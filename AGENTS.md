@@ -10,6 +10,7 @@ This file defines your project registry and workflow for AI agents (Claude Code,
 | my-app | work | claude | `notes/my-app/` | git/my-app, git/my-app-backend |
 | my-project | personal | kilocode | `notes/my-project/` | github.com/username/my-project |
 | example-app | freelance | copilot | `notes/example-app/` | gitlab.com/client/example-app |
+| landingpage | work | claude | `notes/landingpage/` | http://fakeurl.com/landingpage.git |
 
 ### Adding More Projects
 

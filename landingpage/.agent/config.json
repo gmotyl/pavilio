@@ -1,0 +1,9 @@
+{
+  "provider": "claude",
+  "provider_options": {},
+  "features": [],
+  "notifications": {
+    "enabled": true,
+    "style": "system-sounds"
+  }
+}
