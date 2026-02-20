@@ -6,6 +6,7 @@ This file defines your project registry and workflow for AI agents (Claude Code,
 
 | Project | Type | Provider | Notes Path | Repos/Resources |
 |---------|------|----------|-----------|-----------------|
+| ch | work | claude | `notes/ch/` | [Add repository path] |
 | my-app | work | claude | `notes/my-app/` | git/my-app, git/my-app-backend |
 | my-project | personal | kilocode | `notes/my-project/` | github.com/username/my-project |
 | example-app | freelance | copilot | `notes/example-app/` | gitlab.com/client/example-app |
