@@ -4,18 +4,15 @@ This file defines your project registry and workflow for AI agents (Claude Code,
 
 ## Projects Registry
 
-| Project | Type | Provider | Notes Path | Repos/Resources |
-|---------|------|----------|-----------|-----------------|
-| my-app | work | claude | `notes/my-app/` | git/my-app, git/my-app-backend |
-| my-project | personal | kilocode | `notes/my-project/` | github.com/username/my-project |
-| example-app | freelance | copilot | `notes/example-app/` | gitlab.com/client/example-app |
+> **Your projects are private.** Create `.projects.local.md` in the repo root (gitignored) to define your project list. See `AGENTS.md.example` to get started.
+>
+> When `.projects.local.md` exists, read it alongside this file — it is the authoritative project registry for this workspace.
 
-### Adding More Projects
+| Project | Type | Notes Path |
+|---------|------|-----------|
+| my-app | work | `projects/my-app/` |
 
-To add your projects:
-1. Add a new row to the table above with your project details
-2. When you use `/note [project-name]`, Claude Code will lookup the project and use its notes path
-3. Remove example projects when you add your own
+The table above is an example. Replace it with your own projects in `.projects.local.md`.
 
 ## Provider Configuration
 
@@ -164,8 +161,15 @@ See `commands/README.md` for detailed usage and examples.
 |------|-----------|---------|
 | Variables/Functions | camelCase | `getUserData`, `isValid` |
 | Constants | SCREAMING_SNAKE_CASE | `MAX_RETRIES` |
-| Classes | PascalCase | `UserService` |
+| Classes/Types | PascalCase | `UserService`, `User` |
 | Files | kebab-case | `user-service.ts` |
+| Booleans | `is`/`has` prefix | `isValid`, `hasError` |
+
+### Imports & File Organization
+
+- Import order: built-ins → external packages → relative imports
+- Use named imports over default imports for better tree-shaking
+- Relative imports: use `./` or `../` (not bare module names)
 
 ---
 
