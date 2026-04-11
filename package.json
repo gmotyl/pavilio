@@ -17,7 +17,8 @@
     "setup:github": "./scripts/setup:github",
     "setup:jira": "./scripts/setup:jira",
     "setup:azure-devops": "./scripts/setup:azure-devops",
-    "install-skills": "./skills/install-skills.sh"
+    "install-skills": "./skills/install-skills.sh",
+    "update": "bash scripts/update.sh"
   },
   "keywords": [
     "project-management",
