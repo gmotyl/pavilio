@@ -41,3 +41,11 @@ Thumbs.db
 
 # Project-specific (users should not commit their actual project configs with secrets)
 projects/*/config.local.json
+
+# Private workspace config
+.projects.local.md
+
+# Panel
+panel/node_modules/
+panel/dist/
+panel/panel.config.local.ts
