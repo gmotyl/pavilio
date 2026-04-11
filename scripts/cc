@@ -1,0 +1,39 @@
+#!/bin/bash
+PROJECT=$(basename "$PWD")
+REGISTRY="$HOME/.agent-registry.json"
+AGENT_PID=$$
+
+# Register agent (pure bash — no tsx dependency)
+register() {
+  local entry="{\"pid\":$AGENT_PID,\"type\":\"claude\",\"project\":\"$PROJECT\",\"cwd\":\"$PWD\",\"startedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+  if [ -f "$REGISTRY" ] && [ -s "$REGISTRY" ]; then
+    # Remove any existing entry with same PID, append new
+    local existing
+    existing=$(cat "$REGISTRY" | sed 's/]$//')
+    if [ "$existing" = "[" ]; then
+      echo "[$entry]" > "$REGISTRY"
+    else
+      echo "$existing,$entry]" > "$REGISTRY"
+    fi
+  else
+    echo "[$entry]" > "$REGISTRY"
+  fi
+}
+
+deregister() {
+  if [ -f "$REGISTRY" ]; then
+    # Use node one-liner to filter out our PID (available via nvm)
+    node -e "
+      const fs = require('fs');
+      try {
+        const r = JSON.parse(fs.readFileSync('$REGISTRY','utf8'));
+        fs.writeFileSync('$REGISTRY', JSON.stringify(r.filter(e=>e.pid!==$AGENT_PID),null,2));
+      } catch {}
+    " 2>/dev/null
+  fi
+}
+
+register
+trap deregister EXIT INT TERM
+
+claude --allow-dangerously-skip-permissions "$@"
