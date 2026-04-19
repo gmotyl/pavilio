@@ -60,7 +60,7 @@ Default sounds (Peasant):
 
 Get sounds from: https://peon-ping.vercel.app/
 
-## Using Claude Code with motyl-ai-workflow
+## Using Claude Code with pavilio
 
 1. Create project: `npm run create-project`
 2. Choose "claude" as provider

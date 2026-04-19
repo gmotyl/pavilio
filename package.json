@@ -1,7 +1,7 @@
 {
-  "name": "motyl-ai-workflow",
+  "name": "pavilio",
   "version": "1.0.0",
-  "description": "Provider-agnostic project management workflow template for developers",
+  "description": "Pavilio — a dashboard for the AI coding agents running on your machine. Local-first, provider-agnostic project workspace.",
   "main": "index.js",
   "scripts": {
     "create-project": "./scripts/create-project.sh",

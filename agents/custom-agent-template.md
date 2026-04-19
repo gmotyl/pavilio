@@ -55,7 +55,7 @@ Add to `.agent/config.json`:
 - Feature 2: Description
 - Feature 3: Description
 
-## Using with motyl-ai-workflow
+## Using with pavilio
 
 1. Create project: `npm run create-project`
 2. Choose "custom" as provider, enter: "your-provider"
@@ -96,4 +96,4 @@ To add this provider permanently:
 3. Update `scripts/create-project.sh` to include new provider
 4. Update main README.md
 
-Submit pull request to https://github.com/motyl-ai/motyl-ai-workflow
+Submit pull request to https://github.com/motyl-ai/pavilio

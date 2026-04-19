@@ -95,7 +95,7 @@ kilo run --auto "Your task"
 
 Kilocode CLI can be configured with custom notifications via wrapper script.
 
-## Using Kilocode with motyl-ai-workflow
+## Using Kilocode with pavilio
 
 1. Create project: `npm run create-project`
 2. Choose "kilocode" as provider

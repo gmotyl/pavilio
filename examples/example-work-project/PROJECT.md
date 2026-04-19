@@ -7,7 +7,7 @@
 
 ## Overview
 
-This is an example work project showing how to use motyl-ai-workflow for professional/team projects.
+This is an example work project showing how to use pavilio for professional/team projects.
 
 Work projects typically:
 - Have team collaboration requirements

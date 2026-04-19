@@ -1,6 +1,6 @@
 # Complete Daily Workflow Example
 
-Real-world example of using motyl-ai-workflow for a project called `landingpage`.
+Real-world example of using pavilio for a project called `landingpage`.
 
 ## First Time: Create & Initialize Project
 

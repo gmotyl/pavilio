@@ -1,6 +1,6 @@
 # Day-to-Day Workflow
 
-How to use motyl-ai-workflow in your daily work.
+How to use pavilio in your daily work.
 
 ## Daily Routine
 

@@ -68,7 +68,7 @@ Create `.copilot/instructions.md` in your project:
 - Write tests for new features
 ```
 
-## Using Copilot with motyl-ai-workflow
+## Using Copilot with pavilio
 
 1. Create project: `npm run create-project`
 2. Choose "copilot" as provider

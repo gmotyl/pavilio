@@ -1,6 +1,6 @@
 # Setup Guide
 
-Get motyl-ai-workflow running in 20 minutes.
+Get pavilio running in 20 minutes.
 
 ## Prerequisites
 
@@ -12,8 +12,8 @@ Get motyl-ai-workflow running in 20 minutes.
 ## Step 1: Clone Repository
 
 ```bash
-git clone https://github.com/motyl-ai/motyl-ai-workflow
-cd motyl-ai-workflow
+git clone https://github.com/motyl-ai/pavilio
+cd pavilio
 ```
 
 ## Step 2: Choose Your Providers
@@ -97,7 +97,7 @@ Check your credentials/API keys are correct. See provider-specific guides in `ag
 ### "Can't find example projects"
 Make sure you cloned the full repository:
 ```bash
-git clone https://github.com/motyl-ai/motyl-ai-workflow
+git clone https://github.com/motyl-ai/pavilio
 ```
 
 ## Next Steps

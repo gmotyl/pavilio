@@ -1,6 +1,6 @@
 # Projects Panel
 
-Local web dashboard for the motyl-ai-workflow workspace. Built with Vite + React + Express on port 3010.
+Local web dashboard for the pavilio workspace. Built with Vite + React + Express on port 3010.
 
 ## Features
 
@@ -63,4 +63,4 @@ Use `scripts/cc` instead of `claude` and `scripts/oc` instead of `opencode`. The
 
 ## Contributing
 
-Make improvements directly in [motyl-ai-workflow](https://github.com/gmotyl/motyl-ai-workflow). If you're using this as an upstream for a private workspace, run `scripts/update.sh` to pull the latest changes — never push from your private repo back here.
+Make improvements directly in [pavilio](https://github.com/gmotyl/pavilio). If you're using this as an upstream for a private workspace, run `scripts/update.sh` to pull the latest changes — never push from your private repo back here.

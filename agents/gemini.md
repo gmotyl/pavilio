@@ -54,7 +54,7 @@ Add to `.agent/config.json`:
 - `gemini-1.5-pro` - Latest, most capable
 - `gemini-1.5-flash` - Fast and efficient
 
-## Using Gemini with motyl-ai-workflow
+## Using Gemini with pavilio
 
 1. Create project: `npm run create-project`
 2. Choose "gemini" as provider

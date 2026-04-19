@@ -2,7 +2,7 @@
 
 set -e
 
-echo "🚀 motyl-ai-workflow - Master Setup"
+echo "🚀 pavilio - Master Setup"
 echo "===================================="
 echo ""
 echo "This will guide you through setting up your preferred AI providers and integrations."

@@ -1,8 +1,17 @@
-# motyl-ai-workflow
+# Pavilio
 
-AI-assisted multi-project workspace with local dashboard.
+> A dashboard for the AI coding agents running on your machine.
 
-A starter kit for managing multiple projects with AI coding agents. Includes a local web panel for viewing notes, tracking agent activity, managing git, and searching across project knowledge. Fork it, configure it, and start working.
+Pavilio is an AI-assisted multi-project workspace with a local web panel. It's a starter kit for
+managing multiple projects with AI coding agents — view notes, track agent activity, manage git,
+and search across project knowledge, all from one local dashboard. Fork it, configure it, and
+start working.
+
+**Local-first. Agent-agnostic. Open source.**
+
+- Website: [pavilio.ai](https://pavilio.ai)
+- Docs: [pavilio.motyl.dev](https://pavilio.motyl.dev)
+- Formerly `motyl-ai-workflow` (renamed 2026-04-19 — see [rename notice](https://github.com/gmotyl/motyl-ai-workflow))
 
 ## Features
 
@@ -55,7 +64,7 @@ Like `create-react-app` used to be — fork once, make it yours, evolve it howev
 
 ```bash
 # Fork this repo on GitHub, then:
-git clone git@github.com:YOUR_USERNAME/motyl-ai-workflow.git my-workspace
+git clone git@github.com:YOUR_USERNAME/pavilio.git my-workspace
 cd my-workspace
 
 # Configure the panel
@@ -79,12 +88,12 @@ Keep your private workspace in sync with this repo. New panel features, scripts,
 
 ```bash
 # Clone both repos into the same parent directory
-git clone git@github.com:gmotyl/motyl-ai-workflow.git   # the upstream
+git clone git@github.com:gmotyl/pavilio.git   # the upstream
 git clone git@github.com:YOUR_USERNAME/my-workspace.git  # your private repo
 cd my-workspace
 
 # Set up private config
-cp ../motyl-ai-workflow/AGENTS.md.example .projects.local.md
+cp ../pavilio/AGENTS.md.example .projects.local.md
 # Edit .projects.local.md with your actual projects
 
 cp panel/panel.config.ts panel/panel.config.local.ts
@@ -194,7 +203,7 @@ Fork this repo as the foundation for your private workspace. Upgrades sync via r
 
 ```bash
 # 1. Fork this repo on GitHub, then clone both repos side by side:
-git clone git@github.com:YOUR_USERNAME/motyl-ai-workflow.git
+git clone git@github.com:YOUR_USERNAME/pavilio.git
 git clone git@github.com:YOUR_USERNAME/my-workspace.git
 # Both must be in the same parent directory so update.sh can find the upstream
 
@@ -210,7 +219,7 @@ bash scripts/update.sh
 # or: npm run update
 ```
 
-This pulls the latest from your `motyl-ai-workflow` fork (via `git pull`), then rsyncs `panel/`, `commands/`, and `scripts/` into your workspace. Files that only exist in your private repo are never deleted.
+This pulls the latest from your `pavilio` fork (via `git pull`), then rsyncs `panel/`, `commands/`, and `scripts/` into your workspace. Files that only exist in your private repo are never deleted.
 
 ### Private Config
 
@@ -221,7 +230,7 @@ This pulls the latest from your `motyl-ai-workflow` fork (via `git pull`), then 
 
 ### Rules
 
-- Improve the panel, commands, and scripts in `motyl-ai-workflow` directly — never push changes from your private workspace back here
+- Improve the panel, commands, and scripts in `pavilio` directly — never push changes from your private workspace back here
 - `AGENTS.md` and `CLAUDE.md` are manually maintained — cherry-pick upstream improvements as needed
 
 ## Creating a New Project

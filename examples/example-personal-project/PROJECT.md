@@ -6,7 +6,7 @@
 
 ## Overview
 
-This is an example personal project showing the folder structure and patterns used in motyl-ai-workflow.
+This is an example personal project showing the folder structure and patterns used in pavilio.
 
 Personal projects are typically:
 - Side projects

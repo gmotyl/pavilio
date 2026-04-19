@@ -2,15 +2,15 @@
 set -e
 
 # Resolve upstream local clone directory
-# Default: sibling directory named motyl-ai-workflow
+# Default: sibling directory named pavilio
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-UPSTREAM_DIR="${1:-"$SCRIPT_DIR/../../motyl-ai-workflow"}"
+UPSTREAM_DIR="${1:-"$SCRIPT_DIR/../../pavilio"}"
 
 if [ ! -d "$UPSTREAM_DIR/.git" ]; then
   echo "Error: upstream repo not found at $UPSTREAM_DIR"
-  echo "Usage: $0 [/path/to/motyl-ai-workflow]"
+  echo "Usage: $0 [/path/to/pavilio]"
   echo ""
-  echo "Clone it first: git clone git@github.com:gmotyl/motyl-ai-workflow.git"
+  echo "Clone it first: git clone git@github.com:gmotyl/pavilio.git"
   exit 1
 fi
 
@@ -41,4 +41,4 @@ echo ""
 echo "Done. panel/, commands/, scripts/ synced from upstream."
 echo ""
 echo "Note: AGENTS.md and CLAUDE.md are manually maintained."
-echo "Check https://github.com/gmotyl/motyl-ai-workflow for changes and cherry-pick as needed."
+echo "Check https://github.com/gmotyl/pavilio for changes and cherry-pick as needed."

@@ -25,7 +25,7 @@ Same folder structure for all projects, regardless of provider:
 ## Folder Structure
 
 ```
-motyl-ai-workflow/
+pavilio/
 ├── examples/               # Reference implementations
 ├── scripts/                # Setup + utility scripts
 ├── templates/              # Scaffolding templates

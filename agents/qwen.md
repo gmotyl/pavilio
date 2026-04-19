@@ -55,7 +55,7 @@ Add to `.agent/config.json`:
 - `qwen-max` - Most capable
 - `qwen-long` - For long documents
 
-## Using QWEN with motyl-ai-workflow
+## Using QWEN with pavilio
 
 1. Create project: `npm run create-project`
 2. Choose "qwen" as provider
