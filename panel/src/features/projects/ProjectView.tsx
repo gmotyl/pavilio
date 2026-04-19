@@ -23,6 +23,7 @@ import { useWebSocket } from "../realtime/useWebSocket";
 import GrepResultRow from "../search/GrepResultRow";
 import type { GrepResult } from "../search/grep";
 import { useFloatingAction } from "../shell/Layout";
+import { useLastPath } from "../shell/useLastPath";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
@@ -44,6 +45,7 @@ import { Menu } from "lucide-react";
 
 export default function ProjectView() {
   const { name, section } = useParams<{ name: string; section?: string }>();
+  useLastPath(name);
   const [content, setContent] = useState<string | null>(null);
   const [absolutePath, setAbsolutePath] = useState("");
   const [error, setError] = useState<string | null>(null);
