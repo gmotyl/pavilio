@@ -42,6 +42,8 @@ interface GitChangesProps {
   openFile?: string | null;
   /** Text to highlight in the diff view */
   highlight?: string;
+  /** When set, called when the user opens or closes a diff (parent can mirror to URL) */
+  onOpenFileChange?: (file: string | null) => void;
 }
 
 export function statusLabel(s: string) {
@@ -69,6 +71,7 @@ export default function GitChanges({
   fileFilter,
   openFile,
   highlight,
+  onOpenFileChange,
 }: GitChangesProps) {
   const [files, setFiles] = useState<GitFile[]>([]);
   const [branch, setBranch] = useState("");
@@ -146,6 +149,7 @@ export default function GitChanges({
 
   const openDiff = async (path: string) => {
     setActiveDiff(path);
+    onOpenFileChange?.(path);
     setDiffLoading(true);
     try {
       const res = await fetch(
@@ -161,9 +165,11 @@ export default function GitChanges({
   // External trigger to open a specific file diff
   useEffect(() => {
     if (openFile && files.some((f) => f.path === openFile)) {
-      openDiff(openFile);
+      if (activeDiff !== openFile) openDiff(openFile);
+    } else if (!openFile && activeDiff) {
+      setActiveDiff(null);
     }
-  }, [openFile]);
+  }, [openFile, files]);
 
   const stageFiles = async (filesToStage: string[]) => {
     setLoading("staging");
@@ -333,7 +339,10 @@ export default function GitChanges({
       <div>
         <div className="flex items-center gap-3 mb-4">
           <button
-            onClick={() => setActiveDiff(null)}
+            onClick={() => {
+              setActiveDiff(null);
+              onOpenFileChange?.(null);
+            }}
             className="flex items-center gap-1.5 text-sm rounded-md px-2 py-1 transition-colors"
             style={{ color: "var(--text-secondary)" }}
             onMouseEnter={(e) => {

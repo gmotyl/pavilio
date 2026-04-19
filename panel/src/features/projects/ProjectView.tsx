@@ -1010,6 +1010,18 @@ export default function ProjectView() {
                     ? repoOpenFile.highlight
                     : undefined
                 }
+                onOpenFileChange={(file) =>
+                  setRepoOpenFile(
+                    file
+                      ? {
+                          repo: repo.path,
+                          file,
+                          scope: repoOpenFile?.scope ?? "",
+                          highlight: repoOpenFile?.highlight ?? "",
+                        }
+                      : null,
+                  )
+                }
               />
               <div
                 className="mt-4 pt-4"
