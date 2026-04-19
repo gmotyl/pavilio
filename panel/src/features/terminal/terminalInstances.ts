@@ -280,9 +280,15 @@ function createInstance(sessionId: string): InternalInstance {
     console.warn(`[terminal:${sessionId}] initial fit failed:`, err);
   }
 
-  // Two-finger vertical swipe = scroll xterm's scrollback (mirrors desktop
-  // trackpad two-finger scroll, which xterm already handles as wheel).
-  // Single-finger touches still reach xterm for selection / keyboard focus.
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(
+    `${protocol}//${window.location.host}/ws/terminal/${sessionId}`,
+  );
+
+  // Two-finger vertical swipe: in the normal buffer (e.g. Claude CLI) we scroll
+  // xterm's scrollback locally. In the alternate buffer (opencode, less, vim,
+  // htop, etc.) scrollback is empty — the TUI owns the viewport — so we forward
+  // the gesture as arrow-key presses, which those TUIs use to scroll content.
   {
     let lastY: number | null = null;
     const avgY = (touches: TouchList) =>
@@ -301,11 +307,19 @@ function createInstance(sessionId: string): InternalInstance {
         if (e.touches.length !== 2 || lastY == null) return;
         const y = avgY(e.touches);
         const dy = y - lastY;
-        // Approximate line height from terminal geometry.
         const lineH = Math.max(1, holder.clientHeight / terminal.rows);
         const lines = Math.round(-dy / lineH);
         if (lines !== 0) {
-          terminal.scrollLines(lines);
+          if (terminal.buffer.active.type === "alternate") {
+            if (ws.readyState === WebSocket.OPEN) {
+              const seq = (lines > 0 ? "\x1b[B" : "\x1b[A").repeat(
+                Math.abs(lines),
+              );
+              ws.send(JSON.stringify({ type: "input", data: seq }));
+            }
+          } else {
+            terminal.scrollLines(lines);
+          }
           lastY = y;
         }
         e.preventDefault();
@@ -320,11 +334,6 @@ function createInstance(sessionId: string): InternalInstance {
       { passive: true },
     );
   }
-
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(
-    `${protocol}//${window.location.host}/ws/terminal/${sessionId}`,
-  );
 
   const sendResize = () => {
     if (ws.readyState !== WebSocket.OPEN) return;
