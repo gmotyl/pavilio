@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   FileText,
   ExternalLink,
@@ -503,20 +503,27 @@ export default function ProjectView() {
     [searchResults, searchSelectedIdx, openSearchResult],
   );
 
-  const [selectedFile, setSelectedFileState] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedFile = searchParams.get("file");
   const [fileContent, setFileContent] = useState("");
   const [fileAbsPath, setFileAbsPath] = useState("");
   const [fileLoading, setFileLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const setSelectedFile = (path: string | null) => {
-    setSelectedFileState(path);
-    setActiveFile(path);
-  };
-
-  useEffect(() => {
-    setSelectedFile(null);
-  }, [name, section]);
+  const setSelectedFile = useCallback(
+    (path: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (path) next.set("file", path);
+          else next.delete("file");
+          return next;
+        },
+      );
+      setActiveFile(path);
+    },
+    [setSearchParams, setActiveFile],
+  );
 
   useEffect(() => {
     if (!name || section) return;
@@ -541,10 +548,12 @@ export default function ProjectView() {
           const data = await res.json();
           setFileContent(data.content);
           setFileAbsPath(data.absolutePath || "");
+        } else {
+          setSelectedFile(null);
         }
       })
       .finally(() => setFileLoading(false));
-  }, [selectedFile]);
+  }, [selectedFile, setSelectedFile]);
 
   useEffect(() => {
     if (!selectedFile || lastMessage?.type !== "file-change") return;
