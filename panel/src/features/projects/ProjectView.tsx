@@ -1042,6 +1042,15 @@ export default function ProjectView() {
                       ? repoOpenFile.highlight
                       : undefined
                   }
+                  activeFile={searchParams.get("branchfile")}
+                  onActiveFileChange={(file) =>
+                    setSearchParams((prev) => {
+                      const p = new URLSearchParams(prev);
+                      if (file) p.set("branchfile", file);
+                      else p.delete("branchfile");
+                      return p;
+                    })
+                  }
                 />
               </div>
               <div
