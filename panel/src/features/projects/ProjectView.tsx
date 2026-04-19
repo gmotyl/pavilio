@@ -1055,6 +1055,27 @@ export default function ProjectView() {
                   onCommitsOpenChange={(open) =>
                     handleCommitsOpenChange(repo.path, open)
                   }
+                  activeSha={searchParams.get("sha")}
+                  activeFile={searchParams.get("gitfile")}
+                  onActiveShaChange={(sha) =>
+                    setSearchParams((prev) => {
+                      const p = new URLSearchParams(prev);
+                      if (sha) p.set("sha", sha);
+                      else {
+                        p.delete("sha");
+                        p.delete("gitfile");
+                      }
+                      return p;
+                    })
+                  }
+                  onActiveFileChange={(file) =>
+                    setSearchParams((prev) => {
+                      const p = new URLSearchParams(prev);
+                      if (file) p.set("gitfile", file);
+                      else p.delete("gitfile");
+                      return p;
+                    })
+                  }
                 />
               </div>
             </div>
