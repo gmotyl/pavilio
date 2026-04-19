@@ -246,13 +246,47 @@ export default function ProjectView() {
   const [searchResults, setSearchResults] = useState<GrepResult[]>([]);
   const [searchActive, setSearchActive] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
-  // Repos search: trigger opening a specific file diff in a child component
-  const [repoOpenFile, setRepoOpenFile] = useState<{
-    repo: string;
-    file: string;
-    scope: string;
-    highlight: string;
-  } | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Repos search: trigger opening a specific file diff in a child component (URL-backed)
+  const repoOpenFile = (() => {
+    const repo = searchParams.get("repo");
+    const file = searchParams.get("file");
+    if (!repo || !file) return null;
+    return {
+      repo,
+      file,
+      scope: searchParams.get("scope") ?? "",
+      highlight: searchParams.get("highlight") ?? "",
+    };
+  })();
+
+  const setRepoOpenFile = useCallback(
+    (
+      next:
+        | { repo: string; file: string; scope: string; highlight: string }
+        | null,
+    ) => {
+      setSearchParams((prev) => {
+        const params = new URLSearchParams(prev);
+        if (next) {
+          params.set("repo", next.repo);
+          params.set("file", next.file);
+          if (next.highlight) params.set("highlight", next.highlight);
+          else params.delete("highlight");
+          if (next.scope) params.set("scope", next.scope);
+          else params.delete("scope");
+        } else {
+          params.delete("repo");
+          params.delete("file");
+          params.delete("highlight");
+          params.delete("scope");
+        }
+        return params;
+      });
+    },
+    [setSearchParams],
+  );
   const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -503,7 +537,6 @@ export default function ProjectView() {
     [searchResults, searchSelectedIdx, openSearchResult],
   );
 
-  const [searchParams, setSearchParams] = useSearchParams();
   const selectedFile = searchParams.get("file");
   const [fileContent, setFileContent] = useState("");
   const [fileAbsPath, setFileAbsPath] = useState("");
