@@ -6,6 +6,7 @@ import { ActiveFileProvider } from "./features/explorer/useActiveFile";
 import GitPanel from "./features/git/GitPanel";
 import MarkdownViewer from "./features/markdown/MarkdownViewer";
 import Dashboard from "./features/projects/Dashboard";
+import ProjectRedirect from "./features/projects/ProjectRedirect";
 import ProjectView from "./features/projects/ProjectView";
 import QuickFinder from "./features/search/QuickFinder";
 import { BreadcrumbActionsProvider } from "./features/shell/Breadcrumbs";
@@ -29,7 +30,10 @@ function AppShell() {
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
-                <Route path="/project/:name" element={<ProjectView />} />
+                <Route
+                  path="/project/:name"
+                  element={<ProjectRedirect fallback={<ProjectView />} />}
+                />
                 <Route
                   path="/project/:name/:section"
                   element={<ProjectView />}
