@@ -66,4 +66,9 @@ describe("mergeOrder", () => {
   it("handles all ids being new", () => {
     expect(mergeOrder(["X","Y"], ["A","B"])).toEqual(["A","B"]);
   });
+
+  it("returns the same reference when the result is identical", () => {
+    const stored = ["A", "B", "C"];
+    expect(mergeOrder(stored, ["A", "B", "C"])).toBe(stored);
+  });
 });
