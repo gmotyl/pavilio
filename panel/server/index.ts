@@ -10,6 +10,10 @@ import {
   logoutHandler,
   statusHandler,
 } from "./lib/auth.js";
+import { loadAuthState } from "./lib/mobile-auth.js";
+import { mobileAuthMiddleware } from "./middleware/mobile-auth.js";
+import authMobileRouter from "./routes/auth-mobile.js";
+import mobileAccessRouter from "./routes/mobile-access.js";
 import projectsRouter from "./routes/projects.js";
 import { rebuildIndex } from "./lib/file-index.js";
 import filesRouter from "./routes/files.js";
@@ -25,6 +29,7 @@ import { pruneDeadAgents } from "./lib/agent-registry.js";
 
 async function start() {
   await loadConfig();
+  await loadAuthState();
   rebuildIndex();
   const { port, tlsCert, tlsKey } = getConfig();
 
@@ -46,6 +51,7 @@ async function start() {
   });
 
   app.use(express.json());
+  app.use(mobileAuthMiddleware);
 
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok" });
@@ -55,6 +61,9 @@ async function start() {
   app.post("/api/auth/logout", logoutHandler);
   app.get("/api/auth/status", statusHandler);
   app.use(authMiddleware);
+
+  app.use("/api/auth", authMobileRouter);
+  app.use("/api/mobile-access", mobileAccessRouter);
 
   app.use("/api/projects", projectsRouter);
   app.use("/api/files", filesRouter);
