@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, Maximize2, Minimize2, GripHorizontal } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { TerminalHandle } from "./TerminalView";
@@ -224,13 +224,9 @@ function TerminalCell({
   style,
 }: CellProps) {
   const accentColor = displayColor(session, allSessions);
-  const [canDrag, setCanDrag] = useState(false);
-  const enableDrag = useCallback(() => setCanDrag(true), []);
-  const disableDrag = useCallback(() => setCanDrag(false), []);
   return (
     <div
       className="relative w-full overflow-hidden rounded-md group"
-      draggable={canDrag}
       style={{
         height: "100%",
         ...style,
@@ -244,10 +240,6 @@ function TerminalCell({
         transition: "outline-color 150ms, outline-width 150ms",
       }}
       onClick={() => onFocus(session.id)}
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = "move";
-        onDragStart();
-      }}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
@@ -257,7 +249,7 @@ function TerminalCell({
         e.preventDefault();
         onDrop();
       }}
-      onDragEnd={() => { onDragEnd(); disableDrag(); }}
+      onDragEnd={onDragEnd}
     >
       <TerminalView
         sessionId={session.id}
@@ -274,9 +266,8 @@ function TerminalCell({
       )}
       {/* Cell header — visible on hover or when focused */}
       <div
-        className="absolute top-0 left-0 right-0 flex items-center gap-1.5 px-2 py-1 pointer-events-none transition-opacity"
+        className={`absolute top-0 left-0 right-0 flex items-center gap-1.5 px-2 py-1 pointer-events-none transition-opacity ${focused ? "opacity-[0.95]" : "opacity-0 group-hover:opacity-[0.95]"}`}
         style={{
-          opacity: focused ? 0.95 : 0,
           background:
             "linear-gradient(180deg, rgba(26,27,38,0.92) 0%, rgba(26,27,38,0) 100%)",
         }}
@@ -293,14 +284,18 @@ function TerminalCell({
             className="p-1 rounded"
             style={{ color: "var(--text-muted)", cursor: "grab" }}
             title="Drag to swap"
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(255,255,255,0.06)";
-              enableDrag();
+            draggable
+            onDragStart={(e) => {
+              e.stopPropagation();
+              e.dataTransfer.effectAllowed = "move";
+              onDragStart();
             }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              disableDrag();
-            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "rgba(255,255,255,0.06)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
           >
             <GripHorizontal size={11} />
           </div>
