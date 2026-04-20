@@ -12,6 +12,7 @@ import {
   ChevronRight,
   ChevronDown,
   Folder,
+  GitFork,
 } from "lucide-react";
 import DiffView, { type DiffMode } from "./DiffView";
 import BranchPicker from "./BranchPicker";
@@ -81,6 +82,7 @@ export default function GitChanges({
   const [commitMsg, setCommitMsg] = useState("");
   const [loading, setLoading] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
+  const [worktrees, setWorktrees] = useState<{ path: string; head: string; branch: string | null }[]>([]);
   const [activeDiff, setActiveDiff] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState("");
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
@@ -106,6 +108,13 @@ export default function GitChanges({
         const data = await res.json();
         setBranches(data.branches);
       }
+    } catch {}
+  };
+
+  const fetchWorktrees = async () => {
+    try {
+      const res = await fetch(`/api/git/worktrees${qs}`);
+      if (res.ok) setWorktrees(await res.json());
     } catch {}
   };
 
@@ -136,6 +145,7 @@ export default function GitChanges({
   useEffect(() => {
     fetchStatus();
     fetchBranches();
+    fetchWorktrees();
   }, [repo]);
   useEffect(() => {
     setCommitMsg(suggestion);
@@ -488,34 +498,82 @@ export default function GitChanges({
         )}
       </div>
 
-      {checkoutError && (
-        <div
-          className="mb-4 rounded-lg p-3 text-[12px] font-mono whitespace-pre-wrap"
-          style={{
-            background: "color-mix(in srgb, var(--red) 10%, transparent)",
-            border: "1px solid color-mix(in srgb, var(--red) 30%, transparent)",
-            color: "var(--red)",
-          }}
-        >
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider font-sans">
-              Checkout failed
-            </span>
-            <button
-              onClick={() => setCheckoutError("")}
-              className="text-[11px] font-sans px-1.5 py-0.5 rounded transition-colors"
-              style={{ color: "var(--text-muted)" }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.color = "var(--text-primary)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.color = "var(--text-muted)")
-              }
-            >
-              dismiss
-            </button>
+      {checkoutError && (() => {
+        const wtMatch = checkoutError.match(/already checked out at '([^']+)'/i)
+          || checkoutError.match(/is already used by worktree at '([^']+)'/i);
+        const wtPath = wtMatch?.[1];
+        return (
+          <div
+            className="mb-4 rounded-lg p-3 text-[12px] font-mono whitespace-pre-wrap"
+            style={{
+              background: wtPath
+                ? "color-mix(in srgb, var(--yellow) 8%, transparent)"
+                : "color-mix(in srgb, var(--red) 10%, transparent)",
+              border: `1px solid color-mix(in srgb, ${wtPath ? "var(--yellow)" : "var(--red)"} 30%, transparent)`,
+              color: wtPath ? "var(--yellow)" : "var(--red)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wider font-sans">
+                {wtPath ? "Branch in use by worktree" : "Checkout failed"}
+              </span>
+              <button
+                onClick={() => setCheckoutError("")}
+                className="text-[11px] font-sans px-1.5 py-0.5 rounded transition-colors"
+                style={{ color: "var(--text-muted)" }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.color = "var(--text-primary)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.color = "var(--text-muted)")
+                }
+              >
+                dismiss
+              </button>
+            </div>
+            {wtPath
+              ? <span className="font-sans text-[12px]" style={{ color: "var(--text-secondary)" }}>This branch is checked out in a worktree at <span className="font-mono">{wtPath}</span></span>
+              : checkoutError}
           </div>
-          {checkoutError}
+        );
+      })()}
+
+      {/* Worktrees section */}
+      {worktrees.length > 1 && (
+        <div className="mb-4">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <GitFork size={12} style={{ color: "var(--text-tertiary)" }} />
+            <span className="text-[11px] uppercase tracking-[0.12em]" style={{ color: "var(--text-tertiary)" }}>
+              Worktrees
+            </span>
+          </div>
+          <div className="space-y-1">
+            {worktrees.map((wt) => (
+              <div
+                key={wt.path}
+                className="flex items-center gap-2 px-2 py-1 rounded-md text-[11px] font-mono"
+                style={{ background: "var(--bg-elevated)" }}
+              >
+                <span
+                  className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono"
+                  style={{
+                    background: "var(--bg-base)",
+                    color: wt.branch === branch ? "var(--accent)" : "var(--text-secondary)",
+                    border: "1px solid var(--border-subtle)",
+                  }}
+                >
+                  {wt.branch ?? "(detached)"}
+                </span>
+                <span
+                  className="truncate"
+                  style={{ color: "var(--text-muted)" }}
+                  title={wt.path}
+                >
+                  {wt.path.replace(/^(\/Users\/|\/home\/)[^/]+\//, "~/")}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

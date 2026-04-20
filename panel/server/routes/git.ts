@@ -276,6 +276,40 @@ router.post("/checkout", (req, res) => {
   }
 });
 
+// List worktrees
+router.get("/worktrees", (req, res) => {
+  try {
+    const repo = req.query.repo as string | undefined;
+    const raw = git("worktree list --porcelain", repo);
+    // Parse porcelain output into [{path, head, branch}]
+    const worktrees: { path: string; head: string; branch: string | null }[] = [];
+    let current: Partial<{ path: string; head: string; branch: string | null }> = {};
+    for (const line of raw.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        if (current.path) worktrees.push({ path: current.path, head: current.head ?? "", branch: current.branch ?? null });
+        current = { path: line.slice("worktree ".length).trim() };
+      } else if (line.startsWith("HEAD ")) {
+        current.head = line.slice("HEAD ".length).trim();
+      } else if (line.startsWith("branch ")) {
+        const ref = line.slice("branch ".length).trim();
+        if (ref.startsWith("refs/heads/")) {
+          current.branch = ref.slice("refs/heads/".length);
+        } else if (ref.startsWith("refs/remotes/")) {
+          current.branch = ref.slice("refs/remotes/".length);
+        } else {
+          current.branch = ref || null;
+        }
+      } else if (line.trim() === "detached") {
+        current.branch = null;
+      }
+    }
+    if (current.path) worktrees.push({ path: current.path, head: current.head ?? "", branch: current.branch ?? null });
+    res.json(worktrees);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // List branches
 router.get("/branches", (req, res) => {
   try {
