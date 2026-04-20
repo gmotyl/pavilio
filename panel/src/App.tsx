@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { MobileAuthBootstrap } from "./features/mobile-auth/MobileAuthBootstrap";
 import AgentSettings from "./features/agents/AgentSettings";
 import { Login } from "./features/auth/Login";
 import TerminalsPage from "./pages/TerminalsPage";
@@ -53,5 +54,9 @@ function AppShell() {
 }
 
 export default function App() {
-  return <AppShell />;
+  return (
+    <MobileAuthBootstrap>
+      <AppShell />
+    </MobileAuthBootstrap>
+  );
 }
