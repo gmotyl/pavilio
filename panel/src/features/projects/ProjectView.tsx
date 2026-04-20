@@ -24,6 +24,7 @@ import GrepResultRow from "../search/GrepResultRow";
 import type { GrepResult } from "../search/grep";
 import { useFloatingAction } from "../shell/Layout";
 import { useLastPath } from "../shell/useLastPath";
+import { readLastSectionFile, writeLastSectionFile } from "../shell/lastPath";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
@@ -587,6 +588,13 @@ export default function ProjectView() {
       .finally(() => setFileLoading(false));
   }, [selectedFile, setSelectedFile]);
 
+  // Persist the last-open file per section so tab links can restore it.
+  useEffect(() => {
+    if (!name || !section || !selectedFile) return;
+    if (section === "repos" || section === "iterm") return;
+    writeLastSectionFile(name, section, selectedFile);
+  }, [name, section, selectedFile]);
+
   useEffect(() => {
     if (!selectedFile || lastMessage?.type !== "file-change") return;
     const changedPath = lastMessage.path as string;
@@ -646,11 +654,15 @@ export default function ProjectView() {
           const tabs = [
             { label: "iterm", to: `/project/${name}/iterm`, active: section === "iterm" },
             { label: "Overview", to: `/project/${name}`, active: !section },
-            ...nonIterm.map((s) => ({
-              label: s,
-              to: `/project/${name}/${s}`,
-              active: section === s,
-            })),
+            ...nonIterm.map((s) => {
+              const storedFile = s !== "repos" ? readLastSectionFile(name || "", s) : null;
+              const base = `/project/${name}/${s}`;
+              return {
+                label: s,
+                to: storedFile ? `${base}?file=${encodeURIComponent(storedFile)}` : base,
+                active: section === s,
+              };
+            }),
           ];
           const activeTab = tabs.find((t) => t.active) || tabs[0];
           return (
