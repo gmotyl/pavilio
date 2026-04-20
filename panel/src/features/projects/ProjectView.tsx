@@ -24,7 +24,11 @@ import GrepResultRow from "../search/GrepResultRow";
 import type { GrepResult } from "../search/grep";
 import { useFloatingAction } from "../shell/Layout";
 import { useLastPath } from "../shell/useLastPath";
-import { readLastSectionFile, writeLastSectionFile } from "../shell/lastPath";
+import {
+  clearLastSectionFile,
+  readLastSectionFile,
+  writeLastSectionFile,
+} from "../shell/lastPath";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
@@ -589,10 +593,16 @@ export default function ProjectView() {
   }, [selectedFile, setSelectedFile]);
 
   // Persist the last-open file per section so tab links can restore it.
+  // When the user navigates back to the section index (no ?file=), clear
+  // the memory so re-entering the tab lands on the index, not the last file.
   useEffect(() => {
-    if (!name || !section || !selectedFile) return;
+    if (!name || !section) return;
     if (section === "repos" || section === "iterm") return;
-    writeLastSectionFile(name, section, selectedFile);
+    if (selectedFile) {
+      writeLastSectionFile(name, section, selectedFile);
+    } else {
+      clearLastSectionFile(name, section);
+    }
   }, [name, section, selectedFile]);
 
   useEffect(() => {
