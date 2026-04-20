@@ -24,7 +24,11 @@ import GrepResultRow from "../search/GrepResultRow";
 import type { GrepResult } from "../search/grep";
 import { useFloatingAction } from "../shell/Layout";
 import { useLastPath } from "../shell/useLastPath";
-import { readLastSectionFile, writeLastSectionFile } from "../shell/lastPath";
+import {
+  clearLastSectionFile,
+  readLastSectionFile,
+  writeLastSectionFile,
+} from "../shell/lastPath";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
@@ -589,10 +593,16 @@ export default function ProjectView() {
   }, [selectedFile, setSelectedFile]);
 
   // Persist the last-open file per section so tab links can restore it.
+  // When the user navigates back to the section index (no ?file=), clear
+  // the memory so re-entering the tab lands on the index, not the last file.
   useEffect(() => {
-    if (!name || !section || !selectedFile) return;
+    if (!name || !section) return;
     if (section === "repos" || section === "iterm") return;
-    writeLastSectionFile(name, section, selectedFile);
+    if (selectedFile) {
+      writeLastSectionFile(name, section, selectedFile);
+    } else {
+      clearLastSectionFile(name, section);
+    }
   }, [name, section, selectedFile]);
 
   useEffect(() => {
@@ -651,9 +661,19 @@ export default function ProjectView() {
       <div className="flex gap-2 mb-6 text-sm relative items-center">
         {(() => {
           const nonIterm = sections.filter((s) => s !== "iterm");
-          const tabs = [
+          const tabs: {
+            label: string;
+            to: string;
+            active: boolean;
+            state?: { explicit: true };
+          }[] = [
             { label: "iterm", to: `/project/${name}/iterm`, active: section === "iterm" },
-            { label: "Overview", to: `/project/${name}`, active: !section },
+            {
+              label: "Overview",
+              to: `/project/${name}`,
+              active: !section,
+              state: { explicit: true },
+            },
             ...nonIterm.map((s) => {
               const storedFile = s !== "repos" ? readLastSectionFile(name || "", s) : null;
               const base = `/project/${name}/${s}`;
@@ -709,6 +729,7 @@ export default function ProjectView() {
                         <Link
                           key={tab.label}
                           to={tab.to}
+                          state={tab.state}
                           onClick={() => setTabMenuOpen(false)}
                           title={tab.label === "iterm" ? "iTerm" : undefined}
                           className="flex items-center gap-2 px-3 py-2 capitalize transition-colors"
@@ -735,6 +756,7 @@ export default function ProjectView() {
                   <Link
                     key={tab.label}
                     to={tab.to}
+                    state={tab.state}
                     title={tab.label === "iterm" ? "iTerm" : undefined}
                     className="px-3 py-1.5 rounded-md capitalize transition-colors flex items-center gap-1.5"
                     style={{

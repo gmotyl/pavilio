@@ -12,7 +12,11 @@ export default function ProjectRedirect({ fallback }: Props) {
   const current = location.pathname + location.search;
   const stored = name ? readLastPath(name) : null;
 
-  if (stored && stored !== current) {
+  // When the user explicitly navigates to Overview (e.g. via the tab link),
+  // skip the "resume where you left off" redirect so they actually land here.
+  const explicit = (location.state as { explicit?: boolean } | null)?.explicit === true;
+
+  if (!explicit && stored && stored !== current) {
     return <Navigate replace to={stored} />;
   }
   return <>{fallback}</>;

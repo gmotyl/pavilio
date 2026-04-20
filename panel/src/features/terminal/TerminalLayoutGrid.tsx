@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { X, Maximize2, Minimize2, GripHorizontal } from "lucide-react";
+import { X, Maximize2, Minimize2 } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { TerminalHandle } from "./TerminalView";
 import type { SessionMeta } from "./useTerminalSessions";
@@ -224,9 +224,10 @@ function TerminalCell({
   style,
 }: CellProps) {
   const accentColor = displayColor(session, allSessions);
+  const headerBg = `color-mix(in srgb, ${accentColor} 22%, rgb(15,16,20))`;
   return (
     <div
-      className="relative w-full overflow-hidden rounded-md group"
+      className="relative w-full overflow-hidden rounded-md group flex flex-col"
       style={{
         height: "100%",
         ...style,
@@ -251,25 +252,15 @@ function TerminalCell({
       }}
       onDragEnd={onDragEnd}
     >
-      <TerminalView
-        sessionId={session.id}
-        focused={focused}
-        onExit={() => onExit(session.id)}
-        onReady={(h) => onReady?.(session.id, h)}
-      />
-      {/* Dim overlay for inactive cells */}
-      {!focused && (
-        <div
-          className="absolute inset-0 pointer-events-none transition-opacity group-hover:opacity-0"
-          style={{ background: "rgba(0,0,0,0.28)" }}
-        />
-      )}
-      {/* Cell header — visible on hover or when focused */}
+      {/* Cell header — the whole row is a drag handle for swapping cells */}
       <div
-        className={`absolute top-0 left-0 right-0 flex items-center gap-1.5 px-2 py-1 pointer-events-none transition-opacity ${focused ? "opacity-[0.95]" : "opacity-0 group-hover:opacity-[0.95]"}`}
-        style={{
-          background:
-            "linear-gradient(180deg, rgba(26,27,38,0.92) 0%, rgba(26,27,38,0) 100%)",
+        className="flex items-center gap-1.5 px-2 py-1 shrink-0"
+        style={{ background: headerBg, cursor: "grab" }}
+        title="Drag to swap"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = "move";
+          onDragStart();
         }}
       >
         <TerminalActivityLed sessionId={session.id} />
@@ -279,26 +270,7 @@ function TerminalCell({
         >
           {session.name}
         </span>
-        <div className="flex gap-0.5 pointer-events-auto">
-          <div
-            className="p-1 rounded"
-            style={{ color: "var(--text-muted)", cursor: "grab" }}
-            title="Drag to swap"
-            draggable
-            onDragStart={(e) => {
-              e.stopPropagation();
-              e.dataTransfer.effectAllowed = "move";
-              onDragStart();
-            }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.background = "rgba(255,255,255,0.06)")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.background = "transparent")
-            }
-          >
-            <GripHorizontal size={11} />
-          </div>
+        <div className="flex gap-0.5">
           <CellIconButton
             title={maximized ? "Restore" : "Maximize"}
             onClick={(e) => {
@@ -320,14 +292,29 @@ function TerminalCell({
           </CellIconButton>
         </div>
       </div>
-      <div
-        className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
-        style={{
-          background: focused
-            ? "transparent"
-            : "radial-gradient(ellipse at top, rgba(240,198,116,0.04) 0%, transparent 60%)",
-        }}
-      />
+      {/* Terminal area + inactive-dim / hover glow overlays */}
+      <div className="relative flex-1 min-h-0">
+        <TerminalView
+          sessionId={session.id}
+          focused={focused}
+          onExit={() => onExit(session.id)}
+          onReady={(h) => onReady?.(session.id, h)}
+        />
+        {!focused && (
+          <div
+            className="absolute inset-0 pointer-events-none transition-opacity group-hover:opacity-0"
+            style={{ background: "rgba(0,0,0,0.28)" }}
+          />
+        )}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{
+            background: focused
+              ? "transparent"
+              : "radial-gradient(ellipse at top, rgba(240,198,116,0.04) 0%, transparent 60%)",
+          }}
+        />
+      </div>
     </div>
   );
 }

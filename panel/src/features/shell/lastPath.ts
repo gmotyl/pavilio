@@ -32,3 +32,11 @@ export function writeLastSectionFile(project: string, section: string, file: str
     /* sessionStorage disabled — silent no-op */
   }
 }
+
+export function clearLastSectionFile(project: string, section: string): void {
+  try {
+    sessionStorage.removeItem(`${SECTION_FILE_PREFIX}${project}:${section}`);
+  } catch {
+    /* sessionStorage disabled — silent no-op */
+  }
+}
