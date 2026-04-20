@@ -121,6 +121,21 @@ export function useTerminalSessions(project: string) {
     fetchSessions();
   }, [fetchSessions]);
 
+  // When the project changes (no remount — same component instance reused
+  // across route navigations), reset state to the new project's stored values.
+  useEffect(() => {
+    setSessions([]);
+    try {
+      const storedFocus = localStorage.getItem(`panel-terminal-focus-${project}`);
+      setFocusedIdState(storedFocus);
+      const storedOrder = localStorage.getItem(`panel-terminal-order-${project}`);
+      setSessionOrder(storedOrder ? JSON.parse(storedOrder) : []);
+    } catch {
+      setFocusedIdState(null);
+      setSessionOrder([]);
+    }
+  }, [project]);
+
   // Listen for "focus this session" broadcasts (e.g. left sidebar click
   // while user is already on this project's iTerm tab, so no remount
   // happens to re-read localStorage).
