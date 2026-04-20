@@ -1,10 +1,22 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useMemo, useState } from "react";
 import type { SessionMeta } from "./useTerminalSessions";
 import { useWebSocket } from "../realtime/useWebSocket";
+import { mergeOrder, reorderIds, swapIds } from "./sessionOrder";
+
+const ALL_ORDER_KEY = "panel-terminal-order-__all__";
 
 export function useAllTerminalSessions(pollMs = 8000) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const { lastMessage } = useWebSocket();
+
+  const [sessionOrder, setSessionOrder] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(ALL_ORDER_KEY);
+      return stored ? (JSON.parse(stored) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const fetchAll = useCallback(async () => {
     try {
@@ -17,6 +29,7 @@ export function useAllTerminalSessions(pollMs = 8000) {
       }
       const data: SessionMeta[] = await res.json();
       setSessions(data);
+      setSessionOrder((prev) => mergeOrder(prev, data.map((s) => s.id)));
     } catch (err) {
       console.warn(`[terminal] useAllTerminalSessions fetch failed:`, err);
     }
@@ -36,5 +49,35 @@ export function useAllTerminalSessions(pollMs = 8000) {
     if (lastMessage) fetchAll();
   }, [lastMessage, fetchAll]);
 
-  return { sessions, refresh: fetchAll };
+  useEffect(() => {
+    try {
+      localStorage.setItem(ALL_ORDER_KEY, JSON.stringify(sessionOrder));
+    } catch {
+      // ignore
+    }
+  }, [sessionOrder]);
+
+  const orderIndex = useMemo(
+    () => new Map(sessionOrder.map((id, i) => [id, i])),
+    [sessionOrder],
+  );
+
+  const orderedSessions = useMemo(() => {
+    if (sessionOrder.length === 0) return sessions;
+    return [...sessions].sort((a, b) => {
+      const ai = orderIndex.get(a.id) ?? sessions.length;
+      const bi = orderIndex.get(b.id) ?? sessions.length;
+      return ai - bi;
+    });
+  }, [sessions, sessionOrder, orderIndex]);
+
+  const reorder = useCallback((fromId: string, toId: string) => {
+    setSessionOrder((prev) => reorderIds(prev, fromId, toId));
+  }, []);
+
+  const swapOrder = useCallback((idA: string, idB: string) => {
+    setSessionOrder((prev) => swapIds(prev, idA, idB));
+  }, []);
+
+  return { sessions: orderedSessions, refresh: fetchAll, reorder, swapOrder };
 }
