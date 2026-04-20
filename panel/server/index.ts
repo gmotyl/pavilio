@@ -69,8 +69,8 @@ async function start() {
   app.use(vite.middlewares);
 
   const protocol = tlsCert && tlsKey ? "https" : "http";
-  server.listen(port, () => {
-    console.log(`Panel running at ${protocol}://localhost:${port}`);
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`Panel bound to ${protocol}://127.0.0.1:${port} (loopback only)`);
   });
 
   setupWebSocket(server);
