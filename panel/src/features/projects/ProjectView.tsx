@@ -661,9 +661,19 @@ export default function ProjectView() {
       <div className="flex gap-2 mb-6 text-sm relative items-center">
         {(() => {
           const nonIterm = sections.filter((s) => s !== "iterm");
-          const tabs = [
+          const tabs: {
+            label: string;
+            to: string;
+            active: boolean;
+            state?: { explicit: true };
+          }[] = [
             { label: "iterm", to: `/project/${name}/iterm`, active: section === "iterm" },
-            { label: "Overview", to: `/project/${name}`, active: !section },
+            {
+              label: "Overview",
+              to: `/project/${name}`,
+              active: !section,
+              state: { explicit: true },
+            },
             ...nonIterm.map((s) => {
               const storedFile = s !== "repos" ? readLastSectionFile(name || "", s) : null;
               const base = `/project/${name}/${s}`;
@@ -719,6 +729,7 @@ export default function ProjectView() {
                         <Link
                           key={tab.label}
                           to={tab.to}
+                          state={tab.state}
                           onClick={() => setTabMenuOpen(false)}
                           title={tab.label === "iterm" ? "iTerm" : undefined}
                           className="flex items-center gap-2 px-3 py-2 capitalize transition-colors"
@@ -745,6 +756,7 @@ export default function ProjectView() {
                   <Link
                     key={tab.label}
                     to={tab.to}
+                    state={tab.state}
                     title={tab.label === "iterm" ? "iTerm" : undefined}
                     className="px-3 py-1.5 rounded-md capitalize transition-colors flex items-center gap-1.5"
                     style={{
