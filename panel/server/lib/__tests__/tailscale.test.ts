@@ -22,6 +22,69 @@ function mockExecOnce(stdout: string, stderr = "", err: Error | null = null) {
   }) as never);
 }
 
+describe("enableServe", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __testing.resetBinaryCache();
+    existsMock.mockImplementation((p) => String(p).includes("Applications"));
+  });
+
+  it("runs tailscale serve with correct args and returns on state", async () => {
+    mockExecOnce(""); // the serve command itself
+    mockExecOnce(
+      JSON.stringify({ BackendState: "Running", Self: { DNSName: "mac.foo.ts.net." } })
+    );
+    mockExecOnce(
+      JSON.stringify({
+        Web: { "mac.foo.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:3010" } } } },
+      })
+    );
+    const { enableServe } = await import("../tailscale");
+    const res = await enableServe(3010);
+    expect(res.state).toBe("on");
+    expect(execMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("Tailscale"),
+      ["serve", "--bg", "--https=443", "/", "http://127.0.0.1:3010"],
+      expect.any(Function)
+    );
+  });
+
+  it("maps HTTPS-not-enabled stderr to hint", async () => {
+    execMock.mockImplementationOnce(((_c: string, _a: string[], cb: Function) => {
+      cb(new Error("exit 1"), "", "HTTPS is not enabled for this tailnet");
+    }) as never);
+    const { enableServe } = await import("../tailscale");
+    const res = await enableServe(3010);
+    expect(res).toMatchObject({ state: "error", hint: "https_not_enabled" });
+  });
+});
+
+describe("disableServe", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __testing.resetBinaryCache();
+    existsMock.mockImplementation((p) => String(p).includes("Applications"));
+  });
+
+  it("runs serve reset then returns off state", async () => {
+    mockExecOnce(""); // reset
+    mockExecOnce(
+      JSON.stringify({ BackendState: "Running", Self: { DNSName: "mac.foo.ts.net." } })
+    );
+    mockExecOnce(JSON.stringify({}));
+    const { disableServe } = await import("../tailscale");
+    const res = await disableServe(3010);
+    expect(res.state).toBe("off");
+    expect(execMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("Tailscale"),
+      ["serve", "reset"],
+      expect.any(Function)
+    );
+  });
+});
+
 describe("detectTailscale", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -28,8 +28,10 @@ export const __testing = {
 function run(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, (err, stdout, stderr) => {
-      if (err) reject(err);
-      else resolve({ stdout: stdout as string, stderr: stderr as string });
+      if (err) {
+        (err as any).stderr = stderr as string;
+        reject(err);
+      } else resolve({ stdout: stdout as string, stderr: stderr as string });
     });
   });
 }
@@ -104,4 +106,36 @@ export async function detectTailscale(port: number): Promise<TailscaleState> {
   }
 
   return { state: "off", selfHost };
+}
+
+export async function enableServe(port: number): Promise<TailscaleState> {
+  const bin = await resolveBinary();
+  if (!bin) return { state: "not_installed" };
+  try {
+    await run(bin, ["serve", "--bg", "--https=443", "/", `http://127.0.0.1:${port}`]);
+  } catch (e: any) {
+    const stderr = e?.stderr ?? "";
+    const msg = (e as Error).message ?? "";
+    const combined = `${msg} ${stderr}`.toLowerCase();
+    if (combined.includes("https is not enabled")) {
+      return {
+        state: "error",
+        error: "HTTPS certificates are not enabled for this tailnet.",
+        hint: "https_not_enabled",
+      };
+    }
+    return { state: "error", error: msg };
+  }
+  return detectTailscale(port);
+}
+
+export async function disableServe(port: number): Promise<TailscaleState> {
+  const bin = await resolveBinary();
+  if (!bin) return { state: "not_installed" };
+  try {
+    await run(bin, ["serve", "reset"]);
+  } catch (e) {
+    return { state: "error", error: (e as Error).message };
+  }
+  return detectTailscale(port);
 }
