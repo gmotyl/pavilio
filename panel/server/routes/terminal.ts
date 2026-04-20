@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { homedir } from "os";
 import {
   createSession,
   listSessions,
@@ -8,6 +9,12 @@ import {
   updateSession,
 } from "../lib/terminal-manager.js";
 import { getConfig } from "../config.js";
+
+function expandPath(p: string): string {
+  if (p.startsWith("~/")) return resolve(homedir(), p.slice(2));
+  if (p === "~") return homedir();
+  return p;
+}
 
 const router = Router();
 
@@ -18,7 +25,7 @@ router.get("/sessions", (_req, res) => {
 router.post("/sessions", (req, res) => {
   const { cwd, cols = 80, rows = 24, project = "", name } = req.body ?? {};
   const effectiveCwd =
-    cwd && typeof cwd === "string" ? cwd : getConfig().projectsDir;
+    cwd && typeof cwd === "string" ? expandPath(cwd) : getConfig().projectsDir;
   const session = createSession({
     cwd: effectiveCwd,
     cols,
@@ -60,7 +67,7 @@ router.get("/start-dirs", (req, res) => {
         path: string;
       }>;
       for (const repo of repos) {
-        dirs.push({ label: repo.name, path: repo.path });
+        dirs.push({ label: repo.name, path: expandPath(repo.path) });
       }
     } catch {
       // repos.json optional
