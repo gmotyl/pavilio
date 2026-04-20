@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
 
 interface AuthState {
@@ -71,4 +71,56 @@ export function getCurrentToken(): string | null {
 
 export function getCurrentGeneration(): number {
   return requireState().generation;
+}
+
+const COOKIE_NAME = "mobile_session";
+
+function sign(generation: number): string {
+  const s = requireState();
+  const genPart = Buffer.from(String(generation)).toString("base64url");
+  const mac = createHmac("sha256", Buffer.from(s.signingKey, "base64url"))
+    .update(genPart)
+    .digest("base64url");
+  return `${genPart}.${mac}`;
+}
+
+export function verifyLoginToken(submitted: string): boolean {
+  const s = requireState();
+  if (!s.token || !submitted) return false;
+  const a = Buffer.from(s.token);
+  const b = Buffer.from(submitted);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+export function issueSessionCookie(res: Response): void {
+  const s = requireState();
+  const value = sign(s.generation);
+  res.cookie(COOKIE_NAME, value, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+  });
+}
+
+function parseCookie(header: string | undefined, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return null;
+}
+
+export function verifySessionCookie(req: Request): boolean {
+  const s = requireState();
+  const raw = parseCookie(req.headers.cookie as string | undefined, COOKIE_NAME);
+  if (!raw) return false;
+  const [genPart, mac] = raw.split(".");
+  if (!genPart || !mac) return false;
+  const expected = sign(s.generation);
+  if (expected !== raw) return false;
+  const decoded = Number(Buffer.from(genPart, "base64url").toString());
+  return decoded === s.generation;
 }

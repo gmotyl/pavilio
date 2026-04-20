@@ -53,3 +53,47 @@ describe("mobile-auth state", () => {
     expect(mod.getCurrentToken()).toBe(token);
   });
 });
+
+describe("mobile-auth token + cookie", () => {
+  it("verifyLoginToken accepts current token, rejects others", async () => {
+    const mod = await import("../mobile-auth");
+    await mod.loadAuthState();
+    const t = await mod.rotateToken();
+    expect(mod.verifyLoginToken(t)).toBe(true);
+    expect(mod.verifyLoginToken("wrong")).toBe(false);
+    expect(mod.verifyLoginToken("")).toBe(false);
+  });
+
+  it("verifyLoginToken returns false if no active token", async () => {
+    const mod = await import("../mobile-auth");
+    await mod.loadAuthState();
+    expect(mod.verifyLoginToken("anything")).toBe(false);
+  });
+
+  it("cookie issued at gen N is rejected after rotation (gen N+1)", async () => {
+    const mod = await import("../mobile-auth");
+    await mod.loadAuthState();
+    await mod.rotateToken();
+    const res: any = {
+      headers: {} as Record<string, string>,
+      cookie(name: string, value: string) {
+        this.headers[name] = value;
+      },
+    };
+    mod.issueSessionCookie(res);
+    const issued = res.headers.mobile_session as string;
+    const req: any = { headers: { cookie: `mobile_session=${issued}` } };
+    expect(mod.verifySessionCookie(req)).toBe(true);
+
+    await mod.rotateToken();
+    expect(mod.verifySessionCookie(req)).toBe(false);
+  });
+
+  it("tampered cookie is rejected", async () => {
+    const mod = await import("../mobile-auth");
+    await mod.loadAuthState();
+    await mod.rotateToken();
+    const req: any = { headers: { cookie: "mobile_session=garbage.bad" } };
+    expect(mod.verifySessionCookie(req)).toBe(false);
+  });
+});
