@@ -1026,6 +1026,7 @@ export default function ProjectView() {
               maximized={maximized}
               currentProject={name || ""}
               projects={projects}
+              repos={project?.repos}
               onFocus={terminal.setFocusedId}
               onCreate={(opts) => {
                 void createTerminal(opts || {});
