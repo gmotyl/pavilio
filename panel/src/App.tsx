@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import AgentSettings from "./features/agents/AgentSettings";
 import { Login } from "./features/auth/Login";
+import TerminalsPage from "./pages/TerminalsPage";
 import { useAuthStatus } from "./features/auth/useAuthStatus";
 import { ActiveFileProvider } from "./features/explorer/useActiveFile";
 import GitPanel from "./features/git/GitPanel";
@@ -37,6 +38,7 @@ function AppShell() {
                 <Route path="/view/*" element={<MarkdownViewer />} />
                 <Route path="/git" element={<GitPanel />} />
                 <Route path="/settings" element={<AgentSettings />} />
+                <Route path="/terminals" element={<TerminalsPage />} />
               </Routes>
             </Layout>
           </FloatingActionProvider>
