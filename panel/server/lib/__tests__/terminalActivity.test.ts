@@ -110,6 +110,20 @@ describe("terminalActivity", () => {
     errSpy.mockRestore();
   });
 
+  it("async shell prompt output while in attention does not drop to idle", () => {
+    // Repro: long command → attention (green) → shell prints async prompt
+    // 0.5-2 s later → should stay attention, not drop to idle.
+    recordOutput("s1");
+    stayBusyFor("s1", BUSY_THRESHOLD_MS + 100);
+    vi.advanceTimersByTime(IDLE_DEBOUNCE_MS);
+    expect(getState("s1")).toBe("attention");
+    // Async prompt fires after 800 ms
+    vi.advanceTimersByTime(800);
+    recordOutput("s1"); // e.g. powerlevel10k git status line
+    vi.advanceTimersByTime(IDLE_DEBOUNCE_MS);
+    expect(getState("s1")).toBe("attention"); // must NOT be "idle"
+  });
+
   it("emits attentionSinceAt only when state is attention", () => {
     const seen: any[] = [];
     subscribe((ev) => seen.push(ev));

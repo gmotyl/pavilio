@@ -74,8 +74,15 @@ function scheduleIdleCheck(sessionId: string, rec: ActivityRecord): void {
 export function recordOutput(sessionId: string): void {
   const rec = getOrCreate(sessionId);
   if (rec.state !== "busy") {
+    const wasAttention = rec.state === "attention";
     rec.state = "busy";
-    rec.busyStartedAt = Date.now();
+    // If coming from attention, backdate busyStartedAt so the idle-check still
+    // sees a long run and returns to attention instead of dropping to idle.
+    // This prevents async shell prompts (e.g. powerlevel10k git status) from
+    // silently clearing the attention LED after a long command finishes.
+    rec.busyStartedAt = wasAttention
+      ? Date.now() - BUSY_THRESHOLD_MS - 1
+      : Date.now();
     rec.attentionSinceAt = null;
     notify(sessionId, rec);
   }
