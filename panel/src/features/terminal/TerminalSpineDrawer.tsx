@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Link } from "react-router-dom";
 import { X, Plus } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { TerminalActivityLed } from "./TerminalActivityLed";
@@ -69,7 +70,7 @@ export function TerminalSpineDrawer({
           className="flex items-center justify-between px-3 py-3 shrink-0"
           style={{ borderBottom: "1px solid var(--border-subtle)" }}
         >
-          <div>
+          <Link to="/terminals" title="Open all terminals" className="block hover:opacity-80">
             <div
               className="text-[9px] tracking-[0.3em] uppercase"
               style={{ color: "var(--text-tertiary)" }}
@@ -82,7 +83,7 @@ export function TerminalSpineDrawer({
             >
               {sessions.length} open
             </div>
-          </div>
+          </Link>
           <button
             type="button"
             onClick={onClose}

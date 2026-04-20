@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import { Terminal as TerminalIcon, Plus } from "lucide-react";
 import { useAllTerminalSessions } from "./useAllTerminalSessions";
 import type { SessionMeta } from "./useTerminalSessions";
@@ -69,7 +69,9 @@ export function TerminalNavList() {
 
   return (
     <section>
-      <SectionHeader label="Terminals" count={sessions.length} />
+      <Link to="/terminals" title="Open all terminals" className="block hover:opacity-80">
+        <SectionHeader label="Terminals" count={sessions.length} />
+      </Link>
       {sessions.length === 0 ? (
         <button
           type="button"
