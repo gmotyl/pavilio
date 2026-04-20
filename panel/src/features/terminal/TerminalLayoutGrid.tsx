@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { X, Maximize2, Minimize2, GripHorizontal } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { TerminalHandle } from "./TerminalView";
@@ -224,10 +224,13 @@ function TerminalCell({
   style,
 }: CellProps) {
   const accentColor = displayColor(session, allSessions);
+  const [canDrag, setCanDrag] = useState(false);
+  const enableDrag = useCallback(() => setCanDrag(true), []);
+  const disableDrag = useCallback(() => setCanDrag(false), []);
   return (
     <div
       className="relative w-full overflow-hidden rounded-md group"
-      draggable
+      draggable={canDrag}
       style={{
         height: "100%",
         ...style,
@@ -254,7 +257,7 @@ function TerminalCell({
         e.preventDefault();
         onDrop();
       }}
-      onDragEnd={onDragEnd}
+      onDragEnd={() => { onDragEnd(); disableDrag(); }}
     >
       <TerminalView
         sessionId={session.id}
@@ -285,9 +288,11 @@ function TerminalCell({
             title="Drag to swap"
             onMouseEnter={(e) => {
               e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+              enableDrag();
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = "transparent";
+              disableDrag();
             }}
           >
             <GripHorizontal size={11} />

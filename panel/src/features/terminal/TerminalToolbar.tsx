@@ -268,7 +268,7 @@ export function TerminalToolbar({
                   : "var(--text-secondary)",
                 cursor: "grab",
               }}
-              draggable
+              draggable={!editing}
               onDragStart={(e) => {
                 draggedIdRef.current = s.id;
                 e.dataTransfer.effectAllowed = "move";

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { destroyTerminal } from "./terminalInstances";
 import { reorderIds, swapIds, mergeOrder } from "./sessionOrder";
 
@@ -111,15 +111,7 @@ export function useTerminalSessions(project: string) {
       const data: SessionMeta[] = await res.json();
       const filtered = data.filter((s) => s.project === project);
       setSessions(filtered);
-      setSessionOrder((prev) => {
-        const merged = mergeOrder(prev, filtered.map((s) => s.id));
-        try {
-          localStorage.setItem(`panel-terminal-order-${project}`, JSON.stringify(merged));
-        } catch {
-          // ignore
-        }
-        return merged;
-      });
+      setSessionOrder((prev) => mergeOrder(prev, filtered.map((s) => s.id)));
     } catch (err) {
       console.warn(`[terminal] fetch sessions failed:`, err);
     }
@@ -236,17 +228,30 @@ export function useTerminalSessions(project: string) {
     [],
   );
 
+  // Persist order to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(sessionOrder));
+    } catch {
+      // ignore
+    }
+  }, [ORDER_KEY, sessionOrder]);
+
+  // O(N) index map for sort
+  const orderIndex = useMemo(
+    () => new Map(sessionOrder.map((id, i) => [id, i])),
+    [sessionOrder],
+  );
+
   // Sort sessions by persisted order
-  const orderedSessions = sessionOrder.length > 0
-    ? [...sessions].sort((a, b) => {
-        const ai = sessionOrder.indexOf(a.id);
-        const bi = sessionOrder.indexOf(b.id);
-        if (ai === -1 && bi === -1) return 0;
-        if (ai === -1) return 1;
-        if (bi === -1) return -1;
-        return ai - bi;
-      })
-    : sessions;
+  const orderedSessions = useMemo(() => {
+    if (sessionOrder.length === 0) return sessions;
+    return [...sessions].sort((a, b) => {
+      const ai = orderIndex.get(a.id) ?? sessions.length;
+      const bi = orderIndex.get(b.id) ?? sessions.length;
+      return ai - bi;
+    });
+  }, [sessions, sessionOrder, orderIndex]);
 
   // Group sessions by color
   const colorMap = new Map<string, SessionMeta[]>();
@@ -272,24 +277,16 @@ export function useTerminalSessions(project: string) {
 
   const reorder = useCallback(
     (fromId: string, toId: string) => {
-      setSessionOrder((prev) => {
-        const next = reorderIds(prev, fromId, toId);
-        try { localStorage.setItem(ORDER_KEY, JSON.stringify(next)); } catch { /**/ }
-        return next;
-      });
+      setSessionOrder((prev) => reorderIds(prev, fromId, toId));
     },
-    [ORDER_KEY],
+    [],
   );
 
   const swapOrder = useCallback(
     (idA: string, idB: string) => {
-      setSessionOrder((prev) => {
-        const next = swapIds(prev, idA, idB);
-        try { localStorage.setItem(ORDER_KEY, JSON.stringify(next)); } catch { /**/ }
-        return next;
-      });
+      setSessionOrder((prev) => swapIds(prev, idA, idB));
     },
-    [ORDER_KEY],
+    [],
   );
 
   return {
