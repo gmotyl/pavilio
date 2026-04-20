@@ -212,17 +212,17 @@ input[type="checkbox"] {
 
 /* Terminal activity LED — tri-state:
      idle       → dim mustard (quiet)
-     busy       → light green + soft pulse (pty is emitting)
-     attention  → coral red + faster pulse (reserved for Claude hooks)
+     busy       → red + soft pulse (pty is emitting output)
+     attention  → green + faster pulse for 5 min, then solid green (needs check)
    State is set via data-state on the element. */
 @keyframes terminal-led-pulse-busy {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(158, 206, 106, 0.55);
+    box-shadow: 0 0 0 0 rgba(247, 118, 142, 0.7);
     opacity: 1;
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(158, 206, 106, 0);
+    box-shadow: 0 0 0 5px rgba(247, 118, 142, 0);
     opacity: 0.9;
   }
 }
@@ -230,11 +230,11 @@ input[type="checkbox"] {
 @keyframes terminal-led-pulse-attention {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(247, 118, 142, 0.7);
+    box-shadow: 0 0 0 0 rgba(158, 206, 106, 0.7);
     opacity: 1;
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(247, 118, 142, 0);
+    box-shadow: 0 0 0 6px rgba(158, 206, 106, 0);
     opacity: 0.8;
   }
 }
@@ -251,16 +251,17 @@ input[type="checkbox"] {
 }
 
 .terminal-led[data-state="busy"] {
-  background: #9ece6a;
+  background: #f7768e;
   animation: terminal-led-pulse-busy 1.2s ease-in-out infinite;
 }
 
 .terminal-led[data-state="attention"] {
-  background: #f7768e;
+  background: #9ece6a;
   animation: terminal-led-pulse-attention 0.8s ease-in-out infinite;
 }
 
 .terminal-led[data-state="attention"][data-pulse="0"] {
+  background: #9ece6a;
   animation: none;
 }
 
