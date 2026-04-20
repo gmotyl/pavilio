@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { destroyTerminal } from "./terminalInstances";
+import { reorderIds, swapIds, mergeOrder } from "./sessionOrder";
 
 export const TERMINAL_FOCUS_EVENT = "panel-terminal-focus";
 
@@ -86,6 +87,18 @@ export function useTerminalSessions(project: string) {
     [project],
   );
 
+  const ORDER_KEY = `panel-terminal-order-${project}`;
+
+  const [sessionOrder, setSessionOrder] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(`panel-terminal-order-${project}`);
+      return stored ? (JSON.parse(stored) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+
   const fetchSessions = useCallback(async () => {
     try {
       const res = await fetch("/api/terminal/sessions");
@@ -98,6 +111,15 @@ export function useTerminalSessions(project: string) {
       const data: SessionMeta[] = await res.json();
       const filtered = data.filter((s) => s.project === project);
       setSessions(filtered);
+      setSessionOrder((prev) => {
+        const merged = mergeOrder(prev, filtered.map((s) => s.id));
+        try {
+          localStorage.setItem(`panel-terminal-order-${project}`, JSON.stringify(merged));
+        } catch {
+          // ignore
+        }
+        return merged;
+      });
     } catch (err) {
       console.warn(`[terminal] fetch sessions failed:`, err);
     }
@@ -214,11 +236,23 @@ export function useTerminalSessions(project: string) {
     [],
   );
 
+  // Sort sessions by persisted order
+  const orderedSessions = sessionOrder.length > 0
+    ? [...sessions].sort((a, b) => {
+        const ai = sessionOrder.indexOf(a.id);
+        const bi = sessionOrder.indexOf(b.id);
+        if (ai === -1 && bi === -1) return 0;
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
+        return ai - bi;
+      })
+    : sessions;
+
   // Group sessions by color
   const colorMap = new Map<string, SessionMeta[]>();
   const ungrouped: SessionMeta[] = [];
 
-  for (const s of sessions) {
+  for (const s of orderedSessions) {
     if (s.color) {
       const group = colorMap.get(s.color) ?? [];
       group.push(s);
@@ -236,8 +270,30 @@ export function useTerminalSessions(project: string) {
     }),
   );
 
+  const reorder = useCallback(
+    (fromId: string, toId: string) => {
+      setSessionOrder((prev) => {
+        const next = reorderIds(prev, fromId, toId);
+        try { localStorage.setItem(ORDER_KEY, JSON.stringify(next)); } catch { /**/ }
+        return next;
+      });
+    },
+    [ORDER_KEY],
+  );
+
+  const swapOrder = useCallback(
+    (idA: string, idB: string) => {
+      setSessionOrder((prev) => {
+        const next = swapIds(prev, idA, idB);
+        try { localStorage.setItem(ORDER_KEY, JSON.stringify(next)); } catch { /**/ }
+        return next;
+      });
+    },
+    [ORDER_KEY],
+  );
+
   return {
-    sessions,
+    sessions: orderedSessions,
     grouped,
     ungrouped,
     focusedId,
@@ -246,6 +302,8 @@ export function useTerminalSessions(project: string) {
     deleteSession,
     updateSession,
     fetchSessions,
+    reorder,
+    swapOrder,
   };
 }
 
