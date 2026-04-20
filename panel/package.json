@@ -25,6 +25,7 @@
     "chokidar": "^5.0.0",
     "express": "^5.2.1",
     "fuse.js": "^7.3.0",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^1.8.0",
     "mermaid": "^11.14.0",
     "multer": "^2.1.1",

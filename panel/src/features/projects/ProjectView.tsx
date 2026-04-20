@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   FileText,
   ExternalLink,
@@ -23,6 +23,7 @@ import { useWebSocket } from "../realtime/useWebSocket";
 import GrepResultRow from "../search/GrepResultRow";
 import type { GrepResult } from "../search/grep";
 import { useFloatingAction } from "../shell/Layout";
+import { useLastPath } from "../shell/useLastPath";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
@@ -44,6 +45,7 @@ import { Menu } from "lucide-react";
 
 export default function ProjectView() {
   const { name, section } = useParams<{ name: string; section?: string }>();
+  useLastPath(name);
   const [content, setContent] = useState<string | null>(null);
   const [absolutePath, setAbsolutePath] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -244,13 +246,50 @@ export default function ProjectView() {
   const [searchResults, setSearchResults] = useState<GrepResult[]>([]);
   const [searchActive, setSearchActive] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
-  // Repos search: trigger opening a specific file diff in a child component
-  const [repoOpenFile, setRepoOpenFile] = useState<{
-    repo: string;
-    file: string;
-    scope: string;
-    highlight: string;
-  } | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Repos search: trigger opening a specific file diff in a child component (URL-backed)
+  const repoOpenFile = (() => {
+    const repo = searchParams.get("repo");
+    const file = searchParams.get("file");
+    if (!repo || !file) return null;
+    return {
+      repo,
+      file,
+      scope: searchParams.get("scope") ?? "",
+      highlight: searchParams.get("highlight") ?? "",
+    };
+  })();
+
+  const setRepoOpenFile = useCallback(
+    (
+      next:
+        | { repo: string; file: string; scope: string; highlight: string }
+        | null,
+    ) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next) {
+            params.set("repo", next.repo);
+            params.set("file", next.file);
+            if (next.highlight) params.set("highlight", next.highlight);
+            else params.delete("highlight");
+            if (next.scope) params.set("scope", next.scope);
+            else params.delete("scope");
+          } else {
+            params.delete("repo");
+            params.delete("file");
+            params.delete("highlight");
+            params.delete("scope");
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -501,20 +540,27 @@ export default function ProjectView() {
     [searchResults, searchSelectedIdx, openSearchResult],
   );
 
-  const [selectedFile, setSelectedFileState] = useState<string | null>(null);
+  const selectedFile = searchParams.get("file");
   const [fileContent, setFileContent] = useState("");
   const [fileAbsPath, setFileAbsPath] = useState("");
   const [fileLoading, setFileLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const setSelectedFile = (path: string | null) => {
-    setSelectedFileState(path);
-    setActiveFile(path);
-  };
-
-  useEffect(() => {
-    setSelectedFile(null);
-  }, [name, section]);
+  const setSelectedFile = useCallback(
+    (path: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (path) next.set("file", path);
+          else next.delete("file");
+          return next;
+        },
+        { replace: true },
+      );
+      setActiveFile(path);
+    },
+    [setSearchParams, setActiveFile],
+  );
 
   useEffect(() => {
     if (!name || section) return;
@@ -539,10 +585,12 @@ export default function ProjectView() {
           const data = await res.json();
           setFileContent(data.content);
           setFileAbsPath(data.absolutePath || "");
+        } else {
+          setSelectedFile(null);
         }
       })
       .finally(() => setFileLoading(false));
-  }, [selectedFile]);
+  }, [selectedFile, setSelectedFile]);
 
   useEffect(() => {
     if (!selectedFile || lastMessage?.type !== "file-change") return;
@@ -966,6 +1014,18 @@ export default function ProjectView() {
                     ? repoOpenFile.highlight
                     : undefined
                 }
+                onOpenFileChange={(file) =>
+                  setRepoOpenFile(
+                    file
+                      ? {
+                          repo: repo.path,
+                          file,
+                          scope: repoOpenFile?.scope ?? "",
+                          highlight: repoOpenFile?.highlight ?? "",
+                        }
+                      : null,
+                  )
+                }
               />
               <div
                 className="mt-4 pt-4"
@@ -986,6 +1046,18 @@ export default function ProjectView() {
                       ? repoOpenFile.highlight
                       : undefined
                   }
+                  activeFile={searchParams.get("branchfile")}
+                  onActiveFileChange={(file) =>
+                    setSearchParams(
+                      (prev) => {
+                        const p = new URLSearchParams(prev);
+                        if (file) p.set("branchfile", file);
+                        else p.delete("branchfile");
+                        return p;
+                      },
+                      { replace: true },
+                    )
+                  }
                 />
               </div>
               <div
@@ -998,6 +1070,33 @@ export default function ProjectView() {
                   commitsOpen={getCommitsOpen(repo.path)}
                   onCommitsOpenChange={(open) =>
                     handleCommitsOpenChange(repo.path, open)
+                  }
+                  activeSha={searchParams.get("sha")}
+                  activeFile={searchParams.get("gitfile")}
+                  onActiveShaChange={(sha) =>
+                    setSearchParams(
+                      (prev) => {
+                        const p = new URLSearchParams(prev);
+                        if (sha) p.set("sha", sha);
+                        else {
+                          p.delete("sha");
+                          p.delete("gitfile");
+                        }
+                        return p;
+                      },
+                      { replace: true },
+                    )
+                  }
+                  onActiveFileChange={(file) =>
+                    setSearchParams(
+                      (prev) => {
+                        const p = new URLSearchParams(prev);
+                        if (file) p.set("gitfile", file);
+                        else p.delete("gitfile");
+                        return p;
+                      },
+                      { replace: true },
+                    )
                   }
                 />
               </div>

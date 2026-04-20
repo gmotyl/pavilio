@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -25,6 +25,10 @@ interface GitBranchDiffProps {
   openFile?: string | null;
   /** Text to highlight in the diff view */
   highlight?: string;
+  /** Controlled active file inside the branch diff view */
+  activeFile?: string | null;
+  /** Notified when user opens or closes a file diff */
+  onActiveFileChange?: (file: string | null) => void;
 }
 
 function statusColor(s: string) {
@@ -49,6 +53,8 @@ export default function GitBranchDiff({
   fileFilter,
   openFile,
   highlight,
+  activeFile,
+  onActiveFileChange,
 }: GitBranchDiffProps) {
   const [currentBranch, setCurrentBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
@@ -146,20 +152,24 @@ export default function GitBranchDiff({
     } catch {}
   };
 
-  const openDiff = async (file: string) => {
-    setActiveDiff({ file });
-    setDiffLoading(true);
-    try {
-      const res = await fetch(
-        `/api/git/branch-diff?base=${encodeURIComponent(baseBranch)}&file=${encodeURIComponent(file)}&${qs}`,
-      );
-      if (res.ok) setDiffContent((await res.json()).diff);
-      else setDiffContent("");
-    } catch {
-      setDiffContent("");
-    }
-    setDiffLoading(false);
-  };
+  const openDiff = useCallback(
+    async (file: string) => {
+      setActiveDiff({ file });
+      onActiveFileChange?.(file);
+      setDiffLoading(true);
+      try {
+        const res = await fetch(
+          `/api/git/branch-diff?base=${encodeURIComponent(baseBranch)}&file=${encodeURIComponent(file)}&${qs}`,
+        );
+        if (res.ok) setDiffContent((await res.json()).diff);
+        else setDiffContent("");
+      } catch {
+        setDiffContent("");
+      }
+      setDiffLoading(false);
+    },
+    [baseBranch, qs, onActiveFileChange],
+  );
 
   // External trigger to open a specific file diff
   useEffect(() => {
@@ -167,7 +177,22 @@ export default function GitBranchDiff({
       if (!sectionOpen) setSectionOpen(true);
       openDiff(openFile);
     }
-  }, [openFile]);
+  }, [openFile, baseBranch, files, sectionOpen, openDiff]);
+
+  // Sync controlled activeFile prop into internal state
+  useEffect(() => {
+    if (activeFile === undefined) return;
+    if (activeFile === null) {
+      setActiveDiff(null);
+    } else if (
+      activeFile !== activeDiff?.file &&
+      baseBranch &&
+      files.some((f) => f.path === activeFile)
+    ) {
+      if (!sectionOpen) setSectionOpen(true);
+      openDiff(activeFile);
+    }
+  }, [activeFile, activeDiff?.file, baseBranch, files, sectionOpen, openDiff]);
 
   const displayFiles = useMemo(
     () =>
@@ -271,7 +296,7 @@ export default function GitBranchDiff({
       <div>
         <div className="flex items-center gap-3 mb-3">
           <button
-            onClick={() => setActiveDiff(null)}
+            onClick={() => { setActiveDiff(null); onActiveFileChange?.(null); }}
             className="flex items-center gap-1.5 text-sm rounded-md px-2 py-1 transition-colors"
             style={{ color: "var(--text-secondary)" }}
             onMouseEnter={(e) => {

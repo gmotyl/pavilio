@@ -30,6 +30,14 @@ interface GitHistoryProps {
   viewMode?: "flat" | "tree";
   commitsOpen?: boolean;
   onCommitsOpenChange?: (open: boolean) => void;
+  /** Controlled active commit sha (for URL sync) */
+  activeSha?: string | null;
+  /** Controlled active file inside the commit */
+  activeFile?: string | null;
+  /** Notified when user selects or clears a sha */
+  onActiveShaChange?: (sha: string | null) => void;
+  /** Notified when user opens or closes a file within a commit */
+  onActiveFileChange?: (file: string | null) => void;
 }
 
 function statusColor(s: string) {
@@ -58,6 +66,10 @@ export default function GitHistory({
   viewMode: controlledViewMode,
   commitsOpen = true,
   onCommitsOpenChange,
+  activeSha,
+  activeFile,
+  onActiveShaChange,
+  onActiveFileChange,
 }: GitHistoryProps) {
   const [commits, setCommits] = useState<Commit[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -74,6 +86,26 @@ export default function GitHistory({
   const viewMode = controlledViewMode ?? localViewMode;
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
 
+  // Controlled/uncontrolled sync: when activeSha prop changes, mirror to internal state
+  useEffect(() => {
+    if (activeSha === undefined) return;
+    setExpanded(activeSha ?? null);
+    if (!activeSha) {
+      setActiveDiff(null);
+      setCommitFiles([]);
+    }
+  }, [activeSha]);
+
+  // Controlled/uncontrolled sync: when activeFile prop changes, mirror to internal state
+  useEffect(() => {
+    if (activeFile === undefined) return;
+    if (!activeFile) {
+      setActiveDiff(null);
+    } else if (activeSha) {
+      setActiveDiff({ sha: activeSha, file: activeFile });
+    }
+  }, [activeFile, activeSha]);
+
   const qs = repo ? `&repo=${encodeURIComponent(repo)}` : "";
 
   useEffect(() => {
@@ -82,31 +114,52 @@ export default function GitHistory({
     });
   }, [repo]);
 
-  const toggleCommit = async (sha: string) => {
+  const toggleCommit = (sha: string) => {
     if (expanded === sha) {
       setExpanded(null);
       setActiveDiff(null);
+      onActiveShaChange?.(null);
+      onActiveFileChange?.(null);
       return;
     }
     setExpanded(sha);
     setActiveDiff(null);
     setCollapsedDirs(new Set());
-    setFilesLoading(true);
-    try {
-      const res = await fetch(`/api/git/commit-files?sha=${sha}${qs}`);
-      if (res.ok) setCommitFiles(await res.json());
-    } catch {
-      setCommitFiles([]);
-    }
-    setFilesLoading(false);
+    onActiveShaChange?.(sha);
+    onActiveFileChange?.(null);
   };
+
+  // Fetch files for the currently expanded commit. Reacts to both manual
+  // toggle clicks and URL-driven expansion (?sha=<sha>).
+  useEffect(() => {
+    if (!expanded) {
+      setCommitFiles([]);
+      return;
+    }
+    let cancelled = false;
+    setFilesLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/git/commit-files?sha=${expanded}${qs}`);
+        if (!cancelled && res.ok) setCommitFiles(await res.json());
+      } catch {
+        if (!cancelled) setCommitFiles([]);
+      }
+      if (!cancelled) setFilesLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, qs]);
 
   const openDiff = async (sha: string, file: string) => {
     if (activeDiff?.sha === sha && activeDiff?.file === file) {
       setActiveDiff(null);
+      onActiveFileChange?.(null);
       return;
     }
     setActiveDiff({ sha, file });
+    onActiveFileChange?.(file);
     setDiffLoading(true);
     try {
       const res = await fetch(
@@ -218,7 +271,7 @@ export default function GitHistory({
       <div>
         <div className="flex items-center gap-3 mb-3">
           <button
-            onClick={() => setActiveDiff(null)}
+            onClick={() => { setActiveDiff(null); onActiveFileChange?.(null); }}
             className="flex items-center gap-1.5 text-sm rounded-md px-2 py-1 transition-colors"
             style={{ color: "var(--text-secondary)" }}
             onMouseEnter={(e) => {
