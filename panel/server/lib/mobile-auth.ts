@@ -120,7 +120,10 @@ export function verifySessionCookie(req: Request): boolean {
   const [genPart, mac] = raw.split(".");
   if (!genPart || !mac) return false;
   const expected = sign(s.generation);
-  if (expected !== raw) return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(raw);
+  if (a.length !== b.length) return false;
+  if (!timingSafeEqual(a, b)) return false;
   const decoded = Number(Buffer.from(genPart, "base64url").toString());
   return decoded === s.generation;
 }
