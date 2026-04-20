@@ -618,6 +618,7 @@ export default function ProjectView() {
                   type="button"
                   onClick={() => setTabMenuOpen((o) => !o)}
                   className="flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors shrink-0"
+                  title={activeTab.label === "iterm" ? "iTerm" : undefined}
                   style={{
                     background: "var(--bg-base)",
                     color: "var(--text-primary)",
@@ -626,7 +627,7 @@ export default function ProjectView() {
                 >
                   <Menu size={13} />
                   <span className="capitalize text-[12px]">
-                    {activeTab.label === "iterm" ? "iTerm" : activeTab.label}
+                    {activeTab.label === "iterm" ? <Terminal className="w-4 h-4" /> : activeTab.label}
                   </span>
                 </button>
                 <h1
@@ -654,6 +655,7 @@ export default function ProjectView() {
                           key={tab.label}
                           to={tab.to}
                           onClick={() => setTabMenuOpen(false)}
+                          title={tab.label === "iterm" ? "iTerm" : undefined}
                           className="flex items-center gap-2 px-3 py-2 capitalize transition-colors"
                           style={{
                             background: tab.active
@@ -664,8 +666,7 @@ export default function ProjectView() {
                               : "var(--text-secondary)",
                           }}
                         >
-                          {tab.label === "iterm" && <Terminal size={12} />}
-                          {tab.label === "iterm" ? "iTerm" : tab.label}
+                          {tab.label === "iterm" ? <Terminal className="w-4 h-4" /> : tab.label}
                         </Link>
                       ))}
                     </div>
@@ -679,6 +680,7 @@ export default function ProjectView() {
                   <Link
                     key={tab.label}
                     to={tab.to}
+                    title={tab.label === "iterm" ? "iTerm" : undefined}
                     className="px-3 py-1.5 rounded-md capitalize transition-colors flex items-center gap-1.5"
                     style={{
                       background: tab.active
@@ -699,8 +701,7 @@ export default function ProjectView() {
                           : "transparent";
                     }}
                   >
-                    {tab.label === "iterm" && <Terminal size={12} />}
-                    {tab.label === "iterm" ? "iTerm" : tab.label}
+                    {tab.label === "iterm" ? <Terminal className="w-4 h-4" /> : tab.label}
                   </Link>
                 ))}
               </div>
