@@ -25,7 +25,9 @@ router.get("/sessions", (_req, res) => {
 router.post("/sessions", (req, res) => {
   const { cwd, cols = 80, rows = 24, project = "", name } = req.body ?? {};
   const effectiveCwd =
-    cwd && typeof cwd === "string" ? expandPath(cwd) : getConfig().projectsDir;
+    cwd && typeof cwd === "string"
+      ? expandPath(cwd)
+      : resolve(getConfig().projectsDir, "..");
   const session = createSession({
     cwd: effectiveCwd,
     cols,
