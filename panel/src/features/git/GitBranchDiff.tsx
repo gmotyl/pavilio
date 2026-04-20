@@ -192,7 +192,8 @@ export default function GitBranchDiff({
       if (!sectionOpen) setSectionOpen(true);
       openDiff(activeFile);
     }
-  }, [activeFile, activeDiff?.file, baseBranch, files, sectionOpen, openDiff]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFile, baseBranch, files, sectionOpen, openDiff]);
 
   const displayFiles = useMemo(
     () =>

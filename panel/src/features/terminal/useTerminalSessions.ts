@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { destroyTerminal } from "./terminalInstances";
+import { reorderIds, swapIds, mergeOrder } from "./sessionOrder";
 
 export const TERMINAL_FOCUS_EVENT = "panel-terminal-focus";
 
@@ -86,6 +87,18 @@ export function useTerminalSessions(project: string) {
     [project],
   );
 
+  const ORDER_KEY = `panel-terminal-order-${project}`;
+
+  const [sessionOrder, setSessionOrder] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(`panel-terminal-order-${project}`);
+      return stored ? (JSON.parse(stored) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+
   const fetchSessions = useCallback(async () => {
     try {
       const res = await fetch("/api/terminal/sessions");
@@ -98,6 +111,7 @@ export function useTerminalSessions(project: string) {
       const data: SessionMeta[] = await res.json();
       const filtered = data.filter((s) => s.project === project);
       setSessions(filtered);
+      setSessionOrder((prev) => mergeOrder(prev, filtered.map((s) => s.id)));
     } catch (err) {
       console.warn(`[terminal] fetch sessions failed:`, err);
     }
@@ -106,6 +120,21 @@ export function useTerminalSessions(project: string) {
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
+
+  // When the project changes (no remount — same component instance reused
+  // across route navigations), reset state to the new project's stored values.
+  useEffect(() => {
+    setSessions([]);
+    try {
+      const storedFocus = localStorage.getItem(`panel-terminal-focus-${project}`);
+      setFocusedIdState(storedFocus);
+      const storedOrder = localStorage.getItem(`panel-terminal-order-${project}`);
+      setSessionOrder(storedOrder ? JSON.parse(storedOrder) : []);
+    } catch {
+      setFocusedIdState(null);
+      setSessionOrder([]);
+    }
+  }, [project]);
 
   // Listen for "focus this session" broadcasts (e.g. left sidebar click
   // while user is already on this project's iTerm tab, so no remount
@@ -214,11 +243,36 @@ export function useTerminalSessions(project: string) {
     [],
   );
 
+  // Persist order to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(sessionOrder));
+    } catch {
+      // ignore
+    }
+  }, [ORDER_KEY, sessionOrder]);
+
+  // O(N) index map for sort
+  const orderIndex = useMemo(
+    () => new Map(sessionOrder.map((id, i) => [id, i])),
+    [sessionOrder],
+  );
+
+  // Sort sessions by persisted order
+  const orderedSessions = useMemo(() => {
+    if (sessionOrder.length === 0) return sessions;
+    return [...sessions].sort((a, b) => {
+      const ai = orderIndex.get(a.id) ?? sessions.length;
+      const bi = orderIndex.get(b.id) ?? sessions.length;
+      return ai - bi;
+    });
+  }, [sessions, sessionOrder, orderIndex]);
+
   // Group sessions by color
   const colorMap = new Map<string, SessionMeta[]>();
   const ungrouped: SessionMeta[] = [];
 
-  for (const s of sessions) {
+  for (const s of orderedSessions) {
     if (s.color) {
       const group = colorMap.get(s.color) ?? [];
       group.push(s);
@@ -236,8 +290,22 @@ export function useTerminalSessions(project: string) {
     }),
   );
 
+  const reorder = useCallback(
+    (fromId: string, toId: string) => {
+      setSessionOrder((prev) => reorderIds(prev, fromId, toId));
+    },
+    [],
+  );
+
+  const swapOrder = useCallback(
+    (idA: string, idB: string) => {
+      setSessionOrder((prev) => swapIds(prev, idA, idB));
+    },
+    [],
+  );
+
   return {
-    sessions,
+    sessions: orderedSessions,
     grouped,
     ungrouped,
     focusedId,
@@ -246,6 +314,8 @@ export function useTerminalSessions(project: string) {
     deleteSession,
     updateSession,
     fetchSessions,
+    reorder,
+    swapOrder,
   };
 }
 

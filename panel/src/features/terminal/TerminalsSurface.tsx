@@ -44,6 +44,10 @@ export interface TerminalsSurfaceProps {
   // Navigate to another project's iterm
   onNavTo: (path: string) => void;
 
+  // Drag-to-reorder callbacks
+  onReorder?: (fromId: string, toId: string) => void;
+  onSwap?: (idA: string, idB: string) => void;
+
   // When true: fills from below the breadcrumb bar (no negative margins, no p-6 offset)
   standalone?: boolean;
 }
@@ -65,6 +69,8 @@ export function TerminalsSurface({
   terminalHandlesRef,
   onCreateTerminal,
   onNavTo,
+  onReorder,
+  onSwap,
   standalone = false,
 }: TerminalsSurfaceProps) {
   // Dismiss attention state as soon as the user focuses a terminal — the
@@ -104,6 +110,7 @@ export function TerminalsSurface({
           onColorChange={(id, color) => onUpdateSession(id, { color })}
           onRename={(id, n) => onUpdateSession(id, { name: n })}
           onToggleMaximize={onToggleMaximize}
+          onReorder={onReorder ?? (() => {})}
         />
       </div>
 
@@ -142,6 +149,7 @@ export function TerminalsSurface({
             onReady={(sessionId, handle) => {
               terminalHandlesRef.current.set(sessionId, handle);
             }}
+            onSwap={onSwap}
           />
         </div>
 
