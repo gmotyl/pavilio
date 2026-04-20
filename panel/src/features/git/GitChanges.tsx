@@ -569,7 +569,7 @@ export default function GitChanges({
                   style={{ color: "var(--text-muted)" }}
                   title={wt.path}
                 >
-                  {wt.path.replace(/^\/Users\/[^/]+\//, "~/")}
+                  {wt.path.replace(/^(\/Users\/|\/home\/)[^/]+\//, "~/")}
                 </span>
               </div>
             ))}

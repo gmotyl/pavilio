@@ -291,8 +291,14 @@ router.get("/worktrees", (req, res) => {
       } else if (line.startsWith("HEAD ")) {
         current.head = line.slice("HEAD ".length).trim();
       } else if (line.startsWith("branch ")) {
-        // refs/heads/feature/foo → feature/foo
-        current.branch = line.slice("branch refs/heads/".length).trim() || null;
+        const ref = line.slice("branch ".length).trim();
+        if (ref.startsWith("refs/heads/")) {
+          current.branch = ref.slice("refs/heads/".length);
+        } else if (ref.startsWith("refs/remotes/")) {
+          current.branch = ref.slice("refs/remotes/".length);
+        } else {
+          current.branch = ref || null;
+        }
       } else if (line.trim() === "detached") {
         current.branch = null;
       }
