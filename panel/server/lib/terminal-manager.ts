@@ -1,6 +1,7 @@
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
 import { platform } from "os";
+import { recordOutput, removeSession } from "./terminalActivity";
 
 export interface TerminalSession {
   id: string;
@@ -58,7 +59,22 @@ export function createSession(opts: {
 
   sessions.set(id, session);
 
+  // Throttle activity-tracker updates: high-volume output (e.g. `cat`ing a
+  // large file) would otherwise churn the idle timer thousands of times per
+  // second. Missing the final chunk by up to RECORD_THROTTLE_MS is harmless
+  // because the 1 s idle-debounce fires afterward anyway.
+  const RECORD_THROTTLE_MS = 100;
+  let lastRecordedAt = 0;
+  ptyProcess.onData(() => {
+    const now = Date.now();
+    if (now - lastRecordedAt >= RECORD_THROTTLE_MS) {
+      lastRecordedAt = now;
+      recordOutput(id);
+    }
+  });
+
   ptyProcess.onExit(() => {
+    removeSession(id);
     sessions.delete(id);
   });
 

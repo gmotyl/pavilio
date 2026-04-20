@@ -54,106 +54,6 @@ interface InternalInstance extends LiveTerminal {
 
 const instances = new Map<string, InternalInstance>();
 
-// ---- Activity tracking (decoupled from instance lifetime so subscribers
-// can attach before / after an instance is acquired) ----
-
-export type TerminalActivity = "idle" | "busy" | "attention";
-
-const IDLE_AFTER_MS = 500;
-
-interface ActivityRecord {
-  isBusy: boolean;
-  needsAttention: boolean;
-}
-
-const activityState = new Map<string, ActivityRecord>();
-const activityListeners = new Map<
-  string,
-  Set<(state: TerminalActivity) => void>
->();
-const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function deriveState(rec: ActivityRecord | undefined): TerminalActivity {
-  if (!rec) return "idle";
-  if (rec.needsAttention) return "attention";
-  if (rec.isBusy) return "busy";
-  return "idle";
-}
-
-function notifyActivity(sessionId: string) {
-  const ls = activityListeners.get(sessionId);
-  if (!ls) return;
-  const state = deriveState(activityState.get(sessionId));
-  for (const l of ls) l(state);
-}
-
-function getRec(sessionId: string): ActivityRecord {
-  let rec = activityState.get(sessionId);
-  if (!rec) {
-    rec = { isBusy: false, needsAttention: false };
-    activityState.set(sessionId, rec);
-  }
-  return rec;
-}
-
-export function markActivity(sessionId: string): void {
-  const rec = getRec(sessionId);
-  const wasBusy = rec.isBusy;
-  rec.isBusy = true;
-  if (!wasBusy) notifyActivity(sessionId);
-  const existing = idleTimers.get(sessionId);
-  if (existing) clearTimeout(existing);
-  idleTimers.set(
-    sessionId,
-    setTimeout(() => {
-      const r = activityState.get(sessionId);
-      if (!r) return;
-      r.isBusy = false;
-      notifyActivity(sessionId);
-      idleTimers.delete(sessionId);
-    }, IDLE_AFTER_MS),
-  );
-}
-
-/**
- * Flag a session as needing the user's attention. Reserved for Claude
- * hook integration — e.g. when an agent is waiting for permission or a
- * user reply. Red-pulse wins over the green busy state.
- */
-export function markAttention(sessionId: string, active: boolean): void {
-  const rec = getRec(sessionId);
-  if (rec.needsAttention === active) return;
-  rec.needsAttention = active;
-  notifyActivity(sessionId);
-}
-
-export function subscribeActivity(
-  sessionId: string,
-  listener: (state: TerminalActivity) => void,
-): () => void {
-  let ls = activityListeners.get(sessionId);
-  if (!ls) {
-    ls = new Set();
-    activityListeners.set(sessionId, ls);
-  }
-  ls.add(listener);
-  listener(deriveState(activityState.get(sessionId)));
-  return () => {
-    const set = activityListeners.get(sessionId);
-    if (!set) return;
-    set.delete(listener);
-    if (set.size === 0) activityListeners.delete(sessionId);
-  };
-}
-
-function cleanupActivity(sessionId: string) {
-  const t = idleTimers.get(sessionId);
-  if (t) clearTimeout(t);
-  idleTimers.delete(sessionId);
-  activityState.delete(sessionId);
-  // Listeners retained — next mount re-uses them.
-}
-
 export function refitAll(): void {
   for (const inst of instances.values()) inst.fit();
 }
@@ -228,8 +128,6 @@ if (typeof window !== "undefined") {
 // flip attention from outside React land without needing to import.
 if (typeof window !== "undefined") {
   (window as unknown as Record<string, unknown>).__panelTerminal = {
-    markAttention,
-    markActivity,
     refitAll,
   };
 }
@@ -351,7 +249,6 @@ function createInstance(sessionId: string): InternalInstance {
       const msg = JSON.parse(event.data);
       if (msg.type === "output") {
         terminal.write(msg.data);
-        markActivity(sessionId);
       } else if (msg.type === "exit") {
         terminal.write("\r\n\x1b[90m[Process exited]\x1b[0m\r\n");
         const inst = instances.get(sessionId);
@@ -415,6 +312,14 @@ function createInstance(sessionId: string): InternalInstance {
   return inst;
 }
 
+export function sendDismiss(sessionId: string): void {
+  const inst = instances.get(sessionId);
+  if (!inst) return;
+  if (inst.ws.readyState === WebSocket.OPEN) {
+    inst.ws.send(JSON.stringify({ type: "dismiss-attention" }));
+  }
+}
+
 export function acquireTerminal(sessionId: string): LiveTerminal {
   let inst = instances.get(sessionId);
   if (!inst) inst = createInstance(sessionId);
@@ -448,5 +353,4 @@ export function destroyTerminal(sessionId: string): void {
   }
   inst.holder.remove();
   instances.delete(sessionId);
-  cleanupActivity(sessionId);
 }

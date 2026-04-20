@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, Maximize2, Minimize2, X, ChevronDown } from "lucide-react";
+import { Plus, Maximize2, Minimize2, X, ChevronDown, FolderGit2 } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
+import { nextProjectName } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 
@@ -20,6 +21,7 @@ interface Props {
   maximized: boolean;
   currentProject: string;
   projects: { name: string }[];
+  repos?: { name: string; path: string }[];
   onFocus: (id: string) => void;
   onCreate: (opts?: CreateSessionOpts) => void;
   onDelete: (id: string) => void;
@@ -34,6 +36,7 @@ export function TerminalToolbar({
   maximized,
   currentProject,
   projects,
+  repos,
   onFocus,
   onCreate,
   onDelete,
@@ -42,6 +45,7 @@ export function TerminalToolbar({
   onToggleMaximize,
 }: Props) {
   const [newOpen, setNewOpen] = useState(false);
+  const [repoMenuOpen, setRepoMenuOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -51,6 +55,7 @@ export function TerminalToolbar({
       if (!rootRef.current) return;
       if (!rootRef.current.contains(e.target as Node)) {
         setNewOpen(false);
+        setRepoMenuOpen(false);
         setColorPickerFor(null);
       }
     };
@@ -158,6 +163,81 @@ export function TerminalToolbar({
                 )}
               </button>
             ))}
+          </div>
+        )}
+        {/* Repo picker: only shown when the current project has repos */}
+        {repos && repos.length > 0 && (
+          <div className="relative flex items-stretch">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setRepoMenuOpen((v) => !v);
+                setNewOpen(false);
+              }}
+              className="flex items-center px-1.5 transition-colors"
+              style={{
+                color: "var(--text-muted)",
+                borderLeft: "1px solid var(--border-subtle)",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "var(--bg-hover)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "transparent")
+              }
+              title="New terminal in repo"
+            >
+              <FolderGit2 size={12} />
+            </button>
+            {repoMenuOpen && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="absolute left-0 top-full z-50 mt-[1px] min-w-[240px] rounded-md py-1 shadow-lg"
+                style={{
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border-subtle)",
+                }}
+              >
+                <div
+                  className="px-3 py-1 text-[10px] tracking-[0.2em] uppercase"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  New terminal in repo…
+                </div>
+                {repos.map((repo) => (
+                  <button
+                    key={repo.path}
+                    type="button"
+                    onClick={() => {
+                      setRepoMenuOpen(false);
+                      const name = nextProjectName(repo.name, sessions);
+                      onCreate({ cwd: repo.path, name });
+                    }}
+                    className="flex flex-col items-start w-full px-3 py-2 text-left transition-colors"
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = "var(--bg-hover)")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
+                  >
+                    <span
+                      className="text-[12px] font-mono"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      {repo.name}
+                    </span>
+                    <span
+                      className="text-[10px] font-mono truncate w-full"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      {repo.path}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
