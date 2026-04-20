@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -152,21 +152,24 @@ export default function GitBranchDiff({
     } catch {}
   };
 
-  const openDiff = async (file: string) => {
-    setActiveDiff({ file });
-    onActiveFileChange?.(file);
-    setDiffLoading(true);
-    try {
-      const res = await fetch(
-        `/api/git/branch-diff?base=${encodeURIComponent(baseBranch)}&file=${encodeURIComponent(file)}&${qs}`,
-      );
-      if (res.ok) setDiffContent((await res.json()).diff);
-      else setDiffContent("");
-    } catch {
-      setDiffContent("");
-    }
-    setDiffLoading(false);
-  };
+  const openDiff = useCallback(
+    async (file: string) => {
+      setActiveDiff({ file });
+      onActiveFileChange?.(file);
+      setDiffLoading(true);
+      try {
+        const res = await fetch(
+          `/api/git/branch-diff?base=${encodeURIComponent(baseBranch)}&file=${encodeURIComponent(file)}&${qs}`,
+        );
+        if (res.ok) setDiffContent((await res.json()).diff);
+        else setDiffContent("");
+      } catch {
+        setDiffContent("");
+      }
+      setDiffLoading(false);
+    },
+    [baseBranch, qs, onActiveFileChange],
+  );
 
   // External trigger to open a specific file diff
   useEffect(() => {
@@ -174,18 +177,22 @@ export default function GitBranchDiff({
       if (!sectionOpen) setSectionOpen(true);
       openDiff(openFile);
     }
-  }, [openFile]);
+  }, [openFile, baseBranch, files, sectionOpen, openDiff]);
 
   // Sync controlled activeFile prop into internal state
   useEffect(() => {
     if (activeFile === undefined) return;
     if (activeFile === null) {
       setActiveDiff(null);
-    } else if (activeFile !== activeDiff?.file && baseBranch && files.some((f) => f.path === activeFile)) {
+    } else if (
+      activeFile !== activeDiff?.file &&
+      baseBranch &&
+      files.some((f) => f.path === activeFile)
+    ) {
       if (!sectionOpen) setSectionOpen(true);
       openDiff(activeFile);
     }
-  }, [activeFile]);
+  }, [activeFile, activeDiff?.file, baseBranch, files, sectionOpen, openDiff]);
 
   const displayFiles = useMemo(
     () =>

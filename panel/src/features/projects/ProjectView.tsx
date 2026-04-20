@@ -267,23 +267,26 @@ export default function ProjectView() {
         | { repo: string; file: string; scope: string; highlight: string }
         | null,
     ) => {
-      setSearchParams((prev) => {
-        const params = new URLSearchParams(prev);
-        if (next) {
-          params.set("repo", next.repo);
-          params.set("file", next.file);
-          if (next.highlight) params.set("highlight", next.highlight);
-          else params.delete("highlight");
-          if (next.scope) params.set("scope", next.scope);
-          else params.delete("scope");
-        } else {
-          params.delete("repo");
-          params.delete("file");
-          params.delete("highlight");
-          params.delete("scope");
-        }
-        return params;
-      });
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next) {
+            params.set("repo", next.repo);
+            params.set("file", next.file);
+            if (next.highlight) params.set("highlight", next.highlight);
+            else params.delete("highlight");
+            if (next.scope) params.set("scope", next.scope);
+            else params.delete("scope");
+          } else {
+            params.delete("repo");
+            params.delete("file");
+            params.delete("highlight");
+            params.delete("scope");
+          }
+          return params;
+        },
+        { replace: true },
+      );
     },
     [setSearchParams],
   );
@@ -552,6 +555,7 @@ export default function ProjectView() {
           else next.delete("file");
           return next;
         },
+        { replace: true },
       );
       setActiveFile(path);
     },
@@ -1044,12 +1048,15 @@ export default function ProjectView() {
                   }
                   activeFile={searchParams.get("branchfile")}
                   onActiveFileChange={(file) =>
-                    setSearchParams((prev) => {
-                      const p = new URLSearchParams(prev);
-                      if (file) p.set("branchfile", file);
-                      else p.delete("branchfile");
-                      return p;
-                    })
+                    setSearchParams(
+                      (prev) => {
+                        const p = new URLSearchParams(prev);
+                        if (file) p.set("branchfile", file);
+                        else p.delete("branchfile");
+                        return p;
+                      },
+                      { replace: true },
+                    )
                   }
                 />
               </div>
@@ -1067,23 +1074,29 @@ export default function ProjectView() {
                   activeSha={searchParams.get("sha")}
                   activeFile={searchParams.get("gitfile")}
                   onActiveShaChange={(sha) =>
-                    setSearchParams((prev) => {
-                      const p = new URLSearchParams(prev);
-                      if (sha) p.set("sha", sha);
-                      else {
-                        p.delete("sha");
-                        p.delete("gitfile");
-                      }
-                      return p;
-                    })
+                    setSearchParams(
+                      (prev) => {
+                        const p = new URLSearchParams(prev);
+                        if (sha) p.set("sha", sha);
+                        else {
+                          p.delete("sha");
+                          p.delete("gitfile");
+                        }
+                        return p;
+                      },
+                      { replace: true },
+                    )
                   }
                   onActiveFileChange={(file) =>
-                    setSearchParams((prev) => {
-                      const p = new URLSearchParams(prev);
-                      if (file) p.set("gitfile", file);
-                      else p.delete("gitfile");
-                      return p;
-                    })
+                    setSearchParams(
+                      (prev) => {
+                        const p = new URLSearchParams(prev);
+                        if (file) p.set("gitfile", file);
+                        else p.delete("gitfile");
+                        return p;
+                      },
+                      { replace: true },
+                    )
                   }
                 />
               </div>

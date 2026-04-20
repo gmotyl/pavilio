@@ -114,7 +114,7 @@ export default function GitHistory({
     });
   }, [repo]);
 
-  const toggleCommit = async (sha: string) => {
+  const toggleCommit = (sha: string) => {
     if (expanded === sha) {
       setExpanded(null);
       setActiveDiff(null);
@@ -127,15 +127,30 @@ export default function GitHistory({
     setCollapsedDirs(new Set());
     onActiveShaChange?.(sha);
     onActiveFileChange?.(null);
-    setFilesLoading(true);
-    try {
-      const res = await fetch(`/api/git/commit-files?sha=${sha}${qs}`);
-      if (res.ok) setCommitFiles(await res.json());
-    } catch {
-      setCommitFiles([]);
-    }
-    setFilesLoading(false);
   };
+
+  // Fetch files for the currently expanded commit. Reacts to both manual
+  // toggle clicks and URL-driven expansion (?sha=<sha>).
+  useEffect(() => {
+    if (!expanded) {
+      setCommitFiles([]);
+      return;
+    }
+    let cancelled = false;
+    setFilesLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/git/commit-files?sha=${expanded}${qs}`);
+        if (!cancelled && res.ok) setCommitFiles(await res.json());
+      } catch {
+        if (!cancelled) setCommitFiles([]);
+      }
+      if (!cancelled) setFilesLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, qs]);
 
   const openDiff = async (sha: string, file: string) => {
     if (activeDiff?.sha === sha && activeDiff?.file === file) {
