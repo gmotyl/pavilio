@@ -260,6 +260,10 @@ input[type="checkbox"] {
   animation: terminal-led-pulse-attention 0.8s ease-in-out infinite;
 }
 
+.terminal-led[data-state="attention"][data-pulse="0"] {
+  animation: none;
+}
+
 .terminal-led-lg {
   width: 8px;
   height: 8px;
