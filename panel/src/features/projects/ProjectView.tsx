@@ -1134,6 +1134,8 @@ export default function ProjectView() {
             void createTerminal(opts || {});
           }}
           onNavTo={navTo}
+          onReorder={terminal.reorder}
+          onSwap={terminal.swapOrder}
         />
       )}
 
