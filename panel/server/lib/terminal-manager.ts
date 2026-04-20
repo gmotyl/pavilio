@@ -59,8 +59,18 @@ export function createSession(opts: {
 
   sessions.set(id, session);
 
+  // Throttle activity-tracker updates: high-volume output (e.g. `cat`ing a
+  // large file) would otherwise churn the idle timer thousands of times per
+  // second. Missing the final chunk by up to RECORD_THROTTLE_MS is harmless
+  // because the 1 s idle-debounce fires afterward anyway.
+  const RECORD_THROTTLE_MS = 100;
+  let lastRecordedAt = 0;
   ptyProcess.onData(() => {
-    recordOutput(id);
+    const now = Date.now();
+    if (now - lastRecordedAt >= RECORD_THROTTLE_MS) {
+      lastRecordedAt = now;
+      recordOutput(id);
+    }
   });
 
   ptyProcess.onExit(() => {

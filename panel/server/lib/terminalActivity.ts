@@ -29,7 +29,13 @@ function notify(sessionId: string, rec: ActivityRecord): void {
       ? { attentionSinceAt: rec.attentionSinceAt }
       : {}),
   };
-  for (const fn of listeners) fn(ev);
+  for (const fn of listeners) {
+    try {
+      fn(ev);
+    } catch (err) {
+      console.error("[terminal-activity] listener error", err);
+    }
+  }
 }
 
 function getOrCreate(sessionId: string): ActivityRecord {
@@ -53,16 +59,13 @@ function scheduleIdleCheck(sessionId: string, rec: ActivityRecord): void {
   rec.idleTimer = setTimeout(() => {
     rec.idleTimer = null;
     const dur = rec.busyStartedAt != null ? Date.now() - rec.busyStartedAt : 0;
-    // Do NOT clear busyStartedAt here — it persists so that a subsequent
-    // recordOutput call can accumulate duration across brief idle gaps.
+    rec.busyStartedAt = null;
     if (dur > BUSY_THRESHOLD_MS) {
       rec.state = "attention";
       rec.attentionSinceAt = Date.now();
-      rec.busyStartedAt = null; // done — clear after entering attention
     } else {
       rec.state = "idle";
       rec.attentionSinceAt = null;
-      // keep busyStartedAt so next recordOutput accumulates duration
     }
     notify(sessionId, rec);
   }, IDLE_DEBOUNCE_MS);
@@ -72,11 +75,7 @@ export function recordOutput(sessionId: string): void {
   const rec = getOrCreate(sessionId);
   if (rec.state !== "busy") {
     rec.state = "busy";
-    // Only reset busyStartedAt if we don't have one already — this allows
-    // duration to accumulate across brief idle gaps between output bursts.
-    if (rec.busyStartedAt == null) {
-      rec.busyStartedAt = Date.now();
-    }
+    rec.busyStartedAt = Date.now();
     rec.attentionSinceAt = null;
     notify(sessionId, rec);
   }
