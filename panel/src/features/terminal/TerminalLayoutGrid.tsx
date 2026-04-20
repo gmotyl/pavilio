@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { X, Maximize2, Minimize2 } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { X, Maximize2, Minimize2, GripHorizontal } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { TerminalHandle } from "./TerminalView";
 import type { SessionMeta } from "./useTerminalSessions";
@@ -14,6 +14,7 @@ interface Props {
   onExit: (id: string) => void;
   onToggleMaximize: () => void;
   onReady?: (sessionId: string, handle: TerminalHandle) => void;
+  onSwap?: (idA: string, idB: string) => void;
 }
 
 export function TerminalLayoutGrid({
@@ -24,10 +25,13 @@ export function TerminalLayoutGrid({
   onExit,
   onToggleMaximize,
   onReady,
+  onSwap,
 }: Props) {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia("(max-width: 767px)").matches,
   );
+  const draggedCellRef = useRef<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
@@ -66,10 +70,28 @@ export function TerminalLayoutGrid({
       allSessions={sessions}
       focused={session.id === focusedId}
       maximized={maximized}
+      isDropTarget={dropTargetId === session.id}
       onFocus={onFocus}
       onExit={onExit}
       onToggleMaximize={onToggleMaximize}
       onReady={onReady}
+      onDragStart={() => { draggedCellRef.current = session.id; }}
+      onDragOver={() => {
+        if (draggedCellRef.current && draggedCellRef.current !== session.id) {
+          setDropTargetId(session.id);
+        }
+      }}
+      onDrop={() => {
+        if (draggedCellRef.current && draggedCellRef.current !== session.id) {
+          onSwap?.(draggedCellRef.current, session.id);
+        }
+        draggedCellRef.current = null;
+        setDropTargetId(null);
+      }}
+      onDragEnd={() => {
+        draggedCellRef.current = null;
+        setDropTargetId(null);
+      }}
       style={{ height: "100%", ...style }}
     />
   );
@@ -173,10 +195,15 @@ interface CellProps {
   allSessions: SessionMeta[];
   focused: boolean;
   maximized: boolean;
+  isDropTarget: boolean;
   onFocus: (id: string) => void;
   onExit: (id: string) => void;
   onToggleMaximize: () => void;
   onReady?: (id: string, handle: TerminalHandle) => void;
+  onDragStart: () => void;
+  onDragOver: () => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
   style?: React.CSSProperties;
 }
 
@@ -185,27 +212,49 @@ function TerminalCell({
   allSessions,
   focused,
   maximized,
+  isDropTarget,
   onFocus,
   onExit,
   onToggleMaximize,
   onReady,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   style,
 }: CellProps) {
   const accentColor = displayColor(session, allSessions);
   return (
     <div
       className="relative w-full overflow-hidden rounded-md group"
+      draggable
       style={{
         height: "100%",
         ...style,
         cursor: "pointer",
-        outline: focused
-          ? `1.5px solid ${accentColor}`
-          : "1px solid var(--border-subtle)",
+        outline: isDropTarget
+          ? "2px solid rgba(97,175,239,0.8)"
+          : focused
+            ? `1.5px solid ${accentColor}`
+            : "1px solid var(--border-subtle)",
         outlineOffset: focused ? "-1.5px" : "-1px",
         transition: "outline-color 150ms, outline-width 150ms",
       }}
       onClick={() => onFocus(session.id)}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        onDragOver();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+      onDragEnd={onDragEnd}
     >
       <TerminalView
         sessionId={session.id}
@@ -230,6 +279,19 @@ function TerminalCell({
           {session.name}
         </span>
         <div className="flex gap-0.5 pointer-events-auto">
+          <div
+            className="p-1 rounded"
+            style={{ color: "var(--text-muted)", cursor: "grab" }}
+            title="Drag to swap"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+            }}
+          >
+            <GripHorizontal size={11} />
+          </div>
           <CellIconButton
             title={maximized ? "Restore" : "Maximize"}
             onClick={(e) => {
@@ -254,7 +316,6 @@ function TerminalCell({
       <div
         className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
         style={{
-          // on hover of a non-focused cell, show a faint overlay so user sees it's interactive
           background: focused
             ? "transparent"
             : "radial-gradient(ellipse at top, rgba(240,198,116,0.04) 0%, transparent 60%)",
