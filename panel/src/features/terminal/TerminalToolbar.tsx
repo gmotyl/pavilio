@@ -28,6 +28,7 @@ interface Props {
   onColorChange: (id: string, color: string | null) => void;
   onRename: (id: string, name: string) => void;
   onToggleMaximize: () => void;
+  onReorder: (fromId: string, toId: string) => void;
 }
 
 export function TerminalToolbar({
@@ -43,11 +44,14 @@ export function TerminalToolbar({
   onColorChange,
   onRename,
   onToggleMaximize,
+  onReorder,
 }: Props) {
   const [newOpen, setNewOpen] = useState(false);
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const draggedIdRef = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -251,9 +255,10 @@ export function TerminalToolbar({
           return (
             <div
               key={s.id}
-              className="group relative flex items-center gap-1.5 px-2.5 text-[12px] shrink-0 cursor-pointer transition-colors"
+              className="group relative flex items-center gap-1.5 px-2.5 text-[12px] shrink-0 transition-colors"
               style={{
                 borderRight: "1px solid var(--border-subtle)",
+                borderLeft: dragOverId === s.id ? "2px solid var(--accent, #f0c674)" : "2px solid transparent",
                 background: focused ? "var(--bg-base)" : "transparent",
                 borderTop: focused
                   ? `1.5px solid ${dotColor}`
@@ -261,6 +266,30 @@ export function TerminalToolbar({
                 color: focused
                   ? "var(--text-primary)"
                   : "var(--text-secondary)",
+                cursor: "grab",
+              }}
+              draggable
+              onDragStart={(e) => {
+                draggedIdRef.current = s.id;
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (s.id !== draggedIdRef.current) setDragOverId(s.id);
+              }}
+              onDragLeave={() => setDragOverId(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (draggedIdRef.current && draggedIdRef.current !== s.id) {
+                  onReorder(draggedIdRef.current, s.id);
+                }
+                draggedIdRef.current = null;
+                setDragOverId(null);
+              }}
+              onDragEnd={() => {
+                draggedIdRef.current = null;
+                setDragOverId(null);
               }}
               onClick={() => onFocus(s.id)}
               onMouseEnter={(e) => {
