@@ -4,7 +4,7 @@ import { Server } from "http";
 import { getConfig } from "./config.js";
 import { rebuildIndex } from "./lib/file-index.js";
 import { getSession, resizeSession } from "./lib/terminal-manager.js";
-import { recordInput, dismiss } from "./lib/terminalActivity.js";
+import { recordInput, dismiss, getSnapshot, subscribe, type ActivityEvent } from "./lib/terminalActivity.js";
 import { validateWsToken } from "./lib/auth.js";
 
 let wss: WebSocketServer;
@@ -23,6 +23,21 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
     if (termMatch) {
       attachTerminalSocket(ws, termMatch[1]);
+      return;
+    }
+
+    if (url === "/ws/terminal-activity") {
+      // Send snapshot of all current session states
+      for (const ev of getSnapshot()) {
+        ws.send(JSON.stringify({ type: "state", ...ev }));
+      }
+      // Subscribe to future state changes
+      const unsub = subscribe((ev: ActivityEvent) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "state", ...ev }));
+        }
+      });
+      ws.on("close", () => unsub());
       return;
     }
 
