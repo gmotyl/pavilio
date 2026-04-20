@@ -4,6 +4,7 @@ import { Server } from "http";
 import { getConfig } from "./config.js";
 import { rebuildIndex } from "./lib/file-index.js";
 import { getSession, resizeSession } from "./lib/terminal-manager.js";
+import { recordInput, dismiss } from "./lib/terminalActivity.js";
 import { validateWsToken } from "./lib/auth.js";
 
 let wss: WebSocketServer;
@@ -56,7 +57,11 @@ function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
     try {
       const msg = JSON.parse(raw.toString());
       if (msg.type === "input" && typeof msg.data === "string") {
+        recordInput(sessionId);
         session.pty.write(msg.data);
+      } else if (msg.type === "dismiss-attention") {
+        dismiss(sessionId);
+        return;
       } else if (msg.type === "resize") {
         resizeSession(sessionId, Number(msg.cols), Number(msg.rows));
       }
