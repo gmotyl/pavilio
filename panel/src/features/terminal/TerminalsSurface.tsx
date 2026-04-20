@@ -5,6 +5,7 @@ import { TerminalShortcutBar } from "./TerminalShortcutBar";
 import { TerminalMobileRail } from "./TerminalMobileRail";
 import { TerminalSpine } from "./TerminalSpine";
 import { TerminalSpineDrawer } from "./TerminalSpineDrawer";
+import { sendDismiss } from "./terminalInstances";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
 import type { Project } from "../projects/useProjects";
@@ -66,6 +67,13 @@ export function TerminalsSurface({
   onNavTo,
   standalone = false,
 }: TerminalsSurfaceProps) {
+  // Dismiss attention state as soon as the user focuses a terminal — the
+  // green "done" LED is a "check me" notification that clears on first look.
+  const handleFocus = (id: string | null) => {
+    if (id) sendDismiss(id);
+    onFocus(id);
+  };
+
   return (
     <div
       className={`flex flex-col relative ${
@@ -88,7 +96,7 @@ export function TerminalsSurface({
           currentProject={currentProject}
           projects={projects}
           repos={repos}
-          onFocus={onFocus}
+          onFocus={handleFocus}
           onCreate={(opts) => {
             onCreateTerminal(opts || {});
           }}
@@ -105,7 +113,7 @@ export function TerminalsSurface({
           sessions={sessions}
           focusedId={focusedId}
           currentProject={currentProject}
-          onFocus={onFocus}
+          onFocus={handleFocus}
           onCreate={(opts) => {
             onCreateTerminal(opts || {});
           }}
@@ -119,7 +127,7 @@ export function TerminalsSurface({
           <TerminalSpine
             sessions={sessions}
             focusedId={focusedId}
-            onFocus={onFocus}
+            onFocus={handleFocus}
             onOpenDrawer={() => onSetDrawerOpen(true)}
           />
         </div>
@@ -128,7 +136,7 @@ export function TerminalsSurface({
             sessions={sessions}
             focusedId={focusedId}
             maximized={maximized}
-            onFocus={onFocus}
+            onFocus={handleFocus}
             onExit={onDeleteSession}
             onToggleMaximize={onToggleMaximize}
             onReady={(sessionId, handle) => {
@@ -154,7 +162,7 @@ export function TerminalsSurface({
                 // ignore
               }
               if (sessionProject === currentProject) {
-                onFocus(sessionId);
+                handleFocus(sessionId);
               } else {
                 onNavTo(`/project/${sessionProject}/iterm`);
               }
