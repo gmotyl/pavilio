@@ -66,28 +66,26 @@ export default function TerminalsPage() {
   );
 
   return (
-    <div className="p-4 h-full">
-      <h1 className="text-xl font-semibold mb-4">All terminals</h1>
-      <TerminalsSurface
-        currentProject=""
-        projects={projects}
-        repos={undefined}
-        sessions={allSessions}
-        allSessions={allSessions}
-        focusedId={focusedId}
-        onFocus={setFocusedId}
-        onDeleteSession={handleDelete}
-        onUpdateSession={handleUpdate}
-        maximized={maximized}
-        onToggleMaximize={toggleMaximized}
-        drawerOpen={drawerOpen}
-        onSetDrawerOpen={setDrawerOpen}
-        terminalHandlesRef={terminalHandlesRef}
-        onCreateTerminal={() => {
-          /* global view: create inside a project */
-        }}
-        onNavTo={(path) => navigate(path)}
-      />
-    </div>
+    <TerminalsSurface
+      standalone
+      currentProject=""
+      projects={projects}
+      repos={undefined}
+      sessions={allSessions}
+      allSessions={allSessions}
+      focusedId={focusedId}
+      onFocus={setFocusedId}
+      onDeleteSession={handleDelete}
+      onUpdateSession={handleUpdate}
+      maximized={maximized}
+      onToggleMaximize={toggleMaximized}
+      drawerOpen={drawerOpen}
+      onSetDrawerOpen={setDrawerOpen}
+      terminalHandlesRef={terminalHandlesRef}
+      onCreateTerminal={() => {
+        /* global view: create inside a project */
+      }}
+      onNavTo={(path) => navigate(path)}
+    />
   );
 }

@@ -42,6 +42,9 @@ export interface TerminalsSurfaceProps {
 
   // Navigate to another project's iterm
   onNavTo: (path: string) => void;
+
+  // When true: fills from below the breadcrumb bar (no negative margins, no p-6 offset)
+  standalone?: boolean;
 }
 
 export function TerminalsSurface({
@@ -61,13 +64,17 @@ export function TerminalsSurface({
   terminalHandlesRef,
   onCreateTerminal,
   onNavTo,
+  standalone = false,
 }: TerminalsSurfaceProps) {
   return (
     <div
-      className="flex flex-col h-[calc(100dvh-5rem)] md:h-[calc(100dvh-10rem)] relative"
+      className={`flex flex-col relative ${
+        standalone
+          ? "h-[calc(100dvh-2.25rem)]"
+          : "h-[calc(100dvh-5rem)] md:h-[calc(100dvh-10rem)]"
+      }`}
       style={{
-        margin: "-1.5rem",
-        marginTop: 0,
+        ...(standalone ? {} : { margin: "-1.5rem", marginTop: 0 }),
         touchAction: "pan-y",
         overscrollBehaviorX: "contain",
       }}
