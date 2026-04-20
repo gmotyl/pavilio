@@ -26,12 +26,6 @@ import { useFloatingAction } from "../shell/Layout";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
-import { TerminalToolbar } from "../terminal/TerminalToolbar";
-import { TerminalLayoutGrid } from "../terminal/TerminalLayoutGrid";
-import { TerminalShortcutBar } from "../terminal/TerminalShortcutBar";
-import { TerminalMobileRail } from "../terminal/TerminalMobileRail";
-import { TerminalSpine } from "../terminal/TerminalSpine";
-import { TerminalSpineDrawer } from "../terminal/TerminalSpineDrawer";
 import {
   useTerminalSessions,
   nextProjectName,
@@ -41,6 +35,7 @@ import { useTerminalMaximized } from "../terminal/useTerminalMaximized";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import type { TerminalHandle } from "../terminal/TerminalView";
 import { Menu } from "lucide-react";
+import TerminalsSurface from "../terminal/TerminalsSurface";
 
 export default function ProjectView() {
   const { name, section } = useParams<{ name: string; section?: string }>();
@@ -1009,123 +1004,26 @@ export default function ProjectView() {
 
       {/* iTerm tab */}
       {section === "iterm" && (
-        <div
-          className="flex flex-col h-[calc(100dvh-5rem)] md:h-[calc(100dvh-10rem)] relative"
-          style={{
-            margin: "-1.5rem",
-            marginTop: 0,
-            touchAction: "pan-y",
-            overscrollBehaviorX: "contain",
+        <TerminalsSurface
+          currentProject={name || ""}
+          projects={projects}
+          repos={project?.repos}
+          sessions={terminal.sessions}
+          focusedId={terminal.focusedId}
+          onFocus={terminal.setFocusedId}
+          onDeleteSession={terminal.deleteSession}
+          onUpdateSession={terminal.updateSession}
+          allSessions={allTerminals.sessions}
+          maximized={maximized}
+          onToggleMaximize={toggleMaximized}
+          drawerOpen={drawerOpen}
+          onSetDrawerOpen={setDrawerOpen}
+          terminalHandlesRef={terminalHandlesRef}
+          onCreateTerminal={(opts) => {
+            void createTerminal(opts || {});
           }}
-        >
-          {/* Desktop toolbar */}
-          <div className="hidden md:block">
-            <TerminalToolbar
-              sessions={terminal.sessions}
-              focusedId={terminal.focusedId}
-              maximized={maximized}
-              currentProject={name || ""}
-              projects={projects}
-              repos={project?.repos}
-              onFocus={terminal.setFocusedId}
-              onCreate={(opts) => {
-                void createTerminal(opts || {});
-              }}
-              onDelete={terminal.deleteSession}
-              onColorChange={(id, color) =>
-                terminal.updateSession(id, { color })
-              }
-              onRename={(id, n) => terminal.updateSession(id, { name: n })}
-              onToggleMaximize={toggleMaximized}
-            />
-          </div>
-
-          {/* Mobile color-dot rail */}
-          <div className="md:hidden">
-            <TerminalMobileRail
-              sessions={terminal.sessions}
-              focusedId={terminal.focusedId}
-              currentProject={name || ""}
-              onFocus={terminal.setFocusedId}
-              onCreate={(opts) => {
-                void createTerminal(opts || {});
-              }}
-              onOpenDrawer={() => setDrawerOpen(true)}
-            />
-          </div>
-
-          {/* Terminal area: spine (mobile) + grid */}
-          <div className="flex-1 min-h-0 flex relative">
-            <div className="md:hidden">
-              <TerminalSpine
-                sessions={terminal.sessions}
-                focusedId={terminal.focusedId}
-                onFocus={terminal.setFocusedId}
-                onOpenDrawer={() => setDrawerOpen(true)}
-              />
-            </div>
-            <div className="flex-1 min-w-0 p-1">
-              <TerminalLayoutGrid
-                sessions={terminal.sessions}
-                focusedId={terminal.focusedId}
-                maximized={maximized}
-                onFocus={terminal.setFocusedId}
-                onExit={terminal.deleteSession}
-                onToggleMaximize={toggleMaximized}
-                onReady={(sessionId, handle) => {
-                  terminalHandlesRef.current.set(sessionId, handle);
-                }}
-              />
-            </div>
-
-            {/* Cross-project drawer (mobile-first, desktop-compatible) */}
-            {drawerOpen && (
-              <TerminalSpineDrawer
-                sessions={allTerminals.sessions}
-                focusedId={terminal.focusedId}
-                currentProject={name || ""}
-                projects={projects}
-                onFocus={(sessionId, sessionProject) => {
-                  try {
-                    localStorage.setItem(
-                      `panel-terminal-focus-${sessionProject}`,
-                      sessionId,
-                    );
-                  } catch {
-                    // ignore
-                  }
-                  if (sessionProject === name) {
-                    terminal.setFocusedId(sessionId);
-                  } else {
-                    navTo(`/project/${sessionProject}/iterm`);
-                  }
-                  setDrawerOpen(false);
-                }}
-                onCreate={(opts) => {
-                  void createTerminal(opts);
-                }}
-                onClose={() => setDrawerOpen(false)}
-              />
-            )}
-          </div>
-
-          {/* Mobile shortcut bar */}
-          <TerminalShortcutBar
-            onSend={(data) => {
-              const targetId = terminal.focusedId ?? terminal.sessions[0]?.id;
-              if (!targetId) return;
-              const handle = terminalHandlesRef.current.get(targetId);
-              handle?.send(data);
-              // Re-focus the xterm on the next frame so subsequent taps on
-              // the on-screen keyboard still go into the terminal.
-              requestAnimationFrame(() => handle?.focus());
-            }}
-            onToggleKeyboard={() => {
-              const targetId = terminal.focusedId ?? terminal.sessions[0]?.id;
-              if (targetId) terminalHandlesRef.current.get(targetId)?.focus();
-            }}
-          />
-        </div>
+          onNavTo={navTo}
+        />
       )}
 
       {/* File section listing */}
