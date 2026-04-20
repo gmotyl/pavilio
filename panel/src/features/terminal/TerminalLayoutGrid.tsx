@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { X, Maximize2, Minimize2, GripHorizontal } from "lucide-react";
+import { X, Maximize2, Minimize2 } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { TerminalHandle } from "./TerminalView";
 import type { SessionMeta } from "./useTerminalSessions";
@@ -252,10 +252,16 @@ function TerminalCell({
       }}
       onDragEnd={onDragEnd}
     >
-      {/* Cell header — always visible as a separate row above the terminal */}
+      {/* Cell header — the whole row is a drag handle for swapping cells */}
       <div
         className="flex items-center gap-1.5 px-2 py-1 shrink-0"
-        style={{ background: headerBg }}
+        style={{ background: headerBg, cursor: "grab" }}
+        title="Drag to swap"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = "move";
+          onDragStart();
+        }}
       >
         <TerminalActivityLed sessionId={session.id} />
         <span
@@ -265,25 +271,6 @@ function TerminalCell({
           {session.name}
         </span>
         <div className="flex gap-0.5">
-          <div
-            className="p-1 rounded"
-            style={{ color: "var(--text-muted)", cursor: "grab" }}
-            title="Drag to swap"
-            draggable
-            onDragStart={(e) => {
-              e.stopPropagation();
-              e.dataTransfer.effectAllowed = "move";
-              onDragStart();
-            }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.background = "rgba(255,255,255,0.06)")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.background = "transparent")
-            }
-          >
-            <GripHorizontal size={11} />
-          </div>
           <CellIconButton
             title={maximized ? "Restore" : "Maximize"}
             onClick={(e) => {
