@@ -265,6 +265,13 @@ function TerminalCell({
         onExit={() => onExit(session.id)}
         onReady={(h) => onReady?.(session.id, h)}
       />
+      {/* Dim overlay for inactive cells */}
+      {!focused && (
+        <div
+          className="absolute inset-0 pointer-events-none transition-opacity group-hover:opacity-0"
+          style={{ background: "rgba(0,0,0,0.28)" }}
+        />
+      )}
       {/* Cell header — visible on hover or when focused */}
       <div
         className="absolute top-0 left-0 right-0 flex items-center gap-1.5 px-2 py-1 pointer-events-none transition-opacity"
