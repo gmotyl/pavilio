@@ -1055,17 +1055,20 @@ export default function ProjectView() {
                       : undefined
                   }
                   activeFile={searchParams.get("branchfile")}
-                  onActiveFileChange={(file) =>
-                    setSearchParams(
-                      (prev) => {
-                        const p = new URLSearchParams(prev);
-                        if (file) p.set("branchfile", file);
-                        else p.delete("branchfile");
-                        return p;
-                      },
-                      { replace: true },
-                    )
-                  }
+                  onActiveFileChange={(file) => {
+                    if (file) {
+                      setSearchParams(
+                        (prev) => {
+                          const p = new URLSearchParams(prev);
+                          p.set("branchfile", file);
+                          return p;
+                        },
+                        { replace: false },
+                      );
+                    } else {
+                      navTo(-1);
+                    }
+                  }}
                 />
               </div>
               <div
