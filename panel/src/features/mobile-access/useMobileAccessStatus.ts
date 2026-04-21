@@ -14,7 +14,7 @@ interface Result {
   disable: () => Promise<void>;
 }
 
-export function useMobileAccessStatus(enabled: boolean): Result {
+export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
   const [status, setStatus] = useState<MobileAccessState | null>(null);
 
   const refresh = useCallback(async () => {
@@ -41,12 +41,12 @@ export function useMobileAccessStatus(enabled: boolean): Result {
     const schedule = () => {
       id = setTimeout(() => {
         void refresh().then(schedule);
-      }, 2000);
+      }, pollMs);
     };
     void refresh();
     schedule();
     return () => clearTimeout(id);
-  }, [enabled, refresh]);
+  }, [enabled, refresh, pollMs]);
 
   return { status, refresh, enable, disable };
 }

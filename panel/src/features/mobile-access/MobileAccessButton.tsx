@@ -5,7 +5,8 @@ import { useMobileAccessStatus } from "./useMobileAccessStatus";
 
 export function MobileAccessButton() {
   const [open, setOpen] = useState(false);
-  const { status } = useMobileAccessStatus(!open);
+  // When the modal is closed we only need a loose "is it on?" signal — poll slowly.
+  const { status } = useMobileAccessStatus(!open, 30000);
   const isOn = status?.state === "on";
 
   return (

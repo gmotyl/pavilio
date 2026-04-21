@@ -27,8 +27,15 @@ export async function loadAuthState(): Promise<void> {
   const file = stateFile();
   if (existsSync(file)) {
     const raw = readFileSync(file, "utf8");
-    state = JSON.parse(raw);
-    return;
+    try {
+      state = JSON.parse(raw);
+      return;
+    } catch (e) {
+      console.warn(
+        `[mobile-auth] state file at ${file} is invalid JSON, regenerating: ${(e as Error).message}`,
+      );
+      // fall through to fresh-state init
+    }
   }
   state = {
     signingKey: randomBytes(32).toString("base64url"),

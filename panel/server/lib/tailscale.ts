@@ -37,7 +37,7 @@ function run(cmd: string, args: string[]): Promise<{ stdout: string; stderr: str
 }
 
 async function resolveBinary(): Promise<string | null> {
-  if (cachedBinary !== undefined) return cachedBinary;
+  if (cachedBinary) return cachedBinary;
   for (const p of CANDIDATE_PATHS) {
     if (existsSync(p)) {
       cachedBinary = p;
@@ -54,7 +54,7 @@ async function resolveBinary(): Promise<string | null> {
   } catch {
     // which returns non-zero → not found
   }
-  cachedBinary = null;
+  // Do NOT cache "not found" — user may install Tailscale while the server is running.
   return null;
 }
 

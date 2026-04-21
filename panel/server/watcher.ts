@@ -6,6 +6,16 @@ import { rebuildIndex } from "./lib/file-index.js";
 import { getSession, resizeSession } from "./lib/terminal-manager.js";
 import { recordInput, dismiss, getSnapshot, subscribe, type ActivityEvent } from "./lib/terminalActivity.js";
 import { validateWsToken } from "./lib/auth.js";
+import { verifySessionCookie } from "./lib/mobile-auth.js";
+import type { Request } from "express";
+
+function isMobileAuthOk(req: { headers: { host?: string; cookie?: string } }): boolean {
+  const host = (req.headers.host ?? "").toLowerCase().split(":")[0] ?? "";
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") {
+    return true;
+  }
+  return verifySessionCookie(req as unknown as Request);
+}
 
 let wss: WebSocketServer;
 
@@ -15,6 +25,10 @@ export function setupWebSocket(server: Server): WebSocketServer {
   wss.on("connection", (ws, req) => {
     if (!validateWsToken(req.headers.cookie)) {
       ws.close(4001, "Unauthorized");
+      return;
+    }
+    if (!isMobileAuthOk(req)) {
+      ws.close(4003, "Mobile pairing required");
       return;
     }
 
