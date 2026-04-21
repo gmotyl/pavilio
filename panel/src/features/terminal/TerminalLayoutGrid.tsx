@@ -5,6 +5,7 @@ import type { TerminalHandle } from "./TerminalView";
 import type { SessionMeta } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 
 interface Props {
   sessions: SessionMeta[];
@@ -32,6 +33,8 @@ export function TerminalLayoutGrid({
   );
   const draggedCellRef = useRef<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
+  const pendingSession = sessions.find((s) => s.id === pendingCloseId);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
@@ -42,24 +45,38 @@ export function TerminalLayoutGrid({
 
   const count = sessions.length;
 
+  const modal = (
+    <ConfirmCloseTerminalModal
+      sessionName={pendingSession?.name ?? null}
+      onCancel={() => setPendingCloseId(null)}
+      onConfirm={() => {
+        if (pendingCloseId) onExit(pendingCloseId);
+        setPendingCloseId(null);
+      }}
+    />
+  );
+
   if (count === 0) {
     return (
-      <div
-        className="flex items-center justify-center h-full"
-        style={{ color: "var(--text-muted)" }}
-      >
-        <div className="text-center space-y-2">
-          <div
-            className="text-xs uppercase tracking-[0.2em]"
-            style={{ color: "var(--text-tertiary)" }}
-          >
-            No terminals
-          </div>
-          <div className="text-[13px]">
-            Use <span className="font-mono">New Terminal</span> above to start
+      <>
+        <div
+          className="flex items-center justify-center h-full"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <div className="text-center space-y-2">
+            <div
+              className="text-xs uppercase tracking-[0.2em]"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              No terminals
+            </div>
+            <div className="text-[13px]">
+              Use <span className="font-mono">New Terminal</span> above to start
+            </div>
           </div>
         </div>
-      </div>
+        {modal}
+      </>
     );
   }
 
@@ -73,6 +90,7 @@ export function TerminalLayoutGrid({
       isDropTarget={dropTargetId === session.id}
       onFocus={onFocus}
       onExit={onExit}
+      onRequestExit={setPendingCloseId}
       onToggleMaximize={onToggleMaximize}
       onReady={onReady}
       onDragStart={() => { draggedCellRef.current = session.id; }}
@@ -98,11 +116,12 @@ export function TerminalLayoutGrid({
 
   // Mobile OR explicit maximize: render only focused (or first) fullscreen.
   // Keep ALL other sessions mounted (hidden) so their terminal state survives.
+  let body: React.ReactNode;
   if (isMobile || maximized) {
     const visible = focusedId
       ? sessions.find((s) => s.id === focusedId) ?? sessions[0]
       : sessions[0];
-    return (
+    body = (
       <div className="relative w-full h-full">
         {sessions.map((s) => (
           <div
@@ -118,33 +137,25 @@ export function TerminalLayoutGrid({
         ))}
       </div>
     );
-  }
-
-  if (count === 1) {
-    return <div className="w-full h-full">{cell(sessions[0])}</div>;
-  }
-
-  if (count === 2) {
-    return (
+  } else if (count === 1) {
+    body = <div className="w-full h-full">{cell(sessions[0])}</div>;
+  } else if (count === 2) {
+    body = (
       <div className="h-full grid grid-cols-2" style={{ gap: "4px" }}>
         {cell(sessions[0])}
         {cell(sessions[1])}
       </div>
     );
-  }
-
-  if (count === 3) {
-    return (
+  } else if (count === 3) {
+    body = (
       <div className="h-full grid grid-cols-2" style={{ gap: "4px" }}>
         {cell(sessions[0], { gridRow: "1 / 3" })}
         {cell(sessions[1])}
         {cell(sessions[2])}
       </div>
     );
-  }
-
-  if (count === 4) {
-    return (
+  } else if (count === 4) {
+    body = (
       <div
         className="h-full grid grid-cols-2 grid-rows-2"
         style={{ gap: "4px" }}
@@ -152,10 +163,8 @@ export function TerminalLayoutGrid({
         {sessions.map((s) => cell(s))}
       </div>
     );
-  }
-
-  if (count === 5) {
-    return (
+  } else if (count === 5) {
+    body = (
       <div
         className="h-full grid grid-cols-2"
         style={{ gap: "4px", gridTemplateRows: "1fr 1fr 1fr" }}
@@ -167,10 +176,8 @@ export function TerminalLayoutGrid({
         {cell(sessions[4], { gridRow: "3 / 4" })}
       </div>
     );
-  }
-
-  if (count === 6) {
-    return (
+  } else if (count === 6) {
+    body = (
       <div
         className="h-full grid grid-cols-3 grid-rows-2"
         style={{ gap: "4px" }}
@@ -178,15 +185,22 @@ export function TerminalLayoutGrid({
         {sessions.map((s) => cell(s))}
       </div>
     );
+  } else {
+    body = (
+      <div
+        className="h-full grid grid-cols-3"
+        style={{ gap: "4px", gridAutoRows: "1fr" }}
+      >
+        {sessions.map((s) => cell(s))}
+      </div>
+    );
   }
 
   return (
-    <div
-      className="h-full grid grid-cols-3"
-      style={{ gap: "4px", gridAutoRows: "1fr" }}
-    >
-      {sessions.map((s) => cell(s))}
-    </div>
+    <>
+      {body}
+      {modal}
+    </>
   );
 }
 
@@ -198,6 +212,7 @@ interface CellProps {
   isDropTarget: boolean;
   onFocus: (id: string) => void;
   onExit: (id: string) => void;
+  onRequestExit: (id: string) => void;
   onToggleMaximize: () => void;
   onReady?: (id: string, handle: TerminalHandle) => void;
   onDragStart: () => void;
@@ -215,6 +230,7 @@ function TerminalCell({
   isDropTarget,
   onFocus,
   onExit,
+  onRequestExit,
   onToggleMaximize,
   onReady,
   onDragStart,
@@ -284,7 +300,7 @@ function TerminalCell({
             title="Kill session"
             onClick={(e) => {
               e.stopPropagation();
-              onExit(session.id);
+              onRequestExit(session.id);
             }}
             hoverColor="var(--red, #f7768e)"
           >
