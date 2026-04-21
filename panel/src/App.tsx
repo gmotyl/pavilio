@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { FaviconUpdater } from "./features/favicon/FaviconUpdater";
 import { MobileAuthBootstrap } from "./features/mobile-auth/MobileAuthBootstrap";
 import AgentSettings from "./features/agents/AgentSettings";
 import { Login } from "./features/auth/Login";
@@ -29,6 +30,7 @@ function AppShell() {
         <BreadcrumbActionsProvider>
           <FloatingActionProvider>
             <QuickFinder />
+            <FaviconUpdater />
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
