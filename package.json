@@ -18,7 +18,9 @@
     "setup:jira": "./scripts/setup:jira",
     "setup:azure-devops": "./scripts/setup:azure-devops",
     "install-skills": "./skills/install-skills.sh",
-    "update": "bash scripts/update.sh"
+    "pull": "bash scripts/update.sh",
+    "start": "cd panel && npm run dev &",
+    "stop": "lsof -ti :3010 | xargs kill 2>/dev/null; echo 'Panel stopped'"
   },
   "keywords": [
     "project-management",
