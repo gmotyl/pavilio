@@ -268,46 +268,16 @@ The architecture — Vite frontend + Express backend — maps directly to a stan
 
 ## Mobile access (Tailscale)
 
-Reach the panel from your phone without exposing it to your LAN or the public internet. The panel binds only to `127.0.0.1`; `tailscale serve` on your Mac proxies HTTPS from your tailnet into loopback. The phone is gated by a pairing QR whose token rotates on every Enable.
+Reach the panel from your phone without exposing it to your LAN or the public internet. The panel binds only to `127.0.0.1`; `tailscale serve` on your Mac proxies HTTPS from your tailnet into loopback, and a rotating 256-bit pairing token (delivered via QR) gates the phone.
 
-### Threat model, briefly
+**Setup, pairing, troubleshooting, and threat model:** [docs/mobile-access-tailscale.md](./docs/mobile-access-tailscale.md).
 
-The panel exposes a shell surface (terminal sessions, file read/write, git). Tailnet membership is not by itself a sufficient gate — a stolen phone or a compromised tailnet device would otherwise get in. The mobile-access feature adds a 256-bit pairing token that rotates on every Enable. Disable instantly invalidates all paired phones.
+TL;DR:
 
-### Prerequisites
-
-- Tailscale account.
-- "HTTPS Certificates" enabled in your tailnet admin: <https://login.tailscale.com/admin/dns>.
-- MagicDNS enabled in the same admin screen.
-
-### One-time Mac setup
-
-```bash
-brew install --cask tailscale
-open -a Tailscale   # sign in
-```
-
-### Enable + pair phone
-
-1. On the Mac, open the panel and click the **Mobile access** button on the Dashboard header.
-2. Click **Enable mobile access**. A QR appears.
-3. On the phone, install **Tailscale** (App Store / Play Store), sign in with the same account, allow the VPN profile.
-4. Scan the QR on the phone. The panel opens; it is now paired.
-
-### Disable
-
-Click **Disable mobile access** in the modal. This runs `tailscale serve reset` AND invalidates all paired phone sessions. Re-enabling requires a fresh scan.
-
-### Troubleshooting
-
-- **HTTPS cert error on enable** → HTTPS certificates are not enabled for your tailnet. Open <https://login.tailscale.com/admin/dns>, enable the toggle, try again.
-- **`tailscale` binary not found** → verify the Tailscale.app install or homebrew path.
-- **"Serve already configured for a different target"** → the panel will not overwrite your existing serve config. Review with `tailscale serve status`; only reset if it's yours to reset.
-- **Phone shows "Scan a fresh QR"** → the token was rotated (someone clicked Enable/Disable on the Mac after the phone paired). Click Enable on the Mac and rescan.
-
-### Manual teardown
-
-`tailscale serve reset` tears down the tailnet-side proxy only. It does NOT invalidate phone sessions — use the Disable button in the modal for that.
+1. `brew install --cask tailscale` on the Mac, sign in.
+2. Enable **HTTPS Certificates** + **MagicDNS** at <https://login.tailscale.com/admin/dns>.
+3. Install Tailscale on the phone, sign in with the same account.
+4. In the panel sidebar, toggle **Mobile access** on → scan the QR.
 
 ## License
 

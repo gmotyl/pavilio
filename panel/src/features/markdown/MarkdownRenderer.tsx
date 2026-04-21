@@ -10,7 +10,7 @@ const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
 interface MarkdownRendererProps {
   content: string;
-  /** Current file path relative to projectsDir, e.g. "ch/PROJECT.md" */
+  /** Current file path relative to projectsDir, e.g. "my-project/PROJECT.md" */
   basePath?: string;
 }
 

@@ -10,28 +10,28 @@ describe("useFavorites", () => {
 
   it("toggles a favorite on and off", () => {
     const { result } = renderHook(() => useFavorites());
-    act(() => result.current.toggle("metro"));
-    expect(result.current.isFavorite("metro")).toBe(true);
-    act(() => result.current.toggle("metro"));
-    expect(result.current.isFavorite("metro")).toBe(false);
+    act(() => result.current.toggle("my-work"));
+    expect(result.current.isFavorite("my-work")).toBe(true);
+    act(() => result.current.toggle("my-work"));
+    expect(result.current.isFavorite("my-work")).toBe(false);
   });
 
   it("persists to localStorage", () => {
     const { result, unmount } = renderHook(() => useFavorites());
-    act(() => result.current.toggle("ch"));
+    act(() => result.current.toggle("my-blog"));
     unmount();
 
     const { result: result2 } = renderHook(() => useFavorites());
-    expect(result2.current.isFavorite("ch")).toBe(true);
+    expect(result2.current.isFavorite("my-blog")).toBe(true);
   });
 
   it("sortWithFavorites puts favorites first", () => {
     const { result } = renderHook(() => useFavorites());
-    act(() => result.current.toggle("alokai"));
+    act(() => result.current.toggle("my-pet-project"));
 
-    const items = [{ name: "metro" }, { name: "alokai" }, { name: "ch" }];
+    const items = [{ name: "my-work" }, { name: "my-pet-project" }, { name: "my-blog" }];
     const sorted = result.current.sortWithFavorites(items);
-    expect(sorted[0].name).toBe("alokai");
+    expect(sorted[0].name).toBe("my-pet-project");
     expect(sorted.length).toBe(3);
   });
 });

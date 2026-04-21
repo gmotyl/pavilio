@@ -66,7 +66,16 @@ async function start() {
 
   const hmrPort = await findFreePort(24678);
   const vite = await createViteServer({
-    server: { middlewareMode: true, hmr: { port: hmrPort } },
+    server: {
+      middlewareMode: true,
+      hmr: { port: hmrPort },
+      // The panel binds to 127.0.0.1 only; when reached via `tailscale serve`
+      // the Host header carries the tailnet hostname (<mac>.<tail>.ts.net).
+      // Vite's default allowlist blocks non-loopback hosts as DNS-rebind
+      // protection, which is the wrong threat model here — we already gate
+      // every non-loopback request behind the mobile-auth middleware.
+      allowedHosts: [".ts.net", "localhost", "127.0.0.1"],
+    },
     appType: "spa",
   });
 

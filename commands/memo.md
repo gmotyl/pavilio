@@ -66,11 +66,11 @@ You are a quick memo agent. Your function is to capture a thought or note with l
 
 ## Examples
 
-**Input:** `metro quick thought about using redis for session caching instead of postgres`
+**Input:** `my-work quick thought about using redis for session caching instead of postgres`
 
-*Agent reads projects/metro/_index.json, sees Redis was discussed in context of performance issues*
+*Agent reads projects/my-work/_index.json, sees Redis was discussed in context of performance issues*
 
-**Output file:** `projects/metro/memo/2026-01-09_1423_redis_session_caching.md`
+**Output file:** `projects/my-work/memo/2026-01-09_1423_redis_session_caching.md`
 
 ```markdown
 # Redis for Session Caching
@@ -82,25 +82,25 @@ Consider using Redis for session caching instead of Postgres. This relates to th
 
 ---
 
-**Input:** `ch need to check if VAT validation works for DE addresses`
+**Input:** `my-blog need to check if the footer layout breaks on Safari 17`
 
-*Agent reads projects/ch/_index.json, finds VAT validation is part of checkout flow work*
+*Agent reads projects/my-blog/_index.json, finds the footer component was recently touched*
 
-**Output file:** `projects/ch/memo/2026-01-09_0930_vat_validation_de.md`
+**Output file:** `projects/my-blog/memo/2026-01-09_0930_safari_17_footer.md`
 
 ```markdown
-# VAT Validation for DE Addresses
+# Safari 17 footer layout
 
 > Captured: 2026-01-09 09:30
 
-Need to verify that VAT validation works correctly for German (DE) addresses in the checkout flow.
+Need to verify the footer layout doesn't break on Safari 17 — the recent flex changes may have regressed narrower viewports.
 ```
 
 ---
 
-**Input:** `metro talked to X about the thing`
+**Input:** `my-work talked to X about the thing`
 
-*Agent reads projects/metro/_index.json, cannot identify "X" or "the thing"*
+*Agent reads projects/my-work/_index.json, cannot identify "X" or "the thing"*
 
 **Agent asks:** "Who is X and what thing are you referring to?"
 
@@ -108,22 +108,22 @@ Need to verify that VAT validation works correctly for German (DE) addresses in 
 
 ### Continue with Same Project
 
-**Previous memo:** Created `projects/metro/memo/2026-01-09_1423_redis_session_caching.md`
+**Previous memo:** Created `projects/my-work/memo/2026-01-09_1423_redis_session_caching.md`
 
 **Input:** `memo also consider memcached as alternative`
 
-*Agent reuses project "metro" from previous memo*
+*Agent reuses project "my-work" from previous memo*
 
-**Output file:** `projects/metro/memo/2026-01-09_1425_memcached_alternative.md`
+**Output file:** `projects/my-work/memo/2026-01-09_1425_memcached_alternative.md`
 
 ---
 
 ### Edit Previous Memo
 
-**Previous memo:** `projects/metro/memo/2026-01-09_1423_redis_session_caching.md`
+**Previous memo:** `projects/my-work/memo/2026-01-09_1423_redis_session_caching.md`
 
 **Input:** `edit memo add that we should benchmark both options first`
 
 *Agent reads the previous memo, adds the benchmark note, saves to same file*
 
-**Confirmation:** "Updated projects/metro/memo/2026-01-09_1423_redis_session_caching.md"
+**Confirmation:** "Updated projects/my-work/memo/2026-01-09_1423_redis_session_caching.md"

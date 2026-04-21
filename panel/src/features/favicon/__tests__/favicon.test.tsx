@@ -11,7 +11,7 @@ describe("buildFaviconSvg", () => {
   const cases: Array<[FaviconState, string]> = [
     ["busy", "#ef4444"],
     ["attention", "#22c55e"],
-    ["idle", "#b45309"],
+    ["idle", "#ca8a04"],
   ];
   it.each(cases)("for %s state embeds the %s color", (state, color) => {
     const svg = buildFaviconSvg(state);

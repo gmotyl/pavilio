@@ -8,7 +8,7 @@ interface StateStyle {
 const STATES: Record<FaviconState, StateStyle> = {
   busy: { color: "#ef4444", glow: true },
   attention: { color: "#22c55e", glow: true },
-  idle: { color: "#b45309", glow: false },
+  idle: { color: "#ca8a04", glow: false },
 };
 
 export function buildFaviconSvg(state: FaviconState): string {

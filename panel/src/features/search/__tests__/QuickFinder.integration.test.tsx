@@ -6,18 +6,18 @@ import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
 
 const mockFiles = [
   {
-    relativePath: "metro/notes/daily.md",
-    project: "metro",
+    relativePath: "my-work/notes/daily.md",
+    project: "my-work",
     modified: 1700000000000,
   },
   {
-    relativePath: "alokai/PROJECT.md",
-    project: "alokai",
+    relativePath: "my-pet-project/PROJECT.md",
+    project: "my-pet-project",
     modified: 1700000001000,
   },
   {
-    relativePath: "ch/plans/migration.md",
-    project: "ch",
+    relativePath: "my-blog/plans/migration.md",
+    project: "my-blog",
     modified: 1700000002000,
   },
 ];
@@ -47,7 +47,7 @@ describe("QuickFinder integration", () => {
       expect(screen.getByPlaceholderText(/Search files/)).toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(screen.getByText("metro/notes/daily.md")).toBeInTheDocument();
+      expect(screen.getByText("my-work/notes/daily.md")).toBeInTheDocument();
     });
   });
 
@@ -59,13 +59,13 @@ describe("QuickFinder integration", () => {
       expect(screen.getByPlaceholderText(/Search files/)).toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(screen.getByText("metro/notes/daily.md")).toBeInTheDocument();
+      expect(screen.getByText("my-work/notes/daily.md")).toBeInTheDocument();
     });
     await user.type(screen.getByPlaceholderText(/Search files/), "PROJECT");
     await waitFor(() => {
-      expect(screen.getByText("alokai/PROJECT.md")).toBeInTheDocument();
+      expect(screen.getByText("my-pet-project/PROJECT.md")).toBeInTheDocument();
     });
-    expect(screen.queryByText("metro/notes/daily.md")).not.toBeInTheDocument();
+    expect(screen.queryByText("my-work/notes/daily.md")).not.toBeInTheDocument();
   });
 
   it("closes on Escape", async () => {

@@ -2,8 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { NotInstalledPane } from "../MobileAccessModal/NotInstalledPane";
 import { NotLoggedInPane } from "../MobileAccessModal/NotLoggedInPane";
-import { OffPane } from "../MobileAccessModal/OffPane";
+import { AccessPane } from "../MobileAccessModal/AccessPane";
 import { ErrorPane } from "../MobileAccessModal/ErrorPane";
+
+vi.mock("../qr", () => ({
+  renderQrSvg: async (s: string) => `<svg data-url="${s}"></svg>`,
+}));
 
 describe("NotInstalledPane", () => {
   it("shows brew install command and refresh button", () => {
@@ -25,15 +29,6 @@ describe("NotLoggedInPane", () => {
   });
 });
 
-describe("OffPane", () => {
-  it("enable button calls onEnable", () => {
-    const enable = vi.fn();
-    render(<OffPane onEnable={enable} />);
-    fireEvent.click(screen.getByRole("button", { name: /enable mobile access/i }));
-    expect(enable).toHaveBeenCalled();
-  });
-});
-
 describe("ErrorPane", () => {
   it("shows error text", () => {
     render(<ErrorPane error="boom" />);
@@ -47,12 +42,38 @@ describe("ErrorPane", () => {
   });
 });
 
-import { OnPane } from "../MobileAccessModal/OnPane";
+describe("AccessPane (off state)", () => {
+  const offState = { state: "off" as const, selfHost: "mac.foo.ts.net" };
 
-vi.mock("../qr", () => ({ renderQrSvg: async (s: string) => `<svg data-url="${s}"></svg>` }));
+  it("toggle switch turns on → calls onEnable", () => {
+    const enable = vi.fn();
+    render(
+      <AccessPane
+        status={offState}
+        onEnable={enable}
+        onDisable={() => {}}
+        onRegenerate={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("switch", { name: /mobile access/i }));
+    expect(enable).toHaveBeenCalled();
+  });
 
-describe("OnPane", () => {
-  const state = {
+  it("shows hint to toggle on", () => {
+    render(
+      <AccessPane
+        status={offState}
+        onEnable={() => {}}
+        onDisable={() => {}}
+        onRegenerate={() => {}}
+      />,
+    );
+    expect(screen.getByText(/toggle on to pair/i)).toBeInTheDocument();
+  });
+});
+
+describe("AccessPane (on state)", () => {
+  const onState = {
     state: "on" as const,
     selfHost: "mac.foo.ts.net",
     url: "https://mac.foo.ts.net",
@@ -60,29 +81,57 @@ describe("OnPane", () => {
   };
 
   it("renders QR SVG embedding qrUrl", async () => {
-    const { container } = render(<OnPane status={state} onDisable={() => {}} onRegenerate={() => {}} />);
+    const { container } = render(
+      <AccessPane
+        status={onState}
+        onEnable={() => {}}
+        onDisable={() => {}}
+        onRegenerate={() => {}}
+      />,
+    );
     await waitFor(() => {
-      const svg = container.querySelector("svg");
-      expect(svg?.getAttribute("data-url")).toBe(state.qrUrl);
+      const svg = container.querySelector("svg[data-url]");
+      expect(svg?.getAttribute("data-url")).toBe(onState.qrUrl);
     });
   });
 
-  it("disable button calls onDisable", () => {
+  it("toggle switch turns off → calls onDisable", () => {
     const disable = vi.fn();
-    render(<OnPane status={state} onDisable={disable} onRegenerate={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: /disable mobile access/i }));
+    render(
+      <AccessPane
+        status={onState}
+        onEnable={() => {}}
+        onDisable={disable}
+        onRegenerate={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("switch", { name: /mobile access/i }));
     expect(disable).toHaveBeenCalled();
   });
 
   it("regenerate button calls onRegenerate", () => {
     const regen = vi.fn();
-    render(<OnPane status={state} onDisable={() => {}} onRegenerate={regen} />);
-    fireEvent.click(screen.getByRole("button", { name: /regenerate/i }));
+    render(
+      <AccessPane
+        status={onState}
+        onEnable={() => {}}
+        onDisable={() => {}}
+        onRegenerate={regen}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /rotate pairing token/i }));
     expect(regen).toHaveBeenCalled();
   });
 
   it("shows URL", () => {
-    render(<OnPane status={state} onDisable={() => {}} onRegenerate={() => {}} />);
-    expect(screen.getByText(state.url)).toBeInTheDocument();
+    render(
+      <AccessPane
+        status={onState}
+        onEnable={() => {}}
+        onDisable={() => {}}
+        onRegenerate={() => {}}
+      />,
+    );
+    expect(screen.getByText(onState.url)).toBeInTheDocument();
   });
 });

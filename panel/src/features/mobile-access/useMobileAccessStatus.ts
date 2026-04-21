@@ -17,23 +17,42 @@ interface Result {
 export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
   const [status, setStatus] = useState<MobileAccessState | null>(null);
 
-  const refresh = useCallback(async () => {
-    const res = await fetch("/api/mobile-access/status");
-    if (!res.ok) return;
-    setStatus(await res.json());
-  }, []);
+  const call = useCallback(
+    async (label: string, url: string, init?: RequestInit) => {
+      try {
+        const res = await fetch(url, init);
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          console.error(
+            `[mobile-access] ${label} failed: HTTP ${res.status} ${res.statusText}`,
+            body,
+          );
+          return;
+        }
+        const payload = (await res.json()) as MobileAccessState;
+        if (payload.state === "error") {
+          console.error(`[mobile-access] ${label} returned error state`, payload);
+        }
+        setStatus(payload);
+      } catch (err) {
+        console.error(`[mobile-access] ${label} threw`, err);
+      }
+    },
+    [],
+  );
 
-  const enable = useCallback(async () => {
-    const res = await fetch("/api/mobile-access/enable", { method: "POST" });
-    if (!res.ok) return;
-    setStatus(await res.json());
-  }, []);
-
-  const disable = useCallback(async () => {
-    const res = await fetch("/api/mobile-access/disable", { method: "POST" });
-    if (!res.ok) return;
-    setStatus(await res.json());
-  }, []);
+  const refresh = useCallback(
+    () => call("refresh", "/api/mobile-access/status"),
+    [call],
+  );
+  const enable = useCallback(
+    () => call("enable", "/api/mobile-access/enable", { method: "POST" }),
+    [call],
+  );
+  const disable = useCallback(
+    () => call("disable", "/api/mobile-access/disable", { method: "POST" }),
+    [call],
+  );
 
   useEffect(() => {
     if (!enabled) return;

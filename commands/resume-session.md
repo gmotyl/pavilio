@@ -12,7 +12,7 @@ Resumes work on a project by loading context, checking in-progress plans, and en
 **Project resolution (in order):**
 1. If `[project]` argument is provided → use it, remember it for this conversation
 2. No argument → run `pwd` and check if the current directory is a known project folder:
-   - If path ends with `.../projects/[name]` where `[name]` is one of: `metro`, `ch`, `alokai`, `doterra`, `motyl`, `telegram-bridge`, `workspace-setup`, `openclaw` → use that name automatically
+   - If path ends with `.../projects/[name]` and `[name]` matches a folder in `projectsDir` → use that name automatically
 3. If project was remembered from an earlier `/resume-session` call this conversation → use it
 4. None of the above → ask: "Which project do you want to resume?" and wait for reply
 

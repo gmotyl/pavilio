@@ -45,7 +45,7 @@ describe("enableServe", () => {
     expect(execMock).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining("Tailscale"),
-      ["serve", "--bg", "--https=443", "/", "http://127.0.0.1:3010"],
+      ["serve", "--bg", "--https=443", "http://127.0.0.1:3010"],
       expect.any(Function)
     );
   });

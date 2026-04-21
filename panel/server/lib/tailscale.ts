@@ -112,19 +112,26 @@ export async function enableServe(port: number): Promise<TailscaleState> {
   const bin = await resolveBinary();
   if (!bin) return { state: "not_installed" };
   try {
-    await run(bin, ["serve", "--bg", "--https=443", "/", `http://127.0.0.1:${port}`]);
+    await run(bin, ["serve", "--bg", "--https=443", `http://127.0.0.1:${port}`]);
   } catch (e: any) {
     const stderr = e?.stderr ?? "";
     const msg = (e as Error).message ?? "";
     const combined = `${msg} ${stderr}`.toLowerCase();
+    console.error("[tailscale] enable failed", { msg, stderr });
+    // Only map to the `https_not_enabled` hint on the explicit CLI message.
+    // Broader patterns (e.g. "feature/query") can catch unrelated transient
+    // control-plane errors and mislead the user after they've already
+    // enabled HTTPS in the admin.
     if (combined.includes("https is not enabled")) {
       return {
         state: "error",
-        error: "HTTPS certificates are not enabled for this tailnet.",
+        error:
+          "HTTPS certificates are not enabled for this tailnet. Enable them in the Tailscale admin, then try again.",
         hint: "https_not_enabled",
       };
     }
-    return { state: "error", error: msg };
+    const detail = stderr.trim() || msg;
+    return { state: "error", error: detail };
   }
   return detectTailscale(port);
 }

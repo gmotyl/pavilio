@@ -183,7 +183,7 @@ Generate a comprehensive search index:
 If user requests "bootstrap all":
 
 ```
-For each project folder in projects/ (alokai, ch, doterra, metro):
+For each project folder in `projectsDir`:
   1. Check for existing *.md notes
   2. Generate PROJECT.md and _index.json
   3. Report progress

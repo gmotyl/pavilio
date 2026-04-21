@@ -105,7 +105,7 @@ Would you like to paste the transcript manually instead? [Y/n]
         "context": "API strategy discussion"
       }
     ],
-    "technologies": ["React", "Alokai", "SAP"],
+    "technologies": ["React", "Next.js", "Postgres"],
     "blockers": ["Azure authentication issues"],
     "action_items": [
       {
@@ -124,9 +124,9 @@ Would you like to paste the transcript manually instead? [Y/n]
 
 The value of the `"summary"` key in the JSON must be a string that strictly follows this markdown format:
 
-## TODOs for Greg
+## TODOs for You
 
-[List any action items, tasks, or follow-ups specifically assigned to or mentioned for Greg. If none, write "None identified"]
+[List any action items, tasks, or follow-ups specifically assigned to or mentioned for the current user. If none, write "None identified"]
 
 ## Action Items
 
@@ -170,7 +170,7 @@ After processing each meeting, update or create `projects/projectname/PROJECT.md
    - **Current Focus:** Replace entirely with items from THIS meeting — max 7 items. Do NOT append historical focus areas.
    - **Open Questions:** Only truly unresolved items — max 10. Remove anything resolved, stale, or about past vacations/absences.
    - **No Notes Index in PROJECT.md** — notes are indexed in `_index.json`
-   - **No task-specific sections** (e.g., CHAL-71 details) — those belong in individual notes
+   - **No task-specific sections** (e.g., `PROJ-71` details) — those belong in individual notes
    - **No ephemeral data** (team availability, holiday schedules)
 
 **PROJECT.md Template Structure:**
@@ -308,17 +308,17 @@ For recurring meetings, use the `known_participants` field in `_index.json` to m
 {
   "known_participants": {
     "meeting_series_name": {
-      "description": "e.g., 'metro_daily', 'sprint_planning', 'team_standup'",
+      "description": "e.g., 'daily_standup', 'sprint_planning', 'team_sync'",
       "participants": [
         {
-          "name": "Yasir Alawa",
-          "email": "yasir.alawa@metro-markets.de",
-          "aliases": ["Yasir", "Alawa"]
+          "name": "Ada Lovelace",
+          "email": "ada@example.com",
+          "aliases": ["Ada", "Lovelace"]
         },
         {
-          "name": "Muhammad Junaid Iftikhar",
-          "email": "m.iftikhar@metro-markets.de",
-          "aliases": ["Junaid", "Iftikhar", "Muhammad"]
+          "name": "Alan Turing",
+          "email": "alan@example.com",
+          "aliases": ["Alan", "Turing"]
         }
       ],
       "last_updated": "YYYY-MM-DD"
@@ -345,16 +345,16 @@ For recurring meetings, use the `known_participants` field in `_index.json` to m
 When user pastes a list like:
 
 ```
-Alawa, Yasir <yasir.alawa@metro-markets.de>; Iftikhar, Muhammad Junaid <m.iftikhar@metro-markets.de>
+Lovelace, Ada <ada@example.com>; Turing, Alan <alan@example.com>
 ```
 
 Parse it into:
 
 ```json
 {
-  "name": "Yasir Alawa",
-  "email": "yasir.alawa@metro-markets.de",
-  "aliases": ["Yasir", "Alawa"]
+  "name": "Ada Lovelace",
+  "email": "ada@example.com",
+  "aliases": ["Ada", "Lovelace"]
 }
 ```
 
