@@ -705,12 +705,6 @@ export default function ProjectView() {
                     {activeTab.label === "iterm" ? <Terminal className="w-4 h-4" /> : activeTab.label}
                   </span>
                 </button>
-                <h1
-                  className="text-[15px] font-semibold capitalize truncate min-w-0"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {name}
-                </h1>
                 {tabMenuOpen && (
                   <>
                     <div
