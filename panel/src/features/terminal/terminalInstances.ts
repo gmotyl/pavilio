@@ -58,6 +58,25 @@ export function refitAll(): void {
   for (const inst of instances.values()) inst.fit();
 }
 
+/**
+ * Custom xterm key event handler that makes Shift+Enter insert a literal
+ * newline into the current line buffer (via `term.paste("\n")`) instead of
+ * letting xterm forward `\r` to the pty. Plain Enter is untouched so TUIs
+ * like Claude Code / OpenCode keep treating it as "submit".
+ *
+ * Exported as a pure helper so it can be unit-tested without a real
+ * Terminal/jsdom wiring.
+ */
+export function shiftEnterHandler(term: { paste: (d: string) => void }) {
+  return (e: { type: string; key: string; shiftKey: boolean }) => {
+    if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
+      term.paste("\n");
+      return false; // stop xterm from also sending \r
+    }
+    return true;
+  };
+}
+
 function isMobileViewport(): boolean {
   return typeof window !== "undefined" && window.innerWidth < 768;
 }
@@ -166,6 +185,7 @@ function createInstance(sessionId: string): InternalInstance {
     theme: THEME,
     scrollback: 5000,
   });
+  terminal.attachCustomKeyEventHandler(shiftEnterHandler(terminal));
 
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
