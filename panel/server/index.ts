@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createHttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
+import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
 import { createServer as createViteServer } from "vite";
 import { loadConfig, getConfig } from "./config.js";
@@ -27,11 +28,29 @@ import terminalRouter from "./routes/terminal.js";
 import { setupWebSocket, setupFileWatcher } from "./watcher.js";
 import { pruneDeadAgents } from "./lib/agent-registry.js";
 
+async function findFreePort(start: number, span = 50): Promise<number> {
+  for (let candidate = start; candidate < start + span; candidate++) {
+    const free = await new Promise<boolean>((resolve) => {
+      const probe = createNetServer();
+      probe.once("error", () => resolve(false));
+      probe.listen(candidate, "127.0.0.1", () => {
+        probe.close(() => resolve(true));
+      });
+    });
+    if (free) return candidate;
+  }
+  throw new Error(`No free port in ${start}..${start + span - 1}`);
+}
+
 async function start() {
   await loadConfig();
   await loadAuthState();
   rebuildIndex();
-  const { port, tlsCert, tlsKey } = getConfig();
+  const { port: configuredPort, tlsCert, tlsKey } = getConfig();
+  const port = await findFreePort(configuredPort);
+  if (port !== configuredPort) {
+    console.log(`Port ${configuredPort} in use, using ${port} instead.`);
+  }
 
   const app = express();
 
@@ -45,8 +64,9 @@ async function start() {
     server = createHttpServer(app);
   }
 
+  const hmrPort = await findFreePort(24678);
   const vite = await createViteServer({
-    server: { middlewareMode: true },
+    server: { middlewareMode: true, hmr: { port: hmrPort } },
     appType: "spa",
   });
 
