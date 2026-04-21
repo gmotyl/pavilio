@@ -4,12 +4,11 @@ This project uses QMD for semantic search and knowledge management across projec
 
 ## Collections
 
-Collections are set up for:
-- **alokai** - 13 documents indexed
-- **ch** - 28 documents indexed
-- **doterra** - 10 documents indexed
-- **metro** - 34 documents indexed
-- **openclaw** - 4 documents indexed
+Set up one collection per project folder in `projectsDir`. Example:
+
+- **my-work** - N documents indexed
+- **my-pet-project** - N documents indexed
+- **my-blog** - N documents indexed
 
 ## Auto-Reindexing
 
@@ -46,11 +45,10 @@ qmd embed
 If collections were registered with the old `notes/` path, re-register them:
 
 ```bash
-qmd collection add projects/alokai --name alokai --mask "**/*.md"
-qmd collection add projects/ch --name ch --mask "**/*.md"
-qmd collection add projects/doterra --name doterra --mask "**/*.md"
-qmd collection add projects/metro --name metro --mask "**/*.md"
-qmd collection add projects/openclaw --name openclaw --mask "**/*.md"
+qmd collection add projects/my-work --name my-work --mask "**/*.md"
+qmd collection add projects/my-pet-project --name my-pet-project --mask "**/*.md"
+qmd collection add projects/my-blog --name my-blog --mask "**/*.md"
+# ...one line per project folder you want indexed
 qmd embed
 ```
 

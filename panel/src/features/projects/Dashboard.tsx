@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useFavorites } from "./useFavorites";
 import { useProjects, Project } from "./useProjects";
+import { MobileAccessButton } from "../mobile-access/MobileAccessButton";
 import {
   FolderOpen,
   FileText,
@@ -134,11 +135,14 @@ export default function Dashboard() {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold mb-1">Projects</h1>
-        <p className="text-sm" style={{ color: "var(--text-tertiary)" }}>
-          {projects.length} projects in workspace
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold mb-1">Projects</h1>
+          <p className="text-sm" style={{ color: "var(--text-tertiary)" }}>
+            {projects.length} projects in workspace
+          </p>
+        </div>
+        <MobileAccessButton />
       </div>
       {projects.length === 0 ? (
         <p style={{ color: "var(--text-muted)" }}>Loading...</p>

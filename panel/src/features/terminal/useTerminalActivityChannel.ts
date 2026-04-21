@@ -5,6 +5,7 @@ export type ActivityState = "idle" | "busy" | "attention";
 interface ChannelRecord {
   state: ActivityState;
   attentionSinceAt: number | null;
+  busySinceAt: number | null;
 }
 
 const records = new Map<string, ChannelRecord>();
@@ -26,12 +27,20 @@ interface IncomingEvent {
 }
 
 function applyEvent(ev: IncomingEvent): void {
+  const prev = records.get(ev.sessionId);
+  const nextBusySinceAt =
+    ev.state === "busy"
+      ? prev?.state === "busy" && prev.busySinceAt != null
+        ? prev.busySinceAt
+        : ev.at
+      : null;
   records.set(ev.sessionId, {
     state: ev.state,
     attentionSinceAt:
       ev.state === "attention" && typeof ev.attentionSinceAt === "number"
         ? ev.attentionSinceAt
         : null,
+    busySinceAt: nextBusySinceAt,
   });
   notify(ev.sessionId, ev.state);
 }
@@ -76,6 +85,10 @@ export function getActivityState(sessionId: string): ActivityState {
 
 export function getAttentionSinceAt(sessionId: string): number | null {
   return records.get(sessionId)?.attentionSinceAt ?? null;
+}
+
+export function getBusySinceAt(sessionId: string): number | null {
+  return records.get(sessionId)?.busySinceAt ?? null;
 }
 
 export function subscribeActivity(

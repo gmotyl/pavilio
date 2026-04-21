@@ -8,8 +8,8 @@ Generate timesheet descriptions by searching project notes. Produces an expanded
 - Single day: `14.01` = January 14th of current year
 - Range: `10-13.02` = February 10th, 11th, 12th, 13th
 - Cross-month: `28.01-02.02` = January 28th through February 2nd
-- Project filter: append project name, e.g. `16-20.02 ch`
-- Extra instructions: append after dates/project, e.g. `16-20.02 ch - only standups`
+- Project filter: append project name, e.g. `16-20.02 my-work`
+- Extra instructions: append after dates/project, e.g. `16-20.02 my-work - only standups`
 
 ## Instructions
 
@@ -21,7 +21,7 @@ Parse `$ARGUMENTS` to extract dates and optional project filter:
 2. **Range format**: `DD-DD.MM` (e.g., `10-13.02`)
 3. **Cross-month range**: `DD.MM-DD.MM` (e.g., `28.01-02.02`)
 
-If a project name follows the date (e.g., `ch`, `metro`, `alokai`, `doterra`), only search that project.
+If a project name follows the date (e.g., the name of one of your folders under `projectsDir`), only search that project.
 
 Convert to ISO format: `YYYY-MM-DD` for file searching.
 
@@ -41,7 +41,7 @@ find projects/{project}/progress -name "YYYY-MM-DD*.md" -type f | sort
 ```
 
 If filtering by project, only search that project's `projects/{project}/progress/` directory.
-If no project filter, search all: metro, alokai, ch, doterra, and any other subdirectories with progress folders.
+If no project filter, search all subdirectories of `projectsDir` that contain a `progress/` folder.
 
 ### Step 4: Supplement with QMD Search
 
@@ -60,7 +60,7 @@ Read each found progress file. Extract:
 - **Issues investigated** — bugs found, root causes, solutions applied
 - **Key decisions** — architectural choices, design clarifications
 - **Status** — what's ready, in progress, or blocked
-- **Context** — ticket numbers (e.g., CHAL-71), branch names, team interactions
+- **Context** — ticket numbers (e.g., `PROJ-71`), branch names, team interactions
 
 ### Step 6: Output — Expanded Overview
 
@@ -75,7 +75,7 @@ For each date, write a **standup-style summary** (2-5 bullet points per day):
 **Style rules:**
 - Header: day name + date + brief theme (e.g., "Middleware Fix + Phase 1")
 - Each bullet: bold feature name, then narrative with problem/solution/status
-- Include ticket numbers (CHAL-XX) when available
+- Include ticket numbers (e.g. `PROJ-XX`) when available
 - Include key technical details (root cause, fix approach) — not just "fixed a bug"
 - Past tense, standup tone
 - Skip trivial items (typo fixes, minor reformatting)
@@ -94,11 +94,11 @@ After the expanded overview, output a condensed table for quick Jira tempo entry
 ```
 | Date | Project | Activity |
 |------|---------|----------|
-| 16 (Mon) | ch | Fixed butterfly carousel CSS specificity issue (Swiper override). Planned PuigBuyInfo component with 4 style variants. |
-| 17 (Tue) | ch | Debugged and fixed PuigBuyInfo middleware integration. Completed Phase 1 (types + server/client components). |
-| 18 (Wed) | ch | Reviewed BuyInfo design spec with David (style-based rendering decision). Cleaned up feature branch history. |
-| 19 (Thu) | ch | Fixed product carousel CSS leaking into BuyInfo. Resolved icon rendering from nested CMS mediaDesktop field. |
-| 20 (Fri) | ch | Implemented POPUP modal variant for PDP (carousel + tabbed modal, mobile vertical list). Visual polish ongoing. |
+| 16 (Mon) | my-work | Fixed carousel CSS specificity issue. Planned new component with 4 style variants. |
+| 17 (Tue) | my-work | Debugged middleware integration. Completed Phase 1 (types + server/client components). |
+| 18 (Wed) | my-work | Reviewed design spec with team (style-based rendering decision). Cleaned up feature branch history. |
+| 19 (Thu) | my-work | Fixed carousel CSS leaking into adjacent component. Resolved icon rendering from nested CMS field. |
+| 20 (Fri) | my-work | Implemented modal variant (carousel + tabbed modal, mobile vertical list). Visual polish ongoing. |
 ```
 
 **Condensed description rules:**
@@ -113,6 +113,6 @@ After the expanded overview, output a condensed table for quick Jira tempo entry
 ## Important Notes
 
 - Use current year unless explicitly specified
-- Project column uses the folder name (e.g., "ch", "alokai", "metro")
+- Project column uses the folder name (e.g., "my-work", "my-pet-project", "my-blog")
 - Always read the actual progress files — don't guess from filenames alone
 - When multiple sessions exist for the same day, combine into one day entry

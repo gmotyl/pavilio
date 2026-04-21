@@ -81,11 +81,11 @@ User asks to read something that was just displayed.
 
 **User says:**
 ```
-read last note from metro
+read last note from my-work
 ```
 
 **You MUST:**
-1. Find and display the last metro note
+1. Find and display the last my-work note
 2. **IMMEDIATELY** generate audio from the note text
 3. Play it
 
@@ -117,11 +117,11 @@ User wants to search for content AND hear it read.
 
 **User says:**
 ```
-find last metro summary and read
+find last my-work summary and read
 ```
 
 **You MUST:**
-1. Search for the metro summary
+1. Search for the my-work summary
 2. Display the content
 3. **IMMEDIATELY** generate audio
 4. Play it (do not end response until audio is playing)
@@ -143,7 +143,7 @@ find last metro summary and read
    - File plays automatically
 
 4. Confirm to user
-   ✓ Found metro summary (45 lines)
+   ✓ Found my-work summary (45 lines)
    ✓ Audio generated via MCP server
    ✓ Playing in default audio player...
 ```
@@ -164,7 +164,7 @@ User specifies language for the audio.
 
 **User says:**
 ```
-read last metro summary in Polish
+read last my-work summary in Polish
 ```
 
 **You MUST:**
@@ -318,7 +318,7 @@ def handle_read_command(user_request):
 
 **Copilot example (what went wrong):**
 ```
-✓ Audio file created: notes/metro/2026-02-10_daily_standup.mp3
+✓ Audio file created: notes/my-work/2026-02-10_daily_standup.mp3
 ✗ No open command executed
 ✗ User sees file path but hears nothing
 ✗ COMMAND FAILED
@@ -326,8 +326,8 @@ def handle_read_command(user_request):
 
 **Correct flow:**
 ```
-✓ Audio file created: notes/metro/2026-02-10_daily_standup.mp3
-✓ open ~/notes/metro/2026-02-10_daily_standup.mp3 (executed)
+✓ Audio file created: notes/my-work/2026-02-10_daily_standup.mp3
+✓ open ~/notes/my-work/2026-02-10_daily_standup.mp3 (executed)
 ✓ Audio player opens and plays automatically
 ✓ User hears the audio
 ✓ COMMAND SUCCEEDED
@@ -346,15 +346,15 @@ Overwrites on each request (clean up old files automatically).
 ## Example Flow
 
 ```
-User: "find last CH daily summary and read"
+User: "find last my-work daily summary and read"
 
 Agent response:
 [SEARCH OUTPUT]
-## CH Daily Summary - Feb 10
-Butterfly carousel SVG mask React render issue...
+## my-work Daily Summary - Feb 10
+Carousel SVG mask React render issue...
 
 [AUDIO GENERATION]
-$ edge-tts --text "Butterfly carousel SVG mask React render issue..." \
+$ edge-tts --text "Carousel SVG mask React render issue..." \
   --voice "en-GB-RyanNeural" \
   --write-media ~/tts_search_result.mp3
 
@@ -371,7 +371,7 @@ $ open ~/tts_search_result.mp3
 ### ❌ WRONG: Find and display WITHOUT audio
 
 ```
-User: "find last metro summary and read"
+User: "find last my-work summary and read"
 
 Agent: [finds and displays summary]
 ✗ STOPS HERE - NO AUDIO GENERATED
@@ -428,10 +428,10 @@ start ~/daily_standup.mp3     # Windows
 ### ✅ CORRECT: Complete "read" command
 
 ```
-User: "find last metro summary and read"
+User: "find last my-work summary and read"
 
 Agent:
-1. [finds metro summary file]
+1. [finds my-work summary file]
 2. [displays summary content]
 3. $ edge-tts --text "[summary text]" --voice "en-GB-RyanNeural" --write-media ~/tts_result.mp3
 4. $ open ~/tts_result.mp3

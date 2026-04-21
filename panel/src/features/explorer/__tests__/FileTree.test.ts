@@ -4,32 +4,32 @@ import { buildTree, parseViewPath } from "../FileTree";
 describe("buildTree", () => {
   it("groups files by project", () => {
     const files = [
-      { relativePath: "metro/notes/daily.md", project: "metro", modified: 1 },
-      { relativePath: "metro/PROJECT.md", project: "metro", modified: 2 },
-      { relativePath: "alokai/notes/sync.md", project: "alokai", modified: 3 },
+      { relativePath: "my-work/notes/daily.md", project: "my-work", modified: 1 },
+      { relativePath: "my-work/PROJECT.md", project: "my-work", modified: 2 },
+      { relativePath: "my-pet-project/notes/sync.md", project: "my-pet-project", modified: 3 },
     ];
     const tree = buildTree(files);
-    expect(Object.keys(tree)).toEqual(["metro", "alokai"]);
-    expect(tree.metro.root).toHaveLength(1);
-    expect(tree.metro.subfolders.notes).toHaveLength(1);
-    expect(tree.alokai.subfolders.notes).toHaveLength(1);
+    expect(Object.keys(tree)).toEqual(["my-work", "my-pet-project"]);
+    expect(tree["my-work"].root).toHaveLength(1);
+    expect(tree["my-work"].subfolders.notes).toHaveLength(1);
+    expect(tree["my-pet-project"].subfolders.notes).toHaveLength(1);
   });
 
   it("puts top-level project files in root", () => {
     const files = [
-      { relativePath: "ch/PROJECT.md", project: "ch", modified: 1 },
+      { relativePath: "my-blog/PROJECT.md", project: "my-blog", modified: 1 },
     ];
     const tree = buildTree(files);
-    expect(tree.ch.root).toHaveLength(1);
-    expect(tree.ch.root[0].relativePath).toBe("ch/PROJECT.md");
+    expect(tree["my-blog"].root).toHaveLength(1);
+    expect(tree["my-blog"].root[0].relativePath).toBe("my-blog/PROJECT.md");
   });
 
   it("handles deeply nested files as subfolder entries", () => {
     const files = [
-      { relativePath: "metro/notes/log/transcript.txt", project: "metro", modified: 1 },
+      { relativePath: "my-work/notes/log/transcript.txt", project: "my-work", modified: 1 },
     ];
     const tree = buildTree(files);
-    expect(tree.metro.subfolders.notes).toHaveLength(1);
+    expect(tree["my-work"].subfolders.notes).toHaveLength(1);
   });
 
   it("returns empty object for empty input", () => {
@@ -39,11 +39,11 @@ describe("buildTree", () => {
 
 describe("parseViewPath", () => {
   it("parses /view/project/subfolder", () => {
-    expect(parseViewPath("/view/metro/notes")).toEqual({ project: "metro", subfolder: "notes" });
+    expect(parseViewPath("/view/my-work/notes")).toEqual({ project: "my-work", subfolder: "notes" });
   });
 
   it("parses /view/project only", () => {
-    expect(parseViewPath("/view/metro")).toEqual({ project: "metro", subfolder: "" });
+    expect(parseViewPath("/view/my-work")).toEqual({ project: "my-work", subfolder: "" });
   });
 
   it("returns null for non-view paths", () => {

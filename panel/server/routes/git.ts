@@ -382,7 +382,7 @@ router.get("/suggest-message", (req, res) => {
       .filter(Boolean)
       .map((l) => l.slice(3));
 
-    // Detect projects from file paths (files are like "projects/metro/notes/...")
+    // Detect projects from file paths (files are like "projects/my-project/notes/...")
     const projects = [
       ...new Set(
         files

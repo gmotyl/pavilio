@@ -1,12 +1,17 @@
+import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   FolderOpen,
   GitBranch,
   HelpCircle,
   Settings,
+  Smartphone,
   Star,
 } from "lucide-react";
 import GitSummary from "../git/GitSummary";
+import { MobileAccessModal } from "../mobile-access/MobileAccessModal";
+import { Toggle } from "../mobile-access/MobileAccessModal/Toggle";
+import { useMobileAccessStatus } from "../mobile-access/useMobileAccessStatus";
 import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
 import { TerminalNavList } from "../terminal/TerminalNavList";
@@ -35,6 +40,23 @@ export default function LeftSidebar() {
   const navigate = useNavigate();
   const projects = useProjects();
   const { toggle, isFavorite, sortWithFavorites } = useFavorites();
+  const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
+  const {
+    status: mobileStatus,
+    enable: enableMobile,
+    disable: disableMobile,
+  } = useMobileAccessStatus(true, mobileAccessOpen ? 2000 : 30000);
+  const mobileIsOn = mobileStatus?.state === "on";
+
+  const onMobileToggle = (next: boolean) => {
+    if (next) {
+      enableMobile();
+      setMobileAccessOpen(true);
+    } else {
+      disableMobile();
+      setMobileAccessOpen(false);
+    }
+  };
 
   const sorted = sortWithFavorites(projects);
 
@@ -126,7 +148,36 @@ export default function LeftSidebar() {
           <Settings size={14} />
           Agent Settings
         </button>
+        <div
+          className="flex items-center gap-2 w-full text-[12px] px-2 py-1.5 rounded-md"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <button
+            type="button"
+            onClick={() => setMobileAccessOpen(true)}
+            className="flex items-center gap-2 flex-1 text-left transition-colors"
+            style={{ color: "inherit" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "var(--text-secondary)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--text-muted)";
+            }}
+            title={mobileIsOn ? "Show QR code" : "Enable to show QR code"}
+          >
+            <Smartphone size={14} />
+            <span>Mobile access</span>
+          </button>
+          <Toggle
+            on={mobileIsOn}
+            onChange={onMobileToggle}
+            label="Mobile access"
+          />
+        </div>
       </section>
+      {mobileAccessOpen && (
+        <MobileAccessModal onClose={() => setMobileAccessOpen(false)} />
+      )}
     </div>
   );
 }

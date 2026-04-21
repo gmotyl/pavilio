@@ -266,6 +266,19 @@ The only required file is `PROJECT.md`. The panel picks it up on the next pollin
 
 The architecture — Vite frontend + Express backend — maps directly to a standard Electron or Tauri setup. The static build becomes the renderer process and the Express server runs as the main process. No structural changes required to convert this into a native desktop app.
 
+## Mobile access (Tailscale)
+
+Reach the panel from your phone without exposing it to your LAN or the public internet. The panel binds only to `127.0.0.1`; `tailscale serve` on your Mac proxies HTTPS from your tailnet into loopback, and a rotating 256-bit pairing token (delivered via QR) gates the phone.
+
+**Setup, pairing, troubleshooting, and threat model:** [docs/mobile-access-tailscale.md](./docs/mobile-access-tailscale.md).
+
+TL;DR:
+
+1. `brew install --cask tailscale` on the Mac, sign in.
+2. Enable **HTTPS Certificates** + **MagicDNS** at <https://login.tailscale.com/admin/dns>.
+3. Install Tailscale on the phone, sign in with the same account.
+4. In the panel sidebar, toggle **Mobile access** on → scan the QR.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE)

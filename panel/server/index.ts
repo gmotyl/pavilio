@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createHttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
+import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
 import { createServer as createViteServer } from "vite";
 import { loadConfig, getConfig } from "./config.js";
@@ -10,6 +11,10 @@ import {
   logoutHandler,
   statusHandler,
 } from "./lib/auth.js";
+import { loadAuthState } from "./lib/mobile-auth.js";
+import { mobileAuthMiddleware } from "./middleware/mobile-auth.js";
+import authMobileRouter from "./routes/auth-mobile.js";
+import mobileAccessRouter from "./routes/mobile-access.js";
 import projectsRouter from "./routes/projects.js";
 import { rebuildIndex } from "./lib/file-index.js";
 import filesRouter from "./routes/files.js";
@@ -23,10 +28,29 @@ import terminalRouter from "./routes/terminal.js";
 import { setupWebSocket, setupFileWatcher } from "./watcher.js";
 import { pruneDeadAgents } from "./lib/agent-registry.js";
 
+async function findFreePort(start: number, span = 50): Promise<number> {
+  for (let candidate = start; candidate < start + span; candidate++) {
+    const free = await new Promise<boolean>((resolve) => {
+      const probe = createNetServer();
+      probe.once("error", () => resolve(false));
+      probe.listen(candidate, "127.0.0.1", () => {
+        probe.close(() => resolve(true));
+      });
+    });
+    if (free) return candidate;
+  }
+  throw new Error(`No free port in ${start}..${start + span - 1}`);
+}
+
 async function start() {
   await loadConfig();
+  await loadAuthState();
   rebuildIndex();
-  const { port, tlsCert, tlsKey } = getConfig();
+  const { port: configuredPort, tlsCert, tlsKey } = getConfig();
+  const port = await findFreePort(configuredPort);
+  if (port !== configuredPort) {
+    console.log(`Port ${configuredPort} in use, using ${port} instead.`);
+  }
 
   const app = express();
 
@@ -40,12 +64,23 @@ async function start() {
     server = createHttpServer(app);
   }
 
+  const hmrPort = await findFreePort(24678);
   const vite = await createViteServer({
-    server: { middlewareMode: true },
+    server: {
+      middlewareMode: true,
+      hmr: { port: hmrPort },
+      // The panel binds to 127.0.0.1 only; when reached via `tailscale serve`
+      // the Host header carries the tailnet hostname (<mac>.<tail>.ts.net).
+      // Vite's default allowlist blocks non-loopback hosts as DNS-rebind
+      // protection, which is the wrong threat model here — we already gate
+      // every non-loopback request behind the mobile-auth middleware.
+      allowedHosts: [".ts.net", "localhost", "127.0.0.1"],
+    },
     appType: "spa",
   });
 
   app.use(express.json());
+  app.use(mobileAuthMiddleware);
 
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok" });
@@ -55,6 +90,9 @@ async function start() {
   app.post("/api/auth/logout", logoutHandler);
   app.get("/api/auth/status", statusHandler);
   app.use(authMiddleware);
+
+  app.use("/api/auth", authMobileRouter);
+  app.use("/api/mobile-access", mobileAccessRouter);
 
   app.use("/api/projects", projectsRouter);
   app.use("/api/files", filesRouter);
@@ -69,8 +107,8 @@ async function start() {
   app.use(vite.middlewares);
 
   const protocol = tlsCert && tlsKey ? "https" : "http";
-  server.listen(port, () => {
-    console.log(`Panel running at ${protocol}://localhost:${port}`);
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`Panel bound to ${protocol}://127.0.0.1:${port} (loopback only)`);
   });
 
   setupWebSocket(server);

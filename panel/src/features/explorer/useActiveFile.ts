@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, type ReactNode } from
 import { createElement } from "react";
 
 interface ActiveFileContext {
-  /** Currently viewed file path (relative, e.g. "metro/notes/daily.md") */
+  /** Currently viewed file path (relative, e.g. "my-work/notes/daily.md") */
   activeFile: string | null;
   setActiveFile: (path: string | null) => void;
 }
