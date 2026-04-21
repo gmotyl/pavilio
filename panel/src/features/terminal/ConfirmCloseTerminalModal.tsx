@@ -12,6 +12,17 @@ export function ConfirmCloseTerminalModal({
   onConfirm,
 }: Props) {
   const closeBtnRef = useRef<HTMLButtonElement>(null);
+  // Parents pass inline callbacks, so their identity changes every render.
+  // Route them through refs so the keydown effect can depend only on
+  // sessionName — otherwise we'd re-focus the Close button on every parent
+  // update and steal focus away from Cancel if the user Tab'd to it.
+  const onCancelRef = useRef(onCancel);
+  const onConfirmRef = useRef(onConfirm);
+
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+    onConfirmRef.current = onConfirm;
+  });
 
   useEffect(() => {
     if (!sessionName) return;
@@ -19,17 +30,18 @@ export function ConfirmCloseTerminalModal({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onCancel();
+        onCancelRef.current();
       } else if (e.key === "Enter") {
-        // Prevent native button activation from also firing onConfirm
-        // when the Close button is focused (would double-fire).
+        // If a button is focused, let native activation handle it —
+        // otherwise pressing Enter with Cancel focused would confirm.
+        if (document.activeElement?.tagName === "BUTTON") return;
         e.preventDefault();
-        onConfirm();
+        onConfirmRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sessionName, onCancel, onConfirm]);
+  }, [sessionName]);
 
   if (!sessionName) return null;
 

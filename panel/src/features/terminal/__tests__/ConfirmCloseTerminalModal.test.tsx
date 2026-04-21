@@ -65,7 +65,7 @@ describe("ConfirmCloseTerminalModal", () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
-  it("calls onConfirm on Enter key (Close is default)", () => {
+  it("Enter on window (no button focused) → onConfirm", () => {
     const onConfirm = vi.fn();
     render(
       <ConfirmCloseTerminalModal
@@ -74,8 +74,45 @@ describe("ConfirmCloseTerminalModal", () => {
         onConfirm={onConfirm}
       />,
     );
+    (document.activeElement as HTMLElement | null)?.blur();
     fireEvent.keyDown(window, { key: "Enter" });
     expect(onConfirm).toHaveBeenCalledOnce();
+  });
+
+  it("Enter with Cancel focused does NOT call onConfirm", () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmCloseTerminalModal
+        sessionName="s1"
+        onCancel={() => {}}
+        onConfirm={onConfirm}
+      />,
+    );
+    const cancelBtn = screen.getByRole("button", { name: /cancel/i });
+    cancelBtn.focus();
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("does not steal focus back to Close when parent re-renders with new callbacks", () => {
+    const { rerender } = render(
+      <ConfirmCloseTerminalModal
+        sessionName="s1"
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const cancelBtn = screen.getByRole("button", { name: /cancel/i });
+    cancelBtn.focus();
+    expect(document.activeElement).toBe(cancelBtn);
+    rerender(
+      <ConfirmCloseTerminalModal
+        sessionName="s1"
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    expect(document.activeElement).toBe(cancelBtn);
   });
 
   it("calls onCancel on backdrop click", () => {
