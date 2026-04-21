@@ -4,6 +4,7 @@ import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { nextProjectName } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 
 const COLOR_PRESETS = [
   { name: "Off", hex: null as string | null },
@@ -51,6 +52,8 @@ export function TerminalToolbar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
+  const pendingSession = sessions.find((s) => s.id === pendingCloseId);
   const draggedIdRef = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -351,7 +354,7 @@ export function TerminalToolbar({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDelete(s.id);
+                  setPendingCloseId(s.id);
                 }}
                 className="opacity-0 group-hover:opacity-100 p-0.5 rounded transition-all"
                 style={{ color: "var(--text-muted)" }}
@@ -429,6 +432,15 @@ export function TerminalToolbar({
           </span>
         </button>
       </div>
+
+      <ConfirmCloseTerminalModal
+        sessionName={pendingSession?.name ?? null}
+        onCancel={() => setPendingCloseId(null)}
+        onConfirm={() => {
+          if (pendingCloseId) onDelete(pendingCloseId);
+          setPendingCloseId(null);
+        }}
+      />
     </div>
   );
 }
