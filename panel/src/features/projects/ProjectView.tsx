@@ -769,13 +769,13 @@ export default function ProjectView() {
             </Link>
           ))}
         </div>
-        {/* Search toggle */}
+        {/* Search toggle (desktop only) */}
         <button
           onClick={() => {
             setSearchActive((a) => !a);
             setTimeout(() => searchInputRef.current?.focus(), 10);
           }}
-          className="ml-auto px-2 py-1.5 rounded-md transition-colors"
+          className="ml-auto hidden md:block px-2 py-1.5 rounded-md transition-colors"
           style={{
             color: searchActive ? "var(--accent)" : "var(--text-tertiary)",
           }}
