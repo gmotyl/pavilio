@@ -91,6 +91,11 @@ export function TerminalsSurface({
         ...(standalone ? {} : { margin: "-1.5rem", marginTop: 0 }),
         touchAction: "pan-y",
         overscrollBehaviorX: "contain",
+        // Cap to the visual viewport so the on-screen keyboard can never push
+        // the shortcut bar or xterm cursor below the fold. `--vv-height` is
+        // written by `useVisualViewport`; on desktop (or pre-hydration) the
+        // fallback resolves to 100dvh so there's no functional change.
+        maxHeight: "var(--vv-height, 100dvh)",
       }}
     >
       {/* Desktop toolbar */}

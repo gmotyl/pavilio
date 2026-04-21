@@ -77,70 +77,21 @@ export function shiftEnterHandler(term: { paste: (d: string) => void }) {
   };
 }
 
-function isMobileViewport(): boolean {
-  return typeof window !== "undefined" && window.innerWidth < 768;
-}
-
-/**
- * When the user taps a terminal on mobile, the software keyboard opens
- * and the visible viewport shrinks. Push the focused terminal all the
- * way down so its cursor sits just above the keyboard instead of being
- * hidden below the fold.
- */
-function scrollFocusedTerminalIntoView(): void {
-  if (!isMobileViewport()) return;
-  const active = document.activeElement;
-  if (!active) return;
-  for (const inst of instances.values()) {
-    if (inst.holder.contains(active)) {
-      try {
-        inst.holder.scrollIntoView({ block: "end", behavior: "smooth" });
-      } catch {
-        inst.holder.scrollIntoView(false);
-      }
-      return;
-    }
-  }
-}
-
 // On mobile, the on-screen keyboard shrinks the visual viewport without
 // always firing ResizeObserver on our flex container in time. Re-fit
 // every live terminal when the visual viewport changes size so the
-// cursor stays above the keyboard.
+// cursor stays correctly sized inside the capped container (the
+// `--vv-height` cap on TerminalsSurface keeps it above the keyboard).
 if (typeof window !== "undefined" && window.visualViewport) {
   let t: ReturnType<typeof setTimeout> | null = null;
   const onVVResize = () => {
     if (t) clearTimeout(t);
     t = setTimeout(() => {
       refitAll();
-      scrollFocusedTerminalIntoView();
     }, 80);
   };
   window.visualViewport.addEventListener("resize", onVVResize);
   window.visualViewport.addEventListener("scroll", onVVResize);
-}
-
-// Tapping a terminal fires focusin on its helper textarea. On mobile
-// this is also the trigger for the OS keyboard — scroll the cell into
-// view immediately (the vv resize handler above covers the follow-up
-// once the keyboard finishes animating in).
-if (typeof window !== "undefined") {
-  window.addEventListener(
-    "focusin",
-    (e) => {
-      if (!isMobileViewport()) return;
-      const target = e.target as Node | null;
-      if (!target) return;
-      for (const inst of instances.values()) {
-        if (inst.holder.contains(target)) {
-          // Wait a frame so the keyboard starts animating and dvh updates.
-          requestAnimationFrame(() => scrollFocusedTerminalIntoView());
-          return;
-        }
-      }
-    },
-    true,
-  );
 }
 
 // Expose a devtools handle so Claude hooks (or quick manual tests) can
