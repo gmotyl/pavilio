@@ -88,15 +88,22 @@ export function refitAll(): void {
 }
 
 /**
- * Custom xterm key event handler that makes Shift+Enter emit the iTerm2
- * convention: ESC + CR (`\e\r`). TUIs like Claude Code and opencode read
- * this as Alt+Enter and bind it to "insert newline without submitting";
- * terminals that don't bind it fall back to plain Enter behavior, so the
- * worst case is identical to not pressing Shift. Previous attempts sent
- * `term.paste("\n")` (bracketed-paste wrapping caused bash to submit)
- * and raw `\n` (TUIs read LF and CR interchangeably as "submit this
- * line"). `\e\r` is what iTerm users configure in Profiles → Keys for
- * the same use case.
+ * Custom xterm key event handler that makes Shift+Enter emit the Kitty
+ * keyboard-protocol encoding for Shift+Enter: CSI 13;2 u (`\e[13;2u`).
+ * Modern Ink/React-TUI apps (Claude Code, opencode) parse this as a
+ * single "Shift+Enter" key event and bind it to "insert newline".
+ *
+ * Prior attempts and why they failed:
+ *   - `term.paste("\n")` — bracketed-paste wrapping; bash submitted the
+ *     wrapped payload as one line.
+ *   - Raw `\n` — TUIs treat LF and CR interchangeably as "submit."
+ *   - `\e\r` (iTerm Alt+Enter convention) — Claude Code parsed this as
+ *     Escape (clear/cancel) + Enter (submit), which rendered a newline
+ *     then immediately submitted.
+ *
+ * Fall-through: TUIs that don't speak the Kitty protocol will render
+ * `[13;2u` as a short stray character sequence. Acceptable — less bad
+ * than the submit behaviour, and the common modern TUIs all parse it.
  *
  * Exported as a pure helper so it can be unit-tested without a real
  * Terminal/jsdom wiring.
@@ -104,7 +111,7 @@ export function refitAll(): void {
 export function shiftEnterHandler(sendToPty: (data: string) => void) {
   return (e: { type: string; key: string; shiftKey: boolean }) => {
     if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
-      sendToPty("\x1b\r");
+      sendToPty("\x1b[13;2u");
       return false; // stop xterm from also sending \r
     }
     return true;
