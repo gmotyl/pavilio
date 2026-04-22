@@ -335,6 +335,28 @@ function createInstance(sessionId: string): InternalInstance {
     );
   }
 
+  // Desktop wheel = scroll xterm's scrollback. Full-screen TUIs (opencode,
+  // vim, lazygit) turn on mouse-tracking mode so xterm's default wheel
+  // handler forwards the event to the PTY instead of scrolling the buffer;
+  // most TUIs don't bind wheel, so the user sees "nothing scrolls". We run
+  // in the capture phase and preventDefault to short-circuit xterm before
+  // it can forward. Hold Shift to bypass this and let the TUI see the wheel.
+  holder.addEventListener(
+    "wheel",
+    (e) => {
+      if (e.shiftKey) return;
+      let pixels = e.deltaY;
+      if (e.deltaMode === 1) pixels *= 16;
+      else if (e.deltaMode === 2) pixels *= holder.clientHeight;
+      const lineH = Math.max(1, holder.clientHeight / terminal.rows);
+      const lines = Math.round(pixels / lineH);
+      if (lines !== 0) terminal.scrollLines(lines);
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    { capture: true, passive: false },
+  );
+
   // Partially-initialised instance: `ws` and `dataDisposable` are filled
   // in by connectWs() below. We declare `inst` up-front so connectWs can
   // mutate it (and so the instance object identity is stable).
