@@ -121,4 +121,35 @@ describe("terminalInstances", () => {
     // Unsubscribed listener should not receive further updates.
     expect(seen).toHaveLength(2);
   });
+
+  it("reopen() disposes the previous onData handler and re-registers against the new ws", async () => {
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+
+    // `terminal.onData` is the vi.fn spy from the FakeTerminal mock above.
+    // Each call returns a fresh { dispose: vi.fn() } object.
+    const onData = inst.terminal.onData as unknown as ReturnType<typeof vi.fn>;
+    expect(onData).toHaveBeenCalledTimes(1);
+    const firstDisposable = onData.mock.results[0].value as { dispose: ReturnType<typeof vi.fn> };
+
+    inst.reopen();
+
+    // First disposable must have been disposed exactly once.
+    expect(firstDisposable.dispose).toHaveBeenCalledTimes(1);
+    // onData must have been re-registered for the new ws.
+    expect(onData).toHaveBeenCalledTimes(2);
+  });
+
+  it("destroyTerminal disposes the active onData handler", async () => {
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+
+    const onData = inst.terminal.onData as unknown as ReturnType<typeof vi.fn>;
+    expect(onData).toHaveBeenCalledTimes(1);
+    const disposable = onData.mock.results[0].value as { dispose: ReturnType<typeof vi.fn> };
+
+    mod.destroyTerminal("test-session");
+
+    expect(disposable.dispose).toHaveBeenCalledTimes(1);
+  });
 });

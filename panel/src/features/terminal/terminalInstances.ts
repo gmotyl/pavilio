@@ -51,11 +51,11 @@ export interface LiveTerminal {
    */
   reopen: () => void;
   /**
-   * Subscribe to ws replacement. Fires synchronously from reopen() after
-   * the new ws is wired up; used by TerminalView to push the fresh ws into
-   * React state so useMobileReconnect can re-bind its watchdog listeners.
+   * Subscribe to ws swaps triggered by reopen(). Does NOT fire synchronously
+   * with the current ws on subscription — callers must read `inst.ws` first
+   * to prime their state. Returns an unsubscribe function.
    */
-  onWsChange: (fn: WsListener) => () => void;
+  onWsChange: (cb: (ws: WebSocket) => void) => () => void;
 }
 
 interface InternalInstance extends LiveTerminal {
@@ -425,8 +425,9 @@ function createInstance(sessionId: string): InternalInstance {
 export function sendDismiss(sessionId: string): void {
   const inst = instances.get(sessionId);
   if (!inst) return;
-  if (inst.ws.readyState === WebSocket.OPEN) {
-    inst.ws.send(JSON.stringify({ type: "dismiss-attention" }));
+  const currentWs = inst.ws;
+  if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+    currentWs.send(JSON.stringify({ type: "dismiss-attention" }));
   }
 }
 
