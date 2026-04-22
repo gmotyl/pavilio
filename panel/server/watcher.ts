@@ -3,7 +3,12 @@ import { WebSocketServer, WebSocket } from "ws";
 import { Server } from "http";
 import { getConfig } from "./config.js";
 import { rebuildIndex } from "./lib/file-index.js";
-import { getSession, nudgeSession, resizeSession } from "./lib/terminal-manager.js";
+import {
+  getModePreamble,
+  getSession,
+  nudgeSession,
+  resizeSession,
+} from "./lib/terminal-manager.js";
 import { recordInput, dismiss, getSnapshot, subscribe, type ActivityEvent } from "./lib/terminalActivity.js";
 import { validateWsToken } from "./lib/auth.js";
 import { verifySessionCookie } from "./lib/mobile-auth.js";
@@ -69,11 +74,30 @@ export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
     return;
   }
 
+  // Replay the TUI's current DEC private mode state to this client before
+  // streaming live bytes. Without this, a browser refresh reconnects to a
+  // live PTY that never re-emits `\e[?1000h` etc., so the new xterm starts
+  // with no mouse tracking / wrong screen buffer and scroll + clicks break.
+  const preamble = getModePreamble(sessionId);
+  if (preamble && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "output", data: preamble }));
+  }
+
   const dataSub = session.pty.onData((data) => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "output", data }));
     }
   });
+
+  // Kick a SIGWINCH so the TUI repaints its visible buffer to the newly-
+  // attached client. The preamble above restored modes, but the TUI won't
+  // re-emit visible cell contents until something prompts a redraw. Using
+  // nudgeSession (cols-1 → cols) triggers two SIGWINCH events, which all
+  // well-behaved TUIs respond to with a full repaint. Suppresses the
+  // activity LED flip since the redraw isn't new activity.
+  if (session.pty.cols > 1) {
+    nudgeSession(sessionId, session.pty.cols, session.pty.rows);
+  }
 
   const exitSub = session.pty.onExit(({ exitCode }) => {
     if (ws.readyState === WebSocket.OPEN) {

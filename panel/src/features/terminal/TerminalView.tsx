@@ -62,6 +62,17 @@ export function TerminalView({
       if (buf.viewportY >= buf.baseY) inst.terminal.scrollToBottom();
     });
 
+    // After a page refresh, the first fit runs before the PTY has
+    // streamed its initial replay bytes; xterm writes them into the
+    // buffer but the canvas can stay blank until the next fit. Schedule
+    // a second fit so that content shows up without the user having to
+    // toggle layout manually.
+    const settleTimer = setTimeout(() => {
+      inst.fit();
+      const buf = inst.terminal.buffer.active;
+      if (buf.viewportY >= buf.baseY) inst.terminal.scrollToBottom();
+    }, 300);
+
     const resizeObserver = new ResizeObserver(() => inst.fit());
     resizeObserver.observe(container);
 
@@ -79,6 +90,7 @@ export function TerminalView({
 
     return () => {
       cancelAnimationFrame(rafId);
+      clearTimeout(settleTimer);
       resizeObserver.disconnect();
       removeExit?.();
       removeWsChange?.();

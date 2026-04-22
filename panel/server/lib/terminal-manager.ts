@@ -2,6 +2,12 @@ import * as pty from "node-pty";
 import { randomUUID } from "crypto";
 import { platform } from "os";
 import { recordOutput, removeSession } from "./terminalActivity";
+import {
+  createModeState,
+  modePreamble,
+  scanModeState,
+  type ModeState,
+} from "./terminal-mode-state";
 
 export interface TerminalSession {
   id: string;
@@ -12,6 +18,7 @@ export interface TerminalSession {
   pid: number;
   createdAt: string;
   pty: pty.IPty;
+  modeState: ModeState;
   _suppressRecordUntil?: number;
 }
 
@@ -56,9 +63,16 @@ export function createSession(opts: {
     pid: ptyProcess.pid,
     createdAt: new Date().toISOString(),
     pty: ptyProcess,
+    modeState: createModeState(),
   };
 
   sessions.set(id, session);
+
+  // Scan every PTY output chunk for DEC private mode set/reset sequences
+  // so a newly-reconnecting client can receive a preamble that restores
+  // the TUI's current mode state (alt screen, mouse tracking, bracketed
+  // paste) — those bytes are emitted once at TUI startup and never again.
+  ptyProcess.onData((data) => scanModeState(data, session.modeState));
 
   // Throttle activity-tracker updates: high-volume output (e.g. `cat`ing a
   // large file) would otherwise churn the idle timer thousands of times per
@@ -124,6 +138,12 @@ export function shouldSuppressRecord(
   now: number,
 ): boolean {
   return (suppressUntil ?? 0) > now;
+}
+
+export function getModePreamble(id: string): string {
+  const session = sessions.get(id);
+  if (!session) return "";
+  return modePreamble(session.modeState);
 }
 
 export function nudgeSession(id: string, cols: number, rows: number): boolean {
