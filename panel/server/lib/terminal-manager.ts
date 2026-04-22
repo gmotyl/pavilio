@@ -12,6 +12,7 @@ export interface TerminalSession {
   pid: number;
   createdAt: string;
   pty: pty.IPty;
+  _suppressRecordUntil?: number;
 }
 
 export type TerminalSessionMeta = Omit<TerminalSession, "pty">;
@@ -66,6 +67,7 @@ export function createSession(opts: {
   const RECORD_THROTTLE_MS = 100;
   let lastRecordedAt = 0;
   ptyProcess.onData(() => {
+    if ((session._suppressRecordUntil ?? 0) > Date.now()) return;
     const now = Date.now();
     if (now - lastRecordedAt >= RECORD_THROTTLE_MS) {
       lastRecordedAt = now;
@@ -112,5 +114,18 @@ export function resizeSession(id: string, cols: number, rows: number): boolean {
   const session = sessions.get(id);
   if (!session) return false;
   session.pty.resize(cols, rows);
+  return true;
+}
+
+const NUDGE_SUPPRESSION_MS = 700;
+
+export function nudgeSession(id: string, cols: number, rows: number): boolean {
+  const session = sessions.get(id);
+  if (!session) return false;
+  session._suppressRecordUntil = Date.now() + NUDGE_SUPPRESSION_MS;
+  session.pty.resize(Math.max(1, cols - 1), rows);
+  setImmediate(() => {
+    if (sessions.has(id)) session.pty.resize(cols, rows);
+  });
   return true;
 }
