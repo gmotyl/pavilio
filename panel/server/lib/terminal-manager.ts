@@ -67,7 +67,7 @@ export function createSession(opts: {
   const RECORD_THROTTLE_MS = 100;
   let lastRecordedAt = 0;
   ptyProcess.onData(() => {
-    if ((session._suppressRecordUntil ?? 0) > Date.now()) return;
+    if (shouldSuppressRecord(session._suppressRecordUntil, Date.now())) return;
     const now = Date.now();
     if (now - lastRecordedAt >= RECORD_THROTTLE_MS) {
       lastRecordedAt = now;
@@ -118,6 +118,13 @@ export function resizeSession(id: string, cols: number, rows: number): boolean {
 }
 
 const NUDGE_SUPPRESSION_MS = 700;
+
+export function shouldSuppressRecord(
+  suppressUntil: number | undefined,
+  now: number,
+): boolean {
+  return (suppressUntil ?? 0) > now;
+}
 
 export function nudgeSession(id: string, cols: number, rows: number): boolean {
   const session = sessions.get(id);
