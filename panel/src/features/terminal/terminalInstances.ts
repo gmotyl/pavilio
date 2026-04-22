@@ -385,6 +385,16 @@ function createInstance(sessionId: string): InternalInstance {
       } catch (err) {
         console.warn(`[terminal:${sessionId}] fit failed:`, err);
       }
+      // Force a full redraw from the buffer. FitAddon is a no-op when
+      // cols/rows didn't change (e.g., tab switch with unchanged outer
+      // layout), and xterm won't repaint on its own — the canvas can
+      // still hold stale/empty pixels from before the holder was detached,
+      // producing the "terminal is blank until I toggle grid/full" symptom.
+      try {
+        terminal.refresh(0, Math.max(0, terminal.rows - 1));
+      } catch (err) {
+        console.warn(`[terminal:${sessionId}] refresh failed:`, err);
+      }
       const currentWs = inst.ws;
       if (currentWs && currentWs.readyState === WebSocket.OPEN) {
         currentWs.send(
