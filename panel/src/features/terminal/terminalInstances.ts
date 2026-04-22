@@ -88,13 +88,15 @@ export function refitAll(): void {
 }
 
 /**
- * Custom xterm key event handler that makes Shift+Enter send a raw `\n`
- * byte to the PTY instead of letting xterm forward `\r`. We write directly
- * to the pty (via the instance's send fn) rather than using `term.paste`,
- * because paste() wraps in bracketed-paste escape sequences, which shells
- * (bash) then submit as one line — defeating the "newline without submit"
- * intent. Raw `\n` is interpreted as newline-in-input by Claude Code and
- * OpenCode; plain bash treats it as prompt continuation.
+ * Custom xterm key event handler that makes Shift+Enter emit the iTerm2
+ * convention: ESC + CR (`\e\r`). TUIs like Claude Code and opencode read
+ * this as Alt+Enter and bind it to "insert newline without submitting";
+ * terminals that don't bind it fall back to plain Enter behavior, so the
+ * worst case is identical to not pressing Shift. Previous attempts sent
+ * `term.paste("\n")` (bracketed-paste wrapping caused bash to submit)
+ * and raw `\n` (TUIs read LF and CR interchangeably as "submit this
+ * line"). `\e\r` is what iTerm users configure in Profiles → Keys for
+ * the same use case.
  *
  * Exported as a pure helper so it can be unit-tested without a real
  * Terminal/jsdom wiring.
@@ -102,7 +104,7 @@ export function refitAll(): void {
 export function shiftEnterHandler(sendToPty: (data: string) => void) {
   return (e: { type: string; key: string; shiftKey: boolean }) => {
     if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
-      sendToPty("\n");
+      sendToPty("\x1b\r");
       return false; // stop xterm from also sending \r
     }
     return true;
