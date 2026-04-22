@@ -16,6 +16,9 @@ function fakeWs(state: number) {
 }
 
 describe("useMobileReconnect", () => {
+  // The synthetic ws uses vi.fn() for addEventListener, so the hook's internal
+  // "message" listener is stubbed; the watchdog tests exploit that fact to
+  // simulate silence (no message events ever reach the ref).
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => {
     vi.useRealTimers();
@@ -77,5 +80,21 @@ describe("useMobileReconnect", () => {
       vi.advanceTimersByTime(26_000);
     });
     expect(reopen).toHaveBeenCalled();
+  });
+
+  it("does not reopen while ws is still connecting (watchdog gates on OPEN)", () => {
+    const { ws } = fakeWs(0); // CONNECTING
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(26_000);
+    });
+    expect(reopen).not.toHaveBeenCalled();
   });
 });
