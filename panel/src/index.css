@@ -283,16 +283,17 @@ input[type="checkbox"] {
   -webkit-overflow-scrolling: touch;
 }
 
-/* Mobile: hide xterm's internal scrollbar so the cell uses every column.
-   Scroll still works via two-finger touch; the bar itself reserves ~12px
-   on iOS Safari / Chrome Android and shows as an empty strip under the
-   cell × button. */
-@media (max-width: 767px) {
-  .xterm .xterm-viewport {
-    scrollbar-width: none;
-  }
-  .xterm .xterm-viewport::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-  }
+/* Hide xterm's internal scrollbar on all viewports. xterm's FitAddon
+   measures (offsetWidth - clientWidth) on the viewport element to decide
+   how many columns fit; with `scrollbar-width: none` that delta becomes
+   0, so the column count reclaims the ~12-15px the scrollbar gutter was
+   stealing. Scroll still works: wheel forwards to the PTY in TUIs or
+   scrolls xterm's scrollback in plain shell; two-finger touch on mobile
+   hits the same paths. Users never needed to click-drag the bar. */
+.xterm .xterm-viewport {
+  scrollbar-width: none;
+}
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
