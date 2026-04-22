@@ -1513,12 +1513,15 @@ export default function ProjectView() {
     </div>
       <div
         className="hidden md:block absolute top-0 bottom-0 pointer-events-none"
-        style={{
-          left: wide ? "100%" : "min(64rem, 100%)",
-          marginLeft: "0.5rem",
-        }}
+        style={
+          wide
+            ? { right: "1.5rem" }
+            : { left: "min(64rem, 100%)", marginLeft: "0.5rem" }
+        }
       >
-        <div className="sticky bottom-4 pointer-events-auto">{wideToggle}</div>
+        <div className="sticky bottom-4 mt-20 pointer-events-auto">
+          {wideToggle}
+        </div>
       </div>
     </div>
   );
