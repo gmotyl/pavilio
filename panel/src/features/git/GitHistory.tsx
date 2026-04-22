@@ -38,6 +38,8 @@ interface GitHistoryProps {
   onActiveShaChange?: (sha: string | null) => void;
   /** Notified when user opens or closes a file within a commit */
   onActiveFileChange?: (file: string | null) => void;
+  /** When true, render the commit's file list alongside the diff. */
+  showListSidebar?: boolean;
 }
 
 function statusColor(s: string) {
@@ -70,6 +72,7 @@ export default function GitHistory({
   activeFile,
   onActiveShaChange,
   onActiveFileChange,
+  showListSidebar = false,
 }: GitHistoryProps) {
   const [commits, setCommits] = useState<Commit[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -265,9 +268,159 @@ export default function GitHistory({
 
   if (commits.length === 0) return null;
 
+  const renderSidebarTreeNode = (
+    node: TreeNode,
+    sha: string,
+    depth: number,
+  ): React.ReactNode[] => {
+    const items: React.ReactNode[] = [];
+    const dirs = node.children
+      .filter((c) => !c.file)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const nodeFiles = node.children
+      .filter((c) => c.file)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const dir of dirs) {
+      const isCollapsed = collapsedDirs.has(dir.path);
+      const fc = countFiles(dir);
+      items.push(
+        <button
+          key={`dir-${dir.path}`}
+          onClick={() => toggleDir(dir.path)}
+          className="flex items-center gap-1.5 py-1 px-2 rounded w-full text-left transition-colors"
+          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.background = "var(--bg-hover)")
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.background = "transparent")
+          }
+        >
+          {isCollapsed ? (
+            <ChevronRight size={11} style={{ color: "var(--text-muted)" }} />
+          ) : (
+            <ChevronDown size={11} style={{ color: "var(--text-muted)" }} />
+          )}
+          <Folder size={12} style={{ color: "var(--accent)", opacity: 0.7 }} />
+          <span
+            className="text-[12px] font-mono truncate"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            {dir.name}
+          </span>
+          <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+            {fc}
+          </span>
+        </button>,
+      );
+      if (!isCollapsed)
+        items.push(...renderSidebarTreeNode(dir, sha, depth + 1));
+    }
+
+    for (const child of nodeFiles) {
+      const f = child.file!;
+      const isActive = activeDiff?.file === f.path;
+      items.push(
+        <button
+          key={f.path}
+          onClick={() => openDiff(sha, f.path)}
+          className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
+          style={{
+            paddingLeft: `${depth * 12 + 8}px`,
+            background: isActive ? "var(--bg-active)" : undefined,
+          }}
+          onMouseEnter={(e) => {
+            if (!isActive)
+              e.currentTarget.style.background = "var(--bg-hover)";
+          }}
+          onMouseLeave={(e) => {
+            if (!isActive) e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <span
+            className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
+            style={{ color: statusColor(f.status) }}
+          >
+            {f.status}
+          </span>
+          <span
+            className="text-[12px] font-mono truncate"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            {child.name}
+          </span>
+        </button>,
+      );
+    }
+    return items;
+  };
+
+  const renderSidebarList = () => {
+    if (!activeDiff) return null;
+    const commit = commits.find((c) => c.sha === activeDiff.sha);
+    return (
+      <div>
+        <div
+          className="text-[11px] font-semibold uppercase tracking-widest mb-1"
+          style={{ color: "var(--text-tertiary)" }}
+        >
+          {activeDiff.sha.slice(0, 7)}
+        </div>
+        {commit && (
+          <div
+            className="text-[11px] mb-2 truncate"
+            style={{ color: "var(--text-muted)" }}
+            title={commit.message}
+          >
+            {commit.message}
+          </div>
+        )}
+        <div className="space-y-0.5">
+          {viewMode === "tree"
+            ? renderSidebarTreeNode(fileTree, activeDiff.sha, 0)
+            : commitFiles.map((f) => {
+                const isActive = activeDiff.file === f.path;
+                return (
+                  <button
+                    key={f.path}
+                    onClick={() => openDiff(activeDiff.sha, f.path)}
+                    className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
+                    style={{
+                      background: isActive ? "var(--bg-active)" : undefined,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive)
+                        e.currentTarget.style.background = "var(--bg-hover)";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive)
+                        e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    <span
+                      className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
+                      style={{ color: statusColor(f.status) }}
+                    >
+                      {f.status}
+                    </span>
+                    <span
+                      className="text-[12px] font-mono truncate"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      {f.path}
+                    </span>
+                  </button>
+                );
+              })}
+        </div>
+      </div>
+    );
+  };
+
   // Full diff view for a file
   if (activeDiff) {
-    return (
+    const diffEl = (
       <div>
         <div className="flex items-center gap-3 mb-3">
           <button
@@ -350,6 +503,24 @@ export default function GitHistory({
         )}
       </div>
     );
+
+    if (showListSidebar) {
+      return (
+        <div className="md:flex md:gap-4">
+          <div className="flex-1 min-w-0">{diffEl}</div>
+          <aside
+            className="hidden md:block w-[280px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg p-2"
+            style={{
+              background: "var(--bg-base)",
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
+            {renderSidebarList()}
+          </aside>
+        </div>
+      );
+    }
+    return diffEl;
   }
 
   return (

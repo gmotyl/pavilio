@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { readLastPath, writeLastPath, STORAGE_PREFIX } from "../lastPath";
+import {
+  readLastPath,
+  writeLastPath,
+  STORAGE_PREFIX,
+  readLastReposQuery,
+  writeLastReposQuery,
+  clearLastReposQuery,
+} from "../lastPath";
 
 describe("lastPath helpers", () => {
   beforeEach(() => {
@@ -35,6 +42,48 @@ describe("lastPath helpers", () => {
       throw new Error("disabled");
     });
     expect(readLastPath("pavilio")).toBeNull();
+    spy.mockRestore();
+  });
+});
+
+describe("lastReposQuery helpers", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it("writes and reads back the query string", () => {
+    writeLastReposQuery(
+      "pavilio",
+      "repo=abc&file=src%2Ffoo.ts&scope=branch-diff",
+    );
+    expect(readLastReposQuery("pavilio")).toBe(
+      "repo=abc&file=src%2Ffoo.ts&scope=branch-diff",
+    );
+  });
+
+  it("returns null when nothing stored", () => {
+    expect(readLastReposQuery("missing")).toBeNull();
+  });
+
+  it("clears the stored query", () => {
+    writeLastReposQuery("pavilio", "repo=abc");
+    clearLastReposQuery("pavilio");
+    expect(readLastReposQuery("pavilio")).toBeNull();
+  });
+
+  it("silently no-ops on write when sessionStorage throws", () => {
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    expect(() => writeLastReposQuery("pavilio", "x=1")).not.toThrow();
+    spy.mockRestore();
+  });
+
+  it("returns null on read when sessionStorage throws", () => {
+    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("disabled");
+    });
+    expect(readLastReposQuery("pavilio")).toBeNull();
     spy.mockRestore();
   });
 });
