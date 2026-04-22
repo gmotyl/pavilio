@@ -88,22 +88,26 @@ export function refitAll(): void {
 }
 
 /**
- * Custom xterm key event handler that makes Shift+Enter emit the Kitty
- * keyboard-protocol encoding for Shift+Enter: CSI 13;2 u (`\e[13;2u`).
- * Modern Ink/React-TUI apps (Claude Code, opencode) parse this as a
- * single "Shift+Enter" key event and bind it to "insert newline".
+ * Custom xterm key event handler that makes Shift+Enter emit the
+ * Claude-Code-documented multi-line convention: a literal backslash
+ * followed by CR (`\\\r`). Claude Code treats `\<Enter>` as "continuation
+ * — insert newline, keep accepting input." This is the one encoding
+ * that actually prevents Claude Code from submitting.
  *
  * Prior attempts and why they failed:
- *   - `term.paste("\n")` — bracketed-paste wrapping; bash submitted the
- *     wrapped payload as one line.
- *   - Raw `\n` — TUIs treat LF and CR interchangeably as "submit."
- *   - `\e\r` (iTerm Alt+Enter convention) — Claude Code parsed this as
- *     Escape (clear/cancel) + Enter (submit), which rendered a newline
- *     then immediately submitted.
+ *   - `term.paste("\n")` — bracketed-paste wrapping; submitted.
+ *   - Raw `\n` — LF treated as submit.
+ *   - `\e\r` (iTerm Alt+Enter convention) — Claude parsed as
+ *     Escape+Enter; newline rendered then submitted.
+ *   - `\e[13;2u` (Kitty protocol Shift+Enter) — Claude ignored the CSI
+ *     sequence; submitted.
  *
- * Fall-through: TUIs that don't speak the Kitty protocol will render
- * `[13;2u` as a short stray character sequence. Acceptable — less bad
- * than the submit behaviour, and the common modern TUIs all parse it.
+ * Trade-off: TUIs that don't have Claude's backslash-continuation
+ * convention (bash, opencode if it differs) will see a literal `\`
+ * followed by a submit. That's slightly ugly but not catastrophic —
+ * the user gets `\` on their prompt line and whatever was submitted.
+ * For the common pavilio use case (chatting with Claude Code), this
+ * is the right default.
  *
  * Exported as a pure helper so it can be unit-tested without a real
  * Terminal/jsdom wiring.
@@ -111,7 +115,7 @@ export function refitAll(): void {
 export function shiftEnterHandler(sendToPty: (data: string) => void) {
   return (e: { type: string; key: string; shiftKey: boolean }) => {
     if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
-      sendToPty("\x1b[13;2u");
+      sendToPty("\\\r");
       return false; // stop xterm from also sending \r
     }
     return true;

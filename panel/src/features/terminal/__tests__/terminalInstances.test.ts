@@ -157,7 +157,7 @@ describe("terminalInstances", () => {
 });
 
 describe("shiftEnterHandler", () => {
-  it("sends CSI 13;2 u to PTY and returns false on Shift+Enter keydown", async () => {
+  it("sends backslash+CR to PTY and returns false on Shift+Enter keydown", async () => {
     const { shiftEnterHandler } = await import("../terminalInstances");
     const send = vi.fn();
     const handler = shiftEnterHandler(send);
@@ -165,7 +165,7 @@ describe("shiftEnterHandler", () => {
     const result = handler({ type: "keydown", key: "Enter", shiftKey: true });
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith("\x1b[13;2u");
+    expect(send).toHaveBeenCalledWith("\\\r");
     expect(result).toBe(false);
   });
 
