@@ -45,6 +45,8 @@ interface GitChangesProps {
   highlight?: string;
   /** When set, called when the user opens or closes a diff (parent can mirror to URL) */
   onOpenFileChange?: (file: string | null) => void;
+  /** When true, render a file list alongside the diff instead of replacing it. */
+  showListSidebar?: boolean;
 }
 
 export function statusLabel(s: string) {
@@ -73,6 +75,7 @@ export default function GitChanges({
   openFile,
   highlight,
   onOpenFileChange,
+  showListSidebar = false,
 }: GitChangesProps) {
   const [files, setFiles] = useState<GitFile[]>([]);
   const [branch, setBranch] = useState("");
@@ -240,8 +243,13 @@ export default function GitChanges({
     setCollapsedDirs(next);
   };
 
-  const renderTreeNode = (node: TreeNode, depth: number): React.ReactNode[] => {
+  const renderTreeNode = (
+    node: TreeNode,
+    depth: number,
+    compact = false,
+  ): React.ReactNode[] => {
     const items: React.ReactNode[] = [];
+    const indent = compact ? depth * 12 + 8 : depth * 16 + 8;
     // Sort: dirs first, then files
     const dirs = node.children
       .filter((c) => !c.file)
@@ -258,7 +266,7 @@ export default function GitChanges({
           key={`dir-${dir.path}`}
           onClick={() => toggleDir(dir.path)}
           className="flex items-center gap-1.5 py-1 px-2 rounded-md w-full text-left transition-colors"
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
+          style={{ paddingLeft: `${indent}px` }}
           onMouseEnter={(e) =>
             (e.currentTarget.style.background = "var(--bg-hover)")
           }
@@ -267,38 +275,92 @@ export default function GitChanges({
           }
         >
           {isCollapsed ? (
-            <ChevronRight size={12} style={{ color: "var(--text-muted)" }} />
+            <ChevronRight
+              size={compact ? 11 : 12}
+              style={{ color: "var(--text-muted)" }}
+            />
           ) : (
-            <ChevronDown size={12} style={{ color: "var(--text-muted)" }} />
+            <ChevronDown
+              size={compact ? 11 : 12}
+              style={{ color: "var(--text-muted)" }}
+            />
           )}
-          <Folder size={13} style={{ color: "var(--accent)", opacity: 0.7 }} />
+          <Folder
+            size={compact ? 12 : 13}
+            style={{ color: "var(--accent)", opacity: 0.7 }}
+          />
           <span
-            className="text-[13px] font-mono"
+            className={`${compact ? "text-[12px]" : "text-[13px]"} font-mono${compact ? " truncate" : ""}`}
             style={{ color: "var(--text-secondary)" }}
           >
             {dir.name}
           </span>
-          <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+          <span
+            className={compact ? "text-[10px]" : "text-[11px]"}
+            style={{ color: "var(--text-muted)" }}
+          >
             {fileCount}
           </span>
         </button>,
       );
-      if (!isCollapsed) items.push(...renderTreeNode(dir, depth + 1));
+      if (!isCollapsed)
+        items.push(...renderTreeNode(dir, depth + 1, compact));
     }
 
     for (const child of nodeFiles) {
       const f = child.file!;
+      const isActive = activeDiff === f.path;
+
+      if (compact) {
+        items.push(
+          <button
+            key={f.path}
+            onClick={() => openDiff(f.path)}
+            className={`flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors ${isDimmed(f.path) ? "opacity-35" : ""}`}
+            style={{
+              paddingLeft: `${indent}px`,
+              background: isActive ? "var(--bg-active)" : undefined,
+            }}
+            onMouseEnter={(e) => {
+              if (!isActive)
+                e.currentTarget.style.background = "var(--bg-hover)";
+            }}
+            onMouseLeave={(e) => {
+              if (!isActive) e.currentTarget.style.background = "transparent";
+            }}
+          >
+            <span
+              className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
+              style={{ color: statusColor(f.status) }}
+            >
+              {statusLabel(f.status)}
+            </span>
+            <span
+              className="text-[12px] font-mono truncate"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {child.name}
+            </span>
+          </button>,
+        );
+        continue;
+      }
+
       items.push(
         <div
           key={f.path}
           className={`flex items-center gap-2 py-1.5 px-2 rounded-md group transition-colors ${isDimmed(f.path) ? "opacity-35" : ""}`}
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "var(--bg-hover)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
+          style={{
+            paddingLeft: `${indent}px`,
+            background: isActive ? "var(--bg-active)" : undefined,
+          }}
+          onMouseEnter={(e) => {
+            if (!isActive)
+              e.currentTarget.style.background = "var(--bg-hover)";
+          }}
+          onMouseLeave={(e) => {
+            if (!isActive) e.currentTarget.style.background = "transparent";
+          }}
         >
           {showCommit && (
             <input
@@ -343,9 +405,110 @@ export default function GitChanges({
     return items;
   };
 
+  const renderFlatFileRow = (f: GitFile, compact = false) => {
+    const isActive = activeDiff === f.path;
+    if (compact) {
+      return (
+        <button
+          key={f.path}
+          onClick={() => openDiff(f.path)}
+          className={`flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors ${isDimmed(f.path) ? "opacity-35" : ""}`}
+          style={{ background: isActive ? "var(--bg-active)" : undefined }}
+          onMouseEnter={(e) => {
+            if (!isActive)
+              e.currentTarget.style.background = "var(--bg-hover)";
+          }}
+          onMouseLeave={(e) => {
+            if (!isActive) e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <span
+            className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
+            style={{ color: statusColor(f.status) }}
+          >
+            {statusLabel(f.status)}
+          </span>
+          <span
+            className="text-[12px] font-mono truncate"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            {f.path}
+          </span>
+        </button>
+      );
+    }
+    return (
+      <div
+        key={f.path}
+        className={`flex items-center gap-2 py-1.5 px-2 rounded-md group transition-colors ${isDimmed(f.path) ? "opacity-35" : ""}`}
+        style={{ background: isActive ? "var(--bg-active)" : undefined }}
+        onMouseEnter={(e) => {
+          if (!isActive) e.currentTarget.style.background = "var(--bg-hover)";
+        }}
+        onMouseLeave={(e) => {
+          if (!isActive) e.currentTarget.style.background = "transparent";
+        }}
+      >
+        {showCommit && (
+          <input
+            type="checkbox"
+            checked={selected.has(f.path)}
+            onChange={() => toggleFile(f.path)}
+            className="shrink-0"
+          />
+        )}
+        <span
+          className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
+          style={{ color: statusColor(f.status) }}
+        >
+          {statusLabel(f.status)}
+        </span>
+        <button
+          onClick={() => openDiff(f.path)}
+          className="text-[13px] font-mono truncate flex-1 text-left"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {f.path}
+        </button>
+        {!repo && f.path.startsWith("projects/") && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(
+                `/view/${f.path.replace(/^projects\//, "")}`,
+                "_self",
+              );
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded"
+            style={{ color: "var(--text-tertiary)" }}
+            title="Open file"
+          >
+            <ExternalLink size={13} />
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const renderSidebarList = () => (
+    <div>
+      <div
+        className="text-[11px] font-semibold uppercase tracking-widest mb-2"
+        style={{ color: "var(--text-tertiary)" }}
+      >
+        Changed ({displayFiles.length})
+      </div>
+      <div className="space-y-0.5">
+        {viewMode === "tree"
+          ? renderTreeNode(fileTree, 0, true)
+          : displayFiles.map((f) => renderFlatFileRow(f, true))}
+      </div>
+    </div>
+  );
+
   // Diff detail view
   if (activeDiff) {
-    return (
+    const diffEl = (
       <div>
         <div className="flex items-center gap-3 mb-4">
           <button
@@ -426,6 +589,24 @@ export default function GitChanges({
         )}
       </div>
     );
+
+    if (showListSidebar) {
+      return (
+        <div className="md:flex md:gap-4">
+          <div className="flex-1 min-w-0">{diffEl}</div>
+          <aside
+            className="hidden md:block w-[280px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg p-2"
+            style={{
+              background: "var(--bg-base)",
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
+            {renderSidebarList()}
+          </aside>
+        </div>
+      );
+    }
+    return diffEl;
   }
 
   return (
@@ -590,56 +771,7 @@ export default function GitChanges({
           {/* File list */}
           <div className="space-y-0.5 mb-4">
             {viewMode === "flat"
-              ? displayFiles.map((f) => (
-                  <div
-                    key={f.path}
-                    className={`flex items-center gap-2 py-1.5 px-2 rounded-md group transition-colors ${isDimmed(f.path) ? "opacity-35" : ""}`}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.background = "var(--bg-hover)")
-                    }
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.background = "transparent")
-                    }
-                  >
-                    {showCommit && (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(f.path)}
-                        onChange={() => toggleFile(f.path)}
-                        className="shrink-0"
-                      />
-                    )}
-                    <span
-                      className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
-                      style={{ color: statusColor(f.status) }}
-                    >
-                      {statusLabel(f.status)}
-                    </span>
-                    <button
-                      onClick={() => openDiff(f.path)}
-                      className="text-[13px] font-mono truncate flex-1 text-left"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {f.path}
-                    </button>
-                    {!repo && f.path.startsWith("projects/") && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          window.open(
-                            `/view/${f.path.replace(/^projects\//, "")}`,
-                            "_self",
-                          );
-                        }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded"
-                        style={{ color: "var(--text-tertiary)" }}
-                        title="Open file"
-                      >
-                        <ExternalLink size={13} />
-                      </button>
-                    )}
-                  </div>
-                ))
+              ? displayFiles.map((f) => renderFlatFileRow(f))
               : renderTreeNode(fileTree, 0)}
           </div>
 

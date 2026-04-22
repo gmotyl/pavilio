@@ -22,14 +22,15 @@ import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import { useWebSocket } from "../realtime/useWebSocket";
 import GrepResultRow from "../search/GrepResultRow";
 import type { GrepResult } from "../search/grep";
-import { useFloatingAction } from "../shell/Layout";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useLastPath } from "../shell/useLastPath";
 import {
   clearLastSectionFile,
   readLastSectionFile,
   writeLastSectionFile,
+  readLastReposQuery,
 } from "../shell/lastPath";
+import { useReposTabMemory } from "../shell/useReposTabMemory";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
@@ -221,8 +222,6 @@ export default function ProjectView() {
 
   const wideToggle = <WideToggle wide={wide} onToggle={toggleWide} />;
 
-  useFloatingAction(wideToggle, [wide, toggleWide]);
-
   const COMMITS_OPEN_KEY = "panel-commits-open";
   const [commitsOpenMap, setCommitsOpenMap] = useState<Record<string, boolean>>(
     () => {
@@ -248,6 +247,8 @@ export default function ProjectView() {
   const [searchActive, setSearchActive] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
+
+  useReposTabMemory(name, section, searchParams);
 
   // Repos search: trigger opening a specific file diff in a child component (URL-backed)
   const repoOpenFile = (() => {
@@ -654,8 +655,16 @@ export default function ProjectView() {
       state: { explicit: true },
     },
     ...nonItermSections.map((s) => {
-      const storedFile = s !== "repos" ? readLastSectionFile(name || "", s) : null;
       const base = `/project/${name}/${s}`;
+      if (s === "repos") {
+        const storedQuery = readLastReposQuery(name || "");
+        return {
+          label: s,
+          to: storedQuery ? `${base}?${storedQuery}` : base,
+          active: section === s,
+        };
+      }
+      const storedFile = readLastSectionFile(name || "", s);
       return {
         label: s,
         to: storedFile ? `${base}?file=${encodeURIComponent(storedFile)}` : base,
@@ -732,6 +741,7 @@ export default function ProjectView() {
   const isJson = (p: string) => p.endsWith(".json");
 
   return (
+    <div className="relative">
     <div className={`p-6 ${wide ? "" : "max-w-5xl"}`}>
       {/* Desktop-only big title */}
       <h1 className="hidden md:block text-2xl font-semibold mb-4 capitalize">
@@ -1016,6 +1026,7 @@ export default function ProjectView() {
                 viewMode={gitViewMode}
                 onViewModeChange={setGitViewMode}
                 extraActions={wideToggle}
+                showListSidebar={wide}
                 openFile={
                   repoOpenFile?.repo === repo.path &&
                   repoOpenFile.scope === "changed"
@@ -1048,6 +1059,7 @@ export default function ProjectView() {
                 <GitBranchDiff
                   repo={repo.path}
                   viewMode={gitViewMode}
+                  showListSidebar={wide}
                   openFile={
                     repoOpenFile?.repo === repo.path &&
                     repoOpenFile.scope === "branch-diff"
@@ -1081,6 +1093,7 @@ export default function ProjectView() {
                 <GitHistory
                   repo={repo.path}
                   viewMode={gitViewMode}
+                  showListSidebar={wide}
                   commitsOpen={getCommitsOpen(repo.path)}
                   onCommitsOpenChange={(open) =>
                     handleCommitsOpenChange(repo.path, open)
@@ -1497,6 +1510,16 @@ export default function ProjectView() {
           )}
         </>
       )}
+    </div>
+      <div
+        className="hidden md:block absolute top-0 bottom-0 pointer-events-none"
+        style={{
+          left: wide ? "100%" : "min(64rem, 100%)",
+          marginLeft: "0.5rem",
+        }}
+      >
+        <div className="sticky bottom-4 pointer-events-auto">{wideToggle}</div>
+      </div>
     </div>
   );
 }

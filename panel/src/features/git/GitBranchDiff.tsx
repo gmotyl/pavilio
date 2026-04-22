@@ -29,6 +29,8 @@ interface GitBranchDiffProps {
   activeFile?: string | null;
   /** Notified when user opens or closes a file diff */
   onActiveFileChange?: (file: string | null) => void;
+  /** When true, render the file list alongside the diff instead of replacing it. */
+  showListSidebar?: boolean;
 }
 
 function statusColor(s: string) {
@@ -55,6 +57,7 @@ export default function GitBranchDiff({
   highlight,
   activeFile,
   onActiveFileChange,
+  showListSidebar = false,
 }: GitBranchDiffProps) {
   const [currentBranch, setCurrentBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
@@ -260,18 +263,23 @@ export default function GitBranchDiff({
 
     for (const child of nodeFiles) {
       const f = child.file!;
+      const isActive = activeDiff?.file === f.path;
       items.push(
         <button
           key={f.path}
           onClick={() => openDiff(f.path)}
           className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "var(--bg-hover)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
+          style={{
+            paddingLeft: `${depth * 16 + 8}px`,
+            background: isActive ? "var(--bg-active)" : undefined,
+          }}
+          onMouseEnter={(e) => {
+            if (!isActive)
+              e.currentTarget.style.background = "var(--bg-hover)";
+          }}
+          onMouseLeave={(e) => {
+            if (!isActive) e.currentTarget.style.background = "transparent";
+          }}
         >
           <span
             className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
@@ -291,95 +299,7 @@ export default function GitBranchDiff({
     return items;
   };
 
-  // Full diff view
-  if (activeDiff) {
-    return (
-      <div>
-        <div className="flex items-center gap-3 mb-3">
-          <button
-            onClick={() => { setActiveDiff(null); onActiveFileChange?.(null); }}
-            className="flex items-center gap-1.5 text-sm rounded-md px-2 py-1 transition-colors"
-            style={{ color: "var(--text-secondary)" }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--bg-hover)";
-              e.currentTarget.style.color = "var(--text-primary)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--text-secondary)";
-            }}
-          >
-            <ArrowLeft size={14} />
-            Back
-          </button>
-          <span
-            className="text-[11px] font-mono truncate flex-1"
-            style={{ color: "var(--text-tertiary)" }}
-          >
-            {activeDiff.file}
-          </span>
-          <span
-            className="text-[11px] font-mono"
-            style={{ color: "var(--text-muted)" }}
-          >
-            {baseBranch}...{currentBranch}
-          </span>
-          <div
-            className="flex rounded-md overflow-hidden"
-            style={{ border: "1px solid var(--border-default)" }}
-          >
-            <button
-              onClick={() => setDiffMode("inline")}
-              className="p-1.5 transition-colors"
-              style={{
-                background:
-                  diffMode === "inline" ? "var(--bg-active)" : "transparent",
-                color:
-                  diffMode === "inline"
-                    ? "var(--text-primary)"
-                    : "var(--text-tertiary)",
-              }}
-              title="Inline diff"
-            >
-              <AlignJustify size={14} />
-            </button>
-            <button
-              onClick={() => setDiffMode("side-by-side")}
-              className="p-1.5 transition-colors"
-              style={{
-                background:
-                  diffMode === "side-by-side"
-                    ? "var(--bg-active)"
-                    : "transparent",
-                color:
-                  diffMode === "side-by-side"
-                    ? "var(--text-primary)"
-                    : "var(--text-tertiary)",
-                borderLeft: "1px solid var(--border-default)",
-              }}
-              title="Side by side"
-            >
-              <Columns2 size={14} />
-            </button>
-          </div>
-        </div>
-        {diffLoading ? (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Loading diff...
-          </p>
-        ) : (
-          <DiffView
-            diff={diffContent}
-            mode={diffMode}
-            filename={activeDiff.file}
-            highlight={highlight}
-          />
-        )}
-      </div>
-    );
-  }
-
-  return (
+  const renderList = () => (
     <div>
       <div className="flex items-center gap-2 mb-3">
         <button
@@ -485,36 +405,158 @@ export default function GitBranchDiff({
             <div className="space-y-0.5">
               {viewMode === "tree"
                 ? renderTreeNode(fileTree, 0)
-                : displayFiles.map((f) => (
-                    <button
-                      key={f.path}
-                      onClick={() => openDiff(f.path)}
-                      className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = "var(--bg-hover)")
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.background = "transparent")
-                      }
-                    >
-                      <span
-                        className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
-                        style={{ color: statusColor(f.status) }}
+                : displayFiles.map((f) => {
+                    const isActive = activeDiff?.file === f.path;
+                    return (
+                      <button
+                        key={f.path}
+                        onClick={() => openDiff(f.path)}
+                        className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
+                        style={{
+                          background: isActive
+                            ? "var(--bg-active)"
+                            : undefined,
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isActive)
+                            e.currentTarget.style.background =
+                              "var(--bg-hover)";
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isActive)
+                            e.currentTarget.style.background = "transparent";
+                        }}
                       >
-                        {f.status}
-                      </span>
-                      <span
-                        className="text-[12px] font-mono truncate"
-                        style={{ color: "var(--text-secondary)" }}
-                      >
-                        {f.path}
-                      </span>
-                    </button>
-                  ))}
+                        <span
+                          className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
+                          style={{ color: statusColor(f.status) }}
+                        >
+                          {f.status}
+                        </span>
+                        <span
+                          className="text-[12px] font-mono truncate"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {f.path}
+                        </span>
+                      </button>
+                    );
+                  })}
             </div>
           )}
         </>
       )}
     </div>
   );
+
+  const renderDiff = () =>
+    activeDiff ? (
+      <div>
+        <div className="flex items-center gap-3 mb-3">
+          <button
+            onClick={() => {
+              setActiveDiff(null);
+              onActiveFileChange?.(null);
+            }}
+            className="flex items-center gap-1.5 text-sm rounded-md px-2 py-1 transition-colors"
+            style={{ color: "var(--text-secondary)" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--bg-hover)";
+              e.currentTarget.style.color = "var(--text-primary)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "var(--text-secondary)";
+            }}
+          >
+            <ArrowLeft size={14} />
+            Back
+          </button>
+          <span
+            className="text-[11px] font-mono truncate flex-1"
+            style={{ color: "var(--text-tertiary)" }}
+          >
+            {activeDiff.file}
+          </span>
+          <span
+            className="text-[11px] font-mono"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {baseBranch}...{currentBranch}
+          </span>
+          <div
+            className="flex rounded-md overflow-hidden"
+            style={{ border: "1px solid var(--border-default)" }}
+          >
+            <button
+              onClick={() => setDiffMode("inline")}
+              className="p-1.5 transition-colors"
+              style={{
+                background:
+                  diffMode === "inline" ? "var(--bg-active)" : "transparent",
+                color:
+                  diffMode === "inline"
+                    ? "var(--text-primary)"
+                    : "var(--text-tertiary)",
+              }}
+              title="Inline diff"
+            >
+              <AlignJustify size={14} />
+            </button>
+            <button
+              onClick={() => setDiffMode("side-by-side")}
+              className="p-1.5 transition-colors"
+              style={{
+                background:
+                  diffMode === "side-by-side"
+                    ? "var(--bg-active)"
+                    : "transparent",
+                color:
+                  diffMode === "side-by-side"
+                    ? "var(--text-primary)"
+                    : "var(--text-tertiary)",
+                borderLeft: "1px solid var(--border-default)",
+              }}
+              title="Side by side"
+            >
+              <Columns2 size={14} />
+            </button>
+          </div>
+        </div>
+        {diffLoading ? (
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            Loading diff...
+          </p>
+        ) : (
+          <DiffView
+            diff={diffContent}
+            mode={diffMode}
+            filename={activeDiff.file}
+            highlight={highlight}
+          />
+        )}
+      </div>
+    ) : null;
+
+  if (activeDiff) {
+    if (showListSidebar) {
+      return (
+        <div className="md:flex md:gap-4">
+          <div className="flex-1 min-w-0">{renderDiff()}</div>
+          <aside
+            className="hidden md:block w-[280px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg p-2"
+            style={{
+              background: "var(--bg-base)",
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
+            {renderList()}
+          </aside>
+        </div>
+      );
+    }
+    return renderDiff();
+  }
+
+  return renderList();
 }
