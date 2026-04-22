@@ -13,6 +13,8 @@ vi.mock("@xterm/xterm", () => {
     focus = vi.fn();
     scrollLines = vi.fn();
     dispose = vi.fn();
+    refresh = vi.fn();
+    attachCustomKeyEventHandler = vi.fn();
     onData = vi.fn((_cb: (data: string) => void) => ({
       dispose: vi.fn(),
     }));
@@ -151,5 +153,52 @@ describe("terminalInstances", () => {
     mod.destroyTerminal("test-session");
 
     expect(disposable.dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("shiftEnterHandler", () => {
+  it("pastes '\\n' and returns false on Shift+Enter keydown", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const paste = vi.fn();
+    const handler = shiftEnterHandler({ paste });
+
+    const result = handler({ type: "keydown", key: "Enter", shiftKey: true });
+
+    expect(paste).toHaveBeenCalledTimes(1);
+    expect(paste).toHaveBeenCalledWith("\n");
+    expect(result).toBe(false);
+  });
+
+  it("returns true and does not paste on plain Enter keydown", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const paste = vi.fn();
+    const handler = shiftEnterHandler({ paste });
+
+    const result = handler({ type: "keydown", key: "Enter", shiftKey: false });
+
+    expect(paste).not.toHaveBeenCalled();
+    expect(result).toBe(true);
+  });
+
+  it("returns true on Shift+Enter keyup (only fires on keydown)", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const paste = vi.fn();
+    const handler = shiftEnterHandler({ paste });
+
+    const result = handler({ type: "keyup", key: "Enter", shiftKey: true });
+
+    expect(paste).not.toHaveBeenCalled();
+    expect(result).toBe(true);
+  });
+
+  it("returns true on Shift+A keydown (non-Enter key)", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const paste = vi.fn();
+    const handler = shiftEnterHandler({ paste });
+
+    const result = handler({ type: "keydown", key: "A", shiftKey: true });
+
+    expect(paste).not.toHaveBeenCalled();
+    expect(result).toBe(true);
   });
 });

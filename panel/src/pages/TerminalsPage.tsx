@@ -8,7 +8,8 @@ import { destroyTerminal } from "../features/terminal/terminalInstances";
 import type { TerminalHandle } from "../features/terminal/TerminalView";
 
 export default function TerminalsPage() {
-  const { sessions: allSessions, refresh } = useAllTerminalSessions();
+  const { sessions: allSessions, refresh, reorder, swapOrder } =
+    useAllTerminalSessions();
   const projects = useProjects();
   const [maximized, toggleMaximized] = useTerminalMaximized("__all__");
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -86,6 +87,8 @@ export default function TerminalsPage() {
         /* global view: create inside a project */
       }}
       onNavTo={(path) => navigate(path)}
+      onReorder={reorder}
+      onSwap={swapOrder}
     />
   );
 }

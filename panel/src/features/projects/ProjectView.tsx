@@ -23,8 +23,13 @@ import { useWebSocket } from "../realtime/useWebSocket";
 import GrepResultRow from "../search/GrepResultRow";
 import type { GrepResult } from "../search/grep";
 import { useFloatingAction } from "../shell/Layout";
+import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useLastPath } from "../shell/useLastPath";
-import { readLastSectionFile, writeLastSectionFile } from "../shell/lastPath";
+import {
+  clearLastSectionFile,
+  readLastSectionFile,
+  writeLastSectionFile,
+} from "../shell/lastPath";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
@@ -36,7 +41,7 @@ import type { CreateSessionOpts } from "../terminal/useTerminalSessions";
 import { useTerminalMaximized } from "../terminal/useTerminalMaximized";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import type { TerminalHandle } from "../terminal/TerminalView";
-import { Menu } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import TerminalsSurface from "../terminal/TerminalsSurface";
 
 export default function ProjectView() {
@@ -589,10 +594,16 @@ export default function ProjectView() {
   }, [selectedFile, setSelectedFile]);
 
   // Persist the last-open file per section so tab links can restore it.
+  // When the user navigates back to the section index (no ?file=), clear
+  // the memory so re-entering the tab lands on the index, not the last file.
   useEffect(() => {
-    if (!name || !section || !selectedFile) return;
+    if (!name || !section) return;
     if (section === "repos" || section === "iterm") return;
-    writeLastSectionFile(name, section, selectedFile);
+    if (selectedFile) {
+      writeLastSectionFile(name, section, selectedFile);
+    } else {
+      clearLastSectionFile(name, section);
+    }
   }, [name, section, selectedFile]);
 
   useEffect(() => {
@@ -628,6 +639,86 @@ export default function ProjectView() {
   const sections = ["iterm", "plans", "notes", "memo", "progress", "qa"];
   if (hasRepos) sections.push("repos");
 
+  const nonItermSections = sections.filter((s) => s !== "iterm");
+  const tabs: {
+    label: string;
+    to: string;
+    active: boolean;
+    state?: { explicit: true };
+  }[] = [
+    { label: "iterm", to: `/project/${name}/iterm`, active: section === "iterm" },
+    {
+      label: "Overview",
+      to: `/project/${name}`,
+      active: !section,
+      state: { explicit: true },
+    },
+    ...nonItermSections.map((s) => {
+      const storedFile = s !== "repos" ? readLastSectionFile(name || "", s) : null;
+      const base = `/project/${name}/${s}`;
+      return {
+        label: s,
+        to: storedFile ? `${base}?file=${encodeURIComponent(storedFile)}` : base,
+        active: section === s,
+      };
+    }),
+  ];
+  const activeTab = tabs.find((t) => t.active) || tabs[0];
+
+  useBreadcrumbActions(
+    <div className="md:hidden relative">
+      <button
+        type="button"
+        onClick={() => setTabMenuOpen((o) => !o)}
+        className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px]"
+        style={{
+          background: "var(--bg-base)",
+          color: "var(--text-primary)",
+          border: "1px solid var(--border-subtle)",
+        }}
+        title={activeTab.label === "iterm" ? "iTerm" : undefined}
+      >
+        <span className="capitalize">
+          {activeTab.label === "iterm" ? <Terminal className="w-3 h-3" /> : activeTab.label}
+        </span>
+        <ChevronDown size={12} />
+      </button>
+      {tabMenuOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-30"
+            onClick={() => setTabMenuOpen(false)}
+          />
+          <div
+            className="absolute right-0 top-full z-40 mt-1 min-w-[140px] rounded-md py-1 shadow-lg"
+            style={{
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
+            {tabs.map((tab) => (
+              <Link
+                key={tab.label}
+                to={tab.to}
+                state={tab.state}
+                onClick={() => setTabMenuOpen(false)}
+                title={tab.label === "iterm" ? "iTerm" : undefined}
+                className="flex items-center gap-2 px-3 py-2 capitalize"
+                style={{
+                  background: tab.active ? "var(--bg-active)" : "transparent",
+                  color: tab.active ? "var(--text-primary)" : "var(--text-secondary)",
+                }}
+              >
+                {tab.label === "iterm" ? <Terminal className="w-4 h-4" /> : tab.label}
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+    </div>,
+    [name, section, hasRepos, tabMenuOpen],
+  );
+
   const openInVSCode = (path: string) =>
     window.open(`vscode://file/${path}`, "_self");
 
@@ -647,129 +738,44 @@ export default function ProjectView() {
         {name}
       </h1>
 
-      {/* Tabs */}
-      <div className="flex gap-2 mb-6 text-sm relative items-center">
-        {(() => {
-          const nonIterm = sections.filter((s) => s !== "iterm");
-          const tabs = [
-            { label: "iterm", to: `/project/${name}/iterm`, active: section === "iterm" },
-            { label: "Overview", to: `/project/${name}`, active: !section },
-            ...nonIterm.map((s) => {
-              const storedFile = s !== "repos" ? readLastSectionFile(name || "", s) : null;
-              const base = `/project/${name}/${s}`;
-              return {
-                label: s,
-                to: storedFile ? `${base}?file=${encodeURIComponent(storedFile)}` : base,
-                active: section === s,
-              };
-            }),
-          ];
-          const activeTab = tabs.find((t) => t.active) || tabs[0];
-          return (
-            <>
-              {/* Mobile: hamburger + current-tab + project name — one row */}
-              <div className="flex md:hidden items-center relative flex-1 min-w-0 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTabMenuOpen((o) => !o)}
-                  className="flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors shrink-0"
-                  title={activeTab.label === "iterm" ? "iTerm" : undefined}
-                  style={{
-                    background: "var(--bg-base)",
-                    color: "var(--text-primary)",
-                    border: "1px solid var(--border-subtle)",
-                  }}
-                >
-                  <Menu size={13} />
-                  <span className="capitalize text-[12px]">
-                    {activeTab.label === "iterm" ? <Terminal className="w-4 h-4" /> : activeTab.label}
-                  </span>
-                </button>
-                <h1
-                  className="text-[15px] font-semibold capitalize truncate min-w-0"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {name}
-                </h1>
-                {tabMenuOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-30"
-                      style={{ background: "transparent" }}
-                      onClick={() => setTabMenuOpen(false)}
-                    />
-                    <div
-                      className="absolute left-0 top-full z-40 mt-1 min-w-[180px] rounded-md py-1 shadow-lg"
-                      style={{
-                        background: "var(--bg-surface)",
-                        border: "1px solid var(--border-subtle)",
-                      }}
-                    >
-                      {tabs.map((tab) => (
-                        <Link
-                          key={tab.label}
-                          to={tab.to}
-                          onClick={() => setTabMenuOpen(false)}
-                          title={tab.label === "iterm" ? "iTerm" : undefined}
-                          className="flex items-center gap-2 px-3 py-2 capitalize transition-colors"
-                          style={{
-                            background: tab.active
-                              ? "var(--bg-active)"
-                              : "transparent",
-                            color: tab.active
-                              ? "var(--text-primary)"
-                              : "var(--text-secondary)",
-                          }}
-                        >
-                          {tab.label === "iterm" ? <Terminal className="w-4 h-4" /> : tab.label}
-                        </Link>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Desktop: inline tabs */}
-              <div className="hidden md:flex gap-1">
-                {tabs.map((tab) => (
-                  <Link
-                    key={tab.label}
-                    to={tab.to}
-                    title={tab.label === "iterm" ? "iTerm" : undefined}
-                    className="px-3 py-1.5 rounded-md capitalize transition-colors flex items-center gap-1.5"
-                    style={{
-                      background: tab.active
-                        ? "var(--bg-active)"
-                        : "transparent",
-                      color: tab.active
-                        ? "var(--text-primary)"
-                        : "var(--text-tertiary)",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!tab.active)
-                        e.currentTarget.style.background = "var(--bg-hover)";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!tab.active)
-                        e.currentTarget.style.background = tab.active
-                          ? "var(--bg-active)"
-                          : "transparent";
-                    }}
-                  >
-                    {tab.label === "iterm" ? <Terminal className="w-4 h-4" /> : tab.label}
-                  </Link>
-                ))}
-              </div>
-            </>
-          );
-        })()}
-        {/* Search toggle */}
+      {/* Tabs (desktop only — mobile tab switcher lives in breadcrumbs row) */}
+      <div className="hidden md:flex gap-2 mb-6 text-sm relative items-center">
+        <div className="flex gap-1">
+          {tabs.map((tab) => (
+            <Link
+              key={tab.label}
+              to={tab.to}
+              state={tab.state}
+              title={tab.label === "iterm" ? "iTerm" : undefined}
+              className="px-3 py-1.5 rounded-md capitalize transition-colors flex items-center gap-1.5"
+              style={{
+                background: tab.active ? "var(--bg-active)" : "transparent",
+                color: tab.active
+                  ? "var(--text-primary)"
+                  : "var(--text-tertiary)",
+              }}
+              onMouseEnter={(e) => {
+                if (!tab.active)
+                  e.currentTarget.style.background = "var(--bg-hover)";
+              }}
+              onMouseLeave={(e) => {
+                if (!tab.active)
+                  e.currentTarget.style.background = tab.active
+                    ? "var(--bg-active)"
+                    : "transparent";
+              }}
+            >
+              {tab.label === "iterm" ? <Terminal className="w-4 h-4" /> : tab.label}
+            </Link>
+          ))}
+        </div>
+        {/* Search toggle (desktop only) */}
         <button
           onClick={() => {
             setSearchActive((a) => !a);
             setTimeout(() => searchInputRef.current?.focus(), 10);
           }}
-          className="ml-auto px-2 py-1.5 rounded-md transition-colors"
+          className="ml-auto hidden md:block px-2 py-1.5 rounded-md transition-colors"
           style={{
             color: searchActive ? "var(--accent)" : "var(--text-tertiary)",
           }}

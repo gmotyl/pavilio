@@ -55,7 +55,12 @@ export function TerminalView({
     container.appendChild(inst.holder);
     setWs(inst.ws);
 
-    const rafId = requestAnimationFrame(() => inst.fit());
+    const rafId = requestAnimationFrame(() => {
+      inst.fit();
+      // Follow the bottom on tab re-entry unless the user was scrolling back.
+      const buf = inst.terminal.buffer.active;
+      if (buf.viewportY >= buf.baseY) inst.terminal.scrollToBottom();
+    });
 
     const resizeObserver = new ResizeObserver(() => inst.fit());
     resizeObserver.observe(container);
@@ -88,6 +93,8 @@ export function TerminalView({
     // Re-fit + focus when becoming visible (e.g., maximize toggle).
     const rafId = requestAnimationFrame(() => {
       inst.fit();
+      const buf = inst.terminal.buffer.active;
+      if (buf.viewportY >= buf.baseY) inst.terminal.scrollToBottom();
       inst.focus();
     });
     return () => cancelAnimationFrame(rafId);
