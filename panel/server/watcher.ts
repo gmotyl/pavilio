@@ -82,6 +82,13 @@ export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
     }
   });
 
+  const HEARTBEAT_MS = 10_000;
+  const heartbeat = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "ping" }));
+    }
+  }, HEARTBEAT_MS);
+
   ws.on("message", (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
@@ -104,6 +111,7 @@ export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
   ws.on("close", () => {
     dataSub.dispose();
     exitSub.dispose();
+    clearInterval(heartbeat);
   });
 }
 
