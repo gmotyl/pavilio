@@ -266,9 +266,18 @@ function createInstance(sessionId: string): InternalInstance {
     console.warn(`[terminal:${sessionId}] initial fit failed:`, err);
   }
 
-  // Two-finger vertical swipe = scroll xterm's scrollback (mirrors desktop
-  // trackpad two-finger scroll, which xterm already handles as wheel).
-  // Single-finger touches still reach xterm for selection / keyboard focus.
+  // Two-finger vertical swipe. When the TUI has mouse tracking enabled
+  // (opencode, Claude Code, vim mouse=a) we forward SGR wheel events to
+  // the PTY so the TUI scrolls its own view. Otherwise (plain shell), we
+  // scroll xterm's local scrollback. Single-finger touches still reach
+  // xterm for selection / keyboard focus.
+  //
+  // `sendToPtyRef` is filled in after `inst` is constructed below; the
+  // touchmove handler only fires at user interaction time, so referencing
+  // it through the ref is safe.
+  const sendToPtyRef: { current: ((data: string) => void) | null } = {
+    current: null,
+  };
   {
     let lastY: number | null = null;
     const avgY = (touches: TouchList) =>
@@ -287,11 +296,28 @@ function createInstance(sessionId: string): InternalInstance {
         if (e.touches.length !== 2 || lastY == null) return;
         const y = avgY(e.touches);
         const dy = y - lastY;
-        // Approximate line height from terminal geometry.
         const lineH = Math.max(1, holder.clientHeight / terminal.rows);
         const lines = Math.round(-dy / lineH);
         if (lines !== 0) {
-          terminal.scrollLines(lines);
+          const mouseMode = (terminal as unknown as {
+            modes?: { mouseTrackingMode?: string };
+          }).modes?.mouseTrackingMode;
+          const send = sendToPtyRef.current;
+          if (mouseMode && mouseMode !== "none" && send) {
+            // SGR mouse wheel: button 4 (up) = code 64, button 5 (down) = 65.
+            // Press-only format: ESC [ < code ; col ; row M. Report at the
+            // middle of the terminal so position-sensitive TUIs (tmux, etc.)
+            // route scroll to the main pane rather than a corner.
+            const code = lines < 0 ? 64 : 65;
+            const col = Math.max(1, Math.floor(terminal.cols / 2));
+            const row = Math.max(1, Math.floor(terminal.rows / 2));
+            const steps = Math.abs(lines);
+            for (let i = 0; i < steps; i++) {
+              send(`\x1b[<${code};${col};${row}M`);
+            }
+          } else {
+            terminal.scrollLines(lines);
+          }
           lastY = y;
         }
         e.preventDefault();
@@ -407,6 +433,7 @@ function createInstance(sessionId: string): InternalInstance {
   };
 
   terminal.attachCustomKeyEventHandler(shiftEnterHandler(inst.send));
+  sendToPtyRef.current = inst.send;
 
   connectWs(sessionId, inst);
 
