@@ -173,7 +173,10 @@ export function useTerminalSessions(project: string) {
         }
         const created: SessionMeta = await res.json();
         if (created.project === project) {
-          setSessions((prev) => [created, ...prev]);
+          setSessions((prev) => [...prev, created]);
+          setSessionOrder((prev) =>
+            prev.includes(created.id) ? prev : [...prev, created.id],
+          );
           setFocusedId(created.id);
         }
         return created;
