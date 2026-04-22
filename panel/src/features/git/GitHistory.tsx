@@ -188,8 +188,10 @@ export default function GitHistory({
     node: TreeNode,
     sha: string,
     depth: number,
+    compact = false,
   ): React.ReactNode[] => {
     const items: React.ReactNode[] = [];
+    const indent = compact ? depth * 12 + 8 : depth * 16 + 8;
     const dirs = node.children
       .filter((c) => !c.file)
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -205,7 +207,7 @@ export default function GitHistory({
           key={`dir-${dir.path}`}
           onClick={() => toggleDir(dir.path)}
           className="flex items-center gap-1.5 py-1 px-2 rounded w-full text-left transition-colors"
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
+          style={{ paddingLeft: `${indent}px` }}
           onMouseEnter={(e) =>
             (e.currentTarget.style.background = "var(--bg-hover)")
           }
@@ -220,91 +222,7 @@ export default function GitHistory({
           )}
           <Folder size={12} style={{ color: "var(--accent)", opacity: 0.7 }} />
           <span
-            className="text-[12px] font-mono"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {dir.name}
-          </span>
-          <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-            {fc}
-          </span>
-        </button>,
-      );
-      if (!isCollapsed) items.push(...renderTreeNode(dir, sha, depth + 1));
-    }
-
-    for (const child of nodeFiles) {
-      const f = child.file!;
-      items.push(
-        <button
-          key={f.path}
-          onClick={() => openDiff(sha, f.path)}
-          className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "var(--bg-hover)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
-        >
-          <span
-            className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
-            style={{ color: statusColor(f.status) }}
-          >
-            {f.status}
-          </span>
-          <span
-            className="text-[12px] font-mono truncate"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {child.name}
-          </span>
-        </button>,
-      );
-    }
-    return items;
-  };
-
-  if (commits.length === 0) return null;
-
-  const renderSidebarTreeNode = (
-    node: TreeNode,
-    sha: string,
-    depth: number,
-  ): React.ReactNode[] => {
-    const items: React.ReactNode[] = [];
-    const dirs = node.children
-      .filter((c) => !c.file)
-      .sort((a, b) => a.name.localeCompare(b.name));
-    const nodeFiles = node.children
-      .filter((c) => c.file)
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    for (const dir of dirs) {
-      const isCollapsed = collapsedDirs.has(dir.path);
-      const fc = countFiles(dir);
-      items.push(
-        <button
-          key={`dir-${dir.path}`}
-          onClick={() => toggleDir(dir.path)}
-          className="flex items-center gap-1.5 py-1 px-2 rounded w-full text-left transition-colors"
-          style={{ paddingLeft: `${depth * 12 + 8}px` }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "var(--bg-hover)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
-        >
-          {isCollapsed ? (
-            <ChevronRight size={11} style={{ color: "var(--text-muted)" }} />
-          ) : (
-            <ChevronDown size={11} style={{ color: "var(--text-muted)" }} />
-          )}
-          <Folder size={12} style={{ color: "var(--accent)", opacity: 0.7 }} />
-          <span
-            className="text-[12px] font-mono truncate"
+            className={`text-[12px] font-mono${compact ? " truncate" : ""}`}
             style={{ color: "var(--text-secondary)" }}
           >
             {dir.name}
@@ -315,19 +233,19 @@ export default function GitHistory({
         </button>,
       );
       if (!isCollapsed)
-        items.push(...renderSidebarTreeNode(dir, sha, depth + 1));
+        items.push(...renderTreeNode(dir, sha, depth + 1, compact));
     }
 
     for (const child of nodeFiles) {
       const f = child.file!;
-      const isActive = activeDiff?.file === f.path;
+      const isActive = activeDiff?.sha === sha && activeDiff?.file === f.path;
       items.push(
         <button
           key={f.path}
           onClick={() => openDiff(sha, f.path)}
           className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
           style={{
-            paddingLeft: `${depth * 12 + 8}px`,
+            paddingLeft: `${indent}px`,
             background: isActive ? "var(--bg-active)" : undefined,
           }}
           onMouseEnter={(e) => {
@@ -356,6 +274,8 @@ export default function GitHistory({
     return items;
   };
 
+  if (commits.length === 0) return null;
+
   const renderSidebarList = () => {
     if (!activeDiff) return null;
     const commit = commits.find((c) => c.sha === activeDiff.sha);
@@ -378,7 +298,7 @@ export default function GitHistory({
         )}
         <div className="space-y-0.5">
           {viewMode === "tree"
-            ? renderSidebarTreeNode(fileTree, activeDiff.sha, 0)
+            ? renderTreeNode(fileTree, activeDiff.sha, 0, true)
             : commitFiles.map((f) => {
                 const isActive = activeDiff.file === f.path;
                 return (
