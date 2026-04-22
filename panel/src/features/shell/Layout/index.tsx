@@ -46,15 +46,17 @@ export function Layout({ children }: LayoutProps) {
       className="layout-container flex h-screen overflow-hidden relative"
       style={{ background: "var(--bg-base)", color: "var(--text-primary)" }}
     >
-      <button
-        type="button"
-        onClick={left.toggle}
-        className={`sidebar-toggle ${!left.expanded ? "visible" : ""}`}
-        style={{ left: left.expanded ? 228 : 8 }}
-        title={left.expanded ? "Collapse sidebar" : "Expand sidebar"}
-      >
-        <PanelLeft size={14} />
-      </button>
+      <div className="hidden md:block">
+        <button
+          type="button"
+          onClick={left.toggle}
+          className={`sidebar-toggle ${!left.expanded ? "visible" : ""}`}
+          style={{ left: left.expanded ? 228 : 8 }}
+          title={left.expanded ? "Collapse sidebar" : "Expand sidebar"}
+        >
+          <PanelLeft size={14} />
+        </button>
+      </div>
 
       <aside
         className={`sidebar sidebar-left flex-shrink-0 ${!left.expanded ? "sidebar-collapsed" : ""}`}
@@ -77,15 +79,17 @@ export function Layout({ children }: LayoutProps) {
         <FloatingOverlay />
       </main>
 
-      <button
-        type="button"
-        onClick={right.toggle}
-        className={`sidebar-toggle ${!right.expanded ? "visible" : ""}`}
-        style={{ right: right.expanded ? 252 : 8 }}
-        title={right.expanded ? "Collapse file tree" : "Expand file tree"}
-      >
-        <PanelRight size={14} />
-      </button>
+      <div className="hidden md:block">
+        <button
+          type="button"
+          onClick={right.toggle}
+          className={`sidebar-toggle ${!right.expanded ? "visible" : ""}`}
+          style={{ right: right.expanded ? 252 : 8 }}
+          title={right.expanded ? "Collapse file tree" : "Expand file tree"}
+        >
+          <PanelRight size={14} />
+        </button>
+      </div>
 
       <aside
         className={`sidebar sidebar-right flex-shrink-0 ${!right.expanded ? "sidebar-collapsed" : ""}`}

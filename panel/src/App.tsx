@@ -14,6 +14,7 @@ import ProjectView from "./features/projects/ProjectView";
 import QuickFinder from "./features/search/QuickFinder";
 import { BreadcrumbActionsProvider } from "./features/shell/Breadcrumbs";
 import { FloatingActionProvider, Layout } from "./features/shell/Layout";
+import { useVisualViewport } from "./features/shell/useVisualViewport";
 
 function AppShell() {
   const { authRequired, authenticated, loading, recheck } = useAuthStatus();
@@ -56,6 +57,7 @@ function AppShell() {
 }
 
 export default function App() {
+  useVisualViewport();
   return (
     <MobileAuthBootstrap>
       <AppShell />
