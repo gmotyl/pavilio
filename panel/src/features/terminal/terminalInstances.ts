@@ -88,18 +88,21 @@ export function refitAll(): void {
 }
 
 /**
- * Custom xterm key event handler that makes Shift+Enter insert a literal
- * newline into the current line buffer (via `term.paste("\n")`) instead of
- * letting xterm forward `\r` to the pty. Plain Enter is untouched so TUIs
- * like Claude Code / OpenCode keep treating it as "submit".
+ * Custom xterm key event handler that makes Shift+Enter send a raw `\n`
+ * byte to the PTY instead of letting xterm forward `\r`. We write directly
+ * to the pty (via the instance's send fn) rather than using `term.paste`,
+ * because paste() wraps in bracketed-paste escape sequences, which shells
+ * (bash) then submit as one line — defeating the "newline without submit"
+ * intent. Raw `\n` is interpreted as newline-in-input by Claude Code and
+ * OpenCode; plain bash treats it as prompt continuation.
  *
  * Exported as a pure helper so it can be unit-tested without a real
  * Terminal/jsdom wiring.
  */
-export function shiftEnterHandler(term: { paste: (d: string) => void }) {
+export function shiftEnterHandler(sendToPty: (data: string) => void) {
   return (e: { type: string; key: string; shiftKey: boolean }) => {
     if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
-      term.paste("\n");
+      sendToPty("\n");
       return false; // stop xterm from also sending \r
     }
     return true;
@@ -252,8 +255,6 @@ function createInstance(sessionId: string): InternalInstance {
     theme: THEME,
     scrollback: 5000,
   });
-  terminal.attachCustomKeyEventHandler(shiftEnterHandler(terminal));
-
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
   terminal.loadAddon(new WebLinksAddon());
@@ -306,27 +307,13 @@ function createInstance(sessionId: string): InternalInstance {
     );
   }
 
-  // Desktop wheel = scroll xterm's scrollback. Full-screen TUIs (opencode,
-  // vim, lazygit) turn on mouse-tracking mode so xterm's default wheel
-  // handler forwards the event to the PTY instead of scrolling the buffer;
-  // most TUIs don't bind wheel, so the user sees "nothing scrolls". We run
-  // in the capture phase and preventDefault to short-circuit xterm before
-  // it can forward. Hold Shift to bypass this and let the TUI see the wheel.
-  holder.addEventListener(
-    "wheel",
-    (e) => {
-      if (e.shiftKey) return;
-      let pixels = e.deltaY;
-      if (e.deltaMode === 1) pixels *= 16;
-      else if (e.deltaMode === 2) pixels *= holder.clientHeight;
-      const lineH = Math.max(1, holder.clientHeight / terminal.rows);
-      const lines = Math.round(pixels / lineH);
-      if (lines !== 0) terminal.scrollLines(lines);
-      e.preventDefault();
-      e.stopPropagation();
-    },
-    { capture: true, passive: false },
-  );
+  // Wheel is left entirely to xterm's built-in handler:
+  //   • normal screen + no mouse-tracking → xterm scrolls its scrollback
+  //   • mouse-tracking on (opencode, Claude Code, vim mouse=a) → xterm
+  //     forwards the wheel to the PTY and the app handles it
+  // An earlier capture-phase override that routed all wheels to xterm's
+  // scrollback ("bypass TUI mouse-tracking") broke opencode / Claude chat
+  // scroll because those apps bind wheel themselves. Trust xterm here.
 
   // Partially-initialised instance: `ws` and `dataDisposable` are filled
   // in by connectWs() below. We declare `inst` up-front so connectWs can
@@ -418,6 +405,8 @@ function createInstance(sessionId: string): InternalInstance {
       };
     },
   };
+
+  terminal.attachCustomKeyEventHandler(shiftEnterHandler(inst.send));
 
   connectWs(sessionId, inst);
 
