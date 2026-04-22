@@ -133,9 +133,12 @@ export function TerminalsSurface({
         />
       </div>
 
-      {/* Terminal area: spine (mobile) + grid */}
+      {/* Terminal area: grid only. On mobile, the top rail handles session
+          switching — the left-column spine is redundant and steals 16px of
+          horizontal space. Drop the p-1 gutter on mobile too so the grid
+          fills edge-to-edge. */}
       <div className="flex-1 min-h-0 flex relative">
-        <div className="md:hidden">
+        <div className="hidden md:block">
           <TerminalSpine
             sessions={sessions}
             focusedId={focusedId}
@@ -143,7 +146,7 @@ export function TerminalsSurface({
             onOpenDrawer={() => onSetDrawerOpen(true)}
           />
         </div>
-        <div className="flex-1 min-w-0 p-1">
+        <div className="flex-1 min-w-0 p-0 md:p-1">
           <TerminalLayoutGrid
             sessions={sessions}
             focusedId={focusedId}
