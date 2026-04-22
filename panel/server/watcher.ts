@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { Server } from "http";
 import { getConfig } from "./config.js";
 import { rebuildIndex } from "./lib/file-index.js";
-import { getSession, resizeSession } from "./lib/terminal-manager.js";
+import { getSession, nudgeSession, resizeSession } from "./lib/terminal-manager.js";
 import { recordInput, dismiss, getSnapshot, subscribe, type ActivityEvent } from "./lib/terminalActivity.js";
 import { validateWsToken } from "./lib/auth.js";
 import { verifySessionCookie } from "./lib/mobile-auth.js";
@@ -62,7 +62,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
   return wss;
 }
 
-function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
+export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
   const session = getSession(sessionId);
   if (!session) {
     ws.close(4004, "Session not found");
@@ -82,6 +82,13 @@ function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
     }
   });
 
+  const HEARTBEAT_MS = 10_000;
+  const heartbeat = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "ping" }));
+    }
+  }, HEARTBEAT_MS);
+
   ws.on("message", (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
@@ -93,6 +100,8 @@ function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
         return;
       } else if (msg.type === "resize") {
         resizeSession(sessionId, Number(msg.cols), Number(msg.rows));
+      } else if (msg.type === "mobile-nudge") {
+        nudgeSession(sessionId, Number(msg.cols), Number(msg.rows));
       }
     } catch {
       // ignore malformed payloads
@@ -102,6 +111,7 @@ function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
   ws.on("close", () => {
     dataSub.dispose();
     exitSub.dispose();
+    clearInterval(heartbeat);
   });
 }
 

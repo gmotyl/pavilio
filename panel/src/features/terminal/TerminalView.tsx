@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   acquireTerminal,
   releaseTerminal,
   type LiveTerminal,
 } from "./terminalInstances";
+import { useMobileReconnect } from "./useMobileReconnect";
 
 interface TerminalViewProps {
   sessionId: string;
@@ -26,6 +27,10 @@ export function TerminalView({
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const instRef = useRef<LiveTerminal | null>(null);
+  // Track the current ws as React state so useMobileReconnect gets the
+  // fresh reference after inst.reopen() swaps inst.ws. Initialised lazily
+  // inside the mount effect below.
+  const [ws, setWs] = useState<WebSocket | null>(null);
 
   // Latest-refs so changing callbacks don't blow away the mount effect.
   // Parent re-renders (e.g. the 8s poll in useAllTerminalSessions) create
@@ -48,6 +53,7 @@ export function TerminalView({
     const inst = acquireTerminal(sessionId);
     instRef.current = inst;
     container.appendChild(inst.holder);
+    setWs(inst.ws);
 
     const rafId = requestAnimationFrame(() => {
       inst.fit();
@@ -60,6 +66,10 @@ export function TerminalView({
     resizeObserver.observe(container);
 
     const removeExit = inst.addExitListener(() => onExitRef.current?.());
+    // Subscribe to ws replacement so useMobileReconnect sees the new ws
+    // identity after reopen(). The instance pushes the new reference to
+    // us synchronously from reopen().
+    const removeWsChange = inst.onWsChange((next) => setWs(next));
 
     onReadyRef.current?.({
       sessionId,
@@ -71,6 +81,7 @@ export function TerminalView({
       cancelAnimationFrame(rafId);
       resizeObserver.disconnect();
       removeExit?.();
+      removeWsChange?.();
       releaseTerminal(sessionId);
       instRef.current = null;
     };
@@ -88,6 +99,18 @@ export function TerminalView({
     });
     return () => cancelAnimationFrame(rafId);
   }, [focused]);
+
+  const getDims = useCallback(() => {
+    const inst = instRef.current;
+    if (!inst) return { cols: 80, rows: 24 };
+    return { cols: inst.terminal.cols, rows: inst.terminal.rows };
+  }, []);
+
+  const reopen = useCallback(() => {
+    instRef.current?.reopen();
+  }, []);
+
+  useMobileReconnect({ ws, getDims, reopen });
 
   return (
     <div

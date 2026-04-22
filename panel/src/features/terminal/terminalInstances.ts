@@ -1,4 +1,4 @@
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
@@ -32,6 +32,7 @@ const THEME = {
 };
 
 type ExitListener = (code: number | undefined) => void;
+type WsListener = (ws: WebSocket) => void;
 
 export interface LiveTerminal {
   sessionId: string;
@@ -43,16 +44,44 @@ export interface LiveTerminal {
   fit: () => void;
   focus: () => void;
   addExitListener: (fn: ExitListener) => () => void;
+  /**
+   * Tear down the current ws and open a fresh one against the same session.
+   * Used by the mobile-reconnect watchdog when the tab resumes and the
+   * previous socket was silently killed by iOS Safari's background policy.
+   */
+  reopen: () => void;
+  /**
+   * Subscribe to ws swaps triggered by reopen(). Does NOT fire synchronously
+   * with the current ws on subscription — callers must read `inst.ws` first
+   * to prime their state. Returns an unsubscribe function.
+   */
+  onWsChange: (cb: (ws: WebSocket) => void) => () => void;
 }
 
 interface InternalInstance extends LiveTerminal {
   refCount: number;
   exitListeners: Set<ExitListener>;
+  wsListeners: Set<WsListener>;
   exited: boolean;
   exitCode: number | undefined;
+  // Subscriptions tied to the current ws — disposed before each reopen.
+  dataDisposable: IDisposable | null;
 }
 
 const instances = new Map<string, InternalInstance>();
+
+// Optional WebSocket constructor override (for tests that don't run in a
+// real browser). Falls back to the global constructor.
+type WebSocketCtor = new (url: string) => WebSocket;
+let wsCtorOverride: WebSocketCtor | null = null;
+export function __setWebSocketCtorForTests(ctor: WebSocketCtor | null): void {
+  wsCtorOverride = ctor;
+}
+
+function resolveWsCtor(): WebSocketCtor {
+  if (wsCtorOverride) return wsCtorOverride;
+  return WebSocket as unknown as WebSocketCtor;
+}
 
 export function refitAll(): void {
   for (const inst of instances.values()) inst.fit();
@@ -123,6 +152,93 @@ function getHiddenRoot(): HTMLDivElement | null {
   return el;
 }
 
+/**
+ * Build a fresh WebSocket for the session and wire up all per-socket
+ * subscriptions (output, exit, input, resize). The previous ws and its
+ * onData disposable must already be torn down by the caller.
+ *
+ * Returns the new WebSocket. The instance's `ws` and `dataDisposable`
+ * fields are updated in place.
+ */
+function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const Ctor = resolveWsCtor();
+  const ws = new Ctor(
+    `${protocol}//${window.location.host}/ws/terminal/${sessionId}`,
+  );
+
+  const sendResize = () => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    ws.send(
+      JSON.stringify({
+        type: "resize",
+        cols: inst.terminal.cols,
+        rows: inst.terminal.rows,
+      }),
+    );
+  };
+
+  ws.onopen = () => {
+    try {
+      inst.fitAddon.fit();
+    } catch (err) {
+      console.warn(`[terminal:${sessionId}] fit on ws open failed:`, err);
+    }
+    sendResize();
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "output") {
+        inst.terminal.write(msg.data);
+      } else if (msg.type === "exit") {
+        inst.terminal.write("\r\n\x1b[90m[Process exited]\x1b[0m\r\n");
+        inst.exited = true;
+        inst.exitCode = typeof msg.code === "number" ? msg.code : undefined;
+        for (const l of inst.exitListeners) l(inst.exitCode);
+      }
+      // "ping" messages are intentionally ignored — their only purpose is
+      // to keep the socket's lastMessageAt ref fresh for the mobile
+      // reconnect watchdog in useMobileReconnect.
+    } catch (err) {
+      console.warn(
+        `[terminal:${sessionId}] malformed ws payload:`,
+        err,
+        event.data,
+      );
+    }
+  };
+
+  ws.onerror = (event) => {
+    console.warn(`[terminal:${sessionId}] websocket error:`, event);
+    inst.terminal.write("\r\n\x1b[31m[WebSocket error]\x1b[0m\r\n");
+  };
+
+  // Re-register the terminal.onData → ws.send binding against the fresh
+  // ws. The previous disposable (captured on inst.dataDisposable) is torn
+  // down by the caller before we're invoked, so there's no double-send.
+  inst.dataDisposable = inst.terminal.onData((data) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "input", data }));
+    }
+  });
+
+  inst.ws = ws;
+
+  // Notify subscribers (TerminalView) that the ws identity changed so
+  // they can feed the new reference into useMobileReconnect.
+  for (const l of inst.wsListeners) {
+    try {
+      l(ws);
+    } catch (err) {
+      console.warn(`[terminal:${sessionId}] wsChange listener threw:`, err);
+    }
+  }
+
+  return ws;
+}
+
 function createInstance(sessionId: string): InternalInstance {
   const holder = document.createElement("div");
   holder.style.width = "100%";
@@ -190,74 +306,48 @@ function createInstance(sessionId: string): InternalInstance {
     );
   }
 
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(
-    `${protocol}//${window.location.host}/ws/terminal/${sessionId}`,
+  // Desktop wheel = scroll xterm's scrollback. Full-screen TUIs (opencode,
+  // vim, lazygit) turn on mouse-tracking mode so xterm's default wheel
+  // handler forwards the event to the PTY instead of scrolling the buffer;
+  // most TUIs don't bind wheel, so the user sees "nothing scrolls". We run
+  // in the capture phase and preventDefault to short-circuit xterm before
+  // it can forward. Hold Shift to bypass this and let the TUI see the wheel.
+  holder.addEventListener(
+    "wheel",
+    (e) => {
+      if (e.shiftKey) return;
+      let pixels = e.deltaY;
+      if (e.deltaMode === 1) pixels *= 16;
+      else if (e.deltaMode === 2) pixels *= holder.clientHeight;
+      const lineH = Math.max(1, holder.clientHeight / terminal.rows);
+      const lines = Math.round(pixels / lineH);
+      if (lines !== 0) terminal.scrollLines(lines);
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    { capture: true, passive: false },
   );
 
-  const sendResize = () => {
-    if (ws.readyState !== WebSocket.OPEN) return;
-    ws.send(
-      JSON.stringify({
-        type: "resize",
-        cols: terminal.cols,
-        rows: terminal.rows,
-      }),
-    );
-  };
-
-  ws.onopen = () => {
-    try {
-      fitAddon.fit();
-    } catch (err) {
-      console.warn(`[terminal:${sessionId}] fit on ws open failed:`, err);
-    }
-    sendResize();
-  };
-
-  ws.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "output") {
-        terminal.write(msg.data);
-      } else if (msg.type === "exit") {
-        terminal.write("\r\n\x1b[90m[Process exited]\x1b[0m\r\n");
-        const inst = instances.get(sessionId);
-        if (inst) {
-          inst.exited = true;
-          inst.exitCode = typeof msg.code === "number" ? msg.code : undefined;
-          for (const l of inst.exitListeners) l(inst.exitCode);
-        }
-      }
-    } catch (err) {
-      console.warn(`[terminal:${sessionId}] malformed ws payload:`, err, event.data);
-    }
-  };
-
-  ws.onerror = (event) => {
-    console.warn(`[terminal:${sessionId}] websocket error:`, event);
-    terminal.write("\r\n\x1b[31m[WebSocket error]\x1b[0m\r\n");
-  };
-
-  terminal.onData((data) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "input", data }));
-    }
-  });
-
+  // Partially-initialised instance: `ws` and `dataDisposable` are filled
+  // in by connectWs() below. We declare `inst` up-front so connectWs can
+  // mutate it (and so the instance object identity is stable).
   const inst: InternalInstance = {
     sessionId,
     terminal,
     fitAddon,
     holder,
-    ws,
+    // Temporary placeholder; replaced synchronously by connectWs().
+    ws: null as unknown as WebSocket,
     refCount: 0,
     exitListeners: new Set(),
+    wsListeners: new Set(),
     exited: false,
     exitCode: undefined,
+    dataDisposable: null,
     send: (data: string) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "input", data }));
+      const currentWs = inst.ws;
+      if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+        currentWs.send(JSON.stringify({ type: "input", data }));
       }
     },
     fit: () => {
@@ -266,19 +356,71 @@ function createInstance(sessionId: string): InternalInstance {
       } catch (err) {
         console.warn(`[terminal:${sessionId}] fit failed:`, err);
       }
-      sendResize();
+      // Force a full redraw from the buffer. FitAddon is a no-op when
+      // cols/rows didn't change (e.g., tab switch with unchanged outer
+      // layout), and xterm won't repaint on its own — the canvas can
+      // still hold stale/empty pixels from before the holder was detached,
+      // producing the "terminal is blank until I toggle grid/full" symptom.
+      try {
+        terminal.refresh(0, Math.max(0, terminal.rows - 1));
+      } catch (err) {
+        console.warn(`[terminal:${sessionId}] refresh failed:`, err);
+      }
+      const currentWs = inst.ws;
+      if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+        currentWs.send(
+          JSON.stringify({
+            type: "resize",
+            cols: terminal.cols,
+            rows: terminal.rows,
+          }),
+        );
+      }
     },
     focus: () => terminal.focus(),
     addExitListener: (fn: ExitListener) => {
-      const i = instances.get(sessionId);
-      if (!i) return () => undefined;
-      i.exitListeners.add(fn);
-      if (i.exited) fn(i.exitCode);
+      inst.exitListeners.add(fn);
+      if (inst.exited) fn(inst.exitCode);
       return () => {
-        i.exitListeners.delete(fn);
+        inst.exitListeners.delete(fn);
+      };
+    },
+    reopen: () => {
+      // Tear down the current ws + its onData subscription, then open a
+      // fresh one. `connectWs` re-registers onData against the new ws and
+      // updates inst.ws / inst.dataDisposable in place.
+      try {
+        inst.dataDisposable?.dispose();
+      } catch (err) {
+        console.warn(`[terminal:${sessionId}] dispose onData during reopen:`, err);
+      }
+      inst.dataDisposable = null;
+      const prev = inst.ws;
+      if (prev) {
+        try {
+          // Detach handlers first so any late 'close' event from the old
+          // socket doesn't clobber state tied to the new one.
+          prev.onopen = null;
+          prev.onmessage = null;
+          prev.onerror = null;
+          prev.onclose = null;
+          prev.close();
+        } catch (err) {
+          console.warn(`[terminal:${sessionId}] ws.close during reopen:`, err);
+        }
+      }
+      connectWs(sessionId, inst);
+    },
+    onWsChange: (fn: WsListener) => {
+      inst.wsListeners.add(fn);
+      return () => {
+        inst.wsListeners.delete(fn);
       };
     },
   };
+
+  connectWs(sessionId, inst);
+
   instances.set(sessionId, inst);
   return inst;
 }
@@ -286,8 +428,9 @@ function createInstance(sessionId: string): InternalInstance {
 export function sendDismiss(sessionId: string): void {
   const inst = instances.get(sessionId);
   if (!inst) return;
-  if (inst.ws.readyState === WebSocket.OPEN) {
-    inst.ws.send(JSON.stringify({ type: "dismiss-attention" }));
+  const currentWs = inst.ws;
+  if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+    currentWs.send(JSON.stringify({ type: "dismiss-attention" }));
   }
 }
 
@@ -312,6 +455,11 @@ export function releaseTerminal(sessionId: string): void {
 export function destroyTerminal(sessionId: string): void {
   const inst = instances.get(sessionId);
   if (!inst) return;
+  try {
+    inst.dataDisposable?.dispose();
+  } catch (err) {
+    console.warn(`[terminal:${sessionId}] dispose onData during destroy:`, err);
+  }
   try {
     inst.ws.close();
   } catch (err) {
