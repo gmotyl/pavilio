@@ -93,6 +93,8 @@ all connection attempts failed (HTTPS: dial tcp [2606:b740:…]:443: connect: no
 
 Disable the other VPN client (or quit it entirely) and retry. If you don't know whether you have one running, check menubar icons and `System Settings → Network → VPN & Filters`.
 
+The same conflict also produces a subtler failure after pairing succeeds: the Mac peer drops to **offline** in the Tailscale admin panel once you walk away and the connection goes idle, so the phone can no longer reach it even though the Mac is awake. If `login.tailscale.com/admin/machines` shows your Mac as offline while you're AFK, quit the other VPN client and it should come back within seconds.
+
 **B. Admin setup not complete.** Enable **HTTPS Certificates** + **MagicDNS** at [https://login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns). Both toggles must be green. Then restart Tailscale on the Mac (menubar → Quit, relaunch) so the daemon picks up the new tailnet config.
 
 **Diagnostic commands** if still stuck:
