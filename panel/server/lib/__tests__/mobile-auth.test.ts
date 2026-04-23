@@ -42,6 +42,18 @@ describe("mobile-auth state", () => {
     expect(mod.getCurrentToken()).toBeNull();
   });
 
+  it("ensureToken mints once when missing, reuses afterwards", async () => {
+    const mod = await import("../mobile-auth");
+    await mod.loadAuthState();
+    expect(mod.getCurrentToken()).toBeNull();
+    const first = await mod.ensureToken();
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(mod.getCurrentGeneration()).toBe(1);
+    const second = await mod.ensureToken();
+    expect(second).toBe(first);
+    expect(mod.getCurrentGeneration()).toBe(1);
+  });
+
   it("state persists across module reloads", async () => {
     let mod = await import("../mobile-auth");
     await mod.loadAuthState();

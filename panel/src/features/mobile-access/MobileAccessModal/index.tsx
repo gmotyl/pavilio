@@ -5,7 +5,7 @@ import { AccessPane } from "./AccessPane";
 import { ErrorPane } from "./ErrorPane";
 
 export function MobileAccessModal({ onClose }: { onClose: () => void }) {
-  const { status, refresh, enable, disable } = useMobileAccessStatus(true);
+  const { status, refresh, enable, disable, rotate } = useMobileAccessStatus(true);
 
   const onOff =
     status?.state === "off" || status?.state === "on" ? status : null;
@@ -67,7 +67,7 @@ export function MobileAccessModal({ onClose }: { onClose: () => void }) {
               status={onOff}
               onEnable={enable}
               onDisable={disable}
-              onRegenerate={enable}
+              onRegenerate={rotate}
             />
           )}
           {status?.state === "error" && (

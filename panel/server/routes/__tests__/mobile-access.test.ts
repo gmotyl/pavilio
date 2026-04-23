@@ -9,7 +9,7 @@ vi.mock("../../lib/tailscale", () => ({
 }));
 vi.mock("../../lib/mobile-auth", () => ({
   rotateToken: vi.fn(),
-  clearToken: vi.fn(),
+  ensureToken: vi.fn(),
   getCurrentToken: vi.fn(),
 }));
 vi.mock("../../config", () => ({
@@ -50,33 +50,54 @@ describe("GET /api/mobile-access/status", () => {
 describe("POST /api/mobile-access/enable", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("rotates token then runs enableServe", async () => {
-    vi.mocked(auth.rotateToken).mockResolvedValue("NEWTOKEN");
+  it("ensures a token (preserving any existing one) then runs enableServe", async () => {
+    vi.mocked(auth.ensureToken).mockResolvedValue("EXISTING");
     vi.mocked(tailscale.enableServe).mockResolvedValue({
       state: "on",
       selfHost: "mac.foo.ts.net",
       url: "https://mac.foo.ts.net",
     });
-    vi.mocked(auth.getCurrentToken).mockReturnValue("NEWTOKEN");
+    vi.mocked(auth.getCurrentToken).mockReturnValue("EXISTING");
     const res = await request(makeApp()).post("/api/mobile-access/enable");
     expect(res.status).toBe(200);
-    expect(auth.rotateToken).toHaveBeenCalled();
+    expect(auth.ensureToken).toHaveBeenCalled();
+    expect(auth.rotateToken).not.toHaveBeenCalled();
     expect(tailscale.enableServe).toHaveBeenCalled();
-    expect(res.body.qrUrl).toBe("https://mac.foo.ts.net/#mt=NEWTOKEN");
+    expect(res.body.qrUrl).toBe("https://mac.foo.ts.net/#mt=EXISTING");
   });
 });
 
 describe("POST /api/mobile-access/disable", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("runs disableServe then clears token", async () => {
+  it("runs disableServe without clearing or rotating the token", async () => {
     vi.mocked(tailscale.disableServe).mockResolvedValue({ state: "off", selfHost: "x" });
-    vi.mocked(auth.clearToken).mockResolvedValue();
-    vi.mocked(auth.getCurrentToken).mockReturnValue(null);
+    vi.mocked(auth.getCurrentToken).mockReturnValue("STILL_HERE");
     const res = await request(makeApp()).post("/api/mobile-access/disable");
     expect(res.status).toBe(200);
     expect(tailscale.disableServe).toHaveBeenCalled();
-    expect(auth.clearToken).toHaveBeenCalled();
+    expect(auth.rotateToken).not.toHaveBeenCalled();
+    expect(auth.ensureToken).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/mobile-access/rotate", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("rotates the token and reports current tailscale state", async () => {
+    vi.mocked(auth.rotateToken).mockResolvedValue("FRESH");
+    vi.mocked(tailscale.detectTailscale).mockResolvedValue({
+      state: "on",
+      selfHost: "mac.foo.ts.net",
+      url: "https://mac.foo.ts.net",
+    });
+    vi.mocked(auth.getCurrentToken).mockReturnValue("FRESH");
+    const res = await request(makeApp()).post("/api/mobile-access/rotate");
+    expect(res.status).toBe(200);
+    expect(auth.rotateToken).toHaveBeenCalled();
+    expect(tailscale.enableServe).not.toHaveBeenCalled();
+    expect(tailscale.disableServe).not.toHaveBeenCalled();
+    expect(res.body.qrUrl).toBe("https://mac.foo.ts.net/#mt=FRESH");
   });
 });
 

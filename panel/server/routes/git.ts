@@ -60,18 +60,39 @@ function getWorkingTreeDiff(file: string, repo?: string): string {
   return diff;
 }
 
+export function synthesizeAddDiff(file: string, content: string): string {
+  const lines = content.split("\n");
+  // A trailing newline produces an empty last element; don't count it in the
+  // hunk header but keep the "\ No newline at end of file" convention off —
+  // DiffView doesn't need it and it'd just add noise.
+  const hasTrailingNewline =
+    lines.length > 0 && lines[lines.length - 1] === "";
+  const bodyLines = hasTrailingNewline ? lines.slice(0, -1) : lines;
+  const count = bodyLines.length;
+  const header =
+    `diff --git a/${file} b/${file}\n` +
+    `new file mode 100644\n` +
+    `--- /dev/null\n` +
+    `+++ b/${file}\n` +
+    `@@ -0,0 +1,${count} @@\n`;
+  return header + bodyLines.map((l) => `+${l}`).join("\n");
+}
+
 function getBranchDiff(base: string, file: string, repo?: string): string {
   const quotedFile = quoteShellArg(file);
   const diff = git(`diff ${base}...HEAD -- ${quotedFile}`, repo);
   if (diff.trim()) return diff;
 
-  const status = git(`diff --name-status ${base}...HEAD -- ${quotedFile}`, repo)
-    .split("\n")
-    .find(Boolean)
-    ?.trim();
-
-  if (status?.startsWith("A")) {
-    return gitDiffOutput(`diff --no-index -- /dev/null -- ${quotedFile}`, repo);
+  // Empty diff can happen for added files (some git configs + path quirks),
+  // renames without content change, or identical content across the branch
+  // boundary that still appears in --name-status. Fall back to synthesizing
+  // an add-diff from the file's HEAD blob so the viewer shows something
+  // meaningful instead of "No changes".
+  try {
+    const content = git(`show HEAD:${quotedFile}`, repo);
+    if (content.length > 0) return synthesizeAddDiff(file, content);
+  } catch {
+    // file may not exist at HEAD (deleted) — fall through
   }
 
   return diff;

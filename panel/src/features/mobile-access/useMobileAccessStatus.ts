@@ -12,6 +12,7 @@ interface Result {
   refresh: () => Promise<void>;
   enable: () => Promise<void>;
   disable: () => Promise<void>;
+  rotate: () => Promise<void>;
 }
 
 export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
@@ -53,6 +54,10 @@ export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
     () => call("disable", "/api/mobile-access/disable", { method: "POST" }),
     [call],
   );
+  const rotate = useCallback(
+    () => call("rotate", "/api/mobile-access/rotate", { method: "POST" }),
+    [call],
+  );
 
   useEffect(() => {
     if (!enabled) return;
@@ -67,5 +72,5 @@ export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
     return () => clearTimeout(id);
   }, [enabled, refresh, pollMs]);
 
-  return { status, refresh, enable, disable };
+  return { status, refresh, enable, disable, rotate };
 }

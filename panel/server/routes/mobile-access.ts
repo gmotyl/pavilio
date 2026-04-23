@@ -5,7 +5,7 @@ import {
   enableServe,
   disableServe,
 } from "../lib/tailscale.js";
-import { rotateToken, clearToken, getCurrentToken } from "../lib/mobile-auth.js";
+import { ensureToken, rotateToken, getCurrentToken } from "../lib/mobile-auth.js";
 
 const router = Router();
 
@@ -35,15 +35,25 @@ router.get("/status", async (_req, res) => {
 
 router.post("/enable", async (_req, res) => {
   const { port } = getConfig();
-  await rotateToken();
+  // Preserve the existing pairing token across toggle cycles; only mint
+  // one when there isn't a token yet. Users rotate explicitly via /rotate.
+  await ensureToken();
   const state = await enableServe(port);
   res.json(toResponse(state));
 });
 
 router.post("/disable", async (_req, res) => {
   const { port } = getConfig();
+  // Leave the token in place so re-enabling keeps the same QR code paired.
+  // To invalidate paired devices, the user explicitly rotates.
   const state = await disableServe(port);
-  await clearToken();
+  res.json(toResponse(state));
+});
+
+router.post("/rotate", async (_req, res) => {
+  const { port } = getConfig();
+  await rotateToken();
+  const state = await detectTailscale(port);
   res.json(toResponse(state));
 });
 

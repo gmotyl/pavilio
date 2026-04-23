@@ -150,8 +150,9 @@ export function AccessPane({
               }}
             >
               tailscale serve
-            </code>{" "}
-            and rotates the pairing token.
+            </code>
+            . Your pairing token stays the same — rotate it only when you
+            want to invalidate paired devices.
           </div>
         )}
       </div>

@@ -12,6 +12,7 @@ import Dashboard from "./features/projects/Dashboard";
 import ProjectRedirect from "./features/projects/ProjectRedirect";
 import ProjectView from "./features/projects/ProjectView";
 import QuickFinder from "./features/search/QuickFinder";
+import QuickTerminalModal from "./features/terminal/QuickTerminalModal";
 import { BreadcrumbActionsProvider } from "./features/shell/Breadcrumbs";
 import { FloatingActionProvider, Layout } from "./features/shell/Layout";
 import { useVisualViewport } from "./features/shell/useVisualViewport";
@@ -31,6 +32,7 @@ function AppShell() {
         <BreadcrumbActionsProvider>
           <FloatingActionProvider>
             <QuickFinder />
+            <QuickTerminalModal />
             <FaviconUpdater />
             <Layout>
               <Routes>

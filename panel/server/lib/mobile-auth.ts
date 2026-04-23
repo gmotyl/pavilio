@@ -65,6 +65,18 @@ export async function rotateToken(): Promise<string> {
   return s.token;
 }
 
+/**
+ * Return the current token if one exists, otherwise mint a fresh one.
+ * Used by enable() so toggling mobile access on/off reuses the same
+ * pairing token — the token only rotates when the user explicitly
+ * asks to rotate it.
+ */
+export async function ensureToken(): Promise<string> {
+  const s = requireState();
+  if (s.token) return s.token;
+  return rotateToken();
+}
+
 export async function clearToken(): Promise<void> {
   const s = requireState();
   s.generation += 1;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -84,6 +84,10 @@ export default function GitBranchDiff({
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
+  // Monotonic id of the latest openDiff() call. Late responses for any
+  // earlier id are dropped so a slow fetch can never overwrite the content
+  // of a file the user has since clicked away from.
+  const diffRequestIdRef = useRef(0);
 
   const qs = `repo=${encodeURIComponent(repo)}`;
 
@@ -157,18 +161,22 @@ export default function GitBranchDiff({
 
   const openDiff = useCallback(
     async (file: string) => {
+      const myId = ++diffRequestIdRef.current;
       setActiveDiff({ file });
       onActiveFileChange?.(file);
+      setDiffContent("");
       setDiffLoading(true);
+      let next = "";
       try {
         const res = await fetch(
           `/api/git/branch-diff?base=${encodeURIComponent(baseBranch)}&file=${encodeURIComponent(file)}&${qs}`,
         );
-        if (res.ok) setDiffContent((await res.json()).diff);
-        else setDiffContent("");
+        if (res.ok) next = (await res.json()).diff ?? "";
       } catch {
-        setDiffContent("");
+        // keep next as ""
       }
+      if (diffRequestIdRef.current !== myId) return;
+      setDiffContent(next);
       setDiffLoading(false);
     },
     [baseBranch, qs, onActiveFileChange],
