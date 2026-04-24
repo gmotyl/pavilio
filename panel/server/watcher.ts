@@ -22,7 +22,11 @@ function isMobileAuthOk(req: { headers: { host?: string; cookie?: string } }): b
   return verifySessionCookie(req as unknown as Request);
 }
 
-let wss: WebSocketServer;
+let wss: WebSocketServer | null = null;
+
+export function getWss(): WebSocketServer | null {
+  return wss;
+}
 
 export function setupWebSocket(server: Server): WebSocketServer {
   wss = new WebSocketServer({ server });

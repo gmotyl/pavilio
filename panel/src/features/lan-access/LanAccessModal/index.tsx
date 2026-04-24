@@ -1,15 +1,8 @@
-import { useMobileAccessStatus } from "../useMobileAccessStatus";
-import { NotInstalledPane } from "./NotInstalledPane";
-import { NotLoggedInPane } from "./NotLoggedInPane";
-import { AccessPane } from "./AccessPane";
-import { ErrorPane } from "./ErrorPane";
+import { useMobileAccessStatus } from "../../mobile-access/useMobileAccessStatus";
+import { LanAccessPane } from "./LanAccessPane";
 
-export function MobileAccessModal({ onClose }: { onClose: () => void }) {
-  const { status, refresh, enable, disable, rotate } = useMobileAccessStatus(true);
-
-  const ts = status?.tailscale ?? null;
-  const onOff =
-    ts?.state === "off" || ts?.state === "on" ? ts : null;
+export function LanAccessModal({ onClose }: { onClose: () => void }) {
+  const { status, enableLan, disableLan, rotate } = useMobileAccessStatus(true);
 
   return (
     <div
@@ -57,22 +50,14 @@ export function MobileAccessModal({ onClose }: { onClose: () => void }) {
               Loading…
             </div>
           )}
-          {ts?.state === "not_installed" && (
-            <NotInstalledPane onRefresh={refresh} />
-          )}
-          {ts?.state === "not_logged_in" && (
-            <NotLoggedInPane onRefresh={refresh} />
-          )}
-          {onOff && (
-            <AccessPane
-              status={onOff}
-              onEnable={enable}
-              onDisable={disable}
+          {status && (
+            <LanAccessPane
+              lan={status.lan}
+              host={status.host}
+              onEnable={enableLan}
+              onDisable={disableLan}
               onRegenerate={rotate}
             />
-          )}
-          {ts?.state === "error" && (
-            <ErrorPane error={ts.error} hint={ts.hint} />
           )}
         </div>
       </div>

@@ -1,22 +1,39 @@
 import { useEffect, useState, useCallback } from "react";
 
-export type MobileAccessState =
+export type TailscaleState =
   | { state: "not_installed" }
   | { state: "not_logged_in" }
   | { state: "off"; selfHost: string }
   | { state: "on"; selfHost: string; url: string; qrUrl: string }
   | { state: "error"; error: string; hint?: "https_not_enabled" };
 
+export type LanChannel =
+  | { state: "on"; lanIp: string; url: string; qrUrl: string }
+  | { state: "off"; lanIp: string | null };
+
+export interface HostInfo {
+  wsl: boolean;
+  wslVmIp: string | null;
+}
+
+export interface MobileAccessStatus {
+  tailscale: TailscaleState;
+  lan: LanChannel;
+  host: HostInfo;
+}
+
 interface Result {
-  status: MobileAccessState | null;
+  status: MobileAccessStatus | null;
   refresh: () => Promise<void>;
   enable: () => Promise<void>;
   disable: () => Promise<void>;
   rotate: () => Promise<void>;
+  enableLan: () => Promise<void>;
+  disableLan: () => Promise<void>;
 }
 
 export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
-  const [status, setStatus] = useState<MobileAccessState | null>(null);
+  const [status, setStatus] = useState<MobileAccessStatus | null>(null);
 
   const call = useCallback(
     async (label: string, url: string, init?: RequestInit) => {
@@ -30,9 +47,9 @@ export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
           );
           return;
         }
-        const payload = (await res.json()) as MobileAccessState;
-        if (payload.state === "error") {
-          console.error(`[mobile-access] ${label} returned error state`, payload);
+        const payload = (await res.json()) as MobileAccessStatus;
+        if (payload.tailscale?.state === "error") {
+          console.error(`[mobile-access] ${label} returned tailscale error`, payload);
         }
         setStatus(payload);
       } catch (err) {
@@ -58,6 +75,14 @@ export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
     () => call("rotate", "/api/mobile-access/rotate", { method: "POST" }),
     [call],
   );
+  const enableLan = useCallback(
+    () => call("enableLan", "/api/mobile-access/lan/enable", { method: "POST" }),
+    [call],
+  );
+  const disableLan = useCallback(
+    () => call("disableLan", "/api/mobile-access/lan/disable", { method: "POST" }),
+    [call],
+  );
 
   useEffect(() => {
     if (!enabled) return;
@@ -72,5 +97,5 @@ export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
     return () => clearTimeout(id);
   }, [enabled, refresh, pollMs]);
 
-  return { status, refresh, enable, disable, rotate };
+  return { status, refresh, enable, disable, rotate, enableLan, disableLan };
 }

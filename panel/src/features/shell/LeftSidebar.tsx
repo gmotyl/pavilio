@@ -7,9 +7,11 @@ import {
   Settings,
   Smartphone,
   Star,
+  Wifi,
 } from "lucide-react";
 import GitSummary from "../git/GitSummary";
 import { MobileAccessModal } from "../mobile-access/MobileAccessModal";
+import { LanAccessModal } from "../lan-access/LanAccessModal";
 import { Toggle } from "../mobile-access/MobileAccessModal/Toggle";
 import { useMobileAccessStatus } from "../mobile-access/useMobileAccessStatus";
 import { useFavorites } from "../projects/useFavorites";
@@ -41,12 +43,20 @@ export default function LeftSidebar() {
   const projects = useProjects();
   const { toggle, isFavorite, sortWithFavorites } = useFavorites();
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
+  const [lanAccessOpen, setLanAccessOpen] = useState(false);
+  const anyModalOpen = mobileAccessOpen || lanAccessOpen;
   const {
     status: mobileStatus,
     enable: enableMobile,
     disable: disableMobile,
-  } = useMobileAccessStatus(true, mobileAccessOpen ? 2000 : 30000);
-  const mobileIsOn = mobileStatus?.state === "on";
+    enableLan,
+    disableLan,
+  } = useMobileAccessStatus(true, anyModalOpen ? 2000 : 30000);
+  const mobileIsOn = mobileStatus?.tailscale.state === "on";
+  const lanIsOn = mobileStatus?.lan.state === "on";
+  const lanHasInterface =
+    mobileStatus?.lan.state === "on" ||
+    (mobileStatus?.lan.state === "off" && mobileStatus.lan.lanIp !== null);
 
   const onMobileToggle = (next: boolean) => {
     if (next) {
@@ -55,6 +65,16 @@ export default function LeftSidebar() {
     } else {
       disableMobile();
       setMobileAccessOpen(false);
+    }
+  };
+
+  const onLanToggle = (next: boolean) => {
+    if (next) {
+      enableLan();
+      setLanAccessOpen(true);
+    } else {
+      disableLan();
+      setLanAccessOpen(false);
     }
   };
 
@@ -174,9 +194,45 @@ export default function LeftSidebar() {
             label="Mobile access"
           />
         </div>
+        <div
+          className="flex items-center gap-2 w-full text-[12px] px-2 py-1.5 rounded-md"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <button
+            type="button"
+            onClick={() => setLanAccessOpen(true)}
+            className="flex items-center gap-2 flex-1 text-left transition-colors"
+            style={{ color: "inherit" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "var(--text-secondary)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--text-muted)";
+            }}
+            title={
+              lanIsOn
+                ? "Show LAN link"
+                : lanHasInterface
+                  ? "Enable to show LAN link"
+                  : "No LAN interface detected"
+            }
+          >
+            <Wifi size={14} />
+            <span>LAN access</span>
+          </button>
+          <Toggle
+            on={!!lanIsOn}
+            onChange={onLanToggle}
+            label="LAN access"
+            disabled={!lanIsOn && !lanHasInterface}
+          />
+        </div>
       </section>
       {mobileAccessOpen && (
         <MobileAccessModal onClose={() => setMobileAccessOpen(false)} />
+      )}
+      {lanAccessOpen && (
+        <LanAccessModal onClose={() => setLanAccessOpen(false)} />
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import express from "express";
-import { createServer as createHttpServer } from "http";
+import { createServer as createHttpServer, type Server as HttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
 import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
@@ -25,8 +25,9 @@ import imagesRouter from "./routes/images.js";
 import commandsRouter from "./routes/commands.js";
 import agentSettingsRouter from "./routes/agent-settings.js";
 import terminalRouter from "./routes/terminal.js";
-import { setupWebSocket, setupFileWatcher } from "./watcher.js";
+import { setupWebSocket, setupFileWatcher, getWss } from "./watcher.js";
 import { pruneDeadAgents } from "./lib/agent-registry.js";
+import { registerPanelServer } from "./lib/panel-listener.js";
 
 async function findFreePort(start: number, span = 50): Promise<number> {
   for (let candidate = start; candidate < start + span; candidate++) {
@@ -54,7 +55,7 @@ async function start() {
 
   const app = express();
 
-  let server;
+  let server: HttpServer;
   if (tlsCert && tlsKey) {
     server = createHttpsServer(
       { cert: readFileSync(tlsCert), key: readFileSync(tlsKey) },
@@ -69,12 +70,14 @@ async function start() {
     server: {
       middlewareMode: true,
       hmr: { port: hmrPort },
-      // The panel binds to 127.0.0.1 only; when reached via `tailscale serve`
-      // the Host header carries the tailnet hostname (<mac>.<tail>.ts.net).
-      // Vite's default allowlist blocks non-loopback hosts as DNS-rebind
-      // protection, which is the wrong threat model here — we already gate
-      // every non-loopback request behind the mobile-auth middleware.
-      allowedHosts: [".ts.net", "localhost", "127.0.0.1"],
+      // The panel binds to 127.0.0.1 by default. When Tailscale serve or the
+      // LAN-access toggle is enabled, requests arrive with a non-loopback
+      // Host header (`<mac>.<tail>.ts.net` via tailnet, or `<lan-ip>` via LAN
+      // rebind). Vite's default DNS-rebind protection is the wrong threat
+      // model here — every non-loopback request is already gated by the
+      // mobile-auth middleware. Disabling the allowlist lets any Host through
+      // to the middleware layer, which is where the real check happens.
+      allowedHosts: true,
     },
     appType: "spa",
   });
@@ -112,6 +115,7 @@ async function start() {
   });
 
   setupWebSocket(server);
+  registerPanelServer(server, port, getWss);
   setupFileWatcher();
 
   setInterval(pruneDeadAgents, 30_000);

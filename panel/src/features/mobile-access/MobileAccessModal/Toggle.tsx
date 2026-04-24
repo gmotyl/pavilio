@@ -3,11 +3,13 @@ export function Toggle({
   onChange,
   label,
   size = "sm",
+  disabled = false,
 }: {
   on: boolean;
   onChange: (next: boolean) => void;
   label: string;
   size?: "sm" | "md";
+  disabled?: boolean;
 }) {
   const dims =
     size === "sm"
@@ -22,11 +24,14 @@ export function Toggle({
       role="switch"
       aria-checked={on}
       aria-label={label}
+      aria-disabled={disabled}
+      disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
+        if (disabled) return;
         onChange(!on);
       }}
-      className="relative shrink-0 rounded-full cursor-pointer transition-all duration-200"
+      className="relative shrink-0 rounded-full transition-all duration-200"
       style={{
         width: dims.w,
         height: dims.h,
@@ -34,6 +39,8 @@ export function Toggle({
         boxShadow: on
           ? "inset 0 0 0 1px var(--accent)"
           : "inset 0 0 0 1px var(--border-default)",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       <span

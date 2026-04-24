@@ -123,7 +123,7 @@ describe("AccessPane (on state)", () => {
     expect(regen).toHaveBeenCalled();
   });
 
-  it("shows URL", () => {
+  it("renders the self-pairing qrUrl as a clickable anchor, not a plain URL", () => {
     render(
       <AccessPane
         status={onState}
@@ -132,6 +132,8 @@ describe("AccessPane (on state)", () => {
         onRegenerate={() => {}}
       />,
     );
-    expect(screen.getByText(onState.url)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: onState.qrUrl });
+    expect(link).toHaveAttribute("href", onState.qrUrl);
+    expect(link).toHaveAttribute("target", "_blank");
   });
 });

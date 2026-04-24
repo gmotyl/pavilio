@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Smartphone, RotateCw } from "lucide-react";
 import { renderQrSvg } from "../qr";
-import type { MobileAccessState } from "../useMobileAccessStatus";
+import type { TailscaleState } from "../useMobileAccessStatus";
 import { Toggle } from "./Toggle";
+import { ClickableUrl } from "../ClickableUrl";
 
-type OnState = Extract<MobileAccessState, { state: "on" }>;
-type OffState = Extract<MobileAccessState, { state: "off" }>;
+type OnState = Extract<TailscaleState, { state: "on" }>;
+type OffState = Extract<TailscaleState, { state: "off" }>;
 
 export function AccessPane({
   status,
@@ -108,12 +109,7 @@ export function AccessPane({
 
         {isOn ? (
           <>
-            <div
-              className="mt-3 text-[11px] font-mono select-all text-center break-all w-full px-2"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {status.url}
-            </div>
+            <ClickableUrl href={status.qrUrl} />
             <button
               onClick={onRegenerate}
               className="mt-3 inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md transition-colors"
