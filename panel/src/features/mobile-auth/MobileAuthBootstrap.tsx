@@ -25,8 +25,19 @@ async function tryExchangeFragment(): Promise<boolean> {
 }
 
 async function probeSession(): Promise<boolean> {
-  const res = await fetch("/api/mobile-access/status", { credentials: "include" });
-  return res.ok;
+  // `/api/auth/status` is public (bypasses auth middleware) and its
+  // `authenticated` field reflects *either* a valid panel_token or a valid
+  // mobile_session. This works for both Tailscale and LAN peers — unlike
+  // `/api/mobile-access/status` which is loopback-only and 403s LAN peers
+  // on refresh, falsely tripping the pairing gate.
+  const res = await fetch("/api/auth/status", { credentials: "include" });
+  if (!res.ok) return false;
+  try {
+    const body = (await res.json()) as { authenticated?: boolean };
+    return body.authenticated === true;
+  } catch {
+    return false;
+  }
 }
 
 export function MobileAuthBootstrap({ children }: { children: ReactNode }) {

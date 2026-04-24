@@ -42,9 +42,30 @@ describe("MobileAuthBootstrap", () => {
     );
   });
 
-  it("on .ts.net without cookie and without fragment renders PairingGate", async () => {
+  it("on remote host without fragment: probes /api/auth/status; authenticated=true renders children", async () => {
+    setHost("192.168.10.45");
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ authRequired: true, authenticated: true }),
+    });
+    render(
+      <MobileAuthBootstrap>
+        <div>app</div>
+      </MobileAuthBootstrap>,
+    );
+    await waitFor(() => expect(screen.getByText("app")).toBeInTheDocument());
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/auth/status",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("on remote host without cookie and without fragment renders PairingGate", async () => {
     setHost("mac.foo.ts.net");
-    (global.fetch as any).mockResolvedValueOnce({ ok: false, status: 401 });
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ authRequired: true, authenticated: false }),
+    });
     render(
       <MobileAuthBootstrap>
         <div>app</div>
