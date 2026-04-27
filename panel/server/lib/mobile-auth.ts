@@ -112,6 +112,14 @@ export function verifyLoginToken(submitted: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+// 30 days, matches the `panel_token` cookie. Without an explicit lifetime
+// the cookie is treated as a session cookie — iOS Safari purges those when
+// the WebKit process is evicted (background, memory pressure, sleep), so
+// paired phones lose their cookie within hours and hit the PairingGate
+// even though `generation` hasn't changed. Manual `/rotate` still bumps
+// `generation`, which invalidates outstanding cookies regardless of maxAge.
+const SESSION_COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
 export function issueSessionCookie(res: Response): void {
   const s = requireState();
   const value = sign(s.generation);
@@ -120,6 +128,7 @@ export function issueSessionCookie(res: Response): void {
     secure: true,
     sameSite: "lax",
     path: "/",
+    maxAge: SESSION_COOKIE_MAX_AGE_MS,
   });
 }
 

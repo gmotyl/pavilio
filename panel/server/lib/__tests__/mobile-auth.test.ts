@@ -108,4 +108,20 @@ describe("mobile-auth token + cookie", () => {
     const req: any = { headers: { cookie: "mobile_session=garbage.bad" } };
     expect(mod.verifySessionCookie(req)).toBe(false);
   });
+
+  it("issueSessionCookie sets a long-lived maxAge so mobile browsers don't purge it", async () => {
+    const mod = await import("../mobile-auth");
+    await mod.loadAuthState();
+    await mod.rotateToken();
+    const opts: Array<Record<string, unknown>> = [];
+    const res: any = {
+      cookie(_name: string, _value: string, options: Record<string, unknown>) {
+        opts.push(options);
+      },
+    };
+    mod.issueSessionCookie(res);
+    expect(opts).toHaveLength(1);
+    expect(typeof opts[0].maxAge).toBe("number");
+    expect(opts[0].maxAge).toBeGreaterThanOrEqual(7 * 24 * 60 * 60 * 1000);
+  });
 });
