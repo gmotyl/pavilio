@@ -11,7 +11,7 @@ router.post("/mobile-login", (req: Request, res: Response) => {
   if (!verifyLoginToken(token)) {
     return res.status(401).json({ error: "invalid token" });
   }
-  issueSessionCookie(res);
+  issueSessionCookie(req, res);
   return res.json({ ok: true });
 });
 

@@ -4,7 +4,7 @@ import request from "supertest";
 
 vi.mock("../../lib/mobile-auth", () => ({
   verifyLoginToken: vi.fn(),
-  issueSessionCookie: vi.fn((res) => res.cookie("mobile_session", "signed.value", { httpOnly: true })),
+  issueSessionCookie: vi.fn((_req, res) => res.cookie("mobile_session", "signed.value", { httpOnly: true })),
 }));
 
 import * as auth from "../../lib/mobile-auth";

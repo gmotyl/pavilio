@@ -120,12 +120,20 @@ export function verifyLoginToken(submitted: string): boolean {
 // `generation`, which invalidates outstanding cookies regardless of maxAge.
 const SESSION_COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
-export function issueSessionCookie(res: Response): void {
+// `secure` derived from the request scheme. Tailscale serve fronts the panel
+// with HTTPS; LAN access serves plain HTTP. Hardcoding `secure: true` makes
+// browsers silently drop the Set-Cookie on the LAN path, leaving the SPA
+// "paired" but cookieless — every subsequent /api/* call 401s and the
+// dashboard renders empty. The LAN access design explicitly accepts cleartext
+// cookies on LAN as the security tradeoff for plain-HTTP reachability.
+export function issueSessionCookie(req: Request, res: Response): void {
   const s = requireState();
   const value = sign(s.generation);
+  const isHttps =
+    req.secure === true || req.headers["x-forwarded-proto"] === "https";
   res.cookie(COOKIE_NAME, value, {
     httpOnly: true,
-    secure: true,
+    secure: isHttps,
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_COOKIE_MAX_AGE_MS,

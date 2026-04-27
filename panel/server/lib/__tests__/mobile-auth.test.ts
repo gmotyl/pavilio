@@ -92,7 +92,8 @@ describe("mobile-auth token + cookie", () => {
         this.headers[name] = value;
       },
     };
-    mod.issueSessionCookie(res);
+    const reqIn: any = { secure: false, headers: {} };
+    mod.issueSessionCookie(reqIn, res);
     const issued = res.headers.mobile_session as string;
     const req: any = { headers: { cookie: `mobile_session=${issued}` } };
     expect(mod.verifySessionCookie(req)).toBe(true);
@@ -119,9 +120,48 @@ describe("mobile-auth token + cookie", () => {
         opts.push(options);
       },
     };
-    mod.issueSessionCookie(res);
+    const req: any = { secure: false, headers: {} };
+    mod.issueSessionCookie(req, res);
     expect(opts).toHaveLength(1);
     expect(typeof opts[0].maxAge).toBe("number");
     expect(opts[0].maxAge).toBeGreaterThanOrEqual(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it("issueSessionCookie omits Secure on plain HTTP so LAN browsers accept the cookie", async () => {
+    const mod = await import("../mobile-auth");
+    await mod.loadAuthState();
+    await mod.rotateToken();
+    const opts: Array<Record<string, unknown>> = [];
+    const res: any = {
+      cookie(_n: string, _v: string, options: Record<string, unknown>) {
+        opts.push(options);
+      },
+    };
+    const httpReq: any = { secure: false, headers: {} };
+    mod.issueSessionCookie(httpReq, res);
+    expect(opts[0].secure).toBe(false);
+  });
+
+  it("issueSessionCookie sets Secure when the request was HTTPS (Tailscale serve)", async () => {
+    const mod = await import("../mobile-auth");
+    await mod.loadAuthState();
+    await mod.rotateToken();
+    const opts: Array<Record<string, unknown>> = [];
+    const res: any = {
+      cookie(_n: string, _v: string, options: Record<string, unknown>) {
+        opts.push(options);
+      },
+    };
+    const httpsReq: any = { secure: true, headers: {} };
+    mod.issueSessionCookie(httpsReq, res);
+    expect(opts[0].secure).toBe(true);
+
+    opts.length = 0;
+    const proxiedReq: any = {
+      secure: false,
+      headers: { "x-forwarded-proto": "https" },
+    };
+    mod.issueSessionCookie(proxiedReq, res);
+    expect(opts[0].secure).toBe(true);
   });
 });
