@@ -2,6 +2,7 @@ import { Router } from "express";
 import { execSync } from "child_process";
 import { resolve } from "path";
 import { getConfig } from "../config.js";
+import { broadcast } from "../watcher.js";
 
 const router = Router();
 
@@ -200,6 +201,7 @@ router.post("/commit", (req, res) => {
     if (!message) return res.status(400).json({ error: "message required" });
     const safe = message.replace(/"/g, '\\"');
     git(`commit -m "${safe}"`, repo);
+    broadcast({ type: "git-change" });
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -211,6 +213,7 @@ router.post("/push", (req, res) => {
   try {
     const { repo } = req.body || {};
     git("push", repo);
+    broadcast({ type: "git-change" });
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
