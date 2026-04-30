@@ -111,6 +111,31 @@ npm run update   # or: bash scripts/update.sh
 
 This pulls `panel/`, `commands/`, and `scripts/` from the upstream clone. Your private files (`.projects.local.md`, `panel.config.local.ts`, custom scripts) are never touched.
 
+## Windows desktop shortcut (WSL2)
+
+If you run pavilio from WSL on Windows, you can pin a `.lnk` to your desktop that launches `npm start` in your workspace with one click. From inside WSL, in any PowerShell session (no admin needed), substitute `WORKSPACE` with the WSL path to your workspace (e.g. `/root/git/prv/projects`) and run:
+
+```powershell
+$desktop = [Environment]::GetFolderPath('Desktop')
+$lnk = Join-Path $desktop 'Pavilio Panel.lnk'
+$ws = New-Object -ComObject WScript.Shell
+$s = $ws.CreateShortcut($lnk)
+$s.TargetPath = 'C:\Windows\System32\wsl.exe'
+$s.Arguments = '~ -d Ubuntu --cd WORKSPACE -- bash -lc "npm start; echo; echo --- npm start returned, panel running in background ---; exec bash"'
+$s.WorkingDirectory = 'C:\Windows\System32'
+$s.IconLocation = 'C:\Windows\System32\wsl.exe,0'
+$s.Description = 'Run npm start in WSL'
+$s.Save()
+```
+
+Substitute `Ubuntu` with your distro name if different (`wsl --list --quiet` to check). Double-clicking the shortcut opens a console, runs `npm start` (which backgrounds the panel via `cd panel && npm run dev &`), and drops you to a bash prompt — closing the window leaves the panel running. Stop it with `npm stop` from any WSL shell.
+
+If you prefer to see live panel logs (and have closing the window stop the panel), swap the `Arguments` line to:
+
+```powershell
+$s.Arguments = '~ -d Ubuntu --cd WORKSPACE/panel -- bash -lc "npm run dev; echo; echo --- panel exited ---; exec bash"'
+```
+
 ## Project Structure
 
 ```

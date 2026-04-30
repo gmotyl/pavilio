@@ -60,6 +60,32 @@ code, pre, .font-mono {
   font-family: 'JetBrains Mono', ui-monospace, monospace !important;
 }
 
+/*
+ * Remote-panel tint. Set on <html> by useHostModeRoot when window.location
+ * isn't localhost/127.0.0.1. Subtle warm wash on the breadcrumb header
+ * and left sidebar so the user notices, peripherally, that they're not
+ * looking at their own machine. Desktop only — phones reach the panel
+ * exclusively via QR pairing, so the answer is always "remote" there
+ * and the wash would be permanent visual noise.
+ */
+@media (min-width: 768px) {
+  html[data-host-mode="remote"] nav[aria-label="Breadcrumb"] {
+    background: linear-gradient(
+      90deg,
+      rgba(250, 204, 21, 0.06),
+      rgba(250, 204, 21, 0.02) 30%,
+      transparent 60%
+    );
+  }
+  html[data-host-mode="remote"] .sidebar-left {
+    background: linear-gradient(
+      180deg,
+      rgba(250, 204, 21, 0.05),
+      var(--bg-surface) 120px
+    ) !important;
+  }
+}
+
 /* Sidebar transitions */
 .sidebar {
   transition: width var(--transition-sidebar),

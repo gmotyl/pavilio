@@ -16,6 +16,7 @@ import QuickTerminalModal from "./features/terminal/QuickTerminalModal";
 import { BreadcrumbActionsProvider } from "./features/shell/Breadcrumbs";
 import { FloatingActionProvider, Layout } from "./features/shell/Layout";
 import { useVisualViewport } from "./features/shell/useVisualViewport";
+import { useHostModeRoot } from "./features/host-mode/useHostModeRoot";
 
 function AppShell() {
   const { authRequired, authenticated, loading, recheck } = useAuthStatus();
@@ -60,6 +61,7 @@ function AppShell() {
 
 export default function App() {
   useVisualViewport();
+  useHostModeRoot();
   return (
     <MobileAuthBootstrap>
       <AppShell />
