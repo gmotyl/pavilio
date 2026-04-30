@@ -138,13 +138,14 @@ router.post("/run-action", (req, res) => {
   }
 
   const { projectsDir } = getConfig();
-  if (!existsSync(resolve(projectsDir, "package.json"))) {
-    return res.status(404).json({ error: "No package.json found in projectsDir" });
+  const workspaceRoot = resolve(projectsDir, "..");
+  if (!existsSync(resolve(workspaceRoot, "package.json"))) {
+    return res.status(404).json({ error: "No package.json found in workspace root" });
   }
 
   const timeout = action === "setup:restore" ? 300_000 : 120_000;
 
-  exec(`pnpm run ${action}`, { cwd: projectsDir, timeout }, (err, stdout, stderr) => {
+  exec(`pnpm run ${action}`, { cwd: workspaceRoot, timeout }, (err, stdout, stderr) => {
     const output = [stdout, stderr].filter(Boolean).join("\n").trim();
     if (err?.killed) {
       return res.status(504).json({ ok: false, output: "Action timed out" });
