@@ -5,6 +5,7 @@ import {
   BreadcrumbActionsContext,
   BreadcrumbActionsProvider,
 } from "./BreadcrumbActionsProvider";
+import { HostBadge } from "../../host-mode/HostBadge";
 
 interface Crumb {
   label: string;
@@ -118,6 +119,8 @@ export function Breadcrumbs() {
       >
         <Home size={14} />
       </Link>
+
+      <HostBadge />
 
       {crumbs.map((crumb, index) => {
         const isLast = index === crumbs.length - 1;

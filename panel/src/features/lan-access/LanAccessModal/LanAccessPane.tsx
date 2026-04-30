@@ -303,13 +303,21 @@ function WslPortproxyCallout({
 }) {
   const [copied, setCopied] = useState(false);
   const connectAddr = wslVmIp ?? "<your-WSL-eth0-IP>";
-  // Bind the portproxy to the Windows LAN IP specifically — NOT 0.0.0.0 —
-  // otherwise the portproxy shadows Windows' own loopback and breaks
-  // `http://localhost:<port>` from the Windows host (it also collides with
-  // WSL2's native localhost-forwarding relay).
+  // Bind the portproxy to 0.0.0.0 so the entry survives Windows reboots
+  // reliably — `listenaddress=<specific-ip>` entries can drop on boot if
+  // the adapter hasn't been assigned that IP by the time the IP Helper
+  // service applies the persisted config (DHCP-timing dependent). Matches
+  // the pattern WSL's own preinstalled forwards use for ports 22/80/443.
+  //
+  // The two delete lines clean up either historical form (wildcard or
+  // specific LAN IP) so re-running the snippet doesn't accumulate stale
+  // entries. The Get/Remove-NetFirewallRule pair dedupes the rule itself
+  // for the same reason.
   const script =
     `netsh interface portproxy delete v4tov4 listenport=${port} listenaddress=0.0.0.0\n` +
-    `netsh interface portproxy add v4tov4 listenport=${port} listenaddress=${windowsLanIp} connectport=${port} connectaddress=${connectAddr}\n` +
+    `netsh interface portproxy delete v4tov4 listenport=${port} listenaddress=${windowsLanIp}\n` +
+    `netsh interface portproxy add v4tov4 listenport=${port} listenaddress=0.0.0.0 connectport=${port} connectaddress=${connectAddr}\n` +
+    `Get-NetFirewallRule -DisplayName "Pavilio LAN ${port}" -EA SilentlyContinue | Remove-NetFirewallRule\n` +
     `New-NetFirewallRule -DisplayName "Pavilio LAN ${port}" -Direction Inbound -LocalPort ${port} -Protocol TCP -Action Allow`;
 
   const onCopy = async () => {
@@ -333,11 +341,11 @@ function WslPortproxyCallout({
         }}
       >
         <div className="mb-1.5">
-          <strong>WSL2 detected.</strong> The panel is bound inside the WSL
-          VM — LAN peers reach Windows first, which won&apos;t forward to
-          WSL by default. Run this once in an <em>admin</em> PowerShell on
-          Windows (the first line clears any old overly-broad rule that
-          would shadow <code>localhost</code>):
+          <strong>WSL2 detected.</strong> The panel is bound inside the
+          WSL VM — LAN peers reach Windows first, which won&apos;t forward
+          to WSL by default. Run once in an <em>admin</em> PowerShell on
+          Windows; persists across reboots. You should not need to re-run
+          unless the WSL VM IP changes:
         </div>
         <pre
           className="mt-1 p-2 rounded text-[10px] overflow-auto"
