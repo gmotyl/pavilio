@@ -1,7 +1,9 @@
 import { Router } from "express";
+import { exec } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { resolve } from "path";
+import { getConfig } from "../config.js";
 
 const router = Router();
 
@@ -125,6 +127,30 @@ router.post("/write", (req, res) => {
   writeFileSync(resolved, content, "utf-8");
   const stat = statSync(resolved);
   res.json({ path: resolved, size: stat.size, modified: stat.mtimeMs });
+});
+
+const ALLOWED_ACTIONS = new Set(["init:claude", "init:opencode", "setup:backup", "setup:restore"]);
+
+router.post("/run-action", (req, res) => {
+  const { action } = req.body as { action?: string };
+  if (!action || !ALLOWED_ACTIONS.has(action)) {
+    return res.status(400).json({ error: "Unknown action" });
+  }
+
+  const { projectsDir } = getConfig();
+  if (!existsSync(resolve(projectsDir, "package.json"))) {
+    return res.status(404).json({ error: "No package.json found in projectsDir" });
+  }
+
+  const timeout = action === "setup:restore" ? 300_000 : 120_000;
+
+  exec(`pnpm run ${action}`, { cwd: projectsDir, timeout }, (err, stdout, stderr) => {
+    const output = [stdout, stderr].filter(Boolean).join("\n").trim();
+    if (err?.killed) {
+      return res.status(504).json({ ok: false, output: "Action timed out" });
+    }
+    res.json({ ok: !err, output: output || (err ? err.message : "Done") });
+  });
 });
 
 export default router;

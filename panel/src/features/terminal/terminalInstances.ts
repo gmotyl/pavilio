@@ -113,10 +113,18 @@ export function refitAll(): void {
  * Terminal/jsdom wiring.
  */
 export function shiftEnterHandler(sendToPty: (data: string) => void) {
-  return (e: { type: string; key: string; shiftKey: boolean }) => {
+  return (e: { type: string; key: string; shiftKey: boolean; ctrlKey?: boolean }) => {
     if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
       sendToPty("\\\r");
       return false; // stop xterm from also sending \r
+    }
+    // Windows fix: xterm's default Ctrl+C copies selected text instead of
+    // sending ^C when there is a selection. Always send interrupt here so
+    // Ctrl+C reliably interrupts a running process on all platforms.
+    // Ctrl+Shift+C is left unhandled so xterm can use it for clipboard copy.
+    if (e.type === "keydown" && e.ctrlKey && !e.shiftKey && e.key === "c") {
+      sendToPty("\x03");
+      return false;
     }
     return true;
   };
@@ -447,6 +455,40 @@ function createInstance(sessionId: string): InternalInstance {
 
   terminal.attachCustomKeyEventHandler(shiftEnterHandler(inst.send));
   sendToPtyRef.current = inst.send;
+
+  // Windows fix — Ctrl+V: intercept keydown in capture phase before xterm
+  // sees it. preventDefault() suppresses the browser's paste event so there
+  // is no double-paste. readText() is more reliable than clipboardData on
+  // Windows Chrome. stopPropagation() keeps xterm's textarea from also
+  // queuing a paste via onData.
+  holder.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.shiftKey && e.key === "v") {
+        e.preventDefault();
+        e.stopPropagation();
+        navigator.clipboard?.readText().then((text) => {
+          if (text) terminal.paste(text);
+        }).catch(() => {});
+      }
+    },
+    { capture: true },
+  );
+
+  // Windows fix — right-click context-menu paste: fires a paste event
+  // directly (no preceding keydown). Intercept in capture phase to route
+  // through terminal.paste(). Non-text pastes (images) fall through to xterm.
+  holder.addEventListener(
+    "paste",
+    (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (!text) return; // non-text paste (e.g. image) — let xterm handle it
+      terminal.paste(text);
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    { capture: true },
+  );
 
   connectWs(sessionId, inst);
 

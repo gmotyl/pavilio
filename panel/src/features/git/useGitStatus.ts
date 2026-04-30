@@ -33,7 +33,7 @@ export function useGitStatus() {
   }, []);
 
   useEffect(() => {
-    if (lastMessage?.type === "file-change") fetchStatus();
+    if (lastMessage?.type === "file-change" || lastMessage?.type === "git-change") fetchStatus();
   }, [lastMessage]);
 
   return { ...status, refetch: fetchStatus };
