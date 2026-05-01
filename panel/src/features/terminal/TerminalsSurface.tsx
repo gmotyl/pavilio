@@ -129,7 +129,7 @@ export function TerminalsSurface({
           onCreate={(opts) => {
             onCreateTerminal(opts || {});
           }}
-          onOpenDrawer={() => onSetDrawerOpen(true)}
+          onOpenDrawer={() => onSetDrawerOpen(!drawerOpen)}
         />
       </div>
 
