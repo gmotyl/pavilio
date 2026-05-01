@@ -34,6 +34,7 @@ import { useReposTabMemory } from "../shell/useReposTabMemory";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
+import { useTabScrollMemory } from "./useTabScrollMemory";
 import {
   useTerminalSessions,
   nextProjectName,
@@ -70,6 +71,16 @@ export default function ProjectView() {
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
 
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
+
+  // Per-tab scroll memory
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = document.querySelector(
+      ".layout-container main > div.overflow-auto",
+    ) as HTMLElement | null;
+    scrollContainerRef.current = el;
+  }, []);
+  useTabScrollMemory(name, section, scrollContainerRef);
 
   // Create a session in ANY project and navigate if different from current.
   const createTerminal = useCallback(
