@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Archive as ArchiveIcon,
@@ -183,15 +183,23 @@ export default function LeftSidebar() {
   const visibleProjects = projects.filter((p) => !archivedNames.has(p.name));
   const sorted = sortWithFavorites(visibleProjects);
 
+  const sessionsByProject = useMemo(() => {
+    const m = new Map<string, SessionMeta[]>();
+    for (const s of sessions) {
+      const arr = m.get(s.project);
+      if (arr) arr.push(s);
+      else m.set(s.project, [s]);
+    }
+    return m;
+  }, [sessions]);
+
   return (
     <div className="p-3 overflow-auto h-full flex flex-col gap-5 pt-10">
       <section>
         <SectionHeader icon={FolderOpen} label="Projects" />
         <ul className="space-y-0.5">
           {sorted.map((project) => {
-            const projectSessions = sessions.filter(
-              (s) => s.project === project.name,
-            );
+            const projectSessions = sessionsByProject.get(project.name) ?? [];
             const expandedNow = isExpanded(project.name);
             const isCurrent =
               location.pathname === `/project/${project.name}` ||
