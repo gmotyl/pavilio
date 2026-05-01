@@ -11,6 +11,7 @@ import {
   Plus,
   Settings,
   Smartphone,
+  Star,
   Wifi,
 } from "lucide-react";
 import GitSummary from "../git/GitSummary";
@@ -56,7 +57,7 @@ export default function LeftSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const projects = useProjects();
-  const { sortWithFavorites } = useFavorites();
+  const { sortWithFavorites, isFavorite, toggle } = useFavorites();
   const { sessions } = useAllTerminalSessions();
   const { archive, archivedNames } = useArchivedProjects();
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
@@ -202,6 +203,8 @@ export default function LeftSidebar() {
               return "idle";
             })();
 
+            const fav = isFavorite(project.name);
+
             return (
               <li key={project.name}>
                 <div
@@ -210,6 +213,26 @@ export default function LeftSidebar() {
                     background: isCurrent ? "var(--bg-active)" : "transparent",
                   }}
                 >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      toggle(project.name);
+                    }}
+                    className="p-1 rounded transition-colors shrink-0"
+                    title={fav ? "Remove from favorites" : "Add to favorites"}
+                  >
+                    <Star
+                      size={12}
+                      fill={fav ? "var(--accent)" : "none"}
+                      style={{
+                        color: fav ? "var(--accent)" : "var(--text-muted)",
+                        opacity: fav ? 1 : 0,
+                        transition: "all 150ms",
+                      }}
+                      className="group-hover:!opacity-100"
+                    />
+                  </button>
                   <button
                     type="button"
                     onClick={() => setExpanded(project.name, !expandedNow)}
