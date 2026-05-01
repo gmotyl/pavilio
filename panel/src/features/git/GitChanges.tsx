@@ -91,19 +91,12 @@ export default function GitChanges({
   const [worktrees, setWorktrees] = useState<{ path: string; head: string; branch: string | null }[]>([]);
   const [expandedWorktrees, setExpandedWorktrees] = useState<Set<string>>(() => new Set());
 
-  const isWorktreeExpanded = (path: string): boolean => {
-    if (expandedWorktrees.has(path)) return true;
-    try {
-      return localStorage.getItem(`panel-worktree-expanded-${path}`) === "true";
-    } catch {
-      return false;
-    }
-  };
+  const isWorktreeExpanded = (path: string): boolean => expandedWorktrees.has(path);
 
   const toggleWorktree = (path: string) => {
     setExpandedWorktrees((prev) => {
       const next = new Set(prev);
-      const open = !isWorktreeExpanded(path);
+      const open = !prev.has(path);
       if (open) next.add(path);
       else next.delete(path);
       try {
@@ -143,7 +136,22 @@ export default function GitChanges({
   const fetchWorktrees = async () => {
     try {
       const res = await fetch(`/api/git/worktrees${qs}`);
-      if (res.ok) setWorktrees(await res.json());
+      if (res.ok) {
+        const data: { path: string; head: string; branch: string | null }[] = await res.json();
+        setWorktrees(data);
+        // Hydrate expanded state from localStorage once, keyed by the fetched paths
+        setExpandedWorktrees((prev) => {
+          const next = new Set(prev);
+          for (const wt of data) {
+            try {
+              if (localStorage.getItem(`panel-worktree-expanded-${wt.path}`) === "true") {
+                next.add(wt.path);
+              }
+            } catch {}
+          }
+          return next;
+        });
+      }
     } catch {}
   };
 
