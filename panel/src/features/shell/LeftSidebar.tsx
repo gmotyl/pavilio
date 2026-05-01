@@ -273,7 +273,7 @@ export default function LeftSidebar() {
           >
             {project.name}
           </NavLink>
-          {!expandedNow && aggregate !== "idle" && (
+          {aggregate !== "idle" && (
             <span
               aria-hidden
               className="w-1.5 h-1.5 rounded-full mr-1"
