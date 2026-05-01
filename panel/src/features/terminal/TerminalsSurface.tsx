@@ -167,7 +167,6 @@ export function TerminalsSurface({
             sessions={allSessions}
             focusedId={focusedId}
             currentProject={currentProject}
-            projects={projects}
             onFocus={(sessionId, sessionProject) => {
               try {
                 localStorage.setItem(
