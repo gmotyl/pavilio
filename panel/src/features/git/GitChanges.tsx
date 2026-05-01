@@ -47,6 +47,8 @@ interface GitChangesProps {
   onOpenFileChange?: (file: string | null) => void;
   /** When true, render a file list alongside the diff instead of replacing it. */
   showListSidebar?: boolean;
+  /** When true, render a compact nested view (no branch picker, commit form, worktrees, or sub-sidebar). */
+  nested?: boolean;
 }
 
 export function statusLabel(s: string) {
@@ -76,6 +78,7 @@ export default function GitChanges({
   highlight,
   onOpenFileChange,
   showListSidebar = false,
+  nested = false,
 }: GitChangesProps) {
   const [files, setFiles] = useState<GitFile[]>([]);
   const [branch, setBranch] = useState("");
@@ -86,6 +89,29 @@ export default function GitChanges({
   const [loading, setLoading] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
   const [worktrees, setWorktrees] = useState<{ path: string; head: string; branch: string | null }[]>([]);
+  const [expandedWorktrees, setExpandedWorktrees] = useState<Set<string>>(() => new Set());
+
+  const isWorktreeExpanded = (path: string): boolean => {
+    if (expandedWorktrees.has(path)) return true;
+    try {
+      return localStorage.getItem(`panel-worktree-expanded-${path}`) === "true";
+    } catch {
+      return false;
+    }
+  };
+
+  const toggleWorktree = (path: string) => {
+    setExpandedWorktrees((prev) => {
+      const next = new Set(prev);
+      const open = !isWorktreeExpanded(path);
+      if (open) next.add(path);
+      else next.delete(path);
+      try {
+        localStorage.setItem(`panel-worktree-expanded-${path}`, String(open));
+      } catch {}
+      return next;
+    });
+  };
   const [activeDiff, setActiveDiff] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState("");
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
@@ -616,7 +642,7 @@ export default function GitChanges({
       </div>
     );
 
-    if (showListSidebar) {
+    if (showListSidebar && !nested) {
       return (
         <div className="md:flex md:gap-4">
           <aside
@@ -638,72 +664,74 @@ export default function GitChanges({
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center gap-3 mb-4">
-        <GitBranch
-          className="w-4 h-4"
-          style={{ color: "var(--text-tertiary)" }}
-        />
-        {title && <span className="text-sm font-semibold">{title}</span>}
-        {branch && (
-          <BranchPicker
-            branches={branches}
-            value={branch}
-            onChange={handleCheckout}
-            align="left"
-            triggerClassName="text-xs px-2 py-0.5 rounded-full font-mono cursor-pointer flex items-center gap-1 transition-colors"
-            triggerStyle={{
-              background: "var(--bg-elevated)",
-              color: "var(--text-secondary)",
-            }}
-            trigger={<>{loading === "switching" ? "switching..." : branch}</>}
+      {!nested && (
+        <div className="flex items-center gap-3 mb-4">
+          <GitBranch
+            className="w-4 h-4"
+            style={{ color: "var(--text-tertiary)" }}
           />
-        )}
-        <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-          {displayFiles.length}
-          {fileFilter && displayFiles.length !== files.length
-            ? `/${files.length}`
-            : ""}{" "}
-          changed
-        </span>
-        {displayFiles.length > 0 && (
-          <div
-            className="flex rounded-md overflow-hidden ml-auto"
-            style={{ border: "1px solid var(--border-default)" }}
-          >
-            <button
-              onClick={() => setViewMode("flat")}
-              className="p-1 transition-colors"
-              style={{
-                background:
-                  viewMode === "flat" ? "var(--bg-active)" : "transparent",
-                color:
-                  viewMode === "flat"
-                    ? "var(--text-primary)"
-                    : "var(--text-tertiary)",
+          {title && <span className="text-sm font-semibold">{title}</span>}
+          {branch && (
+            <BranchPicker
+              branches={branches}
+              value={branch}
+              onChange={handleCheckout}
+              align="left"
+              triggerClassName="text-xs px-2 py-0.5 rounded-full font-mono cursor-pointer flex items-center gap-1 transition-colors"
+              triggerStyle={{
+                background: "var(--bg-elevated)",
+                color: "var(--text-secondary)",
               }}
-              title="Flat list"
+              trigger={<>{loading === "switching" ? "switching..." : branch}</>}
+            />
+          )}
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            {displayFiles.length}
+            {fileFilter && displayFiles.length !== files.length
+              ? `/${files.length}`
+              : ""}{" "}
+            changed
+          </span>
+          {displayFiles.length > 0 && (
+            <div
+              className="flex rounded-md overflow-hidden ml-auto"
+              style={{ border: "1px solid var(--border-default)" }}
             >
-              <List size={13} />
-            </button>
-            <button
-              onClick={() => setViewMode("tree")}
-              className="p-1 transition-colors"
-              style={{
-                background:
-                  viewMode === "tree" ? "var(--bg-active)" : "transparent",
-                color:
-                  viewMode === "tree"
-                    ? "var(--text-primary)"
-                    : "var(--text-tertiary)",
-                borderLeft: "1px solid var(--border-default)",
-              }}
-              title="Tree view"
-            >
-              <FolderTree size={13} />
-            </button>
-          </div>
-        )}
-      </div>
+              <button
+                onClick={() => setViewMode("flat")}
+                className="p-1 transition-colors"
+                style={{
+                  background:
+                    viewMode === "flat" ? "var(--bg-active)" : "transparent",
+                  color:
+                    viewMode === "flat"
+                      ? "var(--text-primary)"
+                      : "var(--text-tertiary)",
+                }}
+                title="Flat list"
+              >
+                <List size={13} />
+              </button>
+              <button
+                onClick={() => setViewMode("tree")}
+                className="p-1 transition-colors"
+                style={{
+                  background:
+                    viewMode === "tree" ? "var(--bg-active)" : "transparent",
+                  color:
+                    viewMode === "tree"
+                      ? "var(--text-primary)"
+                      : "var(--text-tertiary)",
+                  borderLeft: "1px solid var(--border-default)",
+                }}
+                title="Tree view"
+              >
+                <FolderTree size={13} />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {checkoutError && (() => {
         const wtMatch = checkoutError.match(/already checked out at '([^']+)'/i)
@@ -746,7 +774,7 @@ export default function GitChanges({
       })()}
 
       {/* Worktrees section */}
-      {worktrees.length > 1 && (
+      {!nested && worktrees.length > 1 && (
         <div className="mb-4">
           <div className="flex items-center gap-1.5 mb-1.5">
             <GitFork size={12} style={{ color: "var(--text-tertiary)" }} />
@@ -755,31 +783,49 @@ export default function GitChanges({
             </span>
           </div>
           <div className="space-y-1">
-            {worktrees.map((wt) => (
-              <div
-                key={wt.path}
-                className="flex items-center gap-2 px-2 py-1 rounded-md text-[11px] font-mono"
-                style={{ background: "var(--bg-elevated)" }}
-              >
-                <span
-                  className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono"
-                  style={{
-                    background: "var(--bg-base)",
-                    color: wt.branch === branch ? "var(--accent)" : "var(--text-secondary)",
-                    border: "1px solid var(--border-subtle)",
-                  }}
-                >
-                  {wt.branch ?? "(detached)"}
-                </span>
-                <span
-                  className="truncate"
-                  style={{ color: "var(--text-muted)" }}
-                  title={wt.path}
-                >
-                  {wt.path.replace(/^(\/Users\/|\/home\/)[^/]+\//, "~/")}
-                </span>
-              </div>
-            ))}
+            {worktrees.map((wt) => {
+              const expanded = isWorktreeExpanded(wt.path);
+              return (
+                <div key={wt.path}>
+                  <div
+                    className="flex items-center gap-2 px-2 py-1 rounded-md text-[11px] font-mono"
+                    style={{ background: "var(--bg-elevated)" }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleWorktree(wt.path)}
+                      className="w-4 h-4 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]"
+                      style={{ color: "var(--text-tertiary)" }}
+                      aria-label={expanded ? "Collapse worktree" : "Expand worktree"}
+                    >
+                      {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                    </button>
+                    <span
+                      className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono"
+                      style={{
+                        background: "var(--bg-base)",
+                        color: wt.branch === branch ? "var(--accent)" : "var(--text-secondary)",
+                        border: "1px solid var(--border-subtle)",
+                      }}
+                    >
+                      {wt.branch ?? "(detached)"}
+                    </span>
+                    <span
+                      className="truncate"
+                      style={{ color: "var(--text-muted)" }}
+                      title={wt.path}
+                    >
+                      {wt.path.replace(/^(\/Users\/|\/home\/)[^/]+\//, "~/")}
+                    </span>
+                  </div>
+                  {expanded && (
+                    <div className="ml-6 mt-1 mb-2">
+                      <GitChanges repo={wt.path} nested viewMode={viewMode} onViewModeChange={setViewMode} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -802,7 +848,7 @@ export default function GitChanges({
           </div>
 
           {/* Stage + Commit */}
-          {showCommit && (
+          {!nested && showCommit && (
             <>
               <div className="flex gap-2 mb-4">
                 <button
