@@ -70,7 +70,7 @@ export default function ArchivePage() {
               <Inbox size={14} style={{ color: "var(--text-tertiary)" }} />
               <Link
                 to={`/project/${p.name}`}
-                className="flex-1 min-w-0 hover:underline"
+                className="flex-1 min-w-0 no-underline"
                 title={`Open ${p.name}`}
               >
                 <div
