@@ -247,24 +247,6 @@ export default function LeftSidebar() {
         >
           <button
             type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              toggle(project.name);
-            }}
-            className="p-1 rounded transition-colors shrink-0 opacity-0 group-hover:opacity-100"
-            title={fav ? "Remove from favorites" : "Add to favorites"}
-          >
-            <Star
-              size={12}
-              fill={fav ? "var(--accent)" : "none"}
-              style={{
-                color: fav ? "var(--accent)" : "var(--text-muted)",
-                transition: "all 150ms",
-              }}
-            />
-          </button>
-          <button
-            type="button"
             onClick={() => setExpanded(project.name, !expandedNow)}
             className="w-4 h-4 flex items-center justify-center shrink-0 rounded hover:bg-[var(--bg-hover)]"
             style={{ color: "var(--text-tertiary)" }}
@@ -321,6 +303,22 @@ export default function LeftSidebar() {
             type="button"
             onClick={(e) => {
               e.preventDefault();
+              toggle(project.name);
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded shrink-0"
+            style={{
+              border: "1px solid var(--border-subtle)",
+              color: fav ? "var(--accent)" : "var(--text-tertiary)",
+            }}
+            title={fav ? "Remove from favorites" : "Add to favorites"}
+            aria-label={fav ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Star size={11} fill={fav ? "var(--accent)" : "none"} />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
               archive(project.name);
               if (currentProject === project.name) navigate("/");
             }}
@@ -336,7 +334,10 @@ export default function LeftSidebar() {
           </button>
         </div>
         {expandedNow && projectSessions.length > 0 && (
-          <ul className="ml-4 mt-0.5 space-y-0.5">
+          <ul
+            className="ml-3 mt-0.5 pl-3 space-y-0.5 border-l"
+            style={{ borderColor: "var(--border-subtle)" }}
+          >
             {projectSessions.map((s) => {
               const isFocused = inIterm && s.id === focusedId;
               return (
