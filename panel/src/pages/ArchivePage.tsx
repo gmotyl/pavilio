@@ -68,7 +68,11 @@ export default function ArchivePage() {
               }}
             >
               <Inbox size={14} style={{ color: "var(--text-tertiary)" }} />
-              <div className="flex-1 min-w-0">
+              <Link
+                to={`/project/${p.name}`}
+                className="flex-1 min-w-0 hover:underline"
+                title={`Open ${p.name}`}
+              >
                 <div
                   className="text-sm font-medium truncate"
                   style={{ color: "var(--text-primary)" }}
@@ -81,7 +85,7 @@ export default function ArchivePage() {
                 >
                   Archived {formatDate(p.archivedAt)}
                 </div>
-              </div>
+              </Link>
               <button
                 type="button"
                 onClick={() => restore(p.name)}
