@@ -138,16 +138,20 @@ export function useTerminalSessions(project: string) {
 
   // Listen for "focus this session" broadcasts (e.g. left sidebar click
   // while user is already on this project's iTerm tab, so no remount
-  // happens to re-read localStorage).
+  // happens to re-read localStorage). Also refetch sessions: when the
+  // sidebar's "+" button creates a session via direct fetch, our local
+  // `sessions` state is stale until we refetch — without this, the new
+  // session id is set as focusedId but no terminal renders for it.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<TerminalFocusEventDetail>).detail;
       if (!detail || detail.project !== project) return;
       setFocusedId(detail.sessionId);
+      fetchSessions();
     };
     window.addEventListener(TERMINAL_FOCUS_EVENT, handler);
     return () => window.removeEventListener(TERMINAL_FOCUS_EVENT, handler);
-  }, [project, setFocusedId]);
+  }, [project, setFocusedId, fetchSessions]);
 
   const createSession = useCallback(
     async (opts: CreateSessionOpts = {}) => {

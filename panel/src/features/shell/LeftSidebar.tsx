@@ -57,7 +57,7 @@ export default function LeftSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const projects = useProjects();
-  const { sortWithFavorites, isFavorite, toggle } = useFavorites();
+  const { isFavorite, toggle } = useFavorites();
   const { sessions } = useAllTerminalSessions();
   const { archive, archivedNames } = useArchivedProjects();
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
@@ -147,6 +147,17 @@ export default function LeftSidebar() {
         });
         if (res.ok) {
           const data: SessionMeta = await res.json();
+          // Persist focus before navigating so the iTerm tab picks the
+          // new session as focusedId on initial mount (the focus event
+          // alone fires before the route mounts and is missed otherwise).
+          try {
+            localStorage.setItem(
+              `panel-terminal-focus-${project}`,
+              data.id,
+            );
+          } catch {
+            // ignore
+          }
           dispatchTerminalFocus(project, data.id);
           setExpanded(project, true);
           navigate(`/project/${project}/iterm`);
@@ -198,7 +209,8 @@ export default function LeftSidebar() {
   };
 
   const visibleProjects = projects.filter((p) => !archivedNames.has(p.name));
-  const sorted = sortWithFavorites(visibleProjects);
+  const starredProjects = visibleProjects.filter((p) => isFavorite(p.name));
+  const otherProjects = visibleProjects.filter((p) => !isFavorite(p.name));
 
   const sessionsByProject = useMemo(() => {
     const m = new Map<string, SessionMeta[]>();
@@ -210,169 +222,177 @@ export default function LeftSidebar() {
     return m;
   }, [sessions]);
 
+  const renderProjectRow = (project: { name: string }) => {
+    const projectSessions = sessionsByProject.get(project.name) ?? [];
+    const expandedNow = isExpanded(project.name);
+    const isCurrent =
+      location.pathname === `/project/${project.name}` ||
+      location.pathname.startsWith(`/project/${project.name}/`);
+    const aggregate: "busy" | "attention" | "idle" = (() => {
+      const states = projectSessions.map((s) => getActivityState(s.id));
+      if (states.some((s) => s === "busy")) return "busy";
+      if (states.some((s) => s === "attention")) return "attention";
+      return "idle";
+    })();
+
+    const fav = isFavorite(project.name);
+
+    return (
+      <li key={project.name}>
+        <div
+          className="group flex items-center gap-1 rounded-md px-1 py-0.5"
+          style={{
+            background: isCurrent ? "var(--bg-active)" : "transparent",
+          }}
+        >
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              toggle(project.name);
+            }}
+            className="p-1 rounded transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+            title={fav ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Star
+              size={12}
+              fill={fav ? "var(--accent)" : "none"}
+              style={{
+                color: fav ? "var(--accent)" : "var(--text-muted)",
+                transition: "all 150ms",
+              }}
+            />
+          </button>
+          <button
+            type="button"
+            onClick={() => setExpanded(project.name, !expandedNow)}
+            className="w-4 h-4 flex items-center justify-center shrink-0 rounded hover:bg-[var(--bg-hover)]"
+            style={{ color: "var(--text-tertiary)" }}
+            title={expandedNow ? "Collapse" : "Expand"}
+            aria-label={
+              expandedNow ? "Collapse terminals" : "Expand terminals"
+            }
+          >
+            {expandedNow ? (
+              <ChevronDown size={11} />
+            ) : (
+              <ChevronRight size={11} />
+            )}
+          </button>
+          <NavLink
+            to={`/project/${project.name}/iterm`}
+            className="flex-1 truncate text-[13px] py-0.5"
+            style={({ isActive }) => ({
+              color:
+                isCurrent || isActive
+                  ? "var(--text-primary)"
+                  : "var(--text-secondary)",
+            })}
+          >
+            {project.name}
+          </NavLink>
+          {!expandedNow && aggregate !== "idle" && (
+            <span
+              aria-hidden
+              className="w-1.5 h-1.5 rounded-full mr-1"
+              style={{
+                background:
+                  aggregate === "busy" ? "#f9e2af" : "#a6e3a1",
+              }}
+            />
+          )}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              handleCreateTerminal(project.name);
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded shrink-0"
+            style={{
+              border: "1px solid var(--border-subtle)",
+              color: "var(--text-tertiary)",
+            }}
+            title={`New terminal in ${project.name}`}
+            aria-label={`New terminal in ${project.name}`}
+          >
+            <Plus size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              archive(project.name);
+              if (currentProject === project.name) navigate("/");
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded shrink-0"
+            style={{
+              border: "1px solid var(--border-subtle)",
+              color: "var(--text-tertiary)",
+            }}
+            title={`Archive ${project.name}`}
+            aria-label={`Archive ${project.name}`}
+          >
+            <ArchiveIcon size={11} />
+          </button>
+        </div>
+        {expandedNow && projectSessions.length > 0 && (
+          <ul className="ml-4 mt-0.5 space-y-0.5">
+            {projectSessions.map((s) => {
+              const isFocused = inIterm && s.id === focusedId;
+              return (
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        localStorage.setItem(
+                          `panel-terminal-focus-${s.project}`,
+                          s.id,
+                        );
+                      } catch {
+                        // ignore
+                      }
+                      dispatchTerminalFocus(s.project, s.id);
+                      navigate(`/project/${s.project}/iterm`);
+                    }}
+                    className="w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left"
+                    style={{
+                      background: isFocused
+                        ? "var(--bg-active)"
+                        : "transparent",
+                      color: isFocused
+                        ? "var(--text-primary)"
+                        : "var(--text-secondary)",
+                    }}
+                  >
+                    <TerminalActivityLed sessionId={s.id} />
+                    <span className="font-mono text-[11px] truncate">
+                      {s.name}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </li>
+    );
+  };
+
   return (
     <div className="p-3 overflow-auto h-full flex flex-col gap-5 pt-10">
+      {starredProjects.length > 0 && (
+        <section>
+          <SectionHeader icon={Star} label="Starred" />
+          <ul className="space-y-0.5">
+            {starredProjects.map(renderProjectRow)}
+          </ul>
+        </section>
+      )}
       <section>
         <SectionHeader icon={FolderOpen} label="Projects" />
         <ul className="space-y-0.5">
-          {sorted.map((project) => {
-            const projectSessions = sessionsByProject.get(project.name) ?? [];
-            const expandedNow = isExpanded(project.name);
-            const isCurrent =
-              location.pathname === `/project/${project.name}` ||
-              location.pathname.startsWith(`/project/${project.name}/`);
-            const aggregate: "busy" | "attention" | "idle" = (() => {
-              const states = projectSessions.map((s) => getActivityState(s.id));
-              if (states.some((s) => s === "busy")) return "busy";
-              if (states.some((s) => s === "attention")) return "attention";
-              return "idle";
-            })();
-
-            const fav = isFavorite(project.name);
-
-            return (
-              <li key={project.name}>
-                <div
-                  className="group flex items-center gap-1 rounded-md px-1 py-0.5"
-                  style={{
-                    background: isCurrent ? "var(--bg-active)" : "transparent",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      toggle(project.name);
-                    }}
-                    className="p-1 rounded transition-colors shrink-0"
-                    title={fav ? "Remove from favorites" : "Add to favorites"}
-                  >
-                    <Star
-                      size={12}
-                      fill={fav ? "var(--accent)" : "none"}
-                      style={{
-                        color: fav ? "var(--accent)" : "var(--text-muted)",
-                        opacity: fav ? 1 : 0,
-                        transition: "all 150ms",
-                      }}
-                      className="group-hover:!opacity-100"
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setExpanded(project.name, !expandedNow)}
-                    className="w-4 h-4 flex items-center justify-center shrink-0 rounded hover:bg-[var(--bg-hover)]"
-                    style={{ color: "var(--text-tertiary)" }}
-                    title={expandedNow ? "Collapse" : "Expand"}
-                    aria-label={
-                      expandedNow ? "Collapse terminals" : "Expand terminals"
-                    }
-                  >
-                    {expandedNow ? (
-                      <ChevronDown size={11} />
-                    ) : (
-                      <ChevronRight size={11} />
-                    )}
-                  </button>
-                  <NavLink
-                    to={`/project/${project.name}/iterm`}
-                    className="flex-1 truncate text-[13px] py-0.5"
-                    style={({ isActive }) => ({
-                      color:
-                        isCurrent || isActive
-                          ? "var(--text-primary)"
-                          : "var(--text-secondary)",
-                    })}
-                  >
-                    {project.name}
-                  </NavLink>
-                  {!expandedNow && aggregate !== "idle" && (
-                    <span
-                      aria-hidden
-                      className="w-1.5 h-1.5 rounded-full mr-1"
-                      style={{
-                        background:
-                          aggregate === "busy" ? "#f9e2af" : "#a6e3a1",
-                      }}
-                    />
-                  )}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleCreateTerminal(project.name);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded shrink-0"
-                    style={{
-                      border: "1px solid var(--border-subtle)",
-                      color: "var(--text-tertiary)",
-                    }}
-                    title={`New terminal in ${project.name}`}
-                    aria-label={`New terminal in ${project.name}`}
-                  >
-                    <Plus size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      archive(project.name);
-                      if (currentProject === project.name) navigate("/");
-                    }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded shrink-0"
-                    style={{
-                      border: "1px solid var(--border-subtle)",
-                      color: "var(--text-tertiary)",
-                    }}
-                    title={`Archive ${project.name}`}
-                    aria-label={`Archive ${project.name}`}
-                  >
-                    <ArchiveIcon size={11} />
-                  </button>
-                </div>
-                {expandedNow && projectSessions.length > 0 && (
-                  <ul className="ml-4 mt-0.5 space-y-0.5">
-                    {projectSessions.map((s) => {
-                      const isFocused = inIterm && s.id === focusedId;
-                      return (
-                        <li key={s.id}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              try {
-                                localStorage.setItem(
-                                  `panel-terminal-focus-${s.project}`,
-                                  s.id,
-                                );
-                              } catch {
-                                // ignore
-                              }
-                              dispatchTerminalFocus(s.project, s.id);
-                              navigate(`/project/${s.project}/iterm`);
-                            }}
-                            className="w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left"
-                            style={{
-                              background: isFocused
-                                ? "var(--bg-active)"
-                                : "transparent",
-                              color: isFocused
-                                ? "var(--text-primary)"
-                                : "var(--text-secondary)",
-                            }}
-                          >
-                            <TerminalActivityLed sessionId={s.id} />
-                            <span className="font-mono text-[11px] truncate">
-                              {s.name}
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </li>
-            );
-          })}
+          {otherProjects.map(renderProjectRow)}
           <li>
             <NavLink
               to="/archive"
