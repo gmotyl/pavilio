@@ -24,6 +24,7 @@ import GrepResultRow from "../search/GrepResultRow";
 import type { GrepResult } from "../search/grep";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useLastPath } from "../shell/useLastPath";
+import { useScrollContainer } from "../shell/Layout";
 import {
   clearLastSectionFile,
   readLastSectionFile,
@@ -34,6 +35,7 @@ import { useReposTabMemory } from "../shell/useReposTabMemory";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
+import { useTabScrollMemory } from "./useTabScrollMemory";
 import {
   useTerminalSessions,
   nextProjectName,
@@ -70,6 +72,10 @@ export default function ProjectView() {
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
 
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
+
+  // Per-tab scroll memory
+  const scrollContainerRef = useScrollContainer();
+  useTabScrollMemory(name, section, scrollContainerRef ?? { current: null });
 
   // Create a session in ANY project and navigate if different from current.
   const createTerminal = useCallback(
@@ -749,7 +755,13 @@ export default function ProjectView() {
       </h1>
 
       {/* Tabs (desktop only — mobile tab switcher lives in breadcrumbs row) */}
-      <div className="hidden md:flex gap-2 mb-6 text-sm relative items-center">
+      <div
+        className="hidden md:flex gap-2 mb-4 text-sm relative items-center sticky top-0 z-10 py-2"
+        style={{
+          background: "var(--bg-base)",
+          borderBottom: "1px solid var(--border-subtle)",
+        }}
+      >
         <div className="flex gap-1">
           {tabs.map((tab) => (
             <Link
@@ -1026,7 +1038,7 @@ export default function ProjectView() {
                 viewMode={gitViewMode}
                 onViewModeChange={setGitViewMode}
                 extraActions={wideToggle}
-                showListSidebar={wide}
+                showListSidebar
                 openFile={
                   repoOpenFile?.repo === repo.path &&
                   repoOpenFile.scope === "changed"
@@ -1059,7 +1071,8 @@ export default function ProjectView() {
                 <GitBranchDiff
                   repo={repo.path}
                   viewMode={gitViewMode}
-                  showListSidebar={wide}
+                  onViewModeChange={setGitViewMode}
+                  showListSidebar
                   openFile={
                     repoOpenFile?.repo === repo.path &&
                     repoOpenFile.scope === "branch-diff"

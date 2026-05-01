@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Columns2,
   AlignJustify,
+  FolderTree,
   Folder,
   GitCompareArrows,
 } from "lucide-react";
@@ -20,6 +21,8 @@ interface DiffFile {
 interface GitBranchDiffProps {
   repo: string;
   viewMode?: "flat" | "tree";
+  /** Callback when view mode changes (e.g. from sidebar toggle) */
+  onViewModeChange?: (mode: "flat" | "tree") => void;
   fileFilter?: string;
   /** When set, auto-open the diff for this file path */
   openFile?: string | null;
@@ -52,6 +55,7 @@ function openKey(repo: string) {
 export default function GitBranchDiff({
   repo,
   viewMode = "flat",
+  onViewModeChange,
   fileFilter,
   openFile,
   highlight,
@@ -307,6 +311,81 @@ export default function GitBranchDiff({
     return items;
   };
 
+  const renderSidebarList = () => (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <div
+          className="text-[11px] font-semibold uppercase tracking-widest flex-1"
+          style={{ color: "var(--text-tertiary)" }}
+        >
+          Changed ({displayFiles.length})
+        </div>
+        <button
+          type="button"
+          onClick={() => onViewModeChange?.("flat")}
+          className="p-1 rounded"
+          style={{
+            color: viewMode === "flat" ? "var(--accent)" : "var(--text-tertiary)",
+            background: viewMode === "flat" ? "var(--bg-hover)" : "transparent",
+          }}
+          title="Flat list"
+        >
+          <AlignJustify size={12} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onViewModeChange?.("tree")}
+          className="p-1 rounded"
+          style={{
+            color: viewMode === "tree" ? "var(--accent)" : "var(--text-tertiary)",
+            background: viewMode === "tree" ? "var(--bg-hover)" : "transparent",
+          }}
+          title="Tree"
+        >
+          <FolderTree size={12} />
+        </button>
+      </div>
+      <div className="space-y-0.5">
+        {viewMode === "tree"
+          ? renderTreeNode(fileTree, 0)
+          : displayFiles.map((f) => {
+              const isActive = activeDiff?.file === f.path;
+              return (
+                <button
+                  key={f.path}
+                  onClick={() => openDiff(f.path)}
+                  className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
+                  style={{
+                    background: isActive ? "var(--bg-active)" : undefined,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive)
+                      e.currentTarget.style.background = "var(--bg-hover)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive)
+                      e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  <span
+                    className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
+                    style={{ color: statusColor(f.status) }}
+                  >
+                    {f.status}
+                  </span>
+                  <span
+                    className="text-[12px] font-mono truncate"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    {f.path}
+                  </span>
+                </button>
+              );
+            })}
+      </div>
+    </div>
+  );
+
   const renderList = () => (
     <div>
       <div className="flex items-center gap-2 mb-3">
@@ -550,16 +629,16 @@ export default function GitBranchDiff({
     if (showListSidebar) {
       return (
         <div className="md:flex md:gap-4">
-          <div className="flex-1 min-w-0">{renderDiff()}</div>
           <aside
-            className="hidden md:block w-[280px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg p-2"
+            className="hidden md:block w-[240px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg p-2"
             style={{
               background: "var(--bg-base)",
               border: "1px solid var(--border-subtle)",
             }}
           >
-            {renderList()}
+            {renderSidebarList()}
           </aside>
+          <div className="flex-1 min-w-0">{renderDiff()}</div>
         </div>
       );
     }

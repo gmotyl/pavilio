@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { X, Plus } from "lucide-react";
+import { X } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 
@@ -8,7 +8,6 @@ interface Props {
   sessions: SessionMeta[];
   focusedId: string | null;
   currentProject: string;
-  projects: { name: string }[];
   onFocus: (sessionId: string, project: string) => void;
   onCreate: (opts: CreateSessionOpts) => void;
   onClose: () => void;
@@ -24,7 +23,6 @@ export function TerminalSpineDrawer({
   sessions,
   focusedId,
   currentProject,
-  projects,
   onFocus,
   onCreate,
   onClose,
@@ -167,48 +165,6 @@ export function TerminalSpineDrawer({
           })}
         </div>
 
-        {/* New terminal picker */}
-        <div
-          className="shrink-0 px-3 py-3"
-          style={{ borderTop: "1px solid var(--border-subtle)" }}
-        >
-          <div
-            className="text-[9.5px] tracking-[0.22em] uppercase font-mono mb-2"
-            style={{ color: "var(--text-tertiary)" }}
-          >
-            New in project
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {projects.map((p) => (
-              <button
-                key={p.name}
-                type="button"
-                onClick={() => {
-                  onCreate({ project: p.name });
-                  onClose();
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-mono transition-colors"
-                style={{
-                  background:
-                    p.name === currentProject
-                      ? "var(--accent, #f0c674)"
-                      : "var(--bg-base)",
-                  color:
-                    p.name === currentProject
-                      ? "#1a1b26"
-                      : "var(--text-secondary)",
-                  border:
-                    p.name === currentProject
-                      ? "none"
-                      : "1px solid var(--border-subtle)",
-                }}
-              >
-                <Plus size={11} />
-                {p.name}
-              </button>
-            ))}
-          </div>
-        </div>
       </aside>
     </>
   );

@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
+import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
+import {
+  subscribeActivity,
+  getActivityState,
+} from "../terminal/useTerminalActivityChannel";
 
 interface GitFile {
   status: string;
@@ -35,6 +40,16 @@ export function useGitStatus() {
   useEffect(() => {
     if (lastMessage?.type === "file-change" || lastMessage?.type === "git-change") fetchStatus();
   }, [lastMessage]);
+
+  const { sessions } = useAllTerminalSessions();
+  useEffect(() => {
+    const unsubs = sessions.map((s) =>
+      subscribeActivity(s.id, () => {
+        if (getActivityState(s.id) === "attention") fetchStatus();
+      }),
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [sessions]);
 
   return { ...status, refetch: fetchStatus };
 }
