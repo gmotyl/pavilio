@@ -12,14 +12,15 @@ interface ShortcutButton {
 }
 
 const BUTTONS: ShortcutButton[] = [
-  { label: "yes", data: "yes\r" },
-  { label: "1", data: "1", mono: true },
-  { label: "2", data: "2", mono: true },
-  { label: "3", data: "3", mono: true },
-  { label: "⏎", data: "\r", confirm: true },
   { label: "Esc", data: "\x1b" },
+  { label: "↑", data: "\x1b[A", mono: true },
+  { label: "↓", data: "\x1b[B", mono: true },
+  { label: "←", data: "\x1b[D", mono: true },
+  { label: "→", data: "\x1b[C", mono: true },
+  { label: "Tab", data: "\t", mono: true },
   { label: "⇧Tab", data: "\x1b[Z", mono: true },
   { label: "Ctrl+C", data: "\x03", important: true },
+  { label: "⏎", data: "\r", confirm: true },
 ];
 
 export function TerminalShortcutBar({
