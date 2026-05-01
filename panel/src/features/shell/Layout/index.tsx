@@ -1,4 +1,4 @@
-import { useContext, type ReactNode } from "react";
+import { useContext, useRef, type ReactNode } from "react";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { Breadcrumbs } from "../Breadcrumbs";
 import LeftSidebar from "../LeftSidebar";
@@ -9,6 +9,7 @@ import {
   FloatingActionContext,
   FloatingActionProvider,
 } from "./FloatingActionProvider";
+import { ScrollContainerContext } from "./ScrollContainer";
 
 function FloatingOverlay() {
   const { action } = useContext(FloatingActionContext);
@@ -29,6 +30,7 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const left = useSidebarState("leftSidebar");
   const right = useSidebarState("rightSidebar");
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEdgeSwipe({
     onSwipeRightFromLeftEdge: () => left.setExpanded(true),
@@ -72,10 +74,12 @@ export function Layout({ children }: LayoutProps) {
       </aside>
 
       <main className="flex-1 min-w-0 relative">
-        <div className="overflow-auto h-full">
-          <Breadcrumbs />
-          {children}
-        </div>
+        <ScrollContainerContext.Provider value={scrollRef as React.RefObject<HTMLElement>}>
+          <div ref={scrollRef} className="overflow-auto h-full">
+            <Breadcrumbs />
+            {children}
+          </div>
+        </ScrollContainerContext.Provider>
         <FloatingOverlay />
       </main>
 
@@ -119,3 +123,4 @@ export function Layout({ children }: LayoutProps) {
 
 export { FloatingActionProvider };
 export { useFloatingAction } from "./useFloatingAction";
+export { useScrollContainer } from "./ScrollContainer";

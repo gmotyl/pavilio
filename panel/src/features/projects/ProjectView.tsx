@@ -24,6 +24,7 @@ import GrepResultRow from "../search/GrepResultRow";
 import type { GrepResult } from "../search/grep";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useLastPath } from "../shell/useLastPath";
+import { useScrollContainer } from "../shell/Layout";
 import {
   clearLastSectionFile,
   readLastSectionFile,
@@ -73,14 +74,8 @@ export default function ProjectView() {
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
 
   // Per-tab scroll memory
-  const scrollContainerRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    const el = document.querySelector(
-      ".layout-container main > div.overflow-auto",
-    ) as HTMLElement | null;
-    scrollContainerRef.current = el;
-  }, []);
-  useTabScrollMemory(name, section, scrollContainerRef);
+  const scrollContainerRef = useScrollContainer();
+  useTabScrollMemory(name, section, scrollContainerRef ?? { current: null });
 
   // Create a session in ANY project and navigate if different from current.
   const createTerminal = useCallback(
