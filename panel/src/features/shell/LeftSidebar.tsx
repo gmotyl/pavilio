@@ -99,19 +99,30 @@ export default function LeftSidebar() {
     }
   }, [currentProject]);
 
-  // Per-project expand state (in-memory cache + localStorage fallback)
+  // Per-project expand state — hydrated once from localStorage when projects load
   const [expanded, setExpandedState] = useState<Record<string, boolean>>(
     () => ({}),
   );
-  const isExpanded = useCallback(
-    (name: string) => {
-      if (expanded[name] !== undefined) return expanded[name];
-      try {
-        return localStorage.getItem(`panel-project-expanded-${name}`) === "true";
-      } catch {
-        return false;
+  // Hydrate expand state from localStorage for any projects not yet in state
+  useEffect(() => {
+    if (projects.length === 0) return;
+    setExpandedState((prev) => {
+      const patch: Record<string, boolean> = {};
+      for (const p of projects) {
+        if (prev[p.name] === undefined) {
+          try {
+            patch[p.name] =
+              localStorage.getItem(`panel-project-expanded-${p.name}`) === "true";
+          } catch {
+            patch[p.name] = false;
+          }
+        }
       }
-    },
+      return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
+    });
+  }, [projects]);
+  const isExpanded = useCallback(
+    (name: string) => expanded[name] ?? false,
     [expanded],
   );
   const setExpanded = useCallback((name: string, value: boolean) => {
