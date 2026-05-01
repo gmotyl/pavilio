@@ -749,7 +749,13 @@ export default function ProjectView() {
       </h1>
 
       {/* Tabs (desktop only — mobile tab switcher lives in breadcrumbs row) */}
-      <div className="hidden md:flex gap-2 mb-6 text-sm relative items-center">
+      <div
+        className="hidden md:flex gap-2 mb-4 text-sm relative items-center sticky top-0 z-10 py-2"
+        style={{
+          background: "var(--bg-base)",
+          borderBottom: "1px solid var(--border-subtle)",
+        }}
+      >
         <div className="flex gap-1">
           {tabs.map((tab) => (
             <Link
