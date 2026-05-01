@@ -62,6 +62,7 @@ export default function LeftSidebar() {
   const { archive, archivedNames } = useArchivedProjects();
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
   const [lanAccessOpen, setLanAccessOpen] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const inIterm = /\/project\/[^/]+\/iterm/.test(location.pathname);
   const currentProject =
@@ -149,9 +150,14 @@ export default function LeftSidebar() {
           dispatchTerminalFocus(project, data.id);
           setExpanded(project, true);
           navigate(`/project/${project}/iterm`);
+        } else {
+          setCreateError("Could not create terminal");
+          setTimeout(() => setCreateError(null), 4000);
         }
       } catch (err) {
         console.warn("[sidebar] create terminal failed:", err);
+        setCreateError("Could not create terminal");
+        setTimeout(() => setCreateError(null), 4000);
       }
     },
     [sessions, navigate, setExpanded],
@@ -389,6 +395,19 @@ export default function LeftSidebar() {
         <SectionHeader icon={GitBranch} label="Git" />
         <GitSummary />
       </section>
+
+      {createError && (
+        <div
+          className="mx-1 px-2 py-1.5 rounded-md text-[11px]"
+          style={{
+            background: "var(--bg-elevated)",
+            border: "1px solid color-mix(in srgb, var(--red) 40%, transparent)",
+            color: "var(--red)",
+          }}
+        >
+          {createError}
+        </div>
+      )}
 
       <section className="px-1 pb-3 space-y-0.5">
         <button
