@@ -1,9 +1,58 @@
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams, useLocation, Link } from "react-router-dom";
 import { Terminal as TerminalIcon, Plus } from "lucide-react";
 import { useAllTerminalSessions } from "./useAllTerminalSessions";
 import type { SessionMeta } from "./useTerminalSessions";
-import { dispatchTerminalFocus } from "./useTerminalSessions";
+import {
+  dispatchTerminalFocus,
+  TERMINAL_FOCUS_EVENT,
+  type TerminalFocusEventDetail,
+} from "./useTerminalSessions";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+
+function useFocusedSessionId(): string | null {
+  const { name: project } = useParams<{ name?: string }>();
+  const location = useLocation();
+  const inIterm = /\/project\/[^/]+\/iterm/.test(location.pathname);
+
+  const [focusedId, setFocusedId] = useState<string | null>(() => {
+    if (!project) return null;
+    try {
+      return localStorage.getItem(`panel-terminal-focus-${project}`);
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const detail = (e as CustomEvent<TerminalFocusEventDetail>).detail;
+      setFocusedId(detail.sessionId);
+    };
+    window.addEventListener(TERMINAL_FOCUS_EVENT, onFocus);
+    return () => window.removeEventListener(TERMINAL_FOCUS_EVENT, onFocus);
+  }, []);
+
+  // Reset focus when navigating away from iterm
+  useEffect(() => {
+    if (!inIterm) setFocusedId(null);
+  }, [inIterm]);
+
+  // Re-seed when project changes
+  useEffect(() => {
+    if (!project) {
+      setFocusedId(null);
+      return;
+    }
+    try {
+      setFocusedId(localStorage.getItem(`panel-terminal-focus-${project}`));
+    } catch {
+      setFocusedId(null);
+    }
+  }, [project]);
+
+  return inIterm ? focusedId : null;
+}
 
 function SectionHeader({ label, count }: { label: string; count: number }) {
   return (
@@ -34,6 +83,7 @@ export function TerminalNavList() {
   const navigate = useNavigate();
   const { name: currentProject } = useParams<{ name?: string }>();
   const { sessions } = useAllTerminalSessions();
+  const focusedId = useFocusedSessionId();
 
   // Group sessions by project
   const byProject = new Map<string, SessionMeta[]>();
@@ -114,25 +164,27 @@ export function TerminalNavList() {
                 <span className="truncate">{project}</span>
               </div>
               <ul className="space-y-0.5">
-                {list.map((s) => (
+                {list.map((s) => {
+                  const isActive = s.id === focusedId;
+                  return (
                   <li key={s.id}>
                     <button
                       type="button"
                       onClick={() => openSession(s)}
                       className="flex items-center gap-2 w-full px-2 py-1 rounded-md text-left transition-colors"
                       style={{
-                        color: "var(--text-secondary)",
-                        background: "transparent",
+                        color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                        background: isActive ? "var(--bg-active)" : "transparent",
                         borderLeft: s.color
                           ? `2px solid ${s.color}`
                           : "2px solid transparent",
                         paddingLeft: s.color ? "6px" : undefined,
                       }}
                       onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = "var(--bg-hover)")
+                        (e.currentTarget.style.background = isActive ? "var(--bg-active)" : "var(--bg-hover)")
                       }
                       onMouseLeave={(e) =>
-                        (e.currentTarget.style.background = "transparent")
+                        (e.currentTarget.style.background = isActive ? "var(--bg-active)" : "transparent")
                       }
                     >
                       <TerminalActivityLed sessionId={s.id} />
@@ -144,7 +196,8 @@ export function TerminalNavList() {
                       </span>
                     </button>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </li>
           ))}
