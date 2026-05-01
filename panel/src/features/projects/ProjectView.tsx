@@ -1026,7 +1026,7 @@ export default function ProjectView() {
                 viewMode={gitViewMode}
                 onViewModeChange={setGitViewMode}
                 extraActions={wideToggle}
-                showListSidebar={wide}
+                showListSidebar
                 openFile={
                   repoOpenFile?.repo === repo.path &&
                   repoOpenFile.scope === "changed"
@@ -1059,7 +1059,8 @@ export default function ProjectView() {
                 <GitBranchDiff
                   repo={repo.path}
                   viewMode={gitViewMode}
-                  showListSidebar={wide}
+                  onViewModeChange={setGitViewMode}
+                  showListSidebar
                   openFile={
                     repoOpenFile?.repo === repo.path &&
                     repoOpenFile.scope === "branch-diff"
