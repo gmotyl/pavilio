@@ -127,10 +127,12 @@ export function TerminalNavList() {
           type="button"
           onClick={openNew}
           disabled={!currentProject}
-          className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors disabled:opacity-40"
+          aria-label="New terminal"
+          className="w-6 h-6 flex items-center justify-center rounded-md transition-colors disabled:opacity-40"
           style={{
             color: "var(--text-muted)",
             background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
           }}
           onMouseEnter={(e) => {
             if (currentProject)
@@ -141,12 +143,11 @@ export function TerminalNavList() {
           }
           title={
             currentProject
-              ? "Open iTerm tab to create a terminal"
+              ? "New terminal"
               : "Select a project first"
           }
         >
-          <Plus size={12} />
-          <span>New terminal</span>
+          <Plus size={11} />
         </button>
       ) : (
         <ul className="space-y-2">
