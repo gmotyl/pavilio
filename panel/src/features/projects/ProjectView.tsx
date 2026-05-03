@@ -1,37 +1,24 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
-import {
-  FileText,
-  ExternalLink,
-  Copy,
-  Check,
-  ArrowLeft,
-  GitFork,
-  Search,
-  X,
-  Terminal,
-} from "lucide-react";
-import { useActiveFile } from "../explorer/useActiveFile";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { ExternalLink } from "lucide-react";
 import { useFileIndex } from "../explorer/useFileIndex";
-import GitBranchDiff from "../git/GitBranchDiff";
-import GitChanges from "../git/GitChanges";
-import GitWorktrees from "../git/GitWorktrees";
-import GitHistory from "../git/GitHistory";
 import { useGitViewMode } from "../git/useGitViewMode";
-import ImageDropZone from "../markdown/ImageDropZone";
+import RepoBlock from "./RepoBlock";
+import ProjectSearchBar from "./ProjectSearchBar";
+import FileViewer from "./FileViewer";
+import SectionFilesList from "./SectionFilesList";
+import { ProjectTabsBar, ProjectTabsMenu } from "./ProjectTabs";
+import { useProjectTabs } from "./useProjectTabs";
+import { useProjectSearch } from "./useProjectSearch";
+import { useRepoSearch } from "./useRepoSearch";
+import { useFileViewer } from "./useFileViewer";
+import { useITermShortcuts } from "./useITermShortcuts";
+import { useCommitsOpenMap } from "./useCommitsOpenMap";
+import { useRepoOpenFile } from "./useRepoOpenFile";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
-import { useWebSocket } from "../realtime/useWebSocket";
-import GrepResultRow from "../search/GrepResultRow";
-import type { GrepResult } from "../search/grep";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useLastPath } from "../shell/useLastPath";
 import { useScrollContainer } from "../shell/Layout";
-import {
-  clearLastSectionFile,
-  readLastSectionFile,
-  writeLastSectionFile,
-  readLastReposQuery,
-} from "../shell/lastPath";
 import { useReposTabMemory } from "../shell/useReposTabMemory";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
@@ -45,7 +32,6 @@ import type { CreateSessionOpts } from "../terminal/useTerminalSessions";
 import { useTerminalMaximized } from "../terminal/useTerminalMaximized";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import type { TerminalHandle } from "../terminal/TerminalView";
-import { ChevronDown } from "lucide-react";
 import TerminalsSurface from "../terminal/TerminalsSurface";
 
 export default function ProjectView() {
@@ -56,8 +42,6 @@ export default function ProjectView() {
   const [error, setError] = useState<string | null>(null);
   const files = useFileIndex();
   const projects = useProjects();
-  const { lastMessage } = useWebSocket();
-  const { setActiveFile } = useActiveFile();
 
   const navTo = useNavigate();
   const project = projects.find((p) => p.name === name);
@@ -70,7 +54,6 @@ export default function ProjectView() {
     name || "",
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [tabMenuOpen, setTabMenuOpen] = useState(false);
 
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
 
@@ -136,387 +119,27 @@ export default function ProjectView() {
     [name, terminal, navTo, allSessions],
   );
 
-  // Keyboard shortcuts — only active while in the iTerm tab
-  useEffect(() => {
-    if (section !== "iterm") return;
-
-    const handler = (e: KeyboardEvent) => {
-      const tag = document.activeElement?.tagName?.toLowerCase();
-      const isEditable =
-        tag === "input" ||
-        tag === "textarea" ||
-        (document.activeElement as HTMLElement | null)?.isContentEditable;
-      if (isEditable) return;
-
-      // Cmd/Ctrl + Shift + Enter → toggle maximize
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        !e.altKey &&
-        (e.key === "Enter" || e.code === "Enter")
-      ) {
-        e.preventDefault();
-        setMaximized(!maximized);
-        return;
-      }
-
-      // Cmd/Ctrl + 1..9 → focus terminal at that 1-based index
-      // Cmd/Ctrl + 0    → clear focus (show all)
-      // Cmd/Ctrl + `    → cycle to next session
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
-        // Use e.code for digits so Shift-less numeric keys match on all layouts.
-        const digitMatch = /^Digit([0-9])$/.exec(e.code);
-        if (digitMatch) {
-          const digit = Number(digitMatch[1]);
-          e.preventDefault();
-          if (digit === 0) {
-            terminal.setFocusedId(null);
-          } else {
-            const target = terminal.sessions[digit - 1];
-            if (target) terminal.setFocusedId(target.id);
-          }
-          return;
-        }
-        if (e.key === "`" || e.code === "Backquote") {
-          e.preventDefault();
-          const ids = terminal.sessions.map((s) => s.id);
-          if (ids.length === 0) return;
-          const currentIdx = terminal.focusedId
-            ? ids.indexOf(terminal.focusedId)
-            : -1;
-          const nextIdx = (currentIdx + 1) % ids.length;
-          terminal.setFocusedId(ids[nextIdx]);
-          return;
-        }
-      }
-
-      // Ctrl+Shift+1..6 → navigate to iTerm tab of project 1..6
-      // Use e.code because Shift changes e.key to "!", "@", "#", etc.
-      if (e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey) {
-        const digitMatch = /^Digit([1-6])$/.exec(e.code);
-        if (digitMatch) {
-          const digit = Number(digitMatch[1]);
-          e.preventDefault();
-          const proj = projects[digit - 1];
-          if (proj) navTo(`/project/${proj.name}/iterm`);
-          return;
-        }
-      }
-
-      // Escape → exit maximize (when not inside an input)
-      if (e.key === "Escape" && maximized) {
-        e.preventDefault();
-        setMaximized(false);
-      }
-    };
-
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [
-    section,
-    terminal.sessions,
-    terminal.focusedId,
-    terminal.setFocusedId,
+  useITermShortcuts({
+    active: section === "iterm",
+    sessions: terminal.sessions,
+    focusedId: terminal.focusedId,
+    setFocusedId: terminal.setFocusedId,
     projects,
     navTo,
     maximized,
     setMaximized,
-  ]);
+  });
 
   const [wide, toggleWide] = useWideMode(section || "overview");
-
   const [gitViewMode, setGitViewMode] = useGitViewMode();
-
   const wideToggle = <WideToggle wide={wide} onToggle={toggleWide} />;
 
-  const COMMITS_OPEN_KEY = "panel-commits-open";
-  const [commitsOpenMap, setCommitsOpenMap] = useState<Record<string, boolean>>(
-    () => {
-      try {
-        return JSON.parse(localStorage.getItem(COMMITS_OPEN_KEY) || "{}");
-      } catch {
-        return {};
-      }
-    },
-  );
-  const getCommitsOpen = (repoPath: string) =>
-    commitsOpenMap[repoPath] !== false;
-  const handleCommitsOpenChange = (repoPath: string, open: boolean) => {
-    const next = { ...commitsOpenMap, [repoPath]: open };
-    setCommitsOpenMap(next);
-    try {
-      localStorage.setItem(COMMITS_OPEN_KEY, JSON.stringify(next));
-    } catch {}
-  };
+  const commitsOpen = useCommitsOpenMap();
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<GrepResult[]>([]);
-  const [searchActive, setSearchActive] = useState(false);
-  const [searchLoading, setSearchLoading] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
-
   useReposTabMemory(name, section, searchParams);
 
-  // Repos search: trigger opening a specific file diff in a child component (URL-backed)
-  const repoOpenFile = (() => {
-    const repo = searchParams.get("repo");
-    const file = searchParams.get("file");
-    if (!repo || !file) return null;
-    return {
-      repo,
-      file,
-      scope: searchParams.get("scope") ?? "",
-      highlight: searchParams.get("highlight") ?? "",
-    };
-  })();
-
-  const setRepoOpenFile = useCallback(
-    (
-      next:
-        | { repo: string; file: string; scope: string; highlight: string }
-        | null,
-    ) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (next) {
-            params.set("repo", next.repo);
-            params.set("file", next.file);
-            if (next.highlight) params.set("highlight", next.highlight);
-            else params.delete("highlight");
-            if (next.scope) params.set("scope", next.scope);
-            else params.delete("scope");
-          } else {
-            params.delete("repo");
-            params.delete("file");
-            params.delete("highlight");
-            params.delete("scope");
-          }
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
-  const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setSearchQuery("");
-    setSearchResults([]);
-    setSearchActive(false);
-  }, [name]);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "f" && name) {
-        e.preventDefault();
-        setSearchActive(true);
-        setTimeout(() => searchInputRef.current?.focus(), 10);
-      }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [name]);
-
   const isReposSearch = section === "repos";
-  type RepoSearchScope = "changed" | "branch-diff" | "commits";
-  const SCOPE_KEY = "panel-repo-search-scope";
-  const [repoSearchScope, setRepoSearchScope] = useState<RepoSearchScope>(
-    () => {
-      return (localStorage.getItem(SCOPE_KEY) as RepoSearchScope) || "changed";
-    },
-  );
-  const handleScopeChange = (scope: RepoSearchScope) => {
-    setRepoSearchScope(scope);
-    localStorage.setItem(SCOPE_KEY, scope);
-  };
-
-  // Fetch repo files for search — triggered by scope/repos changes
-  const [repoFiles, setRepoFiles] = useState<
-    {
-      status: string;
-      path: string;
-      repo: string;
-      repoName: string;
-      source: RepoSearchScope;
-    }[]
-  >([]);
-  const repoPathsKey = project?.repos?.map((r) => r.path).join(",") ?? "";
-  useEffect(() => {
-    if (!isReposSearch || !project?.repos?.length) {
-      setRepoFiles([]);
-      return;
-    }
-    let cancelled = false;
-    const repos = project.repos;
-    (async () => {
-      const all: typeof repoFiles = [];
-      await Promise.all(
-        repos.map(async (repo) => {
-          const qs = `repo=${encodeURIComponent(repo.path)}`;
-          // Changed files
-          if (repoSearchScope === "changed") {
-            try {
-              const res = await fetch(`/api/git/status?${qs}`);
-              if (res.ok) {
-                const files: { status: string; path: string }[] =
-                  await res.json();
-                all.push(
-                  ...files.map((f) => ({
-                    ...f,
-                    repo: repo.path,
-                    repoName: repo.name,
-                    source: "changed" as const,
-                  })),
-                );
-              }
-            } catch {}
-          }
-          // Branch diff files
-          if (repoSearchScope === "branch-diff") {
-            const base = localStorage.getItem(
-              `panel-branch-diff-base-${repo.path}`,
-            );
-            if (base) {
-              try {
-                const res = await fetch(
-                  `/api/git/branch-diff-files?base=${encodeURIComponent(base)}&${qs}`,
-                );
-                if (res.ok) {
-                  const data = await res.json();
-                  all.push(
-                    ...(data.files || []).map(
-                      (f: { status: string; path: string }) => ({
-                        ...f,
-                        repo: repo.path,
-                        repoName: repo.name,
-                        source: "branch-diff" as const,
-                      }),
-                    ),
-                  );
-                }
-              } catch {}
-            }
-          }
-          // Recent commits — file paths from last N commits
-          if (repoSearchScope === "commits") {
-            try {
-              const logRes = await fetch(`/api/git/log?limit=10&${qs}`);
-              if (logRes.ok) {
-                const commits: { sha: string; message: string }[] =
-                  await logRes.json();
-                const seen = new Set<string>();
-                await Promise.all(
-                  commits.map(async (c) => {
-                    try {
-                      const cfRes = await fetch(
-                        `/api/git/commit-files?sha=${c.sha}&${qs}`,
-                      );
-                      if (cfRes.ok) {
-                        const cf: { status: string; path: string }[] =
-                          await cfRes.json();
-                        for (const f of cf) {
-                          if (!seen.has(f.path)) {
-                            seen.add(f.path);
-                            all.push({
-                              ...f,
-                              repo: repo.path,
-                              repoName: repo.name,
-                              source: "commits" as const,
-                            });
-                          }
-                        }
-                      }
-                    } catch {}
-                  }),
-                );
-              }
-            } catch {}
-          }
-        }),
-      );
-      if (!cancelled) setRepoFiles(all);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isReposSearch, repoPathsKey, repoSearchScope]);
-
-  // Repos tab: grep within scoped files
-  const [repoGrepResults, setRepoGrepResults] = useState<GrepResult[]>([]);
-  const [repoGrepLoading, setRepoGrepLoading] = useState(false);
-  useEffect(() => {
-    if (!isReposSearch || searchQuery.length < 2 || repoFiles.length === 0) {
-      setRepoGrepResults([]);
-      return;
-    }
-    setRepoGrepLoading(true);
-    const abort = new AbortController();
-    const timer = setTimeout(async () => {
-      try {
-        const allResults: GrepResult[] = [];
-        // Group files by repo
-        const byRepo = new Map<string, string[]>();
-        for (const f of repoFiles) {
-          if (!byRepo.has(f.repo)) byRepo.set(f.repo, []);
-          byRepo.get(f.repo)!.push(f.path);
-        }
-        await Promise.all(
-          [...byRepo.entries()].map(async ([repo, files]) => {
-            const url = `/api/git/grep?q=${encodeURIComponent(searchQuery)}&repo=${encodeURIComponent(repo)}&files=${encodeURIComponent(files.join(","))}`;
-            const res = await fetch(url, { signal: abort.signal });
-            if (res.ok) {
-              const results: GrepResult[] = await res.json();
-              allResults.push(...results.map((r) => ({ ...r, project: repo })));
-            }
-          }),
-        );
-        if (!abort.signal.aborted) setRepoGrepResults(allResults);
-      } catch (e: any) {
-        if (e.name !== "AbortError") setRepoGrepResults([]);
-      } finally {
-        if (!abort.signal.aborted) setRepoGrepLoading(false);
-      }
-    }, 250);
-    return () => {
-      clearTimeout(timer);
-      abort.abort();
-    };
-  }, [isReposSearch, searchQuery, repoFiles]);
-
-  useEffect(() => {
-    if (isReposSearch) return;
-    if (searchQuery.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-    setSearchLoading(true);
-    const abort = new AbortController();
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(
-          `/api/search/grep?q=${encodeURIComponent(searchQuery)}&project=${encodeURIComponent(name!)}`,
-          { signal: abort.signal },
-        );
-        if (res.ok) setSearchResults(await res.json());
-        else setSearchResults([]);
-      } catch (e: any) {
-        if (e.name !== "AbortError") setSearchResults([]);
-      } finally {
-        setSearchLoading(false);
-      }
-    }, 200);
-    return () => {
-      clearTimeout(timer);
-      abort.abort();
-    };
-  }, [searchQuery, name, isReposSearch]);
-
-  useEffect(() => {
-    setSearchSelectedIdx(0);
-  }, [searchQuery]);
 
   const openSearchResult = useCallback(
     (path: string) => {
@@ -525,51 +148,25 @@ export default function ProjectView() {
     [navTo],
   );
 
-  const handleSearchKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Escape") {
-        setSearchActive(false);
-        setSearchQuery("");
-        setSearchResults([]);
-        return;
-      }
-      const count = searchResults.length;
-      if (!count) return;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSearchSelectedIdx((i) => (i + 1) % count);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSearchSelectedIdx((i) => (i - 1 + count) % count);
-      } else if (e.key === "Enter") {
-        const r = searchResults[searchSelectedIdx];
-        if (r) openSearchResult(r.relativePath);
-      }
-    },
-    [searchResults, searchSelectedIdx, openSearchResult],
-  );
+  const search = useProjectSearch({
+    project: name,
+    enabled: !isReposSearch,
+    onOpenResult: openSearchResult,
+  });
 
-  const selectedFile = searchParams.get("file");
-  const [fileContent, setFileContent] = useState("");
-  const [fileAbsPath, setFileAbsPath] = useState("");
-  const [fileLoading, setFileLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const repoSearch = useRepoSearch({
+    active: isReposSearch,
+    repos: project?.repos,
+    query: search.query,
+  });
 
-  const setSelectedFile = useCallback(
-    (path: string | null) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (path) next.set("file", path);
-          else next.delete("file");
-          return next;
-        },
-        { replace: true },
-      );
-      setActiveFile(path);
-    },
-    [setSearchParams, setActiveFile],
-  );
+  const { repoOpenFile, setRepoOpenFile } = useRepoOpenFile({
+    searchParams,
+    setSearchParams,
+  });
+
+  const fileViewer = useFileViewer({ project: name, section });
+  const { selectedFile, setSelectedFile } = fileViewer;
 
   useEffect(() => {
     if (!name || section) return;
@@ -584,45 +181,6 @@ export default function ProjectView() {
       })
       .catch((err) => setError(err.message));
   }, [name, section]);
-
-  useEffect(() => {
-    if (!selectedFile) return;
-    setFileLoading(true);
-    fetch(`/api/files/read/${selectedFile}`)
-      .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          setFileContent(data.content);
-          setFileAbsPath(data.absolutePath || "");
-        } else {
-          setSelectedFile(null);
-        }
-      })
-      .finally(() => setFileLoading(false));
-  }, [selectedFile, setSelectedFile]);
-
-  // Persist the last-open file per section so tab links can restore it.
-  // When the user navigates back to the section index (no ?file=), clear
-  // the memory so re-entering the tab lands on the index, not the last file.
-  useEffect(() => {
-    if (!name || !section) return;
-    if (section === "repos" || section === "iterm") return;
-    if (selectedFile) {
-      writeLastSectionFile(name, section, selectedFile);
-    } else {
-      clearLastSectionFile(name, section);
-    }
-  }, [name, section, selectedFile]);
-
-  useEffect(() => {
-    if (!selectedFile || lastMessage?.type !== "file-change") return;
-    const changedPath = lastMessage.path as string;
-    if (changedPath?.includes(selectedFile)) {
-      fetch(`/api/files/read/${selectedFile}`).then(async (res) => {
-        if (res.ok) setFileContent((await res.json()).content);
-      });
-    }
-  }, [lastMessage, selectedFile]);
 
   const sectionFiles =
     section && section !== "repos" && section !== "iterm"
@@ -644,108 +202,19 @@ export default function ProjectView() {
           .sort((a, b) => b.modified - a.modified)
       : [];
 
-  const sections = ["iterm", "plans", "notes", "memo", "progress", "qa"];
-  if (hasRepos) sections.push("repos");
-
-  const nonItermSections = sections.filter((s) => s !== "iterm");
-  const tabs: {
-    label: string;
-    to: string;
-    active: boolean;
-    state?: { explicit: true };
-  }[] = [
-    { label: "iterm", to: `/project/${name}/iterm`, active: section === "iterm" },
-    {
-      label: "Overview",
-      to: `/project/${name}`,
-      active: !section,
-      state: { explicit: true },
-    },
-    ...nonItermSections.map((s) => {
-      const base = `/project/${name}/${s}`;
-      if (s === "repos") {
-        const storedQuery = readLastReposQuery(name || "");
-        return {
-          label: s,
-          to: storedQuery ? `${base}?${storedQuery}` : base,
-          active: section === s,
-        };
-      }
-      const storedFile = readLastSectionFile(name || "", s);
-      return {
-        label: s,
-        to: storedFile ? `${base}?file=${encodeURIComponent(storedFile)}` : base,
-        active: section === s,
-      };
-    }),
-  ];
-  const activeTab = tabs.find((t) => t.active) || tabs[0];
+  const { tabs, activeTab } = useProjectTabs({
+    projectName: name,
+    section,
+    hasRepos,
+  });
 
   useBreadcrumbActions(
-    <div className="md:hidden relative">
-      <button
-        type="button"
-        onClick={() => setTabMenuOpen((o) => !o)}
-        className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px]"
-        style={{
-          background: "var(--bg-base)",
-          color: "var(--text-primary)",
-          border: "1px solid var(--border-subtle)",
-        }}
-        title={activeTab.label === "iterm" ? "iTerm" : undefined}
-      >
-        <span className="capitalize">
-          {activeTab.label === "iterm" ? <Terminal className="w-3 h-3" /> : activeTab.label}
-        </span>
-        <ChevronDown size={12} />
-      </button>
-      {tabMenuOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-30"
-            onClick={() => setTabMenuOpen(false)}
-          />
-          <div
-            className="absolute right-0 top-full z-40 mt-1 min-w-[140px] rounded-md py-1 shadow-lg"
-            style={{
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border-subtle)",
-            }}
-          >
-            {tabs.map((tab) => (
-              <Link
-                key={tab.label}
-                to={tab.to}
-                state={tab.state}
-                onClick={() => setTabMenuOpen(false)}
-                title={tab.label === "iterm" ? "iTerm" : undefined}
-                className="flex items-center gap-2 px-3 py-2 capitalize"
-                style={{
-                  background: tab.active ? "var(--bg-active)" : "transparent",
-                  color: tab.active ? "var(--text-primary)" : "var(--text-secondary)",
-                }}
-              >
-                {tab.label === "iterm" ? <Terminal className="w-4 h-4" /> : tab.label}
-              </Link>
-            ))}
-          </div>
-        </>
-      )}
-    </div>,
-    [name, section, hasRepos, tabMenuOpen],
+    <ProjectTabsMenu tabs={tabs} activeTab={activeTab} />,
+    [name, section, hasRepos],
   );
 
   const openInVSCode = (path: string) =>
     window.open(`vscode://file/${path}`, "_self");
-
-  const copyPath = (path: string) => {
-    navigator.clipboard.writeText(path);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  const isMarkdown = (p: string) => p.endsWith(".md");
-  const isJson = (p: string) => p.endsWith(".json");
 
   return (
     <div className="relative">
@@ -755,403 +224,100 @@ export default function ProjectView() {
         {name}
       </h1>
 
-      {/* Tabs (desktop only — mobile tab switcher lives in breadcrumbs row) */}
-      <div
-        className="hidden md:flex gap-2 mb-4 text-sm relative items-center sticky top-0 z-10 py-2"
-        style={{
-          background: "var(--bg-base)",
-          borderBottom: "1px solid var(--border-subtle)",
-        }}
-      >
-        <div className="flex gap-1">
-          {tabs.map((tab) => (
-            <Link
-              key={tab.label}
-              to={tab.to}
-              state={tab.state}
-              title={tab.label === "iterm" ? "iTerm" : undefined}
-              className="px-3 py-1.5 rounded-md capitalize transition-colors flex items-center gap-1.5"
-              style={{
-                background: tab.active ? "var(--bg-active)" : "transparent",
-                color: tab.active
-                  ? "var(--text-primary)"
-                  : "var(--text-tertiary)",
-              }}
-              onMouseEnter={(e) => {
-                if (!tab.active)
-                  e.currentTarget.style.background = "var(--bg-hover)";
-              }}
-              onMouseLeave={(e) => {
-                if (!tab.active)
-                  e.currentTarget.style.background = tab.active
-                    ? "var(--bg-active)"
-                    : "transparent";
-              }}
-            >
-              {tab.label === "iterm" ? <Terminal className="w-4 h-4" /> : tab.label}
-            </Link>
-          ))}
-        </div>
-        {/* Search toggle (desktop only) */}
-        <button
-          onClick={() => {
-            setSearchActive((a) => !a);
-            setTimeout(() => searchInputRef.current?.focus(), 10);
-          }}
-          className="ml-auto hidden md:block px-2 py-1.5 rounded-md transition-colors"
-          style={{
-            color: searchActive ? "var(--accent)" : "var(--text-tertiary)",
-          }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "var(--bg-hover)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
-          title="Search in project (Cmd+F)"
-        >
-          <Search size={14} />
-        </button>
-      </div>
+      <ProjectTabsBar
+        tabs={tabs}
+        searchActive={search.active}
+        onToggleSearch={search.toggle}
+      />
 
-      {/* Project search bar */}
-      {searchActive && (
-        <div className="mb-4">
-          <div
-            className="flex items-center gap-2 px-3 py-2 rounded-lg"
-            style={{
-              background: "var(--bg-base)",
-              border: "1px solid var(--border-subtle)",
-            }}
-          >
-            <Search size={14} style={{ color: "var(--accent)" }} />
-            {isReposSearch && (
-              <div
-                className="flex rounded overflow-hidden shrink-0"
-                style={{ border: "1px solid var(--border-subtle)" }}
-              >
-                {(
-                  [
-                    ["changed", "Changed"],
-                    ["branch-diff", "Branch diff"],
-                    ["commits", "Commits"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => handleScopeChange(key)}
-                    className="text-[10px] px-1.5 py-0.5 transition-colors"
-                    style={{
-                      background:
-                        repoSearchScope === key
-                          ? "color-mix(in srgb, var(--accent) 20%, transparent)"
-                          : "transparent",
-                      color:
-                        repoSearchScope === key
-                          ? "var(--accent)"
-                          : "var(--text-muted)",
-                      borderRight:
-                        key !== "commits"
-                          ? "1px solid var(--border-subtle)"
-                          : "none",
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-            <input
-              ref={searchInputRef}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={isReposSearch ? undefined : handleSearchKeyDown}
-              placeholder={
-                isReposSearch
-                  ? `Search in ${repoFiles.length} ${repoSearchScope === "changed" ? "changed" : repoSearchScope === "branch-diff" ? "diff" : "commit"} files...`
-                  : `Search in ${name}...`
-              }
-              className="flex-1 bg-transparent text-sm outline-none"
-              style={{ color: "var(--text-primary)" }}
-              spellCheck={false}
-              autoComplete="off"
-            />
-            {searchQuery && !isReposSearch && (
-              <span
-                className="text-[11px]"
-                style={{ color: "var(--text-muted)" }}
-              >
-                {searchResults.length} results
-              </span>
-            )}
-            {searchQuery && isReposSearch && !repoGrepLoading && (
-              <span
-                className="text-[11px]"
-                style={{ color: "var(--text-muted)" }}
-              >
-                {repoGrepResults.length} results
-              </span>
-            )}
-            {searchQuery && isReposSearch && repoGrepLoading && (
-              <span
-                className="text-[11px] animate-pulse"
-                style={{ color: "var(--text-muted)" }}
-              >
-                searching...
-              </span>
-            )}
-            <button
-              onClick={() => {
-                setSearchActive(false);
-                setSearchQuery("");
-                setSearchResults([]);
-              }}
-              className="text-[11px] px-1.5 py-0.5 rounded"
-              style={{ color: "var(--text-muted)" }}
-            >
-              ESC
-            </button>
-          </div>
-          {!isReposSearch && searchLoading && (
-            <div
-              className="mt-2 text-xs animate-pulse"
-              style={{ color: "var(--text-tertiary)" }}
-            >
-              Searching...
-            </div>
-          )}
-          {!isReposSearch &&
-            !searchLoading &&
-            searchQuery.length >= 2 &&
-            searchResults.length > 0 && (
-              <div
-                className="mt-2 rounded-lg overflow-hidden"
-                style={{
-                  border: "1px solid var(--border-subtle)",
-                  maxHeight: "50vh",
-                  overflowY: "auto",
-                }}
-              >
-                {searchResults.map((result, i) => (
-                  <GrepResultRow
-                    key={result.relativePath}
-                    result={result}
-                    query={searchQuery}
-                    isSelected={i === searchSelectedIdx}
-                    onClick={() => openSearchResult(result.relativePath)}
-                    onMouseEnter={() => setSearchSelectedIdx(i)}
-                  />
-                ))}
-              </div>
-            )}
-          {!isReposSearch &&
-            !searchLoading &&
-            searchQuery.length >= 2 &&
-            searchResults.length === 0 && (
-              <div
-                className="mt-2 text-xs"
-                style={{ color: "var(--text-muted)" }}
-              >
-                No matches found
-              </div>
-            )}
-          {isReposSearch && repoFiles.length === 0 && (
-            <div
-              className="mt-2 text-xs animate-pulse"
-              style={{ color: "var(--text-tertiary)" }}
-            >
-              Loading file list...
-            </div>
-          )}
-          {isReposSearch &&
-            !repoGrepLoading &&
-            searchQuery.length >= 2 &&
-            repoGrepResults.length > 0 && (
-              <div
-                className="mt-2 rounded-lg overflow-hidden"
-                style={{
-                  border: "1px solid var(--border-subtle)",
-                  maxHeight: "50vh",
-                  overflowY: "auto",
-                }}
-              >
-                {repoGrepResults.map((result, i) => (
-                  <GrepResultRow
-                    key={`${result.relativePath}-${i}`}
-                    result={result}
-                    query={searchQuery}
-                    isSelected={false}
-                    onClick={() => {
-                      setRepoOpenFile({
-                        repo: result.project,
-                        file: result.relativePath,
-                        scope: repoSearchScope,
-                        highlight: searchQuery,
-                      });
-                      setSearchActive(false);
-                      setSearchQuery("");
-                    }}
-                    onMouseEnter={() => {}}
-                  />
-                ))}
-              </div>
-            )}
-          {isReposSearch &&
-            !repoGrepLoading &&
-            searchQuery.length >= 2 &&
-            repoGrepResults.length === 0 &&
-            repoFiles.length > 0 && (
-              <div
-                className="mt-2 text-xs"
-                style={{ color: "var(--text-muted)" }}
-              >
-                No matches in {repoFiles.length} {repoSearchScope} files
-              </div>
-            )}
-        </div>
+      {search.active && (
+        <ProjectSearchBar
+          projectName={name}
+          query={search.query}
+          onQueryChange={search.setQuery}
+          onClose={search.close}
+          inputRef={search.inputRef}
+          isReposSearch={isReposSearch}
+          results={search.results}
+          loading={search.loading}
+          selectedIdx={search.selectedIdx}
+          onSelectedIdxChange={search.setSelectedIdx}
+          onOpenResult={openSearchResult}
+          onKeyDown={search.handleKeyDown}
+          repoScope={repoSearch.scope}
+          onRepoScopeChange={repoSearch.setScope}
+          repoFilesCount={repoSearch.files.length}
+          repoGrepResults={repoSearch.grepResults}
+          repoGrepLoading={repoSearch.grepLoading}
+          onOpenRepoResult={(result) => {
+            setRepoOpenFile({
+              repo: result.project,
+              file: result.relativePath,
+              scope: repoSearch.scope,
+              highlight: search.query,
+            });
+            search.close();
+          }}
+        />
       )}
 
       {/* Repos tab */}
       {section === "repos" && project?.repos && (
         <div className="space-y-6">
           {project.repos.map((repo) => (
-            <div
+            <RepoBlock
               key={repo.path}
-              className="rounded-lg p-4"
-              style={{
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-subtle)",
-              }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <GitFork size={14} style={{ color: "var(--accent)" }} />
-                <span className="text-sm font-semibold">{repo.name}</span>
-                <span
-                  className="text-[11px] font-mono"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {repo.path}
-                </span>
-              </div>
-              <GitChanges
-                repo={repo.path}
-                showCommit
-                viewMode={gitViewMode}
-                onViewModeChange={setGitViewMode}
-                extraActions={wideToggle}
-                showListSidebar
-                openFile={
-                  repoOpenFile?.repo === repo.path &&
-                  repoOpenFile.scope === "changed"
-                    ? repoOpenFile.file
-                    : null
-                }
-                highlight={
-                  repoOpenFile?.repo === repo.path &&
-                  repoOpenFile.scope === "changed"
-                    ? repoOpenFile.highlight
-                    : undefined
-                }
-                onOpenFileChange={(file) =>
-                  setRepoOpenFile(
-                    file
-                      ? {
-                          repo: repo.path,
-                          file,
-                          scope: repoOpenFile?.scope ?? "",
-                          highlight: repoOpenFile?.highlight ?? "",
-                        }
-                      : null,
-                  )
-                }
-              />
-              <div
-                className="mt-4 pt-4"
-                style={{ borderTop: "1px solid var(--border-subtle)" }}
-              >
-                <GitBranchDiff
-                  repo={repo.path}
-                  viewMode={gitViewMode}
-                  onViewModeChange={setGitViewMode}
-                  showListSidebar
-                  openFile={
-                    repoOpenFile?.repo === repo.path &&
-                    repoOpenFile.scope === "branch-diff"
-                      ? repoOpenFile.file
-                      : null
-                  }
-                  highlight={
-                    repoOpenFile?.repo === repo.path &&
-                    repoOpenFile.scope === "branch-diff"
-                      ? repoOpenFile.highlight
-                      : undefined
-                  }
-                  activeFile={searchParams.get("branchfile")}
-                  onActiveFileChange={(file) =>
-                    setSearchParams(
-                      (prev) => {
-                        const p = new URLSearchParams(prev);
-                        if (file) p.set("branchfile", file);
-                        else p.delete("branchfile");
-                        return p;
-                      },
-                      { replace: true },
-                    )
-                  }
-                />
-              </div>
-              <div
-                className="mt-4 pt-4"
-                style={{ borderTop: "1px solid var(--border-subtle)" }}
-              >
-                <GitWorktrees
-                  repo={repo.path}
-                  viewMode={gitViewMode}
-                  onViewModeChange={setGitViewMode}
-                />
-              </div>
-              <div
-                className="mt-4 pt-4"
-                style={{ borderTop: "1px solid var(--border-subtle)" }}
-              >
-                <GitHistory
-                  repo={repo.path}
-                  viewMode={gitViewMode}
-                  showListSidebar={wide}
-                  commitsOpen={getCommitsOpen(repo.path)}
-                  onCommitsOpenChange={(open) =>
-                    handleCommitsOpenChange(repo.path, open)
-                  }
-                  activeSha={searchParams.get("sha")}
-                  activeFile={searchParams.get("gitfile")}
-                  onActiveShaChange={(sha) =>
-                    setSearchParams(
-                      (prev) => {
-                        const p = new URLSearchParams(prev);
-                        if (sha) p.set("sha", sha);
-                        else {
-                          p.delete("sha");
-                          p.delete("gitfile");
-                        }
-                        return p;
-                      },
-                      { replace: true },
-                    )
-                  }
-                  onActiveFileChange={(file) =>
-                    setSearchParams(
-                      (prev) => {
-                        const p = new URLSearchParams(prev);
-                        if (file) p.set("gitfile", file);
-                        else p.delete("gitfile");
-                        return p;
-                      },
-                      { replace: true },
-                    )
-                  }
-                />
-              </div>
-            </div>
+              repo={repo}
+              viewMode={gitViewMode}
+              onViewModeChange={setGitViewMode}
+              wideToggle={wideToggle}
+              repoOpenFile={repoOpenFile}
+              onSetRepoOpenFile={setRepoOpenFile}
+              branchFile={searchParams.get("branchfile")}
+              onBranchFileChange={(file) =>
+                setSearchParams(
+                  (prev) => {
+                    const p = new URLSearchParams(prev);
+                    if (file) p.set("branchfile", file);
+                    else p.delete("branchfile");
+                    return p;
+                  },
+                  { replace: true },
+                )
+              }
+              activeSha={searchParams.get("sha")}
+              activeFile={searchParams.get("gitfile")}
+              onActiveShaChange={(sha) =>
+                setSearchParams(
+                  (prev) => {
+                    const p = new URLSearchParams(prev);
+                    if (sha) p.set("sha", sha);
+                    else {
+                      p.delete("sha");
+                      p.delete("gitfile");
+                    }
+                    return p;
+                  },
+                  { replace: true },
+                )
+              }
+              onActiveFileChange={(file) =>
+                setSearchParams(
+                  (prev) => {
+                    const p = new URLSearchParams(prev);
+                    if (file) p.set("gitfile", file);
+                    else p.delete("gitfile");
+                    return p;
+                  },
+                  { replace: true },
+                )
+              }
+              commitsOpen={commitsOpen.isOpen(repo.path)}
+              onCommitsOpenChange={(open) =>
+                commitsOpen.setOpen(repo.path, open)
+              }
+              showListSidebar={wide}
+            />
           ))}
         </div>
       )}
@@ -1184,314 +350,24 @@ export default function ProjectView() {
 
       {/* File section listing */}
       {section && section !== "repos" && section !== "iterm" && !selectedFile && (
-        <div>
-          {/* Current Plans banner */}
-          {section === "plans" &&
-            project?.currentPlans &&
-            project.currentPlans.length > 0 && (
-              <div
-                className="mb-4 rounded-lg p-3"
-                style={{
-                  background: "var(--bg-surface)",
-                  border: "1px solid var(--accent)",
-                  borderColor:
-                    "color-mix(in srgb, var(--accent) 40%, transparent)",
-                }}
-              >
-                <h3
-                  className="text-[11px] font-semibold uppercase tracking-widest mb-2"
-                  style={{ color: "var(--accent)" }}
-                >
-                  Active Plans
-                </h3>
-                <div className="space-y-0.5">
-                  {project.currentPlans.map((planFile) => {
-                    const fileName = planFile.split("/").pop() ?? planFile;
-                    const relativePath = `${name}/plans/${fileName}`;
-                    const label = planFile
-                      .replace(/\.md$/, "")
-                      .replace(/^\d{4}-\d{2}-\d{2}-/, "")
-                      .replace(/-/g, " ");
-                    return (
-                      <div key={planFile} className="flex items-center gap-1">
-                        <button
-                          onClick={() => setSelectedFile(relativePath)}
-                          className="flex items-center gap-3 flex-1 px-3 py-1.5 rounded-md text-left transition-colors"
-                          onMouseEnter={(e) =>
-                            (e.currentTarget.style.background =
-                              "var(--bg-hover)")
-                          }
-                          onMouseLeave={(e) =>
-                            (e.currentTarget.style.background = "transparent")
-                          }
-                        >
-                          <FileText
-                            size={14}
-                            className="shrink-0"
-                            style={{ color: "var(--accent)" }}
-                          />
-                          <span
-                            className="text-sm truncate flex-1 capitalize"
-                            style={{ color: "var(--text-primary)" }}
-                          >
-                            {label}
-                          </span>
-                        </button>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            await fetch(
-                              `/api/projects/${name}/plans/current/${encodeURIComponent(planFile)}`,
-                              { method: "DELETE" },
-                            );
-                          }}
-                          className="shrink-0 p-1 rounded transition-colors"
-                          style={{ color: "var(--text-muted)" }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.color = "var(--red)";
-                            e.currentTarget.style.background = "var(--red-dim)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.color = "var(--text-muted)";
-                            e.currentTarget.style.background = "transparent";
-                          }}
-                          title="Close plan (remove from active)"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-          {section === "qa" ? (
-            (() => {
-              const runs = sectionFiles
-                .filter((f) => f.relativePath.endsWith("/run.md"))
-                .map((f) => {
-                  const parts = f.relativePath.split("/");
-                  const folderName = parts[parts.length - 2];
-                  return { file: f, folderName };
-                })
-                .sort((a, b) => b.folderName.localeCompare(a.folderName));
-
-              return (
-                <>
-                  <h2
-                    className="text-[11px] font-semibold uppercase tracking-widest mb-3"
-                    style={{ color: "var(--text-tertiary)" }}
-                  >
-                    QA Runs ({runs.length})
-                  </h2>
-                  {runs.length === 0 ? (
-                    <p
-                      className="text-sm"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      No QA runs found.
-                    </p>
-                  ) : (
-                    <div className="space-y-0.5">
-                      {runs.map(({ file, folderName }) => (
-                        <button
-                          key={file.relativePath}
-                          onClick={() => setSelectedFile(file.relativePath)}
-                          className="flex items-center gap-3 w-full px-3 py-2 rounded-md text-left transition-colors"
-                          onMouseEnter={(e) =>
-                            (e.currentTarget.style.background =
-                              "var(--bg-hover)")
-                          }
-                          onMouseLeave={(e) =>
-                            (e.currentTarget.style.background = "transparent")
-                          }
-                        >
-                          <FileText
-                            size={14}
-                            className="shrink-0"
-                            style={{ color: "var(--text-tertiary)" }}
-                          />
-                          <span
-                            className="text-sm truncate flex-1 font-mono"
-                            style={{ color: "var(--text-secondary)" }}
-                          >
-                            {folderName}
-                          </span>
-                          <span
-                            className="text-[11px]"
-                            style={{ color: "var(--text-muted)" }}
-                          >
-                            {new Date(file.modified).toLocaleDateString(
-                              "en-US",
-                              { month: "short", day: "numeric" },
-                            )}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
-              );
-            })()
-          ) : (
-            <>
-              <h2
-                className="text-[11px] font-semibold uppercase tracking-widest mb-3"
-                style={{ color: "var(--text-tertiary)" }}
-              >
-                {section} ({sectionFiles.length} files)
-              </h2>
-              {sectionFiles.length === 0 ? (
-                <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-                  No files in this section.
-                </p>
-              ) : (
-                <div className="space-y-0.5">
-                  {sectionFiles.map((file) => {
-                    const fileName =
-                      file.relativePath.split("/").pop() ?? file.relativePath;
-                    const date = new Date(file.modified).toLocaleDateString(
-                      "en-US",
-                      { month: "short", day: "numeric", year: "numeric" },
-                    );
-                    return (
-                      <button
-                        key={file.relativePath}
-                        onClick={() => setSelectedFile(file.relativePath)}
-                        className="flex items-center gap-3 w-full px-3 py-2 rounded-md text-left transition-colors"
-                        onMouseEnter={(e) =>
-                          (e.currentTarget.style.background = "var(--bg-hover)")
-                        }
-                        onMouseLeave={(e) =>
-                          (e.currentTarget.style.background = "transparent")
-                        }
-                      >
-                        <FileText
-                          size={14}
-                          className="shrink-0"
-                          style={{ color: "var(--text-tertiary)" }}
-                        />
-                        <span
-                          className="text-sm truncate flex-1"
-                          style={{ color: "var(--text-secondary)" }}
-                        >
-                          {fileName}
-                        </span>
-                        <span
-                          className="text-[11px]"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          {date}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        <SectionFilesList
+          projectName={name || ""}
+          section={section}
+          files={sectionFiles}
+          currentPlans={project?.currentPlans}
+          onSelect={setSelectedFile}
+        />
       )}
 
       {/* Inline file viewer */}
       {section && section !== "repos" && section !== "iterm" && selectedFile && (
-        <div>
-          <div
-            className="flex items-center gap-2 mb-4 pb-3"
-            style={{ borderBottom: "1px solid var(--border-subtle)" }}
-          >
-            <button
-              onClick={() => setSelectedFile(null)}
-              className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
-              style={{ color: "var(--text-secondary)" }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = "var(--text-primary)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "var(--text-secondary)";
-              }}
-            >
-              <ArrowLeft size={14} />
-              Back
-            </button>
-            <span
-              className="text-sm font-mono truncate flex-1"
-              style={{ color: "var(--text-tertiary)" }}
-            >
-              {selectedFile.split("/").pop()}
-            </span>
-            {fileAbsPath && (
-              <>
-                <button
-                  onClick={() => openInVSCode(fileAbsPath)}
-                  className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
-                  style={{ color: "var(--text-secondary)" }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "var(--bg-hover)";
-                    e.currentTarget.style.color = "var(--text-primary)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "transparent";
-                    e.currentTarget.style.color = "var(--text-secondary)";
-                  }}
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> VS Code
-                </button>
-                <button
-                  onClick={() => copyPath(fileAbsPath)}
-                  className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
-                  style={{
-                    color: copied ? "var(--green)" : "var(--text-secondary)",
-                  }}
-                >
-                  {copied ? (
-                    <Check className="w-3.5 h-3.5" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  {copied ? "Copied" : "Path"}
-                </button>
-              </>
-            )}
-          </div>
-          {fileLoading ? (
-            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              Loading...
-            </p>
-          ) : (
-            <ImageDropZone targetMarkdown={selectedFile}>
-              {isMarkdown(selectedFile) ? (
-                <MarkdownRenderer
-                  content={fileContent}
-                  basePath={selectedFile}
-                />
-              ) : isJson(selectedFile) ? (
-                <pre
-                  className="text-sm font-mono p-4 rounded-lg overflow-auto"
-                  style={{ background: "var(--bg-surface)" }}
-                >
-                  {(() => {
-                    try {
-                      return JSON.stringify(JSON.parse(fileContent), null, 2);
-                    } catch {
-                      return fileContent;
-                    }
-                  })()}
-                </pre>
-              ) : (
-                <pre
-                  className="text-sm font-mono whitespace-pre-wrap"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  {fileContent}
-                </pre>
-              )}
-            </ImageDropZone>
-          )}
-        </div>
+        <FileViewer
+          filePath={selectedFile}
+          content={fileViewer.content}
+          absolutePath={fileViewer.absolutePath}
+          loading={fileViewer.loading}
+          onBack={() => setSelectedFile(null)}
+        />
       )}
 
       {/* Overview */}
