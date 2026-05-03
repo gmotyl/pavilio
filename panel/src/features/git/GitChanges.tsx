@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import DiffView, { type DiffMode } from "./DiffView";
 import BranchPicker from "./BranchPicker";
+import GitBranchDiff from "./GitBranchDiff";
 import { buildFileTree, countFiles, type TreeNode } from "./file-tree";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
 
@@ -827,8 +828,18 @@ export default function GitChanges({
                     </span>
                   </div>
                   {expanded && (
-                    <div className="ml-6 mt-1 mb-2">
+                    <div className="ml-6 mt-1 mb-2 space-y-3">
                       <GitChanges repo={wt.path} nested viewMode={viewMode} onViewModeChange={setViewMode} />
+                      <div
+                        className="pt-3"
+                        style={{ borderTop: "1px solid var(--border-subtle)" }}
+                      >
+                        <GitBranchDiff
+                          repo={wt.path}
+                          viewMode={viewMode}
+                          onViewModeChange={setViewMode}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
