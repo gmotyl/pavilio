@@ -51,7 +51,11 @@ function getWorkingTreeDiff(file: string, repo?: string): string {
     .trim();
 
   if (status === "??") {
-    return gitDiffOutput(`diff --no-index -- /dev/null -- ${quotedFile}`, repo);
+    // `git diff --no-index` always exits non-zero when files differ; gitDiffOutput
+    // captures stdout from the thrown error. Note: only ONE `--` separator before
+    // the path pair — adding `--` between the two paths makes git treat it as a
+    // third argument and print usage instead of a diff.
+    return gitDiffOutput(`diff --no-index -- /dev/null ${quotedFile}`, repo);
   }
 
   if (status?.includes("A")) {
