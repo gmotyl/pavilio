@@ -83,6 +83,9 @@ export function useTerminalSessions(project: string) {
       } catch (err) {
         console.warn(`[terminal] write focus to localStorage failed:`, err);
       }
+      // Broadcast so other surfaces (sidebar, mobile rail) stay in sync
+      // when focus changes from the iTerm grid/spine.
+      if (id) dispatchTerminalFocus(project, id);
     },
     [project],
   );
@@ -147,7 +150,15 @@ export function useTerminalSessions(project: string) {
       const detail = (e as CustomEvent<TerminalFocusEventDetail>).detail;
       if (!detail || detail.project !== project) return;
       setFocusedId(detail.sessionId);
-      fetchSessions();
+      // Only refetch if the session isn't already in our list — covers
+      // sidebar "+" creates without re-fetching on every echo from our
+      // own setFocusedId dispatch.
+      setSessions((prev) => {
+        if (!prev.some((s) => s.id === detail.sessionId)) {
+          fetchSessions();
+        }
+        return prev;
+      });
     };
     window.addEventListener(TERMINAL_FOCUS_EVENT, handler);
     return () => window.removeEventListener(TERMINAL_FOCUS_EVENT, handler);
