@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
   GitCommit,
   ChevronRight,
@@ -6,11 +6,10 @@ import {
   ArrowLeft,
   Columns2,
   AlignJustify,
-  Folder,
 } from "lucide-react";
 import DiffView, { type DiffMode } from "./DiffView";
-import { buildFileTree, countFiles, type TreeNode } from "./file-tree";
-import { useGitViewMode } from "./useGitViewMode";
+import FileChangeList from "./FileChangeList";
+import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
 
 interface Commit {
   sha: string;
@@ -27,7 +26,8 @@ interface CommitFile {
 
 interface GitHistoryProps {
   repo?: string;
-  viewMode?: "flat" | "tree";
+  viewMode?: GitViewMode;
+  onViewModeChange?: (mode: GitViewMode) => void;
   commitsOpen?: boolean;
   onCommitsOpenChange?: (open: boolean) => void;
   /** Controlled active commit sha (for URL sync) */
@@ -40,14 +40,6 @@ interface GitHistoryProps {
   onActiveFileChange?: (file: string | null) => void;
   /** When true, render the commit's file list alongside the diff. */
   showListSidebar?: boolean;
-}
-
-function statusColor(s: string) {
-  if (s === "A") return "var(--green)";
-  if (s === "M") return "var(--yellow)";
-  if (s === "D") return "var(--red)";
-  if (s === "R") return "var(--blue)";
-  return "var(--text-tertiary)";
 }
 
 function relativeDate(dateStr: string): string {
@@ -66,6 +58,7 @@ function relativeDate(dateStr: string): string {
 export default function GitHistory({
   repo,
   viewMode: controlledViewMode,
+  onViewModeChange,
   commitsOpen = true,
   onCommitsOpenChange,
   activeSha,
@@ -87,7 +80,6 @@ export default function GitHistory({
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
   const [localViewMode] = useGitViewMode();
   const viewMode = controlledViewMode ?? localViewMode;
-  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
 
   // Controlled/uncontrolled sync: when activeSha prop changes, mirror to internal state
   useEffect(() => {
@@ -127,7 +119,6 @@ export default function GitHistory({
     }
     setExpanded(sha);
     setActiveDiff(null);
-    setCollapsedDirs(new Set());
     onActiveShaChange?.(sha);
     onActiveFileChange?.(null);
   };
@@ -176,165 +167,39 @@ export default function GitHistory({
     setDiffLoading(false);
   };
 
-  const fileTree = useMemo(() => buildFileTree(commitFiles), [commitFiles]);
-
-  const toggleDir = (path: string) => {
-    const next = new Set(collapsedDirs);
-    next.has(path) ? next.delete(path) : next.add(path);
-    setCollapsedDirs(next);
-  };
-
-  const renderTreeNode = (
-    node: TreeNode,
-    sha: string,
-    depth: number,
-    compact = false,
-  ): React.ReactNode[] => {
-    const items: React.ReactNode[] = [];
-    const indent = compact ? depth * 12 + 8 : depth * 16 + 8;
-    const dirs = node.children
-      .filter((c) => !c.file)
-      .sort((a, b) => a.name.localeCompare(b.name));
-    const nodeFiles = node.children
-      .filter((c) => c.file)
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    for (const dir of dirs) {
-      const isCollapsed = collapsedDirs.has(dir.path);
-      const fc = countFiles(dir);
-      items.push(
-        <button
-          key={`dir-${dir.path}`}
-          onClick={() => toggleDir(dir.path)}
-          className="flex items-center gap-1.5 py-1 px-2 rounded w-full text-left transition-colors"
-          style={{ paddingLeft: `${indent}px` }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "var(--bg-hover)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
-        >
-          {isCollapsed ? (
-            <ChevronRight size={11} style={{ color: "var(--text-muted)" }} />
-          ) : (
-            <ChevronDown size={11} style={{ color: "var(--text-muted)" }} />
-          )}
-          <Folder size={12} style={{ color: "var(--accent)", opacity: 0.7 }} />
-          <span
-            className={`text-[12px] font-mono${compact ? " truncate" : ""}`}
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {dir.name}
-          </span>
-          <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-            {fc}
-          </span>
-        </button>,
-      );
-      if (!isCollapsed)
-        items.push(...renderTreeNode(dir, sha, depth + 1, compact));
-    }
-
-    for (const child of nodeFiles) {
-      const f = child.file!;
-      const isActive = activeDiff?.sha === sha && activeDiff?.file === f.path;
-      items.push(
-        <button
-          key={f.path}
-          onClick={() => openDiff(sha, f.path)}
-          className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
-          style={{
-            paddingLeft: `${indent}px`,
-            background: isActive ? "var(--bg-active)" : undefined,
-          }}
-          onMouseEnter={(e) => {
-            if (!isActive)
-              e.currentTarget.style.background = "var(--bg-hover)";
-          }}
-          onMouseLeave={(e) => {
-            if (!isActive) e.currentTarget.style.background = "transparent";
-          }}
-        >
-          <span
-            className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
-            style={{ color: statusColor(f.status) }}
-          >
-            {f.status}
-          </span>
-          <span
-            className="text-[12px] font-mono truncate"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {child.name}
-          </span>
-        </button>,
-      );
-    }
-    return items;
-  };
-
   if (commits.length === 0) return null;
 
   const renderSidebarList = () => {
     if (!activeDiff) return null;
     const commit = commits.find((c) => c.sha === activeDiff.sha);
     return (
-      <div>
-        <div
-          className="text-[11px] font-semibold uppercase tracking-widest mb-1"
-          style={{ color: "var(--text-tertiary)" }}
-        >
-          {activeDiff.sha.slice(0, 7)}
-        </div>
-        {commit && (
-          <div
-            className="text-[11px] mb-2 truncate"
-            style={{ color: "var(--text-muted)" }}
-            title={commit.message}
-          >
-            {commit.message}
-          </div>
-        )}
-        <div className="space-y-0.5">
-          {viewMode === "tree"
-            ? renderTreeNode(fileTree, activeDiff.sha, 0, true)
-            : commitFiles.map((f) => {
-                const isActive = activeDiff.file === f.path;
-                return (
-                  <button
-                    key={f.path}
-                    onClick={() => openDiff(activeDiff.sha, f.path)}
-                    className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
-                    style={{
-                      background: isActive ? "var(--bg-active)" : undefined,
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive)
-                        e.currentTarget.style.background = "var(--bg-hover)";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive)
-                        e.currentTarget.style.background = "transparent";
-                    }}
-                  >
-                    <span
-                      className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
-                      style={{ color: statusColor(f.status) }}
-                    >
-                      {f.status}
-                    </span>
-                    <span
-                      className="text-[12px] font-mono truncate"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {f.path}
-                    </span>
-                  </button>
-                );
-              })}
-        </div>
-      </div>
+      <FileChangeList
+        files={commitFiles}
+        activeFile={activeDiff.file}
+        onFileClick={(path) => openDiff(activeDiff.sha, path)}
+        viewMode={viewMode}
+        onViewModeChange={onViewModeChange}
+        compact
+        headerExtra={
+          <>
+            <div
+              className="text-[11px] font-semibold uppercase tracking-widest mb-1"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              {activeDiff.sha.slice(0, 7)}
+            </div>
+            {commit && (
+              <div
+                className="text-[11px] mb-2 truncate"
+                style={{ color: "var(--text-muted)" }}
+                title={commit.message}
+              >
+                {commit.message}
+              </div>
+            )}
+          </>
+        }
+      />
     );
   };
 
@@ -427,7 +292,6 @@ export default function GitHistory({
     if (showListSidebar) {
       return (
         <div className="md:flex md:gap-4">
-          <div className="flex-1 min-w-0">{diffEl}</div>
           <aside
             className="hidden md:block w-[280px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg p-2"
             style={{
@@ -437,6 +301,7 @@ export default function GitHistory({
           >
             {renderSidebarList()}
           </aside>
+          <div className="flex-1 min-w-0">{diffEl}</div>
         </div>
       );
     }
@@ -526,7 +391,7 @@ export default function GitHistory({
 
               {/* Expanded: files changed */}
               {expanded === c.sha && (
-                <div className="ml-6 mt-1 mb-2 space-y-0.5">
+                <div className="ml-6 mt-1 mb-2">
                   {filesLoading ? (
                     <p
                       className="text-xs px-2 py-1"
@@ -541,35 +406,13 @@ export default function GitHistory({
                     >
                       No files (merge commit or root)
                     </p>
-                  ) : viewMode === "tree" ? (
-                    renderTreeNode(fileTree, c.sha, 0)
                   ) : (
-                    commitFiles.map((f) => (
-                      <button
-                        key={f.path}
-                        onClick={() => openDiff(c.sha, f.path)}
-                        className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
-                        onMouseEnter={(e) =>
-                          (e.currentTarget.style.background = "var(--bg-hover)")
-                        }
-                        onMouseLeave={(e) =>
-                          (e.currentTarget.style.background = "transparent")
-                        }
-                      >
-                        <span
-                          className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
-                          style={{ color: statusColor(f.status) }}
-                        >
-                          {f.status}
-                        </span>
-                        <span
-                          className="text-[12px] font-mono truncate"
-                          style={{ color: "var(--text-secondary)" }}
-                        >
-                          {f.path}
-                        </span>
-                      </button>
-                    ))
+                    <FileChangeList
+                      files={commitFiles}
+                      onFileClick={(path) => openDiff(c.sha, path)}
+                      viewMode={viewMode}
+                      hideHeader
+                    />
                   )}
                 </div>
               )}

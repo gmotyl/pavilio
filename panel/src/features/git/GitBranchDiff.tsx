@@ -5,13 +5,11 @@ import {
   ArrowLeft,
   Columns2,
   AlignJustify,
-  FolderTree,
-  Folder,
   GitCompareArrows,
 } from "lucide-react";
 import DiffView, { type DiffMode } from "./DiffView";
 import BranchPicker from "./BranchPicker";
-import { buildFileTree, countFiles, type TreeNode } from "./file-tree";
+import FileChangeList from "./FileChangeList";
 
 interface DiffFile {
   status: string;
@@ -34,14 +32,6 @@ interface GitBranchDiffProps {
   onActiveFileChange?: (file: string | null) => void;
   /** When true, render the file list alongside the diff instead of replacing it. */
   showListSidebar?: boolean;
-}
-
-function statusColor(s: string) {
-  if (s === "A") return "var(--green)";
-  if (s === "M") return "var(--yellow)";
-  if (s === "D") return "var(--red)";
-  if (s === "R") return "var(--blue)";
-  return "var(--text-tertiary)";
 }
 
 function lsKey(repo: string) {
@@ -87,7 +77,6 @@ export default function GitBranchDiff({
   const [diffContent, setDiffContent] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
-  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
   // Monotonic id of the latest openDiff() call. Late responses for any
   // earlier id are dropped so a slow fetch can never overwrite the content
   // of a file the user has since clicked away from.
@@ -220,170 +209,15 @@ export default function GitBranchDiff({
     [files, fileFilter],
   );
 
-  const fileTree = useMemo(() => buildFileTree(displayFiles), [displayFiles]);
-
-  const toggleDir = (path: string) => {
-    const next = new Set(collapsedDirs);
-    next.has(path) ? next.delete(path) : next.add(path);
-    setCollapsedDirs(next);
-  };
-
-  const renderTreeNode = (node: TreeNode, depth: number): React.ReactNode[] => {
-    const items: React.ReactNode[] = [];
-    const dirs = node.children
-      .filter((c) => !c.file)
-      .sort((a, b) => a.name.localeCompare(b.name));
-    const nodeFiles = node.children
-      .filter((c) => c.file)
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    for (const dir of dirs) {
-      const isCollapsed = collapsedDirs.has(dir.path);
-      const fc = countFiles(dir);
-      items.push(
-        <button
-          key={`dir-${dir.path}`}
-          onClick={() => toggleDir(dir.path)}
-          className="flex items-center gap-1.5 py-1 px-2 rounded w-full text-left transition-colors"
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "var(--bg-hover)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
-        >
-          {isCollapsed ? (
-            <ChevronRight size={11} style={{ color: "var(--text-muted)" }} />
-          ) : (
-            <ChevronDown size={11} style={{ color: "var(--text-muted)" }} />
-          )}
-          <Folder size={12} style={{ color: "var(--accent)", opacity: 0.7 }} />
-          <span
-            className="text-[12px] font-mono"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {dir.name}
-          </span>
-          <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-            {fc}
-          </span>
-        </button>,
-      );
-      if (!isCollapsed) items.push(...renderTreeNode(dir, depth + 1));
-    }
-
-    for (const child of nodeFiles) {
-      const f = child.file!;
-      const isActive = activeDiff?.file === f.path;
-      items.push(
-        <button
-          key={f.path}
-          onClick={() => openDiff(f.path)}
-          className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
-          style={{
-            paddingLeft: `${depth * 16 + 8}px`,
-            background: isActive ? "var(--bg-active)" : undefined,
-          }}
-          onMouseEnter={(e) => {
-            if (!isActive)
-              e.currentTarget.style.background = "var(--bg-hover)";
-          }}
-          onMouseLeave={(e) => {
-            if (!isActive) e.currentTarget.style.background = "transparent";
-          }}
-        >
-          <span
-            className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
-            style={{ color: statusColor(f.status) }}
-          >
-            {f.status}
-          </span>
-          <span
-            className="text-[12px] font-mono truncate"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {child.name}
-          </span>
-        </button>,
-      );
-    }
-    return items;
-  };
-
   const renderSidebarList = () => (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <div
-          className="text-[11px] font-semibold uppercase tracking-widest flex-1"
-          style={{ color: "var(--text-tertiary)" }}
-        >
-          Changed ({displayFiles.length})
-        </div>
-        <button
-          type="button"
-          onClick={() => onViewModeChange?.("flat")}
-          className="p-1 rounded"
-          style={{
-            color: viewMode === "flat" ? "var(--accent)" : "var(--text-tertiary)",
-            background: viewMode === "flat" ? "var(--bg-hover)" : "transparent",
-          }}
-          title="Flat list"
-        >
-          <AlignJustify size={12} />
-        </button>
-        <button
-          type="button"
-          onClick={() => onViewModeChange?.("tree")}
-          className="p-1 rounded"
-          style={{
-            color: viewMode === "tree" ? "var(--accent)" : "var(--text-tertiary)",
-            background: viewMode === "tree" ? "var(--bg-hover)" : "transparent",
-          }}
-          title="Tree"
-        >
-          <FolderTree size={12} />
-        </button>
-      </div>
-      <div className="space-y-0.5">
-        {viewMode === "tree"
-          ? renderTreeNode(fileTree, 0)
-          : displayFiles.map((f) => {
-              const isActive = activeDiff?.file === f.path;
-              return (
-                <button
-                  key={f.path}
-                  onClick={() => openDiff(f.path)}
-                  className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
-                  style={{
-                    background: isActive ? "var(--bg-active)" : undefined,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive)
-                      e.currentTarget.style.background = "var(--bg-hover)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive)
-                      e.currentTarget.style.background = "transparent";
-                  }}
-                >
-                  <span
-                    className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
-                    style={{ color: statusColor(f.status) }}
-                  >
-                    {f.status}
-                  </span>
-                  <span
-                    className="text-[12px] font-mono truncate"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    {f.path}
-                  </span>
-                </button>
-              );
-            })}
-      </div>
-    </div>
+    <FileChangeList
+      files={displayFiles}
+      activeFile={activeDiff?.file ?? null}
+      onFileClick={openDiff}
+      viewMode={viewMode}
+      onViewModeChange={onViewModeChange}
+      compact
+    />
   );
 
   const renderList = () => (
@@ -489,47 +323,14 @@ export default function GitBranchDiff({
               </p>
             )}
           {!loading && displayFiles.length > 0 && (
-            <div className="space-y-0.5">
-              {viewMode === "tree"
-                ? renderTreeNode(fileTree, 0)
-                : displayFiles.map((f) => {
-                    const isActive = activeDiff?.file === f.path;
-                    return (
-                      <button
-                        key={f.path}
-                        onClick={() => openDiff(f.path)}
-                        className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
-                        style={{
-                          background: isActive
-                            ? "var(--bg-active)"
-                            : undefined,
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isActive)
-                            e.currentTarget.style.background =
-                              "var(--bg-hover)";
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isActive)
-                            e.currentTarget.style.background = "transparent";
-                        }}
-                      >
-                        <span
-                          className="text-[11px] font-mono font-semibold w-4 text-center shrink-0"
-                          style={{ color: statusColor(f.status) }}
-                        >
-                          {f.status}
-                        </span>
-                        <span
-                          className="text-[12px] font-mono truncate"
-                          style={{ color: "var(--text-secondary)" }}
-                        >
-                          {f.path}
-                        </span>
-                      </button>
-                    );
-                  })}
-            </div>
+            <FileChangeList
+              files={displayFiles}
+              activeFile={activeDiff?.file ?? null}
+              onFileClick={openDiff}
+              viewMode={viewMode}
+              onViewModeChange={onViewModeChange}
+              hideHeader
+            />
           )}
         </>
       )}

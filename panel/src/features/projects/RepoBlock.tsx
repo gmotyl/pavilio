@@ -135,6 +135,7 @@ export function RepoBlock({
         <GitHistory
           repo={repo.path}
           viewMode={viewMode}
+          onViewModeChange={onViewModeChange}
           showListSidebar={showListSidebar}
           commitsOpen={commitsOpen}
           onCommitsOpenChange={onCommitsOpenChange}

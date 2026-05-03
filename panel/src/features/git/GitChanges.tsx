@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import DiffView, { type DiffMode } from "./DiffView";
 import BranchPicker from "./BranchPicker";
+import FileChangeList from "./FileChangeList";
 import { buildFileTree, countFiles, type TreeNode } from "./file-tree";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
 
@@ -484,45 +485,14 @@ export default function GitChanges({
   };
 
   const renderSidebarList = () => (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <div
-          className="text-[11px] font-semibold uppercase tracking-widest flex-1"
-          style={{ color: "var(--text-tertiary)" }}
-        >
-          Changed ({displayFiles.length})
-        </div>
-        <button
-          type="button"
-          onClick={() => setViewMode("flat")}
-          className="p-1 rounded"
-          style={{
-            color: viewMode === "flat" ? "var(--accent)" : "var(--text-tertiary)",
-            background: viewMode === "flat" ? "var(--bg-hover)" : "transparent",
-          }}
-          title="Flat list"
-        >
-          <AlignJustify size={12} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode("tree")}
-          className="p-1 rounded"
-          style={{
-            color: viewMode === "tree" ? "var(--accent)" : "var(--text-tertiary)",
-            background: viewMode === "tree" ? "var(--bg-hover)" : "transparent",
-          }}
-          title="Tree"
-        >
-          <FolderTree size={12} />
-        </button>
-      </div>
-      <div className="space-y-0.5">
-        {viewMode === "tree"
-          ? renderTreeNode(fileTree, 0, true)
-          : displayFiles.map((f) => renderFlatFileRow(f, true))}
-      </div>
-    </div>
+    <FileChangeList
+      files={displayFiles}
+      activeFile={activeDiff}
+      onFileClick={openDiff}
+      viewMode={viewMode}
+      onViewModeChange={setViewMode}
+      compact
+    />
   );
 
   // Diff detail view
