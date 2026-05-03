@@ -15,6 +15,7 @@ import { useActiveFile } from "../explorer/useActiveFile";
 import { useFileIndex } from "../explorer/useFileIndex";
 import GitBranchDiff from "../git/GitBranchDiff";
 import GitChanges from "../git/GitChanges";
+import GitWorktrees from "../git/GitWorktrees";
 import GitHistory from "../git/GitHistory";
 import { useGitViewMode } from "../git/useGitViewMode";
 import ImageDropZone from "../markdown/ImageDropZone";
@@ -1097,6 +1098,16 @@ export default function ProjectView() {
                       { replace: true },
                     )
                   }
+                />
+              </div>
+              <div
+                className="mt-4 pt-4"
+                style={{ borderTop: "1px solid var(--border-subtle)" }}
+              >
+                <GitWorktrees
+                  repo={repo.path}
+                  viewMode={gitViewMode}
+                  onViewModeChange={setGitViewMode}
                 />
               </div>
               <div

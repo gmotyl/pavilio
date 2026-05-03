@@ -12,11 +12,9 @@ import {
   ChevronRight,
   ChevronDown,
   Folder,
-  GitFork,
 } from "lucide-react";
 import DiffView, { type DiffMode } from "./DiffView";
 import BranchPicker from "./BranchPicker";
-import GitBranchDiff from "./GitBranchDiff";
 import { buildFileTree, countFiles, type TreeNode } from "./file-tree";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
 
@@ -89,23 +87,6 @@ export default function GitChanges({
   const [commitMsg, setCommitMsg] = useState("");
   const [loading, setLoading] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
-  const [worktrees, setWorktrees] = useState<{ path: string; head: string; branch: string | null }[]>([]);
-  const [expandedWorktrees, setExpandedWorktrees] = useState<Set<string>>(() => new Set());
-
-  const isWorktreeExpanded = (path: string): boolean => expandedWorktrees.has(path);
-
-  const toggleWorktree = (path: string) => {
-    setExpandedWorktrees((prev) => {
-      const next = new Set(prev);
-      const open = !prev.has(path);
-      if (open) next.add(path);
-      else next.delete(path);
-      try {
-        localStorage.setItem(`panel-worktree-expanded-${path}`, String(open));
-      } catch {}
-      return next;
-    });
-  };
   const [activeDiff, setActiveDiff] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState("");
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
@@ -130,28 +111,6 @@ export default function GitChanges({
       if (res.ok) {
         const data = await res.json();
         setBranches(data.branches);
-      }
-    } catch {}
-  };
-
-  const fetchWorktrees = async () => {
-    try {
-      const res = await fetch(`/api/git/worktrees${qs}`);
-      if (res.ok) {
-        const data: { path: string; head: string; branch: string | null }[] = await res.json();
-        setWorktrees(data);
-        // Hydrate expanded state from localStorage once, keyed by the fetched paths
-        setExpandedWorktrees((prev) => {
-          const next = new Set(prev);
-          for (const wt of data) {
-            try {
-              if (localStorage.getItem(`panel-worktree-expanded-${wt.path}`) === "true") {
-                next.add(wt.path);
-              }
-            } catch {}
-          }
-          return next;
-        });
       }
     } catch {}
   };
@@ -183,7 +142,6 @@ export default function GitChanges({
   useEffect(() => {
     fetchStatus();
     fetchBranches();
-    fetchWorktrees();
   }, [repo]);
   useEffect(() => {
     setCommitMsg(suggestion);
@@ -781,73 +739,6 @@ export default function GitChanges({
           </div>
         );
       })()}
-
-      {/* Worktrees section */}
-      {!nested && worktrees.length > 1 && (
-        <div className="mb-4">
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <GitFork size={12} style={{ color: "var(--text-tertiary)" }} />
-            <span className="text-[11px] uppercase tracking-[0.12em]" style={{ color: "var(--text-tertiary)" }}>
-              Worktrees
-            </span>
-          </div>
-          <div className="space-y-1">
-            {worktrees.map((wt) => {
-              const expanded = isWorktreeExpanded(wt.path);
-              return (
-                <div key={wt.path}>
-                  <div
-                    className="flex items-center gap-2 px-2 py-1 rounded-md text-[11px] font-mono"
-                    style={{ background: "var(--bg-elevated)" }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleWorktree(wt.path)}
-                      className="w-4 h-4 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]"
-                      style={{ color: "var(--text-tertiary)" }}
-                      aria-label={expanded ? "Collapse worktree" : "Expand worktree"}
-                    >
-                      {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                    </button>
-                    <span
-                      className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono"
-                      style={{
-                        background: "var(--bg-base)",
-                        color: wt.branch === branch ? "var(--accent)" : "var(--text-secondary)",
-                        border: "1px solid var(--border-subtle)",
-                      }}
-                    >
-                      {wt.branch ?? "(detached)"}
-                    </span>
-                    <span
-                      className="truncate"
-                      style={{ color: "var(--text-muted)" }}
-                      title={wt.path}
-                    >
-                      {wt.path.replace(/^(\/Users\/|\/home\/)[^/]+\//, "~/")}
-                    </span>
-                  </div>
-                  {expanded && (
-                    <div className="ml-6 mt-1 mb-2 space-y-3">
-                      <GitChanges repo={wt.path} nested viewMode={viewMode} onViewModeChange={setViewMode} />
-                      <div
-                        className="pt-3"
-                        style={{ borderTop: "1px solid var(--border-subtle)" }}
-                      >
-                        <GitBranchDiff
-                          repo={wt.path}
-                          viewMode={viewMode}
-                          onViewModeChange={setViewMode}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {displayFiles.length === 0 && !fileFilter ? (
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
