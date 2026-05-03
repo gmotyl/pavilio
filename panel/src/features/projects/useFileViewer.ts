@@ -17,7 +17,14 @@ export function useFileViewer({ project, section }: Options) {
   const { setActiveFile } = useActiveFile();
   const { lastMessage } = useWebSocket();
 
-  const selectedFile = searchParams.get("file");
+  // The `?file=` param is shared with repoOpenFile on the repos tab and
+  // unused on iterm — claim it only for section views (notes, plans,
+  // memo, progress, qa). Otherwise our load effect 404s and clears the
+  // URL param, which also wipes the repo-search file the user just
+  // opened.
+  const ownsFileParam =
+    !!section && section !== "repos" && section !== "iterm";
+  const selectedFile = ownsFileParam ? searchParams.get("file") : null;
   const [content, setContent] = useState("");
   const [absolutePath, setAbsolutePath] = useState("");
   const [loading, setLoading] = useState(false);
