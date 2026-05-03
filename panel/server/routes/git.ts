@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { execSync } from "child_process";
-import { resolve } from "path";
+import { readFileSync } from "fs";
+import { join, resolve } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
 
@@ -51,11 +52,19 @@ function getWorkingTreeDiff(file: string, repo?: string): string {
     .trim();
 
   if (status === "??") {
-    // `git diff --no-index` always exits non-zero when files differ; gitDiffOutput
-    // captures stdout from the thrown error. Note: only ONE `--` separator before
-    // the path pair — adding `--` between the two paths makes git treat it as a
-    // third argument and print usage instead of a diff.
-    return gitDiffOutput(`diff --no-index -- /dev/null ${quotedFile}`, repo);
+    // Read the file directly and synthesize an add-diff. Avoids the
+    // `git diff --no-index` argument-parsing quirks and works the same
+    // whether the file is text or otherwise — DiffView falls back
+    // gracefully for binary content. If the read fails, fall back to
+    // git diff --no-index so the user at least gets git's "Binary files
+    // differ" message rather than a 500.
+    try {
+      const abs = join(getRepoRoot(repo), file);
+      const content = readFileSync(abs, "utf-8");
+      return synthesizeAddDiff(file, content);
+    } catch {
+      return gitDiffOutput(`diff --no-index -- /dev/null ${quotedFile}`, repo);
+    }
   }
 
   if (status?.includes("A")) {
