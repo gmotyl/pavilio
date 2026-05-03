@@ -73,8 +73,10 @@ if command -v powershell.exe >/dev/null 2>&1; then
         PS_PAYLOAD="${PS_PAYLOAD}netsh interface portproxy delete v4tov4 listenport=${PANEL_PORT} listenaddress=${WIN_LAN_IP} ; "
       fi
       PS_PAYLOAD="${PS_PAYLOAD}netsh interface portproxy add v4tov4 listenport=${PANEL_PORT} listenaddress=0.0.0.0 connectport=${PANEL_PORT} connectaddress=${WSL_IP} ; "
-      PS_PAYLOAD="${PS_PAYLOAD}Get-NetFirewallRule -DisplayName 'Pavilio LAN ${PANEL_PORT}' -EA SilentlyContinue | Remove-NetFirewallRule ; "
-      PS_PAYLOAD="${PS_PAYLOAD}New-NetFirewallRule -DisplayName 'Pavilio LAN ${PANEL_PORT}' -Direction Inbound -LocalPort ${PANEL_PORT} -Protocol TCP -Action Allow | Out-Null ; "
+      # Doubled single quotes — PowerShell's escape for a literal ' inside a single-quoted string.
+      # Required because the whole PS_PAYLOAD is itself wrapped in single quotes by -ArgumentList below.
+      PS_PAYLOAD="${PS_PAYLOAD}Get-NetFirewallRule -DisplayName ''Pavilio LAN ${PANEL_PORT}'' -EA SilentlyContinue | Remove-NetFirewallRule ; "
+      PS_PAYLOAD="${PS_PAYLOAD}New-NetFirewallRule -DisplayName ''Pavilio LAN ${PANEL_PORT}'' -Direction Inbound -LocalPort ${PANEL_PORT} -Protocol TCP -Action Allow | Out-Null ; "
       PS_PAYLOAD="${PS_PAYLOAD}Write-Host DONE ; Start-Sleep 2"
       if powershell.exe -NoProfile -Command "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command','${PS_PAYLOAD}'" >/dev/null 2>&1; then
         echo "Portproxy + firewall rule updated."
@@ -94,8 +96,8 @@ curl -fsS -X POST "${BASE}/api/mobile-access/lan/enable" >/dev/null || {
 }
 
 STATUS="$(curl -s "${BASE}/api/mobile-access/status")"
-LAN_IP="$(printf '%s' "$STATUS" | grep -oP '"lanIp":"\K[^"]+' | head -1)"
-TOKEN="$(printf '%s' "$STATUS" | grep -oP '#mt=\K[A-Za-z0-9_-]+' | head -1)"
+LAN_IP="$(printf '%s' "$STATUS" | grep -o '"lanIp":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
+TOKEN="$(printf '%s' "$STATUS" | grep -o '#mt=[A-Za-z0-9_-]*' | head -n 1 | cut -d= -f2)"
 
 echo
 echo "===== Pavilio panel ready ====="
