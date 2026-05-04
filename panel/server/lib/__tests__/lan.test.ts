@@ -1,6 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import type { NetworkInterfaceInfo } from "os";
-import { detectLanIp } from "../lan";
+import {
+  detectLanIp,
+  getWslHostGatewayIp,
+  resetWslGatewayCacheForTests,
+} from "../lan";
 
 const notWsl = () => false;
 const noWslHost = () => null;
@@ -129,5 +133,51 @@ describe("detectLanIp", () => {
       en0: [addr("192.168.1.100")],
     });
     expect(detectLanIp(stub, noWslHost, notWsl)).toBe("192.168.1.100");
+  });
+});
+
+describe("getWslHostGatewayIp", () => {
+  const yesWsl = () => true;
+  beforeEach(() => resetWslGatewayCacheForTests());
+
+  it("parses the default-route Gateway column from /proc/net/route", () => {
+    // Real /proc/net/route layout (tab-separated). 01001AAC is little-endian
+    // for 172.26.0.1 — i.e. the Windows host as seen from WSL eth0.
+    const route =
+      "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n" +
+      "eth0\t00000000\t01001AAC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n" +
+      "eth0\t00001AAC\t00000000\t0001\t0\t0\t0\t00F0FFFF\t0\t0\t0\n";
+    expect(getWslHostGatewayIp(() => route, yesWsl)).toBe("172.26.0.1");
+  });
+
+  it("returns null when no default route is present", () => {
+    const route =
+      "Iface\tDestination\tGateway \tFlags\n" +
+      "eth0\t00001AAC\t00000000\t0001\n";
+    expect(getWslHostGatewayIp(() => route, yesWsl)).toBeNull();
+  });
+
+  it("returns null when not running on WSL (does not read /proc)", () => {
+    let called = false;
+    const read = () => {
+      called = true;
+      return "";
+    };
+    expect(getWslHostGatewayIp(read, () => false)).toBeNull();
+    expect(called).toBe(false);
+  });
+
+  it("caches the lookup so repeated calls don't re-read /proc", () => {
+    let reads = 0;
+    const read = () => {
+      reads += 1;
+      return (
+        "Iface\tDestination\tGateway\tFlags\n" +
+        "eth0\t00000000\t01001AAC\t0003\n"
+      );
+    };
+    expect(getWslHostGatewayIp(read, yesWsl)).toBe("172.26.0.1");
+    expect(getWslHostGatewayIp(read, yesWsl)).toBe("172.26.0.1");
+    expect(reads).toBe(1);
   });
 });

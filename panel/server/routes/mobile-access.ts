@@ -7,7 +7,12 @@ import {
   type TailscaleState,
 } from "../lib/tailscale.js";
 import { ensureToken, rotateToken, getCurrentToken } from "../lib/mobile-auth.js";
-import { detectLanIp, isWsl, getWslVmIp } from "../lib/lan.js";
+import {
+  detectLanIp,
+  isWsl,
+  getWslVmIp,
+  getWslHostGatewayIp,
+} from "../lib/lan.js";
 import { rebindPanel, getCurrentBindHost } from "../lib/panel-listener.js";
 
 const router = Router();
@@ -28,8 +33,17 @@ interface MobileAccessResponse {
 }
 
 function loopbackOnly(req: Request, res: Response, next: NextFunction) {
-  const addr = req.socket.remoteAddress ?? "";
-  if (addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1") {
+  const addr = (req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
+  if (addr === "127.0.0.1" || addr === "::1") {
+    return next();
+  }
+  // On WSL2, a browser running on the Windows host reaches the panel via
+  // wslrelay or netsh portproxy, which translates the source from
+  // 127.0.0.1 (Windows side) into the Windows host's WSL-side gateway IP
+  // (172.x.x.1) by the time it lands inside the VM. That's still
+  // "this machine" — accept it for the host-only management gate.
+  const wslHost = getWslHostGatewayIp();
+  if (wslHost && addr === wslHost) {
     return next();
   }
   return res.status(403).json({ error: "loopback only" });

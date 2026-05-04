@@ -111,6 +111,46 @@ export function getWslVmIp(
   return null;
 }
 
+// The WSL VM's default gateway, which is the Windows host's WSL-side IP.
+// Connections from a Windows-side browser arrive at the panel from this
+// address (after wslrelay or netsh portproxy translates Windows-localhost
+// traffic into the WSL VM), so for "host-only" management gates we treat
+// it as equivalent to loopback.
+let wslGatewayCache: string | null | undefined;
+export function getWslHostGatewayIp(
+  read: () => string = () => readFileSync("/proc/net/route", "utf8"),
+  wslCheck: () => boolean = isWsl,
+): string | null {
+  if (!wslCheck()) return null;
+  if (wslGatewayCache !== undefined) return wslGatewayCache;
+  try {
+    // /proc/net/route columns: Iface Destination Gateway Flags ...
+    // The default route has Destination=00000000. Gateway is little-endian hex.
+    const lines = read().split(/\r?\n/);
+    for (const line of lines.slice(1)) {
+      const cols = line.trim().split(/\s+/);
+      if (cols.length < 3) continue;
+      if (cols[1] !== "00000000") continue;
+      const hex = cols[2];
+      if (!/^[0-9A-Fa-f]{8}$/.test(hex)) continue;
+      const b1 = parseInt(hex.slice(6, 8), 16);
+      const b2 = parseInt(hex.slice(4, 6), 16);
+      const b3 = parseInt(hex.slice(2, 4), 16);
+      const b4 = parseInt(hex.slice(0, 2), 16);
+      wslGatewayCache = `${b1}.${b2}.${b3}.${b4}`;
+      return wslGatewayCache;
+    }
+  } catch {
+    // fall through to null
+  }
+  wslGatewayCache = null;
+  return wslGatewayCache;
+}
+
+export function resetWslGatewayCacheForTests(): void {
+  wslGatewayCache = undefined;
+}
+
 // Cache the PowerShell lookup — it takes up to a few hundred ms and /status
 // polls every 2 seconds while the modal is open.
 let wslHostCache: { ip: string | null; at: number } | null = null;
