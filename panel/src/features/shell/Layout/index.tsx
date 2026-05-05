@@ -51,6 +51,7 @@ export function Layout({ children }: LayoutProps) {
       <div className="hidden md:block">
         <button
           type="button"
+          data-testid="sidebar-toggle-left"
           onClick={left.toggle}
           className={`sidebar-toggle ${!left.expanded ? "visible" : ""}`}
           style={{ left: left.expanded ? 228 : 8 }}
@@ -86,6 +87,7 @@ export function Layout({ children }: LayoutProps) {
       <div className="hidden md:block">
         <button
           type="button"
+          data-testid="sidebar-toggle-right"
           onClick={right.toggle}
           className={`sidebar-toggle ${!right.expanded ? "visible" : ""}`}
           style={{ right: right.expanded ? 252 : 8 }}
