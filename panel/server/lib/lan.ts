@@ -126,13 +126,17 @@ export function getWslHostGatewayIp(
   try {
     // /proc/net/route columns: Iface Destination Gateway Flags ...
     // The default route has Destination=00000000. Gateway is little-endian hex.
+    // Flags are hex; require RTF_UP (0x01) and RTF_GATEWAY (0x02) so we skip
+    // stale or non-gateway routes that happen to share the default destination.
     const lines = read().split(/\r?\n/);
     for (const line of lines.slice(1)) {
       const cols = line.trim().split(/\s+/);
-      if (cols.length < 3) continue;
+      if (cols.length < 4) continue;
       if (cols[1] !== "00000000") continue;
+      const flags = parseInt(cols[3], 16);
+      if (Number.isNaN(flags) || (flags & 0x03) !== 0x03) continue;
       const hex = cols[2];
-      if (!/^[0-9A-Fa-f]{8}$/.test(hex)) continue;
+      if (hex === "00000000" || !/^[0-9A-Fa-f]{8}$/.test(hex)) continue;
       const b1 = parseInt(hex.slice(6, 8), 16);
       const b2 = parseInt(hex.slice(4, 6), 16);
       const b3 = parseInt(hex.slice(2, 4), 16);
