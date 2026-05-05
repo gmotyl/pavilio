@@ -196,4 +196,35 @@ describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () 
       "viewport-modal-title",
     );
   });
+
+  it("Esc closes the modal even when an xterm-style bubble listener would swallow it", () => {
+    const session = makeSession({ id: "s-esc-close" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    // Stand-in for xterm's bubble-phase handler that would normally consume
+    // Escape. The modal listener uses capture phase + stopPropagation so
+    // this should never fire while the modal is open.
+    const xtermLikeHandler = vi.fn();
+    window.addEventListener("keydown", xtermLikeHandler);
+
+    fireEvent.click(screen.getByTestId(`terminal-cell-eye-${session.id}`));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(xtermLikeHandler).not.toHaveBeenCalled();
+
+    window.removeEventListener("keydown", xtermLikeHandler);
+  });
+
+  it("Cmd+U with modal open toggles it closed", () => {
+    const session = makeSession({ id: "s-toggle" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    fireEvent.keyDown(window, { key: "u", metaKey: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "u", metaKey: true });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });

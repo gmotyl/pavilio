@@ -97,14 +97,18 @@ export function TerminalViewportModal({
 
   useEffect(() => {
     if (!snapshot) return;
+    // Capture phase so we beat xterm's own keydown handler — otherwise
+    // xterm sees Escape first and forwards it to the PTY (or swallows it),
+    // leaving the modal open. stopPropagation keeps xterm from ever
+    // seeing the event.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onCloseRef.current();
-      }
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      onCloseRef.current();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [snapshot]);
 
   const visibleSlice = useMemo(() => {

@@ -250,10 +250,10 @@ function TerminalCell({
     if (snap) setSnapshot(snap);
   }, []);
 
-  // Cmd+U (Mac) / Ctrl+U (Windows/Linux) opens the viewport reader for the
-  // focused cell. Capture phase so we beat xterm's own keydown handler and
-  // the browser's View Source default. Only the focused cell registers the
-  // listener — all other cells stay silent so the shortcut is unambiguous.
+  // Cmd+U (Mac) / Ctrl+U (Windows/Linux) toggles the viewport reader for
+  // the focused cell. Capture phase so we beat xterm's own keydown handler
+  // and the browser's View Source default. Only the focused cell registers
+  // the listener — all other cells stay silent so the shortcut is unambiguous.
   useEffect(() => {
     if (!focused) return;
     const onKey = (e: KeyboardEvent) => {
@@ -262,11 +262,11 @@ function TerminalCell({
       if (e.shiftKey || e.altKey) return;
       e.preventDefault();
       e.stopPropagation();
-      openViewport();
+      setSnapshot((cur) => (cur ? null : handleRef.current?.getBufferSnapshot() ?? null));
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [focused, openViewport]);
+  }, [focused]);
 
   return (
     <div
