@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Eye, X, Maximize2, Minimize2 } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
@@ -244,6 +244,30 @@ function TerminalCell({
   const headerBg = `color-mix(in srgb, ${accentColor} 22%, rgb(15,16,20))`;
   const handleRef = useRef<TerminalHandle | null>(null);
   const [snapshot, setSnapshot] = useState<BufferSnapshot | null>(null);
+
+  const openViewport = useCallback(() => {
+    const snap = handleRef.current?.getBufferSnapshot();
+    if (snap) setSnapshot(snap);
+  }, []);
+
+  // Cmd+U (Mac) / Ctrl+U (Windows/Linux) opens the viewport reader for the
+  // focused cell. Capture phase so we beat xterm's own keydown handler and
+  // the browser's View Source default. Only the focused cell registers the
+  // listener — all other cells stay silent so the shortcut is unambiguous.
+  useEffect(() => {
+    if (!focused) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "u") return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openViewport();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [focused, openViewport]);
+
   return (
     <div
       className="relative w-full overflow-hidden rounded-md group flex flex-col"
@@ -292,11 +316,10 @@ function TerminalCell({
         <div className="flex gap-0.5">
           <CellIconButton
             testId={`terminal-cell-eye-${session.id}`}
-            title="View viewport text (read aloud / print)"
+            title={`View viewport text (read aloud / print) — ${navigator.platform.includes("Mac") ? "⌘" : "Ctrl+"}U`}
             onClick={(e) => {
               e.stopPropagation();
-              const snap = handleRef.current?.getBufferSnapshot();
-              if (snap) setSnapshot(snap);
+              openViewport();
             }}
           >
             <Eye size={11} />
