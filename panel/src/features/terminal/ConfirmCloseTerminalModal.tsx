@@ -78,6 +78,7 @@ export function ConfirmCloseTerminalModal({
         <div className="flex justify-end gap-2">
           <button
             type="button"
+            data-testid="confirm-close-terminal-cancel"
             onClick={onCancel}
             className="px-3 py-1.5 rounded-md text-[12.5px]"
             style={{
@@ -92,6 +93,7 @@ export function ConfirmCloseTerminalModal({
             ref={closeBtnRef}
             autoFocus
             type="button"
+            data-testid="confirm-close-terminal-confirm"
             onClick={onConfirm}
             className="px-3 py-1.5 rounded-md text-[12.5px] font-semibold"
             style={{

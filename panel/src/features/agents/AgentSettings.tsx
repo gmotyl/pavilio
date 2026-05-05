@@ -94,6 +94,7 @@ function ActionModal({ state, onClose, onConfirm }: {
           </span>
           {state.status !== "running" && (
             <button
+              data-testid={`agent-action-modal-close-${action.id}`}
               onClick={onClose}
               className="rounded p-1 transition-colors"
               style={{ color: "var(--text-muted)" }}
@@ -151,6 +152,7 @@ function ActionModal({ state, onClose, onConfirm }: {
           {state.status === "confirm" && (
             <>
               <button
+                data-testid={`agent-action-cancel-${action.id}`}
                 onClick={onClose}
                 className="text-xs px-3 py-1.5 rounded transition-colors"
                 style={{ color: "var(--text-secondary)" }}
@@ -160,6 +162,7 @@ function ActionModal({ state, onClose, onConfirm }: {
                 Cancel
               </button>
               <button
+                data-testid={`agent-action-confirm-${action.id}`}
                 onClick={onConfirm}
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-colors"
                 style={{
@@ -181,6 +184,7 @@ function ActionModal({ state, onClose, onConfirm }: {
           )}
           {state.status === "done" && (
             <button
+              data-testid={`agent-action-close-${action.id}`}
               onClick={onClose}
               className="text-xs px-3 py-1.5 rounded transition-colors"
               style={{ color: "var(--text-secondary)" }}
@@ -290,6 +294,7 @@ function FileViewer({ file }: { file: SettingsFile }) {
   return (
     <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--border-subtle)" }}>
       <button
+        data-testid={`agent-settings-file-toggle-${file.path}`}
         onClick={toggle}
         className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors"
         style={{ background: expanded ? "var(--bg-active)" : "var(--bg-surface)" }}
@@ -312,6 +317,7 @@ function FileViewer({ file }: { file: SettingsFile }) {
         )}
         {isAgent && !editing && (
           <button
+            data-testid={`agent-settings-file-edit-${file.path}`}
             onClick={startEditing}
             className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded transition-colors"
             style={{ color: "var(--accent)" }}
@@ -323,6 +329,7 @@ function FileViewer({ file }: { file: SettingsFile }) {
           </button>
         )}
         <button
+          data-testid={`agent-settings-file-vscode-${file.path}`}
           onClick={openInVSCode}
           className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded transition-colors"
           style={{ color: "var(--text-secondary)" }}
@@ -333,6 +340,7 @@ function FileViewer({ file }: { file: SettingsFile }) {
           VS Code
         </button>
         <button
+          data-testid={`agent-settings-file-copy-${file.path}`}
           onClick={copyPath}
           className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded transition-colors"
           style={{ color: copied ? "var(--green)" : "var(--text-secondary)" }}
@@ -351,6 +359,7 @@ function FileViewer({ file }: { file: SettingsFile }) {
             {editing && (
               <div className="flex items-center gap-1">
                 <button
+                  data-testid={`agent-settings-file-save-${file.path}`}
                   onClick={save}
                   disabled={saving}
                   className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded transition-colors"
@@ -362,6 +371,7 @@ function FileViewer({ file }: { file: SettingsFile }) {
                   {saving ? "Saving..." : "Save"}
                 </button>
                 <button
+                  data-testid={`agent-settings-file-cancel-${file.path}`}
                   onClick={cancelEditing}
                   className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded transition-colors"
                   style={{ color: "var(--text-muted)" }}
@@ -449,6 +459,7 @@ export default function AgentSettings() {
           {WORKSPACE_ACTIONS.map((action) => (
             <button
               key={action.id}
+              data-testid={`agent-settings-action-${action.id}`}
               onClick={() => openConfirm(action)}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-colors"
               style={{

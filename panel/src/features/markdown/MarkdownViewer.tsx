@@ -63,6 +63,7 @@ export default function MarkdownViewer() {
     absolutePath ? (
       <>
         <button
+          data-testid="markdown-viewer-vscode"
           onClick={openInVSCode}
           className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors"
           style={{ color: "var(--text-secondary)" }}
@@ -79,6 +80,7 @@ export default function MarkdownViewer() {
           VS Code
         </button>
         <button
+          data-testid="markdown-viewer-copy-path"
           onClick={copyPath}
           className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors"
           style={{ color: copied ? "var(--green)" : "var(--text-secondary)" }}

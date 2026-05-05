@@ -38,6 +38,7 @@ export function TerminalMobileRail({
     >
       <button
         type="button"
+        data-testid="terminal-mobile-rail-new"
         onClick={() => onCreate()}
         className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center active:scale-95 transition-transform"
         style={{
@@ -57,6 +58,7 @@ export function TerminalMobileRail({
           <button
             key={s.id}
             type="button"
+            data-testid={`terminal-mobile-rail-session-${s.id}`}
             onClick={() => onFocus(s.id)}
             className={`shrink-0 rounded-full flex items-center transition-all active:scale-95 ${
               active ? "px-2.5 py-1 gap-1.5" : "w-7 h-7 justify-center"
@@ -89,6 +91,7 @@ export function TerminalMobileRail({
       <div className="relative shrink-0">
         <button
           type="button"
+          data-testid="terminal-mobile-rail-drawer"
           onClick={onOpenDrawer}
           className="w-7 h-7 rounded-md flex items-center justify-center active:scale-95 transition-transform"
           style={{

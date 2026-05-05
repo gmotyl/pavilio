@@ -15,6 +15,8 @@ interface BranchPickerProps {
   triggerClassName?: string;
   /** Additional inline styles for the trigger button */
   triggerStyle?: React.CSSProperties;
+  /** Disambiguator for data-testid when multiple pickers render simultaneously */
+  testIdPrefix?: string;
 }
 
 export default function BranchPicker({
@@ -26,6 +28,7 @@ export default function BranchPicker({
   trigger,
   triggerClassName,
   triggerStyle,
+  testIdPrefix = "branch-picker",
 }: BranchPickerProps) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -75,6 +78,7 @@ export default function BranchPicker({
   return (
     <div ref={containerRef} className="relative">
       <button
+        data-testid={`${testIdPrefix}-toggle`}
         onClick={() => setOpen(!open)}
         className={triggerClassName ?? "text-[11px] font-mono rounded px-1.5 py-0.5 cursor-pointer flex items-center gap-1"}
         style={triggerStyle ?? { background: "var(--bg-base)", color: "var(--text-secondary)", border: "1px solid var(--border-subtle)" }}
@@ -119,6 +123,7 @@ export default function BranchPicker({
               filtered.map((b, i) => (
                 <button
                   key={b}
+                  data-testid={`${testIdPrefix}-option-${b}`}
                   onClick={() => select(b)}
                   className="flex items-center w-full px-2 py-1 text-left text-[11px] font-mono transition-colors"
                   style={{

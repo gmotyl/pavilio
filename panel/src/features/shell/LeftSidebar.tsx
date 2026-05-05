@@ -241,6 +241,7 @@ export default function LeftSidebar() {
         >
           <button
             type="button"
+            data-testid={`sidebar-project-expand-${project.name}`}
             onClick={() => setExpanded(project.name, !expandedNow)}
             className="w-4 h-4 flex items-center justify-center shrink-0 rounded hover:bg-[var(--bg-hover)]"
             style={{ color: "var(--text-tertiary)" }}
@@ -272,6 +273,7 @@ export default function LeftSidebar() {
           </span>
           <button
             type="button"
+            data-testid={`sidebar-project-create-terminal-${project.name}`}
             onClick={(e) => {
               e.preventDefault();
               handleCreateTerminal(project.name);
@@ -288,6 +290,7 @@ export default function LeftSidebar() {
           </button>
           <button
             type="button"
+            data-testid={`sidebar-project-favorite-${project.name}`}
             onClick={(e) => {
               e.preventDefault();
               toggle(project.name);
@@ -304,6 +307,7 @@ export default function LeftSidebar() {
           </button>
           <button
             type="button"
+            data-testid={`sidebar-project-archive-${project.name}`}
             onClick={(e) => {
               e.preventDefault();
               archive(project.name);
@@ -331,6 +335,7 @@ export default function LeftSidebar() {
                 <li key={s.id}>
                   <button
                     type="button"
+                    data-testid={`sidebar-session-${s.id}`}
                     onClick={() => {
                       try {
                         localStorage.setItem(
@@ -419,6 +424,7 @@ export default function LeftSidebar() {
 
       <section className="px-1 pb-3 space-y-0.5">
         <button
+          data-testid="sidebar-help"
           onClick={() => navigate("/view/_help/panel-guide.md")}
           className="flex items-center gap-2 w-full text-[12px] px-2 py-1.5 rounded-md transition-colors"
           style={{ color: "var(--text-muted)" }}
@@ -435,6 +441,7 @@ export default function LeftSidebar() {
           Help & Shortcuts
         </button>
         <button
+          data-testid="sidebar-agent-settings"
           onClick={() => navigate("/settings")}
           className="flex items-center gap-2 w-full text-[12px] px-2 py-1.5 rounded-md transition-colors"
           style={{ color: "var(--text-muted)" }}
@@ -456,6 +463,7 @@ export default function LeftSidebar() {
         >
           <button
             type="button"
+            data-testid="sidebar-mobile-access-open"
             onClick={() => setMobileAccessOpen(true)}
             className="flex items-center gap-2 flex-1 text-left transition-colors"
             style={{ color: "inherit" }}
@@ -482,6 +490,7 @@ export default function LeftSidebar() {
         >
           <button
             type="button"
+            data-testid="sidebar-lan-access-open"
             onClick={() => setLanAccessOpen(true)}
             className="flex items-center gap-2 flex-1 text-left transition-colors"
             style={{ color: "inherit" }}

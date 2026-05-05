@@ -9,6 +9,7 @@ export default function WideToggle({ wide, onToggle }: WideToggleProps) {
   return (
     <button
       onClick={onToggle}
+      data-testid="wide-toggle"
       className="hidden md:flex items-center justify-center w-8 h-8 rounded-lg shadow-lg backdrop-blur-sm transition-all duration-150 hover:scale-110"
       style={{
         background: "color-mix(in srgb, var(--bg-surface) 80%, transparent)",

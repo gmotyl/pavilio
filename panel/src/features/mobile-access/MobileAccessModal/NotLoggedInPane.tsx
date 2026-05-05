@@ -7,6 +7,7 @@ export function NotLoggedInPane({ onRefresh }: { onRefresh: () => void }) {
         <code>tailscale up</code>
       </pre>
       <button
+        data-testid="mobile-access-not-logged-in-refresh"
         className="px-3 py-1 rounded border text-sm"
         onClick={onRefresh}
       >

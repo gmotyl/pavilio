@@ -76,6 +76,7 @@ export function ProjectSearchBar({
             {REPO_SCOPES.map(([key, label], i) => (
               <button
                 key={key}
+                data-testid={`project-search-repo-scope-${key}`}
                 onClick={() => onRepoScopeChange(key)}
                 className="text-[10px] px-1.5 py-0.5 transition-colors"
                 style={{
@@ -138,6 +139,7 @@ export function ProjectSearchBar({
           </span>
         )}
         <button
+          data-testid="project-search-close"
           onClick={onClose}
           className="text-[11px] px-1.5 py-0.5 rounded"
           style={{ color: "var(--text-muted)" }}

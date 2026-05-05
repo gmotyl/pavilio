@@ -313,6 +313,7 @@ export default function QuickTerminalModal() {
                         role="option"
                         aria-selected={active}
                         type="button"
+                        data-testid={`quick-terminal-option-${s.id}`}
                         onClick={() => selectSession(s.id)}
                         className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm font-mono transition-colors"
                         style={{
@@ -385,6 +386,7 @@ export default function QuickTerminalModal() {
           </span>
           <button
             type="button"
+            data-testid="quick-terminal-close"
             aria-label="Close"
             onClick={() => setOpen(false)}
             className="p-1 rounded hover:bg-white/5 transition-colors shrink-0"

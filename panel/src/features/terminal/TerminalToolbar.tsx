@@ -87,6 +87,7 @@ export function TerminalToolbar({
       >
         <button
           type="button"
+          data-testid="terminal-toolbar-new"
           onClick={() => onCreate()}
           className="flex items-center gap-1.5 pl-3 pr-2 text-[12px] transition-colors"
           style={{ color: "var(--text-secondary)" }}
@@ -103,6 +104,7 @@ export function TerminalToolbar({
         </button>
         <button
           type="button"
+          data-testid="terminal-toolbar-new-chevron"
           onClick={() => setNewOpen((o) => !o)}
           className="flex items-center px-1.5 transition-colors"
           style={{
@@ -136,6 +138,7 @@ export function TerminalToolbar({
             {projects.map((p) => (
               <button
                 key={p.name}
+                data-testid={`terminal-toolbar-new-project-${p.name}`}
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
@@ -177,6 +180,7 @@ export function TerminalToolbar({
           <div className="relative flex items-stretch">
             <button
               type="button"
+              data-testid="terminal-toolbar-repo-menu"
               onClick={(e) => {
                 e.stopPropagation();
                 setRepoMenuOpen((v) => !v);
@@ -215,6 +219,7 @@ export function TerminalToolbar({
                 {repos.map((repo) => (
                   <button
                     key={repo.path}
+                    data-testid={`terminal-toolbar-new-repo-${repo.path}`}
                     type="button"
                     onClick={() => {
                       setRepoMenuOpen(false);
@@ -306,6 +311,7 @@ export function TerminalToolbar({
             >
               <button
                 type="button"
+                data-testid={`terminal-toolbar-color-${s.id}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   setColorPickerFor(
@@ -352,6 +358,7 @@ export function TerminalToolbar({
               )}
               <button
                 type="button"
+                data-testid={`terminal-toolbar-close-${s.id}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   setPendingCloseId(s.id);
@@ -380,6 +387,7 @@ export function TerminalToolbar({
                   {COLOR_PRESETS.map((c) => (
                     <button
                       key={c.name}
+                      data-testid={`terminal-toolbar-color-preset-${c.name.toLowerCase()}-${s.id}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         onColorChange(s.id, c.hex);
@@ -409,6 +417,7 @@ export function TerminalToolbar({
       >
         <button
           type="button"
+          data-testid="terminal-toolbar-maximize"
           onClick={onToggleMaximize}
           disabled={sessions.length === 0}
           className="flex items-center gap-1.5 px-3 text-[11px] transition-colors disabled:opacity-40"

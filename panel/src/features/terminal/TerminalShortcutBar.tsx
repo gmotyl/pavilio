@@ -4,6 +4,7 @@ interface TerminalShortcutBarProps {
 }
 
 interface ShortcutButton {
+  key: string;
   label: string;
   data: string;
   mono?: boolean;
@@ -12,15 +13,15 @@ interface ShortcutButton {
 }
 
 const BUTTONS: ShortcutButton[] = [
-  { label: "Esc", data: "\x1b" },
-  { label: "↑", data: "\x1b[A", mono: true },
-  { label: "↓", data: "\x1b[B", mono: true },
-  { label: "←", data: "\x1b[D", mono: true },
-  { label: "→", data: "\x1b[C", mono: true },
-  { label: "Tab", data: "\t", mono: true },
-  { label: "⇧Tab", data: "\x1b[Z", mono: true },
-  { label: "Ctrl+C", data: "\x03", important: true },
-  { label: "⏎", data: "\r", confirm: true },
+  { key: "esc", label: "Esc", data: "\x1b" },
+  { key: "up", label: "↑", data: "\x1b[A", mono: true },
+  { key: "down", label: "↓", data: "\x1b[B", mono: true },
+  { key: "left", label: "←", data: "\x1b[D", mono: true },
+  { key: "right", label: "→", data: "\x1b[C", mono: true },
+  { key: "tab", label: "Tab", data: "\t", mono: true },
+  { key: "shift-tab", label: "⇧Tab", data: "\x1b[Z", mono: true },
+  { key: "ctrl-c", label: "Ctrl+C", data: "\x03", important: true },
+  { key: "enter", label: "⏎", data: "\r", confirm: true },
 ];
 
 export function TerminalShortcutBar({
@@ -37,8 +38,9 @@ export function TerminalShortcutBar({
     >
       {BUTTONS.map((btn) => (
         <button
-          key={btn.label}
+          key={btn.key}
           type="button"
+          data-testid={`terminal-shortcut-${btn.key}`}
           tabIndex={-1}
           onMouseDown={(e) => e.preventDefault()}
           onPointerDown={(e) => {
@@ -76,6 +78,7 @@ export function TerminalShortcutBar({
       {onToggleKeyboard && (
         <button
           type="button"
+          data-testid="terminal-shortcut-toggle-keyboard"
           tabIndex={-1}
           onMouseDown={(e) => e.preventDefault()}
           onPointerDown={(e) => {

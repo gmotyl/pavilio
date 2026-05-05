@@ -12,6 +12,7 @@ export function MobileAccessButton() {
   return (
     <>
       <button
+        data-testid="mobile-access-button"
         className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm"
         style={{
           background: "var(--bg-surface)",

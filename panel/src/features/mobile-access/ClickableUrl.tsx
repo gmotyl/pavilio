@@ -31,6 +31,7 @@ export function ClickableUrl({ href }: ClickableUrlProps) {
         {href}
       </a>
       <button
+        data-testid="clickable-url-copy"
         onClick={onCopy}
         aria-label={copied ? "Copied" : "Copy link"}
         title={copied ? "Copied" : "Copy link"}

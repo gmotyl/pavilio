@@ -204,6 +204,7 @@ export default function QuickFinder() {
           />
           {query && (
             <button
+              data-testid="quick-finder-clear"
               onClick={() => setQuery("")}
               className="text-xs"
               style={{ color: "var(--text-muted)" }}
@@ -276,6 +277,7 @@ export default function QuickFinder() {
               return (
                 <button
                   key={file.relativePath}
+                  data-testid={`quick-finder-result-${file.relativePath}`}
                   data-selected={isSelected}
                   onClick={() => openFile(file.relativePath)}
                   onMouseEnter={() => setSelectedIndex(i)}

@@ -115,6 +115,7 @@ function FileButton({
   return (
     <button
       ref={ref}
+      data-testid={`file-tree-file-${file.relativePath}`}
       onClick={() => onNavigate(viewPath)}
       title={file.relativePath}
       className="flex items-center gap-1 w-full px-1 py-0.5 rounded-md text-xs truncate transition-colors duration-100"
@@ -166,6 +167,7 @@ function SubfolderSection({
   return (
     <div>
       <button
+        data-testid={`file-tree-subfolder-${name}`}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 w-full px-1 py-0.5 rounded-md text-xs transition-colors duration-100"
         style={{ color: "var(--text-secondary)" }}
@@ -232,6 +234,7 @@ function ProjectTreeSection({
   return (
     <div className="mb-0.5">
       <button
+        data-testid={`file-tree-project-${name}`}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 w-full px-1 py-1 rounded-md text-xs font-medium transition-colors duration-100"
         style={{ color: "var(--text-primary)" }}

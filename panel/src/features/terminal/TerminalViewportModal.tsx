@@ -97,14 +97,18 @@ export function TerminalViewportModal({
 
   useEffect(() => {
     if (!snapshot) return;
+    // Capture phase so we beat xterm's own keydown handler — otherwise
+    // xterm sees Escape first and forwards it to the PTY (or swallows it),
+    // leaving the modal open. stopPropagation keeps xterm from ever
+    // seeing the event.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onCloseRef.current();
-      }
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      onCloseRef.current();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [snapshot]);
 
   const visibleSlice = useMemo(() => {
@@ -122,8 +126,13 @@ export function TerminalViewportModal({
   const canLoadMore = topIndex > 0;
   const linesShown = snapshot.viewportBottomIndex - topIndex + 1;
   const totalLines = snapshot.lines.length;
+  // Modal width matches the terminal width plus the body's horizontal
+  // padding (px-4 = 32) + outer border (2). Without this, the inner text
+  // area is ~34px narrower than the terminal, which clips the last ~4
+  // chars of each row to the next line.
+  const TEXT_AREA_CHROME_PX = 40;
   const contentWidthPx = Math.min(
-    Math.max(snapshot.pixelWidth, 320),
+    Math.max(snapshot.pixelWidth + TEXT_AREA_CHROME_PX, 320),
     Math.round(window.innerWidth * 0.95),
   );
 
@@ -185,6 +194,7 @@ export function TerminalViewportModal({
             </span>
             <button
               type="button"
+              data-testid="viewport-modal-print"
               onClick={handlePrint}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] transition-colors"
               style={{
@@ -205,6 +215,7 @@ export function TerminalViewportModal({
             </button>
             <button
               type="button"
+              data-testid="viewport-modal-close"
               onClick={onClose}
               className="p-1.5 rounded-md transition-colors"
               style={{ color: "var(--text-muted)" }}
@@ -231,6 +242,7 @@ export function TerminalViewportModal({
           {canLoadMore && (
             <button
               type="button"
+              data-testid="viewport-modal-load-previous"
               onClick={loadPrevious}
               className="w-full flex items-center justify-center gap-1.5 py-2 text-[11px] tracking-widest uppercase transition-colors sticky top-0 z-10"
               style={{

@@ -88,6 +88,7 @@ export default function ArchivePage() {
               </Link>
               <button
                 type="button"
+                data-testid={`archive-restore-${p.name}`}
                 onClick={() => restore(p.name)}
                 className="flex items-center gap-1.5 px-3 py-1 rounded text-[12px]"
                 style={{

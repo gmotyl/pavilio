@@ -14,6 +14,7 @@ export function ProjectTabsMenu({ tabs, activeTab }: MenuProps) {
     <div className="md:hidden relative">
       <button
         type="button"
+        data-testid="project-tabs-menu-toggle"
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px]"
         style={{
@@ -83,7 +84,7 @@ interface BarProps {
 export function ProjectTabsBar({ tabs, searchActive, onToggleSearch }: BarProps) {
   return (
     <div
-      className="hidden md:flex gap-2 mb-4 text-sm relative items-center sticky top-0 z-10 py-2"
+      className="hidden md:flex gap-2 mb-4 text-sm items-center sticky top-9 z-20 py-2"
       style={{
         background: "var(--bg-base)",
         borderBottom: "1px solid var(--border-subtle)",
@@ -123,6 +124,7 @@ export function ProjectTabsBar({ tabs, searchActive, onToggleSearch }: BarProps)
         ))}
       </div>
       <button
+        data-testid="project-tabs-toggle-search"
         onClick={onToggleSearch}
         className="ml-auto hidden md:block px-2 py-1.5 rounded-md transition-colors"
         style={{

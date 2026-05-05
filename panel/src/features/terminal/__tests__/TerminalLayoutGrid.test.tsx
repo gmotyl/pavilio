@@ -4,11 +4,45 @@ import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
 
 // TerminalView pulls in xterm which cannot render in jsdom; stub it.
-vi.mock("../TerminalView", () => ({
-  TerminalView: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid={`terminal-view-${sessionId}`} />
-  ),
-}));
+// The stub also calls onReady with a fake handle that returns a one-line
+// snapshot, so the Eye button (which depends on getBufferSnapshot) can
+// be exercised in tests without xterm.
+vi.mock("../TerminalView", async () => {
+  const React = await import("react");
+  return {
+    TerminalView: ({
+      sessionId,
+      onReady,
+    }: {
+      sessionId: string;
+      onReady?: (h: {
+        sessionId: string;
+        send: (d: string) => void;
+        focus: () => void;
+        getBufferSnapshot: () => unknown;
+      }) => void;
+    }) => {
+      React.useEffect(() => {
+        onReady?.({
+          sessionId,
+          send: () => {},
+          focus: () => {},
+          getBufferSnapshot: () => ({
+            lines: [[{ text: "hello" }]],
+            viewportTopIndex: 0,
+            viewportBottomIndex: 0,
+            pageSize: 1,
+            pixelWidth: 600,
+            fontSize: 13,
+            defaultFg: "#fff",
+            defaultBg: "#000",
+          }),
+        });
+      }, [sessionId]);
+      return <div data-testid={`terminal-view-${sessionId}`} />;
+    },
+  };
+});
 
 // TerminalActivityLed reads activity state — stub to keep tests focused.
 vi.mock("../TerminalActivityLed", () => ({
@@ -102,5 +136,95 @@ describe("TerminalLayoutGrid — confirm close flow", () => {
 
     expect(onExit).not.toHaveBeenCalled();
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () => {
+  it("clicking the Eye button opens the viewport modal", () => {
+    const session = makeSession({ id: "s-eye-click" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId(`terminal-cell-eye-${session.id}`));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("Cmd+U on the focused cell opens the viewport modal", () => {
+    const session = makeSession({ id: "s-cmd-u" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "u", metaKey: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("Ctrl+U on the focused cell opens the viewport modal", () => {
+    const session = makeSession({ id: "s-ctrl-u" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    fireEvent.keyDown(window, { key: "u", ctrlKey: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("plain U (no modifier) does NOT open the modal", () => {
+    const session = makeSession({ id: "s-plain-u" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    fireEvent.keyDown(window, { key: "u" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("Cmd+Shift+U is ignored (modifier set must be exact)", () => {
+    const session = makeSession({ id: "s-shift-u" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    fireEvent.keyDown(window, { key: "u", metaKey: true, shiftKey: true });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("Cmd+U on an unfocused cell does NOT open its modal", () => {
+    const a = makeSession({ id: "s-a" });
+    const b = makeSession({ id: "s-b" });
+    renderGrid({ sessions: [a, b], focusedId: a.id });
+
+    fireEvent.keyDown(window, { key: "u", metaKey: true });
+
+    // Only one dialog renders — for the focused session (a).
+    const dialogs = screen.queryAllByRole("dialog");
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0].getAttribute("aria-labelledby")).toBe(
+      "viewport-modal-title",
+    );
+  });
+
+  it("Esc closes the modal even when an xterm-style bubble listener would swallow it", () => {
+    const session = makeSession({ id: "s-esc-close" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    // Stand-in for xterm's bubble-phase handler that would normally consume
+    // Escape. The modal listener uses capture phase + stopPropagation so
+    // this should never fire while the modal is open.
+    const xtermLikeHandler = vi.fn();
+    window.addEventListener("keydown", xtermLikeHandler);
+
+    fireEvent.click(screen.getByTestId(`terminal-cell-eye-${session.id}`));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(xtermLikeHandler).not.toHaveBeenCalled();
+
+    window.removeEventListener("keydown", xtermLikeHandler);
+  });
+
+  it("Cmd+U with modal open toggles it closed", () => {
+    const session = makeSession({ id: "s-toggle" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    fireEvent.keyDown(window, { key: "u", metaKey: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "u", metaKey: true });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

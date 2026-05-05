@@ -385,6 +385,7 @@ export default function ProjectView() {
           {absolutePath && (
             <div className="flex gap-2 mb-4">
               <button
+                data-testid="project-view-vscode"
                 onClick={() => openInVSCode(absolutePath)}
                 className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
                 style={{ color: "var(--text-secondary)" }}

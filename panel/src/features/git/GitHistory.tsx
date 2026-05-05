@@ -209,6 +209,7 @@ export default function GitHistory({
       <div>
         <div className="flex items-center gap-3 mb-3">
           <button
+            data-testid="git-history-back"
             onClick={() => { setActiveDiff(null); onActiveFileChange?.(null); }}
             className="flex items-center gap-1.5 text-sm rounded-md px-2 py-1 transition-colors"
             style={{ color: "var(--text-secondary)" }}
@@ -241,6 +242,7 @@ export default function GitHistory({
             style={{ border: "1px solid var(--border-default)" }}
           >
             <button
+              data-testid="git-history-mode-inline"
               onClick={() => setDiffMode("inline")}
               className="p-1.5 transition-colors"
               style={{
@@ -256,6 +258,7 @@ export default function GitHistory({
               <AlignJustify size={14} />
             </button>
             <button
+              data-testid="git-history-mode-side-by-side"
               onClick={() => setDiffMode("side-by-side")}
               className="p-1.5 transition-colors"
               style={{
@@ -311,6 +314,7 @@ export default function GitHistory({
   return (
     <div>
       <button
+        data-testid="git-history-toggle"
         onClick={() => onCommitsOpenChange?.(!commitsOpen)}
         className="flex items-center gap-1.5 mb-3 transition-colors"
         style={{ color: "var(--text-tertiary)" }}
@@ -337,6 +341,7 @@ export default function GitHistory({
           {commits.map((c) => (
             <div key={c.sha}>
               <button
+                data-testid={`git-history-commit-${c.sha}`}
                 onClick={() => toggleCommit(c.sha)}
                 className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left transition-colors"
                 onMouseEnter={(e) =>
