@@ -111,6 +111,7 @@ export default function GitWorktrees({
               >
                 <button
                   type="button"
+                  data-testid={`git-worktree-toggle-${wt.path}`}
                   onClick={() => toggle(wt.path)}
                   className="w-4 h-4 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]"
                   style={{ color: "var(--text-tertiary)" }}

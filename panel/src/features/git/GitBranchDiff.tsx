@@ -224,6 +224,7 @@ export default function GitBranchDiff({
     <div>
       <div className="flex items-center gap-2 mb-3">
         <button
+          data-testid="git-branch-diff-toggle"
           onClick={handleSectionToggle}
           className="flex items-center gap-1.5 transition-colors"
           style={{ color: "var(--text-tertiary)" }}
@@ -253,6 +254,7 @@ export default function GitBranchDiff({
               branches={branches}
               value={baseBranch}
               onChange={handleBaseBranchChange}
+              testIdPrefix="git-branch-diff-base"
             />
             {commitsAhead > 0 && (
               <span
@@ -330,6 +332,7 @@ export default function GitBranchDiff({
               viewMode={viewMode}
               onViewModeChange={onViewModeChange}
               hideHeader
+              testIdPrefix="git-branch-diff-files"
             />
           )}
         </>
@@ -342,6 +345,7 @@ export default function GitBranchDiff({
       <div>
         <div className="flex items-center gap-3 mb-3">
           <button
+            data-testid="git-branch-diff-back"
             onClick={() => {
               setActiveDiff(null);
               onActiveFileChange?.(null);
@@ -377,6 +381,7 @@ export default function GitBranchDiff({
             style={{ border: "1px solid var(--border-default)" }}
           >
             <button
+              data-testid="git-branch-diff-mode-inline"
               onClick={() => setDiffMode("inline")}
               className="p-1.5 transition-colors"
               style={{
@@ -392,6 +397,7 @@ export default function GitBranchDiff({
               <AlignJustify size={14} />
             </button>
             <button
+              data-testid="git-branch-diff-mode-side-by-side"
               onClick={() => setDiffMode("side-by-side")}
               className="p-1.5 transition-colors"
               style={{

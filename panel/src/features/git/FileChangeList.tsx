@@ -36,6 +36,8 @@ interface Props {
   compact?: boolean;
   /** Hide the entire header strip (label + view toggle). */
   hideHeader?: boolean;
+  /** Disambiguator for data-testid when multiple lists render simultaneously */
+  testIdPrefix?: string;
 }
 
 /**
@@ -54,6 +56,7 @@ export function FileChangeList({
   headerExtra,
   compact = false,
   hideHeader = false,
+  testIdPrefix = "file-change-list",
 }: Props) {
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(
     () => new Set(),
@@ -76,6 +79,7 @@ export function FileChangeList({
     return (
       <button
         key={f.path}
+        data-testid={`${testIdPrefix}-flat-${f.path}`}
         onClick={() => onFileClick(f.path)}
         className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
         style={{ background: isActive ? "var(--bg-active)" : undefined }}
@@ -118,6 +122,7 @@ export function FileChangeList({
       items.push(
         <button
           key={`dir-${dir.path}`}
+          data-testid={`${testIdPrefix}-dir-${dir.path}`}
           onClick={() => toggleDir(dir.path)}
           className="flex items-center gap-1.5 py-1 px-2 rounded w-full text-left transition-colors"
           style={{ paddingLeft: `${indent}px` }}
@@ -157,6 +162,7 @@ export function FileChangeList({
       items.push(
         <button
           key={f.path}
+          data-testid={`${testIdPrefix}-tree-file-${f.path}`}
           onClick={() => onFileClick(f.path)}
           className="flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors"
           style={{
@@ -204,6 +210,7 @@ export function FileChangeList({
           <>
             <button
               type="button"
+              data-testid={`${testIdPrefix}-view-flat`}
               onClick={() => onViewModeChange("flat")}
               className="p-1 rounded"
               style={{
@@ -220,6 +227,7 @@ export function FileChangeList({
             </button>
             <button
               type="button"
+              data-testid={`${testIdPrefix}-view-tree`}
               onClick={() => onViewModeChange("tree")}
               className="p-1 rounded"
               style={{

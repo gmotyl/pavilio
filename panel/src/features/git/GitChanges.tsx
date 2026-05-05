@@ -258,6 +258,7 @@ export default function GitChanges({
       items.push(
         <button
           key={`dir-${dir.path}`}
+          data-testid={`git-changes-dir-${repo ?? "workspace"}-${dir.path}`}
           onClick={() => toggleDir(dir.path)}
           className="flex items-center gap-1.5 py-1 px-2 rounded-md w-full text-left transition-colors"
           style={{ paddingLeft: `${indent}px` }}
@@ -309,6 +310,7 @@ export default function GitChanges({
         items.push(
           <button
             key={f.path}
+            data-testid={`git-changes-tree-file-compact-${repo ?? "workspace"}-${f.path}`}
             onClick={() => openDiff(f.path)}
             className={`flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors ${isDimmed(f.path) ? "opacity-35" : ""}`}
             style={{
@@ -371,6 +373,7 @@ export default function GitChanges({
             {statusLabel(f.status)}
           </span>
           <button
+            data-testid={`git-changes-tree-file-${repo ?? "workspace"}-${f.path}`}
             onClick={() => openDiff(f.path)}
             className="text-[13px] font-mono truncate flex-1 text-left"
             style={{ color: "var(--text-secondary)" }}
@@ -379,6 +382,7 @@ export default function GitChanges({
           </button>
           {!repo && f.path.startsWith("projects/") && (
             <button
+              data-testid={`git-changes-open-file-${f.path}`}
               onClick={(e) => {
                 e.stopPropagation();
                 window.open(
@@ -405,6 +409,7 @@ export default function GitChanges({
       return (
         <button
           key={f.path}
+          data-testid={`git-changes-flat-file-compact-${repo ?? "workspace"}-${f.path}`}
           onClick={() => openDiff(f.path)}
           className={`flex items-center gap-2 w-full px-2 py-1 rounded text-left transition-colors ${isDimmed(f.path) ? "opacity-35" : ""}`}
           style={{ background: isActive ? "var(--bg-active)" : undefined }}
@@ -458,6 +463,7 @@ export default function GitChanges({
           {statusLabel(f.status)}
         </span>
         <button
+          data-testid={`git-changes-flat-file-${repo ?? "workspace"}-${f.path}`}
           onClick={() => openDiff(f.path)}
           className="text-[13px] font-mono truncate flex-1 text-left"
           style={{ color: "var(--text-secondary)" }}
@@ -466,6 +472,7 @@ export default function GitChanges({
         </button>
         {!repo && f.path.startsWith("projects/") && (
           <button
+            data-testid={`git-changes-flat-open-file-${f.path}`}
             onClick={(e) => {
               e.stopPropagation();
               window.open(
@@ -501,6 +508,7 @@ export default function GitChanges({
       <div>
         <div className="flex items-center gap-3 mb-4">
           <button
+            data-testid={`git-changes-back-${repo ?? "workspace"}`}
             onClick={() => {
               setActiveDiff(null);
               onOpenFileChange?.(null);
@@ -530,6 +538,7 @@ export default function GitChanges({
             style={{ border: "1px solid var(--border-default)" }}
           >
             <button
+              data-testid={`git-changes-mode-inline-${repo ?? "workspace"}`}
               onClick={() => setDiffMode("inline")}
               className="p-1.5 transition-colors"
               style={{
@@ -545,6 +554,7 @@ export default function GitChanges({
               <AlignJustify size={14} />
             </button>
             <button
+              data-testid={`git-changes-mode-side-by-side-${repo ?? "workspace"}`}
               onClick={() => setDiffMode("side-by-side")}
               className="p-1.5 transition-colors"
               style={{
@@ -635,6 +645,7 @@ export default function GitChanges({
               style={{ border: "1px solid var(--border-default)" }}
             >
               <button
+                data-testid={`git-changes-view-flat-${repo ?? "workspace"}`}
                 onClick={() => setViewMode("flat")}
                 className="p-1 transition-colors"
                 style={{
@@ -650,6 +661,7 @@ export default function GitChanges({
                 <List size={13} />
               </button>
               <button
+                data-testid={`git-changes-view-tree-${repo ?? "workspace"}`}
                 onClick={() => setViewMode("tree")}
                 className="p-1 transition-colors"
                 style={{
@@ -690,6 +702,7 @@ export default function GitChanges({
                 {wtPath ? "Branch in use by worktree" : "Checkout failed"}
               </span>
               <button
+                data-testid={`git-changes-checkout-error-dismiss-${repo ?? "workspace"}`}
                 onClick={() => setCheckoutError("")}
                 className="text-[11px] font-sans px-1.5 py-0.5 rounded transition-colors"
                 style={{ color: "var(--text-muted)" }}
@@ -732,6 +745,7 @@ export default function GitChanges({
             <>
               <div className="flex gap-2 mb-4">
                 <button
+                  data-testid={`git-changes-stage-selected-${repo ?? "workspace"}`}
                   onClick={() => stageFiles([...selected])}
                   disabled={selected.size === 0 || !!loading}
                   className="px-3 py-1.5 text-sm rounded-md transition-colors disabled:opacity-30"
@@ -743,6 +757,7 @@ export default function GitChanges({
                   Stage selected ({selected.size})
                 </button>
                 <button
+                  data-testid={`git-changes-stage-all-${repo ?? "workspace"}`}
                   onClick={() => stageFiles(files.map((f) => f.path))}
                   disabled={!!loading}
                   className="px-3 py-1.5 text-sm rounded-md transition-colors disabled:opacity-30"
@@ -779,6 +794,7 @@ export default function GitChanges({
                 />
                 <div className="flex items-center gap-2 mt-3">
                   <button
+                    data-testid={`git-changes-commit-${repo ?? "workspace"}`}
                     onClick={() => commit(false)}
                     disabled={!commitMsg.trim() || !!loading}
                     className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-30"
@@ -791,6 +807,7 @@ export default function GitChanges({
                     Commit
                   </button>
                   <button
+                    data-testid={`git-changes-commit-and-push-${repo ?? "workspace"}`}
                     onClick={() => commit(true)}
                     disabled={!commitMsg.trim() || !!loading}
                     className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-md transition-colors disabled:opacity-30"

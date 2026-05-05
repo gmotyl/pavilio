@@ -97,7 +97,7 @@ export default function DiffView({ diff, mode, filename, highlight }: DiffViewPr
       {localSearch && (
         <span style={{ color: "var(--text-muted)" }}>{(diff.match(new RegExp(localSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")) || []).length} matches</span>
       )}
-      <button onClick={() => { setSearchOpen(false); setLocalSearch(""); }} style={{ color: "var(--text-muted)" }}>ESC</button>
+      <button data-testid="diff-view-search-close" onClick={() => { setSearchOpen(false); setLocalSearch(""); }} style={{ color: "var(--text-muted)" }}>ESC</button>
     </div>
   );
 
