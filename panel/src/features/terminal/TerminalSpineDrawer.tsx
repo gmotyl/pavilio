@@ -84,6 +84,7 @@ export function TerminalSpineDrawer({
           </Link>
           <button
             type="button"
+            data-testid="terminal-spine-drawer-close"
             onClick={onClose}
             className="p-1.5 rounded-md"
             style={{ color: "var(--text-muted)" }}
@@ -128,6 +129,7 @@ export function TerminalSpineDrawer({
                       <li key={s.id}>
                         <button
                           type="button"
+                          data-testid={`terminal-spine-drawer-session-${s.id}`}
                           onClick={() => onFocus(s.id, s.project)}
                           className="flex items-center gap-2.5 w-full text-left px-2.5 py-2 rounded-md transition-colors"
                           style={{

@@ -82,6 +82,7 @@ export function TerminalSpine({
           <button
             key={s.id}
             type="button"
+            data-testid={`terminal-spine-session-${s.id}`}
             onClick={(e) => {
               e.stopPropagation();
               onFocus(s.id);

@@ -185,6 +185,7 @@ export function TerminalViewportModal({
             </span>
             <button
               type="button"
+              data-testid="viewport-modal-print"
               onClick={handlePrint}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] transition-colors"
               style={{
@@ -205,6 +206,7 @@ export function TerminalViewportModal({
             </button>
             <button
               type="button"
+              data-testid="viewport-modal-close"
               onClick={onClose}
               className="p-1.5 rounded-md transition-colors"
               style={{ color: "var(--text-muted)" }}
@@ -231,6 +233,7 @@ export function TerminalViewportModal({
           {canLoadMore && (
             <button
               type="button"
+              data-testid="viewport-modal-load-previous"
               onClick={loadPrevious}
               className="w-full flex items-center justify-center gap-1.5 py-2 text-[11px] tracking-widest uppercase transition-colors sticky top-0 z-10"
               style={{

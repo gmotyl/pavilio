@@ -291,6 +291,7 @@ function TerminalCell({
         </span>
         <div className="flex gap-0.5">
           <CellIconButton
+            testId={`terminal-cell-eye-${session.id}`}
             title="View viewport text (read aloud / print)"
             onClick={(e) => {
               e.stopPropagation();
@@ -301,6 +302,7 @@ function TerminalCell({
             <Eye size={11} />
           </CellIconButton>
           <CellIconButton
+            testId={`terminal-cell-maximize-${session.id}`}
             title={maximized ? "Restore" : "Maximize"}
             onClick={(e) => {
               e.stopPropagation();
@@ -310,6 +312,7 @@ function TerminalCell({
             {maximized ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
           </CellIconButton>
           <CellIconButton
+            testId={`terminal-cell-kill-${session.id}`}
             title="Kill session"
             onClick={(e) => {
               e.stopPropagation();
@@ -361,17 +364,20 @@ function CellIconButton({
   onClick,
   title,
   hoverColor,
+  testId,
 }: {
   children: React.ReactNode;
   onClick: (e: React.MouseEvent) => void;
   title: string;
   hoverColor?: string;
+  testId?: string;
 }) {
   return (
     <button
       type="button"
       title={title}
       onClick={onClick}
+      data-testid={testId}
       className="p-1 rounded transition-colors"
       style={{ color: "var(--text-muted)" }}
       onMouseEnter={(e) => {
