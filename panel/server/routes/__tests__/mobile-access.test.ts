@@ -16,6 +16,7 @@ vi.mock("../../lib/lan", () => ({
   detectLanIp: vi.fn(),
   isWsl: vi.fn(() => false),
   getWslVmIp: vi.fn(() => null),
+  getWslHostGatewayIp: vi.fn(() => null),
 }));
 vi.mock("../../lib/panel-listener", () => ({
   rebindPanel: vi.fn(),
@@ -228,14 +229,14 @@ describe("POST /api/mobile-access/lan/disable", () => {
 });
 
 describe("loopback guard", () => {
-  it("rejects non-loopback remoteAddress with 403", () => {
+  function callMiddleware(remoteAddress: string) {
     const router = mobileAccessRouter;
     const mw = (router as unknown as { stack: Array<{ name: string; handle: unknown }> })
       .stack.find((l) => l.name === "loopbackOnly")?.handle as
       | ((req: unknown, res: unknown, next: unknown) => void)
       | undefined;
     expect(mw).toBeTypeOf("function");
-    const req = { socket: { remoteAddress: "192.168.1.5" } };
+    const req = { socket: { remoteAddress } };
     let status = 0;
     let body: unknown;
     const res = {
@@ -250,8 +251,39 @@ describe("loopback guard", () => {
     };
     const next = vi.fn();
     mw!(req, res, next);
-    expect(status).toBe(403);
-    expect(body).toEqual({ error: "loopback only" });
-    expect(next).not.toHaveBeenCalled();
+    return { status, body, nextCalls: next.mock.calls.length };
+  }
+
+  it("rejects non-loopback remoteAddress with 403", () => {
+    vi.mocked(lan.getWslHostGatewayIp).mockReturnValue(null);
+    const result = callMiddleware("192.168.1.5");
+    expect(result.status).toBe(403);
+    expect(result.body).toEqual({ error: "loopback only" });
+    expect(result.nextCalls).toBe(0);
+  });
+
+  it("accepts 127.0.0.1", () => {
+    vi.mocked(lan.getWslHostGatewayIp).mockReturnValue(null);
+    const result = callMiddleware("127.0.0.1");
+    expect(result.nextCalls).toBe(1);
+  });
+
+  it("accepts ::ffff:127.0.0.1 (IPv4-mapped IPv6 loopback)", () => {
+    vi.mocked(lan.getWslHostGatewayIp).mockReturnValue(null);
+    const result = callMiddleware("::ffff:127.0.0.1");
+    expect(result.nextCalls).toBe(1);
+  });
+
+  it("accepts the WSL host gateway IP when reported", () => {
+    vi.mocked(lan.getWslHostGatewayIp).mockReturnValue("172.26.0.1");
+    const result = callMiddleware("172.26.0.1");
+    expect(result.nextCalls).toBe(1);
+  });
+
+  it("still rejects non-gateway WSL VM addresses", () => {
+    vi.mocked(lan.getWslHostGatewayIp).mockReturnValue("172.26.0.1");
+    const result = callMiddleware("172.26.5.42");
+    expect(result.status).toBe(403);
+    expect(result.nextCalls).toBe(0);
   });
 });
