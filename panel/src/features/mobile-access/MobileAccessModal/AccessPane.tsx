@@ -111,6 +111,7 @@ export function AccessPane({
           <>
             <ClickableUrl href={status.qrUrl} />
             <button
+              data-testid="mobile-access-regenerate"
               onClick={onRegenerate}
               className="mt-3 inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md transition-colors"
               style={{

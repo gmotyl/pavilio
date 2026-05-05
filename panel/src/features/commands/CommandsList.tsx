@@ -23,6 +23,7 @@ export default function CommandsList() {
         return (
           <button
             key={cmd.name}
+            data-testid={`commands-list-${cmd.name}`}
             onClick={() => navigate(viewPath)}
             title={cmd.description || cmd.name}
             className="flex items-center gap-1 w-full px-1 py-0.5 rounded-md text-xs truncate transition-colors duration-100"

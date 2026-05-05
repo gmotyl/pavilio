@@ -40,6 +40,7 @@ export default function GrepResultRow({
 
   return (
     <button
+      data-testid={`grep-result-${result.relativePath}`}
       data-selected={isSelected}
       onClick={onClick}
       onMouseEnter={onMouseEnter}

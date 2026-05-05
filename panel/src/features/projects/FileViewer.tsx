@@ -39,6 +39,7 @@ export function FileViewer({
         style={{ borderBottom: "1px solid var(--border-subtle)" }}
       >
         <button
+          data-testid="file-viewer-back"
           onClick={onBack}
           className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
           style={{ color: "var(--text-secondary)" }}
@@ -63,6 +64,7 @@ export function FileViewer({
         {absolutePath && (
           <>
             <button
+              data-testid="file-viewer-vscode"
               onClick={() => openInVSCode(absolutePath)}
               className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
               style={{ color: "var(--text-secondary)" }}
@@ -78,6 +80,7 @@ export function FileViewer({
               <ExternalLink className="w-3.5 h-3.5" /> VS Code
             </button>
             <button
+              data-testid="file-viewer-copy-path"
               onClick={() => copyPath(absolutePath)}
               className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
               style={{

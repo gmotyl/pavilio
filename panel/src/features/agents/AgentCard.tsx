@@ -50,6 +50,7 @@ export default function AgentCard({ agent }: { agent: AgentEntry }) {
         <span className="text-[11px] ml-1.5" style={{ color: "var(--text-muted)" }}>{agent.project} · {duration}</span>
       </div>
       <button
+        data-testid={`agent-card-focus-${agent.id}`}
         onClick={focusTerminal}
         className="p-0.5 rounded transition-colors"
         style={{ color: "var(--text-tertiary)" }}

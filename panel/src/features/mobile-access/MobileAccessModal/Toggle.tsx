@@ -22,6 +22,7 @@ export function Toggle({
     <button
       type="button"
       role="switch"
+      data-testid={`access-toggle-${label.toLowerCase().replace(/\s+/g, "-")}`}
       aria-checked={on}
       aria-label={label}
       aria-disabled={disabled}

@@ -7,6 +7,7 @@ export function NotInstalledPane({ onRefresh }: { onRefresh: () => void }) {
         <code>brew install --cask tailscale</code>
       </pre>
       <button
+        data-testid="mobile-access-not-installed-refresh"
         className="px-3 py-1 rounded border text-sm"
         onClick={onRefresh}
       >

@@ -44,6 +44,7 @@ function PlansBanner({
           return (
             <div key={planFile} className="flex items-center gap-1">
               <button
+                data-testid={`section-files-plan-open-${planFile}`}
                 onClick={() => onSelect(relativePath)}
                 className="flex items-center gap-3 flex-1 px-3 py-1.5 rounded-md text-left transition-colors"
                 onMouseEnter={(e) =>
@@ -66,6 +67,7 @@ function PlansBanner({
                 </span>
               </button>
               <button
+                data-testid={`section-files-plan-close-${planFile}`}
                 onClick={async (e) => {
                   e.stopPropagation();
                   await fetch(
@@ -110,6 +112,7 @@ function FileButton({
 }) {
   return (
     <button
+      data-testid={`section-files-file-${file.relativePath}`}
       onClick={() => onSelect(file.relativePath)}
       className="flex items-center gap-3 w-full px-3 py-2 rounded-md text-left transition-colors"
       onMouseEnter={(e) =>

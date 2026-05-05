@@ -66,6 +66,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
         )}
         <button
           type="submit"
+          data-testid="login-submit"
           disabled={submitting || token.length === 0}
           className="w-full px-4 py-2 rounded-md text-sm font-medium transition-opacity disabled:opacity-50"
           style={{ background: "var(--accent, #f0c674)", color: "#1a1b26" }}

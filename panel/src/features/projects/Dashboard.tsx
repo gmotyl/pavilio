@@ -68,6 +68,7 @@ function ProjectCard({
       }}
     >
       <button
+        data-testid={`dashboard-project-favorite-${project.name}`}
         onClick={(e) => {
           e.stopPropagation();
           onToggleFav();

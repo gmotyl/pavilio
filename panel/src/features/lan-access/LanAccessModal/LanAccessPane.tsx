@@ -151,6 +151,7 @@ export function LanAccessPane({
               >
                 <button
                   type="button"
+                  data-testid="lan-access-cleartext-warning"
                   onClick={() => setTooltipOpen((v) => !v)}
                   aria-label="Cleartext warning details"
                   aria-expanded={tooltipOpen}
@@ -203,6 +204,7 @@ export function LanAccessPane({
             </div>
 
             <button
+              data-testid="lan-access-regenerate"
               onClick={onRegenerate}
               className="mt-3 inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md transition-colors"
               style={{
@@ -362,6 +364,7 @@ function WslPortproxyCallout({
         </pre>
         <button
           type="button"
+          data-testid="lan-access-copy-script"
           onClick={onCopy}
           className="mt-1.5 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors"
           style={{

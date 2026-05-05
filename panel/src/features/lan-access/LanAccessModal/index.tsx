@@ -22,6 +22,7 @@ export function LanAccessModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <button
+          data-testid="lan-access-modal-close"
           onClick={onClose}
           aria-label="Close"
           className="absolute top-2 left-2 text-[10px] w-5 h-5 rounded-full flex items-center justify-center transition-colors"

@@ -8,6 +8,7 @@ export function PairingGate({ onRetry }: { onRetry: () => void }) {
           every Enable/Disable, so an old QR won't work.
         </p>
         <button
+          data-testid="pairing-gate-retry"
           className="px-3 py-1 rounded border"
           onClick={onRetry}
         >
