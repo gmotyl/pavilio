@@ -9,7 +9,8 @@
 | `Cmd+Enter` in Quick Finder | Open file in VS Code |
 | `↑` / `↓` | Navigate Quick Finder results |
 | `Enter` | Open selected file |
-| `Esc` | Close Quick Finder / clear search |
+| `Esc` | Close Quick Finder / current modal |
+| `Cmd+U` (Mac) / `Ctrl+U` (Windows/Linux) | Open Terminal Viewport Reader for the focused terminal (toggle) |
 
 ## Navigation
 
@@ -47,3 +48,24 @@ Right sidebar lists all available `/commands` with descriptions. Click to view t
 
 ### Image Optimization
 Drag and drop images onto the markdown viewer to optimize them with sharp and embed the reference.
+
+### Terminal Viewport Reader
+xterm renders to a canvas, so the browser's "Read Aloud" / screen-reader / find-in-page features can't see anything. Each terminal cell has an Eye icon in its header (between the title and the Maximize button) that opens a modal with a plain-DOM, fully styled snapshot of what's currently on screen.
+
+**Open it with:**
+- The Eye icon on the cell header, or
+- `Cmd+U` / `Ctrl+U` while the terminal is focused.
+
+**Inside the modal:**
+- Width matches the terminal width and the font matches xterm's, so wrapping is the same as on the live terminal.
+- ANSI colors, bold, italic, underline, dim, inverse, and strike-through are preserved.
+- The first page shows the current viewport. A full-width **"Load previous page"** button at the top prepends the previous `rows` lines from scrollback — keep clicking to walk further back, up to the start of the buffer.
+- **Print** button opens a new tab with the loaded text and triggers `window.print()`.
+- Right-click the text and pick **Read aloud** in Edge (or use your screen reader / find-in-page).
+
+**Close it with:**
+- `Esc`,
+- `Cmd+U` / `Ctrl+U` (toggles), or
+- click the backdrop / the × in the header.
+
+The snapshot is frozen at the moment you open the modal — output that streams afterward in the live terminal does not shift indices in the modal.
