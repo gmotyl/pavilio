@@ -4,6 +4,7 @@ import {
   releaseTerminal,
   type LiveTerminal,
 } from "./terminalInstances";
+import { captureBufferSnapshot } from "./bufferSnapshot";
 import { useMobileReconnect } from "./useMobileReconnect";
 
 interface TerminalViewProps {
@@ -13,10 +14,42 @@ interface TerminalViewProps {
   onReady?: (api: TerminalHandle) => void;
 }
 
+export interface ColoredRun {
+  text: string;
+  fg?: string;
+  bg?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  dim?: boolean;
+  strike?: boolean;
+}
+
+export type ColoredLine = ColoredRun[];
+
+export interface BufferSnapshot {
+  lines: ColoredLine[];
+  /** Index of the first line currently visible in the terminal viewport. */
+  viewportTopIndex: number;
+  /** Index of the last line currently visible in the terminal viewport. */
+  viewportBottomIndex: number;
+  /** Number of rows per page (= terminal.rows). */
+  pageSize: number;
+  /** Pixel width of the terminal container at snapshot time. */
+  pixelWidth: number;
+  /** Pixel font-size used by the terminal. */
+  fontSize: number;
+  /** Default foreground color from the theme. */
+  defaultFg: string;
+  /** Default background color from the theme. */
+  defaultBg: string;
+}
+
 export interface TerminalHandle {
   sessionId: string;
   send: (data: string) => void;
   focus: () => void;
+  getBufferSnapshot: () => BufferSnapshot;
 }
 
 export function TerminalView({
@@ -86,6 +119,10 @@ export function TerminalView({
       sessionId,
       send: inst.send,
       focus: inst.focus,
+      getBufferSnapshot: () => {
+        const rect = container.getBoundingClientRect();
+        return captureBufferSnapshot(inst.terminal, rect.width, 13);
+      },
     });
 
     return () => {

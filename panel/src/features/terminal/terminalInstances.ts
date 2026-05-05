@@ -8,7 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 // and visible buffer are preserved when a cell is hidden (tab switch,
 // maximize toggle, sidebar collapse).
 
-const THEME = {
+export const THEME = {
   background: "#1a1b26",
   foreground: "#a9b1d6",
   cursor: "#f0c674",

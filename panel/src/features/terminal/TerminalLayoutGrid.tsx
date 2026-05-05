@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { X, Maximize2, Minimize2 } from "lucide-react";
+import { Eye, X, Maximize2, Minimize2 } from "lucide-react";
 import { TerminalView } from "./TerminalView";
-import type { TerminalHandle } from "./TerminalView";
+import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import type { SessionMeta } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
+import { TerminalViewportModal } from "./TerminalViewportModal";
 
 interface Props {
   sessions: SessionMeta[];
@@ -241,6 +242,8 @@ function TerminalCell({
 }: CellProps) {
   const accentColor = displayColor(session, allSessions);
   const headerBg = `color-mix(in srgb, ${accentColor} 22%, rgb(15,16,20))`;
+  const handleRef = useRef<TerminalHandle | null>(null);
+  const [snapshot, setSnapshot] = useState<BufferSnapshot | null>(null);
   return (
     <div
       className="relative w-full overflow-hidden rounded-md group flex flex-col"
@@ -288,6 +291,16 @@ function TerminalCell({
         </span>
         <div className="flex gap-0.5">
           <CellIconButton
+            title="View viewport text (read aloud / print)"
+            onClick={(e) => {
+              e.stopPropagation();
+              const snap = handleRef.current?.getBufferSnapshot();
+              if (snap) setSnapshot(snap);
+            }}
+          >
+            <Eye size={11} />
+          </CellIconButton>
+          <CellIconButton
             title={maximized ? "Restore" : "Maximize"}
             onClick={(e) => {
               e.stopPropagation();
@@ -314,7 +327,10 @@ function TerminalCell({
           sessionId={session.id}
           focused={focused}
           onExit={() => onExit(session.id)}
-          onReady={(h) => onReady?.(session.id, h)}
+          onReady={(h) => {
+            handleRef.current = h;
+            onReady?.(session.id, h);
+          }}
         />
         {!focused && (
           <div
@@ -331,6 +347,11 @@ function TerminalCell({
           }}
         />
       </div>
+      <TerminalViewportModal
+        sessionName={session.name}
+        snapshot={snapshot}
+        onClose={() => setSnapshot(null)}
+      />
     </div>
   );
 }
