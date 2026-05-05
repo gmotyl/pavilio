@@ -136,6 +136,30 @@ If you prefer to see live panel logs (and have closing the window stop the panel
 $s.Arguments = '~ -d Ubuntu --cd WORKSPACE/panel -- bash -lc "npm run dev; echo; echo --- panel exited ---; exec bash"'
 ```
 
+### LAN access from phone or other devices
+
+To reach the panel from other devices on your Wi-Fi (phone, MacBook, tablet), Windows needs a `netsh portproxy` entry that forwards `<hostLanIp>:3010` into the WSL VM. WSL doesn't add this for you, and creating it requires admin elevation.
+
+Use the bundled launcher `scripts/start-panel-windows.sh` instead of plain `npm start` — it starts the panel, checks the portproxy, prompts UAC **only when the entry is missing or stale**, then prints clickable pair links (local + LAN). Subsequent launches are silent no-ops.
+
+```powershell
+$s.Arguments = '~ -d Ubuntu --cd WORKSPACE -- bash -lc "scripts/start-panel-windows.sh"'
+```
+
+What it does:
+
+1. Starts the panel (`npm start` in the background).
+2. Detects the current WSL VM IP (changes on each WSL restart).
+3. Reads `netsh portproxy show all`; if the entry for port 3010 is missing or points at a stale WSL IP, opens a UAC prompt to add `0.0.0.0:3010 → <wslIp>:3010` and (re)create the `Pavilio LAN 3010` firewall rule. **Click Yes** on the prompt — only needed on first run or after Windows loses the entry.
+4. Calls `/api/mobile-access/lan/enable` so the panel binds `0.0.0.0`.
+5. Prints `http://localhost:3010/#mt=…` and `http://<lanIp>:3010/#mt=…`. Ctrl+click in Windows Terminal to open in your browser; copy the LAN one to your phone or MacBook.
+
+A few points worth knowing:
+
+- The portproxy entry is bound to `listenaddress=0.0.0.0`, matching the form WSL uses for its preinstalled 22/80/443 forwards. Specific-IP entries can drop on Windows reboot if the adapter hasn't been assigned the IP yet by the time the IP Helper service applies persisted config (DHCP-timing race). `0.0.0.0` survives reboots reliably.
+- If you cancel the UAC prompt, the panel still runs locally and on `127.0.0.1` — only LAN reach is affected. Re-run the shortcut to retry.
+- The script is portable: on macOS or native Linux the Windows-specific block is skipped automatically, so the same `.lnk`-style flow works in WSL while the script remains usable elsewhere.
+
 ## Project Structure
 
 ```
