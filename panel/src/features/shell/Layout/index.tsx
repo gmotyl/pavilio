@@ -17,7 +17,7 @@ function FloatingOverlay() {
   if (!action) return null;
 
   return (
-    <div className="absolute bottom-4 right-4 z-40 pointer-events-none">
+    <div className="absolute bottom-4 right-4 z-50 pointer-events-none">
       <div className="pointer-events-auto">{action}</div>
     </div>
   );

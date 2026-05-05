@@ -102,8 +102,11 @@ export function Breadcrumbs() {
 
   return (
     <nav
-      className="flex items-center gap-1 px-6 py-2 text-xs"
-      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+      className="sticky top-0 z-30 flex items-center gap-1 px-6 py-2 text-xs"
+      style={{
+        borderBottom: "1px solid var(--border-subtle)",
+        background: "var(--bg-base)",
+      }}
       aria-label="Breadcrumb"
     >
       <Link

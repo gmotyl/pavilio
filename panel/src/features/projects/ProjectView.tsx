@@ -18,7 +18,7 @@ import { useRepoOpenFile } from "./useRepoOpenFile";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useLastPath } from "../shell/useLastPath";
-import { useScrollContainer } from "../shell/Layout";
+import { useFloatingAction, useScrollContainer } from "../shell/Layout";
 import { useReposTabMemory } from "../shell/useReposTabMemory";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
@@ -133,6 +133,15 @@ export default function ProjectView() {
   const [wide, toggleWide] = useWideMode(section || "overview");
   const [gitViewMode, setGitViewMode] = useGitViewMode();
   const wideToggle = <WideToggle wide={wide} onToggle={toggleWide} />;
+
+  // RepoBlock renders its own inline WideToggle in the GitChanges header on
+  // the repos tab, so skip the floating one there to avoid two toggles on
+  // screen. Every other tab gets it as a floating action — same mechanism
+  // MarkdownViewer uses, which is reliably visible in both wide and compact.
+  useFloatingAction(
+    section !== "repos" ? wideToggle : null,
+    [section, wide, toggleWide],
+  );
 
   const commitsOpen = useCommitsOpenMap();
 
@@ -411,18 +420,6 @@ export default function ProjectView() {
         </>
       )}
     </div>
-      <div
-        className="hidden md:block absolute top-0 bottom-0 pointer-events-none"
-        style={
-          wide
-            ? { right: "1.5rem" }
-            : { left: "min(64rem, 100%)", marginLeft: "0.5rem" }
-        }
-      >
-        <div className="sticky bottom-4 mt-20 pointer-events-auto">
-          {wideToggle}
-        </div>
-      </div>
     </div>
   );
 }
