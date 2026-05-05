@@ -1,1 +1,1 @@
-cd panel && pnpm test
+pnpm test
