@@ -24,7 +24,6 @@ import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
 import { TerminalActivityLed } from "../terminal/TerminalActivityLed";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
-import { getActivityState } from "../terminal/useTerminalActivityChannel";
 import {
   TERMINAL_FOCUS_EVENT,
   dispatchTerminalFocus,
@@ -224,16 +223,11 @@ export default function LeftSidebar() {
 
   const renderProjectRow = (project: { name: string }) => {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
+    const projectSessionIds = projectSessions.map((s) => s.id);
     const expandedNow = isExpanded(project.name);
     const isCurrent =
       location.pathname === `/project/${project.name}` ||
       location.pathname.startsWith(`/project/${project.name}/`);
-    const aggregate: "busy" | "attention" | "idle" = (() => {
-      const states = projectSessions.map((s) => getActivityState(s.id));
-      if (states.some((s) => s === "busy")) return "busy";
-      if (states.some((s) => s === "attention")) return "attention";
-      return "idle";
-    })();
 
     const fav = isFavorite(project.name);
 
@@ -273,16 +267,9 @@ export default function LeftSidebar() {
           >
             {project.name}
           </NavLink>
-          {aggregate !== "idle" && (
-            <span
-              aria-hidden
-              className="w-1.5 h-1.5 rounded-full mr-1"
-              style={{
-                background:
-                  aggregate === "busy" ? "#f9e2af" : "#a6e3a1",
-              }}
-            />
-          )}
+          <span className="mr-1 flex items-center">
+            <TerminalActivityLed sessionIds={projectSessionIds} hideWhenIdle />
+          </span>
           <button
             type="button"
             onClick={(e) => {

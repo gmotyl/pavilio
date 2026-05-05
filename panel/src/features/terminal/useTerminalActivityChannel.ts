@@ -125,6 +125,51 @@ export function useAttentionSinceAt(sessionId: string): number | null {
   return state === "attention" ? getAttentionSinceAt(sessionId) : null;
 }
 
+interface AggregateSnapshot {
+  state: ActivityState;
+  attentionSinceAt: number | null;
+}
+
+function computeAggregate(ids: readonly string[]): AggregateSnapshot {
+  let hasBusy = false;
+  let hasAttention = false;
+  let earliestAttention: number | null = null;
+  for (const id of ids) {
+    const s = getActivityState(id);
+    if (s === "busy") hasBusy = true;
+    else if (s === "attention") {
+      hasAttention = true;
+      const t = getAttentionSinceAt(id);
+      if (t != null && (earliestAttention == null || t < earliestAttention)) {
+        earliestAttention = t;
+      }
+    }
+  }
+  if (hasBusy) return { state: "busy", attentionSinceAt: null };
+  if (hasAttention) return { state: "attention", attentionSinceAt: earliestAttention };
+  return { state: "idle", attentionSinceAt: null };
+}
+
+export function useAggregateActivityState(
+  sessionIds: readonly string[],
+): AggregateSnapshot {
+  const key = sessionIds.join("|");
+  const [snapshot, setSnapshot] = useState<AggregateSnapshot>(() =>
+    computeAggregate(sessionIds),
+  );
+  useEffect(() => {
+    const recompute = () => setSnapshot(computeAggregate(sessionIds));
+    recompute();
+    const unsubs = sessionIds.map((id) => subscribeActivity(id, recompute));
+    return () => {
+      for (const u of unsubs) u();
+    };
+    // sessionIds identity may change every render; key captures content
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return snapshot;
+}
+
 export function _resetForTests(): void {
   records.clear();
   listeners.clear();

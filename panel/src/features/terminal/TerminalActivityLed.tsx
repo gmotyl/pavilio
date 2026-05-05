@@ -1,16 +1,13 @@
 import { useEffect, useState } from "react";
-import {
-  useActivityState,
-  useAttentionSinceAt,
-} from "./useTerminalActivityChannel";
+import { useAggregateActivityState } from "./useTerminalActivityChannel";
 
 export const ATTENTION_PULSE_MS = 5 * 60 * 1000; // 5 min
 
-interface Props {
-  sessionId: string;
+type Props = {
   size?: "sm" | "lg";
   title?: string;
-}
+  hideWhenIdle?: boolean;
+} & ({ sessionId: string } | { sessionIds: readonly string[] });
 
 const LABEL: Record<string, string> = {
   idle: "Idle",
@@ -19,16 +16,15 @@ const LABEL: Record<string, string> = {
 };
 
 /**
- * Tri-state activity LED rendered next to every session reference.
+ * Tri-state activity LED. Pass `sessionId` for a single session or
+ * `sessionIds` for an aggregate (busy > attention > idle).
  * See index.css for the per-state colors and pulse animations.
  */
-export function TerminalActivityLed({
-  sessionId,
-  size = "sm",
-  title,
-}: Props) {
-  const state = useActivityState(sessionId);
-  const attentionSinceAt = useAttentionSinceAt(sessionId);
+export function TerminalActivityLed(props: Props) {
+  const { size = "sm", title, hideWhenIdle } = props;
+  const ids: readonly string[] =
+    "sessionId" in props ? [props.sessionId] : props.sessionIds;
+  const { state, attentionSinceAt } = useAggregateActivityState(ids);
   const [pulsing, setPulsing] = useState<boolean>(() =>
     attentionSinceAt != null &&
     Date.now() - attentionSinceAt < ATTENTION_PULSE_MS,
@@ -51,6 +47,8 @@ export function TerminalActivityLed({
     );
     return () => clearTimeout(t);
   }, [state, attentionSinceAt]);
+
+  if (hideWhenIdle && state === "idle") return null;
 
   return (
     <span
