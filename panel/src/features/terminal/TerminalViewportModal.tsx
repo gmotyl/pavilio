@@ -122,8 +122,13 @@ export function TerminalViewportModal({
   const canLoadMore = topIndex > 0;
   const linesShown = snapshot.viewportBottomIndex - topIndex + 1;
   const totalLines = snapshot.lines.length;
+  // Modal width matches the terminal width plus the body's horizontal
+  // padding (px-4 = 32) + outer border (2). Without this, the inner text
+  // area is ~34px narrower than the terminal, which clips the last ~4
+  // chars of each row to the next line.
+  const TEXT_AREA_CHROME_PX = 40;
   const contentWidthPx = Math.min(
-    Math.max(snapshot.pixelWidth, 320),
+    Math.max(snapshot.pixelWidth + TEXT_AREA_CHROME_PX, 320),
     Math.round(window.innerWidth * 0.95),
   );
 
