@@ -84,7 +84,7 @@ interface BarProps {
 export function ProjectTabsBar({ tabs, searchActive, onToggleSearch }: BarProps) {
   return (
     <div
-      className="hidden md:flex gap-2 mb-4 text-sm relative items-center sticky top-0 z-10 py-2"
+      className="hidden md:flex gap-2 mb-4 text-sm items-center sticky top-9 z-20 py-2"
       style={{
         background: "var(--bg-base)",
         borderBottom: "1px solid var(--border-subtle)",
