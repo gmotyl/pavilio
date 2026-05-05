@@ -75,7 +75,7 @@ export function Layout({ children }: LayoutProps) {
 
       <main className="flex-1 min-w-0 relative">
         <ScrollContainerContext.Provider value={scrollRef as React.RefObject<HTMLElement>}>
-          <div ref={scrollRef} className="overflow-auto h-full">
+          <div ref={scrollRef} className="overflow-auto h-full isolate">
             <Breadcrumbs />
             {children}
           </div>
