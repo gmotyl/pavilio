@@ -233,6 +233,21 @@ router.post("/push", (req, res) => {
   }
 });
 
+// Pull
+router.post("/pull", (req, res) => {
+  try {
+    const { repo } = req.body || {};
+    const output = git("pull --ff-only", repo);
+    broadcast({ type: "git-change" });
+    res.json({ ok: true, output });
+  } catch (e: any) {
+    // Network / SSH / merge-conflict failures usually surface on stderr;
+    // include both streams so the panel shows the actual diagnostic.
+    const output = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+    res.status(500).json({ error: e.message, output });
+  }
+});
+
 // Branch info
 router.get("/branch", (req, res) => {
   try {

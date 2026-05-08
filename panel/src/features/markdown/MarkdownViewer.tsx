@@ -9,6 +9,7 @@ import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import ImageDropZone from "./ImageDropZone";
 import MarkdownRenderer from "./MarkdownRenderer";
+import { copyToClipboard } from "../../lib/clipboard";
 
 export default function MarkdownViewer() {
   const location = useLocation();
@@ -52,8 +53,9 @@ export default function MarkdownViewer() {
     window.open(`vscode://file/${absolutePath}`, "_self");
   }, [absolutePath]);
 
-  const copyPath = useCallback(() => {
-    navigator.clipboard.writeText(absolutePath);
+  const copyPath = useCallback(async () => {
+    const ok = await copyToClipboard(absolutePath);
+    if (!ok) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [absolutePath]);

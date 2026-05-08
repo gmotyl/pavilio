@@ -6,14 +6,8 @@ export default function GitSummary() {
   const modified = files.filter((f) => f.status === "M").length;
   const newFiles = files.filter((f) => f.status === "??").length;
 
-  if (files.length === 0) {
-    return (
-      <p className="text-xs px-1" style={{ color: "var(--text-muted)" }}>
-        Clean
-      </p>
-    );
-  }
-
+  // Always render as a Link to /git — even when the working tree is clean,
+  // the user may want to land on the Git page (pull, browse history, etc.).
   return (
     <Link
       to="/git"
@@ -24,13 +18,21 @@ export default function GitSummary() {
       }
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
     >
-      {modified > 0 && (
-        <span style={{ color: "var(--yellow)" }}>{modified}M</span>
+      {files.length === 0 ? (
+        <span style={{ color: "var(--text-muted)" }}>Clean</span>
+      ) : (
+        <>
+          {modified > 0 && (
+            <span style={{ color: "var(--yellow)" }}>{modified}M</span>
+          )}
+          {newFiles > 0 && (
+            <span style={{ color: "var(--green)" }}>{newFiles}U</span>
+          )}
+          <span style={{ color: "var(--text-muted)" }}>
+            {files.length} files
+          </span>
+        </>
       )}
-      {newFiles > 0 && (
-        <span style={{ color: "var(--green)" }}>{newFiles}U</span>
-      )}
-      <span style={{ color: "var(--text-muted)" }}>{files.length} files</span>
     </Link>
   );
 }
