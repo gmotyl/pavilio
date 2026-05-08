@@ -268,9 +268,14 @@ export default function LeftSidebar() {
           >
             {project.name}
           </NavLink>
-          <span className="mr-1 flex items-center">
-            <TerminalActivityLed sessionIds={projectSessionIds} hideWhenIdle />
-          </span>
+          {!expandedNow && (
+            <span className="mr-1 flex items-center">
+              <TerminalActivityLed
+                sessionIds={projectSessionIds}
+                hideWhenIdle
+              />
+            </span>
+          )}
           <button
             type="button"
             data-testid={`sidebar-project-create-terminal-${project.name}`}
