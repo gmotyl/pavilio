@@ -241,7 +241,10 @@ router.post("/pull", (req, res) => {
     broadcast({ type: "git-change" });
     res.json({ ok: true, output });
   } catch (e: any) {
-    res.status(500).json({ error: e.message, output: e.stdout?.toString?.() });
+    // Network / SSH / merge-conflict failures usually surface on stderr;
+    // include both streams so the panel shows the actual diagnostic.
+    const output = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+    res.status(500).json({ error: e.message, output });
   }
 });
 

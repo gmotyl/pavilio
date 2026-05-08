@@ -1,14 +1,24 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download } from "lucide-react";
 import GitChanges from "./GitChanges";
 
 export default function GitPanel() {
   const [pulling, setPulling] = useState(false);
   const [pullMsg, setPullMsg] = useState<string | null>(null);
+  // Track the auto-dismiss timer so we can cancel it on unmount or re-pull,
+  // avoiding a leak / setState-on-unmounted warning.
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (dismissTimer.current) clearTimeout(dismissTimer.current);
+    };
+  }, []);
 
   const pull = async () => {
     setPulling(true);
     setPullMsg(null);
+    if (dismissTimer.current) clearTimeout(dismissTimer.current);
     try {
       const res = await fetch("/api/git/pull", {
         method: "POST",
@@ -26,7 +36,7 @@ export default function GitPanel() {
       setPullMsg(`Pull failed: ${e.message ?? e}`);
     } finally {
       setPulling(false);
-      setTimeout(() => setPullMsg(null), 5000);
+      dismissTimer.current = setTimeout(() => setPullMsg(null), 5000);
     }
   };
 
