@@ -16,7 +16,7 @@ interface Options {
   hasRepos: boolean;
 }
 
-const SECTIONS = ["iterm", "plans", "notes", "memo", "progress", "qa"];
+const SECTIONS = ["iterm", "plans", "context", "notes", "memo", "progress", "qa"];
 
 export function useProjectTabs({
   projectName,
@@ -49,6 +49,10 @@ export function useProjectTabs({
           to: storedQuery ? `${base}?${storedQuery}` : base,
           active: section === s,
         };
+      }
+      if (s === "context") {
+        // Context tab has its own internal selection — no `?file=` memory.
+        return { label: s, to: base, active: section === s };
       }
       const storedFile = readLastSectionFile(name, s);
       return {

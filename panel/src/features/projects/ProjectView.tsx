@@ -7,6 +7,7 @@ import RepoBlock from "./RepoBlock";
 import ProjectSearchBar from "./ProjectSearchBar";
 import FileViewer from "./FileViewer";
 import SectionFilesList from "./SectionFilesList";
+import ContextTab from "./ContextTab";
 import { ProjectTabsBar, ProjectTabsMenu } from "./ProjectTabs";
 import { useProjectTabs } from "./useProjectTabs";
 import { useProjectSearch } from "./useProjectSearch";
@@ -192,7 +193,7 @@ export default function ProjectView() {
   }, [name, section]);
 
   const sectionFiles =
-    section && section !== "repos" && section !== "iterm"
+    section && section !== "repos" && section !== "iterm" && section !== "context"
       ? files
           .filter((f) => {
             if (
@@ -357,8 +358,13 @@ export default function ProjectView() {
         />
       )}
 
+      {/* Context tab — aggregates CONTEXT.md and ADRs from project + linked repos */}
+      {section === "context" && (
+        <ContextTab projectName={name || ""} />
+      )}
+
       {/* File section listing */}
-      {section && section !== "repos" && section !== "iterm" && !selectedFile && (
+      {section && section !== "repos" && section !== "iterm" && section !== "context" && !selectedFile && (
         <SectionFilesList
           projectName={name || ""}
           section={section}
@@ -369,7 +375,7 @@ export default function ProjectView() {
       )}
 
       {/* Inline file viewer */}
-      {section && section !== "repos" && section !== "iterm" && selectedFile && (
+      {section && section !== "repos" && section !== "iterm" && section !== "context" && selectedFile && (
         <FileViewer
           filePath={selectedFile}
           content={fileViewer.content}
