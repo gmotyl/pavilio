@@ -58,6 +58,20 @@ See `docs/PROVIDER-SETUP.md` for:
 
 **To override:** Add project-specific row below the default rules.
 
+## Domain Context & Decisions
+
+Before making non-trivial design or scope decisions, consult these files. They define the words this codebase uses and the decisions that explain why the code looks the way it does.
+
+| File | Purpose | When to read | When to update |
+|------|---------|--------------|----------------|
+| `CONTEXT.md` (repo root) | Workspace-wide glossary — defines terms like *Notes world*, *Repo world*, *Project*, *Linked repository* | When a new term appears, when terminology feels ambiguous, before naming a new concept | When a term is resolved, renamed, or a new domain word becomes load-bearing |
+| `docs/adr/NNNN-*.md` | Architecture Decision Records — one decision per file, sequentially numbered | Before changing scope, swapping a library, or revisiting an old choice. Especially before fixing something that looks wrong (it may be deliberate). | After a real trade-off is made that future readers will need to understand. See `.claude/skills/grill-with-docs/ADR-FORMAT.md` for the bar. |
+| `<project>/CONTEXT.md` | Project-specific glossary (under `projects/<name>/`) | When working inside a specific project that has its own vocabulary | When a project-local term is canonicalized |
+| `<project>/adr/NNNN-*.md` | Project-specific ADRs (under `projects/<name>/adr/`) | Before changing how a particular project works | When a project-local decision is made that won't generalise to the framework |
+| `<linked-repo>/CONTEXT.md` and `<linked-repo>/docs/adr/` (or `<linked-repo>/adr/`) | Each linked code repository's own glossary and decisions | When editing or reviewing code in that repo | Following that repo's conventions |
+
+**Rule:** when a user asks "should we…?" and the answer depends on terminology, scope, or a past trade-off, read the relevant CONTEXT.md / ADRs **before** answering. Don't invent new words for concepts that already have canonical names.
+
 ## Session Tracking
 
 Session tracking is active. All messages are part of a single session until you write "session end" or "end session".
