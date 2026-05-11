@@ -1,5 +1,6 @@
 import { FileText, X } from "lucide-react";
 import type { FileEntry } from "../explorer/useFileIndex";
+import { useFileDragSource, useFileDropTarget } from "../explorer/useFileDrag";
 
 interface Props {
   projectName: string;
@@ -110,8 +111,10 @@ function FileButton({
   monoLabel?: boolean;
   onSelect: (path: string) => void;
 }) {
+  const drag = useFileDragSource(file.relativePath);
   return (
     <button
+      {...drag}
       data-testid={`section-files-file-${file.relativePath}`}
       onClick={() => onSelect(file.relativePath)}
       className="flex items-center gap-3 w-full px-3 py-2 rounded-md text-left transition-colors"
@@ -194,6 +197,31 @@ export function SectionFilesList({
   }
 
   return (
+    <SectionWithDropTarget
+      projectName={projectName}
+      section={section}
+      currentPlans={currentPlans}
+      onSelect={onSelect}
+      files={files}
+    />
+  );
+}
+
+function SectionWithDropTarget({
+  projectName,
+  section,
+  currentPlans,
+  files,
+  onSelect,
+}: {
+  projectName: string;
+  section: string;
+  currentPlans?: string[];
+  files: FileEntry[];
+  onSelect: (relativePath: string) => void;
+}) {
+  const { hover, dropHandlers } = useFileDropTarget(`${projectName}/${section}`);
+  return (
     <div>
       {section === "plans" && currentPlans && currentPlans.length > 0 && (
         <PlansBanner
@@ -203,10 +231,16 @@ export function SectionFilesList({
         />
       )}
       <h2
-        className="text-[11px] font-semibold uppercase tracking-widest mb-3"
-        style={{ color: "var(--text-tertiary)" }}
+        {...dropHandlers}
+        data-testid={`section-files-header-${section}`}
+        className="text-[11px] font-semibold uppercase tracking-widest mb-3 px-2 py-1 rounded-md transition-colors"
+        style={{
+          color: "var(--text-tertiary)",
+          background: hover ? "var(--accent-dim, var(--bg-active))" : "transparent",
+          outline: hover ? "1px solid var(--accent)" : undefined,
+        }}
       >
-        {section} ({files.length} files)
+        {section} ({files.length} files){hover && <span className="ml-2 normal-case font-normal opacity-70">— drop to move here</span>}
       </h2>
       {files.length === 0 ? (
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>

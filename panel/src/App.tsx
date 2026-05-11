@@ -18,6 +18,7 @@ import { BreadcrumbActionsProvider } from "./features/shell/Breadcrumbs";
 import { FloatingActionProvider, Layout } from "./features/shell/Layout";
 import { useVisualViewport } from "./features/shell/useVisualViewport";
 import { useHostModeRoot } from "./features/host-mode/useHostModeRoot";
+import ToastHost from "./components/ToastHost";
 
 function AppShell() {
   const { authRequired, authenticated, loading, recheck } = useAuthStatus();
@@ -54,6 +55,7 @@ function AppShell() {
                 <Route path="/archive" element={<ArchivePage />} />
               </Routes>
             </Layout>
+            <ToastHost />
           </FloatingActionProvider>
         </BreadcrumbActionsProvider>
       </ActiveFileProvider>

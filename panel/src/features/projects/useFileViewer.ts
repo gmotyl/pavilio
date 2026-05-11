@@ -23,7 +23,7 @@ export function useFileViewer({ project, section }: Options) {
   // URL param, which also wipes the repo-search file the user just
   // opened.
   const ownsFileParam =
-    !!section && section !== "repos" && section !== "iterm";
+    !!section && section !== "repos" && section !== "iterm" && section !== "context";
   const selectedFile = ownsFileParam ? searchParams.get("file") : null;
   const [content, setContent] = useState("");
   const [absolutePath, setAbsolutePath] = useState("");
@@ -65,7 +65,7 @@ export function useFileViewer({ project, section }: Options) {
   // Persist last-open file per section so tab links can restore it
   useEffect(() => {
     if (!project || !section) return;
-    if (section === "repos" || section === "iterm") return;
+    if (section === "repos" || section === "iterm" || section === "context") return;
     if (selectedFile) {
       writeLastSectionFile(project, section, selectedFile);
     } else {
