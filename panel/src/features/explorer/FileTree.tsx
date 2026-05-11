@@ -10,6 +10,7 @@ import {
 import { useGitStatus } from "../git/useGitStatus";
 import { useActiveFile } from "./useActiveFile";
 import { useFileIndex, FileEntry } from "./useFileIndex";
+import { useFileDragSource, useFileDropTarget } from "./useFileDrag";
 
 function getFileIcon(name: string) {
   if (name.endsWith(".md"))
@@ -104,6 +105,7 @@ function FileButton({
   const fileName = file.relativePath.split("/").pop() ?? file.relativePath;
   const viewPath = `/view/${file.relativePath}`;
   const ref = useRef<HTMLButtonElement>(null);
+  const drag = useFileDragSource(file.relativePath);
 
   // Auto-scroll when this becomes the active file
   useEffect(() => {
@@ -115,6 +117,7 @@ function FileButton({
   return (
     <button
       ref={ref}
+      {...drag}
       data-testid={`file-tree-file-${file.relativePath}`}
       onClick={() => onNavigate(viewPath)}
       title={file.relativePath}
@@ -141,6 +144,7 @@ function FileButton({
 }
 
 function SubfolderSection({
+  projectName,
   name,
   files,
   currentPath,
@@ -148,6 +152,7 @@ function SubfolderSection({
   onNavigate,
   shouldOpen,
 }: {
+  projectName: string;
   name: string;
   files: FileEntry[];
   currentPath: string;
@@ -157,6 +162,7 @@ function SubfolderSection({
 }) {
   const [open, setOpen] = useState(shouldOpen);
   const prevShouldOpen = useRef(shouldOpen);
+  const { hover, dropHandlers } = useFileDropTarget(`${projectName}/${name}`);
 
   // React to navigation: open when shouldOpen becomes true
   useEffect(() => {
@@ -167,14 +173,19 @@ function SubfolderSection({
   return (
     <div>
       <button
+        {...dropHandlers}
         data-testid={`file-tree-subfolder-${name}`}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 w-full px-1 py-0.5 rounded-md text-xs transition-colors duration-100"
-        style={{ color: "var(--text-secondary)" }}
+        style={{
+          color: "var(--text-secondary)",
+          background: hover ? "var(--accent-dim, var(--bg-active))" : undefined,
+          outline: hover ? "1px solid var(--accent)" : undefined,
+        }}
         onMouseEnter={(e) =>
-          (e.currentTarget.style.background = "var(--bg-hover)")
+          (e.currentTarget.style.background = hover ? "var(--accent-dim, var(--bg-active))" : "var(--bg-hover)")
         }
-        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = hover ? "var(--accent-dim, var(--bg-active))" : "transparent")}
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span className="truncate">{name}/</span>
@@ -225,6 +236,7 @@ function ProjectTreeSection({
   const [open, setOpen] = useState(shouldOpen);
   const prevShouldOpen = useRef(shouldOpen);
   const subfolderNames = Object.keys(node.subfolders).sort();
+  const { hover, dropHandlers } = useFileDropTarget(name);
 
   useEffect(() => {
     if (shouldOpen && !prevShouldOpen.current) setOpen(true);
@@ -234,14 +246,19 @@ function ProjectTreeSection({
   return (
     <div className="mb-0.5">
       <button
+        {...dropHandlers}
         data-testid={`file-tree-project-${name}`}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 w-full px-1 py-1 rounded-md text-xs font-medium transition-colors duration-100"
-        style={{ color: "var(--text-primary)" }}
+        style={{
+          color: "var(--text-primary)",
+          background: hover ? "var(--accent-dim, var(--bg-active))" : undefined,
+          outline: hover ? "1px solid var(--accent)" : undefined,
+        }}
         onMouseEnter={(e) =>
-          (e.currentTarget.style.background = "var(--bg-hover)")
+          (e.currentTarget.style.background = hover ? "var(--accent-dim, var(--bg-active))" : "var(--bg-hover)")
         }
-        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = hover ? "var(--accent-dim, var(--bg-active))" : "transparent")}
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span className="truncate">{name}</span>
@@ -254,6 +271,7 @@ function ProjectTreeSection({
           {subfolderNames.map((subfolder) => (
             <SubfolderSection
               key={subfolder}
+              projectName={name}
               name={subfolder}
               files={node.subfolders[subfolder]}
               currentPath={currentPath}

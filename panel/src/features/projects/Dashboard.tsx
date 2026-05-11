@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useFavorites } from "./useFavorites";
 import { useProjects, Project } from "./useProjects";
 import { MobileAccessButton } from "../mobile-access/MobileAccessButton";
+import { useFileDropTarget } from "../explorer/useFileDrag";
 import {
   FolderOpen,
   FileText,
@@ -47,20 +48,25 @@ function ProjectCard({
 }) {
   const navigate = useNavigate();
   const formattedDate = formatDate(project.latestProgressDate);
+  const { hover, dropHandlers } = useFileDropTarget(project.name);
 
   return (
     <div
+      {...dropHandlers}
+      data-testid={`dashboard-project-card-${project.name}`}
       className="rounded-xl p-4 cursor-pointer transition-all duration-200 group relative"
       style={{
-        background: "var(--bg-surface)",
-        border: `1px solid ${isFav ? "var(--accent-dim)" : "var(--border-subtle)"}`,
+        background: hover ? "var(--accent-dim, var(--bg-elevated))" : "var(--bg-surface)",
+        border: `1px solid ${hover ? "var(--accent)" : isFav ? "var(--accent-dim)" : "var(--border-subtle)"}`,
       }}
       onClick={() => navigate(`/project/${project.name}`)}
       onMouseEnter={(e) => {
+        if (hover) return;
         e.currentTarget.style.borderColor = "var(--border-strong)";
         e.currentTarget.style.background = "var(--bg-elevated)";
       }}
       onMouseLeave={(e) => {
+        if (hover) return;
         e.currentTarget.style.borderColor = isFav
           ? "rgba(229,168,75,0.15)"
           : "var(--border-subtle)";

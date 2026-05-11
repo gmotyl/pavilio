@@ -278,6 +278,14 @@ export default function QuickFinder() {
                 <button
                   key={file.relativePath}
                   data-testid={`quick-finder-result-${file.relativePath}`}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("application/x-pavilio-file", file.relativePath);
+                    e.dataTransfer.setData("text/plain", file.relativePath);
+                    e.dataTransfer.effectAllowed = "move";
+                    // Close the finder so the user can see the drop target
+                    setOpen(false);
+                  }}
                   data-selected={isSelected}
                   onClick={() => openFile(file.relativePath)}
                   onMouseEnter={() => setSelectedIndex(i)}
