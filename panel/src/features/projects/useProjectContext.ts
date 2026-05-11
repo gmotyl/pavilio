@@ -10,6 +10,8 @@ export interface ContextFile {
   filename: string;
   absolutePath: string;
   modified: number;
+  /** Set when the file lives under projectsDir; null for linked-repo files. */
+  relativeToProjectsDir: string | null;
 }
 export interface AdrFile {
   source: string;
@@ -18,6 +20,8 @@ export interface AdrFile {
   modified: number;
   adrNumber: number | null;
   slug: string;
+  /** Set when the file lives under projectsDir; null for linked-repo files. */
+  relativeToProjectsDir: string | null;
 }
 export interface ContextResponse {
   project: string;

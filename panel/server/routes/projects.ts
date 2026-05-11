@@ -1,10 +1,22 @@
 import { Router } from "express";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
-import { join, resolve, basename } from "path";
+import { join, resolve, basename, relative, isAbsolute, sep } from "path";
 import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
 import { getConfig } from "../config.js";
 
 const router = Router();
+
+/** Cross-platform: forward slashes only in API responses. */
+function toPosix(p: string): string {
+  return sep === "/" ? p : p.split(sep).join("/");
+}
+
+/** True when `abs` is the root itself or lies under it (no `..` traversal). */
+function isPathUnder(abs: string, root: string): boolean {
+  if (abs === root) return true;
+  const rel = relative(root, abs);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
 
 interface ContextSource {
   id: string;
@@ -16,6 +28,8 @@ interface ContextFile {
   filename: string;
   absolutePath: string;
   modified: number;
+  /** Forward-slash path relative to projectsDir when source is "project"; null otherwise. */
+  relativeToProjectsDir: string | null;
 }
 interface AdrFile {
   source: string;
@@ -24,6 +38,8 @@ interface AdrFile {
   modified: number;
   adrNumber: number | null;
   slug: string;
+  /** Forward-slash path relative to projectsDir when source is "project"; null otherwise. */
+  relativeToProjectsDir: string | null;
 }
 
 const ADR_FILE_RE = /^(\d{1,4})-([\w-]+)\.md$/i;
@@ -39,18 +55,28 @@ function readReposJson(projectDir: string): RepoEntry[] {
   }
 }
 
-function listContextFilesInRoot(absoluteRoot: string, sourceId: string): ContextFile[] {
+function relativeToProjects(abs: string, projectsDir: string): string | null {
+  return isPathUnder(abs, projectsDir) ? toPosix(relative(projectsDir, abs)) : null;
+}
+
+function listContextFilesInRoot(absoluteRoot: string, sourceId: string, projectsDir: string): ContextFile[] {
   const out: ContextFile[] = [];
   for (const name of ["CONTEXT.md", "CONTEXT-MAP.md"]) {
     const abs = join(absoluteRoot, name);
     if (existsSync(abs) && statSync(abs).isFile()) {
-      out.push({ source: sourceId, filename: name, absolutePath: abs, modified: statSync(abs).mtimeMs });
+      out.push({
+        source: sourceId,
+        filename: name,
+        absolutePath: abs,
+        modified: statSync(abs).mtimeMs,
+        relativeToProjectsDir: relativeToProjects(abs, projectsDir),
+      });
     }
   }
   return out;
 }
 
-function listAdrFilesInRoot(absoluteRoot: string, sourceId: string): AdrFile[] {
+function listAdrFilesInRoot(absoluteRoot: string, sourceId: string, projectsDir: string): AdrFile[] {
   // Prefer docs/adr/ over adr/ when both exist
   const candidates = [join(absoluteRoot, "docs", "adr"), join(absoluteRoot, "adr")];
   const adrDir = candidates.find((p) => existsSync(p) && statSync(p).isDirectory());
@@ -68,6 +94,7 @@ function listAdrFilesInRoot(absoluteRoot: string, sourceId: string): AdrFile[] {
       modified: statSync(abs).mtimeMs,
       adrNumber: match ? parseInt(match[1], 10) : null,
       slug: match ? match[2] : e.name.replace(/\.md$/i, ""),
+      relativeToProjectsDir: relativeToProjects(abs, projectsDir),
     });
   }
   out.sort((a, b) => (a.adrNumber ?? 9999) - (b.adrNumber ?? 9999) || a.filename.localeCompare(b.filename));
@@ -89,23 +116,20 @@ export function buildContextAllowlist(projectDir: string): string[] {
  */
 export function isContextPathAllowed(absolutePath: string, allowlist: string[]): boolean {
   if (absolutePath.includes("\0")) return false;
-  const inAllowed = allowlist.some((root) => absolutePath === root || absolutePath.startsWith(root + "/"));
-  if (!inAllowed) return false;
+  const containingRoot = allowlist.find((root) => isPathUnder(absolutePath, root));
+  if (!containingRoot) return false;
   const name = basename(absolutePath);
   if (name === "CONTEXT.md" || name === "CONTEXT-MAP.md") return true;
+  if (!/\.md$/i.test(name)) return false;
   // ADR files must live under <root>/adr/ or <root>/docs/adr/
-  for (const root of allowlist) {
-    if (absolutePath.startsWith(root + "/adr/") || absolutePath.startsWith(root + "/docs/adr/")) {
-      return /\.md$/i.test(name);
-    }
-  }
-  return false;
+  const adrRoots = [join(containingRoot, "adr"), join(containingRoot, "docs", "adr")];
+  return adrRoots.some((r) => isPathUnder(absolutePath, r) && absolutePath !== r);
 }
 
 router.get("/:name/context", (req, res) => {
   const { projectsDir } = getConfig();
   const projectDir = resolve(projectsDir, req.params.name);
-  if (!projectDir.startsWith(projectsDir + "/") || !existsSync(projectDir)) {
+  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
     return res.status(404).json({ error: "Project not found" });
   }
 
@@ -119,8 +143,8 @@ router.get("/:name/context", (req, res) => {
   const adrs: AdrFile[] = [];
   for (const s of sources) {
     if (!existsSync(s.absoluteRoot)) continue;
-    contexts.push(...listContextFilesInRoot(s.absoluteRoot, s.id));
-    adrs.push(...listAdrFilesInRoot(s.absoluteRoot, s.id));
+    contexts.push(...listContextFilesInRoot(s.absoluteRoot, s.id, projectsDir));
+    adrs.push(...listAdrFilesInRoot(s.absoluteRoot, s.id, projectsDir));
   }
 
   res.json({ project: req.params.name, sources, contexts, adrs });
@@ -129,7 +153,7 @@ router.get("/:name/context", (req, res) => {
 router.get("/:name/context/read", (req, res) => {
   const { projectsDir } = getConfig();
   const projectDir = resolve(projectsDir, req.params.name);
-  if (!projectDir.startsWith(projectsDir + "/") || !existsSync(projectDir)) {
+  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
     return res.status(404).json({ error: "Project not found" });
   }
   const pathParam = typeof req.query.path === "string" ? req.query.path : "";

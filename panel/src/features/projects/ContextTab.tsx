@@ -86,11 +86,18 @@ function FileRow({
 export default function ContextTab({ projectName }: Props) {
   const { data, loading, error, refresh } = useProjectContext(projectName);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedBasePath, setSelectedBasePath] = useState<string | undefined>(undefined);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
-  const onOpenFile = async (absolutePath: string) => {
+  // basePath drives relative-link/image resolution in MarkdownRenderer. The renderer
+  // resolves against the projectsDir-rooted /view/ and /api/files/raw/ endpoints, so
+  // we only pass a basePath when the file actually lives under projectsDir (i.e.
+  // project-local CONTEXT.md or ADRs). For linked-repo files we leave basePath
+  // undefined — relative refs won't rewrite, but the markdown still renders.
+  const onOpenFile = async (absolutePath: string, relativeToProjectsDir: string | null) => {
     setSelectedPath(absolutePath);
+    setSelectedBasePath(relativeToProjectsDir ?? undefined);
     setFileContent(null);
     setFileError(null);
     try {
@@ -184,7 +191,7 @@ export default function ContextTab({ projectName }: Props) {
                       label={c.filename}
                       testId={`context-tab-file-${c.source}-${c.filename}`}
                       selected={selectedPath === c.absolutePath}
-                      onClick={() => onOpenFile(c.absolutePath)}
+                      onClick={() => onOpenFile(c.absolutePath, c.relativeToProjectsDir)}
                     />
                   )}
                 />
@@ -215,7 +222,7 @@ export default function ContextTab({ projectName }: Props) {
                       }
                       testId={`context-tab-adr-${a.source}-${a.filename}`}
                       selected={selectedPath === a.absolutePath}
-                      onClick={() => onOpenFile(a.absolutePath)}
+                      onClick={() => onOpenFile(a.absolutePath, a.relativeToProjectsDir)}
                     />
                   )}
                 />
@@ -244,7 +251,7 @@ export default function ContextTab({ projectName }: Props) {
         {fileContent !== null && (
           <MarkdownRenderer
             content={fileContent}
-            basePath={selectedPath ?? ""}
+            basePath={selectedBasePath}
           />
         )}
       </section>
