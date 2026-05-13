@@ -73,6 +73,8 @@ Before making non-trivial design or scope decisions, consult these files. They d
 
 **Rule:** when a user asks "should we…?" and the answer depends on terminology, scope, or a past trade-off, read the relevant CONTEXT.md / ADRs **before** answering. Don't invent new words for concepts that already have canonical names.
 
+**Discovery vs read:** `CONTEXT.md` is small enough to read eagerly on project entry. `adr/` files are read **lazily** — list the directory on resume so you know which decisions exist, then `Read` a specific ADR only when the current task touches its area. Loading every ADR body up front burns context for no gain.
+
 ## Session Tracking
 
 Session tracking is active. All messages are part of a single session until you write "session end" or "end session".
@@ -103,7 +105,10 @@ Usage: `resume [project-name]` or just `resume`
 Load recent context:
 
 1. Load most recent progress file from `notes/[project]/progress/`
-2. Read PROJECT.md to get repository locations and key context
+2. Read the project's default-discovery files:
+   - `PROJECT.md` — overview, repos, key context (always)
+   - `CONTEXT.md` (if present) — project-specific glossary (always; usually short)
+   - `adr/` (if present) — **list filenames/titles only**, do not read bodies. You'll know which ADRs exist for later targeted reads.
 3. Display brief formatted resume with last session context
 
 ## Commands

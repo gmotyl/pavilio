@@ -1,0 +1,23 @@
+{
+  "scripts": [
+    {
+      "id": "export-notes",
+      "label": "Export Notes",
+      "icon": "FileText",
+      "description": "Concatenates `PROJECT.md`, `DECISIONS.md`, `.agent/config.json`, and every progress note into a single markdown file under `<project>/exports/`. Import that file into a [NotebookLM notebook](https://notebooklm.google.com/) as a notes-only source.",
+      "script": "scripts/export-project-to-notebooklm.sh",
+      "outputMatch": "✅ Export created: (.+)",
+      "timeoutSec": 60
+    },
+    {
+      "id": "export-codebase",
+      "label": "Export Codebase",
+      "icon": "FileCode2",
+      "description": "Concatenates source files from the project's first linked repository into one or more `.txt` chunks under ~380KB each (NotebookLM's per-source limit). Excludes `node_modules`, `.git`, build outputs, tests, lockfiles, minified files. Output lands in `<project>/exports/`.",
+      "script": "scripts/export-codebase.sh",
+      "args": ["{exportsDir}/{project}-codebase", "{repo}"],
+      "outputMatch": "Created (\\S+\\.txt)",
+      "timeoutSec": 120
+    }
+  ]
+}

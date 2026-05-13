@@ -8,6 +8,8 @@ import ProjectSearchBar from "./ProjectSearchBar";
 import FileViewer from "./FileViewer";
 import SectionFilesList from "./SectionFilesList";
 import ContextTab from "./ContextTab";
+import ScriptButton from "./ScriptButton";
+import { useWorkspaceScripts } from "./useWorkspaceScripts";
 import { ProjectTabsBar, ProjectTabsMenu } from "./ProjectTabs";
 import { useProjectTabs } from "./useProjectTabs";
 import { useProjectSearch } from "./useProjectSearch";
@@ -177,6 +179,7 @@ export default function ProjectView() {
 
   const fileViewer = useFileViewer({ project: name, section });
   const { selectedFile, setSelectedFile } = fileViewer;
+  const { scripts } = useWorkspaceScripts();
 
   useEffect(() => {
     if (!name || section) return;
@@ -388,24 +391,29 @@ export default function ProjectView() {
       {/* Overview */}
       {!section && (
         <>
-          {absolutePath && (
-            <div className="flex gap-2 mb-4">
-              <button
-                data-testid="project-view-vscode"
-                onClick={() => openInVSCode(absolutePath)}
-                className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
-                style={{ color: "var(--text-secondary)" }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                  e.currentTarget.style.color = "var(--text-primary)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.color = "var(--text-secondary)";
-                }}
-              >
-                <ExternalLink className="w-3.5 h-3.5" /> Open in VS Code
-              </button>
+          {(absolutePath || scripts.length > 0) && (
+            <div className="flex flex-wrap gap-2 mb-4 items-center">
+              {absolutePath && (
+                <button
+                  data-testid="project-view-vscode"
+                  onClick={() => openInVSCode(absolutePath)}
+                  className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
+                  style={{ color: "var(--text-secondary)" }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "var(--bg-hover)";
+                    e.currentTarget.style.color = "var(--text-primary)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.color = "var(--text-secondary)";
+                  }}
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open in VS Code
+                </button>
+              )}
+              {name && scripts.map((entry) => (
+                <ScriptButton key={entry.id} entry={entry} projectName={name} />
+              ))}
             </div>
           )}
           {error && (
