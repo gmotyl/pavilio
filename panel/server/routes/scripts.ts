@@ -1,10 +1,10 @@
 import { Router } from "express";
 import { execFile } from "child_process";
-import { existsSync, readFileSync, statSync, readdirSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import { join, resolve, sep } from "path";
 import { getConfig } from "../config.js";
-import { discoverProjects } from "../lib/discovery.js";
 
+// Keep in sync with panel/src/features/projects/useWorkspaceScripts.ts
 export interface ScriptEntry {
   id: string;
   label: string;

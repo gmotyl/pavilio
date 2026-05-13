@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+// Keep in sync with panel/server/routes/scripts.ts
 export interface ScriptEntry {
   id: string;
   label: string;
