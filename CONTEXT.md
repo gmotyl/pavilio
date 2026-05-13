@@ -36,6 +36,14 @@ _Avoid_: subfolder (use when speaking generically), category, tab
 A plan file path listed in `projects/<name>/plans/CURRENT.md`. Multiple lines = multiple in-progress plans. The panel surfaces these prominently on the project view so agents resume in the right place.
 _Avoid_: open plan, current plan (file is `CURRENT.md`, but the concept is "active")
 
+**Overview script**:
+A configured button on a project's Overview tab that runs a workspace shell script (`scripts/*.sh`) against the current project. Defined as one entry in the workspace `scripts/scripts.json`. Scoped to one **Project** at a time.
+_Avoid_: action button (too generic), task (overloaded with Todoist), workflow.
+
+**Scripts config**:
+The workspace-level JSON file at `scripts/scripts.json`. Lists every **Overview script** with its label, description, target script path, and optional `outputMatch` / `timeoutSec` / `icon`. Ships in pavilio upstream; pulled to user workspaces via `scripts/update.sh`.
+_Avoid_: scripts manifest, scripts registry.
+
 ## Relationships
 
 - A **Workspace** owns many **Projects**
@@ -43,6 +51,7 @@ _Avoid_: open plan, current plan (file is `CURRENT.md`, but the concept is "acti
 - A **Linked repository** is **Repo world** — read-only to the panel's filesystem mutations
 - A **Project** is composed of **Sections**; each section is one **Notes world** subfolder
 - An **Active plan** is a **Notes world** file path advertised through `plans/CURRENT.md`
+- The **Scripts config** defines a list of **Overview scripts**; the **Panel** renders one button per entry on every **Project**'s Overview tab.
 
 ## Example dialogue
 
