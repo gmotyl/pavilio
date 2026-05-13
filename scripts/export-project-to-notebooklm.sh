@@ -1,104 +1,227 @@
 #!/bin/bash
 
+# Export project notes + linked-repo source as a single .txt for NotebookLM upload.
+# Invoked by the panel's Overview button as:
+#   bash export-project-to-notebooklm.sh <project>
+# with cwd set to the workspace's projects directory.
+
 set -e
 
-echo "📤 Export Project to NotebookLM"
-echo "==============================="
-echo ""
+# ---------------------------------------------------------------------------
+# Args
+# ---------------------------------------------------------------------------
 
-# Get project name
 if [ -z "$1" ]; then
     read -p "Project name (or use --project flag): " PROJECT_NAME
 else
     PROJECT_NAME="$1"
 fi
 
-# Allow --project flag
 if [ "$PROJECT_NAME" = "--project" ]; then
     PROJECT_NAME="$2"
 fi
 
-if [ ! -d "$PROJECT_NAME" ]; then
-    echo "❌ Project directory not found: $PROJECT_NAME"
+if [ -z "$PROJECT_NAME" ] || [ ! -d "$PROJECT_NAME" ]; then
+    echo "❌ Project directory not found: $PROJECT_NAME" >&2
     exit 1
 fi
 
-# Create export directory
+# ---------------------------------------------------------------------------
+# Output path
+# ---------------------------------------------------------------------------
+
 EXPORT_DIR="$PROJECT_NAME/exports"
 mkdir -p "$EXPORT_DIR"
 
-EXPORT_FILE="$EXPORT_DIR/export-$(date +%Y%m%d-%H%M%S).md"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+ISO_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+EXPORT_FILE="$EXPORT_DIR/export-${TIMESTAMP}.txt"
 
-echo "📝 Creating export file..."
-echo ""
+# Truncate / create
+: > "$EXPORT_FILE"
 
-# Start export file
-cat > "$EXPORT_FILE" << 'EOFMD'
-# Project Export for NotebookLM
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-This file contains the project structure, configuration, notes, and decisions for analysis in NotebookLM.
+# Expand a leading ~ in a path using $HOME. Leaves other paths untouched.
+expand_tilde() {
+    local p="$1"
+    case "$p" in
+        "~") printf '%s\n' "$HOME" ;;
+        "~/"*) printf '%s\n' "$HOME/${p#~/}" ;;
+        *) printf '%s\n' "$p" ;;
+    esac
+}
 
-## How to Use
+# Walk a repo with the same filters as scripts/export-codebase.sh and emit
+# `=== <rel-path> ===\n<content>\n` blocks for every matching file.
+emit_repo_source() {
+    local repo_abs="$1"
+    (
+        cd "$repo_abs" || return 1
+        find . -type f \( \
+            -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \
+            -o -name "*.vue" -o -name "*.svelte" \
+            -o -name "*.py" -o -name "*.rb" -o -name "*.go" -o -name "*.rs" \
+            -o -name "*.java" -o -name "*.kt" -o -name "*.scala" \
+            -o -name "*.css" -o -name "*.scss" -o -name "*.less" \
+            -o -name "*.html" -o -name "*.erb" \
+            -o -name "*.php" -o -name "*.c" -o -name "*.cpp" -o -name "*.h" \
+            -o -name "*.swift" -o -name "*.m" \
+            -o -name "*.sh" -o -name "*.yaml" -o -name "*.yml" \
+        \) \
+            ! -path "*/node_modules/*" \
+            ! -path "*/.git/*" \
+            ! -path "*/dist/*" \
+            ! -path "*/build/*" \
+            ! -path "*/.nuxt/*" \
+            ! -path "*/.next/*" \
+            ! -path "*/.output/*" \
+            ! -path "*/coverage/*" \
+            ! -path "*/.turbo/*" \
+            ! -path "*/__pycache__/*" \
+            ! -path "*/venv/*" \
+            ! -path "*/.venv/*" \
+            ! -path "*/vendor/*" \
+            ! -path "*/target/*" \
+            ! -path "*/*api-client/*" \
+            ! -path "*/__tests__/*" \
+            ! -path "*/__mocks__/*" \
+            ! -path "*/test/*" \
+            ! -path "*/tests/*" \
+            ! -path "*/*.test.*" \
+            ! -path "*/*.spec.*" \
+            ! -name "*.d.ts" \
+            ! -name "*.min.js" \
+            ! -name "*.min.css" \
+            ! -name "*.map" \
+            ! -name "*.lock" \
+            ! -name "package-lock.json" \
+            ! -name "yarn.lock" \
+            ! -name "pnpm-lock.yaml" \
+            2>/dev/null | sort | while IFS= read -r file; do
+                rel="${file#./}"
+                printf '=== %s ===\n' "$rel"
+                cat "$file" 2>/dev/null || true
+                printf '\n'
+            done
+    )
+}
 
-1. Copy the content of this file
-2. Go to https://notebooklm.google.com/
-3. Create a new notebook
-4. Paste this content
-5. Ask questions:
-   - "What's the project architecture?"
-   - "How should we refactor X?"
-   - "What are the key decisions?"
-   - "What's missing from the implementation?"
+# ---------------------------------------------------------------------------
+# Header
+# ---------------------------------------------------------------------------
 
----
+{
+    printf '# Project Export for NotebookLM: %s\n' "$PROJECT_NAME"
+    printf '\n'
+    printf 'This file is a single-source dump intended for upload to a NotebookLM notebook.\n'
+    printf 'It contains the project'\''s notes summary followed by the source code of every\n'
+    printf 'linked repository (with common build/vendor/test paths excluded).\n'
+    printf '\n'
+    printf 'Generated: %s\n' "$ISO_TIMESTAMP"
+    printf '\n'
+    printf -- '----------------------------------------\n'
+    printf '\n'
+} >> "$EXPORT_FILE"
 
-EOFMD
+# ---------------------------------------------------------------------------
+# Section 1 — Notes summary
+# ---------------------------------------------------------------------------
 
-# Add PROJECT.md
+{
+    printf '## Notes Summary\n'
+    printf '\n'
+} >> "$EXPORT_FILE"
+
 if [ -f "$PROJECT_NAME/PROJECT.md" ]; then
-    echo "## PROJECT.md" >> "$EXPORT_FILE"
-    echo "" >> "$EXPORT_FILE"
-    cat "$PROJECT_NAME/PROJECT.md" >> "$EXPORT_FILE"
-    echo "" >> "$EXPORT_FILE"
+    {
+        printf '### PROJECT.md\n'
+        printf '\n'
+        cat "$PROJECT_NAME/PROJECT.md"
+        printf '\n\n'
+    } >> "$EXPORT_FILE"
 fi
 
-# Add DECISIONS.md
 if [ -f "$PROJECT_NAME/DECISIONS.md" ]; then
-    echo "## DECISIONS.md" >> "$EXPORT_FILE"
-    echo "" >> "$EXPORT_FILE"
-    cat "$PROJECT_NAME/DECISIONS.md" >> "$EXPORT_FILE"
-    echo "" >> "$EXPORT_FILE"
+    {
+        printf '### DECISIONS.md\n'
+        printf '\n'
+        cat "$PROJECT_NAME/DECISIONS.md"
+        printf '\n\n'
+    } >> "$EXPORT_FILE"
 fi
 
-# Add agent config
 if [ -f "$PROJECT_NAME/.agent/config.json" ]; then
-    echo "## Agent Configuration" >> "$EXPORT_FILE"
-    echo "" >> "$EXPORT_FILE"
-    echo '```json' >> "$EXPORT_FILE"
-    cat "$PROJECT_NAME/.agent/config.json" >> "$EXPORT_FILE"
-    echo '```' >> "$EXPORT_FILE"
-    echo "" >> "$EXPORT_FILE"
+    {
+        printf '### Agent Configuration\n'
+        printf '\n'
+        printf '```json\n'
+        cat "$PROJECT_NAME/.agent/config.json"
+        printf '\n```\n\n'
+    } >> "$EXPORT_FILE"
 fi
 
-# Add recent session notes
-echo "## Recent Session Notes" >> "$EXPORT_FILE"
-echo "" >> "$EXPORT_FILE"
-if [ -d "$PROJECT_NAME/progress" ] && [ "$(ls -A "$PROJECT_NAME/progress")" ]; then
-    for file in "$PROJECT_NAME/progress"/*.md; do
-        if [ -f "$file" ]; then
-            echo "### $(basename "$file")" >> "$EXPORT_FILE"
-            echo "" >> "$EXPORT_FILE"
-            cat "$file" >> "$EXPORT_FILE"
-            echo "" >> "$EXPORT_FILE"
-        fi
-    done
+if [ -d "$PROJECT_NAME/progress" ]; then
+    shopt -s nullglob
+    progress_files=("$PROJECT_NAME/progress"/*.md)
+    shopt -u nullglob
+    if [ "${#progress_files[@]}" -gt 0 ]; then
+        for file in "${progress_files[@]}"; do
+            [ -f "$file" ] || continue
+            {
+                printf '### progress/%s\n' "$(basename "$file")"
+                printf '\n'
+                cat "$file"
+                printf '\n\n'
+            } >> "$EXPORT_FILE"
+        done
+    fi
 fi
+
+# ---------------------------------------------------------------------------
+# Section 2 — Source code from linked repos
+# ---------------------------------------------------------------------------
+
+REPOS_JSON="$PROJECT_NAME/repos.json"
+
+if [ -f "$REPOS_JSON" ]; then
+    REPO_COUNT="$(jq 'length' "$REPOS_JSON")"
+    if [ "$REPO_COUNT" -gt 0 ]; then
+        {
+            printf '## Source Code\n'
+            printf '\n'
+        } >> "$EXPORT_FILE"
+
+        # Iterate entries. Each line: <name>\t<path>
+        jq -r '.[] | [(.name // ""), (.path // "")] | @tsv' "$REPOS_JSON" \
+        | while IFS=$'\t' read -r repo_name repo_path; do
+            [ -n "$repo_path" ] || continue
+
+            resolved="$(expand_tilde "$repo_path")"
+            display_name="${repo_name:-$(basename "$resolved")}"
+
+            {
+                printf '### Repo: %s\n' "$display_name"
+                printf '\n'
+            } >> "$EXPORT_FILE"
+
+            if [ ! -d "$resolved" ]; then
+                {
+                    printf '_(repo path not found: %s)_\n\n' "$resolved"
+                } >> "$EXPORT_FILE"
+                continue
+            fi
+
+            emit_repo_source "$resolved" >> "$EXPORT_FILE"
+            printf '\n' >> "$EXPORT_FILE"
+        done
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Footer — keep this exact format; panel matches `✅ Export created: (.+)`
+# ---------------------------------------------------------------------------
 
 echo "✅ Export created: $EXPORT_FILE"
-echo ""
-echo "To use with NotebookLM:"
-echo "1. Copy the export file content"
-echo "2. Go to https://notebooklm.google.com/"
-echo "3. Create new notebook and paste content"
-echo "4. Ask architectural questions"
-echo ""

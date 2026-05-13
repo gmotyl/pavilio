@@ -12,10 +12,12 @@ The user will provide the transcript. Your process is:
 2. First get `projectname` from the user.
 3. **Select Transcript Source**:
    - Ask user: "How would you like to provide the transcript?"
-   - Fetch the last 5 meeting titles from Quill MCP and provide numbered list to select meeting transcription (include meeting date and time converted to local timezone Europe/Warsaw), manual paste or cancel
+   - Read the global registry at `projects/.processed_transcripts.json` (create empty `{ "processed": [] }` if missing) — see **Processed Transcripts Registry Rules**
+   - Fetch the last 10 meeting titles from Quill MCP, filter out any whose `meeting_id` (or `source_id`) is already in the registry, and present the first 5 unprocessed ones as a numbered list (include meeting date and time converted to local timezone Europe/Warsaw). Offer manual paste or cancel as additional options.
    - If Quill MCP: Call quill MCP to get the transcript
    - If Manual: Ask user to paste transcript
-   - Fall back to Manual if Quill MCP is unavailable or has no meetings
+   - Fall back to Manual if Quill MCP is unavailable or has no unprocessed meetings
+   - **Note**: same filtering logic applies to any other transcript-providing MCP (Fathom, etc.) — always check the registry before listing
 4. **Check for known participants** (see **Participant Recognition Rules** below):
    - Read `projects/projectname/_index.json` and `projects/projectname/PROJECT.md` if they exist
    - Check if this project has a `known_participants` list in `_index.json`
@@ -37,6 +39,7 @@ The user will provide the transcript. Your process is:
     2. `projects/projectname/projects/log/[datetime]_transcript_shortname.txt` - plain 1:1 transcript
     3. **Update** `projects/projectname/PROJECT.md` - See **PROJECT.md Update Rules**
     4. **Update** `projects/projectname/_index.json` - See **Index Update Rules** (including `known_participants` if updated)
+    5. **Update** `projects/.processed_transcripts.json` — record this transcript as processed (skip if source was manual paste with no MCP id). See **Processed Transcripts Registry Rules**
 11. Display numbered list of tasks for Greg, ask which numbers user wants to add to Todoist.
 12. Wait for user input with task numbers.
 13. Add selected tasks to Todoist using MCP. Task should have "[projectname]" prefix followed by short title and a bit longer description and should be for today.
@@ -404,5 +407,62 @@ When analyzing the transcript, actively look for:
 - Tasks assigned to specific people
 - Deadlines mentioned
 - Follow-ups needed
+
+---
+
+### Processed Transcripts Registry Rules
+
+A global registry at `projects/.processed_transcripts.json` tracks every transcript that has been turned into a note, regardless of which project it landed in. Its purpose is to prevent re-processing the same Quill/Fathom/etc. meeting and to keep the "last N transcripts" picker showing only fresh ones.
+
+**Location:** `projects/.processed_transcripts.json` (single file, shared across all projects)
+
+**Schema:**
+
+```json
+{
+  "last_updated": "YYYY-MM-DD",
+  "processed": [
+    {
+      "source": "quill",
+      "source_id": "meeting-id-from-mcp",
+      "title": "Daily Standup",
+      "meeting_date": "2026-05-07T09:00:00+02:00",
+      "processed_date": "2026-05-07",
+      "project": "ch",
+      "note_ref": "projects/ch/projects/2026-05-07_09-00-00_daily_standup.md"
+    }
+  ]
+}
+```
+
+**Field meanings:**
+
+- `source` — MCP/tool that provided the transcript: `quill`, `fathom`, `manual`, etc.
+- `source_id` — stable identifier returned by the MCP (e.g. Quill meeting id, Fathom recording id). Use this for deduplication.
+- `title` — meeting title at the time of processing
+- `meeting_date` — original meeting timestamp in ISO 8601 with timezone
+- `processed_date` — date the note was generated (YYYY-MM-DD)
+- `project` — projectname under `projects/` where the note was written
+- `note_ref` — relative path to the generated `.md` summary
+
+**Read flow (step 3):**
+
+1. Open `projects/.processed_transcripts.json`. If missing, treat as `{ "processed": [] }`.
+2. Build a set of `(source, source_id)` pairs from the `processed` array.
+3. After fetching N meetings from the MCP, drop any whose `(source, source_id)` is in that set.
+4. Display the first 5 remaining meetings to the user.
+
+**Write flow (step 10.5):**
+
+1. After files are written successfully, append a new entry to `processed`.
+2. Update `last_updated` to today's date.
+3. If `source_id` is unknown (manual paste with no MCP linkage), skip the registry update — there's nothing to deduplicate.
+4. Do NOT remove old entries; the registry is append-only. Pruning, if ever needed, is a manual maintenance task.
+
+**Edge cases:**
+
+- If the same MCP meeting is intentionally re-processed (e.g. transcript was updated upstream), the user must remove its entry manually first.
+- If two projects could legitimately want the same meeting noted, that's still a single processed entry — pick the project that owns the primary outcome.
+- Do not commit secrets or attendee emails beyond what already lives in `_index.json`.
 
 ---
