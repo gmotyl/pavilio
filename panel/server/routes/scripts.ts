@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { existsSync, readFileSync, statSync } from "fs";
 import { join, resolve, sep } from "path";
+import { getConfig } from "../config.js";
 
 export interface ScriptEntry {
   id: string;
@@ -50,4 +51,11 @@ export function loadScriptsConfig(workspaceRoot: string): ScriptsConfig {
 }
 
 const router = Router();
+
+router.get("/scripts", (_req, res) => {
+  const { projectsDir } = getConfig();
+  const workspaceRoot = resolve(projectsDir, "..");
+  res.json(loadScriptsConfig(workspaceRoot));
+});
+
 export default router;

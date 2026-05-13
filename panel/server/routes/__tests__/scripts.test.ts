@@ -93,3 +93,43 @@ describe("loadScriptsConfig", () => {
     });
   });
 });
+
+describe("GET /api/scripts", () => {
+  it("returns the parsed array", async () => {
+    seedScriptsJson({
+      scripts: [
+        { id: "a", label: "A", description: "d", script: "scripts/a.sh" },
+      ],
+    });
+    const res = await request(makeApp()).get("/api/scripts");
+    expect(res.status).toBe(200);
+    expect(res.body.scripts).toHaveLength(1);
+    expect(res.body.scripts[0].id).toBe("a");
+  });
+
+  it("returns empty array when scripts.json is missing", async () => {
+    const res = await request(makeApp()).get("/api/scripts");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ scripts: [] });
+  });
+
+  it("exposes optional fields including timeoutSec verbatim", async () => {
+    seedScriptsJson({
+      scripts: [
+        {
+          id: "a",
+          label: "A",
+          description: "d",
+          script: "scripts/a.sh",
+          timeoutSec: 30,
+          icon: "Play",
+          outputMatch: "R: (.+)",
+        },
+      ],
+    });
+    const res = await request(makeApp()).get("/api/scripts");
+    expect(res.body.scripts[0].timeoutSec).toBe(30);
+    expect(res.body.scripts[0].icon).toBe("Play");
+    expect(res.body.scripts[0].outputMatch).toBe("R: (.+)");
+  });
+});
