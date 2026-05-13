@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { execFile } from "child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
-import { homedir } from "os";
 import { join, resolve, sep } from "path";
 import { getConfig } from "../config.js";
+import { expandHome } from "../lib/paths.js";
 
 // Keep in sync with panel/src/features/projects/useWorkspaceScripts.ts
 export interface ScriptEntry {
@@ -20,13 +20,6 @@ export interface ScriptEntry {
    * which are substituted at run time.
    */
   args?: string[];
-}
-
-/** Expand a leading `~` or `~/` to the user's home directory. */
-function expandHome(p: string): string {
-  if (p === "~") return homedir();
-  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
-  return p;
 }
 
 export interface ScriptsConfig {
@@ -113,7 +106,14 @@ export function resolveScriptArgs(
         `Project ${projectName} has no repos.json — cannot resolve {repo}`,
       );
     }
-    const parsed = JSON.parse(readFileSync(reposPath, "utf-8"));
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(reposPath, "utf-8"));
+    } catch (err) {
+      throw new ConfigError(
+        `Project ${projectName} has malformed repos.json: ${(err as Error).message}`,
+      );
+    }
     const repos = Array.isArray(parsed) ? parsed : [];
     if (repos.length === 0 || typeof repos[0]?.path !== "string") {
       throw new ConfigError(

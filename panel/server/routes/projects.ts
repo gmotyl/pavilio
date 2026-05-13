@@ -1,18 +1,11 @@
 import { Router } from "express";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
-import { homedir } from "os";
 import { join, resolve, basename, relative, isAbsolute, sep } from "path";
 import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
+import { expandHome } from "../lib/paths.js";
 import { getConfig } from "../config.js";
 
 const router = Router();
-
-/** Expand a leading `~` or `~/` to the user's home directory. */
-function expandHome(p: string): string {
-  if (p === "~") return homedir();
-  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
-  return p;
-}
 
 /** Cross-platform: forward slashes only in API responses. */
 function toPosix(p: string): string {

@@ -385,4 +385,19 @@ describe("resolveScriptArgs / POST args schema", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/empty/i);
   });
+
+  it("returns 400 with a clear message when repos.json has malformed JSON", async () => {
+    seedProject("alpha");
+    writeFileSync(join(projectsDir, "alpha", "repos.json"), "{ not valid json");
+    seedScript("show.sh", "#!/bin/bash\necho ok\n");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "scripts/show.sh",
+          args: ["{repo}"] },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/malformed repos\.json/i);
+  });
 });
