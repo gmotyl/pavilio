@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { execFile } from "child_process";
 import { existsSync, readFileSync, statSync, readdirSync } from "fs";
 import { join, resolve, sep } from "path";
 import { getConfig } from "../config.js";
@@ -81,6 +82,45 @@ export function resolveScriptPath(scriptField: string, workspaceRoot: string): s
   return abs;
 }
 
+function resolveTimeoutMs(timeoutSec: unknown): number {
+  if (typeof timeoutSec === "number" && Number.isInteger(timeoutSec) && timeoutSec > 0) {
+    return timeoutSec * 1000;
+  }
+  if (timeoutSec !== undefined) {
+    console.warn(`[scripts] invalid timeoutSec ${String(timeoutSec)}, falling back to 60s`);
+  }
+  return 60_000;
+}
+
+function runScript(
+  scriptAbs: string,
+  projectName: string,
+  projectsDir: string,
+  timeoutMs: number,
+): Promise<{ ok: boolean; output: string; durationMs: number }> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    execFile(
+      "bash",
+      [scriptAbs, projectName],
+      { cwd: projectsDir, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        const durationMs = Date.now() - start;
+        const output = [stdout, stderr].filter(Boolean).join("").trim();
+        if (err && (err as NodeJS.ErrnoException).killed) {
+          resolve({
+            ok: false,
+            output: `Timed out after ${Math.round(timeoutMs / 1000)}s\n${output}`.trim(),
+            durationMs,
+          });
+          return;
+        }
+        resolve({ ok: !err, output, durationMs });
+      },
+    );
+  });
+}
+
 const router = Router();
 
 router.get("/scripts", (_req, res) => {
@@ -89,7 +129,7 @@ router.get("/scripts", (_req, res) => {
   res.json(loadScriptsConfig(workspaceRoot));
 });
 
-router.post("/projects/:name/scripts/:id/run", (req, res) => {
+router.post("/projects/:name/scripts/:id/run", async (req, res) => {
   const { projectsDir } = getConfig();
   const workspaceRoot = resolve(projectsDir, "..");
   const { name, id } = req.params;
@@ -114,8 +154,25 @@ router.post("/projects/:name/scripts/:id/run", (req, res) => {
     throw err;
   }
 
-  // Execution wiring lands in Task 5.
-  res.status(501).json({ error: "Not implemented yet", scriptAbs });
+  const timeoutMs = resolveTimeoutMs(entry.timeoutSec);
+  const result = await runScript(scriptAbs, name, projectsDir, timeoutMs);
+
+  let matched: string | undefined;
+  if (entry.outputMatch) {
+    try {
+      const re = new RegExp(entry.outputMatch);
+      matched = re.exec(result.output)?.[1];
+    } catch (err) {
+      console.warn(`[scripts] invalid outputMatch for ${id}:`, (err as Error).message);
+    }
+  }
+
+  res.json({
+    ok: result.ok,
+    output: result.output,
+    durationMs: result.durationMs,
+    ...(matched !== undefined ? { matched } : {}),
+  });
 });
 
 export default router;

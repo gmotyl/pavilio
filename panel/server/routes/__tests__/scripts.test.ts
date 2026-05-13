@@ -203,3 +203,96 @@ describe("POST /api/projects/:name/scripts/:id/run — validation", () => {
     expect(res.body.error).toMatch(/not found|missing|exist/i);
   });
 });
+
+describe("POST /api/projects/:name/scripts/:id/run — execution", () => {
+  it("runs the script and returns ok with output", async () => {
+    seedProject("alpha");
+    seedScript("ok.sh", "#!/bin/bash\necho 'MATCH-ME: hello world'\necho bye\n");
+    seedScriptsJson({
+      scripts: [
+        {
+          id: "ok",
+          label: "OK",
+          description: "d",
+          script: "scripts/ok.sh",
+          outputMatch: "MATCH-ME: (.+)",
+        },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/ok/run");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.output).toContain("hello world");
+    expect(res.body.output).toContain("bye");
+    expect(res.body.matched).toBe("hello world");
+    expect(typeof res.body.durationMs).toBe("number");
+  });
+
+  it("returns ok:false when the script exits non-zero", async () => {
+    seedProject("alpha");
+    seedScript("bad.sh", "#!/bin/bash\necho >&2 something broke\nexit 1\n");
+    seedScriptsJson({
+      scripts: [
+        { id: "bad", label: "Bad", description: "d", script: "scripts/bad.sh" },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/bad/run");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.output).toContain("something broke");
+  });
+
+  it("returns ok:false on timeoutSec exceeded", async () => {
+    seedProject("alpha");
+    seedScript("slow.sh", "#!/bin/bash\nsleep 3\n");
+    seedScriptsJson({
+      scripts: [
+        {
+          id: "slow",
+          label: "Slow",
+          description: "d",
+          script: "scripts/slow.sh",
+          timeoutSec: 1,
+        },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/slow/run");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.output).toMatch(/timed out/i);
+  }, 10_000);
+
+  it("passes the project name as argv to bash", async () => {
+    seedProject("alpha");
+    seedScript("argv.sh", "#!/bin/bash\necho \"argv1=$1\"\n");
+    seedScriptsJson({
+      scripts: [
+        { id: "argv", label: "Argv", description: "d", script: "scripts/argv.sh" },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/argv/run");
+    expect(res.body.output).toContain("argv1=alpha");
+  });
+
+  it("falls back to 60s default when timeoutSec is invalid", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    seedProject("alpha");
+    seedScript("ok.sh", "#!/bin/bash\necho ok\n");
+    seedScriptsJson({
+      scripts: [
+        {
+          id: "ok",
+          label: "OK",
+          description: "d",
+          script: "scripts/ok.sh",
+          timeoutSec: -5 as unknown as number,
+        },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/ok/run");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
