@@ -1,0 +1,13 @@
+{
+  "scripts": [
+    {
+      "id": "export-notebooklm",
+      "label": "Export to NotebookLM",
+      "icon": "Download",
+      "description": "Concatenates PROJECT.md, DECISIONS.md, .agent/config.json, and every progress note into a single markdown file under `exports/`. Import that file into a [NotebookLM notebook](https://notebooklm.google.com/) and discuss the project with the model.",
+      "script": "scripts/export-project-to-notebooklm.sh",
+      "outputMatch": "✅ Export created: (.+)",
+      "timeoutSec": 60
+    }
+  ]
+}
