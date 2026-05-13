@@ -133,3 +133,73 @@ describe("GET /api/scripts", () => {
     expect(res.body.scripts[0].outputMatch).toBe("R: (.+)");
   });
 });
+
+function seedProject(name: string) {
+  mkdirSync(join(projectsDir, name), { recursive: true });
+  writeFileSync(join(projectsDir, name, "PROJECT.md"), "# " + name);
+}
+
+describe("POST /api/projects/:name/scripts/:id/run — validation", () => {
+  it("returns 404 when the project does not exist", async () => {
+    seedScriptsJson({
+      scripts: [{ id: "x", label: "X", description: "d", script: "scripts/x.sh" }],
+    });
+    seedScript("x.sh", "#!/bin/bash\necho ok\n");
+    const res = await request(makeApp())
+      .post("/api/projects/no-such/scripts/x/run");
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/project/i);
+  });
+
+  it("returns 404 when the script id does not exist", async () => {
+    seedProject("alpha");
+    seedScriptsJson({
+      scripts: [{ id: "x", label: "X", description: "d", script: "scripts/x.sh" }],
+    });
+    seedScript("x.sh", "#!/bin/bash\necho ok\n");
+    const res = await request(makeApp())
+      .post("/api/projects/alpha/scripts/no-such/run");
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/script/i);
+  });
+
+  it("returns 400 when the configured script path is outside scripts/", async () => {
+    seedProject("alpha");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "../etc/passwd.sh" },
+      ],
+    });
+    const res = await request(makeApp())
+      .post("/api/projects/alpha/scripts/x/run");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/scripts/i);
+  });
+
+  it("returns 400 when the configured path does not end in .sh", async () => {
+    seedProject("alpha");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "scripts/x.py" },
+      ],
+    });
+    seedScript("x.py", "print('hi')");
+    const res = await request(makeApp())
+      .post("/api/projects/alpha/scripts/x/run");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/\.sh/);
+  });
+
+  it("returns 400 when the resolved file does not exist", async () => {
+    seedProject("alpha");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "scripts/missing.sh" },
+      ],
+    });
+    const res = await request(makeApp())
+      .post("/api/projects/alpha/scripts/x/run");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not found|missing|exist/i);
+  });
+});
