@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { execFile } from "child_process";
-import { existsSync, readFileSync, statSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
+import { homedir } from "os";
 import { join, resolve, sep } from "path";
 import { getConfig } from "../config.js";
 
@@ -13,6 +14,19 @@ export interface ScriptEntry {
   outputMatch?: string;
   icon?: string;
   timeoutSec?: number;
+  /**
+   * Optional argv passed to the script. Defaults to [projectName].
+   * Strings may contain placeholders: {project}, {exportsDir}, {repo}
+   * which are substituted at run time.
+   */
+  args?: string[];
+}
+
+/** Expand a leading `~` or `~/` to the user's home directory. */
+function expandHome(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+  return p;
 }
 
 export interface ScriptsConfig {
@@ -82,6 +96,43 @@ export function resolveScriptPath(scriptField: string, workspaceRoot: string): s
   return abs;
 }
 
+export function resolveScriptArgs(
+  entry: ScriptEntry,
+  projectName: string,
+  projectsDir: string,
+): string[] {
+  const template = entry.args ?? ["{project}"];
+
+  // Resolve `{repo}` lazily — only read repos.json if needed
+  let firstRepo: string | undefined;
+  const needsRepo = template.some((a) => a.includes("{repo}"));
+  if (needsRepo) {
+    const reposPath = join(projectsDir, projectName, "repos.json");
+    if (!existsSync(reposPath)) {
+      throw new ConfigError(
+        `Project ${projectName} has no repos.json — cannot resolve {repo}`,
+      );
+    }
+    const parsed = JSON.parse(readFileSync(reposPath, "utf-8"));
+    const repos = Array.isArray(parsed) ? parsed : [];
+    if (repos.length === 0 || typeof repos[0]?.path !== "string") {
+      throw new ConfigError(
+        `Project ${projectName} repos.json is empty — cannot resolve {repo}`,
+      );
+    }
+    firstRepo = resolve(expandHome(repos[0].path));
+  }
+
+  const exportsDir = join(projectsDir, projectName, "exports");
+
+  return template.map((s) =>
+    s
+      .replaceAll("{project}", projectName)
+      .replaceAll("{exportsDir}", exportsDir)
+      .replaceAll("{repo}", firstRepo ?? ""),
+  );
+}
+
 function resolveTimeoutMs(timeoutSec: unknown): number {
   if (typeof timeoutSec === "number" && Number.isInteger(timeoutSec) && timeoutSec > 0) {
     return timeoutSec * 1000;
@@ -94,7 +145,7 @@ function resolveTimeoutMs(timeoutSec: unknown): number {
 
 function runScript(
   scriptAbs: string,
-  projectName: string,
+  scriptArgs: string[],
   projectsDir: string,
   timeoutMs: number,
 ): Promise<{ ok: boolean; output: string; durationMs: number }> {
@@ -102,7 +153,7 @@ function runScript(
     const start = Date.now();
     execFile(
       "bash",
-      [scriptAbs, projectName],
+      [scriptAbs, ...scriptArgs],
       { cwd: projectsDir, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         const durationMs = Date.now() - start;
@@ -154,8 +205,21 @@ router.post("/projects/:name/scripts/:id/run", async (req, res) => {
     throw err;
   }
 
+  // Ensure exports/ exists before running — harmless if the script doesn't use it.
+  mkdirSync(join(projectsDir, name, "exports"), { recursive: true });
+
+  let scriptArgs: string[];
+  try {
+    scriptArgs = resolveScriptArgs(entry, name, projectsDir);
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
+
   const timeoutMs = resolveTimeoutMs(entry.timeoutSec);
-  const result = await runScript(scriptAbs, name, projectsDir, timeoutMs);
+  const result = await runScript(scriptAbs, scriptArgs, projectsDir, timeoutMs);
 
   let matched: string | undefined;
   if (entry.outputMatch) {

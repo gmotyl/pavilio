@@ -296,3 +296,93 @@ describe("POST /api/projects/:name/scripts/:id/run — execution", () => {
     warn.mockRestore();
   });
 });
+
+describe("resolveScriptArgs / POST args schema", () => {
+  it("defaults to [projectName] when entry.args is missing", async () => {
+    seedProject("alpha");
+    seedScript("argv.sh", "#!/bin/bash\necho \"argv: $*\"\n");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "scripts/argv.sh" },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    expect(res.body.ok).toBe(true);
+    expect(res.body.output).toContain("argv: alpha");
+  });
+
+  it("substitutes {project} placeholder", async () => {
+    seedProject("alpha");
+    seedScript("argv.sh", "#!/bin/bash\necho \"args=$@\"\n");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "scripts/argv.sh",
+          args: ["before", "{project}", "after"] },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    expect(res.body.output).toContain("args=before alpha after");
+  });
+
+  it("substitutes {exportsDir} to an absolute path and the dir exists", async () => {
+    seedProject("alpha");
+    seedScript("show.sh", "#!/bin/bash\necho \"out=$1\"\ntest -d \"$1\" && echo \"dir exists\"\n");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "scripts/show.sh",
+          args: ["{exportsDir}"] },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    expect(res.body.output).toContain("out=" + join(projectsDir, "alpha", "exports"));
+    expect(res.body.output).toContain("dir exists");
+  });
+
+  it("substitutes {repo} with the first expanded repo path from repos.json", async () => {
+    seedProject("alpha");
+    // Seed repos.json pointing at a known path under tmpRoot
+    mkdirSync(join(tmpRoot, "fake-repo"), { recursive: true });
+    writeFileSync(
+      join(projectsDir, "alpha", "repos.json"),
+      JSON.stringify([{ name: "fake", path: join(tmpRoot, "fake-repo") }]),
+    );
+    seedScript("show.sh", "#!/bin/bash\necho \"repo=$1\"\n");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "scripts/show.sh",
+          args: ["{repo}"] },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    expect(res.body.output).toContain("repo=" + join(tmpRoot, "fake-repo"));
+  });
+
+  it("returns 400 when {repo} is used but repos.json is missing", async () => {
+    seedProject("alpha");
+    seedScript("show.sh", "#!/bin/bash\necho ok\n");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "scripts/show.sh",
+          args: ["{repo}"] },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/repos\.json/);
+  });
+
+  it("returns 400 when {repo} is used but repos.json is empty", async () => {
+    seedProject("alpha");
+    writeFileSync(join(projectsDir, "alpha", "repos.json"), "[]");
+    seedScript("show.sh", "#!/bin/bash\necho ok\n");
+    seedScriptsJson({
+      scripts: [
+        { id: "x", label: "X", description: "d", script: "scripts/show.sh",
+          args: ["{repo}"] },
+      ],
+    });
+    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/empty/i);
+  });
+});

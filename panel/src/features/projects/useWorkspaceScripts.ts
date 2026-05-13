@@ -9,6 +9,12 @@ export interface ScriptEntry {
   outputMatch?: string;
   icon?: string;
   timeoutSec?: number;
+  /**
+   * Optional argv passed to the script. Defaults to [projectName].
+   * Strings may contain placeholders: {project}, {exportsDir}, {repo}
+   * which are substituted at run time.
+   */
+  args?: string[];
 }
 
 export function useWorkspaceScripts(): { scripts: ScriptEntry[]; loading: boolean } {
