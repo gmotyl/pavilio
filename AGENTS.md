@@ -53,8 +53,9 @@ See `docs/PROVIDER-SETUP.md` for:
 
 **Planning Mode:**
 - Agent enters planning mode after every session resume
-- Use brainstorming skill for design review
+- Use the `superpowers:brainstorming` skill for design review
 - Provide architecture clarity before implementation
+- **When writing design documents, always invoke the `mermaid-diagrams` skill and include Mermaid diagrams** — at minimum a `flowchart` for components and data flow, plus a `sequenceDiagram` when interaction ordering matters. ASCII box-and-arrow art is harder to skim and does not render in the panel. Follow `/mermaid-chart` patterns — the panel auto-colors subgraphs and sequence `rect` sections to visually separate grouped paths.
 
 **To override:** Add project-specific row below the default rules.
 
