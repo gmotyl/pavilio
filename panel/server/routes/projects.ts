@@ -1,10 +1,18 @@
 import { Router } from "express";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
+import { homedir } from "os";
 import { join, resolve, basename, relative, isAbsolute, sep } from "path";
 import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
 import { getConfig } from "../config.js";
 
 const router = Router();
+
+/** Expand a leading `~` or `~/` to the user's home directory. */
+function expandHome(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+  return p;
+}
 
 /** Cross-platform: forward slashes only in API responses. */
 function toPosix(p: string): string {
@@ -107,7 +115,7 @@ function listAdrFilesInRoot(absoluteRoot: string, sourceId: string, projectsDir:
  */
 export function buildContextAllowlist(projectDir: string): string[] {
   const repos = readReposJson(projectDir);
-  return [projectDir, ...repos.map((r) => resolve(r.path))];
+  return [projectDir, ...repos.map((r) => resolve(expandHome(r.path)))];
 }
 
 /**
@@ -136,7 +144,7 @@ router.get("/:name/context", (req, res) => {
   const repos = readReposJson(projectDir);
   const sources: ContextSource[] = [
     { id: "project", label: req.params.name, absoluteRoot: projectDir },
-    ...repos.map((r) => ({ id: `repo:${r.name}`, label: r.name, absoluteRoot: resolve(r.path) })),
+    ...repos.map((r) => ({ id: `repo:${r.name}`, label: r.name, absoluteRoot: resolve(expandHome(r.path)) })),
   ];
 
   const contexts: ContextFile[] = [];
