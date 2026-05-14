@@ -78,6 +78,7 @@ All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.m
 - [`bootstrap`](skills/bootstrap/SKILL.md) — initialize `PROJECT.md` + `_index.json` (`/bootstrap`)
 - [`resume-session`](skills/resume-session/SKILL.md) — resume a project; opens the session's progress file (`/resume-session`)
 - [`end-session`](skills/end-session/SKILL.md) — verify the progress file is complete, commit + push, optionally propose Todoist tasks (`/end-session`)
+- [`mermaid-chart`](skills/mermaid-chart/SKILL.md) — patterns for diagrams that render well in the panel (`/mermaid-chart`)
 
 **Workflow skills** — read these directly when starting non-trivial work:
 

@@ -29,7 +29,7 @@ echo "✓ Created .claude/commands/ directory"
 
 # Copy skill definitions as Claude Code slash commands
 echo "📋 Installing skill definitions..."
-for cmd in memo note question bootstrap resume-session end-session; do
+for cmd in memo note question bootstrap resume-session end-session mermaid-chart; do
     if [ -f "skills/${cmd}/SKILL.md" ]; then
         cp "skills/${cmd}/SKILL.md" ".claude/commands/${cmd}.md"
         echo "  ✓ ${cmd}.md (from skills/${cmd}/SKILL.md)"

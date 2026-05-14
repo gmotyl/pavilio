@@ -27,10 +27,18 @@ rsync -a \
   --exclude='.DS_Store' \
   "$UPSTREAM_DIR/panel/" "$REPO_ROOT/panel/"
 
-echo "Syncing commands/..."
+echo "Syncing skills/..."
+mkdir -p "$REPO_ROOT/skills"
 rsync -a \
   --exclude='.DS_Store' \
-  "$UPSTREAM_DIR/commands/" "$REPO_ROOT/commands/"
+  "$UPSTREAM_DIR/skills/" "$REPO_ROOT/skills/"
+
+if [ -d "$UPSTREAM_DIR/commands" ]; then
+  echo "Syncing commands/..."
+  rsync -a \
+    --exclude='.DS_Store' \
+    "$UPSTREAM_DIR/commands/" "$REPO_ROOT/commands/"
+fi
 
 echo "Syncing scripts/..."
 rsync -a \
@@ -38,7 +46,7 @@ rsync -a \
   "$UPSTREAM_DIR/scripts/" "$REPO_ROOT/scripts/"
 
 echo ""
-echo "Done. panel/, commands/, scripts/ synced from upstream."
+echo "Done. panel/, skills/, scripts/ (and commands/ if present) synced from upstream."
 echo ""
 echo "Note: AGENTS.md and CLAUDE.md are manually maintained."
 echo "Check https://github.com/gmotyl/pavilio for changes and cherry-pick as needed."
