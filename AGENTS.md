@@ -96,59 +96,24 @@ Load recent context:
    - `adr/` (if present) — **list filenames/titles only**, do not read bodies. You'll know which ADRs exist for later targeted reads.
 3. Display brief formatted resume with last session context
 
-## Commands
-
-Commands in `commands/` folder (if created). Use `/command` syntax:
-
-- `/memo` - Quick capture a thought or note
-- `/note` - Process meeting transcripts or session notes
-- `/question` or `/q` - Query project knowledge base
-- `/bootstrap` - Initialize PROJECT.md and \_index.json
-- `/resume` - Quick session resume (progress + PROJECT.md only)
-
 ## Commands & Skills
 
-### Claude Code Built-in Skills
+Local commands and skills live in [`commands/`](commands/). Slash commands work as `/<name>` when the provider supports it; otherwise run the matching `.sh` script directly. See [`commands/README.md`](commands/README.md) for usage.
 
-Claude Code provides these as native slash commands:
+**Slash commands:**
 
-- `/memo` - Quick capture a thought or note
-- `/note` - Process meeting transcripts or session notes
-  - **Quill Integration:** `/note meeting-name` searches Quill for meetings, creates notes from minutes
-- `/question` or `/q` - Query project knowledge base
-- `/bootstrap` - Initialize PROJECT.md and project structure
+- `/memo` — quick capture a thought or note
+- `/note` — process meeting transcripts or session notes (Quill-aware: `/note meeting-name` pulls minutes from Quill)
+- `/question` or `/q` — query project knowledge base
+- `/bootstrap` — initialize `PROJECT.md` and project structure
+- `/resume` — quick session resume (progress + `PROJECT.md` only)
 
-### Smart Project Initialization
+**Crucial local skills** ([`commands/skills/`](commands/skills/)) — read these directly when starting non-trivial work:
 
-The `/note` command auto-initializes projects:
-
-- `/note my-project` → Found in AGENTS.md → Creates note in `notes/my-project/notes/`
-- `/note new-project` → NOT in AGENTS.md → **Asks: "Initialize project?"**
-  - If yes: Creates full structure + configs + adds to AGENTS.md
-  - If no: Creates generic note in `notes/notes/`
-
-### Quill Integration
-
-The `/note` command integrates with Quill meeting notes:
-
-- Search for meetings by name: `/note my-project` finds "my-project" meetings in Quill
-- Extract meeting minutes and create project notes in `notes/my-project/notes/`
-- Preserve meeting context and action items
-- Link notes back to original Quill meetings
-- Works with both registered projects and newly initialized ones
-
-### Fallback Command Scripts
-
-If built-in skills aren't available, use executable scripts in `commands/` folder:
-
-```bash
-./commands/memo.sh "Your quick thought"
-./commands/note.sh session-topic
-./commands/question.sh "What is X?"
-./commands/bootstrap.sh
-```
-
-See `commands/README.md` for detailed usage and examples.
+- [`grill-with-docs/SKILL.md`](commands/skills/grill-with-docs/SKILL.md) — design: stress-test against `CONTEXT.md` and ADRs
+- [`writing-plans/SKILL.md`](commands/skills/writing-plans/SKILL.md) — produce the plan document before coding
+- [`executing-plans/SKILL.md`](commands/skills/executing-plans/SKILL.md) — run plans with review checkpoints
+- [`test-driven-development/SKILL.md`](commands/skills/test-driven-development/SKILL.md) — red-green-refactor for every feature or bugfix
 
 ---
 
