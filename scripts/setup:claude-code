@@ -27,14 +27,16 @@ echo ""
 mkdir -p .claude/commands
 echo "✓ Created .claude/commands/ directory"
 
-# Copy skill definitions as Claude Code slash commands
+# Copy every skill in skills/ as a Claude Code slash command (no hardcoded list)
 echo "📋 Installing skill definitions..."
-for cmd in memo note question bootstrap resume-session end-session mermaid-chart; do
-    if [ -f "skills/${cmd}/SKILL.md" ]; then
-        cp "skills/${cmd}/SKILL.md" ".claude/commands/${cmd}.md"
-        echo "  ✓ ${cmd}.md (from skills/${cmd}/SKILL.md)"
-    fi
-done
+if [ -d "skills" ]; then
+    for skill_md in skills/*/SKILL.md; do
+        [ -e "$skill_md" ] || continue
+        cmd="$(basename "$(dirname "$skill_md")")"
+        cp "$skill_md" ".claude/commands/${cmd}.md"
+        echo "  ✓ ${cmd}.md (from ${skill_md})"
+    done
+fi
 
 # Create .claude/settings.json if it doesn't exist
 if [ ! -f ".claude/settings.json" ]; then
