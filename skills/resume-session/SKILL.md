@@ -72,6 +72,6 @@ The [[end-session]] skill then just verifies completeness and commits — it sho
 ## Rules
 
 - Always remember the project for subsequent `/end-session` calls in this conversation
-- Use GitNexus MCP for codebase exploration, not `ls`/`find`/glob browsing
+- Use the `context-mode` MCP (`mcp__plugin_context-mode_context-mode__ctx_search`, `ctx_execute`, `ctx_execute_file`) for codebase exploration and any operation that would otherwise dump a large output into context. Do **not** fall back to `ls`/`find`/glob browsing. If `context-mode` is not installed, prompt the user to install it from https://github.com/mksglu/context-mode and run `/context-mode:ctx-doctor` to verify.
 - Enter planning mode after resume — start with [[grill-with-docs]] (Design), never jump straight to code
 - Keep the in-session progress file focused on resume-context, not a transcript
