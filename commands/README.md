@@ -1,151 +1,25 @@
-# AI Agent Commands
+# Commands directory (legacy)
 
-This directory contains command definitions for AI agents and CLI tools.
+Project commands have moved to [`../skills/`](../skills/). Each skill is its own folder with a `SKILL.md` (YAML frontmatter + body).
 
-## Command Files Structure
+This directory still holds a few standalone slash-command markdowns (`czytaj.md`, `end-session.md`, `qmd-setup.md`, `resume.md`, `tempo.md`) and integration folders (`slack/`, `tts-with-edge/`).
 
-**`.md` files** - Definitions for AI agents (Claude Code, Copilot, etc.)
-- `memo.md` - Quick note capture
-- `note.md` - Structured session notes
-- `question.md` - Project knowledge search
-- `bootstrap.md` - Project initialization
+## Skills index
 
-**`.sh` files** - Fallback shell scripts (if CLI doesn't support `.md`)
-- `memo.sh` - Quick note shell script
-- `note.sh` - Note creation shell script
-- `question.sh` - Search shell script
-- `bootstrap.sh` - Bootstrap shell script
+See [`../skills/`](../skills/):
 
-## How Each CLI Uses These
+**Project skills** — installed into `.claude/commands/` by `pnpm setup:claude-code`:
 
-### Claude Code
-- Reads `.md` files as command documentation
-- Uses built-in `/memo`, `/note`, `/question`, `/bootstrap` skills
-- Falls back to shell scripts if needed
+- [`memo`](../skills/memo/SKILL.md) — quick capture
+- [`note`](../skills/note/SKILL.md) — meeting/transcript processing
+- [`question`](../skills/question/SKILL.md) — project knowledge search
+- [`bootstrap`](../skills/bootstrap/SKILL.md) — initialize `PROJECT.md` + `_index.json`
+- [`resume-session`](../skills/resume-session/SKILL.md) — resume a project; opens the in-session progress file
+- [`end-session`](../skills/end-session/SKILL.md) — verify progress, commit + push, propose Todoist tasks
 
-### GitHub Copilot
-- Reads `.md` files to understand what command should do
-- Can execute `.sh` scripts if needed
-- Interprets intent from `.md` file and executes appropriately
+**Workflow skills** — read directly when starting non-trivial work:
 
-### Other CLIs
-- May use `.md` as documentation
-- Can call `.sh` scripts directly
-- Check CLI documentation for command format
-
-## Available Commands
-
-### `/memo` - Quick Note Capture
-Captures quick thoughts and memos into your project's notes directory.
-
-**Usage:**
-```
-/memo Your quick thought here
-/memo  # Opens interactive input
-```
-
-**Output:** Creates/appends to `notes/notes/[date]-memos.md`
-
----
-
-### `/note` - Save Session Notes
-Create or update session notes with structured information.
-
-**Usage:**
-```
-/note                    # Creates today's session note
-/note my-topic-name      # Create specific topic note
-```
-
-**Output:** Creates/opens `notes/notes/[topic].md`
-
-Template includes:
-- Summary section
-- Key points
-- Decisions made
-- Next steps
-
----
-
-### `/question` or `/q` - Query Project Knowledge
-Search project documentation and notes for answers.
-
-**Usage:**
-```
-/question What is the project architecture?
-/q How do I set up the environment?
-```
-
-**Searches:** PROJECT.md, DECISIONS.md, CLAUDE.md, notes/
-
----
-
-### `/bootstrap` - Initialize Project Structure
-Sets up PROJECT.md, DECISIONS.md, and directory structure.
-
-**Usage:**
-```
-/bootstrap
-```
-
-**Creates:**
-- PROJECT.md (project overview and quick start)
-- DECISIONS.md (key architectural decisions)
-- notes/notes/ (for session notes)
-- notes/log/ (for transcripts)
-- progress/ (for session tracking)
-
----
-
-## Implementation
-
-These commands are shell scripts stored in the `commands/` directory.
-
-To use them with Claude Code, Claude reads this directory and makes them available as slash commands.
-
-### Command File Format
-
-Each command is a `.sh` file:
-- Executable with `#!/bin/bash`
-- Takes command arguments
-- Can prompt for input
-- Should provide clear feedback
-
-### Adding New Commands
-
-Create a new `.sh` file in this directory:
-
-```bash
-#!/bin/bash
-# /mycommand - Description
-
-# Your implementation
-echo "Command executed"
-```
-
-Make it executable:
-```bash
-chmod +x commands/mycommand.sh
-```
-
----
-
-## Environment Variables
-
-Commands have access to:
-- `PROJECT_ROOT` - Project root directory (default: `.`)
-- `NOTES_DIR` - Notes directory (usually `notes/notes`)
-- Standard shell variables (PWD, HOME, etc.)
-
----
-
-## Tips
-
-- Use `/memo` for quick captures during work
-- Use `/note [topic]` at the end of sessions
-- Use `/question` to find answers without leaving Claude
-- Use `/bootstrap` to initialize new projects properly
-
----
-
-For more information, see `CLAUDE.md` in the project root.
+- [`grill-with-docs`](../skills/grill-with-docs/SKILL.md) — design review against domain docs
+- [`writing-plans`](../skills/writing-plans/SKILL.md) — produce a plan document
+- [`executing-plans`](../skills/executing-plans/SKILL.md) — execute plans with review checkpoints
+- [`test-driven-development`](../skills/test-driven-development/SKILL.md) — red-green-refactor

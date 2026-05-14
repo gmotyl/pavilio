@@ -57,15 +57,19 @@ router.get("/read/*path", (req, res) => {
   const relativePath = Array.isArray(parts) ? parts.join("/") : parts;
   const { projectsDir } = getConfig();
 
-  // Support _commands/ prefix for files in the commands directory
+  // Support _skills/ prefix for skill SKILL.md files
   let absolutePath: string;
-  if (relativePath.startsWith("_commands/")) {
-    const commandFile = relativePath.slice("_commands/".length);
-    absolutePath = resolve(projectsDir, "../commands", commandFile);
-    const commandsDir = resolve(projectsDir, "../commands");
-    if (!absolutePath.startsWith(commandsDir)) {
+  if (relativePath.startsWith("_skills/")) {
+    const tail = relativePath.slice("_skills/".length);
+    const skillsDir = resolve(projectsDir, "../skills");
+    // Accept either "<name>" (resolve to <name>/SKILL.md) or an explicit path inside the skill folder.
+    const candidate = tail.includes("/")
+      ? resolve(skillsDir, tail)
+      : resolve(skillsDir, tail, "SKILL.md");
+    if (!candidate.startsWith(skillsDir)) {
       return res.status(403).json({ error: "Path traversal blocked" });
     }
+    absolutePath = candidate;
   } else if (relativePath.startsWith("_help/")) {
     const helpFile = relativePath.slice("_help/".length);
     absolutePath = resolve(projectsDir, "../panel/help", helpFile);

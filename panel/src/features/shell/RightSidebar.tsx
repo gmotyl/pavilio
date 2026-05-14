@@ -1,5 +1,5 @@
-import { FolderTree, Terminal } from "lucide-react";
-import CommandsList from "../commands/CommandsList";
+import { FolderTree, Sparkles } from "lucide-react";
+import SkillsList from "../skills/SkillsList";
 import FileTree from "../explorer/FileTree";
 
 export default function RightSidebar() {
@@ -19,15 +19,15 @@ export default function RightSidebar() {
       </section>
       <section>
         <div className="flex items-center gap-2 mb-2 px-1">
-          <Terminal size={12} style={{ color: "var(--text-tertiary)" }} />
+          <Sparkles size={12} style={{ color: "var(--text-tertiary)" }} />
           <h2
             className="text-[11px] font-semibold uppercase tracking-widest"
             style={{ color: "var(--text-tertiary)" }}
           >
-            Commands
+            Skills
           </h2>
         </div>
-        <CommandsList />
+        <SkillsList />
       </section>
     </div>
   );

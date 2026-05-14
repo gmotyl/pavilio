@@ -17,7 +17,7 @@
 - **Breadcrumbs** — top bar shows your current location, each segment is clickable
 - **Home icon** — click to return to dashboard
 - **Left sidebar** — projects list, active agents, git summary
-- **Right sidebar** — file tree for current project, commands list
+- **Right sidebar** — file tree for current project, skills list
 - **Sidebar toggles** — collapse/expand buttons on sidebar edges
 
 ## Features
@@ -43,8 +43,8 @@ Active Claude Code and other AI agents appear in the left sidebar with their sta
 ### Favorites
 Star projects in the left sidebar to pin them to the top of the list. Persisted in localStorage.
 
-### Commands
-Right sidebar lists all available `/commands` with descriptions. Click to view the command's markdown source.
+### Skills
+Right sidebar lists all skills under `skills/` with descriptions parsed from each `SKILL.md` YAML frontmatter. Click to view the skill's source.
 
 ### Image Optimization
 Drag and drop images onto the markdown viewer to optimize them with sharp and embed the reference.

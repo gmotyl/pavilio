@@ -15,7 +15,7 @@ Agent guidance for the `panel/` app. Read this before making panel-specific chan
 ## Current Feature Map
 
 - `agents/` — agent cards and agent settings page
-- `commands/` — command list and command loading hook
+- `skills/` — skill list and skill loading hook (right sidebar)
 - `explorer/` — file tree, active file context, file index hook
 - `git/` — git views, git summary, diff helpers, git tree utilities, git hooks
 - `markdown/` — markdown viewer, renderer, mermaid integration, image drop zone
@@ -34,7 +34,7 @@ Agent guidance for the `panel/` app. Read this before making panel-specific chan
 ## Architecture Insights
 
 - `src/App.tsx` is the composition root. It wires `ActiveFileProvider`, `BreadcrumbActionsProvider`, and `FloatingActionProvider`, then mounts `QuickFinder` once for the whole app.
-- `features/shell/Layout/` owns the app chrome. `LeftSidebar` contains project/agent/git navigation; `RightSidebar` contains Explorer + Commands.
+- `features/shell/Layout/` owns the app chrome. `LeftSidebar` contains project/agent/git navigation; `RightSidebar` contains Explorer + Skills.
 - Pages should inject top-bar actions via `useBreadcrumbActions` / `useFloatingAction` rather than editing shell markup directly.
 - `features/realtime/useWebSocket.ts` is the shared refresh signal. `useProjects`, `useAgents`, `useFileIndex`, `useGitStatus`, `MarkdownViewer`, and `ProjectView` rely on it; reuse it instead of adding duplicate polling.
 - `features/explorer/useActiveFile.ts` is the shared file-preview context used by multiple screens.

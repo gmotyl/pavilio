@@ -8,7 +8,7 @@ This file defines your project registry and workflow for AI agents (Claude Code,
 >
 > When `.projects.local.md` exists, read it alongside this file — it is the authoritative project registry for this workspace.
 
-| Project | Type | Notes Path         |
+| Project | Type | Path               |
 | ------- | ---- | ------------------ |
 | my-app  | work | `projects/my-app/` |
 
@@ -34,11 +34,11 @@ Provider-specific config file locations and session-tracking notes have moved to
 
 - Agent enters planning mode after every session resume
 - Provide architecture clarity before implementation
-- **Workflow (in order):** local skill copies live under [`commands/skills/`](commands/skills/) — read them directly if the plugin-cached versions aren't available.
-  1. **Design** — [`commands/skills/grill-with-docs/SKILL.md`](commands/skills/grill-with-docs/SKILL.md): stress-test the design against the existing domain model (`CONTEXT.md`, `docs/adr/`), sharpen terminology, and update docs inline as decisions crystallise.
-  2. **Plan** — [`commands/skills/writing-plans/SKILL.md`](commands/skills/writing-plans/SKILL.md): produce the actual plan document before touching code.
-  3. **Execute** — [`commands/skills/executing-plans/SKILL.md`](commands/skills/executing-plans/SKILL.md): run the plan in a separate session with review checkpoints.
-  4. **Implement** — [`commands/skills/test-driven-development/SKILL.md`](commands/skills/test-driven-development/SKILL.md): red-green-refactor for every feature or bugfix written during execution.
+- **Workflow (in order):** local skill copies live under [`skills/`](skills/) — read them directly if the plugin-cached versions aren't available.
+  1. **Design** — [`skills/grill-with-docs/SKILL.md`](skills/grill-with-docs/SKILL.md): stress-test the design against the existing domain model (`CONTEXT.md`, `docs/adr/`), sharpen terminology, and update docs inline as decisions crystallise.
+  2. **Plan** — [`skills/writing-plans/SKILL.md`](skills/writing-plans/SKILL.md): produce the actual plan document before touching code.
+  3. **Execute** — [`skills/executing-plans/SKILL.md`](skills/executing-plans/SKILL.md): run the plan in a separate session with review checkpoints.
+  4. **Implement** — [`skills/test-driven-development/SKILL.md`](skills/test-driven-development/SKILL.md): red-green-refactor for every feature or bugfix written during execution.
 - **When writing design documents, always invoke the `mermaid-diagrams` skill and include Mermaid diagrams** — at minimum a `flowchart` for components and data flow, plus a `sequenceDiagram` when interaction ordering matters. ASCII box-and-arrow art is harder to skim and does not render in the panel. Follow `/mermaid-chart` patterns — the panel auto-colors subgraphs and sequence `rect` sections to visually separate grouped paths.
 
 **To override:** Add project-specific row below the default rules.
@@ -56,98 +56,35 @@ Both exist at three scopes:
 - `projects/<name>/` — project-specific (its own `CONTEXT.md` and `adr/`)
 - `<linked-repo>/` — each linked code repo's own glossary and decisions; follow that repo's conventions
 
-**Format & workflow** are defined by the `grill-with-docs` skill — see [`commands/skills/grill-with-docs/SKILL.md`](commands/skills/grill-with-docs/SKILL.md), [`CONTEXT-FORMAT.md`](commands/skills/grill-with-docs/CONTEXT-FORMAT.md), and [`ADR-FORMAT.md`](commands/skills/grill-with-docs/ADR-FORMAT.md).
+**Format & workflow** are defined by the `grill-with-docs` skill — see [`skills/grill-with-docs/SKILL.md`](skills/grill-with-docs/SKILL.md), [`CONTEXT-FORMAT.md`](skills/grill-with-docs/CONTEXT-FORMAT.md), and [`ADR-FORMAT.md`](skills/grill-with-docs/ADR-FORMAT.md).
 
 **Rule:** when a user asks "should we…?" and the answer depends on terminology, scope, or a past trade-off, read the relevant `CONTEXT.md` / ADRs **before** answering. Don't invent new words for concepts that already have canonical names.
 
 ## Session Tracking
 
-Session tracking is active. All messages are part of a single session until you write "session end" or "end session".
+Sessions are bracketed by two skills: [`resume-session`](skills/resume-session/SKILL.md) and [`end-session`](skills/end-session/SKILL.md).
 
-### Session End
+**Continuous-write model:** the progress file `projects/[project]/progress/[date]-slug.md` is **opened at resume time and appended to throughout the session**. Decisions, problems, resolutions, and next steps go in as they happen — not dumped from memory at the end. `/end-session` ("session end" / "end session") then verifies completeness, commits, and proposes any Todoist follow-ups. Save only what's relevant to picking up later — not a transcript.
 
-When you write "session end" or "end session":
+## Skills
 
-1. Create new `notes/[project]/progress/[date]-slug.md` (always create fresh file)
-2. Progress file content:
-   - Context of tasks completed in this session
-   - Results/outcomes achieved
-   - Next steps or blockers discovered
-   - Useful context for resuming work
-3. **AUTO-COMMIT and PUSH** for backup
-   - Commit progress file with message: "session: [project] [date]-[description]"
-   - Push to remote (if configured)
-   - ⚠️ Only commit progress files, not full project notes (use .gitignore)
-4. **PROPOSE Todoist tasks** if something is left to do
-   - Show proposed tasks in format: `[project-name] Task description`
-   - Ask user approval: "Should I add these Todoist tasks?"
-5. Clear context and start a new session automatically
+All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.md` with YAML frontmatter. The right sidebar of the panel lists them; `pnpm setup:claude-code` copies the project-skill `SKILL.md` files into `.claude/commands/` as slash commands.
 
-### Resume Session
+**Project skills** (slash commands):
 
-Usage: `resume [project-name]` or just `resume`
+- [`memo`](skills/memo/SKILL.md) — quick capture a thought or note (`/memo`)
+- [`note`](skills/note/SKILL.md) — process meeting transcripts; Quill-aware (`/note`)
+- [`question`](skills/question/SKILL.md) — query project knowledge base (`/question`, `/q`)
+- [`bootstrap`](skills/bootstrap/SKILL.md) — initialize `PROJECT.md` + `_index.json` (`/bootstrap`)
+- [`resume-session`](skills/resume-session/SKILL.md) — resume a project; opens the session's progress file (`/resume-session`)
+- [`end-session`](skills/end-session/SKILL.md) — verify the progress file is complete, commit + push, optionally propose Todoist tasks (`/end-session`)
 
-Load recent context:
+**Workflow skills** — read these directly when starting non-trivial work:
 
-1. Load most recent progress file from `notes/[project]/progress/`
-2. Read the project's default-discovery files:
-   - `PROJECT.md` — overview, repos, key context (always)
-   - `CONTEXT.md` (if present) — project-specific glossary (always; usually short)
-   - `adr/` (if present) — **list filenames/titles only**, do not read bodies. You'll know which ADRs exist for later targeted reads.
-3. Display brief formatted resume with last session context
-
-## Commands & Skills
-
-Local commands and skills live in [`commands/`](commands/). Slash commands work as `/<name>` when the provider supports it; otherwise run the matching `.sh` script directly. See [`commands/README.md`](commands/README.md) for usage.
-
-**Slash commands:**
-
-- `/memo` — quick capture a thought or note
-- `/note` — process meeting transcripts or session notes (Quill-aware: `/note meeting-name` pulls minutes from Quill)
-- `/question` or `/q` — query project knowledge base
-- `/bootstrap` — initialize `PROJECT.md` and project structure
-- `/resume` — quick session resume (progress + `PROJECT.md` only)
-
-**Crucial local skills** ([`commands/skills/`](commands/skills/)) — read these directly when starting non-trivial work:
-
-- [`grill-with-docs/SKILL.md`](commands/skills/grill-with-docs/SKILL.md) — design: stress-test against `CONTEXT.md` and ADRs
-- [`writing-plans/SKILL.md`](commands/skills/writing-plans/SKILL.md) — produce the plan document before coding
-- [`executing-plans/SKILL.md`](commands/skills/executing-plans/SKILL.md) — run plans with review checkpoints
-- [`test-driven-development/SKILL.md`](commands/skills/test-driven-development/SKILL.md) — red-green-refactor for every feature or bugfix
-
----
-
-## Code Style Guidelines
-
-### TypeScript/JavaScript
-
-- Use TypeScript when possible
-- Explicit types for function parameters and return values
-- Use `const` by default, `let` only when reassignment needed
-- Prefer `async/await` over raw promises
-- Use optional chaining: `obj?.prop` and nullish coalescing: `??`
-
-### Error Handling
-
-- Always handle promise rejections
-- Use `try/catch` with meaningful error messages
-- Propagate errors up with context: `throw new Error(\`Failed to X: ${err.message}\`)`
-
-### Naming Conventions
-
-| Type                | Convention           | Example                  |
-| ------------------- | -------------------- | ------------------------ |
-| Variables/Functions | camelCase            | `getUserData`, `isValid` |
-| Constants           | SCREAMING_SNAKE_CASE | `MAX_RETRIES`            |
-| Classes/Types       | PascalCase           | `UserService`, `User`    |
-| Files               | kebab-case           | `user-service.ts`        |
-| Booleans            | `is`/`has` prefix    | `isValid`, `hasError`    |
-
-### Imports & File Organization
-
-- Import order: built-ins → external packages → relative imports
-- Use named imports over default imports for better tree-shaking
-- Relative imports: use `./` or `../` (not bare module names)
+- [`grill-with-docs`](skills/grill-with-docs/SKILL.md) — design: stress-test against `CONTEXT.md` and ADRs
+- [`writing-plans`](skills/writing-plans/SKILL.md) — produce the plan document before coding
+- [`executing-plans`](skills/executing-plans/SKILL.md) — run plans with review checkpoints
+- [`test-driven-development`](skills/test-driven-development/SKILL.md) — red-green-refactor for every feature or bugfix
 
 ---
 

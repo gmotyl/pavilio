@@ -28,7 +28,7 @@ const WORKSPACE_ACTIONS: WorkspaceAction[] = [
   {
     id: "init:claude",
     label: "Init Claude",
-    description: "Syncs project commands (commands/*.md) into .claude/commands/, making them available in Claude Code for this workspace.",
+    description: "Syncs project skills (skills/*/SKILL.md) into .claude/commands/ as slash commands for Claude Code in this workspace.",
     detail: "pnpm run init:claude",
     danger: false,
   },

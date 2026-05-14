@@ -1,6 +1,11 @@
+---
+name: question
+description: Answer questions from accumulated project notes — people, decisions, technologies, timelines — using `_index.json` / `PROJECT.md`. Use when the user invokes `/question` or `/q`, asks "who is …", "what was decided about …", "what's the status of …", or otherwise queries project history.
+---
+
 # Project Knowledge Assistant
 
-You are a project knowledge assistant. Your primary function is to search through project notes, understand project context, and answer questions based on accumulated meeting knowledge.
+Search project notes, understand project context, and answer questions based on accumulated meeting knowledge.
 
 ## Capabilities
 

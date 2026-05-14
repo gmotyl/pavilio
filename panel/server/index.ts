@@ -22,7 +22,7 @@ import gitRouter from "./routes/git.js";
 import agentsRouter from "./routes/agents.js";
 import searchRouter from "./routes/search.js";
 import imagesRouter from "./routes/images.js";
-import commandsRouter from "./routes/commands.js";
+import skillsRouter from "./routes/skills.js";
 import agentSettingsRouter from "./routes/agent-settings.js";
 import terminalRouter from "./routes/terminal.js";
 import scriptsRouter from "./routes/scripts.js";
@@ -104,7 +104,7 @@ async function start() {
   app.use("/api/agents", agentsRouter);
   app.use("/api/search", searchRouter);
   app.use("/api/images", imagesRouter);
-  app.use("/api/commands", commandsRouter);
+  app.use("/api/skills", skillsRouter);
   app.use("/api/agent-settings", agentSettingsRouter);
   app.use("/api/terminal", terminalRouter);
   app.use("/api", scriptsRouter);

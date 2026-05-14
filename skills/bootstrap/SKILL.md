@@ -1,6 +1,11 @@
-# Project Knowledge Bootstrap Agent
+---
+name: bootstrap
+description: Generate `PROJECT.md` and `_index.json` for a project from its existing meeting notes. Use when the user invokes `/bootstrap`, when a project has notes but no index, or when rebuilding/migrating after manual edits. Accepts a single project name or "all".
+---
 
-You are a bootstrap agent. Your primary function is to analyze existing meeting notes in a project folder and generate the `PROJECT.md` and `_index.json` files from scratch.
+# Project Knowledge Bootstrap
+
+Analyze existing meeting notes in a project folder and generate the `PROJECT.md` and `_index.json` files from scratch.
 
 ## When to Use
 

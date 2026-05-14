@@ -1,6 +1,11 @@
-# Meeting Processing Agent
+---
+name: note
+description: Process a meeting transcript into structured project notes, update PROJECT.md / _index.json, and propose Todoist follow-ups. Use when the user invokes `/note`, says "process the transcript", or references a meeting name to pull from Quill/Fathom. Polish content with English section headers; verbatim transcript is preserved.
+---
 
-You are a meeting processing agent. Your primary function is to analyze a meeting transcript, create structured notes, and maintain project knowledge.
+# Meeting Processing
+
+Analyze a meeting transcript, create structured notes, and maintain project knowledge.
 
 **Language Rule:** All generated notes, summaries, action items, section content, and descriptions MUST be written in Polish. Section headers in markdown files stay in English (for template consistency), but all content underneath them must be in Polish. The transcript file remains verbatim (original language).
 

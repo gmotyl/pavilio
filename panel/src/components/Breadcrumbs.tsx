@@ -60,7 +60,7 @@ function parsePath(pathname: string): Crumb[] {
     return crumbs;
   }
 
-  // /view/* — handle virtual prefixes (_commands, _help) and project files
+  // /view/* — handle virtual prefixes (_skills, _help) and project files
   if (segments[0] === "view" && segments.length >= 2) {
     const raw = segments[1];
     const isVirtual = raw.startsWith("_");

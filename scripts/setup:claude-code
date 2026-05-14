@@ -27,12 +27,12 @@ echo ""
 mkdir -p .claude/commands
 echo "✓ Created .claude/commands/ directory"
 
-# Copy command definition files
-echo "📋 Installing command definitions..."
-for cmd in memo note question bootstrap; do
-    if [ -f "commands/${cmd}.md" ]; then
-        cp "commands/${cmd}.md" ".claude/commands/${cmd}.md"
-        echo "  ✓ ${cmd}.md"
+# Copy skill definitions as Claude Code slash commands
+echo "📋 Installing skill definitions..."
+for cmd in memo note question bootstrap resume-session end-session; do
+    if [ -f "skills/${cmd}/SKILL.md" ]; then
+        cp "skills/${cmd}/SKILL.md" ".claude/commands/${cmd}.md"
+        echo "  ✓ ${cmd}.md (from skills/${cmd}/SKILL.md)"
     fi
 done
 

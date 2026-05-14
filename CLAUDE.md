@@ -54,15 +54,7 @@ At the beginning of each session:
 - `/model` - Select your Claude model (Opus, Sonnet, Haiku, etc.)
 - Choose based on your needs and access level
 
-**Fallback Command Scripts** (if skills unavailable):
-```bash
-./commands/memo.sh "thought"
-./commands/note.sh topic
-./commands/question.sh "query"
-./commands/bootstrap.sh
-```
-
-See `commands/README.md` for full documentation.
+**Local skills** live under [`skills/`](skills/). Workflow skills (`grill-with-docs`, `writing-plans`, `executing-plans`, `test-driven-development`) and project skills (`memo`, `note`, `question`, `bootstrap`, `resume-session`) each have their own folder with a `SKILL.md`.
 
 **Session Tracking:** Active - write "session end" to finalize
 

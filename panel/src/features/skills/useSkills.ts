@@ -1,20 +1,20 @@
 import { useState, useEffect } from "react";
 
-export interface CommandEntry {
+export interface SkillEntry {
   name: string;
   description: string;
   modified: number;
 }
 
-export function useCommands() {
-  const [commands, setCommands] = useState<CommandEntry[]>([]);
+export function useSkills() {
+  const [skills, setSkills] = useState<SkillEntry[]>([]);
 
   useEffect(() => {
-    fetch("/api/commands")
+    fetch("/api/skills")
       .then((res) => (res.ok ? res.json() : []))
-      .then(setCommands)
+      .then(setSkills)
       .catch(() => {});
   }, []);
 
-  return commands;
+  return skills;
 }
