@@ -8,9 +8,9 @@ This file defines your project registry and workflow for AI agents (Claude Code,
 >
 > When `.projects.local.md` exists, read it alongside this file — it is the authoritative project registry for this workspace.
 
-| Project | Type | Notes Path |
-|---------|------|-----------|
-| my-app | work | `projects/my-app/` |
+| Project | Type | Notes Path         |
+| ------- | ---- | ------------------ |
+| my-app  | work | `projects/my-app/` |
 
 The table above is an example. Replace it with your own projects in `.projects.local.md`.
 
@@ -18,15 +18,16 @@ The table above is an example. Replace it with your own projects in `.projects.l
 
 Each provider has its own configuration file location and format. When you create a project, the appropriate files are generated automatically.
 
-| Provider | Config File(s) | Location | Session Tracking |
-|----------|-----------------|----------|-----------------|
-| **Claude Code** | `CLAUDE.md` + `.claude/settings.json` | Project root | ✅ Auto (session end) |
-| **Kilocode** | `opencode.json` | Project root | ✅ Auto (session end) |
-| **GitHub Copilot** | `.github/copilot-instructions.md` | Project .github/ | ⚠️ Manual |
-| **QWEN** | `.qwen/settings.json` | Project `.qwen/` | ⚠️ Manual |
-| **Google Gemini** | `.gemini/settings.json` | Project `.gemini/` | ⚠️ Manual |
+| Provider           | Config File(s)                        | Location           | Session Tracking      |
+| ------------------ | ------------------------------------- | ------------------ | --------------------- |
+| **Claude Code**    | `CLAUDE.md` + `.claude/settings.json` | Project root       | ✅ Auto (session end) |
+| **Kilocode**       | `opencode.json`                       | Project root       | ✅ Auto (session end) |
+| **GitHub Copilot** | `.github/copilot-instructions.md`     | Project .github/   | ⚠️ Manual             |
+| **QWEN**           | `.qwen/settings.json`                 | Project `.qwen/`   | ⚠️ Manual             |
+| **Google Gemini**  | `.gemini/settings.json`               | Project `.gemini/` | ⚠️ Manual             |
 
 **Important:**
+
 - Each provider expects its config files in **specific locations** (see `docs/PROVIDER-SETUP.md`)
 - Claude Code is the only provider with automatic session tracking
 - Other providers require manual progress saving or custom scripts
@@ -34,6 +35,7 @@ Each provider has its own configuration file location and format. When you creat
 
 **Setup Guide:**
 See `docs/PROVIDER-SETUP.md` for:
+
 1. CORRECT file locations for each provider
 2. Configuration file formats and examples
 3. Global vs project-level configuration
@@ -45,6 +47,7 @@ See `docs/PROVIDER-SETUP.md` for:
 ### Default Behavior (All Projects)
 
 **Commits:**
+
 - ✅ **AUTO-COMMIT on session end** - Save progress automatically
 - Commit to current branch (user should use private branches for personal work)
 - Always push to remote for backup
@@ -52,9 +55,14 @@ See `docs/PROVIDER-SETUP.md` for:
 - Session progress files are safe to commit (notes/[project]/progress/)
 
 **Planning Mode:**
+
 - Agent enters planning mode after every session resume
-- Use the `superpowers:brainstorming` skill for design review
 - Provide architecture clarity before implementation
+- **Workflow (in order):**
+  1. **Design** — Use the `grill-with-docs` skill to stress-test the design against the existing domain model (`CONTEXT.md`, `docs/adr/`), sharpen terminology, and update docs inline as decisions crystallise.
+  2. **Plan** — Use the `superpowers:writing-plans` skill to produce the actual plan document before touching code.
+  3. **Execute** — Use the `superpowers:executing-plans` skill to run the plan in a separate session with review checkpoints.
+  4. **Implement** — Use the `superpowers:test-driven-development` skill (red-green-refactor) for every feature or bugfix written during execution.
 - **When writing design documents, always invoke the `mermaid-diagrams` skill and include Mermaid diagrams** — at minimum a `flowchart` for components and data flow, plus a `sequenceDiagram` when interaction ordering matters. ASCII box-and-arrow art is harder to skim and does not render in the panel. Follow `/mermaid-chart` patterns — the panel auto-colors subgraphs and sequence `rect` sections to visually separate grouped paths.
 
 **To override:** Add project-specific row below the default rules.
@@ -63,13 +71,13 @@ See `docs/PROVIDER-SETUP.md` for:
 
 Before making non-trivial design or scope decisions, consult these files. They define the words this codebase uses and the decisions that explain why the code looks the way it does.
 
-| File | Purpose | When to read | When to update |
-|------|---------|--------------|----------------|
-| `CONTEXT.md` (repo root) | Workspace-wide glossary — defines terms like *Notes world*, *Repo world*, *Project*, *Linked repository* | When a new term appears, when terminology feels ambiguous, before naming a new concept | When a term is resolved, renamed, or a new domain word becomes load-bearing |
-| `docs/adr/NNNN-*.md` | Architecture Decision Records — one decision per file, sequentially numbered | Before changing scope, swapping a library, or revisiting an old choice. Especially before fixing something that looks wrong (it may be deliberate). | After a real trade-off is made that future readers will need to understand. See `.claude/skills/grill-with-docs/ADR-FORMAT.md` for the bar. |
-| `<project>/CONTEXT.md` | Project-specific glossary (under `projects/<name>/`) | When working inside a specific project that has its own vocabulary | When a project-local term is canonicalized |
-| `<project>/adr/NNNN-*.md` | Project-specific ADRs (under `projects/<name>/adr/`) | Before changing how a particular project works | When a project-local decision is made that won't generalise to the framework |
-| `<linked-repo>/CONTEXT.md` and `<linked-repo>/docs/adr/` (or `<linked-repo>/adr/`) | Each linked code repository's own glossary and decisions | When editing or reviewing code in that repo | Following that repo's conventions |
+| File                                                                               | Purpose                                                                                                  | When to read                                                                                                                                        | When to update                                                                                                                              |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CONTEXT.md` (repo root)                                                           | Workspace-wide glossary — defines terms like _Notes world_, _Repo world_, _Project_, _Linked repository_ | When a new term appears, when terminology feels ambiguous, before naming a new concept                                                              | When a term is resolved, renamed, or a new domain word becomes load-bearing                                                                 |
+| `docs/adr/NNNN-*.md`                                                               | Architecture Decision Records — one decision per file, sequentially numbered                             | Before changing scope, swapping a library, or revisiting an old choice. Especially before fixing something that looks wrong (it may be deliberate). | After a real trade-off is made that future readers will need to understand. See `.claude/skills/grill-with-docs/ADR-FORMAT.md` for the bar. |
+| `<project>/CONTEXT.md`                                                             | Project-specific glossary (under `projects/<name>/`)                                                     | When working inside a specific project that has its own vocabulary                                                                                  | When a project-local term is canonicalized                                                                                                  |
+| `<project>/adr/NNNN-*.md`                                                          | Project-specific ADRs (under `projects/<name>/adr/`)                                                     | Before changing how a particular project works                                                                                                      | When a project-local decision is made that won't generalise to the framework                                                                |
+| `<linked-repo>/CONTEXT.md` and `<linked-repo>/docs/adr/` (or `<linked-repo>/adr/`) | Each linked code repository's own glossary and decisions                                                 | When editing or reviewing code in that repo                                                                                                         | Following that repo's conventions                                                                                                           |
 
 **Rule:** when a user asks "should we…?" and the answer depends on terminology, scope, or a past trade-off, read the relevant CONTEXT.md / ADRs **before** answering. Don't invent new words for concepts that already have canonical names.
 
@@ -118,13 +126,15 @@ Commands in `commands/` folder (if created). Use `/command` syntax:
 - `/memo` - Quick capture a thought or note
 - `/note` - Process meeting transcripts or session notes
 - `/question` or `/q` - Query project knowledge base
-- `/bootstrap` - Initialize PROJECT.md and _index.json
+- `/bootstrap` - Initialize PROJECT.md and \_index.json
 - `/resume` - Quick session resume (progress + PROJECT.md only)
 
 ## Commands & Skills
 
 ### Claude Code Built-in Skills
+
 Claude Code provides these as native slash commands:
+
 - `/memo` - Quick capture a thought or note
 - `/note` - Process meeting transcripts or session notes
   - **Quill Integration:** `/note meeting-name` searches Quill for meetings, creates notes from minutes
@@ -132,14 +142,18 @@ Claude Code provides these as native slash commands:
 - `/bootstrap` - Initialize PROJECT.md and project structure
 
 ### Smart Project Initialization
+
 The `/note` command auto-initializes projects:
+
 - `/note my-project` → Found in AGENTS.md → Creates note in `notes/my-project/notes/`
 - `/note new-project` → NOT in AGENTS.md → **Asks: "Initialize project?"**
   - If yes: Creates full structure + configs + adds to AGENTS.md
   - If no: Creates generic note in `notes/notes/`
 
 ### Quill Integration
+
 The `/note` command integrates with Quill meeting notes:
+
 - Search for meetings by name: `/note my-project` finds "my-project" meetings in Quill
 - Extract meeting minutes and create project notes in `notes/my-project/notes/`
 - Preserve meeting context and action items
@@ -147,7 +161,9 @@ The `/note` command integrates with Quill meeting notes:
 - Works with both registered projects and newly initialized ones
 
 ### Fallback Command Scripts
+
 If built-in skills aren't available, use executable scripts in `commands/` folder:
+
 ```bash
 ./commands/memo.sh "Your quick thought"
 ./commands/note.sh session-topic
@@ -177,13 +193,13 @@ See `commands/README.md` for detailed usage and examples.
 
 ### Naming Conventions
 
-| Type | Convention | Example |
-|------|-----------|---------|
-| Variables/Functions | camelCase | `getUserData`, `isValid` |
-| Constants | SCREAMING_SNAKE_CASE | `MAX_RETRIES` |
-| Classes/Types | PascalCase | `UserService`, `User` |
-| Files | kebab-case | `user-service.ts` |
-| Booleans | `is`/`has` prefix | `isValid`, `hasError` |
+| Type                | Convention           | Example                  |
+| ------------------- | -------------------- | ------------------------ |
+| Variables/Functions | camelCase            | `getUserData`, `isValid` |
+| Constants           | SCREAMING_SNAKE_CASE | `MAX_RETRIES`            |
+| Classes/Types       | PascalCase           | `UserService`, `User`    |
+| Files               | kebab-case           | `user-service.ts`        |
+| Booleans            | `is`/`has` prefix    | `isValid`, `hasError`    |
 
 ### Imports & File Organization
 
