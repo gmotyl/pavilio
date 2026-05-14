@@ -16,31 +16,7 @@ The table above is an example. Replace it with your own projects in `.projects.l
 
 ## Provider Configuration
 
-Each provider has its own configuration file location and format. When you create a project, the appropriate files are generated automatically.
-
-| Provider           | Config File(s)                        | Location           | Session Tracking      |
-| ------------------ | ------------------------------------- | ------------------ | --------------------- |
-| **Claude Code**    | `CLAUDE.md` + `.claude/settings.json` | Project root       | ✅ Auto (session end) |
-| **Kilocode**       | `opencode.json`                       | Project root       | ✅ Auto (session end) |
-| **GitHub Copilot** | `.github/copilot-instructions.md`     | Project .github/   | ⚠️ Manual             |
-| **QWEN**           | `.qwen/settings.json`                 | Project `.qwen/`   | ⚠️ Manual             |
-| **Google Gemini**  | `.gemini/settings.json`               | Project `.gemini/` | ⚠️ Manual             |
-
-**Important:**
-
-- Each provider expects its config files in **specific locations** (see `docs/PROVIDER-SETUP.md`)
-- Claude Code is the only provider with automatic session tracking
-- Other providers require manual progress saving or custom scripts
-- Global settings: `~/.claude/`, `~/.config/kilo/`, `~/.copilot/`, `~/.qwen/`, `~/.gemini/`
-
-**Setup Guide:**
-See `docs/PROVIDER-SETUP.md` for:
-
-1. CORRECT file locations for each provider
-2. Configuration file formats and examples
-3. Global vs project-level configuration
-4. Session tracking setup for each provider
-5. Switching providers mid-project
+Provider-specific config file locations and session-tracking notes have moved to [`docs/PROVIDERS.md`](docs/PROVIDERS.md). See [`docs/PROVIDER-SETUP.md`](docs/PROVIDER-SETUP.md) for the full setup guide.
 
 ## Project-Specific Rules
 
@@ -58,30 +34,31 @@ See `docs/PROVIDER-SETUP.md` for:
 
 - Agent enters planning mode after every session resume
 - Provide architecture clarity before implementation
-- **Workflow (in order):**
-  1. **Design** — Use the `grill-with-docs` skill to stress-test the design against the existing domain model (`CONTEXT.md`, `docs/adr/`), sharpen terminology, and update docs inline as decisions crystallise.
-  2. **Plan** — Use the `superpowers:writing-plans` skill to produce the actual plan document before touching code.
-  3. **Execute** — Use the `superpowers:executing-plans` skill to run the plan in a separate session with review checkpoints.
-  4. **Implement** — Use the `superpowers:test-driven-development` skill (red-green-refactor) for every feature or bugfix written during execution.
+- **Workflow (in order):** local skill copies live under [`commands/skills/`](commands/skills/) — read them directly if the plugin-cached versions aren't available.
+  1. **Design** — [`commands/skills/grill-with-docs/SKILL.md`](commands/skills/grill-with-docs/SKILL.md): stress-test the design against the existing domain model (`CONTEXT.md`, `docs/adr/`), sharpen terminology, and update docs inline as decisions crystallise.
+  2. **Plan** — [`commands/skills/writing-plans/SKILL.md`](commands/skills/writing-plans/SKILL.md): produce the actual plan document before touching code.
+  3. **Execute** — [`commands/skills/executing-plans/SKILL.md`](commands/skills/executing-plans/SKILL.md): run the plan in a separate session with review checkpoints.
+  4. **Implement** — [`commands/skills/test-driven-development/SKILL.md`](commands/skills/test-driven-development/SKILL.md): red-green-refactor for every feature or bugfix written during execution.
 - **When writing design documents, always invoke the `mermaid-diagrams` skill and include Mermaid diagrams** — at minimum a `flowchart` for components and data flow, plus a `sequenceDiagram` when interaction ordering matters. ASCII box-and-arrow art is harder to skim and does not render in the panel. Follow `/mermaid-chart` patterns — the panel auto-colors subgraphs and sequence `rect` sections to visually separate grouped paths.
 
 **To override:** Add project-specific row below the default rules.
 
 ## Domain Context & Decisions
 
-Before making non-trivial design or scope decisions, consult these files. They define the words this codebase uses and the decisions that explain why the code looks the way it does.
+Two kinds of documents anchor non-trivial design and scope decisions:
 
-| File                                                                               | Purpose                                                                                                  | When to read                                                                                                                                        | When to update                                                                                                                              |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CONTEXT.md` (repo root)                                                           | Workspace-wide glossary — defines terms like _Notes world_, _Repo world_, _Project_, _Linked repository_ | When a new term appears, when terminology feels ambiguous, before naming a new concept                                                              | When a term is resolved, renamed, or a new domain word becomes load-bearing                                                                 |
-| `docs/adr/NNNN-*.md`                                                               | Architecture Decision Records — one decision per file, sequentially numbered                             | Before changing scope, swapping a library, or revisiting an old choice. Especially before fixing something that looks wrong (it may be deliberate). | After a real trade-off is made that future readers will need to understand. See `.claude/skills/grill-with-docs/ADR-FORMAT.md` for the bar. |
-| `<project>/CONTEXT.md`                                                             | Project-specific glossary (under `projects/<name>/`)                                                     | When working inside a specific project that has its own vocabulary                                                                                  | When a project-local term is canonicalized                                                                                                  |
-| `<project>/adr/NNNN-*.md`                                                          | Project-specific ADRs (under `projects/<name>/adr/`)                                                     | Before changing how a particular project works                                                                                                      | When a project-local decision is made that won't generalise to the framework                                                                |
-| `<linked-repo>/CONTEXT.md` and `<linked-repo>/docs/adr/` (or `<linked-repo>/adr/`) | Each linked code repository's own glossary and decisions                                                 | When editing or reviewing code in that repo                                                                                                         | Following that repo's conventions                                                                                                           |
+- **`CONTEXT.md`** — the glossary. Defines the words this codebase uses (e.g. _Notes world_, _Project_, _Linked repository_). Small enough to read eagerly on project entry.
+- **`docs/adr/NNNN-*.md`** — Architecture Decision Records. One decision per file, sequentially numbered. Read **lazily**: list filenames on resume, only `Read` a body when the current task touches its area.
 
-**Rule:** when a user asks "should we…?" and the answer depends on terminology, scope, or a past trade-off, read the relevant CONTEXT.md / ADRs **before** answering. Don't invent new words for concepts that already have canonical names.
+Both exist at three scopes:
 
-**Discovery vs read:** `CONTEXT.md` is small enough to read eagerly on project entry. `adr/` files are read **lazily** — list the directory on resume so you know which decisions exist, then `Read` a specific ADR only when the current task touches its area. Loading every ADR body up front burns context for no gain.
+- Repo root — workspace-wide
+- `projects/<name>/` — project-specific (its own `CONTEXT.md` and `adr/`)
+- `<linked-repo>/` — each linked code repo's own glossary and decisions; follow that repo's conventions
+
+**Format & workflow** are defined by the `grill-with-docs` skill — see [`commands/skills/grill-with-docs/SKILL.md`](commands/skills/grill-with-docs/SKILL.md), [`CONTEXT-FORMAT.md`](commands/skills/grill-with-docs/CONTEXT-FORMAT.md), and [`ADR-FORMAT.md`](commands/skills/grill-with-docs/ADR-FORMAT.md).
+
+**Rule:** when a user asks "should we…?" and the answer depends on terminology, scope, or a past trade-off, read the relevant `CONTEXT.md` / ADRs **before** answering. Don't invent new words for concepts that already have canonical names.
 
 ## Session Tracking
 
