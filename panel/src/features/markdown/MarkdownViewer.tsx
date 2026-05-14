@@ -123,7 +123,11 @@ export default function MarkdownViewer() {
       </div>
     );
 
-  const isMarkdown = filePath.endsWith(".md");
+  // _skills/<name> resolves to skills/<name>/SKILL.md on the server; _help/<x.md> is markdown.
+  // Treat these virtual paths as markdown even without a .md suffix in the URL.
+  const isMarkdown =
+    filePath.endsWith(".md") ||
+    (filePath.startsWith("_skills/") && !filePath.includes("."));
   const isJson = filePath.endsWith(".json");
 
   return (

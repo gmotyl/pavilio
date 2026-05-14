@@ -19,6 +19,7 @@
     "setup:azure-devops": "./scripts/setup:azure-devops",
     "install-skills": "./skills/install-skills.sh",
     "update": "bash scripts/update.sh",
+    "pull": "bash scripts/update.sh",
     "test": "pnpm -C panel test",
     "build": "pnpm -C panel build",
     "dev": "pnpm -C panel dev"

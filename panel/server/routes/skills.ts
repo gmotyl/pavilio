@@ -34,7 +34,7 @@ router.get("/", (_req, res) => {
 
   try {
     const entries = readdirSync(skillsDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
+      .filter((d) => d.isDirectory() || d.isSymbolicLink())
       .map((d) => d.name)
       .sort();
 
