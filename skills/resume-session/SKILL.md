@@ -31,7 +31,7 @@ Resume work on a project by loading context, checking in-progress plans, and ent
 3. Read `projects/[project]/plans/CURRENT.md`
 4. **Branch on CURRENT.md content:**
 
-   **Empty or missing** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then invoke `superpowers:brainstorming`.
+   **Empty or missing** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then enter the workflow at **step 1: Design** (see below).
 
    **One plan path listed** → Skip summary. Show:
    ```
@@ -40,14 +40,23 @@ Resume work on a project by loading context, checking in-progress plans, and ent
 
    Continue this plan, or do you have a different task?
    ```
-   Wait for reply. If confirmed → `superpowers:executing-plans` from next incomplete task. If new task → treat as fast-entry with task description.
+   Wait for reply. If confirmed → enter the workflow at **step 3: Execute** for that plan. If new task → treat as fast-entry with task description.
 
    **Multiple plans listed** → Skip summary. Show numbered list, wait for selection.
 
 **Fast-entry variant** (`/resume-session [project] <task description>`):
 1. Load PROJECT.md silently (no display)
 2. Skip progress summary
-3. Immediately invoke `superpowers:brainstorming` with the task description
+3. Enter the workflow at **step 1: Design** with the task description in hand
+
+## Workflow after resume
+
+Resume always lands in **planning mode**, never directly in code edits. Follow the four-step workflow defined in [`AGENTS.md`](../../AGENTS.md):
+
+1. **Design** — [[grill-with-docs]]: stress-test the task against the project's `CONTEXT.md` and `docs/adr/` (and any project-scoped `CONTEXT.md`/`adr/`). Sharpen terminology, surface hidden constraints, and update docs inline when decisions crystallise.
+2. **Plan** — [[writing-plans]]: produce a written plan document before touching code.
+3. **Execute** — [[executing-plans]]: run the plan in a separate session with review checkpoints. Resume into this step when CURRENT.md already points at an in-progress plan.
+4. **Implement** — [[test-driven-development]]: red-green-refactor for every feature or bugfix.
 
 ## Open a progress file for this session
 
@@ -64,5 +73,5 @@ The [[end-session]] skill then just verifies completeness and commits — it sho
 
 - Always remember the project for subsequent `/end-session` calls in this conversation
 - Use GitNexus MCP for codebase exploration, not `ls`/`find`/glob browsing
-- Enter planning mode after resume — invoke `superpowers:brainstorming` before any implementation
+- Enter planning mode after resume — start with [[grill-with-docs]] (Design), never jump straight to code
 - Keep the in-session progress file focused on resume-context, not a transcript
