@@ -24,6 +24,10 @@ _Avoid_: notes folder, project files (ambiguous), workspace data
 Everything inside a linked repository. The panel only reads from here, and writes go through `git` (commit, pull). Filesystem mutations would silently rewrite git history, so the panel does not move or rename files in repo world.
 _Avoid_: code world, source files, project repos
 
+**Toolbox**:
+Workspace-level user-owned directories that hold tooling rather than notes: `skills/`, `commands/`, `.claude/commands/`, `.opencode/commands/`, `panel/`, `scripts/`. Same mutation policy as **Notes world** — the user owns these and the panel edits them freely (create, rename, drag, delete). Distinct from **Notes world** in one way only: `pnpm pull` may add or refresh files here from upstream pavilio, while leaving local-only files alone. The merge contract (which files are upstream-tracked vs local) is captured separately in a forthcoming ADR.
+_Avoid_: framework world (implies read-only), config dirs (too generic)
+
 **Panel**:
 The Vite + React + Express app at `panel/` that the workspace runs locally. Single user, no multi-tenancy. Served at `http://localhost:3010` and optionally over LAN.
 _Avoid_: UI, dashboard, app
@@ -52,6 +56,7 @@ _Avoid_: scripts manifest, scripts registry.
 - A **Project** is composed of **Sections**; each section is one **Notes world** subfolder
 - An **Active plan** is a **Notes world** file path advertised through `plans/CURRENT.md`
 - The **Scripts config** defines a list of **Overview scripts**; the **Panel** renders one button per entry on every **Project**'s Overview tab.
+- The **Workspace** also contains the **Toolbox** — workspace-level tooling directories that the **Panel** edits with the same mutation policy as **Notes world**, but that `pnpm pull` may merge from upstream pavilio.
 
 ## Example dialogue
 
