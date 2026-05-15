@@ -1,4 +1,4 @@
-import { useState, ReactNode } from "react";
+import { useState, useEffect, ReactNode } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
 
 interface Props {
@@ -8,8 +8,30 @@ interface Props {
   children: ReactNode;
 }
 
+function storageId(key: string) {
+  return `rightSidebar.${key}.expanded`;
+}
+
+function readInitial(key: string): boolean {
+  try {
+    const v = localStorage.getItem(storageId(key));
+    if (v === null) return true; // default expanded
+    return v === "true";
+  } catch {
+    return true;
+  }
+}
+
 export default function CollapsibleSection({ storageKey, title, icon, children }: Props) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState<boolean>(() => readInitial(storageKey));
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageId(storageKey), String(expanded));
+    } catch {
+      // ignore quota / private-mode errors
+    }
+  }, [expanded, storageKey]);
 
   return (
     <section>
