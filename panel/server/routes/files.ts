@@ -58,6 +58,21 @@ router.get("/read/*path", (req, res) => {
   const relativePath = Array.isArray(parts) ? parts.join("/") : parts;
   const { projectsDir } = getConfig();
 
+  // ?root=<id> — explicit cross-root read (checked first, before legacy prefixes)
+  const rootParam = typeof req.query.root === "string" ? req.query.root : "";
+  if (rootParam && isValidRoot(rootParam)) {
+    const base = resolveRoot(rootParam);
+    const candidate = resolve(base, relativePath);
+    if (!isPathUnder(candidate, base)) {
+      return res.status(403).json({ error: "Path traversal blocked" });
+    }
+    if (!existsSync(candidate)) {
+      return res.status(404).json({ error: "File not found" });
+    }
+    const content = readFileSync(candidate, "utf-8");
+    return res.json({ path: relativePath, absolutePath: candidate, content });
+  }
+
   // Support _skills/ prefix for skill SKILL.md files
   let absolutePath: string;
   if (relativePath.startsWith("_skills/")) {
