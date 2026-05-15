@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
 
 export type RootId = "projects" | "skills" | "claude-commands" | "opencode-commands";
@@ -14,7 +14,7 @@ export function useFileIndex(root: RootId = "projects") {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const { lastMessage } = useWebSocket();
 
-  const fetchFiles = async () => {
+  const fetchFiles = useCallback(async () => {
     const url =
       root === "projects" ? "/api/files/index" : `/api/files/listing?root=${root}`;
     const res = await fetch(url);
@@ -32,17 +32,15 @@ export function useFileIndex(root: RootId = "projects") {
         root,
       }))
     );
-  };
-
-  useEffect(() => {
-    fetchFiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [root]);
 
   useEffect(() => {
+    fetchFiles();
+  }, [fetchFiles]);
+
+  useEffect(() => {
     if (lastMessage?.type === "file-change") fetchFiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastMessage]);
+  }, [lastMessage, fetchFiles]);
 
   return files;
 }

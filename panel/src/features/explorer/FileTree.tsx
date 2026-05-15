@@ -12,6 +12,20 @@ import { useActiveFile } from "./useActiveFile";
 import { useFileIndex, FileEntry, RootId } from "./useFileIndex";
 import { useFileDragSource, useFileDropTarget } from "./useFileDrag";
 
+/**
+ * Repo-relative on-disk path for a file under the given root.
+ * Used to look up `git status` entries, which are keyed by the path
+ * as `git` reports it (relative to the repo root).
+ */
+function gitPathFor(root: RootId, relativePath: string): string {
+  switch (root) {
+    case "projects":          return `projects/${relativePath}`;
+    case "skills":            return `skills/${relativePath}`;
+    case "claude-commands":   return `.claude/commands/${relativePath}`;
+    case "opencode-commands": return `.opencode/commands/${relativePath}`;
+  }
+}
+
 function getFileIcon(name: string) {
   if (name.endsWith(".md"))
     return (
@@ -218,7 +232,7 @@ function SubfolderSection({
                 key={file.relativePath}
                 file={file}
                 isActive={currentPath === fp}
-                gitStatus={gitMap.get(`projects/${file.relativePath}`)}
+                gitStatus={gitMap.get(gitPathFor(root, file.relativePath))}
                 onNavigate={onNavigate}
                 root={root}
               />
@@ -307,7 +321,7 @@ function ProjectTreeSection({
                 key={file.relativePath}
                 file={file}
                 isActive={currentPath === fp}
-                gitStatus={gitMap.get(`projects/${file.relativePath}`)}
+                gitStatus={gitMap.get(gitPathFor(root, file.relativePath))}
                 onNavigate={onNavigate}
                 root={root}
               />
