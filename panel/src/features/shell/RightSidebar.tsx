@@ -1,5 +1,4 @@
 import { FolderTree, Sparkles } from "lucide-react";
-import SkillsList from "../skills/SkillsList";
 import FileTree from "../explorer/FileTree";
 import CollapsibleSection from "./CollapsibleSection";
 
@@ -18,7 +17,7 @@ export default function RightSidebar() {
         title="Skills"
         icon={<Sparkles size={12} style={{ color: "var(--text-tertiary)" }} />}
       >
-        <SkillsList />
+        <FileTree root="skills" />
       </CollapsibleSection>
     </div>
   );
