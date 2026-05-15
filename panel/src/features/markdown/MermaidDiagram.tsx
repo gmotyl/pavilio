@@ -70,6 +70,13 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
 
     let cancelled = false;
 
+    // mermaid.render appends a temp <div id="d<id>"> to body. It removes
+    // the div on success but leaves it on parse error, pinning the default
+    // "Syntax error" SVG to the page. Strip it ourselves.
+    const cleanupOrphan = () => {
+      document.getElementById("d" + idRef.current)?.remove();
+    };
+
     mermaid
       .render(idRef.current, fixAmbiguousLabels(chart))
       .then(({ svg }) => {
@@ -299,12 +306,18 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
       })
       .catch((err) => {
         if (!cancelled) {
+          // Gated by !cancelled so a stale render's late failure doesn't
+          // remove the temp div the next render is using (idRef.current is
+          // stable across effect runs). The effect cleanup handles unmount
+          // and chart-change paths.
+          cleanupOrphan();
           setError(err?.message || "Failed to render diagram");
         }
       });
 
     return () => {
       cancelled = true;
+      cleanupOrphan();
     };
   }, [chart]);
 
