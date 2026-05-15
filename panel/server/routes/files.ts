@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { readFileSync, existsSync, promises as fsPromises } from "fs";
+import { readFileSync, existsSync, readdirSync, statSync, promises as fsPromises } from "fs";
 import { resolve, dirname, basename, extname, join, relative, isAbsolute, sep } from "path";
 import { getConfig } from "../config.js";
 import { getFileIndex, rebuildIndex } from "../lib/file-index.js";
+import { resolveRoot, isValidRoot } from "../lib/file-roots.js";
 
 /** Cross-platform: forward slashes only in API responses. */
 function toPosix(p: string): string {
@@ -208,6 +209,40 @@ router.post("/move", async (req, res) => {
     to: toPosix(relative(projectsDir, resolved.absolutePath)),
     renamed: resolved.renamed,
   });
+});
+
+// Walk a root directory recursively, skipping hidden entries (dot-prefixed names)
+function walkRoot(absRoot: string): Array<{ relativePath: string; modified: number }> {
+  const out: Array<{ relativePath: string; modified: number }> = [];
+  function recur(dir: string, prefix: string) {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      const abs = join(dir, e.name);
+      const rel = prefix ? `${prefix}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        recur(abs, rel);
+      } else if (e.isFile()) {
+        try {
+          const st = statSync(abs);
+          out.push({ relativePath: toPosix(rel), modified: st.mtimeMs });
+        } catch {}
+      }
+    }
+  }
+  recur(absRoot, "");
+  return out;
+}
+
+// List all files under a named root (projects | skills | claude-commands | opencode-commands)
+router.get("/listing", (req, res) => {
+  const root = String(req.query.root ?? "");
+  if (!isValidRoot(root)) {
+    return res.status(400).json({ error: "Unknown root" });
+  }
+  const abs = resolveRoot(root);
+  res.json(walkRoot(abs));
 });
 
 // File tree for a specific project
