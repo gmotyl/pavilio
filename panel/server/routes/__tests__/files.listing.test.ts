@@ -31,6 +31,10 @@ describe("GET /api/files/listing", () => {
     mkdirSync(join(tmpRoot, "skills", "memo"), { recursive: true });
     writeFileSync(join(tmpRoot, "skills", "memo", "SKILL.md"), "---\nname: memo\n---\n");
     writeFileSync(join(tmpRoot, "skills", "memo", "EXTRA.md"), "extra notes\n");
+    mkdirSync(join(tmpRoot, ".claude", "commands"), { recursive: true });
+    writeFileSync(join(tmpRoot, ".claude", "commands", "memo.md"), "claude memo\n");
+    mkdirSync(join(tmpRoot, ".opencode", "commands"), { recursive: true });
+    writeFileSync(join(tmpRoot, ".opencode", "commands", "note.md"), "opencode note\n");
   });
 
   afterEach(() => {
@@ -50,5 +54,16 @@ describe("GET /api/files/listing", () => {
     const app = makeApp();
     const res = await request(app).get("/api/files/listing?root=bogus");
     expect(res.status).toBe(400);
+  });
+
+  it("lists .claude/commands and .opencode/commands when present", async () => {
+    const app = makeApp();
+    const cc = await request(app).get("/api/files/listing?root=claude-commands");
+    expect(cc.status).toBe(200);
+    expect(cc.body.map((f: { relativePath: string }) => f.relativePath)).toContain("memo.md");
+
+    const oc = await request(app).get("/api/files/listing?root=opencode-commands");
+    expect(oc.status).toBe(200);
+    expect(oc.body.map((f: { relativePath: string }) => f.relativePath)).toContain("note.md");
   });
 });
