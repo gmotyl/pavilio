@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import CollapsibleSection from "../CollapsibleSection";
 
 describe("CollapsibleSection", () => {
@@ -14,5 +15,16 @@ describe("CollapsibleSection", () => {
       "aria-expanded",
       "true"
     );
+  });
+
+  it("hides children after the user clicks to collapse", async () => {
+    const user = userEvent.setup();
+    render(
+      <CollapsibleSection storageKey="test.section.b" title="Skills">
+        <div data-testid="child">tree</div>
+      </CollapsibleSection>
+    );
+    await user.click(screen.getByRole("button", { name: /skills/i }));
+    expect(screen.queryByTestId("child")).not.toBeInTheDocument();
   });
 });
