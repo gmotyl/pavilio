@@ -305,8 +305,12 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
         }
       })
       .catch((err) => {
-        cleanupOrphan();
         if (!cancelled) {
+          // Gated by !cancelled so a stale render's late failure doesn't
+          // remove the temp div the next render is using (idRef.current is
+          // stable across effect runs). The effect cleanup handles unmount
+          // and chart-change paths.
+          cleanupOrphan();
           setError(err?.message || "Failed to render diagram");
         }
       });
