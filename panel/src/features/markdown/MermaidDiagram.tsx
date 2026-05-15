@@ -70,6 +70,13 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
 
     let cancelled = false;
 
+    // mermaid.render appends a temp <div id="d<id>"> to body. It removes
+    // the div on success but leaves it on parse error, pinning the default
+    // "Syntax error" SVG to the page. Strip it ourselves.
+    const cleanupOrphan = () => {
+      document.getElementById("d" + idRef.current)?.remove();
+    };
+
     mermaid
       .render(idRef.current, fixAmbiguousLabels(chart))
       .then(({ svg }) => {
@@ -298,6 +305,7 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
         }
       })
       .catch((err) => {
+        cleanupOrphan();
         if (!cancelled) {
           setError(err?.message || "Failed to render diagram");
         }
@@ -305,6 +313,7 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
 
     return () => {
       cancelled = true;
+      cleanupOrphan();
     };
   }, [chart]);
 
