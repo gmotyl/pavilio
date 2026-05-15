@@ -9,8 +9,22 @@ import {
 } from "lucide-react";
 import { useGitStatus } from "../git/useGitStatus";
 import { useActiveFile } from "./useActiveFile";
-import { useFileIndex, FileEntry } from "./useFileIndex";
+import { useFileIndex, FileEntry, RootId } from "./useFileIndex";
 import { useFileDragSource, useFileDropTarget } from "./useFileDrag";
+
+/**
+ * Repo-relative on-disk path for a file under the given root.
+ * Used to look up `git status` entries, which are keyed by the path
+ * as `git` reports it (relative to the repo root).
+ */
+function gitPathFor(root: RootId, relativePath: string): string {
+  switch (root) {
+    case "projects":          return `projects/${relativePath}`;
+    case "skills":            return `skills/${relativePath}`;
+    case "claude-commands":   return `.claude/commands/${relativePath}`;
+    case "opencode-commands": return `.opencode/commands/${relativePath}`;
+  }
+}
 
 function getFileIcon(name: string) {
   if (name.endsWith(".md"))
@@ -96,14 +110,19 @@ function FileButton({
   isActive,
   gitStatus,
   onNavigate,
+  root = "projects",
 }: {
   file: FileEntry;
   isActive: boolean;
   gitStatus?: string;
   onNavigate: (path: string) => void;
+  root?: RootId;
 }) {
   const fileName = file.relativePath.split("/").pop() ?? file.relativePath;
-  const viewPath = `/view/${file.relativePath}`;
+  const viewPath =
+    root === "projects"
+      ? `/view/${file.relativePath}`
+      : `/view/_root/${root}/${file.relativePath}`;
   const ref = useRef<HTMLButtonElement>(null);
   const drag = useFileDragSource(file.relativePath);
 
@@ -151,6 +170,7 @@ function SubfolderSection({
   gitMap,
   onNavigate,
   shouldOpen,
+  root = "projects",
 }: {
   projectName: string;
   name: string;
@@ -159,6 +179,7 @@ function SubfolderSection({
   gitMap: Map<string, string>;
   onNavigate: (path: string) => void;
   shouldOpen: boolean;
+  root?: RootId;
 }) {
   const [open, setOpen] = useState(shouldOpen);
   const prevShouldOpen = useRef(shouldOpen);
@@ -201,15 +222,22 @@ function SubfolderSection({
           className="ml-3 pl-1"
           style={{ borderLeft: "1px solid var(--border-subtle)" }}
         >
-          {files.map((file) => (
-            <FileButton
-              key={file.relativePath}
-              file={file}
-              isActive={currentPath === `/view/${file.relativePath}`}
-              gitStatus={gitMap.get(`projects/${file.relativePath}`)}
-              onNavigate={onNavigate}
-            />
-          ))}
+          {files.map((file) => {
+            const fp =
+              root === "projects"
+                ? `/view/${file.relativePath}`
+                : `/view/_root/${root}/${file.relativePath}`;
+            return (
+              <FileButton
+                key={file.relativePath}
+                file={file}
+                isActive={currentPath === fp}
+                gitStatus={gitMap.get(gitPathFor(root, file.relativePath))}
+                onNavigate={onNavigate}
+                root={root}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -224,6 +252,7 @@ function ProjectTreeSection({
   onNavigate,
   shouldOpen,
   activeSubfolder,
+  root = "projects",
 }: {
   name: string;
   node: ProjectNode;
@@ -232,6 +261,7 @@ function ProjectTreeSection({
   onNavigate: (path: string) => void;
   shouldOpen: boolean;
   activeSubfolder: string;
+  root?: RootId;
 }) {
   const [open, setOpen] = useState(shouldOpen);
   const prevShouldOpen = useRef(shouldOpen);
@@ -278,25 +308,37 @@ function ProjectTreeSection({
               gitMap={gitMap}
               onNavigate={onNavigate}
               shouldOpen={activeSubfolder === subfolder}
+              root={root}
             />
           ))}
-          {node.root.map((file) => (
-            <FileButton
-              key={file.relativePath}
-              file={file}
-              isActive={currentPath === `/view/${file.relativePath}`}
-              gitStatus={gitMap.get(`projects/${file.relativePath}`)}
-              onNavigate={onNavigate}
-            />
-          ))}
+          {node.root.map((file) => {
+            const fp =
+              root === "projects"
+                ? `/view/${file.relativePath}`
+                : `/view/_root/${root}/${file.relativePath}`;
+            return (
+              <FileButton
+                key={file.relativePath}
+                file={file}
+                isActive={currentPath === fp}
+                gitStatus={gitMap.get(gitPathFor(root, file.relativePath))}
+                onNavigate={onNavigate}
+                root={root}
+              />
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-export default function FileTree() {
-  const files = useFileIndex();
+interface FileTreeProps {
+  root?: RootId;
+}
+
+export default function FileTree({ root = "projects" }: FileTreeProps = {}) {
+  const files = useFileIndex(root);
   const { files: gitFiles } = useGitStatus();
   const navigate = useNavigate();
   const location = useLocation();
@@ -336,6 +378,7 @@ export default function FileTree() {
           onNavigate={navigate}
           shouldOpen={active?.project === project}
           activeSubfolder={active?.project === project ? active.subfolder : ""}
+          root={root}
         />
       ))}
     </div>

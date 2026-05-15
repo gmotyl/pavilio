@@ -11,6 +11,21 @@ import ImageDropZone from "./ImageDropZone";
 import MarkdownRenderer from "./MarkdownRenderer";
 import { copyToClipboard } from "../../lib/clipboard";
 
+/**
+ * Build the /api/files/read/... URL from a route path.
+ * Paths starting with _root/<rootId>/ are cross-root references:
+ * they map to /api/files/read/<rest>?root=<rootId>.
+ */
+export function buildReadUrl(routePath: string): string {
+  const parts = routePath.split("/").filter(Boolean);
+  if (parts[0] === "_root" && parts[1]) {
+    const rootId = parts[1];
+    const rest = parts.slice(2).join("/");
+    return `/api/files/read/${rest}?root=${encodeURIComponent(rootId)}`;
+  }
+  return `/api/files/read/${routePath}`;
+}
+
 export default function MarkdownViewer() {
   const location = useLocation();
   const filePath = location.pathname.replace(/^\/view\//, "");
@@ -29,7 +44,7 @@ export default function MarkdownViewer() {
   const { lastMessage } = useWebSocket();
 
   const fetchContent = async () => {
-    const res = await fetch(`/api/files/read/${filePath}`);
+    const res = await fetch(buildReadUrl(filePath));
     if (res.ok) {
       const data = await res.json();
       setContent(data.content);
