@@ -12,6 +12,7 @@ import {
   Settings,
   Smartphone,
   Star,
+  Terminal as TerminalIcon,
   Wifi,
 } from "lucide-react";
 import GitSummary from "../git/GitSummary";
@@ -391,6 +392,21 @@ export default function LeftSidebar() {
         <SectionHeader icon={FolderOpen} label="Projects" />
         <ul className="space-y-0.5">
           {otherProjects.map(renderProjectRow)}
+          <li>
+            <NavLink
+              to="/terminals"
+              className="flex items-center gap-2 rounded-md px-1.5 py-1 text-[12px]"
+              style={({ isActive }) => ({
+                color: isActive
+                  ? "var(--text-primary)"
+                  : "var(--text-tertiary)",
+                background: isActive ? "var(--bg-active)" : "transparent",
+              })}
+            >
+              <TerminalIcon size={12} />
+              <span>Terminals</span>
+            </NavLink>
+          </li>
           <li>
             <NavLink
               to="/archive"

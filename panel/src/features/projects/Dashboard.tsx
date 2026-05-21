@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useFavorites } from "./useFavorites";
 import { useProjects, Project } from "./useProjects";
 import { MobileAccessButton } from "../mobile-access/MobileAccessButton";
@@ -10,6 +10,7 @@ import {
   Map as MapIcon,
   Database,
   Star,
+  Terminal as TerminalIcon,
 } from "lucide-react";
 
 function formatDate(dateStr: string | null): string | null {
@@ -149,7 +150,22 @@ export default function Dashboard() {
             {projects.length} projects in workspace
           </p>
         </div>
-        <MobileAccessButton />
+        <div className="flex items-center gap-2">
+          <Link
+            to="/terminals"
+            data-testid="dashboard-terminals-link"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm"
+            style={{
+              background: "var(--bg-surface)",
+              borderColor: "var(--border-subtle)",
+              color: "var(--text-primary)",
+            }}
+          >
+            <TerminalIcon size={14} />
+            <span>Terminals</span>
+          </Link>
+          <MobileAccessButton />
+        </div>
       </div>
       {projects.length === 0 ? (
         <p style={{ color: "var(--text-muted)" }}>Loading...</p>
