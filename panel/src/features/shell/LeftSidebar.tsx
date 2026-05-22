@@ -395,6 +395,7 @@ export default function LeftSidebar() {
           <li>
             <NavLink
               to="/terminals"
+              data-testid="sidebar-terminals-link"
               className="flex items-center gap-2 rounded-md px-1.5 py-1 text-[12px]"
               style={({ isActive }) => ({
                 color: isActive

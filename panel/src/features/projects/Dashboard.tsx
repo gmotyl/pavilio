@@ -154,7 +154,15 @@ export default function Dashboard() {
           <Link
             to="/terminals"
             data-testid="dashboard-terminals-link"
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-all"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--bg-hover)";
+              e.currentTarget.style.borderColor = "var(--border-strong)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "var(--bg-surface)";
+              e.currentTarget.style.borderColor = "var(--border-subtle)";
+            }}
             style={{
               background: "var(--bg-surface)",
               borderColor: "var(--border-subtle)",
