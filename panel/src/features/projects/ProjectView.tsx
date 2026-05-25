@@ -36,9 +36,12 @@ import { useTerminalMaximized } from "../terminal/useTerminalMaximized";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import type { TerminalHandle } from "../terminal/TerminalView";
 import TerminalsSurface from "../terminal/TerminalsSurface";
+import { TimeBadge } from "../time/TimeBadge";
+import { useProjectBusyTracker } from "../time/useProjectBusyTracker";
 
 export default function ProjectView() {
   const { name, section } = useParams<{ name: string; section?: string }>();
+  const { todayMinutes } = useProjectBusyTracker(name ?? "");
   useLastPath(name);
   const [content, setContent] = useState<string | null>(null);
   const [absolutePath, setAbsolutePath] = useState("");
@@ -233,9 +236,15 @@ export default function ProjectView() {
     <div className="relative">
     <div className={`p-6 ${wide ? "" : "max-w-5xl"}`}>
       {/* Desktop-only big title */}
-      <h1 className="hidden md:block text-2xl font-semibold mb-4 capitalize">
-        {name}
-      </h1>
+      <div className="hidden md:flex items-center mb-4">
+        <h1 className="text-2xl font-semibold capitalize">
+          {name}
+        </h1>
+        <TimeBadge
+          minutes={todayMinutes}
+          to={`/project/${name}/time`}
+        />
+      </div>
 
       <ProjectTabsBar
         tabs={tabs}
