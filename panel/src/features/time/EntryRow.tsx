@@ -130,6 +130,7 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
           />
           <button
             type="submit"
+            data-testid="time-entry-edit-save"
             disabled={busy}
             className="text-sm px-3 py-1 rounded disabled:opacity-50"
             style={{ background: "var(--accent)", color: "var(--accent-contrast, white)" }}
@@ -138,6 +139,7 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
           </button>
           <button
             type="button"
+            data-testid="time-entry-edit-cancel"
             onClick={cancel}
             disabled={busy}
             className="text-sm px-3 py-1 rounded"
@@ -165,6 +167,7 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
         <span>Delete this entry?</span>
         <button
           type="button"
+          data-testid="time-entry-delete-confirm"
           onClick={onConfirmDelete}
           disabled={busy}
           className="text-sm px-3 py-1 rounded disabled:opacity-50"
@@ -174,6 +177,7 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
         </button>
         <button
           type="button"
+          data-testid="time-entry-delete-cancel"
           onClick={cancel}
           disabled={busy}
           className="text-sm px-3 py-1 rounded"
@@ -211,11 +215,11 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
       </button>
       <button
         type="button"
+        data-testid="time-entry-delete"
         onClick={() => {
           setError(null);
           setMode("confirming-delete");
         }}
-        data-testid="time-entry-delete"
         aria-label="Delete entry"
         className="text-xs px-1"
         style={{ color: "var(--text-tertiary)" }}
