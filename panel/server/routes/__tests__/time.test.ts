@@ -100,3 +100,110 @@ describe("GET /api/time/range", () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe("PATCH /api/time/entry/:id", () => {
+  it("updates minutes and the change is visible in GET /api/time/range", async () => {
+    const post = await request(app).post("/api/time/append").send({
+      project: "metro", entry: { type: "manual", date: "2026-05-25", minutes: 90, note: "PR" },
+    });
+    const id = post.body.entry.id;
+    const r = await request(app).patch(`/api/time/entry/${id}`).send({
+      project: "metro", patch: { minutes: 60 },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ ok: true });
+
+    const range = await request(app).get(
+      "/api/time/range?project=metro&from=2026-05-25&to=2026-05-25",
+    );
+    expect(range.body.entries).toEqual([
+      { date: "2026-05-25", minutes: 60, note: "PR" },
+    ]);
+  });
+
+  it("updates the note", async () => {
+    const post = await request(app).post("/api/time/append").send({
+      project: "metro", entry: { type: "manual", date: "2026-05-25", minutes: 90, note: "old" },
+    });
+    const id = post.body.entry.id;
+    const r = await request(app).patch(`/api/time/entry/${id}`).send({
+      project: "metro", patch: { note: "new" },
+    });
+    expect(r.status).toBe(200);
+    const range = await request(app).get(
+      "/api/time/range?project=metro&from=2026-05-25&to=2026-05-25",
+    );
+    expect(range.body.entries[0].note).toBe("new");
+  });
+
+  it("404 on unknown id", async () => {
+    const r = await request(app).patch("/api/time/entry/missing").send({
+      project: "metro", patch: { minutes: 60 },
+    });
+    expect(r.status).toBe(404);
+  });
+
+  it("400 when minutes is negative", async () => {
+    const post = await request(app).post("/api/time/append").send({
+      project: "metro", entry: { type: "manual", date: "2026-05-25", minutes: 90 },
+    });
+    const id = post.body.entry.id;
+    const r = await request(app).patch(`/api/time/entry/${id}`).send({
+      project: "metro", patch: { minutes: -5 },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("400 when minutes is non-integer", async () => {
+    const post = await request(app).post("/api/time/append").send({
+      project: "metro", entry: { type: "manual", date: "2026-05-25", minutes: 90 },
+    });
+    const id = post.body.entry.id;
+    const r = await request(app).patch(`/api/time/entry/${id}`).send({
+      project: "metro", patch: { minutes: 1.5 },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("400 when date is malformed", async () => {
+    const post = await request(app).post("/api/time/append").send({
+      project: "metro", entry: { type: "manual", date: "2026-05-25", minutes: 90 },
+    });
+    const id = post.body.entry.id;
+    const r = await request(app).patch(`/api/time/entry/${id}`).send({
+      project: "metro", patch: { date: "not-a-date" },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("400 when project is missing", async () => {
+    const r = await request(app).patch("/api/time/entry/any").send({ patch: {} });
+    expect(r.status).toBe(400);
+  });
+});
+
+describe("DELETE /api/time/entry/:id", () => {
+  it("removes the entry so GET /api/time/range no longer returns it", async () => {
+    const post = await request(app).post("/api/time/append").send({
+      project: "metro", entry: { type: "manual", date: "2026-05-25", minutes: 90, note: "x" },
+    });
+    const id = post.body.entry.id;
+    const r = await request(app).delete(`/api/time/entry/${id}?project=metro`);
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ ok: true });
+    const range = await request(app).get(
+      "/api/time/range?project=metro&from=2026-05-25&to=2026-05-25",
+    );
+    expect(range.body.entries).toEqual([]);
+  });
+
+  it("404 on unknown id", async () => {
+    const r = await request(app).delete("/api/time/entry/missing?project=metro");
+    expect(r.status).toBe(404);
+  });
+
+  it("400 when project is missing", async () => {
+    const r = await request(app).delete("/api/time/entry/any");
+    expect(r.status).toBe(400);
+  });
+});

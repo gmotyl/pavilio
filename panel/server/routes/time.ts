@@ -1,6 +1,15 @@
 import type { Express, Request, Response } from "express";
 import { randomBytes } from "node:crypto";
-import { appendTimeEntry, readTimeEntries, TimeEntry } from "../lib/time-store.js";
+import {
+  appendTimeEntry,
+  patchTimeEntry,
+  readTimeEntries,
+  TimeEntry,
+} from "../lib/time-store.js";
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const isPositiveInteger = (n: unknown): n is number =>
+  typeof n === "number" && Number.isInteger(n) && n >= 0;
 
 const ALLOWED_TYPES = new Set(["manual", "busy_block", "reset"]);
 
@@ -38,6 +47,45 @@ export function mountTimeRoutes(
     );
     const entries = manual.map((m) => ({ date: m.date, minutes: m.minutes, note: m.note }));
     res.json({ entries });
+  });
+
+  app.patch("/api/time/entry/:id", (req: Request, res: Response) => {
+    const id = req.params.id;
+    const { project, patch } = req.body ?? {};
+    if (!project || typeof project !== "string")
+      return res.status(400).json({ error: "project is required" });
+    if (!patch || typeof patch !== "object")
+      return res.status(400).json({ error: "patch is required" });
+    if ("minutes" in patch && !isPositiveInteger(patch.minutes))
+      return res.status(400).json({ error: "minutes must be a non-negative integer" });
+    if ("date" in patch && (typeof patch.date !== "string" || !ISO_DATE.test(patch.date)))
+      return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+    if ("note" in patch && typeof patch.note !== "string")
+      return res.status(400).json({ error: "note must be a string" });
+    const ok = patchTimeEntry({
+      projectsDir: opts.projectsDir,
+      projectName: project,
+      hostname: opts.hostname,
+      entryId: id,
+      patch,
+    });
+    if (!ok) return res.status(404).json({ error: "not found" });
+    res.json({ ok: true });
+  });
+
+  app.delete("/api/time/entry/:id", (req: Request, res: Response) => {
+    const id = req.params.id;
+    const project = String(req.query.project ?? "");
+    if (!project) return res.status(400).json({ error: "project is required" });
+    const ok = patchTimeEntry({
+      projectsDir: opts.projectsDir,
+      projectName: project,
+      hostname: opts.hostname,
+      entryId: id,
+      patch: null,
+    });
+    if (!ok) return res.status(404).json({ error: "not found" });
+    res.json({ ok: true });
   });
 
   app.get("/api/time/today", (req: Request, res: Response) => {
