@@ -6,10 +6,12 @@ type TimeEntry =
   | { id: string; type: "busy_block"; date: string; start: string; end: string; minutes: number }
   | { id: string; type: "reset"; date: string; ts: string };
 
+type VisibleEntry = Exclude<TimeEntry, { type: "reset" }>;
+
 type Totals = { busyMinutes: number; manualMinutes: number };
 
 export function EntriesList({ project, refreshKey }: { project: string; refreshKey?: number }) {
-  const [entries, setEntries] = useState<TimeEntry[]>([]);
+  const [entries, setEntries] = useState<VisibleEntry[]>([]);
   const [totals, setTotals] = useState<Totals>({ busyMinutes: 0, manualMinutes: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +26,10 @@ export function EntriesList({ project, refreshKey }: { project: string; refreshK
       })
       .then((data) => {
         if (cancelled) return;
-        setEntries((data.entries ?? []).filter((e: TimeEntry) => e.type !== "reset"));
+        const visible = (data.entries ?? []).filter(
+          (e: TimeEntry): e is VisibleEntry => e.type !== "reset"
+        );
+        setEntries(visible);
         setTotals(data.totals ?? { busyMinutes: 0, manualMinutes: 0 });
         setError(null);
         setLoading(false);
