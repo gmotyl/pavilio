@@ -1,0 +1,142 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { ReportBlock } from "../ReportBlock";
+
+const FIXTURE_ENTRIES = [
+  { date: "2026-05-19", minutes: 75, note: "alpha" },
+  { date: "2026-05-19", minutes: 60, note: "beta" },
+  { date: "2026-05-20", minutes: 30, note: "gamma" },
+];
+
+const mockFetchEntries = (entries: { date: string; minutes: number; note?: string }[]) => {
+  (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+    ok: true,
+    json: async () => ({ entries }),
+  } as Response);
+};
+
+const flushFetch = async () => {
+  await waitFor(() =>
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0),
+  );
+  // allow the .then setState to flush
+  await act(async () => {
+    await Promise.resolve();
+  });
+};
+
+describe("ReportBlock", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    localStorage.clear();
+    global.fetch = vi.fn();
+    mockFetchEntries(FIXTURE_ENTRIES);
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("renders three controls + Copy + Download buttons", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    expect(screen.getByTestId("time-report-period")).toBeInTheDocument();
+    expect(screen.getByTestId("time-report-format")).toBeInTheDocument();
+    expect(screen.getByTestId("time-report-detail")).toBeInTheDocument();
+    expect(screen.getByTestId("time-report-copy")).toBeInTheDocument();
+    expect(screen.getByTestId("time-report-csv")).toBeInTheDocument();
+  });
+
+  it("format toggle updates preview from text to markdown", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    // Default format=text shows the note inline
+    expect(screen.getByText(/alpha/)).toBeInTheDocument();
+
+    const formatSelect = screen.getByTestId("time-report-format") as HTMLSelectElement;
+    fireEvent.change(formatSelect, { target: { value: "markdown" } });
+
+    // Markdown has the table header `| Date |`
+    expect(screen.getByText(/\| Date \|/)).toBeInTheDocument();
+  });
+
+  it("detail toggle updates preview to daily rollup", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const detailSelect = screen.getByTestId("time-report-detail") as HTMLSelectElement;
+    fireEvent.change(detailSelect, { target: { value: "daily" } });
+
+    // 75 + 60 = 135 minutes -> 2:15
+    expect(screen.getByText(/2:15/)).toBeInTheDocument();
+  });
+
+  it("persists prefs to localStorage", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const periodSelect = screen.getByTestId("time-report-period") as HTMLSelectElement;
+    fireEvent.change(periodSelect, { target: { value: "last-week" } });
+
+    await waitFor(() => {
+      const raw = localStorage.getItem("pavilio.time.report.metro");
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!);
+      expect(parsed.period).toBe("last-week");
+    });
+  });
+
+  it("Copy calls clipboard.writeText with formatted text", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    fireEvent.click(screen.getByTestId("time-report-copy"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const arg = writeText.mock.calls[0][0] as string;
+    expect(arg).toContain("Metro");
+    expect(arg).toContain("alpha");
+  });
+
+  it("Download .csv triggers a download with CSV content regardless of preview format", async () => {
+    const createObjectURL = vi.fn().mockReturnValue("blob:mock");
+    const revokeObjectURL = vi.fn();
+    Object.assign(URL, { createObjectURL, revokeObjectURL });
+
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    // Track anchor creation
+    const realCreateElement = document.createElement.bind(document);
+    const click = vi.fn();
+    let anchor: HTMLAnchorElement | undefined;
+    const spy = vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      const el = realCreateElement(tag);
+      if (tag === "a") {
+        anchor = el as HTMLAnchorElement;
+        anchor.click = click;
+      }
+      return el;
+    });
+
+    fireEvent.click(screen.getByTestId("time-report-csv"));
+
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+    expect(anchor).toBeDefined();
+    expect(anchor!.download).toMatch(/^metro-time-.+\.csv$/);
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const blob = createObjectURL.mock.calls[0][0] as Blob;
+    expect(blob.type).toMatch(/text\/csv/);
+
+    spy.mockRestore();
+  });
+});
