@@ -25,6 +25,21 @@ export function mountTimeRoutes(
     res.json({ entry: stored });
   });
 
+  app.get("/api/time/range", (req: Request, res: Response) => {
+    const project = String(req.query.project ?? "");
+    const from = String(req.query.from ?? "");
+    const to = String(req.query.to ?? "");
+    if (!project || !from || !to)
+      return res.status(400).json({ error: "project, from, to required" });
+    const all = readTimeEntries({ projectsDir: opts.projectsDir, projectName: project });
+    const manual = all.filter(
+      (e): e is Extract<TimeEntry, { type: "manual" }> =>
+        e.type === "manual" && e.date >= from && e.date <= to,
+    );
+    const entries = manual.map((m) => ({ date: m.date, minutes: m.minutes, note: m.note }));
+    res.json({ entries });
+  });
+
   app.get("/api/time/today", (req: Request, res: Response) => {
     const project = String(req.query.project ?? "");
     if (!project) return res.status(400).json({ error: "project is required" });
