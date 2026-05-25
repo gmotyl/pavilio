@@ -118,6 +118,42 @@ describe("useProjectBusyTracker", () => {
     expect(() => new Date(body.entry.end).toISOString()).not.toThrow();
   });
 
+  it("resetToday clears local minutes and POSTs an audit row", async () => {
+    setSessions([{ id: "s1", project: "metro" }]);
+    setAggregateState("idle");
+    const { result, rerender } = renderHook(() =>
+      useProjectBusyTracker("metro"),
+    );
+    // accumulate some minutes
+    setAggregateState("busy");
+    act(() => {
+      rerender();
+    });
+    expect(result.current.todayMinutes).toBe(15);
+    // flip back to idle so reset isn't immediately re-opened by an active block
+    setAggregateState("idle");
+    act(() => {
+      rerender();
+    });
+    fetchMock.mockClear();
+    await act(async () => {
+      await result.current.resetToday();
+    });
+    expect(result.current.todayMinutes).toBe(0);
+    const auditCall = fetchMock.mock.calls.find(
+      ([url]) => url === "/api/time/append",
+    );
+    expect(auditCall).toBeDefined();
+    const [, init] = auditCall!;
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(init.body as string);
+    expect(body.project).toBe("metro");
+    expect(body.entry.type).toBe("reset");
+    expect(body.entry.date).toBe("2026-05-25");
+    expect(typeof body.entry.ts).toBe("string");
+    expect(() => new Date(body.entry.ts).toISOString()).not.toThrow();
+  });
+
   it("a busy session in another project does not advance this project's minutes", () => {
     // sessions belong to project "other"; only its sessions are busy
     setSessions([

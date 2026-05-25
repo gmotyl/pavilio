@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import { useAggregateActivityState } from "../terminal/useTerminalActivityChannel";
 import { useBusyAccumulator } from "./useBusyAccumulator";
 
 export interface UseProjectBusyTrackerResult {
   todayMinutes: number;
+  resetToday: () => Promise<void>;
 }
 
 interface OpenBlock {
@@ -31,7 +32,7 @@ export function useProjectBusyTracker(
   const { state } = useAggregateActivityState(sessionIds);
   const agentBusy = state === "busy";
 
-  const { todayMinutes, state: accState } = useBusyAccumulator({
+  const { todayMinutes, state: accState, reset } = useBusyAccumulator({
     project: projectName,
     agentBusy,
   });
@@ -71,5 +72,24 @@ export function useProjectBusyTracker(
     prevOpenRef.current = curr;
   }, [accState.open, projectName]);
 
-  return { todayMinutes };
+  const resetToday = useCallback(async (): Promise<void> => {
+    reset();
+    const now = new Date();
+    const entry = {
+      type: "reset" as const,
+      date: isoDate(now.getTime()),
+      ts: now.toISOString(),
+    };
+    try {
+      await fetch("/api/time/append", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ project: projectName, entry }),
+      });
+    } catch (err) {
+      console.warn("[time] reset POST failed", err);
+    }
+  }, [reset, projectName]);
+
+  return { todayMinutes, resetToday };
 }
