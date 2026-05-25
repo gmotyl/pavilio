@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { formatMinutes } from "./TimeBadge";
+import { EntryRow, type ManualEntry } from "./EntryRow";
 
 type TimeEntry =
   | { id: string; type: "manual"; date: string; minutes: number; note?: string; createdAt?: string }
   | { id: string; type: "busy_block"; date: string; start: string; end: string; minutes: number }
   | { id: string; type: "reset"; date: string; ts: string };
 
-type VisibleEntry = Extract<TimeEntry, { type: "manual" }>;
+type VisibleEntry = ManualEntry;
 
 type Totals = { busyMinutes: number; manualMinutes: number };
 
@@ -15,6 +16,7 @@ export function EntriesList({ project, refreshKey }: { project: string; refreshK
   const [totals, setTotals] = useState<Totals>({ busyMinutes: 0, manualMinutes: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [localRefresh, setLocalRefresh] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +44,7 @@ export function EntriesList({ project, refreshKey }: { project: string; refreshK
     return () => {
       cancelled = true;
     };
-  }, [project, refreshKey]);
+  }, [project, refreshKey, localRefresh]);
 
   if (loading) return <p style={{ color: "var(--text-muted)" }}>Loading…</p>;
   if (error)
@@ -73,10 +75,12 @@ export function EntriesList({ project, refreshKey }: { project: string; refreshK
       ) : (
         <ul className="space-y-1">
           {entries.map((e) => (
-            <li key={e.id} className="flex items-center gap-3 text-sm">
-              <span style={{ color: "var(--text-primary)" }}>{formatMinutes(e.minutes)}</span>
-              <span style={{ color: "var(--text-tertiary)" }}>{e.note ?? ""}</span>
-            </li>
+            <EntryRow
+              key={e.id}
+              project={project}
+              entry={e}
+              onChange={() => setLocalRefresh((n) => n + 1)}
+            />
           ))}
         </ul>
       )}
