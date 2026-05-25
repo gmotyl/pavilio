@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 vi.mock("../../features/terminal/useAllTerminalSessions", () => ({
@@ -49,7 +49,9 @@ afterEach(() => {
 describe("ProjectTimePage", () => {
   it("renders the project name in the header", () => {
     renderPage();
-    expect(screen.getByRole("heading")).toHaveTextContent("metro · Time");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "metro · Time",
+    );
   });
 
   it("renders the today total and the reset button", () => {
@@ -88,5 +90,40 @@ describe("ProjectTimePage", () => {
         url === "/api/time/append" && init?.method === "POST",
     );
     expect(auditCall).toBeUndefined();
+  });
+
+  it("renders the manual entry form, reset button, and report block", async () => {
+    renderPage();
+    expect(screen.getByTestId("time-manual-entry-save")).toBeInTheDocument();
+    expect(screen.getByTestId("time-reset-today")).toBeInTheDocument();
+    expect(screen.getByTestId("time-report-period")).toBeInTheDocument();
+  });
+
+  it("refreshes EntriesList after the manual entry form saves", async () => {
+    vi.useRealTimers();
+    renderPage();
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter(
+        ([url]) => typeof url === "string" && url.startsWith("/api/time/today"),
+      );
+      expect(calls.length).toBeGreaterThan(0);
+    });
+    const initialTodayCalls = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === "string" && url.startsWith("/api/time/today"),
+    ).length;
+
+    const durationInput = screen.getByLabelText(
+      "Duration (HH:MM or minutes)",
+    ) as HTMLInputElement;
+    fireEvent.change(durationInput, { target: { value: "30" } });
+    fireEvent.click(screen.getByTestId("time-manual-entry-save"));
+
+    await waitFor(() => {
+      const todayCalls = fetchMock.mock.calls.filter(
+        ([url]) => typeof url === "string" && url.startsWith("/api/time/today"),
+      ).length;
+      expect(todayCalls).toBeGreaterThan(initialTodayCalls);
+    });
   });
 });
