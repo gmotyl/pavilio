@@ -22,7 +22,9 @@
     "pull": "bash scripts/update.sh",
     "test": "pnpm -C panel test",
     "build": "pnpm -C panel build",
-    "dev": "pnpm -C panel dev"
+    "dev": "pnpm -C panel dev",
+    "start": "pnpm -C panel dev &",
+    "stop": "lsof -ti :3010 | xargs kill 2>/dev/null; echo 'Panel stopped'"
   },
   "keywords": [
     "project-management",
