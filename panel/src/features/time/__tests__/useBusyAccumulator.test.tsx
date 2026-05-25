@@ -44,6 +44,42 @@ describe("useBusyAccumulator", () => {
     expect(JSON.parse(raw!).open).not.toBeNull();
   });
 
+  it("reloads state when project prop changes (no cross-project bleed)", () => {
+    // Seed A with 30 closed minutes, leave B empty.
+    localStorage.setItem(
+      "pavilio.time.A",
+      JSON.stringify({ date: "2026-05-25", closedMinutes: 30, open: null }),
+    );
+    const { result, rerender } = renderHook(
+      ({ project, busy }: { project: string; busy: boolean }) =>
+        useBusyAccumulator({ project, agentBusy: busy }),
+      { initialProps: { project: "A", busy: false } },
+    );
+    expect(result.current.todayMinutes).toBe(30);
+    // Switch to project B without remounting. Should reflect B's empty state.
+    act(() => {
+      rerender({ project: "B", busy: false });
+    });
+    expect(result.current.todayMinutes).toBe(0);
+    // And going back to A restores A's 30 minutes.
+    act(() => {
+      rerender({ project: "A", busy: false });
+    });
+    expect(result.current.todayMinutes).toBe(30);
+  });
+
+  it("does not accumulate or persist when project is empty", () => {
+    const { result, rerender } = renderHook(
+      ({ busy }) => useBusyAccumulator({ project: "", agentBusy: busy }),
+      { initialProps: { busy: false } },
+    );
+    act(() => {
+      rerender({ busy: true });
+    });
+    expect(result.current.todayMinutes).toBe(0);
+    expect(localStorage.getItem("pavilio.time.")).toBeNull();
+  });
+
   it("hydrates from localStorage and force-closes stale open block on mount", () => {
     localStorage.setItem(
       "pavilio.time.metro",

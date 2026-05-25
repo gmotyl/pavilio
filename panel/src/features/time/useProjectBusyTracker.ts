@@ -25,7 +25,12 @@ export function useProjectBusyTracker(
   const { sessions } = useAllTerminalSessions();
 
   const sessionIds = useMemo(
-    () => sessions.filter((s) => s.project === projectName).map((s) => s.id),
+    () =>
+      projectName
+        ? sessions
+            .filter((s) => s.project && s.project === projectName)
+            .map((s) => s.id)
+        : [],
     [sessions, projectName],
   );
 
