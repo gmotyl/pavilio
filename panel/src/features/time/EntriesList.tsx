@@ -6,7 +6,7 @@ type TimeEntry =
   | { id: string; type: "busy_block"; date: string; start: string; end: string; minutes: number }
   | { id: string; type: "reset"; date: string; ts: string };
 
-type VisibleEntry = Exclude<TimeEntry, { type: "reset" }>;
+type VisibleEntry = Extract<TimeEntry, { type: "manual" }>;
 
 type Totals = { busyMinutes: number; manualMinutes: number };
 
@@ -27,7 +27,7 @@ export function EntriesList({ project, refreshKey }: { project: string; refreshK
       .then((data) => {
         if (cancelled) return;
         const visible = (data.entries ?? []).filter(
-          (e: TimeEntry): e is VisibleEntry => e.type !== "reset"
+          (e: TimeEntry): e is VisibleEntry => e.type === "manual"
         );
         setEntries(visible);
         setTotals(data.totals ?? { busyMinutes: 0, manualMinutes: 0 });
@@ -74,15 +74,8 @@ export function EntriesList({ project, refreshKey }: { project: string; refreshK
         <ul className="space-y-1">
           {entries.map((e) => (
             <li key={e.id} className="flex items-center gap-3 text-sm">
-              <span style={{ color: "var(--text-tertiary)" }}>
-                [{e.type === "manual" ? "manual" : "auto"}]
-              </span>
               <span style={{ color: "var(--text-primary)" }}>{formatMinutes(e.minutes)}</span>
-              <span style={{ color: "var(--text-tertiary)" }}>
-                {e.type === "manual"
-                  ? e.note ?? ""
-                  : `${e.start.slice(11, 16)}–${e.end.slice(11, 16)}`}
-              </span>
+              <span style={{ color: "var(--text-tertiary)" }}>{e.note ?? ""}</span>
             </li>
           ))}
         </ul>

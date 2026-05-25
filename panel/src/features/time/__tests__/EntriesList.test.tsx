@@ -16,7 +16,7 @@ describe("EntriesList", () => {
     await waitFor(() => expect(screen.getByText("No entries yet.")).toBeInTheDocument());
   });
 
-  it("renders manual + busy_block entries with tags and skips reset entries", async () => {
+  it("shows only manual entries in the list (busy_blocks contribute to totals but not the list)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -30,8 +30,13 @@ describe("EntriesList", () => {
     }) as unknown as typeof fetch;
     render(<EntriesList project="metro" />);
     await waitFor(() => expect(screen.getByText("PR review")).toBeInTheDocument());
-    expect(screen.getByText("[manual]")).toBeInTheDocument();
-    expect(screen.getByText("[auto]")).toBeInTheDocument();
+    // Auto-tracked total still shows
+    expect(screen.getByText("30m")).toBeInTheDocument();
+    // [manual]/[auto] tags are gone
+    expect(screen.queryByText("[manual]")).toBeNull();
+    expect(screen.queryByText("[auto]")).toBeNull();
+    // busy_block entry should NOT render as a list row (time-range absent)
+    expect(screen.queryByText(/14:00.*14:30/)).toBeNull();
     // reset entries shouldn't appear visually
     expect(screen.queryByText(/reset/i)).toBeNull();
   });
