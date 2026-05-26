@@ -130,6 +130,37 @@ describe("TimeTrackingProvider", () => {
     expect(seen.at(-1)).toBe(0);
   });
 
+  it("clears a project's entry when its slot unmounts", () => {
+    // Seed LS so the slot reports a non-zero minute count while mounted.
+    localStorage.setItem(
+      "pavilio.time.ch",
+      JSON.stringify({ date: "2026-05-26", closedMinutes: 30, open: null }),
+    );
+    setSessions([{ id: "s1", project: "ch" }]);
+
+    const seen: number[] = [];
+
+    const { rerender } = render(
+      <TimeTrackingProvider>
+        <Probe project="ch" onValue={(m) => seen.push(m)} />
+      </TimeTrackingProvider>,
+    );
+
+    expect(seen.at(-1)).toBe(30);
+
+    // Drop both the session and the LS entry — trackedProjects recomputes
+    // to [] → slot unmounts → cleanup deletes ch from minutesByProject.
+    localStorage.removeItem("pavilio.time.ch");
+    setSessions([]);
+    rerender(
+      <TimeTrackingProvider>
+        <Probe project="ch" onValue={(m) => seen.push(m)} />
+      </TimeTrackingProvider>,
+    );
+
+    expect(seen.at(-1)).toBe(0);
+  });
+
   it("returns 0 + noop reset when used outside the provider", async () => {
     const seen: number[] = [];
 

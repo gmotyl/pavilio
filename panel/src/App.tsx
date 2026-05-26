@@ -35,8 +35,8 @@ function AppShell() {
     <BrowserRouter>
       <ActiveFileProvider>
         <TimeTrackingProvider>
-        <BreadcrumbActionsProvider>
-          <FloatingActionProvider>
+          <BreadcrumbActionsProvider>
+            <FloatingActionProvider>
             <QuickFinder />
             <QuickTerminalModal />
             <FaviconUpdater />

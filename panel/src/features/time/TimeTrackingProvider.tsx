@@ -28,26 +28,35 @@ const REPORT_INFIX = "report.";
 
 function scanStorageProjects(): string[] {
   if (typeof window === "undefined" || !window.localStorage) return [];
-  const out: string[] = [];
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const k = window.localStorage.key(i);
-    if (!k || !k.startsWith(LS_PREFIX)) continue;
-    const rest = k.slice(LS_PREFIX.length);
-    if (rest.startsWith(REPORT_INFIX)) continue;
-    if (rest) out.push(rest);
+  // localStorage access can throw SecurityError when storage is disabled
+  // (private mode, strict cookie policies). Degrade gracefully.
+  try {
+    const out: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (!k || !k.startsWith(LS_PREFIX)) continue;
+      const rest = k.slice(LS_PREFIX.length);
+      if (rest.startsWith(REPORT_INFIX)) continue;
+      if (rest) out.push(rest);
+    }
+    return out;
+  } catch (err) {
+    console.warn("[time] localStorage scan failed", err);
+    return [];
   }
-  return out;
 }
 
 interface SlotProps {
   project: string;
-  onMinutes: (project: string, minutes: number) => void;
-  onReset: (project: string, fn: () => Promise<void>) => void;
+  onMinutes: (project: string, minutes: number | null) => void;
+  onReset: (project: string, fn: (() => Promise<void>) | null) => void;
 }
 
 // One slot per tracked project. Each slot owns its own tracker hook so that
 // minute counts and busy_block POSTs are produced exactly once per project,
-// regardless of which route is currently rendered.
+// regardless of which route is currently rendered. On unmount the slot
+// unregisters itself so the context map and resets registry don't accumulate
+// stale entries when a project stops being tracked.
 function ProjectTrackerSlot({ project, onMinutes, onReset }: SlotProps) {
   const { todayMinutes, resetToday } = useProjectBusyTracker(project);
   useEffect(() => {
@@ -56,6 +65,12 @@ function ProjectTrackerSlot({ project, onMinutes, onReset }: SlotProps) {
   useEffect(() => {
     onReset(project, resetToday);
   }, [project, resetToday, onReset]);
+  useEffect(() => {
+    return () => {
+      onMinutes(project, null);
+      onReset(project, null);
+    };
+  }, [project, onMinutes, onReset]);
   return null;
 }
 
@@ -77,15 +92,31 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     return Array.from(new Set([...fromSessions, ...fromStorage])).sort();
   }, [sessions]);
 
-  const onMinutes = useCallback((project: string, minutes: number) => {
-    setMinutesByProject((m) =>
-      m[project] === minutes ? m : { ...m, [project]: minutes },
-    );
-  }, []);
+  const onMinutes = useCallback(
+    (project: string, minutes: number | null) => {
+      setMinutesByProject((m) => {
+        if (minutes === null) {
+          if (!(project in m)) return m;
+          const next = { ...m };
+          delete next[project];
+          return next;
+        }
+        return m[project] === minutes ? m : { ...m, [project]: minutes };
+      });
+    },
+    [],
+  );
 
-  const onReset = useCallback((project: string, fn: () => Promise<void>) => {
-    resetsRef.current.set(project, fn);
-  }, []);
+  const onReset = useCallback(
+    (project: string, fn: (() => Promise<void>) | null) => {
+      if (fn === null) {
+        resetsRef.current.delete(project);
+      } else {
+        resetsRef.current.set(project, fn);
+      }
+    },
+    [],
+  );
 
   const resetProject = useCallback(async (project: string) => {
     const fn = resetsRef.current.get(project);
@@ -117,11 +148,13 @@ export function useProjectTodayMinutes(project: string): {
   resetToday: () => Promise<void>;
 } {
   const ctx = useContext(TimeTrackingContext);
-  if (!ctx || !project) {
-    return { todayMinutes: 0, resetToday: async () => {} };
-  }
-  return {
-    todayMinutes: ctx.minutesByProject[project] ?? 0,
-    resetToday: () => ctx.resetProject(project),
-  };
+  const resetProject = ctx?.resetProject;
+  const resetToday = useCallback(
+    (): Promise<void> =>
+      resetProject && project ? resetProject(project) : Promise.resolve(),
+    [resetProject, project],
+  );
+  const todayMinutes =
+    ctx && project ? (ctx.minutesByProject[project] ?? 0) : 0;
+  return { todayMinutes, resetToday };
 }
