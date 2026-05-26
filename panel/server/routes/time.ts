@@ -6,12 +6,16 @@ import {
   readTimeEntries,
   TimeEntry,
 } from "../lib/time-store.js";
+import { validateProjectName } from "../lib/projectName.js";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const isPositiveInteger = (n: unknown): n is number =>
   typeof n === "number" && Number.isInteger(n) && n >= 0;
 
 const ALLOWED_TYPES = new Set(["manual", "busy_block", "reset"]);
+const MAX_MINUTES = 24 * 60;
+const isValidMinutes = (n: unknown): n is number =>
+  typeof n === "number" && Number.isFinite(n) && n >= 0 && n < MAX_MINUTES;
 
 export function mountTimeRoutes(
   app: Express,
@@ -19,10 +23,14 @@ export function mountTimeRoutes(
 ) {
   app.post("/api/time/append", (req: Request, res: Response) => {
     const { project, entry } = req.body ?? {};
-    if (!project || typeof project !== "string" || !entry || typeof entry !== "object")
-      return res.status(400).json({ error: "project and entry are required" });
+    const projectErr = validateProjectName(project);
+    if (projectErr) return res.status(400).json({ error: projectErr });
+    if (!entry || typeof entry !== "object")
+      return res.status(400).json({ error: "entry is required" });
     if (!ALLOWED_TYPES.has(entry.type))
       return res.status(400).json({ error: "invalid entry.type" });
+    if ((entry.type === "manual" || entry.type === "busy_block") && !isValidMinutes(entry.minutes))
+      return res.status(400).json({ error: "minutes must be a finite number in [0, 1440)" });
 
     const stored: TimeEntry = { ...entry, id: entry.id ?? randomBytes(8).toString("hex") };
     appendTimeEntry({
@@ -38,8 +46,10 @@ export function mountTimeRoutes(
     const project = String(req.query.project ?? "");
     const from = String(req.query.from ?? "");
     const to = String(req.query.to ?? "");
-    if (!project || !from || !to)
-      return res.status(400).json({ error: "project, from, to required" });
+    const projectErr = validateProjectName(project);
+    if (projectErr) return res.status(400).json({ error: projectErr });
+    if (!from || !to)
+      return res.status(400).json({ error: "from, to required" });
     const all = readTimeEntries({ projectsDir: opts.projectsDir, projectName: project });
     const manual = all.filter(
       (e): e is Extract<TimeEntry, { type: "manual" }> =>
@@ -52,8 +62,8 @@ export function mountTimeRoutes(
   app.patch("/api/time/entry/:id", (req: Request, res: Response) => {
     const id = req.params.id;
     const { project, patch } = req.body ?? {};
-    if (!project || typeof project !== "string")
-      return res.status(400).json({ error: "project is required" });
+    const projectErr = validateProjectName(project);
+    if (projectErr) return res.status(400).json({ error: projectErr });
     if (!patch || typeof patch !== "object")
       return res.status(400).json({ error: "patch is required" });
     if ("minutes" in patch && !isPositiveInteger(patch.minutes))
@@ -76,7 +86,8 @@ export function mountTimeRoutes(
   app.delete("/api/time/entry/:id", (req: Request, res: Response) => {
     const id = req.params.id;
     const project = String(req.query.project ?? "");
-    if (!project) return res.status(400).json({ error: "project is required" });
+    const projectErr = validateProjectName(project);
+    if (projectErr) return res.status(400).json({ error: projectErr });
     const ok = patchTimeEntry({
       projectsDir: opts.projectsDir,
       projectName: project,
@@ -90,7 +101,8 @@ export function mountTimeRoutes(
 
   app.get("/api/time/today", (req: Request, res: Response) => {
     const project = String(req.query.project ?? "");
-    if (!project) return res.status(400).json({ error: "project is required" });
+    const projectErr = validateProjectName(project);
+    if (projectErr) return res.status(400).json({ error: projectErr });
     const today = new Date().toISOString().slice(0, 10);
     const all = readTimeEntries({ projectsDir: opts.projectsDir, projectName: project });
     const todayEntries = all.filter((e) => e.date === today);
