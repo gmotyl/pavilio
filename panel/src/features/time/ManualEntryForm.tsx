@@ -1,12 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { parseHHMM } from "./parseHHMM";
+import { localISODate } from "./dateLocal";
 
 type ManualEntryFormProps = {
   project: string;
   onSaved: () => void;
 };
 
-const todayIso = (): string => new Date().toISOString().slice(0, 10);
+// Default to local today so 23:30 doesn't roll the date input to tomorrow.
+const todayIso = (): string => localISODate();
 
 const fieldLabelClass =
   "text-[10px] tracking-[0.15em] uppercase mb-1 block";

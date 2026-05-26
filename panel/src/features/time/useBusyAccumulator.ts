@@ -6,13 +6,15 @@ import {
   tick,
   type AccumulatorState,
 } from "./busyAccumulator";
+import { localISODate } from "./dateLocal";
 
 // Must match the server's BUSY_THRESHOLD_MS in panel/server/lib/terminalActivity.ts.
 // A busy state shorter than this is treated as a screen-refresh flicker and not counted.
 const BUSY_DEBOUNCE_MS = 10_000;
 
 const lsKey = (project: string) => `pavilio.time.${project}`;
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// Local-time bucket: a block started at 23:30 should count as today, not tomorrow.
+const todayStr = () => localISODate();
 
 function load(project: string): AccumulatorState {
   try {

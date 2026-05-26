@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ManualEntryForm } from "../ManualEntryForm";
+import { localISODate } from "../dateLocal";
 
 describe("ManualEntryForm", () => {
   const originalFetch = global.fetch;
@@ -106,9 +107,9 @@ describe("ManualEntryForm", () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
-  it("defaults date input to today (YYYY-MM-DD)", () => {
+  it("defaults date input to today (local YYYY-MM-DD)", () => {
     const { dateInput } = setup();
-    const today = new Date().toISOString().slice(0, 10);
-    expect(dateInput.value).toBe(today);
+    // Local date so that 23:30 doesn't show tomorrow in negative-offset zones.
+    expect(dateInput.value).toBe(localISODate());
   });
 });

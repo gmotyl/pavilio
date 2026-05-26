@@ -5,6 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mountTimeRoutes } from "../time";
+import { localISODate } from "../../lib/dateLocal";
 
 let app: express.Express;
 let projectsDir: string;
@@ -39,7 +40,8 @@ describe("POST /api/time/append", () => {
 
 describe("GET /api/time/today", () => {
   it("returns all of today's entries across hosts", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    // Server endpoint buckets by local date; the seeded entry must match.
+    const today = localISODate();
     await request(app).post("/api/time/append").send({
       project: "metro", entry: { type: "manual", date: today, minutes: 10, note: "a" },
     });

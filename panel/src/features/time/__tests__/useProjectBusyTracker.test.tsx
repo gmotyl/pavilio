@@ -12,6 +12,11 @@ vi.mock("../../terminal/useTerminalActivityChannel", () => ({
 import { useAllTerminalSessions } from "../../terminal/useAllTerminalSessions";
 import { useAggregateActivityState } from "../../terminal/useTerminalActivityChannel";
 import { useProjectBusyTracker } from "../useProjectBusyTracker";
+import { localISODate } from "../dateLocal";
+
+// Local-time constructor for the fake clock — keeps the test deterministic
+// regardless of host timezone.
+const NOW = new Date(2026, 4, 25, 12, 0);
 
 const useAllTerminalSessionsMock = useAllTerminalSessions as unknown as ReturnType<
   typeof vi.fn
@@ -46,7 +51,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   localStorage.clear();
   vi.useFakeTimers();
-  vi.setSystemTime(new Date("2026-05-25T12:00:00Z"));
+  vi.setSystemTime(NOW);
   fetchMock = vi.fn().mockResolvedValue({
     ok: true,
     json: async () => ({ entry: {} }),
@@ -121,7 +126,9 @@ describe("useProjectBusyTracker", () => {
     expect(body.entry.minutes % 15).toBe(0);
     expect(typeof body.entry.start).toBe("string");
     expect(typeof body.entry.end).toBe("string");
-    expect(body.entry.date).toBe("2026-05-25");
+    // Date is the local calendar day the block started — derived from the
+    // helper so the assertion can't drift away from production behaviour.
+    expect(body.entry.date).toBe(localISODate(new Date(body.entry.start)));
     expect(() => new Date(body.entry.start).toISOString()).not.toThrow();
     expect(() => new Date(body.entry.end).toISOString()).not.toThrow();
   });
@@ -160,7 +167,8 @@ describe("useProjectBusyTracker", () => {
     const body = JSON.parse(init.body as string);
     expect(body.project).toBe("metro");
     expect(body.entry.type).toBe("reset");
-    expect(body.entry.date).toBe("2026-05-25");
+    // reset.date is the local day the reset was issued — derive from helper.
+    expect(body.entry.date).toBe(localISODate(new Date(body.entry.ts)));
     expect(typeof body.entry.ts).toBe("string");
     expect(() => new Date(body.entry.ts).toISOString()).not.toThrow();
   });

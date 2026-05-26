@@ -7,6 +7,7 @@ import {
   TimeEntry,
 } from "../lib/time-store.js";
 import { validateProjectName } from "../lib/projectName.js";
+import { localISODate } from "../lib/dateLocal.js";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const isPositiveInteger = (n: unknown): n is number =>
@@ -103,7 +104,9 @@ export function mountTimeRoutes(
     const project = String(req.query.project ?? "");
     const projectErr = validateProjectName(project);
     if (projectErr) return res.status(400).json({ error: projectErr });
-    const today = new Date().toISOString().slice(0, 10);
+    // Local date — Pavilio runs on the same host as the client, so this is the
+    // user's calendar date and matches the date stamped on busy_block / manual entries.
+    const today = localISODate();
     const all = readTimeEntries({ projectsDir: opts.projectsDir, projectName: project });
     const todayEntries = all.filter((e) => e.date === today);
     const lastResetTs = todayEntries

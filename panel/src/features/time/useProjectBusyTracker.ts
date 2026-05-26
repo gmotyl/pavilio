@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import { useAggregateActivityState } from "../terminal/useTerminalActivityChannel";
 import { useBusyAccumulator } from "./useBusyAccumulator";
+import { localISODate } from "./dateLocal";
 
 export interface UseProjectBusyTrackerResult {
   todayMinutes: number;
@@ -15,8 +16,9 @@ interface OpenBlock {
 
 const SLOT_MS = 15 * 60 * 1000;
 
+// Local-time YYYY-MM-DD: the date the user actually worked, not the UTC date.
 function isoDate(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
+  return localISODate(new Date(ms));
 }
 
 export function useProjectBusyTracker(

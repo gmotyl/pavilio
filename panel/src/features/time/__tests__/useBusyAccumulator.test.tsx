@@ -1,11 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useBusyAccumulator } from "../useBusyAccumulator";
+import { localISODate } from "../dateLocal";
+
+// Local-time constructor (month is 0-indexed) keeps the date deterministic
+// regardless of the host timezone — UTC ISO strings would flip the day in
+// some zones.
+const NOW = new Date(2026, 4, 25, 12, 0);
+const TODAY = localISODate(NOW);
 
 beforeEach(() => {
   localStorage.clear();
   vi.useFakeTimers();
-  vi.setSystemTime(new Date("2026-05-25T12:00:00Z"));
+  vi.setSystemTime(NOW);
 });
 
 afterEach(() => {
@@ -56,7 +63,7 @@ describe("useBusyAccumulator", () => {
     // Seed A with 30 closed minutes, leave B empty.
     localStorage.setItem(
       "pavilio.time.A",
-      JSON.stringify({ date: "2026-05-25", closedMinutes: 30, open: null }),
+      JSON.stringify({ date: TODAY, closedMinutes: 30, open: null }),
     );
     const { result, rerender } = renderHook(
       ({ project, busy }: { project: string; busy: boolean }) =>
@@ -92,15 +99,16 @@ describe("useBusyAccumulator", () => {
   });
 
   it("hydrates from localStorage and force-closes stale open block on mount", () => {
+    // Use local-time epoch so the LS `date` field matches local today
+    // regardless of host timezone.
+    const startMs = new Date(2026, 4, 25, 10, 0).getTime();
+    const lockUntilMs = new Date(2026, 4, 25, 10, 15).getTime();
     localStorage.setItem(
       "pavilio.time.metro",
       JSON.stringify({
-        date: "2026-05-25",
+        date: TODAY,
         closedMinutes: 0,
-        open: {
-          startMs: Date.UTC(2026, 4, 25, 10, 0),
-          lockUntilMs: Date.UTC(2026, 4, 25, 10, 15),
-        },
+        open: { startMs, lockUntilMs },
       }),
     );
     const { result } = renderHook(() =>
