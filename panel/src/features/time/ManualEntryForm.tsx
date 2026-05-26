@@ -8,6 +8,17 @@ type ManualEntryFormProps = {
 
 const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
+const fieldLabelClass =
+  "text-[10px] tracking-[0.15em] uppercase mb-1 block";
+const fieldLabelStyle = { color: "var(--text-tertiary)" } as const;
+
+const underlineInputClass =
+  "border-0 border-b bg-transparent px-0 py-2 text-base outline-none transition-colors focus:border-[color:var(--accent)] w-full";
+const underlineInputStyle = {
+  borderBottomColor: "var(--border-subtle)",
+  color: "var(--text-primary)",
+} as const;
+
 export const ManualEntryForm = ({ project, onSaved }: ManualEntryFormProps) => {
   const [hhmm, setHhmm] = useState("");
   const [date, setDate] = useState(todayIso);
@@ -51,62 +62,67 @@ export const ManualEntryForm = ({ project, onSaved }: ManualEntryFormProps) => {
   };
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          value={hhmm}
-          onChange={(e) => setHhmm(e.target.value)}
-          placeholder="e.g. 1:30 or 90"
-          className="px-2 py-1 rounded text-sm outline-none border w-32"
-          style={{
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            borderColor: "var(--border)",
-          }}
-          spellCheck={false}
-          autoComplete="off"
-          aria-label="Duration (HH:MM or minutes)"
-        />
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="px-2 py-1 rounded text-sm outline-none border"
-          style={{
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            borderColor: "var(--border)",
-          }}
-          aria-label="Date"
-        />
-        <input
-          type="text"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Note"
-          className="px-2 py-1 rounded text-sm outline-none border flex-1 min-w-40"
-          style={{
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            borderColor: "var(--border)",
-          }}
-          spellCheck={false}
-          autoComplete="off"
-          aria-label="Note"
-        />
-        <button
-          type="submit"
-          data-testid="time-manual-entry-save"
-          disabled={submitting}
-          className="text-sm px-3 py-1 rounded disabled:opacity-50"
-          style={{
-            background: "var(--accent)",
-            color: "var(--accent-contrast, white)",
-          }}
-        >
-          {submitting ? "Saving..." : "Save"}
-        </button>
+    <form onSubmit={onSubmit} className="space-y-3">
+      <div className="md:flex md:items-end md:gap-6 space-y-4 md:space-y-0">
+        <div className="md:w-28">
+          <label htmlFor="manual-entry-time" className={fieldLabelClass} style={fieldLabelStyle}>
+            Time
+          </label>
+          <input
+            id="manual-entry-time"
+            type="text"
+            value={hhmm}
+            onChange={(e) => setHhmm(e.target.value)}
+            placeholder="e.g. 1:30"
+            className={`${underlineInputClass} font-mono`}
+            style={underlineInputStyle}
+            spellCheck={false}
+            autoComplete="off"
+            aria-label="Duration (HH:MM or minutes)"
+          />
+        </div>
+        <div className="md:w-44">
+          <label htmlFor="manual-entry-date" className={fieldLabelClass} style={fieldLabelStyle}>
+            Date
+          </label>
+          <input
+            id="manual-entry-date"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className={`${underlineInputClass} font-mono`}
+            style={underlineInputStyle}
+            aria-label="Date"
+          />
+        </div>
+        <div className="flex-1">
+          <label htmlFor="manual-entry-note" className={fieldLabelClass} style={fieldLabelStyle}>
+            Note
+          </label>
+          <input
+            id="manual-entry-note"
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Note"
+            className={underlineInputClass}
+            style={underlineInputStyle}
+            spellCheck={false}
+            autoComplete="off"
+            aria-label="Note"
+          />
+        </div>
+        <div className="md:pb-2">
+          <button
+            type="submit"
+            data-testid="time-manual-entry-save"
+            disabled={submitting}
+            className="text-sm hover:underline bg-transparent border-0 cursor-pointer p-0 disabled:opacity-50"
+            style={{ color: "var(--accent)" }}
+          >
+            {submitting ? "Saving…" : "Save →"}
+          </button>
+        </div>
       </div>
       {error && (
         <div

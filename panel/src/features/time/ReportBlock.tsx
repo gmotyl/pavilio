@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   formatReport,
+  formatHHMM,
   ReportEntry,
   ReportFormat,
   ReportDetail,
@@ -46,9 +47,21 @@ function periodLabel(period: Period, range: DateRange): string {
   if (typeof period === "object") return `${range.from} – ${range.to}`;
   if (period === "today") return range.from;
   if (period === "this-week" || period === "last-week") return `Week of ${range.from}`;
-  // this-month / last-month -> YYYY-MM
   return `Month ${range.from.slice(0, 7)}`;
 }
+
+const fieldLabelClass = "text-[10px] tracking-[0.15em] uppercase mb-1 block";
+const fieldLabelStyle = { color: "var(--text-tertiary)" } as const;
+
+const underlineSelectClass =
+  "border-0 border-b bg-transparent px-0 py-2 text-sm outline-none transition-colors focus:border-[color:var(--accent)] cursor-pointer";
+const underlineSelectStyle = {
+  borderBottomColor: "var(--border-subtle)",
+  color: "var(--text-primary)",
+} as const;
+
+const textLinkClass =
+  "text-sm hover:underline bg-transparent border-0 cursor-pointer p-0";
 
 export function ReportBlock({
   project,
@@ -95,6 +108,8 @@ export function ReportBlock({
     [entries, prefs.format, prefs.detail, projectLabel, label],
   );
 
+  const totalMinutes = entries.reduce((s, e) => s + e.minutes, 0);
+
   const onCopy = async () => {
     try {
       await navigator.clipboard.writeText(formatted);
@@ -125,16 +140,21 @@ export function ReportBlock({
   const periodValue: string = typeof prefs.period === "string" ? prefs.period : "custom";
 
   return (
-    <section className="space-y-3" aria-label="Time report">
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <label>
-          Period{" "}
+    <section className="space-y-4" aria-label="Time report">
+      <div className="flex flex-wrap items-end gap-6">
+        <div>
+          <label htmlFor="report-period" className={fieldLabelClass} style={fieldLabelStyle}>
+            Period
+          </label>
           <select
+            id="report-period"
             data-testid="time-report-period"
             value={periodValue}
             onChange={(e) =>
               setPrefs((p) => ({ ...p, period: e.target.value as NamedPeriod }))
             }
+            className={underlineSelectClass}
+            style={underlineSelectStyle}
           >
             <option value="today">Today</option>
             <option value="this-week">This week</option>
@@ -142,47 +162,82 @@ export function ReportBlock({
             <option value="this-month">This month</option>
             <option value="last-month">Last month</option>
           </select>
-        </label>
-        <label>
-          Format{" "}
+        </div>
+        <div>
+          <label htmlFor="report-format" className={fieldLabelClass} style={fieldLabelStyle}>
+            Format
+          </label>
           <select
+            id="report-format"
             data-testid="time-report-format"
             value={prefs.format}
             onChange={(e) =>
               setPrefs((p) => ({ ...p, format: e.target.value as ReportFormat }))
             }
+            className={underlineSelectClass}
+            style={underlineSelectStyle}
           >
             <option value="text">Plain text</option>
             <option value="markdown">Markdown</option>
             <option value="csv">CSV</option>
           </select>
-        </label>
-        <label>
-          Detail{" "}
+        </div>
+        <div>
+          <label htmlFor="report-detail" className={fieldLabelClass} style={fieldLabelStyle}>
+            Detail
+          </label>
           <select
+            id="report-detail"
             data-testid="time-report-detail"
             value={prefs.detail}
             onChange={(e) =>
               setPrefs((p) => ({ ...p, detail: e.target.value as ReportDetail }))
             }
+            className={underlineSelectClass}
+            style={underlineSelectStyle}
           >
             <option value="detailed">Detailed</option>
             <option value="daily">Daily summary</option>
           </select>
-        </label>
-        <button type="button" data-testid="time-report-copy" onClick={onCopy}>
-          Copy
-        </button>
-        <button type="button" data-testid="time-report-csv" onClick={onDownloadCSV}>
-          Download .csv
-        </button>
+        </div>
+        <div className="flex items-center gap-4 pb-2">
+          <button
+            type="button"
+            data-testid="time-report-copy"
+            onClick={onCopy}
+            className={textLinkClass}
+            style={{ color: "var(--accent)" }}
+          >
+            Copy
+          </button>
+          <button
+            type="button"
+            data-testid="time-report-csv"
+            onClick={onDownloadCSV}
+            className={textLinkClass}
+            style={{ color: "var(--accent)" }}
+          >
+            Download .csv
+          </button>
+        </div>
       </div>
+
+      <div
+        className="text-right text-[11px]"
+        style={{ color: "var(--text-tertiary)" }}
+      >
+        {entries.length} {entries.length === 1 ? "entry" : "entries"} ·{" "}
+        {formatHHMM(totalMinutes)} · {label}
+      </div>
+
       <pre
-        className="text-xs p-3 rounded overflow-auto"
+        className="font-mono text-[12px] leading-[1.65] p-5 overflow-auto"
         style={{
           background: "var(--bg-surface)",
           color: "var(--text-primary)",
-          maxHeight: "24rem",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "2px",
+          maxHeight: "28rem",
         }}
       >
         {formatted}

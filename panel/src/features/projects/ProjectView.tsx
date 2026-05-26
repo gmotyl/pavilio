@@ -36,7 +36,7 @@ import { useTerminalMaximized } from "../terminal/useTerminalMaximized";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import type { TerminalHandle } from "../terminal/TerminalView";
 import TerminalsSurface from "../terminal/TerminalsSurface";
-import { TimeBadge } from "../time/TimeBadge";
+import { TimeTrackingLink } from "../time/TimeTrackingLink";
 import { useProjectBusyTracker } from "../time/useProjectBusyTracker";
 
 export default function ProjectView() {
@@ -240,7 +240,7 @@ export default function ProjectView() {
         <h1 className="text-2xl font-semibold capitalize">
           {name}
         </h1>
-        <TimeBadge
+        <TimeTrackingLink
           minutes={todayMinutes}
           to={`/project/${name}/time`}
         />

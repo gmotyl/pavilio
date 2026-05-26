@@ -46,7 +46,7 @@ describe("EntryRow", () => {
     fireEvent.click(screen.getByTestId("time-entry-edit"));
     const hhmm = screen.getByLabelText(/duration/i) as HTMLInputElement;
     fireEvent.change(hhmm, { target: { value: "1:00" } });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByTestId("time-entry-edit-save"));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
     expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -62,7 +62,7 @@ describe("EntryRow", () => {
     render(<EntryRow project="metro" entry={sample} onChange={() => {}} />);
     fireEvent.click(screen.getByTestId("time-entry-edit"));
     expect(screen.getByLabelText(/duration/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    fireEvent.click(screen.getByTestId("time-entry-edit-cancel"));
     expect(screen.queryByLabelText(/duration/i)).toBeNull();
     expect(screen.getByTestId("time-entry-edit")).toBeInTheDocument();
   });
@@ -72,7 +72,7 @@ describe("EntryRow", () => {
     fireEvent.click(screen.getByTestId("time-entry-edit"));
     const hhmm = screen.getByLabelText(/duration/i) as HTMLInputElement;
     fireEvent.change(hhmm, { target: { value: "garbage" } });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByTestId("time-entry-edit-save"));
     expect(global.fetch).not.toHaveBeenCalled();
     expect(await screen.findByText(/use HH:MM or minutes/i)).toBeInTheDocument();
   });
@@ -98,7 +98,7 @@ describe("EntryRow", () => {
   it("canceling delete hides the prompt and does not fetch", () => {
     render(<EntryRow project="metro" entry={sample} onChange={() => {}} />);
     fireEvent.click(screen.getByTestId("time-entry-delete"));
-    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    fireEvent.click(screen.getByTestId("time-entry-delete-cancel"));
     expect(screen.queryByText(/delete this entry/i)).toBeNull();
     expect(global.fetch).not.toHaveBeenCalled();
   });

@@ -54,9 +54,9 @@ describe("ProjectTimePage", () => {
     );
   });
 
-  it("renders the today total and the reset button", () => {
+  it("renders the today overline and the reset button", () => {
     renderPage();
-    expect(screen.getByText(/Today:/)).toBeInTheDocument();
+    expect(screen.getByText(/Today ·/)).toBeInTheDocument();
     expect(screen.getByTestId("time-reset-today")).toBeInTheDocument();
   });
 

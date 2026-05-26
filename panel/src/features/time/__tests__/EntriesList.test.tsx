@@ -16,7 +16,7 @@ describe("EntriesList", () => {
     await waitFor(() => expect(screen.getByText("No entries yet.")).toBeInTheDocument());
   });
 
-  it("shows only manual entries in the list (busy_blocks contribute to totals but not the list)", async () => {
+  it("shows only manual entries in the list (busy_blocks/resets are filtered out)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -30,8 +30,9 @@ describe("EntriesList", () => {
     }) as unknown as typeof fetch;
     render(<EntriesList project="metro" />);
     await waitFor(() => expect(screen.getByText("PR review")).toBeInTheDocument());
-    // Auto-tracked total still shows
-    expect(screen.getByText("30m")).toBeInTheDocument();
+    // No more inline totals header — that lives in the page hero now
+    expect(screen.queryByText(/Manual:/)).toBeNull();
+    expect(screen.queryByText(/Auto-tracked:/)).toBeNull();
     // [manual]/[auto] tags are gone
     expect(screen.queryByText("[manual]")).toBeNull();
     expect(screen.queryByText("[auto]")).toBeNull();

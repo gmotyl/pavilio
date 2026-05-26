@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { formatMinutes } from "./TimeBadge";
 import { EntryRow, type ManualEntry } from "./EntryRow";
 
 type TimeEntry =
@@ -9,11 +8,20 @@ type TimeEntry =
 
 type VisibleEntry = ManualEntry;
 
-type Totals = { busyMinutes: number; manualMinutes: number };
-
-export function EntriesList({ project, refreshKey }: { project: string; refreshKey?: number }) {
+/**
+ * EntriesList renders only the manual entries (busy_blocks contribute to the
+ * page-level hero totals, not this list). The hero in ProjectTimePage owns
+ * the "Today" totals display now, so this component intentionally renders no
+ * totals header.
+ */
+export function EntriesList({
+  project,
+  refreshKey,
+}: {
+  project: string;
+  refreshKey?: number;
+}) {
   const [entries, setEntries] = useState<VisibleEntry[]>([]);
-  const [totals, setTotals] = useState<Totals>({ busyMinutes: 0, manualMinutes: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [localRefresh, setLocalRefresh] = useState(0);
@@ -32,7 +40,6 @@ export function EntriesList({ project, refreshKey }: { project: string; refreshK
           (e: TimeEntry): e is VisibleEntry => e.type === "manual"
         );
         setEntries(visible);
-        setTotals(data.totals ?? { busyMinutes: 0, manualMinutes: 0 });
         setError(null);
         setLoading(false);
       })
@@ -46,44 +53,44 @@ export function EntriesList({ project, refreshKey }: { project: string; refreshK
     };
   }, [project, refreshKey, localRefresh]);
 
-  if (loading) return <p style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (loading)
+    return (
+      <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+        Loading…
+      </p>
+    );
   if (error)
     return (
-      <p role="alert" style={{ color: "var(--text-error, #f88)" }}>
+      <p
+        role="alert"
+        className="text-sm"
+        style={{ color: "var(--text-error, #f88)" }}
+      >
         {error}
       </p>
     );
 
+  if (entries.length === 0) {
+    return (
+      <p
+        className="text-sm italic text-center py-4"
+        style={{ color: "var(--text-muted)" }}
+      >
+        No entries yet.
+      </p>
+    );
+  }
+
   return (
-    <div className="space-y-4">
-      <div className="flex gap-6 text-sm" style={{ color: "var(--text-tertiary)" }}>
-        <span>
-          Manual:{" "}
-          <strong style={{ color: "var(--text-primary)" }}>
-            {formatMinutes(totals.manualMinutes) || "0m"}
-          </strong>
-        </span>
-        <span>
-          Auto-tracked:{" "}
-          <strong style={{ color: "var(--text-primary)" }}>
-            {formatMinutes(totals.busyMinutes) || "0m"}
-          </strong>
-        </span>
-      </div>
-      {entries.length === 0 ? (
-        <p style={{ color: "var(--text-muted)" }}>No entries yet.</p>
-      ) : (
-        <ul className="space-y-1">
-          {entries.map((e) => (
-            <EntryRow
-              key={e.id}
-              project={project}
-              entry={e}
-              onChange={() => setLocalRefresh((n) => n + 1)}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
+    <ul className="space-y-0">
+      {entries.map((e) => (
+        <EntryRow
+          key={e.id}
+          project={project}
+          entry={e}
+          onChange={() => setLocalRefresh((n) => n + 1)}
+        />
+      ))}
+    </ul>
   );
 }

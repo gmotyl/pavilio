@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from "react";
-import { formatMinutes } from "./TimeBadge";
 import { parseHHMM } from "./parseHHMM";
 
 export type ManualEntry = {
@@ -19,11 +18,23 @@ const toHHMM = (n: number): string => {
   return `${h}:${String(m).padStart(2, "0")}`;
 };
 
-const inputStyle = {
-  background: "var(--bg-secondary)",
+const formatPretty = (n: number): string => {
+  if (n <= 0) return "0m";
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+};
+
+const underlineInputClass =
+  "border-0 border-b bg-transparent px-0 py-1 text-sm outline-none transition-colors focus:border-[color:var(--accent)]";
+const underlineInputStyle = {
+  borderBottomColor: "var(--border-subtle)",
   color: "var(--text-primary)",
-  borderColor: "var(--border)",
 } as const;
+
+const textLinkClass = "text-sm hover:underline bg-transparent border-0 cursor-pointer p-0";
 
 type EntryRowProps = {
   project: string;
@@ -97,15 +108,15 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
 
   if (mode === "editing") {
     return (
-      <li data-entry-id={entry.id} className="text-sm">
-        <form onSubmit={onSave} className="flex flex-wrap items-center gap-2">
+      <li data-entry-id={entry.id} className="py-2">
+        <form onSubmit={onSave} className="flex flex-wrap items-end gap-4">
           <input
             type="text"
             value={hhmm}
             onChange={(e) => setHhmm(e.target.value)}
             aria-label="Duration (HH:MM or minutes)"
-            className="px-2 py-1 rounded text-sm outline-none border w-24"
-            style={inputStyle}
+            className={`${underlineInputClass} font-mono w-20`}
+            style={underlineInputStyle}
             spellCheck={false}
             autoComplete="off"
           />
@@ -114,8 +125,8 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
             value={date}
             onChange={(e) => setDate(e.target.value)}
             aria-label="Date"
-            className="px-2 py-1 rounded text-sm outline-none border"
-            style={inputStyle}
+            className={`${underlineInputClass} font-mono`}
+            style={underlineInputStyle}
           />
           <input
             type="text"
@@ -123,8 +134,8 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
             onChange={(e) => setNote(e.target.value)}
             aria-label="Note"
             placeholder="Note"
-            className="px-2 py-1 rounded text-sm outline-none border flex-1 min-w-32"
-            style={inputStyle}
+            className={`${underlineInputClass} flex-1 min-w-32`}
+            style={underlineInputStyle}
             spellCheck={false}
             autoComplete="off"
           />
@@ -132,23 +143,27 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
             type="submit"
             data-testid="time-entry-edit-save"
             disabled={busy}
-            className="text-sm px-3 py-1 rounded disabled:opacity-50"
-            style={{ background: "var(--accent)", color: "var(--accent-contrast, white)" }}
+            className={`${textLinkClass} disabled:opacity-50`}
+            style={{ color: "var(--accent)" }}
           >
-            Save
+            Save →
           </button>
           <button
             type="button"
             data-testid="time-entry-edit-cancel"
             onClick={cancel}
             disabled={busy}
-            className="text-sm px-3 py-1 rounded"
+            className={textLinkClass}
             style={{ color: "var(--text-tertiary)" }}
           >
             Cancel
           </button>
           {error && (
-            <span role="alert" className="text-[12px]" style={{ color: "var(--text-error, #f87171)" }}>
+            <span
+              role="alert"
+              className="text-[12px] basis-full"
+              style={{ color: "var(--text-error, #f87171)" }}
+            >
               {error}
             </span>
           )}
@@ -161,7 +176,7 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
     return (
       <li
         data-entry-id={entry.id}
-        className="flex items-center gap-3 text-sm"
+        className="flex items-center gap-3 text-sm py-2 px-3 -mx-3 rounded"
         style={{ color: "var(--text-tertiary)" }}
       >
         <span>Delete this entry?</span>
@@ -170,23 +185,28 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
           data-testid="time-entry-delete-confirm"
           onClick={onConfirmDelete}
           disabled={busy}
-          className="text-sm px-3 py-1 rounded disabled:opacity-50"
-          style={{ background: "var(--text-error, #b91c1c)", color: "white" }}
+          className={`${textLinkClass} disabled:opacity-50`}
+          style={{ color: "var(--text-error, #f87171)" }}
         >
           Confirm
         </button>
+        <span style={{ color: "var(--text-muted)" }}>·</span>
         <button
           type="button"
           data-testid="time-entry-delete-cancel"
           onClick={cancel}
           disabled={busy}
-          className="text-sm px-3 py-1 rounded"
+          className={textLinkClass}
           style={{ color: "var(--text-tertiary)" }}
         >
           Cancel
         </button>
         {error && (
-          <span role="alert" className="text-[12px]" style={{ color: "var(--text-error, #f87171)" }}>
+          <span
+            role="alert"
+            className="text-[12px]"
+            style={{ color: "var(--text-error, #f87171)" }}
+          >
             {error}
           </span>
         )}
@@ -197,10 +217,15 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
   return (
     <li
       data-entry-id={entry.id}
-      className="flex items-center gap-3 text-sm"
+      className="group flex items-center gap-3 text-sm py-2 px-3 -mx-3 rounded transition-colors hover:bg-[color:var(--bg-hover)]"
     >
-      <span style={{ color: "var(--text-primary)" }}>{formatMinutes(entry.minutes)}</span>
-      <span className="flex-1" style={{ color: "var(--text-tertiary)" }}>
+      <span
+        className="font-mono text-right"
+        style={{ color: "var(--text-primary)", minWidth: "4ch" }}
+      >
+        {formatPretty(entry.minutes)}
+      </span>
+      <span className="flex-1" style={{ color: "var(--text-secondary)" }}>
         {entry.note ?? ""}
       </span>
       <button
@@ -208,7 +233,7 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
         onClick={enterEdit}
         data-testid="time-entry-edit"
         aria-label="Edit entry"
-        className="text-xs px-1"
+        className="text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity"
         style={{ color: "var(--text-tertiary)" }}
       >
         ✎
@@ -221,7 +246,7 @@ export const EntryRow = ({ project, entry, onChange }: EntryRowProps) => {
           setMode("confirming-delete");
         }}
         aria-label="Delete entry"
-        className="text-xs px-1"
+        className="text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity"
         style={{ color: "var(--text-tertiary)" }}
       >
         ✕
