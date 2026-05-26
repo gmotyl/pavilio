@@ -66,9 +66,11 @@ const textLinkClass =
 export function ReportBlock({
   project,
   projectLabel,
+  refreshKey,
 }: {
   project: string;
   projectLabel: string;
+  refreshKey?: number;
 }) {
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs(project));
   const [entries, setEntries] = useState<ReportEntry[]>([]);
@@ -92,7 +94,7 @@ export function ReportBlock({
     return () => {
       cancelled = true;
     };
-  }, [project, range.from, range.to]);
+  }, [project, range.from, range.to, refreshKey]);
 
   const label = periodLabel(prefs.period, range);
 

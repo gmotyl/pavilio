@@ -174,7 +174,11 @@ export default function ProjectTimePage() {
             </div>
           </div>
           <div className="pt-2">
-            <ReportBlock project={project} projectLabel={project} />
+            <ReportBlock
+              project={project}
+              projectLabel={project}
+              refreshKey={refreshKey}
+            />
           </div>
         </section>
       </div>
