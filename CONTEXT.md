@@ -48,6 +48,18 @@ _Avoid_: action button (too generic), task (overloaded with Todoist), workflow.
 The workspace-level JSON file at `scripts/scripts.json`. Lists every **Overview script** with its label, description, target script path, and optional `outputMatch` / `timeoutSec` / `icon`. Ships in pavilio upstream; pulled to user workspaces via `scripts/update.sh`.
 _Avoid_: scripts manifest, scripts registry.
 
+**Manual entry**:
+A user-entered time record on a **Project**'s Time tab: duration, date, optional note. The chargeable source of truth. Persisted as a JSONL line of `type: "manual"` under `projects/<name>/time/<hostname>.jsonl`. Editable and deletable from the entries list.
+_Avoid_: time entry (ambiguous with busy block), time log.
+
+**Busy block**:
+A 15-minute coverage window opened by the panel's auto-tracker when one of a **Project**'s terminals stays `busy` for at least 10 continuous seconds (see [ADR 0003](docs/adr/0003-busy-debounce-threshold.md)). Persists as a JSONL line of `type: "busy_block"`. Surfaces only as a *reference* number in the "Auto-tracked" hero figure — it does NOT appear in the entries list, and it does NOT appear in exported reports. The user reads it and decides how many minutes to log as a **Manual entry**.
+_Avoid_: auto-tracked entry (the row never appears in the user-facing list), busy slot, billable block.
+
+**Time bucket**:
+A `YYYY-MM-DD` local-date string used to group **Manual entries** and **Busy blocks** for daily totals and reports. Always local time, never UTC, because the user works on a single machine and "yesterday's evening" is yesterday's bucket regardless of UTC offset.
+_Avoid_: date string (ambiguous, used everywhere), report day.
+
 ## Relationships
 
 - A **Workspace** owns many **Projects**
@@ -57,6 +69,7 @@ _Avoid_: scripts manifest, scripts registry.
 - An **Active plan** is a **Notes world** file path advertised through `plans/CURRENT.md`
 - The **Scripts config** defines a list of **Overview scripts**; the **Panel** renders one button per entry on every **Project**'s Overview tab.
 - The **Workspace** also contains the **Toolbox** — workspace-level tooling directories that the **Panel** edits with the same mutation policy as **Notes world**, but that `pnpm pull` may merge from upstream pavilio.
+- A **Project**'s **Time bucket** for a given day contains zero or more **Manual entries** (chargeable) and zero or more **Busy blocks** (reference only). Exports include manual entries only.
 
 ## Example dialogue
 

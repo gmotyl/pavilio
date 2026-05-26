@@ -5,6 +5,7 @@ import AgentSettings from "./features/agents/AgentSettings";
 import { Login } from "./features/auth/Login";
 import TerminalsPage from "./pages/TerminalsPage";
 import ArchivePage from "./pages/ArchivePage";
+import ProjectTimePage from "./pages/ProjectTimePage";
 import { useAuthStatus } from "./features/auth/useAuthStatus";
 import { ActiveFileProvider } from "./features/explorer/useActiveFile";
 import GitPanel from "./features/git/GitPanel";
@@ -43,6 +44,10 @@ function AppShell() {
                 <Route
                   path="/project/:name"
                   element={<ProjectRedirect fallback={<ProjectView />} />}
+                />
+                <Route
+                  path="/project/:name/time"
+                  element={<ProjectTimePage />}
                 />
                 <Route
                   path="/project/:name/:section"

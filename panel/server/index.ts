@@ -25,6 +25,8 @@ import imagesRouter from "./routes/images.js";
 import agentSettingsRouter from "./routes/agent-settings.js";
 import terminalRouter from "./routes/terminal.js";
 import scriptsRouter from "./routes/scripts.js";
+import { mountTimeRoutes } from "./routes/time.js";
+import { machineHostname } from "./lib/hostname.js";
 import { setupWebSocket, setupFileWatcher, getWss } from "./watcher.js";
 import { pruneDeadAgents } from "./lib/agent-registry.js";
 import { registerPanelServer } from "./lib/panel-listener.js";
@@ -106,6 +108,7 @@ async function start() {
   app.use("/api/agent-settings", agentSettingsRouter);
   app.use("/api/terminal", terminalRouter);
   app.use("/api", scriptsRouter);
+  mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 
   app.use(vite.middlewares);
 

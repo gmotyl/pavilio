@@ -1,0 +1,102 @@
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
+import { useAggregateActivityState } from "../terminal/useTerminalActivityChannel";
+import { useBusyAccumulator } from "./useBusyAccumulator";
+import { localISODate } from "./dateLocal";
+
+export interface UseProjectBusyTrackerResult {
+  todayMinutes: number;
+  resetToday: () => Promise<void>;
+}
+
+interface OpenBlock {
+  startMs: number;
+  lockUntilMs: number;
+}
+
+const SLOT_MS = 15 * 60 * 1000;
+
+// Local-time YYYY-MM-DD: the date the user actually worked, not the UTC date.
+function isoDate(ms: number): string {
+  return localISODate(new Date(ms));
+}
+
+export function useProjectBusyTracker(
+  projectName: string,
+): UseProjectBusyTrackerResult {
+  const { sessions } = useAllTerminalSessions();
+
+  const sessionIds = useMemo(
+    () =>
+      projectName
+        ? sessions
+            .filter((s) => s.project && s.project === projectName)
+            .map((s) => s.id)
+        : [],
+    [sessions, projectName],
+  );
+
+  const { state } = useAggregateActivityState(sessionIds);
+  const agentBusy = state === "busy";
+
+  const { todayMinutes, state: accState, reset } = useBusyAccumulator({
+    project: projectName,
+    agentBusy,
+  });
+
+  // Track the most recently observed open block so we can describe it on close.
+  const lastOpenRef = useRef<OpenBlock | null>(null);
+  const prevOpenRef = useRef<OpenBlock | null>(null);
+
+  useEffect(() => {
+    const prev = prevOpenRef.current;
+    const curr = accState.open;
+    if (curr) lastOpenRef.current = curr;
+
+    // open → null transition: a block just closed
+    if (prev && !curr) {
+      const closed = lastOpenRef.current ?? prev;
+      const slots = Math.ceil(
+        (closed.lockUntilMs - closed.startMs) / SLOT_MS,
+      );
+      const minutes = slots * 15;
+      const entry = {
+        type: "busy_block" as const,
+        date: isoDate(closed.startMs),
+        start: new Date(closed.startMs).toISOString(),
+        end: new Date(closed.lockUntilMs).toISOString(),
+        minutes,
+      };
+      void fetch("/api/time/append", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ project: projectName, entry }),
+      }).catch((err) => {
+        console.warn("[time] busy_block POST failed", err);
+      });
+      lastOpenRef.current = null;
+    }
+    prevOpenRef.current = curr;
+  }, [accState.open, projectName]);
+
+  const resetToday = useCallback(async (): Promise<void> => {
+    reset();
+    const now = new Date();
+    const entry = {
+      type: "reset" as const,
+      date: isoDate(now.getTime()),
+      ts: now.toISOString(),
+    };
+    try {
+      await fetch("/api/time/append", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ project: projectName, entry }),
+      });
+    } catch (err) {
+      console.warn("[time] reset POST failed", err);
+    }
+  }, [reset, projectName]);
+
+  return { todayMinutes, resetToday };
+}

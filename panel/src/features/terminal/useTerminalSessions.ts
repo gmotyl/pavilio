@@ -149,10 +149,21 @@ export function useTerminalSessions(project: string) {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<TerminalFocusEventDetail>).detail;
       if (!detail || detail.project !== project) return;
-      setFocusedId(detail.sessionId);
+      // Use the bare state setter and write localStorage directly — calling
+      // setFocusedId here would re-dispatch the event and recurse infinitely.
+      setFocusedIdState((current) =>
+        current === detail.sessionId ? current : detail.sessionId,
+      );
+      try {
+        localStorage.setItem(
+          `panel-terminal-focus-${project}`,
+          detail.sessionId,
+        );
+      } catch {
+        // ignore
+      }
       // Only refetch if the session isn't already in our list — covers
-      // sidebar "+" creates without re-fetching on every echo from our
-      // own setFocusedId dispatch.
+      // sidebar "+" creates that haven't propagated to our local sessions yet.
       setSessions((prev) => {
         if (!prev.some((s) => s.id === detail.sessionId)) {
           fetchSessions();
@@ -162,7 +173,7 @@ export function useTerminalSessions(project: string) {
     };
     window.addEventListener(TERMINAL_FOCUS_EVENT, handler);
     return () => window.removeEventListener(TERMINAL_FOCUS_EVENT, handler);
-  }, [project, setFocusedId, fetchSessions]);
+  }, [project, fetchSessions]);
 
   const createSession = useCallback(
     async (opts: CreateSessionOpts = {}) => {
