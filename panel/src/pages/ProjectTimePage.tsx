@@ -147,7 +147,12 @@ export default function ProjectTimePage() {
             </div>
           </div>
           <div className="pt-2">
-            <ManualEntryForm project={project} onSaved={bumpRefresh} />
+            <ManualEntryForm
+              project={project}
+              onSaved={bumpRefresh}
+              prefillMinutes={todayMinutes}
+              onResetAutoRequested={resetToday}
+            />
           </div>
         </section>
 

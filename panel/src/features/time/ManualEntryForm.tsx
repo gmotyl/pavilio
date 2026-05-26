@@ -1,14 +1,44 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { parseHHMM } from "./parseHHMM";
 import { localISODate } from "./dateLocal";
 
 type ManualEntryFormProps = {
   project: string;
   onSaved: () => void;
+  /** Auto-tracked minutes for today, used to prefill the duration input. */
+  prefillMinutes?: number;
+  /** Called after a successful save iff the "reset Auto-tracked" toggle is on. */
+  onResetAutoRequested?: () => void;
 };
 
 // Default to local today so 23:30 doesn't roll the date input to tomorrow.
 const todayIso = (): string => localISODate();
+
+const toHHMM = (n: number): string => {
+  if (n <= 0) return "";
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  return `${h}:${String(m).padStart(2, "0")}`;
+};
+
+const resetAutoLsKey = (project: string): string =>
+  `pavilio.time.form.${project}.resetAutoOnSave`;
+
+const loadResetAuto = (project: string): boolean => {
+  try {
+    return localStorage.getItem(resetAutoLsKey(project)) === "true";
+  } catch {
+    return false;
+  }
+};
+
+const saveResetAuto = (project: string, on: boolean): void => {
+  try {
+    localStorage.setItem(resetAutoLsKey(project), String(on));
+  } catch {
+    // ignore
+  }
+};
 
 const fieldLabelClass =
   "text-[10px] tracking-[0.15em] uppercase mb-1 block";
@@ -21,12 +51,41 @@ const underlineInputStyle = {
   color: "var(--text-primary)",
 } as const;
 
-export const ManualEntryForm = ({ project, onSaved }: ManualEntryFormProps) => {
-  const [hhmm, setHhmm] = useState("");
+export const ManualEntryForm = ({
+  project,
+  onSaved,
+  prefillMinutes,
+  onResetAutoRequested,
+}: ManualEntryFormProps) => {
+  const [hhmm, setHhmm] = useState<string>(() => toHHMM(prefillMinutes ?? 0));
+  // Once the user types in the duration field, stop overriding it from
+  // prefillMinutes — except after a successful save, which resets this flag.
+  const [userEdited, setUserEdited] = useState(false);
   const [date, setDate] = useState(todayIso);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [resetAutoOnSave, setResetAutoOnSave] = useState<boolean>(() =>
+    loadResetAuto(project),
+  );
+
+  // Persist the checkbox preference per project.
+  useEffect(() => {
+    saveResetAuto(project, resetAutoOnSave);
+  }, [project, resetAutoOnSave]);
+
+  // Reload preference when switching between projects.
+  useEffect(() => {
+    setResetAutoOnSave(loadResetAuto(project));
+  }, [project]);
+
+  // Sync the duration field with the live Auto-tracked value — but only
+  // while the user hasn't touched the field. They can clear it (the
+  // placeholder shows) without us immediately stuffing it back.
+  useEffect(() => {
+    if (userEdited) return;
+    setHhmm(toHHMM(prefillMinutes ?? 0));
+  }, [prefillMinutes, userEdited]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -55,6 +114,8 @@ export const ManualEntryForm = ({ project, onSaved }: ManualEntryFormProps) => {
       if (!res.ok) throw new Error("HTTP " + res.status);
       setHhmm("");
       setNote("");
+      setUserEdited(false);
+      if (resetAutoOnSave && onResetAutoRequested) onResetAutoRequested();
       onSaved();
     } catch {
       setError("Could not save");
@@ -74,7 +135,10 @@ export const ManualEntryForm = ({ project, onSaved }: ManualEntryFormProps) => {
             id="manual-entry-time"
             type="text"
             value={hhmm}
-            onChange={(e) => setHhmm(e.target.value)}
+            onChange={(e) => {
+              setHhmm(e.target.value);
+              setUserEdited(true);
+            }}
             placeholder="e.g. 1:30"
             className={`${underlineInputClass} font-mono`}
             style={underlineInputStyle}
@@ -126,6 +190,19 @@ export const ManualEntryForm = ({ project, onSaved }: ManualEntryFormProps) => {
           </button>
         </div>
       </div>
+      <label
+        className="flex items-center gap-2 text-xs cursor-pointer select-none w-fit"
+        style={{ color: "var(--text-tertiary)" }}
+      >
+        <input
+          type="checkbox"
+          data-testid="time-reset-auto-on-save"
+          checked={resetAutoOnSave}
+          onChange={(e) => setResetAutoOnSave(e.target.checked)}
+          className="cursor-pointer"
+        />
+        Reset Auto-tracked after save
+      </label>
       {error && (
         <div
           role="alert"

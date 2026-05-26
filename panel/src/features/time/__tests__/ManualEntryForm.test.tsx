@@ -112,4 +112,128 @@ describe("ManualEntryForm", () => {
     // Local date so that 23:30 doesn't show tomorrow in negative-offset zones.
     expect(dateInput.value).toBe(localISODate());
   });
+
+  describe("prefill with Auto-tracked", () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("prefills HH:MM from prefillMinutes on mount", () => {
+      render(<ManualEntryForm project="metro" onSaved={vi.fn()} prefillMinutes={90} />);
+      const hhmm = screen.getByPlaceholderText(/e\.g\. 1:30/i) as HTMLInputElement;
+      expect(hhmm.value).toBe("1:30");
+    });
+
+    it("renders empty when prefillMinutes is 0 (placeholder visible)", () => {
+      render(<ManualEntryForm project="metro" onSaved={vi.fn()} prefillMinutes={0} />);
+      const hhmm = screen.getByPlaceholderText(/e\.g\. 1:30/i) as HTMLInputElement;
+      expect(hhmm.value).toBe("");
+    });
+
+    it("syncs to new prefillMinutes when the user hasn't edited", () => {
+      const { rerender } = render(
+        <ManualEntryForm project="metro" onSaved={vi.fn()} prefillMinutes={15} />,
+      );
+      const hhmm = screen.getByPlaceholderText(/e\.g\. 1:30/i) as HTMLInputElement;
+      expect(hhmm.value).toBe("0:15");
+      rerender(<ManualEntryForm project="metro" onSaved={vi.fn()} prefillMinutes={30} />);
+      expect(hhmm.value).toBe("0:30");
+    });
+
+    it("stops overriding once the user types (even to empty)", () => {
+      const { rerender } = render(
+        <ManualEntryForm project="metro" onSaved={vi.fn()} prefillMinutes={15} />,
+      );
+      const hhmm = screen.getByPlaceholderText(/e\.g\. 1:30/i) as HTMLInputElement;
+      fireEvent.change(hhmm, { target: { value: "" } });
+      expect(hhmm.value).toBe("");
+      rerender(<ManualEntryForm project="metro" onSaved={vi.fn()} prefillMinutes={30} />);
+      // User cleared the field — don't stuff a new value in. Placeholder is visible.
+      expect(hhmm.value).toBe("");
+    });
+  });
+
+  describe("reset Auto-tracked toggle", () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("renders the checkbox, defaults to unchecked", () => {
+      render(<ManualEntryForm project="metro" onSaved={vi.fn()} />);
+      const cb = screen.getByTestId("time-reset-auto-on-save") as HTMLInputElement;
+      expect(cb.checked).toBe(false);
+    });
+
+    it("persists checkbox state per project in localStorage", () => {
+      render(<ManualEntryForm project="metro" onSaved={vi.fn()} />);
+      const cb = screen.getByTestId("time-reset-auto-on-save") as HTMLInputElement;
+      fireEvent.click(cb);
+      expect(localStorage.getItem("pavilio.time.form.metro.resetAutoOnSave")).toBe("true");
+    });
+
+    it("rehydrates checkbox state from localStorage on mount", () => {
+      localStorage.setItem("pavilio.time.form.metro.resetAutoOnSave", "true");
+      render(<ManualEntryForm project="metro" onSaved={vi.fn()} />);
+      const cb = screen.getByTestId("time-reset-auto-on-save") as HTMLInputElement;
+      expect(cb.checked).toBe(true);
+    });
+
+    it("does NOT call onResetAutoRequested when unchecked", async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true } as Response);
+      const onResetAutoRequested = vi.fn();
+      const onSaved = vi.fn();
+      render(
+        <ManualEntryForm
+          project="metro"
+          onSaved={onSaved}
+          onResetAutoRequested={onResetAutoRequested}
+        />,
+      );
+      const hhmm = screen.getByPlaceholderText(/e\.g\. 1:30/i);
+      fireEvent.change(hhmm, { target: { value: "30" } });
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      expect(onResetAutoRequested).not.toHaveBeenCalled();
+    });
+
+    it("calls onResetAutoRequested when checked, after successful save", async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true } as Response);
+      const onResetAutoRequested = vi.fn();
+      const onSaved = vi.fn();
+      render(
+        <ManualEntryForm
+          project="metro"
+          onSaved={onSaved}
+          onResetAutoRequested={onResetAutoRequested}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("time-reset-auto-on-save"));
+      const hhmm = screen.getByPlaceholderText(/e\.g\. 1:30/i);
+      fireEvent.change(hhmm, { target: { value: "30" } });
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      expect(onResetAutoRequested).toHaveBeenCalledTimes(1);
+    });
+
+    it("does NOT call onResetAutoRequested when save fails", async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: false,
+        status: 500,
+      } as Response);
+      const onResetAutoRequested = vi.fn();
+      render(
+        <ManualEntryForm
+          project="metro"
+          onSaved={vi.fn()}
+          onResetAutoRequested={onResetAutoRequested}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("time-reset-auto-on-save"));
+      const hhmm = screen.getByPlaceholderText(/e\.g\. 1:30/i);
+      fireEvent.change(hhmm, { target: { value: "30" } });
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+      await screen.findByText(/could not save/i);
+      expect(onResetAutoRequested).not.toHaveBeenCalled();
+    });
+  });
 });
