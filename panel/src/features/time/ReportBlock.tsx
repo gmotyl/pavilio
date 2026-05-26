@@ -19,7 +19,7 @@ type Prefs = {
 const lsKey = (project: string) => `pavilio.time.report.${project}`;
 
 const DEFAULT_PREFS: Prefs = {
-  period: "last-month",
+  period: "this-week",
   format: "text",
   detail: "detailed",
 };
@@ -242,7 +242,9 @@ export function ReportBlock({
           maxHeight: "28rem",
         }}
       >
-        {formatted}
+        {entries.length === 0
+          ? `No entries in ${label}.\nTry a different period above (e.g. Today or This week).`
+          : formatted}
       </pre>
     </section>
   );
