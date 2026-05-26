@@ -4,7 +4,20 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 vi.mock("../../features/terminal/useAllTerminalSessions", () => ({
   useAllTerminalSessions: () => ({
-    sessions: [],
+    // The TimeTrackingProvider mounts a tracker slot per project present in
+    // sessions, so the test page needs at least one "metro" session for
+    // resetToday to dispatch through the provider.
+    sessions: [
+      {
+        id: "s1",
+        project: "metro",
+        name: "t1",
+        color: null,
+        cwd: "",
+        pid: 0,
+        createdAt: "",
+      },
+    ],
     refresh: vi.fn(),
     reorder: vi.fn(),
     swapOrder: vi.fn(),
@@ -16,16 +29,19 @@ vi.mock("../../features/terminal/useTerminalActivityChannel", () => ({
 }));
 
 import ProjectTimePage from "../ProjectTimePage";
+import { TimeTrackingProvider } from "../../features/time/TimeTrackingProvider";
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={["/project/metro/time"]}>
-      <Routes>
-        <Route path="/project/:name/time" element={<ProjectTimePage />} />
-      </Routes>
-    </MemoryRouter>,
+    <TimeTrackingProvider>
+      <MemoryRouter initialEntries={["/project/metro/time"]}>
+        <Routes>
+          <Route path="/project/:name/time" element={<ProjectTimePage />} />
+        </Routes>
+      </MemoryRouter>
+    </TimeTrackingProvider>,
   );
 }
 

@@ -37,11 +37,11 @@ import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import type { TerminalHandle } from "../terminal/TerminalView";
 import TerminalsSurface from "../terminal/TerminalsSurface";
 import { TimeTrackingLink } from "../time/TimeTrackingLink";
-import { useProjectBusyTracker } from "../time/useProjectBusyTracker";
+import { useProjectTodayMinutes } from "../time/TimeTrackingProvider";
 
 export default function ProjectView() {
   const { name, section } = useParams<{ name: string; section?: string }>();
-  const { todayMinutes } = useProjectBusyTracker(name ?? "");
+  const { todayMinutes } = useProjectTodayMinutes(name ?? "");
   useLastPath(name);
   const [content, setContent] = useState<string | null>(null);
   const [absolutePath, setAbsolutePath] = useState("");
