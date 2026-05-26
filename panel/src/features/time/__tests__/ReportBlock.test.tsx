@@ -107,6 +107,23 @@ describe("ReportBlock", () => {
     expect(arg).toContain("alpha");
   });
 
+  it("defaults to this-week when no prefs are stored", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const periodSelect = screen.getByTestId("time-report-period") as HTMLSelectElement;
+    expect(periodSelect.value).toBe("this-week");
+  });
+
+  it("shows empty-state hint when range returns no entries", async () => {
+    mockFetchEntries([]);
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    expect(screen.getByText(/No entries in/)).toBeInTheDocument();
+    expect(screen.getByText(/Try a different period above/)).toBeInTheDocument();
+  });
+
   it("Download .csv triggers a download with CSV content regardless of preview format", async () => {
     const createObjectURL = vi.fn().mockReturnValue("blob:mock");
     const revokeObjectURL = vi.fn();
