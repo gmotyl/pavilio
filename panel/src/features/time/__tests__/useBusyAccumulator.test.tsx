@@ -20,7 +20,7 @@ describe("useBusyAccumulator", () => {
     expect(result.current.todayMinutes).toBe(0);
   });
 
-  it("jumps to 15 on busy true → false → true sequence outside window", () => {
+  it("jumps to 15 once busy persists past the 10s debounce window", () => {
     const { result, rerender } = renderHook(
       ({ busy }) => useBusyAccumulator({ project: "metro", agentBusy: busy }),
       { initialProps: { busy: false } },
@@ -28,16 +28,24 @@ describe("useBusyAccumulator", () => {
     act(() => {
       rerender({ busy: true });
     });
+    // still in debounce window — no dispatch yet
+    expect(result.current.todayMinutes).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
     expect(result.current.todayMinutes).toBe(15);
   });
 
-  it("persists open block to localStorage", () => {
+  it("persists open block to localStorage after debounce fires", () => {
     const { rerender } = renderHook(
       ({ busy }) => useBusyAccumulator({ project: "metro", agentBusy: busy }),
       { initialProps: { busy: false } },
     );
     act(() => {
       rerender({ busy: true });
+    });
+    act(() => {
+      vi.advanceTimersByTime(10_000);
     });
     const raw = localStorage.getItem("pavilio.time.metro");
     expect(raw).not.toBeNull();
@@ -76,6 +84,9 @@ describe("useBusyAccumulator", () => {
     act(() => {
       rerender({ busy: true });
     });
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
     expect(result.current.todayMinutes).toBe(0);
     expect(localStorage.getItem("pavilio.time.")).toBeNull();
   });
@@ -97,5 +108,75 @@ describe("useBusyAccumulator", () => {
     );
     // 15min block was open and lock has expired → should be closed
     expect(result.current.todayMinutes).toBe(15);
+  });
+});
+
+describe("debounce: short flickers don't count", () => {
+  it("busy for 5s then idle: no block opens, todayMinutes stays at 0", () => {
+    const { result, rerender } = renderHook(
+      ({ busy }) => useBusyAccumulator({ project: "metro", agentBusy: busy }),
+      { initialProps: { busy: false } },
+    );
+    act(() => {
+      rerender({ busy: true });
+    });
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    act(() => {
+      rerender({ busy: false });
+    });
+    // advance well past the 10s debounce — nothing should fire
+    act(() => {
+      vi.advanceTimersByTime(20_000);
+    });
+    expect(result.current.todayMinutes).toBe(0);
+    // and nothing persisted as an open block either
+    const raw = localStorage.getItem("pavilio.time.metro");
+    if (raw) {
+      expect(JSON.parse(raw).open).toBeNull();
+    }
+  });
+
+  it("busy for 12s: block opens at the 10s mark", () => {
+    const { result, rerender } = renderHook(
+      ({ busy }) => useBusyAccumulator({ project: "metro", agentBusy: busy }),
+      { initialProps: { busy: false } },
+    );
+    act(() => {
+      rerender({ busy: true });
+    });
+    act(() => {
+      vi.advanceTimersByTime(9_999);
+    });
+    expect(result.current.todayMinutes).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(2);
+    });
+    expect(result.current.todayMinutes).toBe(15);
+  });
+});
+
+describe("continuous busy past 15min extends the lock", () => {
+  it("busy continuously for ~30min: todayMinutes climbs past 15", () => {
+    const { result, rerender } = renderHook(
+      ({ busy }) => useBusyAccumulator({ project: "metro", agentBusy: busy }),
+      { initialProps: { busy: false } },
+    );
+    act(() => {
+      rerender({ busy: true });
+    });
+    // debounce fires → block opens
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(result.current.todayMinutes).toBe(15);
+    // advance 16 more minutes while continuously busy — many 60s ticks
+    act(() => {
+      vi.advanceTimersByTime(16 * 60_000);
+    });
+    // lock should have been extended past the original 15min window, so the
+    // second 15-minute slot is now covered
+    expect(result.current.todayMinutes).toBeGreaterThanOrEqual(30);
   });
 });

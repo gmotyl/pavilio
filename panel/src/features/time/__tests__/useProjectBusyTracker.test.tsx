@@ -70,7 +70,7 @@ describe("useProjectBusyTracker", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("busy starts accumulation → todayMinutes = 15", () => {
+  it("busy starts accumulation → todayMinutes = 15 after debounce", () => {
     setSessions([{ id: "s1", project: "metro" }]);
     setAggregateState("idle");
     const { result, rerender } = renderHook(() =>
@@ -81,6 +81,11 @@ describe("useProjectBusyTracker", () => {
     act(() => {
       rerender();
     });
+    // 10s debounce — block does not open until busy persists past the window
+    expect(result.current.todayMinutes).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
     expect(result.current.todayMinutes).toBe(15);
   });
 
@@ -88,10 +93,13 @@ describe("useProjectBusyTracker", () => {
     setSessions([{ id: "s1", project: "metro" }]);
     setAggregateState("idle");
     const { rerender } = renderHook(() => useProjectBusyTracker("metro"));
-    // flip to busy → opens 15min block
+    // flip to busy → debounce arms; advance 10s so the block actually opens
     setAggregateState("busy");
     act(() => {
       rerender();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
     });
     // flip back to idle so no new busy events extend the lock
     setAggregateState("idle");
@@ -124,10 +132,13 @@ describe("useProjectBusyTracker", () => {
     const { result, rerender } = renderHook(() =>
       useProjectBusyTracker("metro"),
     );
-    // accumulate some minutes
+    // accumulate some minutes — flip busy then wait out the 10s debounce
     setAggregateState("busy");
     act(() => {
       rerender();
+    });
+    act(() => {
+      vi.advanceTimersByTime(10_000);
     });
     expect(result.current.todayMinutes).toBe(15);
     // flip back to idle so reset isn't immediately re-opened by an active block
