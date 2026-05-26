@@ -20,6 +20,7 @@ import { FloatingActionProvider, Layout } from "./features/shell/Layout";
 import { useVisualViewport } from "./features/shell/useVisualViewport";
 import { useHostModeRoot } from "./features/host-mode/useHostModeRoot";
 import ToastHost from "./components/ToastHost";
+import { TimeTrackingProvider } from "./features/time/TimeTrackingProvider";
 
 function AppShell() {
   const { authRequired, authenticated, loading, recheck } = useAuthStatus();
@@ -33,6 +34,7 @@ function AppShell() {
   return (
     <BrowserRouter>
       <ActiveFileProvider>
+        <TimeTrackingProvider>
         <BreadcrumbActionsProvider>
           <FloatingActionProvider>
             <QuickFinder />
@@ -63,6 +65,7 @@ function AppShell() {
             <ToastHost />
           </FloatingActionProvider>
         </BreadcrumbActionsProvider>
+        </TimeTrackingProvider>
       </ActiveFileProvider>
     </BrowserRouter>
   );

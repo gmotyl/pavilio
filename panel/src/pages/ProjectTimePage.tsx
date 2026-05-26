@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useProjectBusyTracker } from "../features/time/useProjectBusyTracker";
+import { useProjectTodayMinutes } from "../features/time/TimeTrackingProvider";
 import { formatHHMM } from "../features/time/reportFormatters";
 import { EntriesList } from "../features/time/EntriesList";
 import { ManualEntryForm } from "../features/time/ManualEntryForm";
@@ -24,7 +24,7 @@ function todayLabel(): string {
 export default function ProjectTimePage() {
   const { name } = useParams<{ name: string }>();
   const project = name ?? "";
-  const { todayMinutes, resetToday } = useProjectBusyTracker(project);
+  const { todayMinutes, resetToday } = useProjectTodayMinutes(project);
   const [refreshKey, setRefreshKey] = useState(0);
   const [manualToday, setManualToday] = useState(0);
 
