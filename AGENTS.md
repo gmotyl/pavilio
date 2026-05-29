@@ -2,6 +2,10 @@
 
 This file defines your project registry and workflow for AI agents (Claude Code, Kilocode, Copilot, etc.).
 
+## Communication rule - important!
+
+- When reporting information to me, be extremely concise and sacrifise grammar fo the sake of concision.
+
 ## Projects Registry
 
 > **Your projects are private.** Create `.projects.local.md` in the repo root (gitignored) to define your project list. See `AGENTS.md.example` to get started.

@@ -5,7 +5,7 @@ description: Create a markdown memo with mermaid diagrams that explains a techni
 
 # Memo Explain
 
-Create a markdown memo that explains a topic with embedded mermaid diagrams. Sibling of [[memo]] — use this variant when the explanation benefits from a visual: a flowchart, sequence diagram, architecture sketch, or before/after comparison.
+Create a markdown memo that explains a topic with embedded mermaid diagrams. Sibling of [[memo]] — use this variant when the explanation benefits from a visual: a flowchart, sequence diagram, architecture sketch, or before/after comparison. Be extremely concise and sacrifise grammar fo the sake of concision.
 
 ## When to use
 
@@ -47,13 +47,14 @@ Create a markdown memo that explains a topic with embedded mermaid diagrams. Sib
 **Location:** `projects/<project>/memo/YYYY-MM-DD_HHmm_<slug>.md`
 
 **Filename rules:**
+
 - Format: `YYYY-MM-DD_HHmm_<slug>.md`
 - Slug: max 4 words, snake_case, lowercase
 - Example: `2026-05-15_2210_right_sidebar_design.md`
 
 **Content template:**
 
-```markdown
+````markdown
 # <Title derived from the topic>
 
 > Captured: YYYY-MM-DD HH:mm
@@ -65,6 +66,7 @@ Create a markdown memo that explains a topic with embedded mermaid diagrams. Sib
 ```mermaid
 <diagram code>
 ```
+````
 
 <Optional commentary connecting the diagram back to the decisions or code.>
 

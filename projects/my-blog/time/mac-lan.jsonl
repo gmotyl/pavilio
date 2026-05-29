@@ -1,0 +1,6 @@
+{"type":"manual","date":"2026-05-25","minutes":165,"note":"test","createdAt":"2026-05-25T16:47:31.978Z","id":"344d1bf418618ed1"}
+{"type":"manual","date":"2026-05-25","minutes":30,"note":"tresting pavilio","createdAt":"2026-05-25T16:48:03.326Z","id":"e498667d14fa7493"}
+{"type":"busy_block","date":"2026-05-26","start":"2026-05-26T05:27:24.903Z","end":"2026-05-26T05:46:12.736Z","minutes":30,"id":"e8b430ba000f8934"}
+{"type":"reset","date":"2026-05-26","ts":"2026-05-26T05:51:01.581Z","id":"0e0600e2eb75dc49"}
+{"type":"busy_block","date":"2026-05-26","start":"2026-05-26T05:49:40.225Z","end":"2026-05-26T06:05:53.752Z","minutes":30,"id":"a1a02f4845c2c0a8"}
+{"type":"busy_block","date":"2026-05-26","start":"2026-05-26T05:51:06.476Z","end":"2026-05-26T06:06:16.394Z","minutes":30,"id":"b5b8569c7e4e3cd2"}

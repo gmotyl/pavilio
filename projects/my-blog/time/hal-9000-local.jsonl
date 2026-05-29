@@ -1,0 +1,7 @@
+{"type":"manual","date":"2026-05-26","minutes":15,"note":"some note about the task","createdAt":"2026-05-26T06:19:17.703Z","id":"48f4cd63356cd4c8"}
+{"type":"reset","date":"2026-05-26","ts":"2026-05-26T06:33:27.241Z","id":"6b229bd84670a118"}
+{"type":"busy_block","date":"2026-05-26","start":"2026-05-26T06:18:21.507Z","end":"2026-05-26T06:33:42.359Z","minutes":30,"id":"5b6f9646e5a0e7aa"}
+{"type":"manual","date":"2026-05-26","minutes":30,"note":"generating news","createdAt":"2026-05-26T07:00:36.761Z","id":"a381e421ceb655e6"}
+{"type":"manual","date":"2026-05-26","minutes":30,"note":"test","createdAt":"2026-05-26T07:01:49.417Z","id":"dd077e3ee36afce3"}
+{"type":"reset","date":"2026-05-26","ts":"2026-05-26T07:01:49.426Z","id":"3f17aaa7c7bdebd5"}
+{"type":"busy_block","date":"2026-05-26","start":"2026-05-26T06:34:36.512Z","end":"2026-05-26T07:08:46.244Z","minutes":45,"id":"137916d1c2398e02"}
