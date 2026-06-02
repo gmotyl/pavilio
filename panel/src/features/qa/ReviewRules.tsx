@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Pencil, Plus } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 
@@ -19,22 +19,35 @@ export default function ReviewRules({ project }: { project: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const res = await fetch(`/api/files/read/${path}`);
-    if (res.ok) {
-      const data = await res.json();
-      setContent(data.content);
-      setExists(true);
-    } else {
-      setContent(null);
-      setExists(false);
-    }
-    setEditing(false);
-    setError(null);
-    setCollapsed(false);
+  // Inlined load with an `active` flag so a slow earlier fetch can't clobber a
+  // newer one (and we don't set state after unmount) when `project` changes.
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/files/read/${path}`);
+        if (!active) return;
+        if (res.ok) {
+          const data = await res.json();
+          setContent(data.content);
+          setExists(true);
+        } else {
+          setContent(null);
+          setExists(false);
+        }
+        setEditing(false);
+        setError(null);
+        setCollapsed(false);
+      } catch {
+        if (!active) return;
+        setContent(null);
+        setExists(false);
+        setError("Failed to load rules.");
+      }
+    };
+    void load();
+    return () => { active = false; };
   }, [path]);
-
-  useEffect(() => { void load(); }, [load]);
 
   const write = async (text: string) => {
     setBusy(true);

@@ -31,6 +31,8 @@ Read, if present:
 
 Whatever the user said is the fixed point — a commit SHA, branch, tag, `main`, `HEAD~5`, etc. Pass it through; don't be opinionated. If they didn't specify one, ask: "Review against what — a branch, a commit, or `main`?" Don't proceed until you have it.
 
+**Validate it as a git ref before using it in any command.** The fixed point is user-supplied and gets interpolated into shell commands, so confirm it resolves first: run `git rev-parse --verify --quiet "<fixed-point>^{commit}"`. If that prints nothing (non-zero exit), the ref is invalid — stop and ask the user to clarify. Never pass an unvalidated or shell-unsafe string (spaces, `;`, `|`, `$(...)`, backticks) into the diff/log commands.
+
 Capture once: `git diff <fixed-point>...HEAD` (three-dot, against the merge-base) and the commit list via `git log <fixed-point>..HEAD --oneline`.
 
 ### 3. Identify the standards sources

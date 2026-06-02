@@ -76,4 +76,15 @@ describe("POST /api/files/write", () => {
     expect(res.status).toBe(200);
     expect(readFileSync(join(projectsDir, "ch/qa/REVIEW_RULES.md"), "utf-8")).toBe("");
   });
+
+  it("returns 500 when the filesystem write fails", async () => {
+    // `ch/qa` is a regular file, so mkdir of it (as a dir) fails with ENOTDIR.
+    mkdirSync(join(projectsDir, "ch"), { recursive: true });
+    writeFileSync(join(projectsDir, "ch/qa"), "i am a file");
+    const res = await request(makeApp())
+      .post("/api/files/write")
+      .send({ path: "ch/qa/REVIEW_RULES.md", content: "x" });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/write failed/i);
+  });
 });

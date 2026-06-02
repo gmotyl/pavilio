@@ -242,8 +242,12 @@ router.post("/write", async (req, res) => {
     return res.status(403).json({ error: "Path traversal blocked" });
   }
 
-  await fsPromises.mkdir(dirname(absolutePath), { recursive: true });
-  await fsPromises.writeFile(absolutePath, content, "utf-8");
+  try {
+    await fsPromises.mkdir(dirname(absolutePath), { recursive: true });
+    await fsPromises.writeFile(absolutePath, content, "utf-8");
+  } catch (e: unknown) {
+    return res.status(500).json({ error: `Write failed: ${(e as Error).message}` });
+  }
 
   rebuildIndex();
   return res.json({ ok: true, path: toPosix(relative(projectsDir, absolutePath)) });
