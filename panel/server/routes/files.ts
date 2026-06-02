@@ -226,6 +226,33 @@ router.post("/move", async (req, res) => {
   });
 });
 
+// Write a file's content (create or overwrite) within projectsDir.
+// Body: { path: string, content: string }
+// Response: { ok: true, path } where `path` is the final relativePath.
+router.post("/write", async (req, res) => {
+  const { projectsDir } = getConfig();
+  const relPath = typeof req.body?.path === "string" ? req.body.path : "";
+  const content = typeof req.body?.content === "string" ? req.body.content : null;
+  if (!relPath || content === null) {
+    return res.status(400).json({ error: "Both 'path' and 'content' are required" });
+  }
+
+  const absolutePath = resolve(projectsDir, relPath);
+  if (!isPathUnder(absolutePath, projectsDir)) {
+    return res.status(403).json({ error: "Path traversal blocked" });
+  }
+
+  try {
+    await fsPromises.mkdir(dirname(absolutePath), { recursive: true });
+    await fsPromises.writeFile(absolutePath, content, "utf-8");
+  } catch (e: unknown) {
+    return res.status(500).json({ error: `Write failed: ${(e as Error).message}` });
+  }
+
+  rebuildIndex();
+  return res.json({ ok: true, path: toPosix(relative(projectsDir, absolutePath)) });
+});
+
 // Walk a root directory recursively, skipping hidden entries (dot-prefixed names)
 function walkRoot(absRoot: string): Array<{ relativePath: string; modified: number }> {
   const out: Array<{ relativePath: string; modified: number }> = [];
