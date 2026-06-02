@@ -1,6 +1,7 @@
 import { FileText, X } from "lucide-react";
 import type { FileEntry } from "../explorer/useFileIndex";
 import { useFileDragSource, useFileDropTarget } from "../explorer/useFileDrag";
+import ReviewRules from "../qa/ReviewRules";
 
 interface Props {
   projectName: string;
@@ -165,6 +166,7 @@ export function SectionFilesList({
 
     return (
       <div>
+        <ReviewRules project={projectName} />
         <h2
           className="text-[11px] font-semibold uppercase tracking-widest mb-3"
           style={{ color: "var(--text-tertiary)" }}
