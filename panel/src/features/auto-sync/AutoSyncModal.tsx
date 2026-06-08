@@ -18,9 +18,9 @@ export function AutoSyncModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
         <div className="flex gap-2">
-          <button className="text-[12px] px-2 py-1 rounded-md" style={{ background: "var(--accent)", color: "#fff" }}
+          <button data-testid="auto-sync-sync-now" className="text-[12px] px-2 py-1 rounded-md" style={{ background: "var(--accent)", color: "#fff" }}
             onClick={async () => { await syncNow(); refresh(); }}>Sync now</button>
-          <button className="text-[12px] px-2 py-1 rounded-md" style={{ color: "var(--text-muted)" }} onClick={onClose}>Close</button>
+          <button data-testid="auto-sync-close" className="text-[12px] px-2 py-1 rounded-md" style={{ color: "var(--text-muted)" }} onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
