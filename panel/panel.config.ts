@@ -20,6 +20,13 @@ export interface PanelConfig {
   tlsCert?: string;
   /** Absolute path to TLS private key (.pem) — enables HTTPS when set together with tlsCert */
   tlsKey?: string;
+  /** Auto-sync settings for the data repo. Enabled flag lives in .autosync-state.json (default on). */
+  autoSync?: {
+    /** Minutes between automatic syncs */
+    intervalMinutes: number;
+    /** Paths (relative to repo root) auto-committed each tick */
+    dataPaths: string[];
+  };
 }
 
 const defaults: PanelConfig = {
@@ -33,6 +40,10 @@ const defaults: PanelConfig = {
     "**/.git/**",
     "**/log/*.txt",
   ],
+  autoSync: {
+    intervalMinutes: 30,
+    dataPaths: ["projects/"],
+  },
 };
 
 export default defaults;
