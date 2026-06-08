@@ -49,7 +49,8 @@ describe("syncRepo", () => {
     expect(r1.state).toBe("synced");
     const r2 = await syncRepo(win, opts("win"));
     expect(r2.state).toBe("synced");
-    await syncRepo(mac, opts("mac")); // pull win's commit
+    const r3 = await syncRepo(mac, opts("mac")); // pull win's commit
+    expect(r3.summary).toContain("↓1");
     // both files present on mac, history is linear (no merge commits)
     expect(readFileSync(join(mac, "projects/p/win-note.md"), "utf-8")).toBe("win\n");
     const merges = git(mac, "rev-list", "--merges", "--count", "HEAD").trim();

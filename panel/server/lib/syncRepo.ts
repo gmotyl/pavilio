@@ -56,6 +56,8 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
         setStatus({ state: "offline", detail: "Remote unreachable." });
         return status;
       }
+      // count remote commits not yet in local HEAD (i.e. what we are about to pull)
+      const behind = git(repo, ["rev-list", "--count", "HEAD..@{u}"]).stdout.trim() || "0";
       // scoped auto-commit of data paths
       git(repo, ["add", "--", ...opts.dataPaths]);
       const staged = git(repo, ["diff", "--cached", "--quiet"]);
@@ -72,7 +74,6 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
         setStatus({ state: "conflict", detail: "Rebase conflict — manual sync needed." });
         return status;
       }
-      const behind = git(repo, ["rev-list", "--count", "HEAD@{1}..HEAD"]).stdout.trim() || "0";
       // push
       const push = git(repo, ["push"]);
       if (!push.ok) return null; // signal retry
