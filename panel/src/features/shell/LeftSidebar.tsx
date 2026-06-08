@@ -9,6 +9,7 @@ import {
   HelpCircle,
   Inbox,
   Plus,
+  RotateCw,
   Settings,
   Smartphone,
   Star,
@@ -18,8 +19,10 @@ import {
 import GitSummary from "../git/GitSummary";
 import { MobileAccessModal } from "../mobile-access/MobileAccessModal";
 import { LanAccessModal } from "../lan-access/LanAccessModal";
+import { AutoSyncModal } from "../auto-sync/AutoSyncModal";
 import { Toggle } from "../mobile-access/MobileAccessModal/Toggle";
 import { useMobileAccessStatus } from "../mobile-access/useMobileAccessStatus";
+import { useAutoSyncStatus } from "../auto-sync/useAutoSyncStatus";
 import { useArchivedProjects } from "../projects/useArchivedProjects";
 import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
@@ -62,6 +65,7 @@ export default function LeftSidebar() {
   const { archive, archivedNames } = useArchivedProjects();
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
   const [lanAccessOpen, setLanAccessOpen] = useState(false);
+  const [autoSyncOpen, setAutoSyncOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const inIterm = /\/project\/[^/]+\/iterm/.test(location.pathname);
@@ -174,7 +178,7 @@ export default function LeftSidebar() {
     [sessions, navigate, setExpanded],
   );
 
-  const anyModalOpen = mobileAccessOpen || lanAccessOpen;
+  const anyModalOpen = mobileAccessOpen || lanAccessOpen || autoSyncOpen;
   const {
     status: mobileStatus,
     enable: enableMobile,
@@ -182,6 +186,7 @@ export default function LeftSidebar() {
     enableLan,
     disableLan,
   } = useMobileAccessStatus(true, anyModalOpen ? 2000 : 30000);
+  const { status: autoSync, enable: enableSync, disable: disableSync } = useAutoSyncStatus();
   const mobileIsOn = mobileStatus?.tailscale.state === "on";
   const lanIsOn = mobileStatus?.lan.state === "on";
   const lanHasInterface =
@@ -207,6 +212,8 @@ export default function LeftSidebar() {
       setLanAccessOpen(false);
     }
   };
+
+  const onAutoSyncToggle = (next: boolean) => { if (next) enableSync(); else disableSync(); };
 
   const visibleProjects = projects.filter((p) => !archivedNames.has(p.name));
   const starredProjects = visibleProjects.filter((p) => isFavorite(p.name));
@@ -540,6 +547,25 @@ export default function LeftSidebar() {
             disabled={!lanIsOn && !lanHasInterface}
           />
         </div>
+        <div
+          className="flex items-center gap-2 w-full text-[12px] px-2 py-1.5 rounded-md"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <button
+            type="button"
+            data-testid="sidebar-auto-sync-open"
+            onClick={() => setAutoSyncOpen(true)}
+            className="flex items-center gap-2 flex-1 text-left transition-colors"
+            style={{ color: "inherit" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-secondary)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+            title="Auto-sync notes & progress across machines"
+          >
+            <RotateCw size={14} />
+            <span>Auto-sync</span>
+          </button>
+          <Toggle on={!!autoSync?.enabled} onChange={onAutoSyncToggle} label="Auto-sync" />
+        </div>
       </section>
       {mobileAccessOpen && (
         <MobileAccessModal onClose={() => setMobileAccessOpen(false)} />
@@ -547,6 +573,7 @@ export default function LeftSidebar() {
       {lanAccessOpen && (
         <LanAccessModal onClose={() => setLanAccessOpen(false)} />
       )}
+      {autoSyncOpen && <AutoSyncModal onClose={() => setAutoSyncOpen(false)} />}
     </div>
   );
 }
