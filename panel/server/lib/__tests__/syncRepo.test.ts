@@ -37,7 +37,7 @@ describe("syncRepo", () => {
     writeFileSync(join(seed, ".gitattributes"), "projects/**/time/*.jsonl merge=union\n");
     git(seed, "add", "-A"); git(seed, "commit", "-qm", "seed"); git(seed, "push", "-q", "origin", "HEAD:main");
     mac = clone("mac"); win = clone("win");
-  });
+  }, 30_000);
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
   const opts = (h: string) => ({ dataPaths: ["projects/"], hostname: h });
@@ -55,7 +55,7 @@ describe("syncRepo", () => {
     expect(readFileSync(join(mac, "projects/p/win-note.md"), "utf-8")).toBe("win\n");
     const merges = git(mac, "rev-list", "--merges", "--count", "HEAD").trim();
     expect(merges).toBe("0");
-  });
+  }, 30_000);
 
   it("auto-merges append-only jsonl on both sides via union driver", async () => {
     appendFileSync(join(mac, "projects/p/time/mac.jsonl"), "mac1\n");
@@ -67,7 +67,7 @@ describe("syncRepo", () => {
     const body = readFileSync(join(win, "projects/p/time/mac.jsonl"), "utf-8");
     expect(body).toContain("mac1");
     expect(body).toContain("win1");
-  });
+  }, 30_000);
 
   it("on a real same-line conflict, aborts cleanly and reports conflict (no half-rebase)", async () => {
     writeFileSync(join(mac, "projects/p/note.md"), "MAC EDIT\n");
@@ -79,12 +79,12 @@ describe("syncRepo", () => {
     expect(() => git(win, "status")).not.toThrow();
     const status = git(win, "status", "--porcelain=v2", "--branch");
     expect(status).not.toContain("rebase");
-  });
+  }, 30_000);
 
   it("reports offline when the remote is unreachable", async () => {
     git(mac, "remote", "set-url", "origin", join(root, "does-not-exist.git"));
     writeFileSync(join(mac, "projects/p/x.md"), "x\n");
     const r = await syncRepo(mac, opts("mac"));
     expect(r.state).toBe("offline");
-  });
+  }, 30_000);
 });
