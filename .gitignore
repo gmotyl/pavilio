@@ -49,6 +49,7 @@ projects/*/config.local.json
 panel/node_modules/
 panel/dist/
 panel/panel.config.local.ts
+panel/.autosync-state.json
 
 # Per-host launcher overrides (e.g. PANEL_EXTRA_PORTS)
 scripts/start-panel-windows.local.env

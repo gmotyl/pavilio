@@ -1,4 +1,5 @@
 import express from "express";
+import { resolve } from "path";
 import { createServer as createHttpServer, type Server as HttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
 import { createServer as createNetServer } from "net";
@@ -26,7 +27,10 @@ import agentSettingsRouter from "./routes/agent-settings.js";
 import terminalRouter from "./routes/terminal.js";
 import scriptsRouter from "./routes/scripts.js";
 import { mountTimeRoutes } from "./routes/time.js";
+import autoSyncRouter from "./routes/auto-sync.js";
 import { machineHostname } from "./lib/hostname.js";
+import { startScheduler } from "./lib/autoSyncScheduler.js";
+import { isEnabled } from "./lib/autoSyncState.js";
 import { setupWebSocket, setupFileWatcher, getWss } from "./watcher.js";
 import { pruneDeadAgents } from "./lib/agent-registry.js";
 import { registerPanelServer } from "./lib/panel-listener.js";
@@ -107,6 +111,7 @@ async function start() {
   app.use("/api/images", imagesRouter);
   app.use("/api/agent-settings", agentSettingsRouter);
   app.use("/api/terminal", terminalRouter);
+  app.use("/api/auto-sync", autoSyncRouter);
   app.use("/api", scriptsRouter);
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 
@@ -122,6 +127,17 @@ async function start() {
   setupFileWatcher();
 
   setInterval(pruneDeadAgents, 30_000);
+
+  if (isEnabled()) {
+    const c = getConfig();
+    const autoSync = c.autoSync ?? { intervalMinutes: 30, dataPaths: ["projects/"] };
+    startScheduler({
+      repo: resolve(c.projectsDir, ".."),
+      hostname: machineHostname(),
+      dataPaths: autoSync.dataPaths,
+      intervalMinutes: autoSync.intervalMinutes,
+    });
+  }
 }
 
 start();
