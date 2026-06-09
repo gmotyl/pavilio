@@ -246,7 +246,7 @@ router.post("/pull", async (req, res) => {
       hostname: machineHostname(),
     });
     broadcast({ type: "git-change" });
-    if (status.state === "conflict" || status.state === "push-failed" || status.state === "offline") {
+    if (status.state === "conflict" || status.state === "push-failed" || status.state === "offline" || status.state === "busy") {
       return res.status(409).json({ error: status.detail || status.state, output: status.detail, syncState: status.state });
     }
     res.json({ ok: true, output: status.summary, syncState: status.state });

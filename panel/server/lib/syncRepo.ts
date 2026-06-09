@@ -1,7 +1,10 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { broadcast } from "../watcher.js";
+
+const execFileAsync = promisify(execFile);
 
 export type SyncState =
   | "idle" | "syncing" | "synced" | "offline" | "conflict" | "push-failed" | "busy";
@@ -31,9 +34,21 @@ function setStatus(next: Partial<SyncStatus>) {
 }
 
 interface Run { ok: boolean; status: number | null; stdout: string; stderr: string; }
-function git(cwd: string, args: string[]): Run {
-  const r = spawnSync("git", args, { cwd, encoding: "utf-8" });
-  return { ok: r.status === 0, status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+
+// Async git runner — execFile keeps network-bound git ops (fetch/pull/push) off
+// the single Node event loop so the panel's terminals/websockets don't freeze.
+async function git(cwd: string, args: string[]): Promise<Run> {
+  try {
+    const { stdout, stderr } = await execFileAsync("git", args, { cwd });
+    return { ok: true, status: 0, stdout: stdout ?? "", stderr: stderr ?? "" };
+  } catch (e: any) {
+    return {
+      ok: false,
+      status: typeof e?.code === "number" ? e.code : null,
+      stdout: e?.stdout ?? "",
+      stderr: e?.stderr ?? "",
+    };
+  }
 }
 
 function midRebase(repo: string): boolean {
@@ -50,32 +65,43 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       return status;
     }
 
-    const attempt = (): SyncStatus | null => {
+    const paths = opts.dataPaths.filter((p) => p && p.trim().length > 0);
+    if (paths.length === 0) {
+      setStatus({ state: "push-failed", detail: "No data paths configured." });
+      return status;
+    }
+
+    const attempt = async (): Promise<SyncStatus | null> => {
       // fetch (connectivity probe)
-      if (!git(repo, ["fetch", "--quiet"]).ok) {
+      if (!(await git(repo, ["fetch", "--quiet"])).ok) {
         setStatus({ state: "offline", detail: "Remote unreachable." });
         return status;
       }
-      // count remote commits not yet in local HEAD (i.e. what we are about to pull)
-      const behind = git(repo, ["rev-list", "--count", "HEAD..@{u}"]).stdout.trim() || "0";
-      // scoped auto-commit of data paths
-      git(repo, ["add", "--", ...opts.dataPaths]);
-      const staged = git(repo, ["diff", "--cached", "--quiet"]);
+      // commits about to be pulled from remote (for summary)
+      const behind = (await git(repo, ["rev-list", "--count", "HEAD..@{u}"])).stdout.trim() || "0";
+      // scoped auto-commit: stage AND commit only data paths, so a user's
+      // manually-staged files (e.g. half-edited panel code) are never swept in.
+      await git(repo, ["add", "--", ...paths]);
+      const staged = await git(repo, ["diff", "--cached", "--quiet", "--", ...paths]);
       if (staged.status === 1) {
         const ts = new Date().toISOString();
-        git(repo, ["commit", "-m", `auto-sync ${opts.hostname} ${ts}`]);
+        const commit = await git(repo, ["commit", "-m", `auto-sync ${opts.hostname} ${ts}`, "--", ...paths]);
+        if (!commit.ok) {
+          setStatus({ state: "push-failed", detail: `Commit failed: ${commit.stderr.trim() || "unknown error"}` });
+          return status;
+        }
       }
-      // count local commits we are about to push (for summary)
-      const ahead = git(repo, ["rev-list", "--count", "@{u}..HEAD"]).stdout.trim() || "0";
+      // local commits to push (for summary)
+      const ahead = (await git(repo, ["rev-list", "--count", "@{u}..HEAD"])).stdout.trim() || "0";
       // rebase onto upstream
-      const pull = git(repo, ["pull", "--rebase", "--autostash"]);
+      const pull = await git(repo, ["pull", "--rebase", "--autostash"]);
       if (!pull.ok) {
-        if (midRebase(repo)) git(repo, ["rebase", "--abort"]);
+        if (midRebase(repo)) await git(repo, ["rebase", "--abort"]);
         setStatus({ state: "conflict", detail: "Rebase conflict — manual sync needed." });
         return status;
       }
       // push
-      const push = git(repo, ["push"]);
+      const push = await git(repo, ["push"]);
       if (!push.ok) return null; // signal retry
       setStatus({
         state: "synced",
@@ -86,12 +112,16 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       return status;
     };
 
-    const first = attempt();
+    const first = await attempt();
     if (first) return first;
     // push rejected (remote moved) → one retry
-    const second = attempt();
+    const second = await attempt();
     if (second) return second;
     setStatus({ state: "push-failed", detail: "Push rejected after retry." });
+    return status;
+  } catch (e: any) {
+    // never leave the UI stuck in "syncing" on an unexpected throw
+    setStatus({ state: "push-failed", detail: `Sync error: ${e?.message ?? e}` });
     return status;
   } finally {
     running = false;
