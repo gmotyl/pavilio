@@ -83,6 +83,12 @@ describe("PlansTab", () => {
     expect(screen.queryByTestId("plans-tab-star-woo.md")).toBeNull();
   });
 
+  it("makes plan file rows draggable", async () => {
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    const fileBtn = await screen.findByTestId("plans-tab-file-workspace-woo.md");
+    expect(fileBtn.getAttribute("draggable")).toBe("true");
+  });
+
   it("adds a plan to active via POST when an unstarred project plan's star is clicked", async () => {
     const mockFetch = mockFetchResponses({
       "plans-tree": TREE,

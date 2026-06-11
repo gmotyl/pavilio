@@ -1,8 +1,21 @@
 import { Router } from "express";
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, lstatSync } from "fs";
-import { join, resolve, basename, relative, isAbsolute, sep } from "path";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  readdirSync,
+  statSync,
+  lstatSync,
+  mkdirSync,
+  renameSync,
+  copyFileSync,
+  unlinkSync,
+} from "fs";
+import { join, resolve, basename, relative, dirname, isAbsolute, sep } from "path";
 import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
+import { resolveCollision } from "./files.js";
+import { rebuildIndex } from "../lib/file-index.js";
 import { getConfig } from "../config.js";
 
 const router = Router();
@@ -136,6 +149,26 @@ function listPlanFilesInDir(absoluteRoot: string, sourceId: string, projectsDir:
   return out;
 }
 
+/** The ordered plan sources for a project: project plans + .kilo/plans roots + ~/.claude/plans. */
+function plansSources(
+  projectDir: string,
+  projectsDir: string,
+  name: string,
+): { id: string; label: string; absoluteRoot: string }[] {
+  const repoRoot = resolve(projectsDir, "..");
+  const repos = readReposJson(projectDir);
+  return [
+    { id: "project", label: name, absoluteRoot: join(projectDir, "plans") },
+    { id: "workspace", label: "workspace (.kilo)", absoluteRoot: join(repoRoot, ".kilo", "plans") },
+    ...repos.map((r) => ({
+      id: `repo:${r.name}`,
+      label: r.name,
+      absoluteRoot: join(resolve(expandHome(r.path)), ".kilo", "plans"),
+    })),
+    { id: "claude", label: "Claude plans (~/.claude/plans)", absoluteRoot: expandHome("~/.claude/plans") },
+  ];
+}
+
 /** Directories a project may surface plan files from. */
 export function buildPlansAllowlist(projectDir: string, projectsDir: string): string[] {
   const repoRoot = resolve(projectsDir, "..");
@@ -232,24 +265,10 @@ router.get("/:name/plans-tree", (req, res) => {
     return res.status(404).json({ error: "Project not found" });
   }
 
-  const repoRoot = resolve(projectsDir, "..");
-  const repos = readReposJson(projectDir);
-  const candidates: { id: string; label: string; absoluteRoot: string; always: boolean }[] = [
-    { id: "project", label: req.params.name, absoluteRoot: join(projectDir, "plans"), always: true },
-    { id: "workspace", label: "workspace (.kilo)", absoluteRoot: join(repoRoot, ".kilo", "plans"), always: false },
-    ...repos.map((r) => ({
-      id: `repo:${r.name}`,
-      label: r.name,
-      absoluteRoot: join(resolve(expandHome(r.path)), ".kilo", "plans"),
-      always: false,
-    })),
-    { id: "claude", label: "Claude plans (~/.claude/plans)", absoluteRoot: expandHome("~/.claude/plans"), always: false },
-  ];
-
   const sources: PlanSource[] = [];
-  for (const c of candidates) {
+  for (const c of plansSources(projectDir, projectsDir, req.params.name)) {
     const files = listPlanFilesInDir(c.absoluteRoot, c.id, projectsDir);
-    if (files.length === 0 && !c.always) continue;
+    if (files.length === 0 && c.id !== "project") continue; // project node always shown
     sources.push({ id: c.id, label: c.label, absoluteRoot: c.absoluteRoot, files });
   }
 
@@ -283,6 +302,56 @@ router.get("/:name/plans/read", (req, res) => {
   }
   const content = readFileSync(absPath, "utf-8");
   res.json({ absolutePath: absPath, content });
+});
+
+// Move a plan file between plan sources (project plans <-> .kilo/plans <-> ~/.claude/plans).
+// Body: { from: string (absolute path), toId: string (a plans source id) }
+router.post("/:name/plans/move", (req, res) => {
+  const { projectsDir } = getConfig();
+  const projectDir = resolve(projectsDir, req.params.name);
+  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  const fromParam = typeof req.body?.from === "string" ? req.body.from : "";
+  const toId = typeof req.body?.toId === "string" ? req.body.toId : "";
+  if (!fromParam || !toId) return res.status(400).json({ error: "Both 'from' and 'toId' are required" });
+
+  const absFrom = resolve(fromParam);
+  const allowlist = buildPlansAllowlist(projectDir, projectsDir);
+  if (!isPlanPathAllowed(absFrom, allowlist)) {
+    return res.status(403).json({ error: "Source not in this project's plans allowlist" });
+  }
+  if (!existsSync(absFrom)) return res.status(404).json({ error: "Source file not found" });
+  const fromStat = lstatSync(absFrom);
+  if (fromStat.isSymbolicLink()) return res.status(403).json({ error: "Symbolic links are not allowed" });
+  if (!fromStat.isFile()) return res.status(400).json({ error: "Source is not a regular file" });
+
+  const dest = plansSources(projectDir, projectsDir, req.params.name).find((s) => s.id === toId);
+  if (!dest) return res.status(400).json({ error: "Unknown destination source" });
+  const destDir = dest.absoluteRoot;
+
+  if (dirname(absFrom) === destDir) {
+    return res.json({ from: absFrom, to: absFrom, renamed: false, noop: true });
+  }
+
+  mkdirSync(destDir, { recursive: true });
+  const resolved = resolveCollision(destDir, basename(absFrom));
+  if (!resolved) return res.status(409).json({ error: "Too many collisions at destination" });
+
+  try {
+    renameSync(absFrom, resolved.absolutePath);
+  } catch (e: unknown) {
+    if ((e as NodeJS.ErrnoException).code === "EXDEV") {
+      copyFileSync(absFrom, resolved.absolutePath); // cross-device (e.g. ~/.claude on another fs)
+      unlinkSync(absFrom);
+    } else {
+      return res.status(500).json({ error: `Move failed: ${(e as Error).message}` });
+    }
+  }
+
+  // Keep the file index fresh when a file enters/leaves projectsDir.
+  if (isPathUnder(destDir, projectsDir) || isPathUnder(absFrom, projectsDir)) rebuildIndex();
+  res.json({ from: absFrom, to: resolved.absolutePath, renamed: resolved.renamed });
 });
 
 router.get("/", (_req, res) => {

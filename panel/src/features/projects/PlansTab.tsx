@@ -14,39 +14,123 @@ import {
   type PlanFile,
   type PlanSource,
 } from "./usePlansTree";
+import { usePlanDragSource, usePlanDropTarget } from "./usePlanDrag";
 
 interface Props {
   projectName: string;
   currentPlans?: string[];
 }
 
+function PlanFileRow({
+  file,
+  sourceId,
+  selected,
+  currentEntry,
+  starrable,
+  onOpen,
+  onStar,
+  onUnstar,
+}: {
+  file: PlanFile;
+  sourceId: string;
+  selected: boolean;
+  currentEntry: string | undefined;
+  starrable: boolean;
+  onOpen: (file: PlanFile) => void;
+  onStar: (file: PlanFile) => void;
+  onUnstar: (entry: string) => void;
+}) {
+  const isCurrent = currentEntry !== undefined;
+  const drag = usePlanDragSource(file.absolutePath);
+  return (
+    <div className="group flex items-center gap-0.5">
+      <button
+        {...drag}
+        data-testid={`plans-tab-file-${sourceId}-${file.filename}`}
+        onClick={() => onOpen(file)}
+        title={file.absolutePath}
+        className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1 rounded-md text-left text-xs transition-colors"
+        style={{
+          background: selected ? "var(--bg-active)" : "transparent",
+          color: selected
+            ? "var(--text-primary)"
+            : isCurrent
+              ? "var(--accent)"
+              : "var(--text-secondary)",
+          fontWeight: isCurrent ? 600 : 400,
+        }}
+        onMouseEnter={(e) => {
+          if (!selected) e.currentTarget.style.background = "var(--bg-hover)";
+        }}
+        onMouseLeave={(e) => {
+          if (!selected) e.currentTarget.style.background = "transparent";
+        }}
+      >
+        <FileText
+          size={13}
+          className="shrink-0"
+          style={{ color: isCurrent ? "var(--accent)" : "var(--text-tertiary)" }}
+        />
+        <span className="truncate">{file.filename}</span>
+      </button>
+      {starrable && (
+        <button
+          data-testid={`plans-tab-star-${file.filename}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isCurrent && currentEntry) onUnstar(currentEntry);
+            else onStar(file);
+          }}
+          title={isCurrent ? "Active plan — click to remove" : "Mark as active plan"}
+          className={`shrink-0 p-1 rounded transition-all ${isCurrent ? "" : "opacity-0 group-hover:opacity-100"}`}
+          style={{ color: isCurrent ? "var(--accent)" : "var(--text-muted)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        >
+          <Star size={12} fill={isCurrent ? "currentColor" : "none"} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function PlanSourceNode({
   source,
+  projectName,
   selectedPath,
   currentByFilename,
   onOpen,
   onStar,
   onUnstar,
+  onMoved,
 }: {
   source: PlanSource;
+  projectName: string;
   selectedPath: string | null;
   currentByFilename: Map<string, string>;
   onOpen: (file: PlanFile) => void;
   onStar: (file: PlanFile) => void;
   onUnstar: (entry: string) => void;
+  onMoved: () => void;
 }) {
   const starrable = source.id === "project";
   const [open, setOpen] = useState(source.id === "project" || source.files.length > 0);
   const repoHint = source.id !== "project" && source.id !== "claude";
+  const { hover, dropHandlers } = usePlanDropTarget(projectName, source.id, onMoved);
   return (
     <div className="mb-0.5">
       <button
+        {...dropHandlers}
         data-testid={`plans-tab-source-${source.id}`}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 w-full px-1 py-1 rounded-md text-xs font-medium transition-colors duration-100"
-        style={{ color: "var(--text-primary)" }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        style={{
+          color: "var(--text-primary)",
+          background: hover ? "var(--accent-dim, var(--bg-active))" : undefined,
+          outline: hover ? "1px solid var(--accent)" : undefined,
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = hover ? "var(--accent-dim, var(--bg-active))" : "var(--bg-hover)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = hover ? "var(--accent-dim, var(--bg-active))" : "transparent")}
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span className="truncate">
@@ -72,57 +156,19 @@ function PlanSourceNode({
             </p>
           ) : (
             source.files.map((file) => {
-              const selected = selectedPath === file.absolutePath;
               const currentEntry = currentByFilename.get(file.filename);
-              const isCurrent = currentEntry !== undefined;
               return (
-                <div key={file.absolutePath} className="group flex items-center gap-0.5">
-                  <button
-                    data-testid={`plans-tab-file-${source.id}-${file.filename}`}
-                    onClick={() => onOpen(file)}
-                    title={file.absolutePath}
-                    className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1 rounded-md text-left text-xs transition-colors"
-                    style={{
-                      background: selected ? "var(--bg-active)" : "transparent",
-                      color: selected
-                        ? "var(--text-primary)"
-                        : isCurrent
-                          ? "var(--accent)"
-                          : "var(--text-secondary)",
-                      fontWeight: isCurrent ? 600 : 400,
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!selected) e.currentTarget.style.background = "var(--bg-hover)";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!selected) e.currentTarget.style.background = "transparent";
-                    }}
-                  >
-                    <FileText
-                      size={13}
-                      className="shrink-0"
-                      style={{ color: isCurrent ? "var(--accent)" : "var(--text-tertiary)" }}
-                    />
-                    <span className="truncate">{file.filename}</span>
-                  </button>
-                  {starrable && (
-                    <button
-                      data-testid={`plans-tab-star-${file.filename}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (isCurrent) onUnstar(currentEntry);
-                        else onStar(file);
-                      }}
-                      title={isCurrent ? "Active plan — click to remove" : "Mark as active plan"}
-                      className={`shrink-0 p-1 rounded transition-all ${isCurrent ? "" : "opacity-0 group-hover:opacity-100"}`}
-                      style={{ color: isCurrent ? "var(--accent)" : "var(--text-muted)" }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                    >
-                      <Star size={12} fill={isCurrent ? "currentColor" : "none"} />
-                    </button>
-                  )}
-                </div>
+                <PlanFileRow
+                  key={file.absolutePath}
+                  file={file}
+                  sourceId={source.id}
+                  selected={selectedPath === file.absolutePath}
+                  currentEntry={currentEntry}
+                  starrable={starrable}
+                  onOpen={onOpen}
+                  onStar={onStar}
+                  onUnstar={onUnstar}
+                />
               );
             })
           )}
@@ -217,11 +263,13 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
             <PlanSourceNode
               key={s.id}
               source={s}
+              projectName={projectName}
               selectedPath={selectedPath}
               currentByFilename={s.id === "project" ? currentByFilename : new Map()}
               onOpen={onOpen}
               onStar={onStar}
               onUnstar={onUnstar}
+              onMoved={refresh}
             />
           ))}
         </div>

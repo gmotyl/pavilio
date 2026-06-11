@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import request from "supertest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -200,6 +200,66 @@ describe("POST /api/projects/:name/plans/current/:planFile", () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     const res = await request(makeApp()).post("/api/projects/alokai/plans/current/ghost.md");
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/projects/:name/plans/move", () => {
+  it("moves a workspace .kilo plan into the project plans dir", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const from = join(tmpRoot, "workspace", ".kilo", "plans", "woo.md");
+    seedFile(from, "# woo");
+    const res = await request(makeApp())
+      .post("/api/projects/alokai/plans/move")
+      .send({ from, toId: "project" });
+    expect(res.status).toBe(200);
+    expect(res.body.noop).toBeUndefined();
+    expect(existsSync(from)).toBe(false);
+    expect(existsSync(join(projectsDir, "alokai", "plans", "woo.md"))).toBe(true);
+  });
+
+  it("renames on collision at the destination", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    seedFile(join(projectsDir, "alokai", "plans", "woo.md"), "# existing");
+    const from = join(tmpRoot, "workspace", ".kilo", "plans", "woo.md");
+    seedFile(from, "# incoming");
+    const res = await request(makeApp())
+      .post("/api/projects/alokai/plans/move")
+      .send({ from, toId: "project" });
+    expect(res.status).toBe(200);
+    expect(res.body.renamed).toBe(true);
+    expect(existsSync(join(projectsDir, "alokai", "plans", "woo-1.md"))).toBe(true);
+  });
+
+  it("is a noop when source already lives in the destination", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const from = join(projectsDir, "alokai", "plans", "foo.md");
+    seedFile(from, "# foo");
+    const res = await request(makeApp())
+      .post("/api/projects/alokai/plans/move")
+      .send({ from, toId: "project" });
+    expect(res.status).toBe(200);
+    expect(res.body.noop).toBe(true);
+    expect(existsSync(from)).toBe(true);
+  });
+
+  it("rejects a source outside the plans allowlist with 403", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const from = join(tmpRoot, "elsewhere", "secret.md");
+    seedFile(from, "leak");
+    const res = await request(makeApp())
+      .post("/api/projects/alokai/plans/move")
+      .send({ from, toId: "project" });
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 400 for an unknown destination source id", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const from = join(tmpRoot, "workspace", ".kilo", "plans", "woo.md");
+    seedFile(from, "# woo");
+    const res = await request(makeApp())
+      .post("/api/projects/alokai/plans/move")
+      .send({ from, toId: "nope" });
+    expect(res.status).toBe(400);
   });
 
   it("strips path traversal in the plan name (basename only)", async () => {
