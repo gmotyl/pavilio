@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import request from "supertest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -161,6 +161,19 @@ describe("GET /api/projects/:name/plans/read", () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     const res = await request(makeApp()).get("/api/projects/alokai/plans/read");
     expect(res.status).toBe(400);
+  });
+
+  it("rejects a symlink inside an allowed dir with 403 (no symlink follow)", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const secret = join(tmpRoot, "secret.md");
+    writeFileSync(secret, "top secret");
+    const link = join(projectsDir, "alokai", "plans", "link.md");
+    mkdirSync(join(link, ".."), { recursive: true });
+    symlinkSync(secret, link);
+    const res = await request(makeApp()).get(
+      `/api/projects/alokai/plans/read?path=${encodeURIComponent(link)}`,
+    );
+    expect(res.status).toBe(403);
   });
 });
 

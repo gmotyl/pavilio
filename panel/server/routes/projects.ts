@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, lstatSync } from "fs";
 import { join, resolve, basename, relative, isAbsolute, sep } from "path";
 import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
@@ -270,7 +270,15 @@ router.get("/:name/plans/read", (req, res) => {
   if (!isPlanPathAllowed(absPath, allowlist)) {
     return res.status(403).json({ error: "Path not in this project's plans allowlist" });
   }
-  if (!existsSync(absPath) || !statSync(absPath).isFile()) {
+  if (!existsSync(absPath)) {
+    return res.status(404).json({ error: "File not found" });
+  }
+  // lstat (no symlink follow): a symlink inside an allowed dir could point outside it (TOCTOU).
+  const stats = lstatSync(absPath);
+  if (stats.isSymbolicLink()) {
+    return res.status(403).json({ error: "Symbolic links are not allowed" });
+  }
+  if (!stats.isFile()) {
     return res.status(404).json({ error: "File not found" });
   }
   const content = readFileSync(absPath, "utf-8");
