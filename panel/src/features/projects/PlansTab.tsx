@@ -5,7 +5,7 @@ import {
   FileText,
   ClipboardList,
   RefreshCw,
-  X,
+  Star,
 } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import {
@@ -23,14 +23,18 @@ interface Props {
 function PlanSourceNode({
   source,
   selectedPath,
+  currentByFilename,
   onOpen,
+  onUnstar,
 }: {
   source: PlanSource;
   selectedPath: string | null;
+  currentByFilename: Map<string, string>;
   onOpen: (file: PlanFile) => void;
+  onUnstar: (entry: string) => void;
 }) {
   const [open, setOpen] = useState(source.id === "project" || source.files.length > 0);
-  const repoHint = source.id !== "project";
+  const repoHint = source.id !== "project" && source.id !== "claude";
   return (
     <div className="mb-0.5">
       <button
@@ -45,7 +49,7 @@ function PlanSourceNode({
         <span className="truncate">
           {source.id === "project" ? "projects (current)" : source.label}
         </span>
-        {repoHint && source.id !== "claude" && (
+        {repoHint && (
           <span className="font-normal" style={{ color: "var(--text-muted)" }}>
             &nbsp;(.kilo)
           </span>
@@ -66,122 +70,60 @@ function PlanSourceNode({
           ) : (
             source.files.map((file) => {
               const selected = selectedPath === file.absolutePath;
+              const currentEntry = currentByFilename.get(file.filename);
+              const isCurrent = currentEntry !== undefined;
               return (
-                <button
-                  key={file.absolutePath}
-                  data-testid={`plans-tab-file-${source.id}-${file.filename}`}
-                  onClick={() => onOpen(file)}
-                  title={file.absolutePath}
-                  className="flex items-center gap-2 w-full px-2 py-1 rounded-md text-left text-xs transition-colors"
-                  style={{
-                    background: selected ? "var(--bg-active)" : "transparent",
-                    color: selected ? "var(--text-primary)" : "var(--text-secondary)",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!selected) e.currentTarget.style.background = "var(--bg-hover)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!selected) e.currentTarget.style.background = "transparent";
-                  }}
-                >
-                  <FileText
-                    size={13}
-                    className="shrink-0"
-                    style={{ color: "var(--text-tertiary)" }}
-                  />
-                  <span className="truncate">{file.filename}</span>
-                </button>
+                <div key={file.absolutePath} className="flex items-center gap-0.5">
+                  <button
+                    data-testid={`plans-tab-file-${source.id}-${file.filename}`}
+                    onClick={() => onOpen(file)}
+                    title={file.absolutePath}
+                    className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1 rounded-md text-left text-xs transition-colors"
+                    style={{
+                      background: selected ? "var(--bg-active)" : "transparent",
+                      color: selected
+                        ? "var(--text-primary)"
+                        : isCurrent
+                          ? "var(--accent)"
+                          : "var(--text-secondary)",
+                      fontWeight: isCurrent ? 600 : 400,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!selected) e.currentTarget.style.background = "var(--bg-hover)";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!selected) e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    <FileText
+                      size={13}
+                      className="shrink-0"
+                      style={{ color: isCurrent ? "var(--accent)" : "var(--text-tertiary)" }}
+                    />
+                    <span className="truncate">{file.filename}</span>
+                  </button>
+                  {isCurrent && (
+                    <button
+                      data-testid={`plans-tab-star-${file.filename}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUnstar(currentEntry);
+                      }}
+                      title="Active plan — click to remove from active"
+                      className="shrink-0 p-1 rounded transition-colors"
+                      style={{ color: "var(--accent)" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      <Star size={12} fill="currentColor" />
+                    </button>
+                  )}
+                </div>
               );
             })
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-function ActivePlansBanner({
-  projectName,
-  plans,
-  projectFiles,
-  onOpen,
-  onClosed,
-}: {
-  projectName: string;
-  plans: string[];
-  projectFiles: PlanFile[];
-  onOpen: (file: PlanFile) => void;
-  onClosed: () => void;
-}) {
-  return (
-    <div
-      className="mb-4 rounded-lg p-3"
-      style={{
-        background: "var(--bg-surface)",
-        border: "1px solid var(--accent)",
-        borderColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
-      }}
-    >
-      <h3
-        className="text-[11px] font-semibold uppercase tracking-widest mb-2"
-        style={{ color: "var(--accent)" }}
-      >
-        Active Plans
-      </h3>
-      <div className="space-y-0.5">
-        {plans.map((planFile) => {
-          const fileName = planFile.split("/").pop() ?? planFile;
-          const match = projectFiles.find((f) => f.filename === fileName);
-          const label = fileName
-            .replace(/\.md$/, "")
-            .replace(/^\d{4}-\d{2}-\d{2}-/, "")
-            .replace(/-/g, " ");
-          return (
-            <div key={planFile} className="flex items-center gap-1">
-              <button
-                data-testid={`plans-tab-active-open-${planFile}`}
-                onClick={() => match && onOpen(match)}
-                disabled={!match}
-                className="flex items-center gap-3 flex-1 px-3 py-1.5 rounded-md text-left transition-colors disabled:opacity-50"
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              >
-                <FileText size={14} className="shrink-0" style={{ color: "var(--accent)" }} />
-                <span
-                  className="text-sm truncate flex-1 capitalize"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {label}
-                </span>
-              </button>
-              <button
-                data-testid={`plans-tab-active-close-${planFile}`}
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  await fetch(
-                    `/api/projects/${projectName}/plans/current/${encodeURIComponent(planFile)}`,
-                    { method: "DELETE" },
-                  );
-                  onClosed();
-                }}
-                className="shrink-0 p-1 rounded transition-colors"
-                style={{ color: "var(--text-muted)" }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = "var(--red)";
-                  e.currentTarget.style.background = "var(--red-dim)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = "var(--text-muted)";
-                  e.currentTarget.style.background = "transparent";
-                }}
-                title="Close plan (remove from active)"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -192,6 +134,13 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
   const [selectedBasePath, setSelectedBasePath] = useState<string | undefined>(undefined);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+
+  // Map current-plan filename → its original CURRENT.md entry (used by the DELETE call).
+  const currentByFilename = new Map<string, string>();
+  for (const entry of currentPlans ?? []) {
+    const filename = entry.split("/").pop() ?? entry;
+    currentByFilename.set(filename, entry);
+  }
 
   const onOpen = async (file: PlanFile) => {
     setSelectedPath(file.absolutePath);
@@ -204,6 +153,14 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
     } catch (e) {
       setFileError(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  const onUnstar = async (entry: string) => {
+    await fetch(
+      `/api/projects/${projectName}/plans/current/${encodeURIComponent(entry)}`,
+      { method: "DELETE" },
+    );
+    refresh();
   };
 
   if (loading && !data) {
@@ -221,8 +178,6 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
     );
   }
   if (!data) return null;
-
-  const projectFiles = data.sources.find((s) => s.id === "project")?.files ?? [];
 
   return (
     <div className="flex flex-col md:flex-row gap-6">
@@ -245,23 +200,15 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
           </button>
         </div>
 
-        {currentPlans && currentPlans.length > 0 && (
-          <ActivePlansBanner
-            projectName={projectName}
-            plans={currentPlans}
-            projectFiles={projectFiles}
-            onOpen={onOpen}
-            onClosed={refresh}
-          />
-        )}
-
         <div className="text-sm">
           {data.sources.map((s) => (
             <PlanSourceNode
               key={s.id}
               source={s}
               selectedPath={selectedPath}
+              currentByFilename={s.id === "project" ? currentByFilename : new Map()}
               onOpen={onOpen}
+              onUnstar={onUnstar}
             />
           ))}
         </div>

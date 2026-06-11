@@ -70,4 +70,16 @@ describe("PlansTab", () => {
     fireEvent.click(fileBtn);
     await waitFor(() => expect(screen.getByText("Hello plan body")).toBeTruthy());
   });
+
+  it("stars a project plan that is in currentPlans", async () => {
+    renderWithRouter(
+      <PlansTab
+        projectName="alokai"
+        currentPlans={["alokai/plans/2026-01-01-foo.md"]}
+      />,
+    );
+    expect(await screen.findByTestId("plans-tab-star-2026-01-01-foo.md")).toBeTruthy();
+    // non-current workspace file gets no star
+    expect(screen.queryByTestId("plans-tab-star-woo.md")).toBeNull();
+  });
 });
