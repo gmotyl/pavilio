@@ -43,6 +43,21 @@ interface AdrFile {
   relativeToProjectsDir: string | null;
 }
 
+interface PlanFile {
+  source: string;
+  filename: string;
+  absolutePath: string;
+  modified: number;
+  /** Forward-slash path relative to projectsDir when the file lives under it; null otherwise. */
+  relativeToProjectsDir: string | null;
+}
+interface PlanSource {
+  id: string;
+  label: string;
+  absoluteRoot: string;
+  files: PlanFile[];
+}
+
 const ADR_FILE_RE = /^(\d{1,4})-([\w-]+)\.md$/i;
 
 function readReposJson(projectDir: string): RepoEntry[] {
@@ -100,6 +115,44 @@ function listAdrFilesInRoot(absoluteRoot: string, sourceId: string, projectsDir:
   }
   out.sort((a, b) => (a.adrNumber ?? 9999) - (b.adrNumber ?? 9999) || a.filename.localeCompare(b.filename));
   return out;
+}
+
+/** List `*.md` files in a single directory, newest first. */
+function listPlanFilesInDir(absoluteRoot: string, sourceId: string, projectsDir: string): PlanFile[] {
+  if (!existsSync(absoluteRoot) || !statSync(absoluteRoot).isDirectory()) return [];
+  const out: PlanFile[] = [];
+  for (const e of readdirSync(absoluteRoot, { withFileTypes: true })) {
+    if (!e.isFile() || !e.name.endsWith(".md")) continue;
+    const abs = join(absoluteRoot, e.name);
+    out.push({
+      source: sourceId,
+      filename: e.name,
+      absolutePath: abs,
+      modified: statSync(abs).mtimeMs,
+      relativeToProjectsDir: relativeToProjects(abs, projectsDir),
+    });
+  }
+  out.sort((a, b) => b.modified - a.modified);
+  return out;
+}
+
+/** Directories a project may surface plan files from. */
+export function buildPlansAllowlist(projectDir: string, projectsDir: string): string[] {
+  const repoRoot = resolve(projectsDir, "..");
+  const repos = readReposJson(projectDir);
+  return [
+    join(projectDir, "plans"),
+    join(repoRoot, ".kilo", "plans"),
+    ...repos.map((r) => join(resolve(expandHome(r.path)), ".kilo", "plans")),
+    expandHome("~/.claude/plans"),
+  ];
+}
+
+/** A path is allowed if it is a `.md` file living strictly under one allowlisted plans dir. */
+export function isPlanPathAllowed(absolutePath: string, allowedDirs: string[]): boolean {
+  if (absolutePath.includes("\0")) return false;
+  if (!/\.md$/i.test(basename(absolutePath))) return false;
+  return allowedDirs.some((dir) => isPathUnder(absolutePath, dir) && absolutePath !== dir);
 }
 
 /**
@@ -164,6 +217,58 @@ router.get("/:name/context/read", (req, res) => {
   const allowlist = buildContextAllowlist(projectDir);
   if (!isContextPathAllowed(absPath, allowlist)) {
     return res.status(403).json({ error: "Path not in this project's context allowlist" });
+  }
+  if (!existsSync(absPath) || !statSync(absPath).isFile()) {
+    return res.status(404).json({ error: "File not found" });
+  }
+  const content = readFileSync(absPath, "utf-8");
+  res.json({ absolutePath: absPath, content });
+});
+
+router.get("/:name/plans-tree", (req, res) => {
+  const { projectsDir } = getConfig();
+  const projectDir = resolve(projectsDir, req.params.name);
+  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+
+  const repoRoot = resolve(projectsDir, "..");
+  const repos = readReposJson(projectDir);
+  const candidates: { id: string; label: string; absoluteRoot: string; always: boolean }[] = [
+    { id: "project", label: req.params.name, absoluteRoot: join(projectDir, "plans"), always: true },
+    { id: "workspace", label: "workspace (.kilo)", absoluteRoot: join(repoRoot, ".kilo", "plans"), always: false },
+    ...repos.map((r) => ({
+      id: `repo:${r.name}`,
+      label: r.name,
+      absoluteRoot: join(resolve(expandHome(r.path)), ".kilo", "plans"),
+      always: false,
+    })),
+    { id: "claude", label: "Claude plans (~/.claude/plans)", absoluteRoot: expandHome("~/.claude/plans"), always: false },
+  ];
+
+  const sources: PlanSource[] = [];
+  for (const c of candidates) {
+    const files = listPlanFilesInDir(c.absoluteRoot, c.id, projectsDir);
+    if (files.length === 0 && !c.always) continue;
+    sources.push({ id: c.id, label: c.label, absoluteRoot: c.absoluteRoot, files });
+  }
+
+  res.json({ project: req.params.name, sources });
+});
+
+router.get("/:name/plans/read", (req, res) => {
+  const { projectsDir } = getConfig();
+  const projectDir = resolve(projectsDir, req.params.name);
+  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  const pathParam = typeof req.query.path === "string" ? req.query.path : "";
+  if (!pathParam) return res.status(400).json({ error: "Missing 'path' query parameter" });
+
+  const absPath = resolve(pathParam);
+  const allowlist = buildPlansAllowlist(projectDir, projectsDir);
+  if (!isPlanPathAllowed(absPath, allowlist)) {
+    return res.status(403).json({ error: "Path not in this project's plans allowlist" });
   }
   if (!existsSync(absPath) || !statSync(absPath).isFile()) {
     return res.status(404).json({ error: "File not found" });
