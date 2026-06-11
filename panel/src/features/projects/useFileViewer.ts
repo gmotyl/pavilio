@@ -6,6 +6,7 @@ import {
   clearLastSectionFile,
   writeLastSectionFile,
 } from "../shell/lastPath";
+import { SPECIAL_SECTIONS } from "./sections";
 
 interface Options {
   project: string | undefined;
@@ -22,8 +23,7 @@ export function useFileViewer({ project, section }: Options) {
   // memo, progress, qa). Otherwise our load effect 404s and clears the
   // URL param, which also wipes the repo-search file the user just
   // opened.
-  const ownsFileParam =
-    !!section && section !== "repos" && section !== "iterm" && section !== "context";
+  const ownsFileParam = !!section && !SPECIAL_SECTIONS.has(section);
   const selectedFile = ownsFileParam ? searchParams.get("file") : null;
   const [content, setContent] = useState("");
   const [absolutePath, setAbsolutePath] = useState("");
@@ -65,7 +65,7 @@ export function useFileViewer({ project, section }: Options) {
   // Persist last-open file per section so tab links can restore it
   useEffect(() => {
     if (!project || !section) return;
-    if (section === "repos" || section === "iterm" || section === "context") return;
+    if (SPECIAL_SECTIONS.has(section)) return;
     if (selectedFile) {
       writeLastSectionFile(project, section, selectedFile);
     } else {

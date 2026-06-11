@@ -8,6 +8,8 @@ import ProjectSearchBar from "./ProjectSearchBar";
 import FileViewer from "./FileViewer";
 import SectionFilesList from "./SectionFilesList";
 import ContextTab from "./ContextTab";
+import PlansTab from "./PlansTab";
+import { SPECIAL_SECTIONS } from "./sections";
 import ScriptButton from "./ScriptButton";
 import { useWorkspaceScripts } from "./useWorkspaceScripts";
 import { ProjectTabsBar, ProjectTabsMenu } from "./ProjectTabs";
@@ -199,7 +201,7 @@ export default function ProjectView() {
   }, [name, section]);
 
   const sectionFiles =
-    section && section !== "repos" && section !== "iterm" && section !== "context"
+    section && !SPECIAL_SECTIONS.has(section)
       ? files
           .filter((f) => {
             if (
@@ -375,8 +377,13 @@ export default function ProjectView() {
         <ContextTab projectName={name || ""} />
       )}
 
+      {/* Plans tab — foldable tree across project plans + .kilo/plans + ~/.claude/plans */}
+      {section === "plans" && (
+        <PlansTab projectName={name || ""} currentPlans={project?.currentPlans} />
+      )}
+
       {/* File section listing */}
-      {section && section !== "repos" && section !== "iterm" && section !== "context" && !selectedFile && (
+      {section && !SPECIAL_SECTIONS.has(section) && !selectedFile && (
         <SectionFilesList
           projectName={name || ""}
           section={section}
@@ -387,7 +394,7 @@ export default function ProjectView() {
       )}
 
       {/* Inline file viewer */}
-      {section && section !== "repos" && section !== "iterm" && section !== "context" && selectedFile && (
+      {section && !SPECIAL_SECTIONS.has(section) && selectedFile && (
         <FileViewer
           filePath={selectedFile}
           content={fileViewer.content}
