@@ -79,7 +79,24 @@ describe("PlansTab", () => {
       />,
     );
     expect(await screen.findByTestId("plans-tab-star-2026-01-01-foo.md")).toBeTruthy();
-    // non-current workspace file gets no star
+    // workspace (non-project) files are not starrable
     expect(screen.queryByTestId("plans-tab-star-woo.md")).toBeNull();
+  });
+
+  it("adds a plan to active via POST when an unstarred project plan's star is clicked", async () => {
+    const mockFetch = mockFetchResponses({
+      "plans-tree": TREE,
+      "plans/current": { ok: true },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    const star = await screen.findByTestId("plans-tab-star-2026-01-01-foo.md");
+    fireEvent.click(star);
+    await waitFor(() => {
+      const posted = mockFetch.mock.calls.find(
+        ([url, opts]) =>
+          String(url).includes("/plans/current/") && opts?.method === "POST",
+      );
+      expect(posted).toBeTruthy();
+    });
   });
 });

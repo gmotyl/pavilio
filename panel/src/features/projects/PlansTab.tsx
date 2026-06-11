@@ -25,14 +25,17 @@ function PlanSourceNode({
   selectedPath,
   currentByFilename,
   onOpen,
+  onStar,
   onUnstar,
 }: {
   source: PlanSource;
   selectedPath: string | null;
   currentByFilename: Map<string, string>;
   onOpen: (file: PlanFile) => void;
+  onStar: (file: PlanFile) => void;
   onUnstar: (entry: string) => void;
 }) {
+  const starrable = source.id === "project";
   const [open, setOpen] = useState(source.id === "project" || source.files.length > 0);
   const repoHint = source.id !== "project" && source.id !== "claude";
   return (
@@ -73,7 +76,7 @@ function PlanSourceNode({
               const currentEntry = currentByFilename.get(file.filename);
               const isCurrent = currentEntry !== undefined;
               return (
-                <div key={file.absolutePath} className="flex items-center gap-0.5">
+                <div key={file.absolutePath} className="group flex items-center gap-0.5">
                   <button
                     data-testid={`plans-tab-file-${source.id}-${file.filename}`}
                     onClick={() => onOpen(file)}
@@ -102,20 +105,21 @@ function PlanSourceNode({
                     />
                     <span className="truncate">{file.filename}</span>
                   </button>
-                  {isCurrent && (
+                  {starrable && (
                     <button
                       data-testid={`plans-tab-star-${file.filename}`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onUnstar(currentEntry);
+                        if (isCurrent) onUnstar(currentEntry);
+                        else onStar(file);
                       }}
-                      title="Active plan — click to remove from active"
-                      className="shrink-0 p-1 rounded transition-colors"
-                      style={{ color: "var(--accent)" }}
+                      title={isCurrent ? "Active plan — click to remove" : "Mark as active plan"}
+                      className={`shrink-0 p-1 rounded transition-all ${isCurrent ? "" : "opacity-0 group-hover:opacity-100"}`}
+                      style={{ color: isCurrent ? "var(--accent)" : "var(--text-muted)" }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
                       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
-                      <Star size={12} fill="currentColor" />
+                      <Star size={12} fill={isCurrent ? "currentColor" : "none"} />
                     </button>
                   )}
                 </div>
@@ -159,6 +163,14 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
     await fetch(
       `/api/projects/${projectName}/plans/current/${encodeURIComponent(entry)}`,
       { method: "DELETE" },
+    );
+    refresh();
+  };
+
+  const onStar = async (file: PlanFile) => {
+    await fetch(
+      `/api/projects/${projectName}/plans/current/${encodeURIComponent(file.filename)}`,
+      { method: "POST" },
     );
     refresh();
   };
@@ -208,6 +220,7 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
               selectedPath={selectedPath}
               currentByFilename={s.id === "project" ? currentByFilename : new Map()}
               onOpen={onOpen}
+              onStar={onStar}
               onUnstar={onUnstar}
             />
           ))}

@@ -282,6 +282,33 @@ router.get("/", (_req, res) => {
   res.json(projects);
 });
 
+router.post("/:name/plans/current/:planFile", (req, res) => {
+  const { projectsDir } = getConfig();
+  const projectDir = resolve(projectsDir, req.params.name);
+  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  // Only a project-local plan file (by basename) may be marked active.
+  const filename = basename(decodeURIComponent(req.params.planFile));
+  if (!/\.md$/i.test(filename)) return res.status(400).json({ error: "Not a .md plan file" });
+  const planAbs = join(projectDir, "plans", filename);
+  if (!existsSync(planAbs) || !statSync(planAbs).isFile()) {
+    return res.status(404).json({ error: "Plan file not found" });
+  }
+
+  const currentMdPath = join(projectDir, "plans", "CURRENT.md");
+  const existing = existsSync(currentMdPath)
+    ? readFileSync(currentMdPath, "utf-8").split("\n").map((l) => l.trim()).filter(Boolean)
+    : [];
+  if (existing.some((l) => l.endsWith(filename))) {
+    return res.json({ ok: true }); // already active — idempotent
+  }
+  const line = `projects/${req.params.name}/plans/${filename}`;
+  const header = existing.length === 0 ? "# CURRENT plan\n\n" : "";
+  writeFileSync(currentMdPath, header + [...existing, line].join("\n") + "\n");
+  res.json({ ok: true });
+});
+
 router.delete("/:name/plans/current/:planFile", (req, res) => {
   const { projectsDir } = getConfig();
   const currentMdPath = join(projectsDir, req.params.name, "plans", "CURRENT.md");
