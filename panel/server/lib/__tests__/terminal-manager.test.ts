@@ -5,6 +5,36 @@ import {
   nudgeSession,
   shouldSuppressRecord,
 } from "../terminal-manager"
+import {
+  serializeReplay,
+  flushReplay,
+  _resetReplayForTests,
+} from "../terminalReplay"
+
+// Fake node-pty: capture the onData callbacks registered against the
+// most-recently-spawned pty so a test can drive PTY output deterministically
+// without spawning a real shell.
+let lastPtyDataCallbacks: Array<(data: string) => void> = []
+function emitPtyData(data: string): void {
+  for (const cb of lastPtyDataCallbacks) cb(data)
+}
+vi.mock("node-pty", () => ({
+  spawn: () => {
+    const dataCallbacks: Array<(data: string) => void> = []
+    lastPtyDataCallbacks = dataCallbacks
+    return {
+      pid: 1234,
+      onData: (cb: (data: string) => void) => {
+        dataCallbacks.push(cb)
+        return { dispose: () => {} }
+      },
+      onExit: () => ({ dispose: () => {} }),
+      resize: () => {},
+      kill: () => {},
+      write: () => {},
+    }
+  },
+}))
 
 describe("shouldSuppressRecord", () => {
   it("returns false when suppressUntil is undefined", () => {
@@ -46,5 +76,29 @@ describe("nudgeSession", () => {
 
   it("returns false when the session does not exist", () => {
     expect(nudgeSession("nonexistent", 80, 24)).toBe(false)
+  })
+})
+
+describe("replay buffer wiring", () => {
+  afterEach(() => {
+    _resetReplayForTests()
+    // guard against emitPtyData replaying a stale pty across tests
+    lastPtyDataCallbacks = []
+  })
+
+  it("feeds PTY output into the session's replay buffer", async () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "test" })
+    emitPtyData("REPLAY_ME")
+    await flushReplay(meta.id)
+    expect(serializeReplay(meta.id)).toContain("REPLAY_ME")
+    destroySession(meta.id)
+  })
+
+  it("tears down the replay buffer on destroySession", async () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "test" })
+    emitPtyData("GONE_SOON")
+    await flushReplay(meta.id)
+    destroySession(meta.id)
+    expect(serializeReplay(meta.id)).toBe("")
   })
 })
