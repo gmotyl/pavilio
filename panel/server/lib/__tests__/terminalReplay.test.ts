@@ -7,6 +7,7 @@ import {
   serializeReplay,
   destroyReplay,
   _resetReplayForTests,
+  buildReplayPayload,
 } from "../terminalReplay";
 
 afterEach(() => _resetReplayForTests());
@@ -58,5 +59,16 @@ describe("terminalReplay", () => {
     expect(() => feedReplay("ghost", "x")).not.toThrow();
     expect(() => resizeReplay("ghost", 10, 10)).not.toThrow();
     await expect(flushReplay("ghost")).resolves.toBeUndefined();
+  });
+
+  it("builds a payload: reset, then preamble, then snapshot, in order", () => {
+    const out = buildReplayPayload("\x1b[?1000h", "SNAP");
+    expect(out.startsWith("\x1bc")).toBe(true);
+    expect(out.indexOf("\x1b[?1000h")).toBeGreaterThan(out.indexOf("\x1bc"));
+    expect(out.indexOf("SNAP")).toBeGreaterThan(out.indexOf("\x1b[?1000h"));
+  });
+
+  it("omits empty preamble/snapshot but always resets", () => {
+    expect(buildReplayPayload("", "")).toBe("\x1bc");
   });
 });

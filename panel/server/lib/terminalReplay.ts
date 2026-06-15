@@ -79,3 +79,10 @@ export function destroyReplay(id: string): void {
 export function _resetReplayForTests(): void {
   for (const id of [...buffers.keys()]) destroyReplay(id);
 }
+
+// Full reset first (clears modes + screen so a non-empty client doesn't
+// double-paint), then restore modes (preamble), then paint the snapshot.
+const RESET = "\x1bc";
+export function buildReplayPayload(preamble: string, snapshot: string): string {
+  return RESET + (preamble ?? "") + (snapshot ?? "");
+}
