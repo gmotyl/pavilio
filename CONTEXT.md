@@ -60,6 +60,18 @@ _Avoid_: auto-tracked entry (the row never appears in the user-facing list), bus
 A `YYYY-MM-DD` local-date string used to group **Manual entries** and **Busy blocks** for daily totals and reports. Always local time, never UTC, because the user works on a single machine and "yesterday's evening" is yesterday's bucket regardless of UTC offset.
 _Avoid_: date string (ambiguous, used everywhere), report day.
 
+**Preamble**:
+The DEC private mode state (alt screen, mouse tracking, bracketed paste) the server replays to a client when it attaches to a live session. Those bytes are emitted once at TUI startup and never again, so without the preamble a reconnecting xterm gets the wrong screen buffer and scroll/clicks break. Carried by `getModePreamble` / `terminal-mode-state.ts`. Restores *modes*, not screen contents.
+_Avoid_: mode replay (collides with **Replay**), init sequence, header.
+
+**Nudge**:
+A double SIGWINCH (`cols-1 → cols`) the server fires at a TUI to prompt it to repaint its visible screen for a freshly-attached client. A heuristic — works only for TUIs that redraw on resize, never for plain shells, and a TUI may coalesce the two signals into a no-op. From `nudgeSession`. Restores a TUI's *screen* by asking the TUI to redraw it.
+_Avoid_: resize hack, repaint, SIGWINCH (the mechanism, not the concept).
+
+**Replay**:
+A serialized screen + scrollback snapshot the server sends a client on attach, before live bytes, reconstructed from a per-session headless `@xterm/headless` terminal and `@xterm/addon-serialize` (see [ADR 0004](docs/adr/0004-headless-xterm-replay-on-reconnect.md)). Unlike **Nudge**, it restores exact contents for both TUIs *and* plain shells without the cooperation of the running program. Prefixed with a full reset; sent after the client's first **resize** so dimensions match.
+_Avoid_: replay (lowercase, ambiguous with WS message replay), restore, snapshot (overloaded with buffer snapshot).
+
 ## Relationships
 
 - A **Workspace** owns many **Projects**
@@ -70,6 +82,7 @@ _Avoid_: date string (ambiguous, used everywhere), report day.
 - The **Scripts config** defines a list of **Overview scripts**; the **Panel** renders one button per entry on every **Project**'s Overview tab.
 - The **Workspace** also contains the **Toolbox** — workspace-level tooling directories that the **Panel** edits with the same mutation policy as **Notes world**, but that `pnpm pull` may merge from upstream pavilio.
 - A **Project**'s **Time bucket** for a given day contains zero or more **Manual entries** (chargeable) and zero or more **Busy blocks** (reference only). Exports include manual entries only.
+- When a client attaches to a session, the **Panel** server sends three things in order: the **Preamble** (modes), then the **Replay** (screen + scrollback), then live PTY bytes. The **Nudge** is a legacy fallback that asks a TUI to redraw its own screen; **Replay** supersedes it for both TUIs and plain shells.
 
 ## Example dialogue
 
