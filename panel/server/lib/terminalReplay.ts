@@ -25,11 +25,18 @@ interface ReplayBuffer {
 
 const buffers = new Map<string, ReplayBuffer>();
 
+// Clamp a dimension to a positive integer. Guards against NaN/undefined (a
+// malformed ws resize yields Number(undefined) === NaN), non-positive, and
+// fractional values — any of which can make xterm throw.
+function safeDim(n: number): number {
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+}
+
 export function createReplay(id: string, cols: number, rows: number): void {
   if (buffers.has(id)) return; // idempotent
   const term = new Terminal({
-    cols: Math.max(1, cols),
-    rows: Math.max(1, rows),
+    cols: safeDim(cols),
+    rows: safeDim(rows),
     scrollback: SCROLLBACK,
     allowProposedApi: true,
   });
@@ -49,14 +56,22 @@ export function feedReplay(id: string, data: string): void {
 export function flushReplay(id: string): Promise<void> {
   const buf = buffers.get(id);
   if (!buf) return Promise.resolve();
-  return new Promise((resolve) => buf.term.write("", () => resolve()));
+  // Bound the wait: if the write queue ever stalls or the terminal is disposed
+  // mid-flush, resolve anyway so an awaiting attach handler can't hang.
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 1000);
+    buf.term.write("", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 export function resizeReplay(id: string, cols: number, rows: number): void {
   const buf = buffers.get(id);
   if (!buf) return;
   try {
-    buf.term.resize(Math.max(1, cols), Math.max(1, rows));
+    buf.term.resize(safeDim(cols), safeDim(rows));
   } catch (err) {
     console.warn(`[terminalReplay:${id}] resize failed:`, err);
   }

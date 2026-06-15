@@ -170,6 +170,11 @@ export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
       } else if (msg.type === "resize") {
         const cols = Number(msg.cols);
         const rows = Number(msg.rows);
+        // Reject malformed dims at the boundary so NaN/non-positive values
+        // never reach the PTY or the replay terminal.
+        if (!Number.isFinite(cols) || cols <= 0 || !Number.isFinite(rows) || rows <= 0) {
+          return;
+        }
         if (!replaySent) {
           void sendReplay(cols, rows);
         } else {

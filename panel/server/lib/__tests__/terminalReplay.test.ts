@@ -24,6 +24,14 @@ describe("terminalReplay", () => {
     expect(serializeReplay("nope")).toBe("");
   });
 
+  it("clamps NaN/non-positive dims instead of throwing", async () => {
+    expect(() => createReplay("s-nan", NaN, undefined as unknown as number)).not.toThrow();
+    expect(() => resizeReplay("s-nan", NaN, -5)).not.toThrow();
+    feedReplay("s-nan", "still works");
+    await flushReplay("s-nan");
+    expect(serializeReplay("s-nan")).toContain("still works");
+  });
+
   it("preserves multiple lines of scrollback", async () => {
     createReplay("s2", 80, 3);
     for (let i = 0; i < 10; i++) feedReplay("s2", `line${i}\r\n`);
