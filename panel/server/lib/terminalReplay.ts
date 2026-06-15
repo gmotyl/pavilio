@@ -1,5 +1,13 @@
-import { Terminal } from "@xterm/headless";
-import { SerializeAddon } from "@xterm/addon-serialize";
+// These packages ship as CJS whose named exports a native-ESM loader (tsx,
+// running the server) cannot statically detect — `import { Terminal }` resolves
+// to undefined at runtime even though the types declare it. Import the default
+// (the CJS module.exports object) and destructure. esModuleInterop makes this
+// type-safe; it also works under Vitest's bundler interop.
+import headlessPkg from "@xterm/headless";
+import serializePkg from "@xterm/addon-serialize";
+
+const { Terminal } = headlessPkg;
+const { SerializeAddon } = serializePkg;
 
 // One headless terminal per PTY session, fed every output chunk so that a
 // client attaching later can be sent a serialized snapshot of the screen +
