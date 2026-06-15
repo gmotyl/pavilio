@@ -9,6 +9,12 @@ import {
   nudgeSession,
   resizeSession,
 } from "./lib/terminal-manager.js";
+import {
+  resizeReplay,
+  serializeReplay,
+  flushReplay,
+  buildReplayPayload,
+} from "./lib/terminalReplay.js";
 import { recordInput, dismiss, getSnapshot, subscribe, type ActivityEvent } from "./lib/terminalActivity.js";
 import { validateWsToken } from "./lib/auth.js";
 import { verifySessionCookie } from "./lib/mobile-auth.js";
@@ -78,30 +84,65 @@ export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
     return;
   }
 
-  // Replay the TUI's current DEC private mode state to this client before
-  // streaming live bytes. Without this, a browser refresh reconnects to a
-  // live PTY that never re-emits `\e[?1000h` etc., so the new xterm starts
-  // with no mouse tracking / wrong screen buffer and scroll + clicks break.
-  const preamble = getModePreamble(sessionId);
-  if (preamble && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "output", data: preamble }));
-  }
+  let replaySent = false;
+  let dataSub: { dispose: () => void } | null = null;
+  let fallbackTimer: NodeJS.Timeout | null = null;
 
-  const dataSub = session.pty.onData((data) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "output", data }));
+  // Subscribe live PTY forwarding. Called only AFTER the replay snapshot is
+  // sent, so the snapshot (which already contains everything up to now) is
+  // not duplicated by streamed bytes.
+  const startLiveForwarding = () => {
+    if (dataSub) return;
+    dataSub = session.pty.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "output", data }));
+      }
+    });
+  };
+
+  // Send the replay payload (reset + preamble + serialized snapshot) sized to
+  // `cols`x`rows`, then begin live forwarding and nudge the TUI.
+  const sendReplay = async (cols: number, rows: number) => {
+    if (replaySent) return;
+    replaySent = true; // set before await to guard against a second resize
+    if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+
+    try {
+      resizeSession(sessionId, cols, rows);
+      resizeReplay(sessionId, cols, rows);
+      await flushReplay(sessionId);
+
+      // The ws may have closed during the await; its close handler ran while
+      // dataSub was still null, so bail before subscribing into a dead socket.
+      if (ws.readyState !== WebSocket.OPEN) return;
+
+      const preamble = getModePreamble(sessionId);
+      const snapshot = serializeReplay(sessionId);
+      ws.send(JSON.stringify({
+        type: "output",
+        data: buildReplayPayload(preamble, snapshot),
+      }));
+
+      startLiveForwarding();
+
+      // Nudge so a TUI re-validates its dims and repaints anything the snapshot
+      // could not capture; the repaint now streams through live forwarding.
+      // Use the just-applied dims, not session.pty.* which may lag an async resize.
+      if (cols > 1) {
+        nudgeSession(sessionId, cols, rows);
+      }
+    } catch (err) {
+      console.warn(`[terminal:${sessionId}] replay failed:`, err);
+      // Fall back to plain live forwarding so the client still receives output.
+      if (ws.readyState === WebSocket.OPEN) startLiveForwarding();
     }
-  });
+  };
 
-  // Kick a SIGWINCH so the TUI repaints its visible buffer to the newly-
-  // attached client. The preamble above restored modes, but the TUI won't
-  // re-emit visible cell contents until something prompts a redraw. Using
-  // nudgeSession (cols-1 → cols) triggers two SIGWINCH events, which all
-  // well-behaved TUIs respond to with a full repaint. Suppresses the
-  // activity LED flip since the redraw isn't new activity.
-  if (session.pty.cols > 1) {
-    nudgeSession(sessionId, session.pty.cols, session.pty.rows);
-  }
+  // Fallback: client should send a resize on ws open, but if it doesn't,
+  // replay at the PTY's current dims so the screen is never left blank.
+  fallbackTimer = setTimeout(() => {
+    void sendReplay(session.pty.cols, session.pty.rows);
+  }, 300);
 
   const exitSub = session.pty.onExit(({ exitCode }) => {
     if (ws.readyState === WebSocket.OPEN) {
@@ -127,7 +168,19 @@ export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
         dismiss(sessionId);
         return;
       } else if (msg.type === "resize") {
-        resizeSession(sessionId, Number(msg.cols), Number(msg.rows));
+        const cols = Number(msg.cols);
+        const rows = Number(msg.rows);
+        // Reject malformed dims at the boundary so NaN/non-positive values
+        // never reach the PTY or the replay terminal.
+        if (!Number.isFinite(cols) || cols <= 0 || !Number.isFinite(rows) || rows <= 0) {
+          return;
+        }
+        if (!replaySent) {
+          void sendReplay(cols, rows);
+        } else {
+          resizeSession(sessionId, cols, rows);
+          resizeReplay(sessionId, cols, rows);
+        }
       } else if (msg.type === "mobile-nudge") {
         nudgeSession(sessionId, Number(msg.cols), Number(msg.rows));
       }
@@ -137,7 +190,8 @@ export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
   });
 
   ws.on("close", () => {
-    dataSub.dispose();
+    if (fallbackTimer) clearTimeout(fallbackTimer);
+    dataSub?.dispose();
     exitSub.dispose();
     clearInterval(heartbeat);
   });

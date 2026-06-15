@@ -8,6 +8,12 @@ import {
   scanModeState,
   type ModeState,
 } from "./terminal-mode-state";
+import {
+  createReplay,
+  feedReplay,
+  resizeReplay,
+  destroyReplay,
+} from "./terminalReplay";
 
 export interface TerminalSession {
   id: string;
@@ -68,6 +74,13 @@ export function createSession(opts: {
 
   sessions.set(id, session);
 
+  // Mirror every PTY output chunk into a headless replay buffer so a client
+  // reconnecting later can be sent a serialized snapshot instead of a blank
+  // screen. Kept as a separate onData subscription from the mode-scan hook so
+  // the two concerns stay isolated.
+  createReplay(id, opts.cols, opts.rows);
+  ptyProcess.onData((data) => feedReplay(id, data));
+
   // Scan every PTY output chunk for DEC private mode set/reset sequences
   // so a newly-reconnecting client can receive a preamble that restores
   // the TUI's current mode state (alt screen, mouse tracking, bracketed
@@ -90,6 +103,7 @@ export function createSession(opts: {
   });
 
   ptyProcess.onExit(() => {
+    destroyReplay(id);
     removeSession(id);
     sessions.delete(id);
   });
@@ -109,6 +123,7 @@ export function destroySession(id: string): boolean {
   const session = sessions.get(id);
   if (!session) return false;
   session.pty.kill();
+  destroyReplay(id);
   sessions.delete(id);
   return true;
 }
@@ -128,6 +143,7 @@ export function resizeSession(id: string, cols: number, rows: number): boolean {
   const session = sessions.get(id);
   if (!session) return false;
   session.pty.resize(cols, rows);
+  resizeReplay(id, cols, rows);
   return true;
 }
 
