@@ -113,10 +113,15 @@ export function followBottomAcrossResize(
   if (wasAtBottom) term.scrollToBottom();
 }
 
-/** Re-fit every live terminal, following the bottom for those at the bottom. */
+/**
+ * Re-fit every ACTIVE terminal, following the bottom for those at the bottom.
+ * Parked terminals (refCount === 0) live in the hidden root at a fixed
+ * 1200x800 — fitting them there would fire spurious PTY resizes and corrupt
+ * their layout for when the user switches back, so they're skipped.
+ */
 export function refitAllAndFollow(): void {
   for (const inst of instances.values()) {
-    followBottomAcrossResize(inst.terminal, inst.fit);
+    if (inst.refCount > 0) followBottomAcrossResize(inst.terminal, inst.fit);
   }
 }
 
@@ -185,7 +190,12 @@ if (typeof window !== "undefined" && window.visualViewport) {
 // the user comes back to a terminal scrolled away from the cursor. Re-fit and
 // follow the bottom (unless they had scrolled up) so the cursor is back in
 // view. rAF defers until layout/canvas are live again after the tab shows.
-if (typeof document !== "undefined") {
+// Guarded against the test env: vitest's resetModules re-imports this module
+// per test, and the jsdom `document` persists across them — so an unguarded
+// module-scope listener would accumulate one per test, leaking every prior
+// module instance (and its terminals/sockets). Vite statically replaces
+// process.env.NODE_ENV in the real build, so this is a no-op cost there.
+if (typeof document !== "undefined" && process.env.NODE_ENV !== "test") {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     requestAnimationFrame(() => refitAllAndFollow());
