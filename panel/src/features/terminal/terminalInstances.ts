@@ -87,6 +87,39 @@ export function refitAll(): void {
   for (const inst of instances.values()) inst.fit();
 }
 
+/** Minimal surface of an xterm Terminal needed to follow the bottom. */
+interface FollowableTerminal {
+  buffer: { active: { viewportY: number; baseY: number } };
+  scrollToBottom: () => void;
+}
+
+/**
+ * Re-fit a terminal across a layout change (tab re-entry, reopen, visibility
+ * regain) while preserving the user's scroll intent.
+ *
+ * The crucial part is the ORDER: we read "was the user at the bottom?" BEFORE
+ * calling fit(). A resize that shrinks rows grows the scrollback, pushing
+ * baseY ahead of the unchanged viewportY — so reading the flag after fit()
+ * (the old bug) made an at-bottom terminal look scrolled-up and skipped the
+ * scroll, leaving the cursor off-screen. Capture first, fit, then follow.
+ */
+export function followBottomAcrossResize(
+  term: FollowableTerminal,
+  fit: () => void,
+): void {
+  const { viewportY, baseY } = term.buffer.active;
+  const wasAtBottom = viewportY >= baseY;
+  fit();
+  if (wasAtBottom) term.scrollToBottom();
+}
+
+/** Re-fit every live terminal, following the bottom for those at the bottom. */
+export function refitAllAndFollow(): void {
+  for (const inst of instances.values()) {
+    followBottomAcrossResize(inst.terminal, inst.fit);
+  }
+}
+
 /**
  * Custom xterm key event handler that makes Shift+Enter emit the
  * Claude-Code-documented multi-line convention: a literal backslash
@@ -145,6 +178,18 @@ if (typeof window !== "undefined" && window.visualViewport) {
   };
   window.visualViewport.addEventListener("resize", onVVResize);
   window.visualViewport.addEventListener("scroll", onVVResize);
+}
+
+// When the browser tab regains visibility, the canvas was not painting while
+// hidden and any output that streamed in left the rendered viewport stale —
+// the user comes back to a terminal scrolled away from the cursor. Re-fit and
+// follow the bottom (unless they had scrolled up) so the cursor is back in
+// view. rAF defers until layout/canvas are live again after the tab shows.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    requestAnimationFrame(() => refitAllAndFollow());
+  });
 }
 
 // Expose a devtools handle so Claude hooks (or quick manual tests) can
