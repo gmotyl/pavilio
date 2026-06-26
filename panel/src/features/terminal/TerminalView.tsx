@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   acquireTerminal,
+  followBottomAcrossResize,
   releaseTerminal,
   type LiveTerminal,
 } from "./terminalInstances";
@@ -89,10 +90,8 @@ export function TerminalView({
     setWs(inst.ws);
 
     const rafId = requestAnimationFrame(() => {
-      inst.fit();
       // Follow the bottom on tab re-entry unless the user was scrolling back.
-      const buf = inst.terminal.buffer.active;
-      if (buf.viewportY >= buf.baseY) inst.terminal.scrollToBottom();
+      followBottomAcrossResize(inst.terminal, inst.fit);
     });
 
     // After a page refresh, the first fit runs before the PTY has
@@ -101,9 +100,7 @@ export function TerminalView({
     // a second fit so that content shows up without the user having to
     // toggle layout manually.
     const settleTimer = setTimeout(() => {
-      inst.fit();
-      const buf = inst.terminal.buffer.active;
-      if (buf.viewportY >= buf.baseY) inst.terminal.scrollToBottom();
+      followBottomAcrossResize(inst.terminal, inst.fit);
     }, 300);
 
     const resizeObserver = new ResizeObserver(() => inst.fit());
@@ -141,9 +138,7 @@ export function TerminalView({
     if (!focused || !inst) return;
     // Re-fit + focus when becoming visible (e.g., maximize toggle).
     const rafId = requestAnimationFrame(() => {
-      inst.fit();
-      const buf = inst.terminal.buffer.active;
-      if (buf.viewportY >= buf.baseY) inst.terminal.scrollToBottom();
+      followBottomAcrossResize(inst.terminal, inst.fit);
       inst.focus();
     });
     return () => cancelAnimationFrame(rafId);

@@ -156,6 +156,53 @@ describe("terminalInstances", () => {
   });
 });
 
+describe("followBottomAcrossResize", () => {
+  // A minimal terminal-like stub whose `fit` callback can mutate baseY to
+  // simulate the scrollback growth a real resize causes.
+  function makeTerm(viewportY: number, baseY: number) {
+    const term = {
+      buffer: { active: { viewportY, baseY } },
+      scrollToBottom: vi.fn(),
+    };
+    return term;
+  }
+
+  it("always calls fit", async () => {
+    const { followBottomAcrossResize } = await import("../terminalInstances");
+    const term = makeTerm(10, 10);
+    const fit = vi.fn();
+    followBottomAcrossResize(term, fit);
+    expect(fit).toHaveBeenCalledTimes(1);
+  });
+
+  it("scrolls to bottom when the user was at the bottom before fit", async () => {
+    const { followBottomAcrossResize } = await import("../terminalInstances");
+    const term = makeTerm(10, 10); // viewportY === baseY → at bottom
+    followBottomAcrossResize(term, vi.fn());
+    expect(term.scrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT scroll when the user had scrolled up before fit", async () => {
+    const { followBottomAcrossResize } = await import("../terminalInstances");
+    const term = makeTerm(3, 10); // viewportY < baseY → scrolled up
+    followBottomAcrossResize(term, vi.fn());
+    expect(term.scrollToBottom).not.toHaveBeenCalled();
+  });
+
+  it("scrolls to bottom even when fit shifts baseY past viewportY (regression: capture before fit)", async () => {
+    const { followBottomAcrossResize } = await import("../terminalInstances");
+    const term = makeTerm(10, 10); // at bottom before fit
+    // Simulate a shrink-on-reattach: rows decrease, scrollback grows, so
+    // baseY jumps ahead of the (unchanged) viewportY. The OLD code read
+    // atBottom AFTER this and wrongly skipped the scroll.
+    const fit = vi.fn(() => {
+      term.buffer.active.baseY = 40;
+    });
+    followBottomAcrossResize(term, fit);
+    expect(term.scrollToBottom).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("shiftEnterHandler", () => {
   it("sends backslash+CR to PTY and returns false on Shift+Enter keydown", async () => {
     const { shiftEnterHandler } = await import("../terminalInstances");
