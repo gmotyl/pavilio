@@ -35,7 +35,20 @@ export default function QuickFinder() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const files = useFileIndex();
+  const [includeArchived, setIncludeArchived] = useState(
+    () => localStorage.getItem("panel-search-include-archived") !== "false",
+  );
+  const toggleArchived = useCallback(() => {
+    setIncludeArchived((v) => {
+      localStorage.setItem("panel-search-include-archived", String(!v));
+      return !v;
+    });
+  }, []);
+  const allFiles = useFileIndex();
+  const files = useMemo(
+    () => (includeArchived ? allFiles : allFiles.filter((f) => !f.archived)),
+    [allFiles, includeArchived],
+  );
 
   const projectColorMap = useMemo(() => {
     const map = new Map<string, (typeof PROJECT_COLORS)[0]>();
@@ -78,7 +91,7 @@ export default function QuickFinder() {
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(
-          `/api/search/grep?q=${encodeURIComponent(grepQuery)}`,
+          `/api/search/grep?q=${encodeURIComponent(grepQuery)}&includeArchived=${includeArchived}`,
           { signal: abort.signal },
         );
         if (res.ok) setGrepResults(await res.json());
@@ -93,7 +106,7 @@ export default function QuickFinder() {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [grepQuery, isGrepMode]);
+  }, [grepQuery, isGrepMode, includeArchived]);
 
   const grepItems = useMemo(
     () => grepResults.map((r) => r.relativePath),
@@ -301,6 +314,17 @@ export default function QuickFinder() {
                   >
                     {file.project}
                   </span>
+                  {file.archived && (
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded shrink-0 uppercase tracking-wide"
+                      style={{
+                        background: "rgba(148,163,184,0.15)",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      archived
+                    </span>
+                  )}
                   <span
                     className="text-sm font-mono truncate flex-1 min-w-0"
                     style={{ color: "var(--text-primary)" }}
@@ -332,6 +356,17 @@ export default function QuickFinder() {
           <span>↵ open</span>
           <span>⌘↵ VS Code</span>
           <span>esc close</span>
+          <button
+            type="button"
+            data-testid="quick-finder-toggle-archived"
+            onClick={toggleArchived}
+            style={{
+              color: includeArchived ? "var(--text-secondary)" : "var(--text-muted)",
+            }}
+            title="Include archived projects in results"
+          >
+            {includeArchived ? "☑" : "☐"} archived
+          </button>
           <span className="ml-auto" style={{ color: "var(--text-tertiary)" }}>
             ? search in files
           </span>
