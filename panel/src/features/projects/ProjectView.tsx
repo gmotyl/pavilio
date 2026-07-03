@@ -167,9 +167,14 @@ export default function ProjectView() {
 
   const search = useProjectSearch({
     project: name,
-    enabled: !isReposSearch,
+    enabled: false, // notes search handled by QuickFinder; hook only drives repos-tab overlay
     onOpenResult: openSearchResult,
   });
+
+  const onToggleSearch = useCallback(() => {
+    if (isReposSearch) search.toggle();
+    else window.dispatchEvent(new Event("pavilio:open-quick-finder"));
+  }, [isReposSearch, search.toggle]);
 
   const repoSearch = useRepoSearch({
     active: isReposSearch,
@@ -250,11 +255,11 @@ export default function ProjectView() {
 
       <ProjectTabsBar
         tabs={tabs}
-        searchActive={search.active}
-        onToggleSearch={search.toggle}
+        searchActive={isReposSearch && search.active}
+        onToggleSearch={onToggleSearch}
       />
 
-      {search.active && (
+      {isReposSearch && search.active && (
         <ProjectSearchBar
           projectName={name}
           query={search.query}
@@ -341,6 +346,11 @@ export default function ProjectView() {
                 commitsOpen.setOpen(repo.path, open)
               }
               showListSidebar={wide}
+              liveHighlight={
+                search.active && search.query.trim().length >= 2
+                  ? search.query.trim()
+                  : undefined
+              }
             />
           ))}
         </div>

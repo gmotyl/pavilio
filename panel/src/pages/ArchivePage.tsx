@@ -16,7 +16,7 @@ function formatDate(iso: string): string {
 }
 
 export default function ArchivePage() {
-  const { archived, restore } = useArchivedProjects();
+  const { archived, restore, error } = useArchivedProjects();
   const [filter, setFilter] = useState("");
 
   const visible = useMemo(() => {
@@ -31,6 +31,19 @@ export default function ArchivePage() {
         <Inbox size={20} style={{ color: "var(--text-secondary)" }} />
         <h1 className="text-xl font-semibold">Archive</h1>
       </header>
+
+      {error && (
+        <p
+          data-testid="archive-error"
+          className="mb-4 text-sm px-3 py-2 rounded-md"
+          style={{
+            color: "var(--danger, #f87171)",
+            border: "1px solid var(--border-subtle)",
+          }}
+        >
+          {error}
+        </p>
+      )}
 
       <div
         className="flex items-center gap-2 px-3 py-2 rounded-md mb-4"
@@ -68,11 +81,7 @@ export default function ArchivePage() {
               }}
             >
               <Inbox size={14} style={{ color: "var(--text-tertiary)" }} />
-              <Link
-                to={`/project/${p.name}`}
-                className="flex-1 min-w-0 no-underline"
-                title={`Open ${p.name}`}
-              >
+              <div className="flex-1 min-w-0">
                 <div
                   className="text-sm font-medium truncate"
                   style={{ color: "var(--text-primary)" }}
@@ -85,7 +94,7 @@ export default function ArchivePage() {
                 >
                   Archived {formatDate(p.archivedAt)}
                 </div>
-              </Link>
+              </div>
               <button
                 type="button"
                 data-testid={`archive-restore-${p.name}`}
@@ -109,7 +118,7 @@ export default function ArchivePage() {
         className="mt-6 text-[11px] text-center"
         style={{ color: "var(--text-muted)" }}
       >
-        Archived projects are hidden from navigation. Data is preserved.{" "}
+        Archived projects live in projects/archived/ and are hidden from navigation. Data is preserved.{" "}
         <Link to="/" style={{ color: "var(--text-secondary)" }}>
           Back to dashboard
         </Link>

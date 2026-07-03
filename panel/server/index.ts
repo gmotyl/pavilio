@@ -28,6 +28,7 @@ import terminalRouter from "./routes/terminal.js";
 import scriptsRouter from "./routes/scripts.js";
 import { mountTimeRoutes } from "./routes/time.js";
 import autoSyncRouter from "./routes/auto-sync.js";
+import archiveRouter from "./routes/archive.js";
 import { machineHostname } from "./lib/hostname.js";
 import { startScheduler } from "./lib/autoSyncScheduler.js";
 import { isEnabled } from "./lib/autoSyncState.js";
@@ -112,6 +113,7 @@ async function start() {
   app.use("/api/agent-settings", agentSettingsRouter);
   app.use("/api/terminal", terminalRouter);
   app.use("/api/auto-sync", autoSyncRouter);
+  app.use("/api/archive", archiveRouter);
   app.use("/api", scriptsRouter);
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 

@@ -29,6 +29,8 @@ interface Props {
   commitsOpen: boolean;
   onCommitsOpenChange: (open: boolean) => void;
   showListSidebar: boolean;
+  /** Overrides URL-derived highlight while the repos search overlay has a live query. */
+  liveHighlight?: string;
 }
 
 export function RepoBlock({
@@ -47,6 +49,7 @@ export function RepoBlock({
   commitsOpen,
   onCommitsOpenChange,
   showListSidebar,
+  liveHighlight,
 }: Props) {
   const matchesScope = (scope: string) =>
     repoOpenFile?.repo === repo.path && repoOpenFile.scope === scope;
@@ -55,7 +58,7 @@ export function RepoBlock({
     matchesScope(scope) ? repoOpenFile!.file : null;
 
   const highlightFor = (scope: string) =>
-    matchesScope(scope) ? repoOpenFile!.highlight : undefined;
+    liveHighlight || (matchesScope(scope) ? repoOpenFile!.highlight : undefined);
 
   const onOpenFileChange =
     (scope: string) => (file: string | null) =>

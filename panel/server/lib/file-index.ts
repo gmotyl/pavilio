@@ -1,5 +1,5 @@
 import { readdirSync, statSync } from "fs";
-import { join, relative } from "path";
+import { join, relative, sep } from "path";
 import { getConfig } from "../config.js";
 
 export interface FileEntry {
@@ -7,6 +7,7 @@ export interface FileEntry {
   absolutePath: string;
   project: string;
   modified: number;
+  archived: boolean;
 }
 
 let index: FileEntry[] = [];
@@ -26,14 +27,19 @@ function walk(dir: string, projectsDir: string): FileEntry[] {
       item.name.endsWith(".txt") ||
       item.name.endsWith(".json")
     ) {
-      const rel = relative(projectsDir, fullPath);
-      const project = rel.split("/")[0];
+      // POSIX separators everywhere: relativePath is split on "/" here and
+      // used verbatim in API responses and URLs by the frontend
+      const rel = relative(projectsDir, fullPath).split(sep).join("/");
+      const segs = rel.split("/");
+      const archived = segs[0] === "archived";
+      const project = archived ? (segs[1] ?? "archived") : segs[0];
       const stat = statSync(fullPath);
       entries.push({
         relativePath: rel,
         absolutePath: fullPath,
         project,
         modified: stat.mtimeMs,
+        archived,
       });
     }
   }

@@ -81,4 +81,132 @@ describe("QuickFinder integration", () => {
       screen.queryByPlaceholderText(/Search files/),
     ).not.toBeInTheDocument();
   });
+
+  it("opens on pavilio:open-quick-finder event", async () => {
+    renderWithRouter(<QuickFinder />);
+    expect(
+      screen.queryByPlaceholderText(/Search files/),
+    ).not.toBeInTheDocument();
+
+    window.dispatchEvent(new Event("pavilio:open-quick-finder"));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Search files/)).toBeInTheDocument();
+    });
+  });
+
+  it("does not intercept Cmd+F", async () => {
+    renderWithRouter(<QuickFinder />);
+
+    let defaultPrevented: boolean | null = null;
+    const listener = (e: KeyboardEvent) => {
+      defaultPrevented = e.defaultPrevented;
+    };
+    window.addEventListener("keydown", listener);
+    try {
+      const event = new KeyboardEvent("keydown", {
+        key: "f",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(event);
+      expect(defaultPrevented).toBe(false);
+      expect(
+        screen.queryByPlaceholderText(/Search files/),
+      ).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener("keydown", listener);
+    }
+  });
+});
+
+describe("QuickFinder archived toggle", () => {
+  const archiveFiles = [
+    {
+      relativePath: "alpha/notes/a.md",
+      project: "alpha",
+      modified: 1,
+      archived: false,
+    },
+    {
+      relativePath: "archived/beta/notes/b.md",
+      project: "beta",
+      modified: 1,
+      archived: true,
+    },
+  ];
+
+  beforeEach(() => {
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    localStorage.clear();
+  });
+
+  it("hides archived files when the archived toggle is off", async () => {
+    mockFetchResponses({
+      "/api/files/index": archiveFiles,
+    });
+    const user = userEvent.setup();
+    renderWithRouter(<QuickFinder />);
+    await user.keyboard("{Meta>}p{/Meta}");
+    await waitFor(() => {
+      expect(screen.getByText("alpha/notes/a.md")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("archived/beta/notes/b.md"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("quick-finder-toggle-archived"));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText("archived/beta/notes/b.md"),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("alpha/notes/a.md")).toBeInTheDocument();
+    expect(localStorage.getItem("panel-search-include-archived")).toBe(
+      "false",
+    );
+  });
+
+  it("defaults to including archived files", async () => {
+    mockFetchResponses({
+      "/api/files/index": archiveFiles,
+    });
+    const user = userEvent.setup();
+    renderWithRouter(<QuickFinder />);
+    await user.keyboard("{Meta>}p{/Meta}");
+    await waitFor(() => {
+      expect(screen.getByText("alpha/notes/a.md")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("archived/beta/notes/b.md"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("archived")).toBeInTheDocument();
+  });
+
+  it("passes includeArchived to grep fetch", async () => {
+    localStorage.setItem("panel-search-include-archived", "false");
+    const mockFetch = mockFetchResponses({
+      "/api/files/index": archiveFiles,
+      "/api/search/grep": [],
+    });
+    const user = userEvent.setup();
+    renderWithRouter(<QuickFinder />);
+    await user.keyboard("{Meta>}p{/Meta}");
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Search files/)).toBeInTheDocument();
+    });
+    await user.type(screen.getByPlaceholderText(/Search files/), "?needle");
+
+    await waitFor(() => {
+      expect(
+        mockFetch.mock.calls.some((call) =>
+          String(call[0]).includes(
+            "/api/search/grep?q=needle&includeArchived=false",
+          ),
+        ),
+      ).toBe(true);
+    });
+  });
 });
