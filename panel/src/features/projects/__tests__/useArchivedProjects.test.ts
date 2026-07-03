@@ -65,4 +65,14 @@ describe("useArchivedProjects (API-backed)", () => {
     await act(() => result.current.archive("alpha"));
     expect(result.current.error).toBe("Already archived: alpha");
   });
+
+  it("clears error after a subsequent successful refresh", async () => {
+    fetchMock
+      .mockReturnValueOnce(jsonResponse({ error: "boom" }, 500)) // initial GET fails
+      .mockReturnValueOnce(jsonResponse([]));                    // manual refresh succeeds
+    const { result } = renderHook(() => useArchivedProjects());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    await act(() => result.current.refresh());
+    expect(result.current.error).toBeNull();
+  });
 });

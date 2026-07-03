@@ -35,12 +35,20 @@ export default function QuickFinder() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const [includeArchived, setIncludeArchived] = useState(
-    () => localStorage.getItem("panel-search-include-archived") !== "false",
-  );
+  const [includeArchived, setIncludeArchived] = useState(() => {
+    try {
+      return localStorage.getItem("panel-search-include-archived") !== "false";
+    } catch {
+      return true;
+    }
+  });
   const toggleArchived = useCallback(() => {
     setIncludeArchived((v) => {
-      localStorage.setItem("panel-search-include-archived", String(!v));
+      try {
+        localStorage.setItem("panel-search-include-archived", String(!v));
+      } catch {
+        // persistence unavailable (private mode / quota) — toggle still works for the session
+      }
       return !v;
     });
   }, []);

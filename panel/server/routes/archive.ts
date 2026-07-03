@@ -1,5 +1,12 @@
 import { Router } from "express";
-import { existsSync, mkdirSync, renameSync, readdirSync, statSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  renameSync,
+  readdirSync,
+  statSync,
+  utimesSync,
+} from "fs";
 import { join } from "path";
 import { getConfig } from "../config.js";
 import { rebuildIndex } from "../lib/file-index.js";
@@ -40,9 +47,21 @@ router.post("/:name", (req, res) => {
   const dest = join(projectsDir, "archived", name);
   if (!existsSync(src)) return res.status(404).json({ error: `Unknown project: ${name}` });
   if (existsSync(dest)) return res.status(409).json({ error: `Already archived: ${name}` });
-  mkdirSync(join(projectsDir, "archived"), { recursive: true });
-  renameSync(src, dest);
-  rebuildIndex();
+  try {
+    mkdirSync(join(projectsDir, "archived"), { recursive: true });
+    renameSync(src, dest);
+    // rename preserves mtime; touch so archivedAt reflects the archive time
+    const now = new Date();
+    utimesSync(dest, now, now);
+  } catch (err) {
+    return res.status(500).json({ error: `Archive failed: ${(err as Error).message}` });
+  }
+  try {
+    rebuildIndex();
+  } catch (err) {
+    // move already succeeded; watcher will rebuild shortly
+    console.warn("[archive] rebuildIndex failed:", err);
+  }
   res.json({ ok: true });
 });
 
@@ -54,8 +73,16 @@ router.post("/:name/restore", (req, res) => {
   const dest = join(projectsDir, name);
   if (!existsSync(src)) return res.status(404).json({ error: `Not archived: ${name}` });
   if (existsSync(dest)) return res.status(409).json({ error: `Active project exists: ${name}` });
-  renameSync(src, dest);
-  rebuildIndex();
+  try {
+    renameSync(src, dest);
+  } catch (err) {
+    return res.status(500).json({ error: `Restore failed: ${(err as Error).message}` });
+  }
+  try {
+    rebuildIndex();
+  } catch (err) {
+    console.warn("[archive] rebuildIndex failed:", err);
+  }
   res.json({ ok: true });
 });
 

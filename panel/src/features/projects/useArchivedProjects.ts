@@ -14,6 +14,7 @@ export function useArchivedProjects() {
       const res = await fetch("/api/archive");
       if (!res.ok) throw new Error(`Failed to load archive (${res.status})`);
       setArchived(await res.json());
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load archive");
     }

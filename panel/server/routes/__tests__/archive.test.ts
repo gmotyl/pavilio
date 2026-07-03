@@ -86,6 +86,15 @@ describe("archive routes", () => {
     expect(typeof res.body[0].archivedAt).toBe("string");
   });
 
+  it("archivedAt reflects archive time, not last content modification", async () => {
+    seedProject("alpha");
+    const before = Date.now() - 1000;
+    const app = makeApp();
+    await request(app).post("/api/archive/alpha");
+    const res = await request(app).get("/api/archive");
+    expect(new Date(res.body[0].archivedAt).getTime()).toBeGreaterThan(before);
+  });
+
   it("returns [] when archived/ does not exist", async () => {
     const res = await request(makeApp()).get("/api/archive");
     expect(res.status).toBe(200);
