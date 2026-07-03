@@ -24,7 +24,10 @@ router.get("/grep", (req, res) => {
   const project = req.query.project as string | undefined;
   const { projectsDir } = getConfig();
   const allFiles = getFileIndex();
-  const files = project ? allFiles.filter((f) => f.project === project) : allFiles;
+  const includeArchived = req.query.includeArchived !== "false";
+  const files = (project ? allFiles.filter((f) => f.project === project) : allFiles).filter(
+    (f) => includeArchived || !f.archived,
+  );
   const results: SearchResult[] = [];
   const lowerQuery = query.toLowerCase();
   const maxResults = 20;
