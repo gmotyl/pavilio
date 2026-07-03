@@ -140,8 +140,13 @@ export default function QuickFinder() {
         setOpen((p) => !p);
       }
     };
+    const openHandler = () => setOpen(true);
     window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
+    window.addEventListener("pavilio:open-quick-finder", openHandler);
+    return () => {
+      window.removeEventListener("keydown", handler, true);
+      window.removeEventListener("pavilio:open-quick-finder", openHandler);
+    };
   }, []);
 
   const openFile = useCallback(

@@ -22,19 +22,6 @@ export function useProjectSearch({ project, enabled, onOpenResult }: Options) {
     setActive(false);
   }, [project]);
 
-  // Cmd/Ctrl+F to open
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "f" && project) {
-        e.preventDefault();
-        setActive(true);
-        setTimeout(() => inputRef.current?.focus(), 10);
-      }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [project]);
-
   // Debounced grep against project files
   useEffect(() => {
     if (!enabled) return;

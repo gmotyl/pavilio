@@ -81,6 +81,44 @@ describe("QuickFinder integration", () => {
       screen.queryByPlaceholderText(/Search files/),
     ).not.toBeInTheDocument();
   });
+
+  it("opens on pavilio:open-quick-finder event", async () => {
+    renderWithRouter(<QuickFinder />);
+    expect(
+      screen.queryByPlaceholderText(/Search files/),
+    ).not.toBeInTheDocument();
+
+    window.dispatchEvent(new Event("pavilio:open-quick-finder"));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Search files/)).toBeInTheDocument();
+    });
+  });
+
+  it("does not intercept Cmd+F", async () => {
+    renderWithRouter(<QuickFinder />);
+
+    let defaultPrevented: boolean | null = null;
+    const listener = (e: KeyboardEvent) => {
+      defaultPrevented = e.defaultPrevented;
+    };
+    window.addEventListener("keydown", listener);
+    try {
+      const event = new KeyboardEvent("keydown", {
+        key: "f",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(event);
+      expect(defaultPrevented).toBe(false);
+      expect(
+        screen.queryByPlaceholderText(/Search files/),
+      ).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener("keydown", listener);
+    }
+  });
 });
 
 describe("QuickFinder archived toggle", () => {

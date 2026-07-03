@@ -136,7 +136,7 @@ export function ProjectTabsBar({ tabs, searchActive, onToggleSearch }: BarProps)
         onMouseLeave={(e) =>
           (e.currentTarget.style.background = "transparent")
         }
-        title="Search in project (Cmd+F)"
+        title="Search (⌘P — repos tab: search repo files)"
       >
         <Search size={14} />
       </button>
