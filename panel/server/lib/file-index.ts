@@ -7,6 +7,7 @@ export interface FileEntry {
   absolutePath: string;
   project: string;
   modified: number;
+  archived: boolean;
 }
 
 let index: FileEntry[] = [];
@@ -27,13 +28,16 @@ function walk(dir: string, projectsDir: string): FileEntry[] {
       item.name.endsWith(".json")
     ) {
       const rel = relative(projectsDir, fullPath);
-      const project = rel.split("/")[0];
+      const segs = rel.split("/");
+      const archived = segs[0] === "archived";
+      const project = archived ? (segs[1] ?? "archived") : segs[0];
       const stat = statSync(fullPath);
       entries.push({
         relativePath: rel,
         absolutePath: fullPath,
         project,
         modified: stat.mtimeMs,
+        archived,
       });
     }
   }
