@@ -346,6 +346,11 @@ export default function ProjectView() {
                 commitsOpen.setOpen(repo.path, open)
               }
               showListSidebar={wide}
+              liveHighlight={
+                search.active && search.query.trim().length >= 2
+                  ? search.query.trim()
+                  : undefined
+              }
             />
           ))}
         </div>
