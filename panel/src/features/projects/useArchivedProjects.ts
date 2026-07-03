@@ -5,70 +5,59 @@ export interface ArchivedProject {
   archivedAt: string;
 }
 
-export const archiveStorageKey = "panel-archived-projects";
-
-function load(): ArchivedProject[] {
-  try {
-    const raw = localStorage.getItem(archiveStorageKey);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (x): x is ArchivedProject =>
-        x && typeof x.name === "string" && typeof x.archivedAt === "string",
-    );
-  } catch {
-    return [];
-  }
-}
-
-function save(list: ArchivedProject[]): void {
-  try {
-    localStorage.setItem(archiveStorageKey, JSON.stringify(list));
-    window.dispatchEvent(new Event("panel-archived-projects-change"));
-  } catch (err) {
-    console.warn("[archive] save failed:", err);
-  }
-}
-
 export function useArchivedProjects() {
-  const [archived, setArchived] = useState<ArchivedProject[]>(() => load());
+  const [archived, setArchived] = useState<ArchivedProject[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  // Cross-tab and cross-component sync
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/archive");
+      if (!res.ok) throw new Error(`Failed to load archive (${res.status})`);
+      setArchived(await res.json());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load archive");
+    }
+  }, []);
+
   useEffect(() => {
-    const onChange = () => setArchived(load());
-    window.addEventListener("panel-archived-projects-change", onChange);
-    window.addEventListener("storage", onChange);
-    return () => {
-      window.removeEventListener("panel-archived-projects-change", onChange);
-      window.removeEventListener("storage", onChange);
-    };
-  }, []);
+    refresh();
+  }, [refresh]);
 
-  const archive = useCallback((name: string) => {
-    const list = load();
-    if (list.some((p) => p.name === name)) return;
-    const next = [...list, { name, archivedAt: new Date().toISOString() }];
-    save(next);
-    setArchived(next);
-  }, []);
+  const mutate = useCallback(
+    async (url: string) => {
+      setError(null);
+      try {
+        const res = await fetch(url, { method: "POST" });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          setError(body?.error ?? `Request failed (${res.status})`);
+          return;
+        }
+        await refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Request failed");
+      }
+    },
+    [refresh],
+  );
 
-  const restore = useCallback((name: string) => {
-    const list = load();
-    const next = list.filter((p) => p.name !== name);
-    save(next);
-    setArchived(next);
-  }, []);
+  const archive = useCallback(
+    (name: string) => mutate(`/api/archive/${encodeURIComponent(name)}`),
+    [mutate],
+  );
+  const restore = useCallback(
+    (name: string) => mutate(`/api/archive/${encodeURIComponent(name)}/restore`),
+    [mutate],
+  );
 
   const archivedNames = useMemo(
     () => new Set(archived.map((p) => p.name)),
     [archived],
   );
-
   const isArchived = useCallback(
     (name: string) => archivedNames.has(name),
     [archivedNames],
   );
 
-  return { archived, archivedNames, archive, restore, isArchived };
+  return { archived, archivedNames, archive, restore, isArchived, error, refresh };
 }
