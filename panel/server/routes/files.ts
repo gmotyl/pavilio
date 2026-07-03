@@ -44,10 +44,11 @@ export function resolveCollision(destDir: string, originalName: string):
 // File path index for Cmd+P finder
 router.get("/index", (_req, res) => {
   res.json(
-    getFileIndex().map(({ relativePath, project, modified }) => ({
+    getFileIndex().map(({ relativePath, project, modified, archived }) => ({
       relativePath,
       project,
       modified,
+      archived,
     }))
   );
 });

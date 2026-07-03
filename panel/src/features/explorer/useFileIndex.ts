@@ -7,6 +7,7 @@ export interface FileEntry {
   relativePath: string;
   project: string;     // first path segment (used by buildTree)
   modified: number;
+  archived?: boolean;
   root?: RootId;
 }
 
@@ -22,13 +23,14 @@ export function useFileIndex(root: RootId = "projects") {
       setFiles([]);
       return;
     }
-    const raw: Array<{ relativePath: string; project?: string; modified: number }> =
+    const raw: Array<{ relativePath: string; project?: string; modified: number; archived?: boolean }> =
       await res.json();
     setFiles(
       raw.map((f) => ({
         relativePath: f.relativePath,
         project: f.project ?? f.relativePath.split("/")[0] ?? "",
         modified: f.modified,
+        archived: f.archived ?? false,
         root,
       }))
     );
