@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { ArrowLeft, ExternalLink, Copy, Check } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import ImageDropZone from "../markdown/ImageDropZone";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
+import PathActions from "./PathActions";
 
 interface Props {
   filePath: string;
@@ -14,9 +14,6 @@ interface Props {
 const isMarkdown = (p: string) => p.endsWith(".md");
 const isJson = (p: string) => p.endsWith(".json");
 
-const openInVSCode = (path: string) =>
-  window.open(`vscode://file/${path}`, "_self");
-
 export function FileViewer({
   filePath,
   content,
@@ -24,14 +21,6 @@ export function FileViewer({
   loading,
   onBack,
 }: Props) {
-  const [copied, setCopied] = useState(false);
-
-  const copyPath = (path: string) => {
-    navigator.clipboard.writeText(path);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
   return (
     <div>
       <div
@@ -61,41 +50,7 @@ export function FileViewer({
         >
           {filePath.split("/").pop()}
         </span>
-        {absolutePath && (
-          <>
-            <button
-              data-testid="file-viewer-vscode"
-              onClick={() => openInVSCode(absolutePath)}
-              className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
-              style={{ color: "var(--text-secondary)" }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = "var(--text-primary)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "var(--text-secondary)";
-              }}
-            >
-              <ExternalLink className="w-3.5 h-3.5" /> VS Code
-            </button>
-            <button
-              data-testid="file-viewer-copy-path"
-              onClick={() => copyPath(absolutePath)}
-              className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
-              style={{
-                color: copied ? "var(--green)" : "var(--text-secondary)",
-              }}
-            >
-              {copied ? (
-                <Check className="w-3.5 h-3.5" />
-              ) : (
-                <Copy className="w-3.5 h-3.5" />
-              )}
-              {copied ? "Copied" : "Path"}
-            </button>
-          </>
-        )}
+        {absolutePath && <PathActions absolutePath={absolutePath} />}
       </div>
       {loading ? (
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>

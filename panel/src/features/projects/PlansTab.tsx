@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ChevronRight,
   ChevronDown,
@@ -9,12 +10,17 @@ import {
 } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import {
+  clearLastSectionFile,
+  writeLastSectionFile,
+} from "../shell/lastPath";
+import {
   usePlansTree,
   fetchPlanFile,
   type PlanFile,
   type PlanSource,
 } from "./usePlansTree";
 import { usePlanDragSource, usePlanDropTarget } from "./usePlanDrag";
+import PathActions from "./PathActions";
 
 interface Props {
   projectName: string;
@@ -180,10 +186,67 @@ function PlanSourceNode({
 
 export default function PlansTab({ projectName, currentPlans }: Props) {
   const { data, loading, error, refresh } = usePlansTree(projectName);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedBasePath, setSelectedBasePath] = useState<string | undefined>(undefined);
+  // Selection lives in the `?file=` URL param (like notes/memo) so the
+  // plans tab link built by useProjectTabs can restore the open plan.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedPath = searchParams.get("file");
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+
+  const setSelectedPath = useCallback(
+    (path: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (path) next.set("file", path);
+          else next.delete("file");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const selectedFile = useMemo(() => {
+    if (!data || !selectedPath) return null;
+    for (const source of data.sources) {
+      const file = source.files.find((f) => f.absolutePath === selectedPath);
+      if (file) return file;
+    }
+    return null;
+  }, [data, selectedPath]);
+
+  // Load plan content when selection changes
+  useEffect(() => {
+    if (!selectedPath) {
+      setFileContent(null);
+      setFileError(null);
+      return;
+    }
+    let cancelled = false;
+    setFileContent(null);
+    setFileError(null);
+    fetchPlanFile(projectName, selectedPath)
+      .then((r) => {
+        if (!cancelled) setFileContent(r.content);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setFileError(e instanceof Error ? e.message : String(e));
+        clearLastSectionFile(projectName, "plans");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectName, selectedPath]);
+
+  // Persist last-open plan so the tab link can restore it
+  useEffect(() => {
+    if (!projectName) return;
+    if (selectedPath) writeLastSectionFile(projectName, "plans", selectedPath);
+    else clearLastSectionFile(projectName, "plans");
+  }, [projectName, selectedPath]);
 
   // Map current-plan filename → its original CURRENT.md entry (used by the DELETE call).
   const currentByFilename = new Map<string, string>();
@@ -192,18 +255,7 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
     currentByFilename.set(filename, entry);
   }
 
-  const onOpen = async (file: PlanFile) => {
-    setSelectedPath(file.absolutePath);
-    setSelectedBasePath(file.relativeToProjectsDir ?? undefined);
-    setFileContent(null);
-    setFileError(null);
-    try {
-      const r = await fetchPlanFile(projectName, file.absolutePath);
-      setFileContent(r.content);
-    } catch (e) {
-      setFileError(e instanceof Error ? e.message : String(e));
-    }
-  };
+  const onOpen = (file: PlanFile) => setSelectedPath(file.absolutePath);
 
   const onUnstar = async (entry: string) => {
     await fetch(
@@ -281,6 +333,20 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
             Select a plan to view.
           </p>
         )}
+        {selectedPath && (
+          <div
+            className="flex items-center gap-2 mb-4 pb-3"
+            style={{ borderBottom: "1px solid var(--border-subtle)" }}
+          >
+            <span
+              className="text-sm font-mono truncate flex-1"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              {selectedPath.split("/").pop()}
+            </span>
+            <PathActions absolutePath={selectedPath} />
+          </div>
+        )}
         {selectedPath && fileError && (
           <p className="text-sm" style={{ color: "var(--red)" }}>
             Failed to load file: {fileError}
@@ -292,7 +358,10 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
           </p>
         )}
         {fileContent !== null && (
-          <MarkdownRenderer content={fileContent} basePath={selectedBasePath} />
+          <MarkdownRenderer
+            content={fileContent}
+            basePath={selectedFile?.relativeToProjectsDir ?? undefined}
+          />
         )}
       </section>
     </div>

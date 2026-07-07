@@ -89,6 +89,26 @@ describe("PlansTab", () => {
     expect(fileBtn.getAttribute("draggable")).toBe("true");
   });
 
+  it("restores the open plan from the ?file= URL param", async () => {
+    renderWithRouter(<PlansTab projectName="alokai" />, {
+      initialEntries: [
+        `/?file=${encodeURIComponent("/p/.kilo/plans/woo.md")}`,
+      ],
+    });
+    await waitFor(() => expect(screen.getByText("Hello plan body")).toBeTruthy());
+  });
+
+  it("persists the open plan to sessionStorage and shows path actions", async () => {
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    fireEvent.click(await screen.findByTestId("plans-tab-file-workspace-woo.md"));
+    await waitFor(() => expect(screen.getByText("Hello plan body")).toBeTruthy());
+    expect(screen.getByTestId("file-viewer-vscode")).toBeTruthy();
+    expect(screen.getByTestId("file-viewer-copy-path")).toBeTruthy();
+    expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+      "/p/.kilo/plans/woo.md",
+    );
+  });
+
   it("adds a plan to active via POST when an unstarred project plan's star is clicked", async () => {
     const mockFetch = mockFetchResponses({
       "plans-tree": TREE,
