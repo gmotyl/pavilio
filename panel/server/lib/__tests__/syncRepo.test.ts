@@ -122,4 +122,24 @@ describe("syncRepo", () => {
     expect(["offline"]).toContain(r.state);
     expect(r.detail).not.toMatch(/Rebase conflict/);
   }, 30_000);
+
+  it("watchdog: a stuck previous run does not block syncing forever", async () => {
+    const hang = join(root, "hang-ssh2.sh");
+    writeFileSync(hang, "#!/bin/sh\nsleep 300\n", { mode: 0o755 });
+    const url = git(mac, "remote", "get-url", "origin").trim();
+    git(mac, "remote", "set-url", "origin", "ssh://fake-host/repo.git");
+    const prev = process.env.GIT_SSH_COMMAND;
+    process.env.GIT_SSH_COMMAND = hang;
+    // long gitTimeoutMs → this call stays "running" in the background
+    const stuck = syncRepo(mac, { ...opts("mac"), gitTimeoutMs: 20_000 });
+    await new Promise((r) => setTimeout(r, 300)); // let it enter running state
+    // restore a healthy remote for the second call
+    git(mac, "remote", "set-url", "origin", url);
+    if (prev === undefined) delete process.env.GIT_SSH_COMMAND;
+    else process.env.GIT_SSH_COMMAND = prev;
+    // watchdogMs: 0 → previous run counts as stuck immediately
+    const r = await syncRepo(mac, { ...opts("mac"), watchdogMs: 0 });
+    expect(r.state).not.toBe("busy");
+    await stuck; // cleanup: let the first call finish (its group gets SIGKILLed at 20s or on fetch fail)
+  }, 60_000);
 });

@@ -18,9 +18,12 @@ export interface SyncOpts {
   hostname: string;
   /** Hard per-git-command timeout. On expiry the whole process group (git + ssh) is SIGKILLed. */
   gitTimeoutMs?: number;
+  /** If a previous run is still flagged running after this long, assume it is stuck and proceed. */
+  watchdogMs?: number;
 }
 
 let running = false;
+let runningSince = 0;
 let status: SyncStatus = { state: "idle", lastSync: null, detail: "", summary: "" };
 
 export function getSyncStatus(): SyncStatus {
@@ -33,6 +36,7 @@ function setStatus(next: Partial<SyncStatus>) {
 }
 
 const DEFAULT_GIT_TIMEOUT_MS = 120_000;
+const DEFAULT_WATCHDOG_MS = 15 * 60_000;
 
 interface Run { ok: boolean; status: number | null; stdout: string; stderr: string; timedOut: boolean; }
 
@@ -65,8 +69,13 @@ function midRebase(repo: string): boolean {
 }
 
 export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus> {
-  if (running) return { ...status, state: "busy" };
+  const watchdog = opts.watchdogMs ?? DEFAULT_WATCHDOG_MS;
+  if (running) {
+    if (Date.now() - runningSince <= watchdog) return { ...status, state: "busy" };
+    console.error("[auto-sync] watchdog: previous run stuck — force-resetting running flag");
+  }
   running = true;
+  runningSince = Date.now();
   setStatus({ state: "syncing", detail: "" });
   try {
     if (midRebase(repo)) {
