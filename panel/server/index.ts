@@ -138,6 +138,7 @@ async function start() {
       hostname: machineHostname(),
       dataPaths: autoSync.dataPaths,
       intervalMinutes: autoSync.intervalMinutes,
+      notifyCmd: autoSync.notifyCmd,
     });
   }
 }

@@ -26,6 +26,10 @@ export interface PanelConfig {
     intervalMinutes: number;
     /** Paths (relative to repo root) auto-committed each tick */
     dataPaths: string[];
+    /** Optional shell command fired when sync needs attention (conflict/push-failed/stale).
+     *  Gets SYNC_STATE + SYNC_DETAIL env vars. Example (macOS):
+     *  `osascript -e "display notification \"$SYNC_DETAIL\" with title \"Pavilio sync: $SYNC_STATE\""` */
+    notifyCmd?: string;
   };
 }
 
