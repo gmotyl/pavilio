@@ -140,6 +140,13 @@ describe("syncRepo", () => {
     // watchdogMs: 0 → previous run counts as stuck immediately
     const r = await syncRepo(mac, { ...opts("mac"), watchdogMs: 0 });
     expect(r.state).not.toBe("busy");
-    await stuck; // cleanup: let the first call finish (its group gets SIGKILLed at 20s or on fetch fail)
+    await stuck; // let the stale (force-reset) run finish — its finally/setStatus must not clobber shared state
+    // A third quick call must not be blocked by the stale run's finally resetting
+    // `running` out from under the second run, and its status must reflect the
+    // third call's own outcome (not a stale broadcast from the first run).
+    writeFileSync(join(mac, "projects/p/third.md"), "third\n");
+    const r3 = await syncRepo(mac, opts("mac"));
+    expect(r3.state).not.toBe("busy");
+    expect(r3.state).toBe("synced");
   }, 60_000);
 });

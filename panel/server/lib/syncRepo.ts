@@ -24,6 +24,7 @@ export interface SyncOpts {
 
 let running = false;
 let runningSince = 0;
+let generation = 0;
 let status: SyncStatus = { state: "idle", lastSync: null, detail: "", summary: "" };
 
 export function getSyncStatus(): SyncStatus {
@@ -33,6 +34,13 @@ export function getSyncStatus(): SyncStatus {
 function setStatus(next: Partial<SyncStatus>) {
   status = { ...status, ...next };
   broadcast({ type: "sync-status", ...status });
+}
+
+// Guards against a stale run (force-reset by the watchdog) clobbering the
+// status/broadcast of the newer run that superseded it.
+function setStatusFor(gen: number, next: Partial<SyncStatus>) {
+  if (gen !== generation) return;
+  setStatus(next);
 }
 
 const DEFAULT_GIT_TIMEOUT_MS = 120_000;
@@ -76,16 +84,17 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
   }
   running = true;
   runningSince = Date.now();
-  setStatus({ state: "syncing", detail: "" });
+  const myGen = ++generation;
+  setStatusFor(myGen, { state: "syncing", detail: "" });
   try {
     if (midRebase(repo)) {
-      setStatus({ state: "conflict", detail: "Repo is mid-rebase — resolve manually." });
+      setStatusFor(myGen, { state: "conflict", detail: "Repo is mid-rebase — resolve manually." });
       return status;
     }
 
     const paths = opts.dataPaths.filter((p) => p && p.trim().length > 0);
     if (paths.length === 0) {
-      setStatus({ state: "push-failed", detail: "No data paths configured." });
+      setStatusFor(myGen, { state: "push-failed", detail: "No data paths configured." });
       return status;
     }
 
@@ -94,7 +103,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
     const attempt = async (): Promise<SyncStatus | null> => {
       // fetch (connectivity probe)
       if (!(await git(repo, ["fetch", "--quiet"], t)).ok) {
-        setStatus({ state: "offline", detail: "Remote unreachable." });
+        setStatusFor(myGen, { state: "offline", detail: "Remote unreachable." });
         return status;
       }
       // commits about to be pulled from remote (for summary)
@@ -107,7 +116,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
         const ts = new Date().toISOString();
         const commit = await git(repo, ["commit", "-m", `auto-sync ${opts.hostname} ${ts}`, "--", ...paths], t);
         if (!commit.ok) {
-          setStatus({ state: "push-failed", detail: `Commit failed: ${commit.stderr.trim() || "unknown error"}` });
+          setStatusFor(myGen, { state: "push-failed", detail: `Commit failed: ${commit.stderr.trim() || "unknown error"}` });
           return status;
         }
       }
@@ -118,19 +127,19 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       if (!pull.ok) {
         if (midRebase(repo)) {
           await git(repo, ["rebase", "--abort"], t);
-          setStatus({ state: "conflict", detail: "Rebase conflict — manual sync needed." });
+          setStatusFor(myGen, { state: "conflict", detail: "Rebase conflict — manual sync needed." });
         } else if (pull.timedOut) {
-          setStatus({ state: "offline", detail: "Pull timed out — will retry next tick." });
+          setStatusFor(myGen, { state: "offline", detail: "Pull timed out — will retry next tick." });
         } else {
           const reason = pull.stderr.trim().split("\n")[0]?.slice(0, 160) || "network error";
-          setStatus({ state: "offline", detail: `Pull failed: ${reason}` });
+          setStatusFor(myGen, { state: "offline", detail: `Pull failed: ${reason}` });
         }
         return status;
       }
       // push
       const push = await git(repo, ["push"], t);
       if (!push.ok) return null; // signal retry
-      setStatus({
+      setStatusFor(myGen, {
         state: "synced",
         lastSync: new Date().toISOString(),
         detail: "",
@@ -144,13 +153,13 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
     // push rejected (remote moved) → one retry
     const second = await attempt();
     if (second) return second;
-    setStatus({ state: "push-failed", detail: "Push rejected after retry." });
+    setStatusFor(myGen, { state: "push-failed", detail: "Push rejected after retry." });
     return status;
   } catch (e: any) {
     // never leave the UI stuck in "syncing" on an unexpected throw
-    setStatus({ state: "push-failed", detail: `Sync error: ${e?.message ?? e}` });
+    setStatusFor(myGen, { state: "push-failed", detail: `Sync error: ${e?.message ?? e}` });
     return status;
   } finally {
-    running = false;
+    if (myGen === generation) running = false;
   }
 }
