@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, appendFileSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { syncRepo } from "../syncRepo.js";
+import { syncRepo, isStale } from "../syncRepo.js";
 
 function git(cwd: string, ...args: string[]) {
   const r = spawnSync("git", args, { cwd, encoding: "utf-8" });
@@ -149,4 +149,15 @@ describe("syncRepo", () => {
     expect(r3.state).not.toBe("busy");
     expect(r3.state).toBe("synced");
   }, 60_000);
+
+  it("isStale flags a lastSync older than 3x the interval", async () => {
+    // fresh module state: never synced → not stale (now=0 predates any lastSync)
+    expect(isStale(30, 0)).toBe(false);
+    writeFileSync(join(mac, "projects/p/stale-probe.md"), "s\n");
+    const r = await syncRepo(mac, opts("mac"));
+    expect(r.state).toBe("synced");
+    expect(isStale(30)).toBe(false); // just synced
+    const in2h = Date.now() + 2 * 60 * 60_000;
+    expect(isStale(30, in2h)).toBe(true); // 2h > 3 * 30min
+  }, 30_000);
 });

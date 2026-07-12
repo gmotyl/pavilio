@@ -31,6 +31,12 @@ export function getSyncStatus(): SyncStatus {
   return status;
 }
 
+/** True when the last successful sync is older than 3x the scheduler interval. */
+export function isStale(intervalMinutes: number, now = Date.now()): boolean {
+  if (!status.lastSync) return false;
+  return now - Date.parse(status.lastSync) > 3 * intervalMinutes * 60_000;
+}
+
 function setStatus(next: Partial<SyncStatus>) {
   status = { ...status, ...next };
   broadcast({ type: "sync-status", ...status });

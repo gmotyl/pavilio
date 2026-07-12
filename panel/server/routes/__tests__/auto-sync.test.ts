@@ -5,6 +5,7 @@ import request from "supertest";
 vi.mock("../../lib/syncRepo", () => ({
   syncRepo: vi.fn(async () => ({ state: "synced", lastSync: "2026-06-08T00:00:00Z", detail: "", summary: "↑1 ↓0" })),
   getSyncStatus: vi.fn(() => ({ state: "idle", lastSync: null, detail: "", summary: "" })),
+  isStale: vi.fn(() => false),
 }));
 vi.mock("../../lib/autoSyncState", () => ({
   isEnabled: vi.fn(() => true),
