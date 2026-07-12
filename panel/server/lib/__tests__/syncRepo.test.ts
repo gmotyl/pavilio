@@ -108,4 +108,18 @@ describe("syncRepo", () => {
       else process.env.GIT_SSH_COMMAND = prev;
     }
   }, 30_000);
+
+  it("reports offline (not conflict) when pull fails for network reasons", async () => {
+    // fetch succeeds against the local remote; then we break the remote before pull
+    writeFileSync(join(mac, "projects/p/new.md"), "x\n");
+    // seed a remote commit so pull actually has to contact the remote
+    writeFileSync(join(win, "projects/p/win2.md"), "w\n");
+    await syncRepo(win, opts("win"));
+    // now sabotage: point origin at a nonexistent path AFTER a manual fetch
+    git(mac, "fetch", "--quiet");
+    git(mac, "remote", "set-url", "origin", join(root, "gone.git"));
+    const r = await syncRepo(mac, opts("mac"));
+    expect(["offline"]).toContain(r.state);
+    expect(r.detail).not.toMatch(/Rebase conflict/);
+  }, 30_000);
 });

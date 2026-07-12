@@ -107,8 +107,15 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       // rebase onto upstream
       const pull = await git(repo, ["pull", "--rebase", "--autostash"], t);
       if (!pull.ok) {
-        if (midRebase(repo)) await git(repo, ["rebase", "--abort"], t);
-        setStatus({ state: "conflict", detail: "Rebase conflict — manual sync needed." });
+        if (midRebase(repo)) {
+          await git(repo, ["rebase", "--abort"], t);
+          setStatus({ state: "conflict", detail: "Rebase conflict — manual sync needed." });
+        } else if (pull.timedOut) {
+          setStatus({ state: "offline", detail: "Pull timed out — will retry next tick." });
+        } else {
+          const reason = pull.stderr.trim().split("\n")[0]?.slice(0, 160) || "network error";
+          setStatus({ state: "offline", detail: `Pull failed: ${reason}` });
+        }
         return status;
       }
       // push
