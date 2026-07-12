@@ -39,12 +39,13 @@ describe("auto-sync routes", () => {
   it("GET /status returns enabled + status + interval", async () => {
     const res = await request(makeApp()).get("/api/auto-sync/status");
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ enabled: true, state: "idle", intervalMinutes: 30 });
+    expect(res.body).toMatchObject({ enabled: true, state: "idle", stale: false, intervalMinutes: 30 });
   });
 
   it("POST /enable persists, starts scheduler, triggers a sync", async () => {
     const res = await request(makeApp()).post("/api/auto-sync/enable");
     expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ enabled: true, stale: false });
     expect(state.setEnabled).toHaveBeenCalledWith(true);
     expect(sched.startScheduler).toHaveBeenCalled();
   });
@@ -52,6 +53,7 @@ describe("auto-sync routes", () => {
   it("POST /disable persists + stops scheduler", async () => {
     const res = await request(makeApp()).post("/api/auto-sync/disable");
     expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ enabled: false, stale: false });
     expect(state.setEnabled).toHaveBeenCalledWith(false);
     expect(sched.stopScheduler).toHaveBeenCalled();
   });
@@ -60,6 +62,6 @@ describe("auto-sync routes", () => {
     const res = await request(makeApp()).post("/api/auto-sync/now");
     expect(res.status).toBe(200);
     expect(syncRepo).toHaveBeenCalled();
-    expect(res.body.state).toBe("synced");
+    expect(res.body).toMatchObject({ state: "synced", stale: false });
   });
 });
