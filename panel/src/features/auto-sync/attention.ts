@@ -14,3 +14,16 @@ export function attentionTransition(
   if (eff === prev) return null;
   return ATTENTION.has(eff) ? eff : null;
 }
+
+let lastEffective: string | null = null;
+
+/** Shared across all hook instances so concurrent pollers can't double-report one transition. */
+export function observeTransition(next: { state: string; stale?: boolean }): string | null {
+  const entered = attentionTransition(lastEffective, next);
+  lastEffective = effectiveState(next);
+  return entered;
+}
+
+export function resetAttentionForTest(): void {
+  lastEffective = null;
+}

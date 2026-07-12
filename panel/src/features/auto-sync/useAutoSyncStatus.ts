@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { toast } from "../../lib/toast";
-import { attentionTransition, effectiveState } from "./attention";
+import { observeTransition } from "./attention";
 
 export interface AutoSyncStatus {
   enabled: boolean;
@@ -20,16 +20,14 @@ const ATTENTION_TEXT: Record<string, string> = {
 
 export function useAutoSyncStatus(pollMs = 15000) {
   const [status, setStatus] = useState<AutoSyncStatus | null>(null);
-  const prevState = useRef<string | null>(null);
 
   const call = useCallback(async (url: string, init?: RequestInit) => {
     try {
       const res = await fetch(url, init);
       if (!res.ok) return;
       const next = (await res.json()) as AutoSyncStatus;
-      const entered = attentionTransition(prevState.current, next);
+      const entered = observeTransition(next);
       if (entered) toast.error(`${ATTENTION_TEXT[entered]}${next.detail ? ` (${next.detail})` : ""}`);
-      prevState.current = effectiveState(next);
       setStatus(next);
     } catch (e) {
       console.error("[auto-sync]", e);

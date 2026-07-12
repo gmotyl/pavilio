@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { attentionTransition, effectiveState } from "../attention";
+import { describe, it, expect, beforeEach } from "vitest";
+import { attentionTransition, effectiveState, observeTransition, resetAttentionForTest } from "../attention";
 
 describe("attentionTransition", () => {
   it("fires on entering an attention state", () => {
@@ -21,5 +21,23 @@ describe("attentionTransition", () => {
   it("effectiveState: stale wins over the raw state", () => {
     expect(effectiveState({ state: "synced", stale: true })).toBe("stale");
     expect(effectiveState({ state: "offline" })).toBe("offline");
+  });
+});
+
+describe("observeTransition (shared module-scope state)", () => {
+  beforeEach(() => {
+    resetAttentionForTest();
+  });
+
+  it("does not fire on the very first observation ever (page load)", () => {
+    expect(observeTransition({ state: "conflict" })).toBe(null);
+  });
+
+  it("dedupes concurrent hook instances polling the same backend state", () => {
+    observeTransition({ state: "synced" });
+    // sidebar instance polls first
+    expect(observeTransition({ state: "conflict" })).toBe("conflict");
+    // modal instance polls immediately after with the same status
+    expect(observeTransition({ state: "conflict" })).toBe(null);
   });
 });
