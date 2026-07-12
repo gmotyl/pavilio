@@ -17,7 +17,7 @@ vi.mock("../../lib/autoSyncScheduler", () => ({
   isRunning: vi.fn(() => true),
 }));
 vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/tmp/projects", autoSync: { intervalMinutes: 30, dataPaths: ["projects/"] } }),
+  getConfig: () => ({ projectsDir: "/tmp/projects", autoSync: { intervalMinutes: 30, dataPaths: ["projects/"], notifyCmd: "echo hi" } }),
 }));
 vi.mock("../../lib/hostname", () => ({ machineHostname: () => "testhost" }));
 
@@ -47,7 +47,15 @@ describe("auto-sync routes", () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ enabled: true, stale: false });
     expect(state.setEnabled).toHaveBeenCalledWith(true);
-    expect(sched.startScheduler).toHaveBeenCalled();
+    expect(sched.startScheduler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo: expect.any(String),
+        hostname: "testhost",
+        dataPaths: ["projects/"],
+        intervalMinutes: 30,
+        notifyCmd: "echo hi",
+      })
+    );
   });
 
   it("POST /disable persists + stops scheduler", async () => {

@@ -23,7 +23,7 @@ router.get("/status", (_req, res) => {
 router.post("/enable", async (_req, res) => {
   const { repo, autoSync, hostname } = cfg();
   setEnabled(true);
-  startScheduler({ repo, hostname, dataPaths: autoSync.dataPaths, intervalMinutes: autoSync.intervalMinutes });
+  startScheduler({ repo, hostname, dataPaths: autoSync.dataPaths, intervalMinutes: autoSync.intervalMinutes, notifyCmd: autoSync.notifyCmd });
   res.json({ enabled: true, ...getSyncStatus(), stale: isStale(autoSync.intervalMinutes), intervalMinutes: autoSync.intervalMinutes });
 });
 
