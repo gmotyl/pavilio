@@ -28,7 +28,7 @@ export async function _notifyForTest(
   s: Pick<SyncStatus, "state" | "detail">,
   opts: Pick<SchedulerOpts, "notifyCmd" | "intervalMinutes">,
 ): Promise<void> {
-  const attention = isStale(opts.intervalMinutes) ? "stale" : ATTENTION.has(s.state) ? s.state : null;
+  const attention = ATTENTION.has(s.state) ? s.state : isStale(opts.intervalMinutes) ? "stale" : null;
   if (attention && attention !== lastNotified) {
     if (opts.notifyCmd) runNotifyCmd(opts.notifyCmd, attention, s.detail);
     lastNotified = attention;
