@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { broadcast } from "../watcher.js";
-
-const execFileAsync = promisify(execFile);
 
 export type SyncState =
   | "idle" | "syncing" | "synced" | "offline" | "conflict" | "push-failed" | "busy";
@@ -19,6 +16,8 @@ export interface SyncStatus {
 export interface SyncOpts {
   dataPaths: string[]; // e.g. ["projects/"]
   hostname: string;
+  /** Hard per-git-command timeout. On expiry the whole process group (git + ssh) is SIGKILLed. */
+  gitTimeoutMs?: number;
 }
 
 let running = false;
@@ -33,22 +32,32 @@ function setStatus(next: Partial<SyncStatus>) {
   broadcast({ type: "sync-status", ...status });
 }
 
-interface Run { ok: boolean; status: number | null; stdout: string; stderr: string; }
+const DEFAULT_GIT_TIMEOUT_MS = 120_000;
 
-// Async git runner — execFile keeps network-bound git ops (fetch/pull/push) off
-// the single Node event loop so the panel's terminals/websockets don't freeze.
-async function git(cwd: string, args: string[]): Promise<Run> {
-  try {
-    const { stdout, stderr } = await execFileAsync("git", args, { cwd });
-    return { ok: true, status: 0, stdout: stdout ?? "", stderr: stderr ?? "" };
-  } catch (e: any) {
-    return {
-      ok: false,
-      status: typeof e?.code === "number" ? e.code : null,
-      stdout: e?.stdout ?? "",
-      stderr: e?.stderr ?? "",
-    };
-  }
+interface Run { ok: boolean; status: number | null; stdout: string; stderr: string; timedOut: boolean; }
+
+// spawn with detached:true puts git in its own process group so a timeout kill
+// also reaps grandchildren (ssh) — a hung ssh once kept the runner alive for 19h.
+function git(cwd: string, args: string[], timeoutMs = DEFAULT_GIT_TIMEOUT_MS): Promise<Run> {
+  return new Promise((done) => {
+    const child = spawn("git", args, { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "", timedOut = false;
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // Kill the process group (negative pid) and the child process as a fallback
+      if (child.pid != null && child.pid > 0) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      }
+      try { child.kill("SIGKILL"); } catch {}
+    }, timeoutMs);
+    child.on("error", () => { clearTimeout(timer); done({ ok: false, status: null, stdout, stderr, timedOut }); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      done({ ok: code === 0 && !timedOut, status: code, stdout, stderr, timedOut });
+    });
+  });
 }
 
 function midRebase(repo: string): boolean {
@@ -71,37 +80,39 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       return status;
     }
 
+    const t = opts.gitTimeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
+
     const attempt = async (): Promise<SyncStatus | null> => {
       // fetch (connectivity probe)
-      if (!(await git(repo, ["fetch", "--quiet"])).ok) {
+      if (!(await git(repo, ["fetch", "--quiet"], t)).ok) {
         setStatus({ state: "offline", detail: "Remote unreachable." });
         return status;
       }
       // commits about to be pulled from remote (for summary)
-      const behind = (await git(repo, ["rev-list", "--count", "HEAD..@{u}"])).stdout.trim() || "0";
+      const behind = (await git(repo, ["rev-list", "--count", "HEAD..@{u}"], t)).stdout.trim() || "0";
       // scoped auto-commit: stage AND commit only data paths, so a user's
       // manually-staged files (e.g. half-edited panel code) are never swept in.
-      await git(repo, ["add", "--", ...paths]);
-      const staged = await git(repo, ["diff", "--cached", "--quiet", "--", ...paths]);
+      await git(repo, ["add", "--", ...paths], t);
+      const staged = await git(repo, ["diff", "--cached", "--quiet", "--", ...paths], t);
       if (staged.status === 1) {
         const ts = new Date().toISOString();
-        const commit = await git(repo, ["commit", "-m", `auto-sync ${opts.hostname} ${ts}`, "--", ...paths]);
+        const commit = await git(repo, ["commit", "-m", `auto-sync ${opts.hostname} ${ts}`, "--", ...paths], t);
         if (!commit.ok) {
           setStatus({ state: "push-failed", detail: `Commit failed: ${commit.stderr.trim() || "unknown error"}` });
           return status;
         }
       }
       // local commits to push (for summary)
-      const ahead = (await git(repo, ["rev-list", "--count", "@{u}..HEAD"])).stdout.trim() || "0";
+      const ahead = (await git(repo, ["rev-list", "--count", "@{u}..HEAD"], t)).stdout.trim() || "0";
       // rebase onto upstream
-      const pull = await git(repo, ["pull", "--rebase", "--autostash"]);
+      const pull = await git(repo, ["pull", "--rebase", "--autostash"], t);
       if (!pull.ok) {
-        if (midRebase(repo)) await git(repo, ["rebase", "--abort"]);
+        if (midRebase(repo)) await git(repo, ["rebase", "--abort"], t);
         setStatus({ state: "conflict", detail: "Rebase conflict — manual sync needed." });
         return status;
       }
       // push
-      const push = await git(repo, ["push"]);
+      const push = await git(repo, ["push"], t);
       if (!push.ok) return null; // signal retry
       setStatus({
         state: "synced",

@@ -87,4 +87,25 @@ describe("syncRepo", () => {
     const r = await syncRepo(mac, opts("mac"));
     expect(r.state).toBe("offline");
   }, 30_000);
+
+  it("times out a hung fetch (stalled ssh) and reports offline, leaving no orphan", async () => {
+    // GIT_SSH_COMMAND that hangs forever simulates the stalled ssh from the incident
+    const hang = join(root, "hang-ssh.sh");
+    writeFileSync(hang, "#!/bin/sh\nsleep 300\n", { mode: 0o755 });
+    git(mac, "remote", "set-url", "origin", "ssh://fake-host/repo.git");
+    const prev = process.env.GIT_SSH_COMMAND;
+    process.env.GIT_SSH_COMMAND = hang;
+    try {
+      const start = Date.now();
+      const r = await syncRepo(mac, { ...opts("mac"), gitTimeoutMs: 1_000 });
+      expect(r.state).toBe("offline");
+      expect(Date.now() - start).toBeLessThan(10_000); // did not wait for sleep 300
+      // no orphaned hang-ssh survives the process-group kill
+      const ps = spawnSync("pgrep", ["-f", "hang-ssh.sh"], { encoding: "utf-8" });
+      expect(ps.stdout.trim()).toBe("");
+    } finally {
+      if (prev === undefined) delete process.env.GIT_SSH_COMMAND;
+      else process.env.GIT_SSH_COMMAND = prev;
+    }
+  }, 30_000);
 });
