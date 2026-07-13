@@ -1,24 +1,63 @@
-import { syncRepo, type SyncOpts } from "./syncRepo.js";
+import { exec } from "node:child_process";
+import { syncRepo, isStale, type SyncOpts, type SyncStatus } from "./syncRepo.js";
 
 let handle: NodeJS.Timeout | null = null;
+let lastNotified: string | null = null;
 
 interface SchedulerOpts extends SyncOpts {
   repo: string;
   intervalMinutes: number;
+  /** Shell command run on transition into an attention state (conflict|push-failed|stale).
+   *  Receives SYNC_STATE and SYNC_DETAIL env vars. Unset → no notification. */
+  notifyCmd?: string;
+}
+
+const ATTENTION = new Set(["conflict", "push-failed"]);
+
+function runNotifyCmd(cmd: string, state: string, detail: string): void {
+  exec(cmd, {
+    env: { ...process.env, SYNC_STATE: state, SYNC_DETAIL: detail },
+    timeout: 10_000,
+  }, (e) => {
+    if (e) console.error("[auto-sync] notifyCmd failed:", e.message);
+  });
+}
+
+/** Decide + fire notification for a completed tick. Exported for tests. */
+export async function _notifyForTest(
+  s: Pick<SyncStatus, "state" | "detail">,
+  opts: Pick<SchedulerOpts, "notifyCmd" | "intervalMinutes">,
+): Promise<void> {
+  const attention = ATTENTION.has(s.state) ? s.state : isStale(opts.intervalMinutes) ? "stale" : null;
+  if (attention && attention !== lastNotified) {
+    if (opts.notifyCmd) runNotifyCmd(opts.notifyCmd, attention, s.detail);
+    lastNotified = attention;
+  }
+  if (!attention && (s.state === "synced" || s.state === "idle")) lastNotified = null; // re-arm on recovery
 }
 
 export function startScheduler(opts: SchedulerOpts): void {
   stopScheduler();
-  const tick = () => {
-    void syncRepo(opts.repo, { dataPaths: opts.dataPaths, hostname: opts.hostname })
-      .catch((e) => console.error("[auto-sync] tick failed:", e));
+  const tick = async () => {
+    try {
+      const s = await syncRepo(opts.repo, {
+        dataPaths: opts.dataPaths,
+        hostname: opts.hostname,
+        gitTimeoutMs: opts.gitTimeoutMs,
+        watchdogMs: opts.watchdogMs,
+      });
+      await _notifyForTest(s, opts);
+    } catch (e) {
+      console.error("[auto-sync] tick failed:", e);
+    }
   };
-  tick(); // run immediately on start
-  handle = setInterval(tick, opts.intervalMinutes * 60_000);
+  void tick(); // run immediately on start
+  handle = setInterval(() => void tick(), opts.intervalMinutes * 60_000);
 }
 
 export function stopScheduler(): void {
   if (handle) { clearInterval(handle); handle = null; }
+  lastNotified = null;
 }
 
 export function isRunning(): boolean {
