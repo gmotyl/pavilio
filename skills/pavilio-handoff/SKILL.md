@@ -23,7 +23,7 @@ Turn a task description into a prebaked handoff for [[pavilio-resume]]. Delegate
 # Handoff: <title>
 Todoist: <related high-level task id/url if mentioned, else "none">
 Goal: <one paragraph, from the task description>
-Context:
+## Context
 - <file pointers: latest progress file, plan, repo paths>
 ## Todo
 - [ ] <coarse steps; "discover how X works" is a valid step>
@@ -32,7 +32,7 @@ Context:
 
 4. **Show the draft in chat and confirm** before writing.
 5. Write to `projects/<proj>/progress/<date>-<slug>.md`.
-6. Register in `projects/<proj>/progress/BRIEFING.md` under `## Handoffs`: `- [ ] <title> → projects/<proj>/progress/<file>.md (Todoist: <id or —>)`. If BRIEFING.md is missing, create a minimal stub (title line + `## Handoffs`). Never touch root `BRIEFING.md`.
+6. Register in `projects/<proj>/progress/BRIEFING.md` under `## Handoffs`: `- [ ] <title> → projects/<proj>/progress/<file>.md (Todoist: <id or —>)`. If BRIEFING.md is missing, create a minimal stub with `# BRIEFING` and `## Handoffs`. Never touch root `BRIEFING.md`.
 7. Print: `run /pavilio-resume projects/<proj>/progress/<file>.md`
 
 ## Non-goals

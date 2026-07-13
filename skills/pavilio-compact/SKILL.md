@@ -23,7 +23,7 @@ Package THIS session's remaining work into a handoff for [[pavilio-resume]]. Dis
 # Handoff: <title>
 Todoist: <related high-level task id/url if known, else "none">
 Goal: <the remaining objective, one paragraph>
-Context:
+## Context
 - <file pointers: files touched or load-bearing this session, plan, repo paths>
 ## Todo
 - [ ] <concrete next steps not yet done; "discover how X works" is a valid step>
@@ -33,7 +33,7 @@ Context:
    Done work stays in the progress file — the handoff carries only what's left.
 4. **Show the draft in chat and confirm** before writing.
 5. Write to `projects/<proj>/progress/<date>-<slug>.md`.
-6. Register in `projects/<proj>/progress/BRIEFING.md` under `## Handoffs`: `- [ ] <title> → projects/<proj>/progress/<file>.md (Todoist: <id or —>)`. If BRIEFING.md is missing, create a minimal stub (title line + `## Handoffs`). Never touch root `BRIEFING.md`.
+6. Register in `projects/<proj>/progress/BRIEFING.md` under `## Handoffs`: `- [ ] <title> → projects/<proj>/progress/<file>.md (Todoist: <id or —>)`. If BRIEFING.md is missing, create a minimal stub with `# BRIEFING` and `## Handoffs`. Never touch root `BRIEFING.md`.
 7. Print: `run /pavilio-resume projects/<proj>/progress/<file>.md`
 
 ## Non-goals
