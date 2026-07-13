@@ -59,6 +59,8 @@ interface Run { ok: boolean; status: number | null; stdout: string; stderr: stri
 function git(cwd: string, args: string[], timeoutMs = DEFAULT_GIT_TIMEOUT_MS): Promise<Run> {
   return new Promise((done) => {
     const child = spawn("git", args, { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    child.stdout.setEncoding("utf-8");
+    child.stderr.setEncoding("utf-8");
     let stdout = "", stderr = "", timedOut = false;
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));

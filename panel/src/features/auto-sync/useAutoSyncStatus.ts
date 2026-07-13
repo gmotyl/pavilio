@@ -27,7 +27,11 @@ export function useAutoSyncStatus(pollMs = 15000) {
       if (!res.ok) return;
       const next = (await res.json()) as AutoSyncStatus;
       const entered = observeTransition(next);
-      if (entered) toast.error(`${ATTENTION_TEXT[entered]}${next.detail ? ` (${next.detail})` : ""}`);
+      if (entered) {
+        const message = `${ATTENTION_TEXT[entered]}${next.detail ? ` (${next.detail})` : ""}`;
+        if (entered === "stale") toast.info(message);
+        else toast.error(message);
+      }
       setStatus(next);
     } catch (e) {
       console.error("[auto-sync]", e);

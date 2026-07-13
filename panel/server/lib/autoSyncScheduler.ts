@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { exec } from "node:child_process";
 import { syncRepo, isStale, type SyncOpts, type SyncStatus } from "./syncRepo.js";
 
 let handle: NodeJS.Timeout | null = null;
@@ -15,7 +15,7 @@ interface SchedulerOpts extends SyncOpts {
 const ATTENTION = new Set(["conflict", "push-failed"]);
 
 function runNotifyCmd(cmd: string, state: string, detail: string): void {
-  execFile("/bin/sh", ["-c", cmd], {
+  exec(cmd, {
     env: { ...process.env, SYNC_STATE: state, SYNC_DETAIL: detail },
     timeout: 10_000,
   }, (e) => {

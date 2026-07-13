@@ -22,6 +22,10 @@ describe("attentionTransition", () => {
     expect(effectiveState({ state: "synced", stale: true })).toBe("stale");
     expect(effectiveState({ state: "offline" })).toBe("offline");
   });
+  it("effectiveState: concrete attention states win over stale", () => {
+    expect(effectiveState({ state: "conflict", stale: true })).toBe("conflict");
+    expect(effectiveState({ state: "push-failed", stale: true })).toBe("push-failed");
+  });
 });
 
 describe("observeTransition (shared module-scope state)", () => {
@@ -39,5 +43,15 @@ describe("observeTransition (shared module-scope state)", () => {
     expect(observeTransition({ state: "conflict" })).toBe("conflict");
     // modal instance polls immediately after with the same status
     expect(observeTransition({ state: "conflict" })).toBe(null);
+  });
+});
+
+describe("attentionTransition: conflict/push-failed precedence over stale", () => {
+  beforeEach(() => {
+    resetAttentionForTest();
+  });
+
+  it("reports conflict, not stale, when both are set", () => {
+    expect(attentionTransition("synced", { state: "conflict", stale: true })).toBe("conflict");
   });
 });

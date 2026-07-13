@@ -1,6 +1,7 @@
 const ATTENTION = new Set(["conflict", "push-failed", "stale"]);
 
 export function effectiveState(s: { state: string; stale?: boolean }): string {
+  if (s.state === "conflict" || s.state === "push-failed") return s.state;
   return s.stale ? "stale" : s.state;
 }
 
