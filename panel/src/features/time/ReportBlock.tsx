@@ -60,6 +60,10 @@ const underlineSelectStyle = {
   color: "var(--text-primary)",
 } as const;
 
+// `colorScheme: dark` renders the native date picker's calendar glyph legibly
+// on the warm-dark surface (otherwise a dark glyph on a dark background).
+const dateInputStyle = { ...underlineSelectStyle, colorScheme: "dark" } as const;
+
 const textLinkClass =
   "text-sm hover:underline bg-transparent border-0 cursor-pointer p-0";
 
@@ -187,7 +191,7 @@ export function ReportBlock({
               setPrefs((p) => ({ ...p, period: { from: e.target.value, to: range.to } }))
             }
             className={underlineSelectClass}
-            style={underlineSelectStyle}
+            style={dateInputStyle}
           />
         </div>
         <div>
@@ -203,7 +207,7 @@ export function ReportBlock({
               setPrefs((p) => ({ ...p, period: { from: range.from, to: e.target.value } }))
             }
             className={underlineSelectClass}
-            style={underlineSelectStyle}
+            style={dateInputStyle}
           />
         </div>
         <div>
