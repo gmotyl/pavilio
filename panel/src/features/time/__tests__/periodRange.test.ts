@@ -39,4 +39,21 @@ describe("rangeForPeriod", () => {
     expect(rangeForPeriod({ from: "2026-01-01", to: "2026-01-31" }, may25))
       .toEqual({ from: "2026-01-01", to: "2026-01-31" });
   });
+
+  it("yesterday: from == to == today-1", () => {
+    expect(rangeForPeriod("yesterday", may25)).toEqual({ from: "2026-05-24", to: "2026-05-24" });
+  });
+
+  it("yesterday wraps across year boundary", () => {
+    const jan1 = new Date(2026, 0, 1);
+    expect(rangeForPeriod("yesterday", jan1)).toEqual({ from: "2025-12-31", to: "2025-12-31" });
+  });
+
+  it("this-year: Jan 1 – Dec 31 of current year", () => {
+    expect(rangeForPeriod("this-year", may25)).toEqual({ from: "2026-01-01", to: "2026-12-31" });
+  });
+
+  it("last-year: Jan 1 – Dec 31 of previous year", () => {
+    expect(rangeForPeriod("last-year", may25)).toEqual({ from: "2025-01-01", to: "2025-12-31" });
+  });
 });

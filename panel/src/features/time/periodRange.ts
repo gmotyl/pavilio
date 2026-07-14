@@ -1,9 +1,12 @@
 export type Period =
   | "today"
+  | "yesterday"
   | "this-week"
   | "last-week"
   | "this-month"
   | "last-month"
+  | "this-year"
+  | "last-year"
   | { from: string; to: string };
 
 export type DateRange = { from: string; to: string };
@@ -66,6 +69,18 @@ export function rangeForPeriod(period: Period, today: Date): DateRange {
       const py = prev.getFullYear();
       const pm = prev.getMonth();
       return { from: toISODate(firstOfMonth(py, pm)), to: toISODate(lastOfMonth(py, pm)) };
+    }
+    case "yesterday": {
+      const iso = toISODate(addDays(today, -1));
+      return { from: iso, to: iso };
+    }
+    case "this-year": {
+      const y = today.getFullYear();
+      return { from: toISODate(new Date(y, 0, 1)), to: toISODate(new Date(y, 11, 31)) };
+    }
+    case "last-year": {
+      const y = today.getFullYear() - 1;
+      return { from: toISODate(new Date(y, 0, 1)), to: toISODate(new Date(y, 11, 31)) };
     }
   }
 }
