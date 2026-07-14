@@ -156,4 +156,79 @@ describe("ReportBlock", () => {
 
     spy.mockRestore();
   });
+
+  it("renders From/To date inputs and new presets", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+    expect(screen.getByTestId("time-report-from")).toBeInTheDocument();
+    expect(screen.getByTestId("time-report-to")).toBeInTheDocument();
+    const select = screen.getByTestId("time-report-period") as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(
+      expect.arrayContaining(["yesterday", "this-year", "last-year", "custom"]),
+    );
+  });
+
+  it("editing From flips period to custom and refetches with the new from date", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const fromInput = screen.getByTestId("time-report-from") as HTMLInputElement;
+    fireEvent.change(fromInput, { target: { value: "2026-01-10" } });
+
+    await waitFor(() => {
+      const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes("from=2026-01-10"))).toBe(true);
+    });
+
+    const select = screen.getByTestId("time-report-period") as HTMLSelectElement;
+    expect(select.value).toBe("custom");
+
+    const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
+    expect(parsed.period).toEqual({ from: "2026-01-10", to: expect.any(String) });
+  });
+
+  it("editing From past To pulls To up to keep from <= to", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const toInput = screen.getByTestId("time-report-to") as HTMLInputElement;
+    fireEvent.change(toInput, { target: { value: "2026-02-01" } });
+    const fromInput = screen.getByTestId("time-report-from") as HTMLInputElement;
+    fireEvent.change(fromInput, { target: { value: "2026-05-01" } });
+
+    await waitFor(() => {
+      const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
+      expect(parsed.period).toEqual({ from: "2026-05-01", to: "2026-05-01" });
+    });
+  });
+
+  it("editing To before From pulls From down to keep from <= to", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const fromInput = screen.getByTestId("time-report-from") as HTMLInputElement;
+    fireEvent.change(fromInput, { target: { value: "2026-05-01" } });
+    const toInput = screen.getByTestId("time-report-to") as HTMLInputElement;
+    fireEvent.change(toInput, { target: { value: "2026-02-01" } });
+
+    await waitFor(() => {
+      const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
+      expect(parsed.period).toEqual({ from: "2026-02-01", to: "2026-02-01" });
+    });
+  });
+
+  it("labels year presets by the year, not as a month", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const periodSelect = screen.getByTestId("time-report-period") as HTMLSelectElement;
+    fireEvent.change(periodSelect, { target: { value: "this-year" } });
+    await flushFetch();
+
+    const year = String(new Date().getFullYear());
+    // footer reads "N entries · HH:MM · <label>"
+    expect(screen.getByText(new RegExp(`· ${year}$`))).toBeInTheDocument();
+    expect(screen.queryByText(/Month \d{4}-\d{2}/)).not.toBeInTheDocument();
+  });
 });

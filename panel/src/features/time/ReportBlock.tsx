@@ -45,8 +45,9 @@ function savePrefs(project: string, p: Prefs): void {
 
 function periodLabel(period: Period, range: DateRange): string {
   if (typeof period === "object") return `${range.from} – ${range.to}`;
-  if (period === "today") return range.from;
+  if (period === "today" || period === "yesterday") return range.from;
   if (period === "this-week" || period === "last-week") return `Week of ${range.from}`;
+  if (period === "this-year" || period === "last-year") return range.from.slice(0, 4);
   return `Month ${range.from.slice(0, 7)}`;
 }
 
@@ -59,6 +60,10 @@ const underlineSelectStyle = {
   borderBottomColor: "var(--border-subtle)",
   color: "var(--text-primary)",
 } as const;
+
+// `colorScheme: dark` renders the native date picker's calendar glyph legibly
+// on the warm-dark surface (otherwise a dark glyph on a dark background).
+const dateInputStyle = { ...underlineSelectStyle, colorScheme: "dark" } as const;
 
 const textLinkClass =
   "text-sm hover:underline bg-transparent border-0 cursor-pointer p-0";
@@ -152,18 +157,69 @@ export function ReportBlock({
             id="report-period"
             data-testid="time-report-period"
             value={periodValue}
-            onChange={(e) =>
-              setPrefs((p) => ({ ...p, period: e.target.value as NamedPeriod }))
-            }
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "custom") {
+                setPrefs((p) => ({ ...p, period: { from: range.from, to: range.to } }));
+              } else {
+                setPrefs((p) => ({ ...p, period: v as NamedPeriod }));
+              }
+            }}
             className={underlineSelectClass}
             style={underlineSelectStyle}
           >
             <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
             <option value="this-week">This week</option>
             <option value="last-week">Last week</option>
             <option value="this-month">This month</option>
             <option value="last-month">Last month</option>
+            <option value="this-year">This year</option>
+            <option value="last-year">Last year</option>
+            <option value="custom">Custom</option>
           </select>
+        </div>
+        <div>
+          <label htmlFor="report-from" className={fieldLabelClass} style={fieldLabelStyle}>
+            From
+          </label>
+          <input
+            id="report-from"
+            type="date"
+            data-testid="time-report-from"
+            value={range.from}
+            onChange={(e) => {
+              const from = e.target.value;
+              // ISO YYYY-MM-DD compares lexicographically; keep from <= to.
+              setPrefs((p) => ({
+                ...p,
+                period: { from, to: range.to < from ? from : range.to },
+              }));
+            }}
+            className={underlineSelectClass}
+            style={dateInputStyle}
+          />
+        </div>
+        <div>
+          <label htmlFor="report-to" className={fieldLabelClass} style={fieldLabelStyle}>
+            To
+          </label>
+          <input
+            id="report-to"
+            type="date"
+            data-testid="time-report-to"
+            value={range.to}
+            onChange={(e) => {
+              const to = e.target.value;
+              // ISO YYYY-MM-DD compares lexicographically; keep from <= to.
+              setPrefs((p) => ({
+                ...p,
+                period: { from: range.from > to ? to : range.from, to },
+              }));
+            }}
+            className={underlineSelectClass}
+            style={dateInputStyle}
+          />
         </div>
         <div>
           <label htmlFor="report-format" className={fieldLabelClass} style={fieldLabelStyle}>
