@@ -45,8 +45,9 @@ function savePrefs(project: string, p: Prefs): void {
 
 function periodLabel(period: Period, range: DateRange): string {
   if (typeof period === "object") return `${range.from} – ${range.to}`;
-  if (period === "today") return range.from;
+  if (period === "today" || period === "yesterday") return range.from;
   if (period === "this-week" || period === "last-week") return `Week of ${range.from}`;
+  if (period === "this-year" || period === "last-year") return range.from.slice(0, 4);
   return `Month ${range.from.slice(0, 7)}`;
 }
 

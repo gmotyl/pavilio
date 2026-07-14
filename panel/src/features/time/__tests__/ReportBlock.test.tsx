@@ -187,4 +187,18 @@ describe("ReportBlock", () => {
     const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
     expect(parsed.period).toEqual({ from: "2026-01-10", to: expect.any(String) });
   });
+
+  it("labels year presets by the year, not as a month", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const periodSelect = screen.getByTestId("time-report-period") as HTMLSelectElement;
+    fireEvent.change(periodSelect, { target: { value: "this-year" } });
+    await flushFetch();
+
+    const year = String(new Date().getFullYear());
+    // footer reads "N entries · HH:MM · <label>"
+    expect(screen.getByText(new RegExp(`· ${year}$`))).toBeInTheDocument();
+    expect(screen.queryByText(/Month \d{4}-\d{2}/)).not.toBeInTheDocument();
+  });
 });
