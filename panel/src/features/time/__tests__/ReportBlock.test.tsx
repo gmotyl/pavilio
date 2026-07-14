@@ -156,4 +156,35 @@ describe("ReportBlock", () => {
 
     spy.mockRestore();
   });
+
+  it("renders From/To date inputs and new presets", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+    expect(screen.getByTestId("time-report-from")).toBeInTheDocument();
+    expect(screen.getByTestId("time-report-to")).toBeInTheDocument();
+    const select = screen.getByTestId("time-report-period") as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(
+      expect.arrayContaining(["yesterday", "this-year", "last-year", "custom"]),
+    );
+  });
+
+  it("editing From flips period to custom and refetches with the new from date", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const fromInput = screen.getByTestId("time-report-from") as HTMLInputElement;
+    fireEvent.change(fromInput, { target: { value: "2026-01-10" } });
+
+    await waitFor(() => {
+      const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes("from=2026-01-10"))).toBe(true);
+    });
+
+    const select = screen.getByTestId("time-report-period") as HTMLSelectElement;
+    expect(select.value).toBe("custom");
+
+    const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
+    expect(parsed.period).toEqual({ from: "2026-01-10", to: expect.any(String) });
+  });
 });

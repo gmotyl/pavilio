@@ -152,18 +152,59 @@ export function ReportBlock({
             id="report-period"
             data-testid="time-report-period"
             value={periodValue}
-            onChange={(e) =>
-              setPrefs((p) => ({ ...p, period: e.target.value as NamedPeriod }))
-            }
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "custom") {
+                setPrefs((p) => ({ ...p, period: { from: range.from, to: range.to } }));
+              } else {
+                setPrefs((p) => ({ ...p, period: v as NamedPeriod }));
+              }
+            }}
             className={underlineSelectClass}
             style={underlineSelectStyle}
           >
             <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
             <option value="this-week">This week</option>
             <option value="last-week">Last week</option>
             <option value="this-month">This month</option>
             <option value="last-month">Last month</option>
+            <option value="this-year">This year</option>
+            <option value="last-year">Last year</option>
+            <option value="custom">Custom</option>
           </select>
+        </div>
+        <div>
+          <label htmlFor="report-from" className={fieldLabelClass} style={fieldLabelStyle}>
+            From
+          </label>
+          <input
+            id="report-from"
+            type="date"
+            data-testid="time-report-from"
+            value={range.from}
+            onChange={(e) =>
+              setPrefs((p) => ({ ...p, period: { from: e.target.value, to: range.to } }))
+            }
+            className={underlineSelectClass}
+            style={underlineSelectStyle}
+          />
+        </div>
+        <div>
+          <label htmlFor="report-to" className={fieldLabelClass} style={fieldLabelStyle}>
+            To
+          </label>
+          <input
+            id="report-to"
+            type="date"
+            data-testid="time-report-to"
+            value={range.to}
+            onChange={(e) =>
+              setPrefs((p) => ({ ...p, period: { from: range.from, to: e.target.value } }))
+            }
+            className={underlineSelectClass}
+            style={underlineSelectStyle}
+          />
         </div>
         <div>
           <label htmlFor="report-format" className={fieldLabelClass} style={fieldLabelStyle}>
