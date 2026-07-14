@@ -188,9 +188,14 @@ export function ReportBlock({
             type="date"
             data-testid="time-report-from"
             value={range.from}
-            onChange={(e) =>
-              setPrefs((p) => ({ ...p, period: { from: e.target.value, to: range.to } }))
-            }
+            onChange={(e) => {
+              const from = e.target.value;
+              // ISO YYYY-MM-DD compares lexicographically; keep from <= to.
+              setPrefs((p) => ({
+                ...p,
+                period: { from, to: range.to < from ? from : range.to },
+              }));
+            }}
             className={underlineSelectClass}
             style={dateInputStyle}
           />
@@ -204,9 +209,14 @@ export function ReportBlock({
             type="date"
             data-testid="time-report-to"
             value={range.to}
-            onChange={(e) =>
-              setPrefs((p) => ({ ...p, period: { from: range.from, to: e.target.value } }))
-            }
+            onChange={(e) => {
+              const to = e.target.value;
+              // ISO YYYY-MM-DD compares lexicographically; keep from <= to.
+              setPrefs((p) => ({
+                ...p,
+                period: { from: range.from > to ? to : range.from, to },
+              }));
+            }}
             className={underlineSelectClass}
             style={dateInputStyle}
           />

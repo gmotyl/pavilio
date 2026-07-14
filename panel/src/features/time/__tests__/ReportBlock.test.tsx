@@ -188,6 +188,36 @@ describe("ReportBlock", () => {
     expect(parsed.period).toEqual({ from: "2026-01-10", to: expect.any(String) });
   });
 
+  it("editing From past To pulls To up to keep from <= to", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const toInput = screen.getByTestId("time-report-to") as HTMLInputElement;
+    fireEvent.change(toInput, { target: { value: "2026-02-01" } });
+    const fromInput = screen.getByTestId("time-report-from") as HTMLInputElement;
+    fireEvent.change(fromInput, { target: { value: "2026-05-01" } });
+
+    await waitFor(() => {
+      const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
+      expect(parsed.period).toEqual({ from: "2026-05-01", to: "2026-05-01" });
+    });
+  });
+
+  it("editing To before From pulls From down to keep from <= to", async () => {
+    render(<ReportBlock project="metro" projectLabel="Metro" />);
+    await flushFetch();
+
+    const fromInput = screen.getByTestId("time-report-from") as HTMLInputElement;
+    fireEvent.change(fromInput, { target: { value: "2026-05-01" } });
+    const toInput = screen.getByTestId("time-report-to") as HTMLInputElement;
+    fireEvent.change(toInput, { target: { value: "2026-02-01" } });
+
+    await waitFor(() => {
+      const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
+      expect(parsed.period).toEqual({ from: "2026-02-01", to: "2026-02-01" });
+    });
+  });
+
   it("labels year presets by the year, not as a month", async () => {
     render(<ReportBlock project="metro" projectLabel="Metro" />);
     await flushFetch();
