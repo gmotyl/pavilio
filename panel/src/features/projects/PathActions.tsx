@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ExternalLink, Copy, Check } from "lucide-react";
+import { copyToClipboard } from "../../lib/clipboard";
 
 const openInVSCode = (path: string) =>
   window.open(`vscode://file/${path}`, "_self");
@@ -8,8 +9,8 @@ const openInVSCode = (path: string) =>
 export function PathActions({ absolutePath }: { absolutePath: string }) {
   const [copied, setCopied] = useState(false);
 
-  const copyPath = () => {
-    navigator.clipboard.writeText(absolutePath);
+  const copyPath = async () => {
+    if (!(await copyToClipboard(absolutePath))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

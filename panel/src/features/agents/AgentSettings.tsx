@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ExternalLink, Copy, Check, FileText, ChevronDown, ChevronRight, Save, Pencil, X, Play, AlertTriangle } from "lucide-react";
+import { copyToClipboard } from "../../lib/clipboard";
 
 interface SettingsFile {
   name: string;
@@ -282,9 +283,9 @@ function FileViewer({ file }: { file: SettingsFile }) {
     window.open(`vscode://file/${file.path}`, "_self");
   };
 
-  const copyPath = (e: React.MouseEvent) => {
+  const copyPath = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(file.path);
+    if (!(await copyToClipboard(file.path))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

@@ -520,9 +520,13 @@ function createInstance(sessionId: string): InternalInstance {
     "keydown",
     (e: KeyboardEvent) => {
       if (e.ctrlKey && !e.shiftKey && e.key === "v") {
+        // Insecure context (plain http over LAN): clipboard API is absent —
+        // bail WITHOUT preventDefault so the native paste event still fires
+        // and the paste-event handler below can do the work.
+        if (!navigator.clipboard?.readText) return;
         e.preventDefault();
         e.stopPropagation();
-        navigator.clipboard?.readText().then((text) => {
+        navigator.clipboard.readText().then((text) => {
           if (text) terminal.paste(text);
         }).catch(() => {});
       }

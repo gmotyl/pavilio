@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Copy, Check } from "lucide-react";
+import { copyToClipboard } from "../../lib/clipboard";
 
 interface ClickableUrlProps {
   href: string;
@@ -9,14 +10,9 @@ export function ClickableUrl({ href }: ClickableUrlProps) {
   const [copied, setCopied] = useState(false);
 
   const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(href);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard blocked (insecure context etc.); fall back silently —
-      // the link is still select-all-able.
-    }
+    if (!(await copyToClipboard(href))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   return (

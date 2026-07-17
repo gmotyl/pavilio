@@ -3,6 +3,7 @@ import { Wifi, RotateCw } from "lucide-react";
 import { renderQrSvg } from "../../mobile-access/qr";
 import { Toggle } from "../../mobile-access/MobileAccessModal/Toggle";
 import { ClickableUrl } from "../../mobile-access/ClickableUrl";
+import { copyToClipboard } from "../../../lib/clipboard";
 import type { LanChannel, HostInfo } from "../../mobile-access/useMobileAccessStatus";
 
 const HTTPS_ISSUE_URL =
@@ -323,13 +324,9 @@ function WslPortproxyCallout({
     `New-NetFirewallRule -DisplayName "Pavilio LAN ${port}" -Direction Inbound -LocalPort ${port} -Protocol TCP -Action Allow`;
 
   const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(script);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // ignore
-    }
+    if (!(await copyToClipboard(script))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   return (
