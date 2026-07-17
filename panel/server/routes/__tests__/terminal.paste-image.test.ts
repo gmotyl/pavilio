@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import express from "express";
 import request from "supertest";
-import { existsSync, readFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 vi.mock("../../config", () => ({
   getConfig: () => ({ projectsDir: "/tmp/unused" }),
@@ -61,5 +63,23 @@ describe("POST /api/terminal/paste-image", () => {
         contentType: "text/plain",
       });
     expect(res.status).toBe(400);
+  });
+
+  it("sweeps pastes older than the TTL on upload", async () => {
+    const dir = join(tmpdir(), "pavilio-pastes");
+    mkdirSync(dir, { recursive: true });
+    const stale = join(dir, "paste-0-stale.png");
+    writeFileSync(stale, PNG);
+    const old = (Date.now() - 25 * 60 * 60 * 1000) / 1000; // 25h ago
+    utimesSync(stale, old, old);
+
+    const res = await request(makeApp())
+      .post("/api/terminal/paste-image")
+      .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
+
+    expect(res.status).toBe(200);
+    created.push(res.body.path);
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(res.body.path)).toBe(true);
   });
 });
