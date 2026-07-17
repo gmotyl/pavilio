@@ -2,6 +2,11 @@ import { Terminal, type IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import {
+  imageFromClipboardItems,
+  readClipboardImage,
+  uploadPastedImage,
+} from "./imagePaste";
 
 // Shared cache of live xterm instances, keyed by sessionId.
 // The Terminal (+ its DOM node) survive React unmounts so that scrollback
@@ -526,8 +531,16 @@ function createInstance(sessionId: string): InternalInstance {
         if (!navigator.clipboard?.readText) return;
         e.preventDefault();
         e.stopPropagation();
-        navigator.clipboard.readText().then((text) => {
-          if (text) terminal.paste(text);
+        navigator.clipboard.readText().then(async (text) => {
+          if (text) {
+            terminal.paste(text);
+            return;
+          }
+          // Empty text — the clipboard may hold an image (screenshot).
+          const image = await readClipboardImage();
+          if (!image) return;
+          const path = await uploadPastedImage(image);
+          if (path) terminal.paste(path + " ");
         }).catch(() => {});
       }
     },
@@ -536,15 +549,26 @@ function createInstance(sessionId: string): InternalInstance {
 
   // Windows fix — right-click context-menu paste: fires a paste event
   // directly (no preceding keydown). Intercept in capture phase to route
-  // through terminal.paste(). Non-text pastes (images) fall through to xterm.
+  // through terminal.paste(). Image pastes are uploaded to the server and
+  // the saved path is pasted instead (the CLI can't see this browser's
+  // clipboard when it runs on another machine).
   holder.addEventListener(
     "paste",
     (e: ClipboardEvent) => {
       const text = e.clipboardData?.getData("text/plain") ?? "";
-      if (!text) return; // non-text paste (e.g. image) — let xterm handle it
-      terminal.paste(text);
+      if (text) {
+        terminal.paste(text);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      const image = imageFromClipboardItems(e.clipboardData?.items);
+      if (!image) return; // nothing usable — let xterm handle it
       e.preventDefault();
       e.stopPropagation();
+      uploadPastedImage(image).then((path) => {
+        if (path) terminal.paste(path + " ");
+      });
     },
     { capture: true },
   );
