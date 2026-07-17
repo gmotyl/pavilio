@@ -26,6 +26,10 @@ describe("syncRepo", () => {
     root = mkdtempSync(join(tmpdir(), "syncrepo-"));
     remote = join(root, "remote.git");
     git(root, "init", "--quiet", "--bare", remote);
+    // The seed pushes HEAD:main, so the remote's HEAD must point there —
+    // otherwise clones are empty on machines whose default branch isn't
+    // "main". symbolic-ref (unlike --initial-branch) works on old git too.
+    git(remote, "symbolic-ref", "HEAD", "refs/heads/main");
     // seed
     const seed = join(root, "seed");
     git(root, "clone", "--quiet", remote, seed);
