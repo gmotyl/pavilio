@@ -52,20 +52,14 @@ description: <what it does + explicit invocation triggers: "Use when the user in
 
 Conventions: description frontmatter must name the slash command and trigger phrases; keep the body terse and imperative; state fixed read budgets when the skill gathers data; always end with Non-goals.
 
-3. **Write both command wrappers** — identical one-liner, absolute path:
+3. **Generate the command wrappers** — do NOT hand-write them. The per-agent setup scripts derive one wrapper per `skills/*/SKILL.md` automatically:
 
-- `.claude/commands/<name>.md`
-- `.opencode/commands/<name>.md`
+- Claude Code: `bash scripts/setup:claude-code` → `.claude/commands/<name>.md`
+- opencode: `bash scripts/setup:opencode` → `.opencode/commands/<name>.md` + registers it in `opencode.json`'s `command` block
 
-```markdown
-Read and follow the instructions in `<repo-root>/skills/<name>/SKILL.md` exactly.
-```
+4. **Commit:** `git add skills/<name>`, commit as `feat: <name> skill`. Only the SKILL.md is committed — `.claude/` and `.opencode/` (and `opencode.json`) are generated per-user and gitignored.
 
-4. **Sync opencode:** `bash scripts/init-opencode.sh` (copies `.opencode/commands/` → `~/.config/opencode/commands/`).
-
-5. **Commit:** `git add skills/<name> .opencode/commands/<name>.md` (`.claude/` is gitignored — expected, skip it), commit as `feat: <name> skill`.
-
-6. **Report:** file paths + note that `/<name>` is now available in Claude Code (immediately) and opencode (after sync), and that upstreaming to gmotyl/pavilio via PR is optional.
+5. **Report:** file path + note that `/<name>` becomes available after running the setup script for each agent in use (or on the next `pnpm pull`, which re-runs them), and that upstreaming to gmotyl/pavilio via PR is optional.
 
 ## Non-goals
 
