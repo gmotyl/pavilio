@@ -5,7 +5,7 @@ description: Stress-test an idea or plan into a sharp, domain-aligned design. Au
 
 # pavilio-grill
 
-Fuses the `brainstorming` and `grill-with-docs` skills for the pavilio workspace. Grill-forward: relentless one-at-a-time interview with a recommended answer per question, project-scoped domain docs, spec doc as the durable artifact.
+Design-and-harden in one pass. Grill-forward: relentless one-at-a-time interview with a recommended answer per question, project-scoped domain docs, spec doc as the durable artifact.
 
 **Announce at start:** "Using pavilio-grill to sharpen this into a design."
 
@@ -50,8 +50,8 @@ Interview relentlessly until you reach shared understanding. Walk each branch of
 Capture decisions as they crystallise — don't batch.
 
 - **CONTEXT.md** — when a term is resolved, write it right there using the format in
-  [grill-with-docs/CONTEXT-FORMAT.md](../grill-with-docs/CONTEXT-FORMAT.md). Create the file lazily on the first resolved term. Keep it domain-level; don't couple to implementation details. Multi-context repos use `CONTEXT-MAP.md`.
-- **ADRs** — offer sparingly, only when ALL THREE hold: hard to reverse, surprising without context, result of a real trade-off. Format + guidance in [grill-with-docs/ADR-FORMAT.md](../grill-with-docs/ADR-FORMAT.md). Location override: `projects/<project>/adr/` (NOT `docs/adr/`); scan it for the highest number and increment.
+  [CONTEXT-FORMAT.md](CONTEXT-FORMAT.md). Create the file lazily on the first resolved term. Keep it domain-level; don't couple to implementation details. Multi-context repos use `CONTEXT-MAP.md`.
+- **ADRs** — offer sparingly, only when ALL THREE hold: hard to reverse, surprising without context, result of a real trade-off. Format + guidance in [ADR-FORMAT.md](ADR-FORMAT.md). Location override: `projects/<project>/adr/` (NOT `docs/adr/`); scan it for the highest number and increment.
 
 ## 4. Present the design
 

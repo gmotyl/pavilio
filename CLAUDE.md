@@ -54,7 +54,7 @@ At the beginning of each session:
 - `/model` - Select your Claude model (Opus, Sonnet, Haiku, etc.)
 - Choose based on your needs and access level
 
-**Local skills** live under [`skills/`](skills/). Workflow skills (`grill-with-docs`, `writing-plans`, `executing-plans`, `test-driven-development`) and project skills (`memo`, `note`, `question`, `bootstrap`, `resume-session`) each have their own folder with a `SKILL.md`.
+**Local skills** live under [`skills/`](skills/), each in its own folder with a `SKILL.md`. The self-contained **pavilio-** family covers the workflow: `pavilio-session-start` / `pavilio-session-end` (session bracket), `pavilio-grill` (design), `pavilio-writing-plans` (plan), plus `pavilio-handoff` / `pavilio-compact` / `pavilio-resume`, `pavilio-manager`, `pavilio-audit`, `pavilio-qa-agent`, `pavilio-create-skill`. Other project skills: `memo`, `note`, `question`, `bootstrap`, `mermaid-chart`.
 
 **Session Tracking:** Active - write "session end" to finalize
 
