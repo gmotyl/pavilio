@@ -48,22 +48,25 @@ commands = {}
 for path in sorted(glob.glob(os.path.join(cmd_dir, "*.md"))):
     name = os.path.splitext(os.path.basename(path))[0]
     with open(path) as f:
-        body = f.read()
+        body = f.read().strip()
+    # Metadata lives in the source skill, not the generated one-line wrapper.
     desc = agent = model = None
-    m = re.match(r"^---\n(.*?)\n---\n(.*)$", body, re.S)
-    if m:
-        fm, body = m.group(1), m.group(2)
-        for line in fm.splitlines():
-            if ":" in line:
-                k, v = line.split(":", 1)
-                k, v = k.strip(), v.strip()
-                if k == "description":
-                    desc = v
-                elif k == "agent":
-                    agent = v
-                elif k == "model":
-                    model = v
-    entry = {"template": body.strip()}
+    skill_path = os.path.join(root, "skills", name, "SKILL.md")
+    if os.path.exists(skill_path):
+        with open(skill_path) as sf:
+            m = re.match(r"^---\n(.*?)\n---\n", sf.read(), re.S)
+        if m:
+            for line in m.group(1).splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    k, v = k.strip(), v.strip()
+                    if k == "description":
+                        desc = v
+                    elif k == "agent":
+                        agent = v
+                    elif k == "model":
+                        model = v
+    entry = {"template": body}
     if desc:
         entry["description"] = desc
     if agent:
