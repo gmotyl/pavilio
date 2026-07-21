@@ -10,6 +10,7 @@ import {
 import { join } from "path";
 import { getConfig } from "../config.js";
 import { rebuildIndex } from "../lib/file-index.js";
+import { markArchivedInRegistry, markRestoredInRegistry } from "../lib/registry.js";
 
 const router = Router();
 
@@ -57,6 +58,12 @@ router.post("/:name", (req, res) => {
     return res.status(500).json({ error: `Archive failed: ${(err as Error).message}` });
   }
   try {
+    markArchivedInRegistry(projectsDir, name);
+  } catch (err) {
+    // registry sync is best-effort; the move itself succeeded
+    console.warn("[archive] registry update failed:", err);
+  }
+  try {
     rebuildIndex();
   } catch (err) {
     // move already succeeded; watcher will rebuild shortly
@@ -77,6 +84,11 @@ router.post("/:name/restore", (req, res) => {
     renameSync(src, dest);
   } catch (err) {
     return res.status(500).json({ error: `Restore failed: ${(err as Error).message}` });
+  }
+  try {
+    markRestoredInRegistry(projectsDir, name);
+  } catch (err) {
+    console.warn("[archive] registry update failed:", err);
   }
   try {
     rebuildIndex();
