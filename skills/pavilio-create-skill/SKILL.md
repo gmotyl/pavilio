@@ -5,7 +5,7 @@ description: Scaffold a new workspace skill that works as a slash command in bot
 
 # Pavilio Create Skill
 
-Scaffold a new skill the standard workspace way. Skill creation only — this does not design the skill's behavior; if the behavior is non-trivial and undesigned, run brainstorming first.
+Scaffold a new skill the standard workspace way. Skill creation only — this does not design the skill's behavior; if the behavior is non-trivial and undesigned, design it first with [[pavilio-grill]].
 
 ## Usage
 
@@ -63,6 +63,6 @@ Conventions: description frontmatter must name the slash command and trigger phr
 
 ## Non-goals
 
-- Does not design complex skill behavior (use brainstorming/grill-with-docs first).
+- Does not design complex skill behavior (use [[pavilio-grill]] first).
 - Does not edit `AGENTS.md`, `commands/` (repo-level), or upstream pavilio repo.
 - Does not overwrite an existing skill without explicit confirmation.

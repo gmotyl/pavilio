@@ -1,11 +1,11 @@
 ---
 name: pavilio-writing-plans
-description: Write a comprehensive, bite-sized implementation plan from an approved spec, saved under projects/<project>/plans/. Pavilio-scoped variant of superpowers writing-plans. Use when the user invokes `/pavilio-writing-plans` or has a spec/requirements ready to turn into an executable plan.
+description: Write a comprehensive, bite-sized implementation plan from an approved spec, saved under projects/<project>/plans/. Use when the user invokes `/pavilio-writing-plans` or has a spec/requirements ready to turn into an executable plan.
 ---
 
 # pavilio-writing-plans
 
-Same discipline as `superpowers:writing-plans`, with one change: **plans are saved project-scoped, not to `docs/superpowers/plans/`.**
+Turn an approved spec into a bite-sized, test-first implementation plan. The one workspace rule: **plans are saved project-scoped under `projects/<project>/plans/`.**
 
 **Announce at start:** "Using pavilio-writing-plans to create the implementation plan."
 
@@ -34,7 +34,7 @@ Every plan MUST start with:
 ```markdown
 # [Feature Name] Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** implement this plan task-by-task, top-down; check off each step (`- [ ]` → `- [x]`) as it lands. Do one task fully (test → implement → verify → commit) before starting the next.
 
 **Goal:** [One sentence describing what this builds]
 

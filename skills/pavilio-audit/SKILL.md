@@ -74,13 +74,13 @@ Flag **quick wins** (high impact, S effort) separately so they can be done immed
 
 ## Final Deliverable Format
 
-Write the report to a **file** (don't dump it only into chat), following the [[memo-explain]] conventions:
+Write the report to a **file** (don't dump it only into chat) as a self-contained markdown document:
 
-- **Location:** `projects/<project>/memo/YYYY-MM-DD_HHmm_audit.md`. Resolve `<project>` the same way [[code-review]] does (explicit arg → `pwd` under a project repo → ask). If the audited repo is not a tracked project under `projects/`, write to `<repo-root>/AUDIT_YYYY-MM-DD.md` instead and tell the user the path.
+- **Location:** `projects/<project>/memo/YYYY-MM-DD_HHmm_audit.md`. Resolve `<project>` from an explicit arg, else `pwd` under a project repo, else ask. If the audited repo is not a tracked project under `projects/`, write to `<repo-root>/AUDIT_YYYY-MM-DD.md` instead and tell the user the path.
 - Use the native Write tool. Do NOT commit the file. Do NOT touch `PROJECT.md`, `_index.json`, or other index files.
 - After writing, report the file path + a 3-bullet summary (health grade, top risk, top quick win).
 
-Embed **mermaid diagrams where they clarify** — follow the [[mermaid-chart]] / [[mermaid-diagrams]] pitfall rules (no angle brackets outside arrow tokens, quote any flowchart label with non-alphanumerics). Good candidates:
+Embed **mermaid diagrams where they clarify** — mind the common pitfalls (no angle brackets outside arrow tokens, quote any flowchart label with non-alphanumerics). Good candidates:
 
 - Repo Map → `flowchart TD` architecture sketch (modules + main data/control flow).
 - A multi-service or request flow worth calling out → `sequenceDiagram`.
