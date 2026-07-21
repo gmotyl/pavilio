@@ -37,6 +37,21 @@ describe("buildFileTree", () => {
     const root = buildFileTree([]);
     expect(root.children.length).toBe(0);
   });
+
+  it("never creates a nameless node for a trailing-slash dir entry", () => {
+    // git status --porcelain without -uall reports an untracked dir as "?? dir/"
+    const files = [
+      { status: "??", path: "src/db/" },
+      { status: "M", path: "src/index.ts" },
+    ];
+    const root = buildFileTree(files);
+    const src = root.children.find((c) => c.name === "src");
+    const names = (src?.children ?? []).map((c) => c.name);
+    expect(names).not.toContain("");
+    const db = src?.children.find((c) => c.name === "db");
+    expect(db?.file?.status).toBe("??");
+    expect(db?.path).toBe("src/db");
+  });
 });
 
 describe("countFiles", () => {

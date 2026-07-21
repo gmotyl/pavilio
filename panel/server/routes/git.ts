@@ -118,7 +118,9 @@ function getBranchDiff(base: string, file: string, repo?: string): string {
 router.get("/status", (req, res) => {
   try {
     const repo = req.query.repo as string | undefined;
-    const status = git("status --porcelain", repo);
+    // -uall expands untracked directories into their individual files;
+    // without it a new dir arrives as a single "?? dir/" entry.
+    const status = git("status --porcelain -uall", repo);
     const files = status
       .split("\n")
       .filter(Boolean)
@@ -435,7 +437,7 @@ router.get("/branch-diff", (req, res) => {
 router.get("/suggest-message", (req, res) => {
   try {
     const repo = req.query.repo as string | undefined;
-    const status = git("status --porcelain", repo);
+    const status = git("status --porcelain -uall", repo);
     const files = status
       .split("\n")
       .filter(Boolean)

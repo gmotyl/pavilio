@@ -95,6 +95,11 @@ describe("ReportBlock", () => {
     Object.assign(navigator, {
       clipboard: { writeText },
     });
+    // copyToClipboard only uses the async clipboard API in secure contexts
+    Object.defineProperty(window, "isSecureContext", {
+      value: true,
+      configurable: true,
+    });
 
     render(<ReportBlock project="metro" projectLabel="Metro" />);
     await flushFetch();

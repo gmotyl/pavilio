@@ -7,6 +7,7 @@ import {
   ReportDetail,
 } from "./reportFormatters";
 import { rangeForPeriod, Period, DateRange } from "./periodRange";
+import { copyToClipboard } from "../../lib/clipboard";
 
 type NamedPeriod = Exclude<Period, object>;
 
@@ -118,11 +119,7 @@ export function ReportBlock({
   const totalMinutes = entries.reduce((s, e) => s + e.minutes, 0);
 
   const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(formatted);
-    } catch {
-      // clipboard unavailable; ignore
-    }
+    await copyToClipboard(formatted);
   };
 
   const onDownloadCSV = () => {

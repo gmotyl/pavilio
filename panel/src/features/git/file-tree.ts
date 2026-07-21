@@ -13,7 +13,10 @@ export interface TreeNode {
 export function buildFileTree(files: FileEntry[]): TreeNode {
   const root: TreeNode = { name: "", path: "", children: [] };
   for (const f of files) {
-    const parts = f.path.split("/");
+    // git status without -uall reports untracked dirs as "dir/" — a trailing
+    // slash would otherwise create a nameless child node.
+    const parts = f.path.split("/").filter(Boolean);
+    if (parts.length === 0) continue;
     let node = root;
     for (let i = 0; i < parts.length; i++) {
       const segment = parts[i];

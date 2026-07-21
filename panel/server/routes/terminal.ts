@@ -1,7 +1,9 @@
 import { Router } from "express";
+import multer from "multer";
 import { readFileSync } from "fs";
-import { resolve } from "path";
-import { homedir } from "os";
+import { promises as fs } from "fs";
+import { join, resolve } from "path";
+import { homedir, tmpdir } from "os";
 import {
   createSession,
   listSessions,
@@ -77,6 +79,75 @@ router.get("/start-dirs", (req, res) => {
   }
 
   res.json(dirs);
+});
+
+// Pasted images from the browser (e.g. Mac browser → panel on another
+// machine): the terminal CLI can only read the clipboard of the machine it
+// runs on, so the browser uploads the image here and pastes the saved path.
+const pasteUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
+const EXT_BY_MIME: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+};
+
+const PASTE_DIR = join(tmpdir(), "pavilio-pastes");
+const PASTE_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Nothing else ever deletes these files, so each upload sweeps expired ones.
+async function sweepOldPastes() {
+  let names: string[];
+  try {
+    names = await fs.readdir(PASTE_DIR);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const p = join(PASTE_DIR, name);
+    try {
+      const stat = await fs.stat(p);
+      if (Date.now() - stat.mtimeMs > PASTE_TTL_MS) await fs.unlink(p);
+    } catch {
+      // raced with another sweep — ignore
+    }
+  }
+}
+
+router.post("/paste-image", (req, res) => {
+  pasteUpload.single("image")(req, res, async (err: unknown) => {
+    if (err) {
+      const tooBig = (err as { code?: string })?.code === "LIMIT_FILE_SIZE";
+      return res
+        .status(tooBig ? 413 : 400)
+        .json({ error: tooBig ? "Image too large (max 20MB)" : "Upload failed" });
+    }
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: "Missing image" });
+    const ext = EXT_BY_MIME[file.mimetype];
+    if (!ext) return res.status(400).json({ error: "Not an image" });
+
+    try {
+      // Screenshots often contain secrets — keep them out of reach of other
+      // local users on shared-/tmp machines.
+      await fs.mkdir(PASTE_DIR, { recursive: true, mode: 0o700 });
+      // Fire-and-forget: don't delay this upload's response on the sweep.
+      sweepOldPastes().catch(() => {});
+      const path = join(
+        PASTE_DIR,
+        `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`,
+      );
+      await fs.writeFile(path, file.buffer, { mode: 0o600 });
+      res.json({ path });
+    } catch {
+      res.status(500).json({ error: "Upload failed" });
+    }
+  });
 });
 
 export default router;
