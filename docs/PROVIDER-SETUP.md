@@ -44,8 +44,8 @@ Each AI provider has its own configuration location and format. This guide shows
 
 - `resume` - Load last session context
 - `session end` - Save progress
-- `/memo` - Quick note capture
-- `/note` - Process meeting transcripts
+- `/pavilio-memo` - Quick note capture
+- `/pavilio-note` - Process meeting transcripts
 
 ## Important Context
 

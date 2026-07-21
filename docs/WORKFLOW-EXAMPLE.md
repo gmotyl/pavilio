@@ -5,7 +5,7 @@ Real-world example of using pavilio for a project called `landingpage`.
 ## First Time: Create & Initialize Project
 
 ```
-❯ /note landingpage
+❯ /pavilio-note landingpage
 
 ⚠️  Project "landingpage" not found in AGENTS.md
 
@@ -40,14 +40,14 @@ Real-world example of using pavilio for a project called `landingpage`.
 ## During Session: Create Notes & Memos
 
 ```
-❯ /note landingpage
+❯ /pavilio-note landingpage
 
 ✓ Found project in AGENTS.md
 ✓ Creating note in notes/landingpage/notes/
 
 [Editor opens - add session notes, decisions, next steps]
 
-❯ /memo "Fixed navbar layout issue, need to review responsive design"
+❯ /pavilio-memo "Fixed navbar layout issue, need to review responsive design"
 
 ✓ Memo saved to notes/landingpage/notes/[date]-memos.md
 ```
@@ -88,7 +88,7 @@ Ready for next session!
 
   Ready to continue!
 
-❯ /note landingpage
+❯ /pavilio-note landingpage
 
 [Create today's session note]
 [Document: Tested on iPhone, added media queries]
@@ -130,17 +130,17 @@ Ready for next session!
 
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `/note [project]` | Create session note (auto-initializes if needed) | `/note landingpage` |
-| `/memo "text"` | Quick thought capture | `/memo "Fix navbar bug"` |
+| `/pavilio-note [project]` | Create session note (auto-initializes if needed) | `/pavilio-note landingpage` |
+| `/pavilio-memo "text"` | Quick thought capture | `/pavilio-memo "Fix navbar bug"` |
 | `resume [project]` | Load project context + last session | `resume landingpage` |
 | `session end` | Save progress + commit | `session end` |
 | `standup [project]` | Daily standup preparation | `standup landingpage` |
-| `/question` | Search project knowledge | `/question "How was navbar built?"` |
+| `/pavilio-question` | Search project knowledge | `/pavilio-question "How was navbar built?"` |
 
 ## Key Points
 
 - **Automatic Session Tracking:** Each `session end` creates a progress file and commits automatically
 - **Project Context:** Commands automatically detect which project you're working on
-- **Quill Integration:** `/note meeting-name` searches for meetings and creates notes from minutes
+- **Quill Integration:** `/pavilio-note meeting-name` searches for meetings and creates notes from minutes
 - **No Manual File Management:** Everything is organized by the template structure
 - **Resume Anywhere:** `resume [project]` loads context from your last session

@@ -1,6 +1,6 @@
 ---
-name: bootstrap
-description: Generate `PROJECT.md` and `_index.json` for a project from its existing meeting notes. Use when the user invokes `/bootstrap`, when a project has notes but no index, or when rebuilding/migrating after manual edits. Accepts a single project name or "all".
+name: pavilio-bootstrap
+description: Generate `PROJECT.md` and `_index.json` for a project from its existing meeting notes. Use when the user invokes `/pavilio-bootstrap`, when a project has notes but no index, or when rebuilding/migrating after manual edits. Accepts a single project name or "all".
 ---
 
 # Project Knowledge Bootstrap

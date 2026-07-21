@@ -1,6 +1,6 @@
 ---
-name: note
-description: Process a meeting transcript into structured project notes, update PROJECT.md / _index.json, and propose Todoist follow-ups. Use when the user invokes `/note`, says "process the transcript", or references a meeting name to pull from Quill/Fathom. Polish content with English section headers; verbatim transcript is preserved.
+name: pavilio-note
+description: Process a meeting transcript into structured project notes, update PROJECT.md / _index.json, and propose Todoist follow-ups. Use when the user invokes `/pavilio-note`, says "process the transcript", or references a meeting name to pull from Quill/Fathom. Polish content with English section headers; verbatim transcript is preserved.
 ---
 
 # Meeting Processing

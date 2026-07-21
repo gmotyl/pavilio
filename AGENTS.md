@@ -87,13 +87,15 @@ All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.m
 - [`pavilio-audit`](skills/pavilio-audit/SKILL.md) — deep repo audit → health grade + improvement plan (`/pavilio-audit`)
 - [`pavilio-qa-agent`](skills/pavilio-qa-agent/SKILL.md) — acceptance-criteria-driven QA runner (`/pavilio-qa-agent`)
 - [`pavilio-create-skill`](skills/pavilio-create-skill/SKILL.md) — scaffold a new workspace skill (`/pavilio-create-skill`)
+- [`pavilio-memo`](skills/pavilio-memo/SKILL.md) — quick capture a thought or note (`/pavilio-memo`)
+- [`pavilio-memo-explain`](skills/pavilio-memo-explain/SKILL.md) — explain a concept/flow as a mermaid memo (`/pavilio-memo-explain`)
+- [`pavilio-note`](skills/pavilio-note/SKILL.md) — process meeting transcripts; Quill-aware (`/pavilio-note`)
+- [`pavilio-note-batch`](skills/pavilio-note-batch/SKILL.md) — batch-process unprocessed Quill meetings (`/pavilio-note-batch`)
+- [`pavilio-question`](skills/pavilio-question/SKILL.md) — query project knowledge base (`/pavilio-question`)
+- [`pavilio-bootstrap`](skills/pavilio-bootstrap/SKILL.md) — initialize `PROJECT.md` + `_index.json` (`/pavilio-bootstrap`)
 
 **Other project skills:**
 
-- [`memo`](skills/memo/SKILL.md) — quick capture a thought or note (`/memo`)
-- [`note`](skills/note/SKILL.md) — process meeting transcripts; Quill-aware (`/note`)
-- [`question`](skills/question/SKILL.md) — query project knowledge base (`/question`, `/q`)
-- [`bootstrap`](skills/bootstrap/SKILL.md) — initialize `PROJECT.md` + `_index.json` (`/bootstrap`)
 - [`mermaid-chart`](skills/mermaid-chart/SKILL.md) — patterns for diagrams that render well in the panel (`/mermaid-chart`)
 
 ---

@@ -1,6 +1,6 @@
 ---
-name: question
-description: Answer questions from accumulated project notes — people, decisions, technologies, timelines — using `_index.json` / `PROJECT.md`. Use when the user invokes `/question` or `/q`, asks "who is …", "what was decided about …", "what's the status of …", or otherwise queries project history.
+name: pavilio-question
+description: Answer questions from accumulated project notes — people, decisions, technologies, timelines — using `_index.json` / `PROJECT.md`. Use when the user invokes `/pavilio-question`, asks "who is …", "what was decided about …", "what's the status of …", or otherwise queries project history.
 ---
 
 # Project Knowledge Assistant
@@ -181,6 +181,6 @@ If `_index.json` or `PROJECT.md` doesn't exist for a project:
 1. Fall back to searching `.md` files directly in the projects/project folder
 2. Look for patterns: dates in filenames, common sections in notes
 3. Inform user: "Note: [project] doesn't have a structured index yet. Searching raw notes..."
-4. Suggest running `/bootstrap [project]` to generate the index from existing notes
+4. Suggest running `/pavilio-bootstrap [project]` to generate the index from existing notes
 
 ---
