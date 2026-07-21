@@ -1,0 +1,99 @@
+#!/bin/bash
+
+set -e
+
+echo "🔧 Setting up OpenCode..."
+echo ""
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+OC_CMD_DIR="$REPO_ROOT/.opencode/commands"
+OC_JSON="$REPO_ROOT/opencode.json"
+
+# 1. Generate one opencode command wrapper per skill (dynamic, no hardcoded list) —
+#    mirrors setup:claude-code. Wrappers use the absolute skill path so the command
+#    resolves regardless of the invoking cwd.
+mkdir -p "$OC_CMD_DIR"
+echo "📋 Generating opencode command wrappers from skills/ ..."
+if [ -d "skills" ]; then
+    for skill_md in skills/*/SKILL.md; do
+        [ -e "$skill_md" ] || continue
+        cmd="$(basename "$(dirname "$skill_md")")"
+        printf 'Read and follow the instructions in `%s/%s` exactly.\n' "$REPO_ROOT" "$skill_md" > "$OC_CMD_DIR/${cmd}.md"
+        echo "  ✓ ${cmd}.md"
+    done
+fi
+
+# 2. Register the wrappers in opencode.json's `command` block. opencode reads
+#    slash-commands from this block; regenerating it means every skill is wired
+#    automatically. Other keys (permission, mcp, …) are preserved. opencode.json
+#    is created minimally only if absent.
+echo ""
+echo "🧩 Registering commands in opencode.json ..."
+python3 - "$REPO_ROOT" <<'PY'
+import json, os, glob, re, sys
+
+root = sys.argv[1]
+cmd_dir = os.path.join(root, ".opencode", "commands")
+cfg_path = os.path.join(root, "opencode.json")
+
+cfg = {}
+if os.path.exists(cfg_path):
+    with open(cfg_path) as f:
+        cfg = json.load(f)
+cfg.setdefault("$schema", "https://opencode.ai/config.json")
+
+commands = {}
+for path in sorted(glob.glob(os.path.join(cmd_dir, "*.md"))):
+    name = os.path.splitext(os.path.basename(path))[0]
+    with open(path) as f:
+        body = f.read().strip()
+    # Metadata lives in the source skill, not the generated one-line wrapper.
+    desc = agent = model = None
+    skill_path = os.path.join(root, "skills", name, "SKILL.md")
+    if os.path.exists(skill_path):
+        with open(skill_path) as sf:
+            m = re.match(r"^---\n(.*?)\n---\n", sf.read(), re.S)
+        if m:
+            for line in m.group(1).splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    k, v = k.strip(), v.strip()
+                    if k == "description":
+                        desc = v
+                    elif k == "agent":
+                        agent = v
+                    elif k == "model":
+                        model = v
+    entry = {"template": body}
+    if desc:
+        entry["description"] = desc
+    if agent:
+        entry["agent"] = agent
+    if model:
+        entry["model"] = model
+    commands[name] = entry
+
+cfg["command"] = commands
+with open(cfg_path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+
+print(f"  ✓ {len(commands)} commands registered in opencode.json")
+PY
+
+# 3. Sync wrappers to the global opencode config, if present, so commands also
+#    resolve when opencode is launched outside this repo.
+GLOBAL="$HOME/.config/opencode"
+if [ -d "$GLOBAL" ]; then
+    mkdir -p "$GLOBAL/commands"
+    cp "$OC_CMD_DIR"/*.md "$GLOBAL/commands/" 2>/dev/null || true
+    echo "  ✓ Synced wrappers → $GLOBAL/commands/"
+fi
+
+echo ""
+echo "✅ OpenCode setup complete!"
+echo ""
+echo "Commands are registered in opencode.json — launch opencode from this repo to use them."
+echo ""

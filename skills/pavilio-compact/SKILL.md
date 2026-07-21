@@ -38,7 +38,7 @@ Goal: <the remaining objective, one paragraph>
 
 ## Non-goals
 
-- Does not close the session — `/end-session` remains a separate step.
+- Does not close the session — `/pavilio-session-end` remains a separate step.
 - Does not commit; does not rewrite or verify the progress file.
 - Never creates Todoist tasks (link an existing high-level task only if already known).
 - No prioritization or briefing (that's [[pavilio-manager]]); no execution (that's [[pavilio-resume]]).

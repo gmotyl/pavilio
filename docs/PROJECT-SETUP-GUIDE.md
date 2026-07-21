@@ -38,8 +38,8 @@ my-web-app/
 ### 3. Understanding the Structure
 
 **`notes/notes/`** - Where you keep session notes
-- Use `/memo` to capture quick thoughts
-- Use `/note` for meeting processing
+- Use `/pavilio-memo` to capture quick thoughts
+- Use `/pavilio-note` for meeting processing
 - Store decisions and documentation here
 
 **`progress/`** - Auto-created session tracking
@@ -78,9 +78,9 @@ claude  # or your configured Claude command
 ```
 resume my-web-app      # Load last session context
 session end            # Save session and create progress file
-/memo                  # Quick note capture
-/note                  # Process transcripts
-/q topic               # Search project knowledge
+/pavilio-memo            # Quick note capture
+/pavilio-note            # Process transcripts
+/pavilio-question topic  # Search project knowledge
 ```
 
 ### Session Tracking
@@ -123,7 +123,7 @@ This adds an entry like:
 **Benefits:**
 - Agents (Claude Code, etc.) know what projects exist
 - You can `resume my-web-app` from anywhere
-- Commands like `/note ch` work because the agent understands your project structure
+- Commands like `/pavilio-note ch` work because the agent understands your project structure
 
 ## Project Types
 
@@ -150,7 +150,7 @@ When using Claude Code with your project:
 2. **Understands your project structure**: Knows where notes, progress, etc. go
 3. **Session tracking**: Automatically creates progress files
 4. **Resuming**: `resume my-web-app` loads context from last session
-5. **Commands work properly**: `/note`, `/memo`, etc. know the project structure
+5. **Commands work properly**: `/pavilio-note`, `/pavilio-memo`, etc. know the project structure
 
 ## Example Workflow
 
@@ -196,7 +196,7 @@ Use `resume [project-name]` to switch between projects.
 
 ## Troubleshooting
 
-### Claude doesn't understand `/note [project]`
+### Claude doesn't understand `/pavilio-note [project]`
 
 Make sure:
 1. `AGENTS.md` exists in the root

@@ -1,6 +1,6 @@
 ---
-name: memo
-description: Capture a quick thought or note for a project with light cleanup. Use when the user invokes `/memo`, says "memo …", or wants to jot something against a specific project. Writes to `projects/<name>/memo/YYYY-MM-DD_HHmm_slug.md` and remembers the last project for follow-up memos.
+name: pavilio-memo
+description: Capture a quick thought or note for a project with light cleanup. Use when the user invokes `/pavilio-memo`, says "memo …", or wants to jot something against a specific project. Writes to `projects/<name>/memo/YYYY-MM-DD_HHmm_slug.md` and remembers the last project for follow-up memos.
 ---
 
 # Quick Memo

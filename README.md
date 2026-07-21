@@ -45,14 +45,33 @@ Follow the instructions at **https://github.com/obra/superpowers**
 ### Session Workflow
 
 ```
-resume [project]
-  → superpowers:brainstorming  (design before coding)
-  → superpowers:writing-plans  (turn design into tasks)
-  → superpowers:executing-plans (build task by task)
-  → end-session                (commit progress, propose todos)
+/pavilio-session-start [project]
+  → /pavilio-grill              (design — you approve it, nothing gets coded yet)
+      ↳ pavilio-writing-plans   (auto: grill hands off, writes the bite-sized plan)
+  → /pavilio-execute-plan       (build task by task: test → implement → verify → commit)
+  → /pavilio-session-end        (commit progress, propose todos)
 ```
 
 Skills are optional — the panel and scripts work without them — but they make the biggest difference in the quality and consistency of AI-assisted work.
+
+## Built-in Skills
+
+Every skill under `skills/` is exposed as a slash command in Claude Code and opencode (run `pnpm setup:claude-code` / `pnpm setup:opencode`, or `pnpm pull` which refreshes both). The self-contained **pavilio-** family:
+
+| Command | What it does |
+|---------|--------------|
+| `/pavilio-session-start` | Start/resume a project — load context, open the progress file, enter planning mode |
+| `/pavilio-session-end` | Verify progress is captured, commit + push, propose Todoist follow-ups |
+| `/pavilio-grill` | Stress-test an idea or plan into a sharp, domain-aligned design |
+| `/pavilio-writing-plans` | Turn an approved spec into a bite-sized, test-first plan (usually invoked automatically by `/pavilio-grill`) |
+| `/pavilio-execute-plan` | Execute a written plan task-by-task with review checkpoints; stop and ask when blocked |
+| `/pavilio-handoff` | Delegate a task by prebaking a handoff file for later execution |
+| `/pavilio-compact` | Package the current session's remaining work into a handoff before context runs out |
+| `/pavilio-resume` | Pick up a prebaked handoff file and execute its todo list top-down |
+| `/pavilio-manager` | Proactive managing-developer advisor — briefs and prioritizes work |
+| `/pavilio-audit` | Deep repo audit → health grade + prioritized improvement plan |
+| `/pavilio-qa-agent` | Acceptance-criteria-driven QA runner |
+| `/pavilio-create-skill` | Scaffold a new workspace skill (slash command in both agents) |
 
 ## Quick Start
 

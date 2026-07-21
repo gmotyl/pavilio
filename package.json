@@ -9,6 +9,7 @@
     "export-project": "./scripts/export-project-to-notebooklm.sh",
     "setup:all": "./scripts/setup:all",
     "setup:claude-code": "./scripts/setup:claude-code",
+    "setup:opencode": "./scripts/setup:opencode",
     "setup:kilocode-cli": "./scripts/setup:kilocode-cli",
     "setup:copilot": "./scripts/setup:copilot",
     "setup:qwen": "./scripts/setup:qwen",

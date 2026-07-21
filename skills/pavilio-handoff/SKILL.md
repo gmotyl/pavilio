@@ -13,6 +13,10 @@ Turn a task description into a prebaked handoff for [[pavilio-resume]]. Delegate
 /pavilio-handoff <project> <task description>
 ```
 
+## Paths
+
+All `projects/<proj>/…` paths are relative to the **workspace repo root**. In this workspace layout the repo root is itself named `projects` and project folders live under a nested `projects/` dir, so the `projects` segment can legitimately repeat (`<repo-root>/projects/<proj>/…`). Write and resolve the path exactly as such; never collapse a repeated `projects/`.
+
 ## Behavior
 
 1. **Resolve inputs**: project + task from arguments; ask only for what's missing.

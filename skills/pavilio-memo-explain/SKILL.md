@@ -1,6 +1,6 @@
 ---
-name: memo-explain
-description: Create a markdown memo with mermaid diagrams that explains a technical concept, flow, or design decision for a project. Use when the user invokes `/memo-explain`, asks to "explain X graphically", "present this as a diagram", or wants a technical walkthrough captured as a memo. Writes to `projects/<project>/memo/YYYY-MM-DD_HHmm_slug.md` and embeds diagrams using the mermaid-diagrams conventions.
+name: pavilio-memo-explain
+description: Create a markdown memo with mermaid diagrams that explains a technical concept, flow, or design decision for a project. Use when the user invokes `/pavilio-memo-explain`, asks to "explain X graphically", "present this as a diagram", or wants a technical walkthrough captured as a memo. Writes to `projects/<project>/memo/YYYY-MM-DD_HHmm_slug.md` and embeds diagrams using standard mermaid conventions.
 ---
 
 # Memo Explain
