@@ -53,10 +53,9 @@ Start work on a project by loading context, checking in-progress plans, and ente
 
 Session start always lands in **planning mode**, never directly in code edits. Follow the four-step workflow:
 
-1. **Design** — [[pavilio-grill]]: stress-test the task against the project's `CONTEXT.md` and `adr/` (and any project-scoped `CONTEXT.md`/`adr/`). Sharpen terminology, surface hidden constraints, and update docs inline when decisions crystallise.
-2. **Plan** — [[pavilio-writing-plans]]: produce a written plan document before touching code.
-3. **Execute** — run the plan task-by-task with review checkpoints. Enter here directly when CURRENT.md already points at an in-progress plan; check off each step as it lands.
-4. **Implement** — red-green-refactor for every feature or bugfix: write the failing test → see it fail → minimal implementation → see it pass → commit.
+1. **Design → Plan** — [[pavilio-grill]]: stress-test the task against the project's `CONTEXT.md` and `adr/`. Sharpen terminology, surface hidden constraints, and update docs inline. Once you approve the design, grill hands off under the hood to [[pavilio-writing-plans]], which writes the bite-sized plan — don't invoke the plan writer by hand.
+2. **Execute** — [[pavilio-execute-plan]]: run the plan task-by-task with review checkpoints. Enter here directly when CURRENT.md already points at an in-progress plan; check off each step as it lands.
+3. **Implement** — red-green-refactor for every feature or bugfix: write the failing test → see it fail → minimal implementation → see it pass → commit. (The per-step rhythm inside Execute.)
 
 ## Open a progress file for this session
 
