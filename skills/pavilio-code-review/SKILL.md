@@ -1,6 +1,6 @@
 ---
-name: code-review
-description: Two-axis review (Standards + Spec) of the diff between HEAD and a fixed point, using the project's documented standards (PROJECT.md, CONTEXT.md, qa/REVIEW_RULES.md, ADRs) and the originating spec. Use when the user wants to review a branch, PR, or work-in-progress, or asks to "review since X".
+name: pavilio-code-review
+description: Two-axis review (Standards + Spec) of the diff between HEAD and a fixed point, using the project's documented standards (PROJECT.md, CONTEXT.md, qa/REVIEW_RULES.md, ADRs) and the originating spec. Use when the user wants to review a branch, PR, or work-in-progress, asks to "review since X", or as the branch-level review step at the end of [[pavilio-execute-plan]].
 ---
 
 # Code Review
