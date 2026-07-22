@@ -69,7 +69,7 @@ Group selected meetings by resolved project:
 
 Each subagent prompt:
 
-> Read and follow the instructions in `/Users/gmotyl/git/prv/projects/skills/note/SKILL.md` exactly, with this input: projectname=`<project>` `-yolo` `--meeting-id <meeting_id>` `--transcript-file projects/.tmp_transcripts/<meeting_id>.txt`. Your final message must be ONLY the Batch Mode JSON output defined in that skill.
+> Read and follow the instructions in the `pavilio-note` skill (`skills/pavilio-note/SKILL.md`) exactly, with this input: projectname=`<project>` `-yolo` `--meeting-id <meeting_id>` `--transcript-file projects/.tmp_transcripts/<meeting_id>.txt`. Your final message must be ONLY the Batch Mode JSON output defined in that skill.
 
 Parse each subagent's JSON result. A subagent that errors or returns `status: error` does not stop the others.
 

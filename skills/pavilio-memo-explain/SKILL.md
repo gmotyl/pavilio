@@ -5,19 +5,19 @@ description: Create a markdown memo with mermaid diagrams that explains a techni
 
 # Memo Explain
 
-Create a markdown memo that explains a topic with embedded mermaid diagrams. Sibling of [[memo]] — use this variant when the explanation benefits from a visual: a flowchart, sequence diagram, architecture sketch, or before/after comparison. Be extremely concise and sacrifise grammar fo the sake of concision.
+Create a markdown memo that explains a topic with embedded mermaid diagrams. Sibling of [[pavilio-memo]] — use this variant when the explanation benefits from a visual: a flowchart, sequence diagram, architecture sketch, or before/after comparison. Be extremely concise and sacrifise grammar fo the sake of concision.
 
 ## When to use
 
 - User asks to explain how something works
 - Documenting a code change or design decision
 - Capturing a flow with multiple actors or branches
-- Following up after a `/resume-session` brainstorm with a visual recap
+- Following up after a `/pavilio-session-start` brainstorm with a visual recap
 - Any time text alone would leave the reader hunting for the structure
 
 ## When NOT to use
 
-- Quick thought capture with no inherent structure → use [[memo]]
+- Quick thought capture with no inherent structure → use [[pavilio-memo]]
 - Project-wide architecture overview that should live forever → that's PROJECT.md or an ADR, not a dated memo
 
 ## Process
