@@ -1,6 +1,6 @@
 ---
-name: code-review
-description: Two-axis review (Standards + Spec) of the diff between HEAD and a fixed point, using the project's documented standards (PROJECT.md, CONTEXT.md, qa/REVIEW_RULES.md, ADRs) and the originating spec. Use when the user wants to review a branch, PR, or work-in-progress, or asks to "review since X".
+name: pavilio-code-review
+description: Two-axis review (Standards + Spec) of the diff between HEAD and a fixed point, using the project's documented standards (PROJECT.md, CONTEXT.md, qa/REVIEW_RULES.md, ADRs) and the originating spec. Use when the user wants to review a branch, PR, or work-in-progress, asks to "review since X", or as the branch-level review step at the end of [[pavilio-execute-plan]].
 ---
 
 # Code Review
@@ -58,23 +58,57 @@ Look for the originating spec, in order:
 
 Send a single message with two `Agent` tool calls (general-purpose subagent for both).
 
+Each sub-agent must return findings as a **table**, one row per finding, using this shared status vocabulary so the aggregate reads at a glance:
+
+| Emoji | Status | Meaning |
+|-------|--------|---------|
+| 🔴 | HARD | Blocking — a documented rule is violated / a requirement is wrong or missing. Must fix (or explicitly defer with a ticket). |
+| 🟡 | JUDGEMENT | Debatable or non-blocking concern; worth a human decision. |
+| 💡 | NIT | Cosmetic / optional. |
+| ✅ | PASS | Checked and correct — include the notable ones so the reader sees what was verified, not just what failed. |
+
+Sub-agents return **only the table** (rows sorted 🔴 → 🟡 → 💡 → ✅), no prose preamble. Keep each `Finding` cell to one tight sentence; put the file:line in `Location`.
+
 **Standards sub-agent prompt** — include:
 
 - The full diff command and commit list.
 - The list of standards-source files from step 3.
-- The brief: "Read the standards docs (especially `qa/REVIEW_RULES.md`). Then read the diff. Report — per file/hunk where relevant — every place the diff violates a documented standard. Cite the standard (file + rule). Distinguish hard violations from judgement calls. Skip anything tooling enforces. Under 400 words."
+- The brief: "Read the standards docs (especially `qa/REVIEW_RULES.md`), then the diff. Emit a markdown table with columns `| Status | Area | Finding | Location | Reference |` — one row per check, `Status` one of 🔴/🟡/💡/✅, `Reference` citing the standard (file + rule). Cover every place the diff violates a documented standard **and** the notable things it got right (✅). Skip anything tooling enforces. Rows sorted 🔴→🟡→💡→✅. Table only, no prose. Under 400 words."
 
 **Spec sub-agent prompt** — include:
 
 - The diff command and commit list.
 - The path or fetched contents of the spec.
-- The brief: "Read the spec. Then read the diff. Report: (a) requirements asked for but missing/partial; (b) behaviour not asked for (scope creep); (c) requirements implemented but apparently wrong. Quote the spec line per finding. Under 400 words."
+- The brief: "Read the spec, then the diff. Emit a markdown table with columns `| Status | Kind | Finding | Location | Spec ref |` where `Kind` is one of `missing`, `scope-creep`, `wrong`, or `ok`, `Status` one of 🔴/🟡/💡/✅, and `Spec ref` quotes/cites the spec line. Include ✅ rows confirming the requirements that ARE correctly implemented. Rows sorted 🔴→🟡→💡→✅. Table only, no prose. Under 400 words."
 
 If the spec is missing, skip the Spec sub-agent and note it.
 
 ### 6. Aggregate
 
-Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank — the two axes are deliberately separate. End with a one-line summary: total findings per axis, and the single worst issue flagged.
+Render one scannable report. Do **not** merge or rerank across axes — Standards and Spec stay separate — but present each as its sub-agent's table.
+
+```
+## 🔎 Code review — <branch> vs <fixed-point> (<N> commits, <M> files)
+
+🔴 hard · 🟡 judgement · 💡 nit · ✅ pass
+
+### Standards
+<Standards table>
+
+### Spec
+<Spec table, or "_No spec available — Spec axis skipped._">
+
+### Verdict
+| Axis | 🔴 | 🟡 | 💡 |
+|------|----|----|----|
+| Standards | n | n | n |
+| Spec | n | n | n |
+
+**Worst issue:** <one line — the single most important 🔴, with the fix.>
+**Recommendation:** <ship / ship-with-follow-up-ticket / fix-first>
+```
+
+If there are zero 🔴/🟡/💡 on an axis, still show the table (all ✅) so the reader sees it was actually reviewed.
 
 ## Why two axes
 
