@@ -14,21 +14,24 @@ Start work on a project by loading context, checking in-progress plans, and ente
 
 ## Behavior
 
+**Path anchor (read this first):** every `projects/...` path below is relative to the **workspace repo root** (`git rev-parse --show-toplevel`, e.g. `/Users/.../git/prv/projects`). That repo is itself named `projects`, and the project folders live in its **`projects/` subdirectory** — so a project's notes dir is `<root>/projects/<name>/`. Do **not** collapse the `projects/projects` nesting: `<root>/<name>/` does not exist. The authoritative name→path map is the **Notes Path** column of `.projects.local.md` at the repo root — resolve the project against it and confirm the folder exists before loading anything.
+
 **Project resolution (in order):**
-1. If `[project]` argument is provided → use it, remember it for this conversation
-2. No argument → run `pwd` and check if the current directory is a known project folder:
-   - If path ends with `.../projects/[name]` and `[name]` matches a folder in `projectsDir` → use that name automatically
-3. If project was remembered from an earlier `/pavilio-session-start` call this conversation → use it
+1. `[project]` argument provided → look it up in `.projects.local.md`, use its Notes Path, remember it for this conversation
+2. No argument → run `pwd`; if it is inside `<root>/projects/<name>/...`, use that `<name>`
+3. Remembered from an earlier `/pavilio-session-start` call this conversation → use it
 4. None of the above → ask: "Which project do you want to start?" and wait for reply
+
+If the resolved folder is missing, say so and re-resolve via `.projects.local.md` — never guess a sibling path like `<root>/<name>/`.
 
 **Then follow the full start logic:**
 
-1. Load most recent progress file from `projects/[project]/progress/`
+1. Load most recent progress file from `<root>/projects/[project]/progress/`
 2. Read the project's default-discovery files:
    - `PROJECT.md` — overview, repos, key context (always)
    - `CONTEXT.md` (if present) — project-specific glossary (always; usually short)
    - `adr/` (if present) — **list filenames/titles only**, do not read bodies. You'll know which ADRs exist for later targeted reads.
-3. Read `projects/[project]/plans/CURRENT.md`
+3. Read `<root>/projects/[project]/plans/CURRENT.md`
 4. **Branch on CURRENT.md content:**
 
    **Empty or missing** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then enter the workflow at **step 1: Design** (see below).
@@ -59,7 +62,7 @@ Session start always lands in **planning mode**, never directly in code edits. F
 
 ## Open a progress file for this session
 
-Right after the project is resolved, **open `projects/[project]/progress/[date]-slug.md`** (create if missing, slug derived from the task or "wip" if undecided). This is the live notebook for the session — append to it as you go:
+Right after the project is resolved, **open `<root>/projects/[project]/progress/[date]-slug.md`** (create if missing, slug derived from the task or "wip" if undecided). This is the live notebook for the session — append to it as you go:
 
 - decisions and their rationale
 - problems hit + how they were solved (or remain open)

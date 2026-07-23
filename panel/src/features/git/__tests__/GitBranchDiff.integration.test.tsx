@@ -1,8 +1,23 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import GitBranchDiff from "../GitBranchDiff";
 import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
+
+// Stateful stub of the realtime channel so tests can push messages.
+const ws = vi.hoisted(() => ({ setLast: (_m: unknown) => {} }));
+vi.mock("../../realtime/useWebSocket", () => {
+  const React = require("react");
+  return {
+    useWebSocket: () => {
+      const [lastMessage, setLastMessage] = React.useState(null);
+      React.useEffect(() => {
+        ws.setLast = setLastMessage;
+      }, []);
+      return { lastMessage };
+    },
+  };
+});
 
 describe("GitBranchDiff integration", () => {
   beforeEach(() => {
@@ -79,5 +94,59 @@ describe("GitBranchDiff integration", () => {
     expect(
       screen.queryByText("No changes (binary or new file)"),
     ).not.toBeInTheDocument();
+  });
+
+  it("refetches branches + diff files on git-change (branch switch)", async () => {
+    let phase: "before" | "after" = "before";
+    const mockFetch = vi.fn((input: string | URL | Request) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : (input as Request).url;
+      if (url.includes("/api/git/branches")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              current: phase === "before" ? "feature/search" : "hotfix/login",
+              branches: ["main", "feature/search", "hotfix/login"],
+            }),
+        } as Response);
+      }
+      if (url.includes("/api/git/branch-diff-files")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              files:
+                phase === "before"
+                  ? [{ status: "M", path: "src/search.ts" }]
+                  : [{ status: "M", path: "src/login.ts" }],
+              commitsAhead: 1,
+            }),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: false,
+        json: () => Promise.resolve({}),
+      } as Response);
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWithRouter(<GitBranchDiff repo="/path/to/repo" />);
+    await waitFor(() =>
+      expect(screen.getByText("src/search.ts")).toBeInTheDocument(),
+    );
+
+    // Server switched HEAD and broadcast git-change; diff must follow without reload.
+    phase = "after";
+    act(() => ws.setLast({ type: "git-change" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("src/login.ts")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("src/search.ts")).not.toBeInTheDocument();
   });
 });

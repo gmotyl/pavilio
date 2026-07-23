@@ -329,6 +329,7 @@ router.post("/checkout", (req, res) => {
     const safe = branch.replace(/[;&|`$]/g, "");
     const output = git(`checkout "${safe}"`, repo);
     const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
+    broadcast({ type: "git-change" });
     res.json({ ok: true, branch: current, output: output.trim() });
   } catch (e: any) {
     // Git checkout errors (uncommitted changes, etc.) — return the stderr message
