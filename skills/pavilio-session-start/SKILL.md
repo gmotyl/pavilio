@@ -26,12 +26,12 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 
 **Then follow the full start logic:**
 
-1. Load most recent progress file from `projects/[project]/progress/`
+1. Load most recent progress file from `<root>/projects/[project]/progress/`
 2. Read the project's default-discovery files:
    - `PROJECT.md` — overview, repos, key context (always)
    - `CONTEXT.md` (if present) — project-specific glossary (always; usually short)
    - `adr/` (if present) — **list filenames/titles only**, do not read bodies. You'll know which ADRs exist for later targeted reads.
-3. Read `projects/[project]/plans/CURRENT.md`
+3. Read `<root>/projects/[project]/plans/CURRENT.md`
 4. **Branch on CURRENT.md content:**
 
    **Empty or missing** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then enter the workflow at **step 1: Design** (see below).
@@ -62,7 +62,7 @@ Session start always lands in **planning mode**, never directly in code edits. F
 
 ## Open a progress file for this session
 
-Right after the project is resolved, **open `projects/[project]/progress/[date]-slug.md`** (create if missing, slug derived from the task or "wip" if undecided). This is the live notebook for the session — append to it as you go:
+Right after the project is resolved, **open `<root>/projects/[project]/progress/[date]-slug.md`** (create if missing, slug derived from the task or "wip" if undecided). This is the live notebook for the session — append to it as you go:
 
 - decisions and their rationale
 - problems hit + how they were solved (or remain open)

@@ -12,11 +12,13 @@ This file defines your project registry and workflow for AI agents (Claude Code,
 >
 > When `.projects.local.md` exists, read it alongside this file — it is the authoritative project registry for this workspace.
 
-| Project | Type | Path               |
-| ------- | ---- | ------------------ |
-| my-app  | work | `projects/my-app/` |
+| Project | Type | Path                      |
+| ------- | ---- | ------------------------- |
+| my-app  | work | `<root>/projects/my-app/` |
 
 The table above is an example. Replace it with your own projects in `.projects.local.md`.
+
+`<root>` is this workspace's repo root (`git rev-parse --show-toplevel`). Project folders always live in its `projects/` subdirectory, so a project's path is `<root>/projects/<name>/`. When the repo itself is named `projects`, that resolves to `.../projects/projects/<name>/` — keep both levels, never collapse to `<root>/<name>/`.
 
 ## Provider Configuration
 
@@ -56,7 +58,7 @@ Two kinds of documents anchor non-trivial design and scope decisions:
 Both exist at three scopes:
 
 - Repo root — workspace-wide
-- `projects/<name>/` — project-specific (its own `CONTEXT.md` and `adr/`)
+- `<root>/projects/<name>/` — project-specific (its own `CONTEXT.md` and `adr/`)
 - `<linked-repo>/` — each linked code repo's own glossary and decisions; follow that repo's conventions
 
 **Format & workflow** are defined by the `pavilio-grill` skill — see [`skills/pavilio-grill/SKILL.md`](skills/pavilio-grill/SKILL.md), [`CONTEXT-FORMAT.md`](skills/pavilio-grill/CONTEXT-FORMAT.md), and [`ADR-FORMAT.md`](skills/pavilio-grill/ADR-FORMAT.md).
@@ -67,7 +69,7 @@ Both exist at three scopes:
 
 Sessions are bracketed by two skills: [`pavilio-session-start`](skills/pavilio-session-start/SKILL.md) and [`pavilio-session-end`](skills/pavilio-session-end/SKILL.md).
 
-**Continuous-write model:** the progress file `projects/[project]/progress/[date]-slug.md` is **opened at session start and appended to throughout the session**. Decisions, problems, resolutions, and next steps go in as they happen — not dumped from memory at the end. `/pavilio-session-end` ("session end" / "end session") then verifies completeness, commits, and proposes any Todoist follow-ups. Save only what's relevant to picking up later — not a transcript.
+**Continuous-write model:** the progress file `<root>/projects/[project]/progress/[date]-slug.md` is **opened at session start and appended to throughout the session**. Decisions, problems, resolutions, and next steps go in as they happen — not dumped from memory at the end. `/pavilio-session-end` ("session end" / "end session") then verifies completeness, commits, and proposes any Todoist follow-ups. Save only what's relevant to picking up later — not a transcript.
 
 ## Skills
 

@@ -9,7 +9,7 @@ Verify that the session's important context, decisions, and next steps are persi
 
 ## Mental model
 
-**Progress is written as you go, not at the end.** When [[pavilio-session-start]] runs (or as soon as a project is established for the conversation), open a `projects/[project]/progress/[date]-slug.md` file and append to it throughout the session:
+**Progress is written as you go, not at the end.** (`<root>` below is the workspace repo root — `git rev-parse --show-toplevel`; project folders live in its `projects/` subdir, so notes are at `<root>/projects/<name>/`. Never collapse the `projects/projects` nesting.) When [[pavilio-session-start]] runs (or as soon as a project is established for the conversation), open a `<root>/projects/[project]/progress/[date]-slug.md` file and append to it throughout the session:
 
 - decisions made + their rationale
 - problems hit + how they were resolved (or left unresolved)
@@ -32,7 +32,7 @@ Verify that the session's important context, decisions, and next steps are persi
 
 **Then:**
 
-1. **Locate the in-progress file** for this session: `projects/[project]/progress/[date]-slug.md`. If it does not exist (no session-start ran, or progress was never opened), create it now with all the context from this conversation.
+1. **Locate the in-progress file** for this session: `<root>/projects/[project]/progress/[date]-slug.md`. If it does not exist (no session-start ran, or progress was never opened), create it now with all the context from this conversation.
 2. **Verify completeness** — re-read the file and the conversation, and add anything missing:
    - Context of tasks completed this session
    - Results / outcomes achieved

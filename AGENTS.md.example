@@ -8,13 +8,15 @@ When this file exists, AI agents read it alongside `AGENTS.md` as the authoritat
 
 ## Projects Registry (Private)
 
+`<root>` below is your workspace repo root (`git rev-parse --show-toplevel`). Project folders live in its `projects/` subdirectory, so a Notes Path is `<root>/projects/<name>/`. If your repo is itself named `projects`, that is `.../projects/projects/<name>/` — keep both levels; never collapse to `<root>/<name>/`.
+
 | Project | Collection | Notes Path |
 |---------|-----------|------------|
-| my-app | my-app | `projects/my-app/` |
-| my-client | my-client | `projects/my-client/` |
-| side-project | side-project | `projects/side-project/` |
+| my-app | my-app | `<root>/projects/my-app/` |
+| my-client | my-client | `<root>/projects/my-client/` |
+| side-project | side-project | `<root>/projects/side-project/` |
 
-**Repositories:** Each project's associated repos are listed in `projects/<name>/repos.json`. The panel reads this file to show git status per repo.
+**Repositories:** Each project's associated repos are listed in `<root>/projects/<name>/repos.json`. The panel reads this file to show git status per repo.
 
 ## Project-Specific Rules
 
