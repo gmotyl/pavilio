@@ -10,6 +10,7 @@ import {
 import DiffView, { type DiffMode } from "./DiffView";
 import BranchPicker from "./BranchPicker";
 import FileChangeList from "./FileChangeList";
+import { useWebSocket } from "../realtime/useWebSocket";
 
 interface DiffFile {
   status: string;
@@ -82,44 +83,45 @@ export default function GitBranchDiff({
   // of a file the user has since clicked away from.
   const diffRequestIdRef = useRef(0);
 
+  const { lastMessage } = useWebSocket();
+  // Latest base branch, readable from ws handlers without re-subscribing.
+  const baseBranchRef = useRef(baseBranch);
+  baseBranchRef.current = baseBranch;
+
   const qs = `repo=${encodeURIComponent(repo)}`;
 
-  // Fetch branches
-  useEffect(() => {
-    fetch(`/api/git/branches?${qs}`).then(async (res) => {
-      if (res.ok) {
-        const data = await res.json();
-        setCurrentBranch(data.current);
-        setBranches(data.branches.filter((b: string) => b !== data.current));
-        // Auto-select stored or first reasonable default
-        if (!baseBranch) {
-          const stored = localStorage.getItem(lsKey(repo));
-          if (stored && data.branches.includes(stored)) {
-            setBaseBranch(stored);
-          } else {
-            const defaults = ["main", "master", "develop"];
-            const found = defaults.find(
-              (d) => data.branches.includes(d) && d !== data.current,
-            );
-            if (found) setBaseBranch(found);
-          }
-        }
+  const fetchBranches = useCallback(async () => {
+    const res = await fetch(`/api/git/branches?${qs}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    setCurrentBranch(data.current);
+    setBranches(data.branches.filter((b: string) => b !== data.current));
+    // Auto-select stored or first reasonable default (only when none chosen yet)
+    if (!baseBranchRef.current) {
+      const stored = localStorage.getItem(lsKey(repo));
+      if (stored && data.branches.includes(stored)) {
+        setBaseBranch(stored);
+      } else {
+        const defaults = ["main", "master", "develop"];
+        const found = defaults.find(
+          (d) => data.branches.includes(d) && d !== data.current,
+        );
+        if (found) setBaseBranch(found);
       }
-    });
-  }, [repo]);
-
-  // Fetch diff files when base branch changes
-  useEffect(() => {
-    if (!baseBranch) {
-      setFiles([]);
-      return;
     }
-    setLoading(true);
-    setActiveDiff(null);
-    fetch(
-      `/api/git/branch-diff-files?base=${encodeURIComponent(baseBranch)}&${qs}`,
-    )
-      .then(async (res) => {
+  }, [qs, repo]);
+
+  const fetchDiffFiles = useCallback(
+    async (base: string) => {
+      if (!base) {
+        setFiles([]);
+        return;
+      }
+      setLoading(true);
+      try {
+        const res = await fetch(
+          `/api/git/branch-diff-files?base=${encodeURIComponent(base)}&${qs}`,
+        );
         if (res.ok) {
           const data = await res.json();
           setFiles(data.files);
@@ -128,13 +130,38 @@ export default function GitBranchDiff({
           setFiles([]);
           setCommitsAhead(0);
         }
-      })
-      .catch(() => {
+      } catch {
         setFiles([]);
         setCommitsAhead(0);
-      })
-      .finally(() => setLoading(false));
-  }, [baseBranch, repo]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [qs],
+  );
+
+  // Fetch branches on mount / repo change
+  useEffect(() => {
+    fetchBranches();
+  }, [fetchBranches]);
+
+  // Fetch diff files when base branch changes
+  useEffect(() => {
+    setActiveDiff(null);
+    fetchDiffFiles(baseBranch);
+  }, [baseBranch, fetchDiffFiles]);
+
+  // Refresh on git state changes elsewhere (checkout, commit, external edits).
+  // Without this the diff keeps showing the previous HEAD until a page reload.
+  useEffect(() => {
+    if (
+      lastMessage?.type !== "git-change" &&
+      lastMessage?.type !== "file-change"
+    )
+      return;
+    fetchBranches();
+    fetchDiffFiles(baseBranchRef.current);
+  }, [lastMessage, fetchBranches, fetchDiffFiles]);
 
   // Persist base branch selection
   const handleBaseBranchChange = (branch: string) => {

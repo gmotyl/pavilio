@@ -13,7 +13,7 @@ export default function ReviewRules({ project }: { project: string }) {
   const path = `${project}/qa/REVIEW_RULES.md`;
   const [content, setContent] = useState<string | null>(null);
   const [exists, setExists] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,7 +37,6 @@ export default function ReviewRules({ project }: { project: string }) {
         }
         setEditing(false);
         setError(null);
-        setCollapsed(false);
       } catch {
         if (!active) return;
         setContent(null);

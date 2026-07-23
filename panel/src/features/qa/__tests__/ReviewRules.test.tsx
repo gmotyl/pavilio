@@ -25,10 +25,25 @@ function mockRead(ok: boolean, content = "") {
   });
 }
 
+// Rules start collapsed; content lives behind the toggle.
+const expand = () => fireEvent.click(screen.getByTestId("review-rules-toggle"));
+
 describe("ReviewRules", () => {
+  it("is collapsed by default and hides content until expanded", async () => {
+    mockRead(true, "# My Rules");
+    render(<ReviewRules project="ch" />);
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/files/read/ch/qa/REVIEW_RULES.md"),
+    );
+    expect(screen.queryByTestId("md")).not.toBeInTheDocument();
+    expand();
+    expect(await screen.findByTestId("md")).toHaveTextContent("# My Rules");
+  });
+
   it("renders existing rules content", async () => {
     mockRead(true, "# My Rules");
     render(<ReviewRules project="ch" />);
+    expand();
     expect(await screen.findByTestId("md")).toHaveTextContent("# My Rules");
     expect(fetchMock).toHaveBeenCalledWith("/api/files/read/ch/qa/REVIEW_RULES.md");
   });
@@ -36,6 +51,7 @@ describe("ReviewRules", () => {
   it("shows a Create button when the file is missing (404)", async () => {
     mockRead(false);
     render(<ReviewRules project="ch" />);
+    expand();
     expect(await screen.findByRole("button", { name: /create rules/i })).toBeInTheDocument();
   });
 
@@ -43,6 +59,7 @@ describe("ReviewRules", () => {
     mockRead(false);
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) }); // write
     render(<ReviewRules project="ch" />);
+    expand();
     fireEvent.click(await screen.findByRole("button", { name: /create rules/i }));
     await waitFor(() => {
       const writeCall = fetchMock.mock.calls.find((c) => c[0] === "/api/files/write");
@@ -57,6 +74,7 @@ describe("ReviewRules", () => {
     mockRead(true, "# Old");
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) }); // write
     render(<ReviewRules project="ch" />);
+    expand();
     fireEvent.click(await screen.findByRole("button", { name: /edit/i }));
     const textarea = screen.getByRole("textbox");
     fireEvent.change(textarea, { target: { value: "# New rules" } });
@@ -71,6 +89,7 @@ describe("ReviewRules", () => {
     mockRead(true, "# Old");
     fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({}) }); // write fails
     render(<ReviewRules project="ch" />);
+    expand();
     fireEvent.click(await screen.findByRole("button", { name: /edit/i }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "# New" } });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));

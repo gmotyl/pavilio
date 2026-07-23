@@ -14,12 +14,15 @@ Start work on a project by loading context, checking in-progress plans, and ente
 
 ## Behavior
 
+**Path anchor (read this first):** every `projects/...` path below is relative to the **workspace repo root** (`git rev-parse --show-toplevel`, e.g. `/Users/.../git/prv/projects`). That repo is itself named `projects`, and the project folders live in its **`projects/` subdirectory** — so a project's notes dir is `<root>/projects/<name>/`. Do **not** collapse the `projects/projects` nesting: `<root>/<name>/` does not exist. The authoritative name→path map is the **Notes Path** column of `.projects.local.md` at the repo root — resolve the project against it and confirm the folder exists before loading anything.
+
 **Project resolution (in order):**
-1. If `[project]` argument is provided → use it, remember it for this conversation
-2. No argument → run `pwd` and check if the current directory is a known project folder:
-   - If path ends with `.../projects/[name]` and `[name]` matches a folder in `projectsDir` → use that name automatically
-3. If project was remembered from an earlier `/pavilio-session-start` call this conversation → use it
+1. `[project]` argument provided → look it up in `.projects.local.md`, use its Notes Path, remember it for this conversation
+2. No argument → run `pwd`; if it is inside `<root>/projects/<name>/...`, use that `<name>`
+3. Remembered from an earlier `/pavilio-session-start` call this conversation → use it
 4. None of the above → ask: "Which project do you want to start?" and wait for reply
+
+If the resolved folder is missing, say so and re-resolve via `.projects.local.md` — never guess a sibling path like `<root>/<name>/`.
 
 **Then follow the full start logic:**
 
