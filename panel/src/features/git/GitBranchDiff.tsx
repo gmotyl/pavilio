@@ -91,23 +91,27 @@ export default function GitBranchDiff({
   const qs = `repo=${encodeURIComponent(repo)}`;
 
   const fetchBranches = useCallback(async () => {
-    const res = await fetch(`/api/git/branches?${qs}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    setCurrentBranch(data.current);
-    setBranches(data.branches.filter((b: string) => b !== data.current));
-    // Auto-select stored or first reasonable default (only when none chosen yet)
-    if (!baseBranchRef.current) {
-      const stored = localStorage.getItem(lsKey(repo));
-      if (stored && data.branches.includes(stored)) {
-        setBaseBranch(stored);
-      } else {
-        const defaults = ["main", "master", "develop"];
-        const found = defaults.find(
-          (d) => data.branches.includes(d) && d !== data.current,
-        );
-        if (found) setBaseBranch(found);
+    try {
+      const res = await fetch(`/api/git/branches?${qs}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setCurrentBranch(data.current);
+      setBranches(data.branches.filter((b: string) => b !== data.current));
+      // Auto-select stored or first reasonable default (only when none chosen yet)
+      if (!baseBranchRef.current) {
+        const stored = localStorage.getItem(lsKey(repo));
+        if (stored && data.branches.includes(stored)) {
+          setBaseBranch(stored);
+        } else {
+          const defaults = ["main", "master", "develop"];
+          const found = defaults.find(
+            (d) => data.branches.includes(d) && d !== data.current,
+          );
+          if (found) setBaseBranch(found);
+        }
       }
+    } catch {
+      // Keep the current branch state; a later refresh retries.
     }
   }, [qs, repo]);
 
