@@ -99,7 +99,7 @@ All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.m
 
 **Other project skills:**
 
-- [`mermaid-chart`](skills/mermaid-chart/SKILL.md) — patterns for diagrams that render well in the panel (`/mermaid-chart`)
+- [`pavilio-mermaid-chart`](skills/pavilio-mermaid-chart/SKILL.md) — patterns for diagrams that render well in the panel (`/pavilio-mermaid-chart`)
 
 ---
 
