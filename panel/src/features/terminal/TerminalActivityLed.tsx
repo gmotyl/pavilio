@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
 import { useAggregateActivityState } from "./useTerminalActivityChannel";
+import { ATTENTION_PULSE_MS, useAttentionPulse } from "./useAttentionPulse";
 
-export const ATTENTION_PULSE_MS = 5 * 60 * 1000; // 5 min
+export { ATTENTION_PULSE_MS };
 
 type Props = {
   size?: "sm" | "lg";
@@ -25,28 +25,7 @@ export function TerminalActivityLed(props: Props) {
   const ids: readonly string[] =
     "sessionId" in props ? [props.sessionId] : props.sessionIds;
   const { state, attentionSinceAt } = useAggregateActivityState(ids);
-  const [pulsing, setPulsing] = useState<boolean>(() =>
-    attentionSinceAt != null &&
-    Date.now() - attentionSinceAt < ATTENTION_PULSE_MS,
-  );
-
-  useEffect(() => {
-    if (state !== "attention" || attentionSinceAt == null) {
-      setPulsing(false);
-      return;
-    }
-    const elapsed = Date.now() - attentionSinceAt;
-    if (elapsed >= ATTENTION_PULSE_MS) {
-      setPulsing(false);
-      return;
-    }
-    setPulsing(true);
-    const t = setTimeout(
-      () => setPulsing(false),
-      ATTENTION_PULSE_MS - elapsed,
-    );
-    return () => clearTimeout(t);
-  }, [state, attentionSinceAt]);
+  const pulsing = useAttentionPulse(attentionSinceAt, state === "attention");
 
   if (hideWhenIdle && state === "idle") return null;
 

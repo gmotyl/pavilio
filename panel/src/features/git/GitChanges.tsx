@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import DiffView, { type DiffMode } from "./DiffView";
 import BranchPicker from "./BranchPicker";
+import CopyIconButton from "../shell/CopyIconButton";
 import FileChangeList from "./FileChangeList";
 import { buildFileTree, countFiles, type TreeNode } from "./file-tree";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
@@ -45,6 +46,10 @@ interface GitChangesProps {
   highlight?: string;
   /** When set, called when the user opens or closes a diff (parent can mirror to URL) */
   onOpenFileChange?: (file: string | null) => void;
+  /** Called whenever the current branch is loaded or changed (parent can mirror it) */
+  onBranchChange?: (branch: string) => void;
+  /** Show a copy-to-clipboard icon next to the branch badge */
+  showBranchCopy?: boolean;
   /** When true, render a file list alongside the diff instead of replacing it. */
   showListSidebar?: boolean;
   /** When true, render a compact nested view (no branch picker, commit form, worktrees, or sub-sidebar). */
@@ -77,6 +82,8 @@ export default function GitChanges({
   openFile,
   highlight,
   onOpenFileChange,
+  onBranchChange,
+  showBranchCopy = false,
   showListSidebar = false,
   nested = false,
 }: GitChangesProps) {
@@ -147,6 +154,9 @@ export default function GitChanges({
   useEffect(() => {
     setCommitMsg(suggestion);
   }, [suggestion]);
+  useEffect(() => {
+    onBranchChange?.(branch);
+  }, [branch]);
 
   const toggleFile = (path: string) => {
     const next = new Set(selected);
@@ -630,6 +640,13 @@ export default function GitChanges({
                 color: "var(--text-secondary)",
               }}
               trigger={<>{loading === "switching" ? "switching..." : branch}</>}
+            />
+          )}
+          {branch && showBranchCopy && (
+            <CopyIconButton
+              value={branch}
+              label="Copy branch"
+              data-testid="git-changes-copy-branch"
             />
           )}
           <span className="text-xs" style={{ color: "var(--text-muted)" }}>

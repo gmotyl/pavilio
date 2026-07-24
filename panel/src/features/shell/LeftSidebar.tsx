@@ -27,6 +27,7 @@ import { useArchivedProjects } from "../projects/useArchivedProjects";
 import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
 import { TerminalActivityLed } from "../terminal/TerminalActivityLed";
+import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import {
   TERMINAL_FOCUS_EVENT,
@@ -264,6 +265,11 @@ export default function LeftSidebar() {
               <ChevronRight size={11} />
             )}
           </button>
+          {!expandedNow && (
+            <span className="flex items-center">
+              <ProjectActivityLed sessionIds={projectSessionIds} />
+            </span>
+          )}
           <NavLink
             to={`/project/${project.name}/iterm`}
             className="flex-1 truncate text-[13px] py-0.5"
@@ -276,14 +282,6 @@ export default function LeftSidebar() {
           >
             {project.name}
           </NavLink>
-          {!expandedNow && (
-            <span className="mr-1 flex items-center">
-              <TerminalActivityLed
-                sessionIds={projectSessionIds}
-                hideWhenIdle
-              />
-            </span>
-          )}
           <button
             type="button"
             data-testid={`sidebar-project-create-terminal-${project.name}`}
