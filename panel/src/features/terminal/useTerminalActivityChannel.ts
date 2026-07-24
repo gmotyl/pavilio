@@ -150,6 +150,61 @@ function computeAggregate(ids: readonly string[]): AggregateSnapshot {
   return { state: "idle", attentionSinceAt: null };
 }
 
+/**
+ * Non-collapsing aggregate: unlike {@link computeAggregate} (busy > attention >
+ * idle), this reports every state present so a project row can show a busy dot
+ * AND an attention dot at once, plus whether any session is open at all.
+ */
+export interface AggregateFlags {
+  hasBusy: boolean;
+  hasAttention: boolean;
+  hasAny: boolean;
+  attentionSinceAt: number | null;
+}
+
+function computeAggregateFlags(ids: readonly string[]): AggregateFlags {
+  let hasBusy = false;
+  let hasAttention = false;
+  let earliestAttention: number | null = null;
+  for (const id of ids) {
+    const s = getActivityState(id);
+    if (s === "busy") hasBusy = true;
+    else if (s === "attention") {
+      hasAttention = true;
+      const t = getAttentionSinceAt(id);
+      if (t != null && (earliestAttention == null || t < earliestAttention)) {
+        earliestAttention = t;
+      }
+    }
+  }
+  return {
+    hasBusy,
+    hasAttention,
+    hasAny: ids.length > 0,
+    attentionSinceAt: earliestAttention,
+  };
+}
+
+export function useAggregateActivityFlags(
+  sessionIds: readonly string[],
+): AggregateFlags {
+  const key = sessionIds.join("|");
+  const [flags, setFlags] = useState<AggregateFlags>(() =>
+    computeAggregateFlags(sessionIds),
+  );
+  useEffect(() => {
+    const recompute = () => setFlags(computeAggregateFlags(sessionIds));
+    recompute();
+    const unsubs = sessionIds.map((id) => subscribeActivity(id, recompute));
+    return () => {
+      for (const u of unsubs) u();
+    };
+    // key captures sessionIds content; identity changes every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return flags;
+}
+
 export function useAggregateActivityState(
   sessionIds: readonly string[],
 ): AggregateSnapshot {

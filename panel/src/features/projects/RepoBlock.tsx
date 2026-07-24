@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
-import { GitFork } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { GitFork, Braces } from "lucide-react";
+import CopyIconButton from "../shell/CopyIconButton";
 import GitBranchDiff from "../git/GitBranchDiff";
 import GitChanges from "../git/GitChanges";
 import GitHistory from "../git/GitHistory";
@@ -51,6 +52,8 @@ export function RepoBlock({
   showListSidebar,
   liveHighlight,
 }: Props) {
+  const [branch, setBranch] = useState("");
+
   const matchesScope = (scope: string) =>
     repoOpenFile?.repo === repo.path && repoOpenFile.scope === scope;
 
@@ -81,15 +84,30 @@ export function RepoBlock({
         border: "1px solid var(--border-subtle)",
       }}
     >
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-1.5 mb-3">
         <GitFork size={14} style={{ color: "var(--accent)" }} />
         <span className="text-sm font-semibold">{repo.name}</span>
+        <CopyIconButton
+          value={JSON.stringify(
+            { name: repo.name, path: repo.path, branch },
+            null,
+            2,
+          )}
+          label="Copy branch + path as JSON"
+          icon={Braces}
+          data-testid="repo-copy-json"
+        />
         <span
-          className="text-[11px] font-mono"
+          className="text-[11px] font-mono ml-1"
           style={{ color: "var(--text-muted)" }}
         >
           {repo.path}
         </span>
+        <CopyIconButton
+          value={repo.path}
+          label="Copy path"
+          data-testid="repo-copy-path"
+        />
       </div>
 
       <GitChanges
@@ -98,6 +116,8 @@ export function RepoBlock({
         viewMode={viewMode}
         onViewModeChange={onViewModeChange}
         extraActions={wideToggle}
+        onBranchChange={setBranch}
+        showBranchCopy
         showListSidebar
         openFile={openFileFor("changed")}
         highlight={highlightFor("changed")}
