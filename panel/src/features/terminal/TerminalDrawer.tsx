@@ -39,6 +39,21 @@ export default function TerminalDrawer() {
     }
   }, []);
 
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // Handle straddles the left (inner) edge: left grows, right shrinks.
+      // setWidth clamps to [DRAWER_MIN_WIDTH, DRAWER_MAX_WIDTH].
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setWidth(width + 16);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setWidth(width - 16);
+      }
+    },
+    [setWidth, width],
+  );
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -62,13 +77,22 @@ export default function TerminalDrawer() {
     >
       <div
         data-testid="terminal-drawer-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize terminal drawer"
+        tabIndex={0}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        className="absolute left-0 top-0 h-full w-1 cursor-col-resize z-10"
-        style={{ background: "transparent" }}
-        title="Drag to resize"
-      />
+        onKeyDown={onKeyDown}
+        className="group absolute left-0 top-0 h-full w-2 cursor-col-resize z-10 focus-visible:outline-none"
+        title="Drag to resize (or focus and use arrow keys)"
+      >
+        <span
+          aria-hidden
+          className="absolute left-0 top-0 h-full w-px transition-colors group-hover:bg-[var(--border-strong)] group-focus-visible:bg-[var(--accent)]"
+        />
+      </div>
       <div
         className="flex items-center justify-between px-2 h-7 flex-shrink-0"
         style={{ borderBottom: "1px solid var(--border-subtle)" }}
@@ -83,7 +107,7 @@ export default function TerminalDrawer() {
           type="button"
           data-testid="terminal-drawer-close"
           onClick={() => setOpen(false)}
-          className="w-5 h-5 flex items-center justify-center rounded"
+          className="w-5 h-5 flex items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
           style={{ color: "var(--text-tertiary)" }}
           title="Close terminal drawer (Esc)"
           aria-label="Close terminal drawer"

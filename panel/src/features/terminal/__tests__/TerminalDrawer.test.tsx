@@ -43,4 +43,15 @@ describe("TerminalDrawer", () => {
     fireEvent.click(screen.getByTestId("terminal-drawer-close"));
     expect(screen.queryByTestId("terminal-drawer")).not.toBeInTheDocument();
   });
+
+  it("resizes and persists width via keyboard on the handle", () => {
+    renderAt("/project/vector/memo", true, 480);
+    const handle = screen.getByTestId("terminal-drawer-resize");
+    handle.focus();
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({
+      width: "496px",
+    });
+    expect(localStorage.getItem("panel:terminalDrawer:width")).toBe("496");
+  });
 });
