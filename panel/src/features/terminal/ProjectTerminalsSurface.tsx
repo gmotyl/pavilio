@@ -3,11 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { useProjects } from "../projects/useProjects";
 import { useITermShortcuts } from "../projects/useITermShortcuts";
 import TerminalsSurface from "./TerminalsSurface";
-import {
-  useTerminalSessions,
-  nextProjectName,
-} from "./useTerminalSessions";
+import { useTerminalSessions } from "./useTerminalSessions";
 import type { CreateSessionOpts } from "./useTerminalSessions";
+import { createTerminalSession } from "./createTerminalSession";
 import { useTerminalMaximized } from "./useTerminalMaximized";
 import { useAllTerminalSessions } from "./useAllTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
@@ -48,32 +46,12 @@ export default function ProjectTerminalsSurface({
       const targetSessions = allSessions.filter(
         (s) => s.project === targetProject,
       );
-      const derivedName =
-        opts.name || nextProjectName(targetProject, targetSessions);
-      try {
-        const res = await fetch("/api/terminal/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cwd: opts.cwd,
-            name: derivedName,
-            project: targetProject,
-          }),
-        });
-        if (!res.ok) return;
-        const created = await res.json();
-        try {
-          localStorage.setItem(
-            `panel-terminal-focus-${targetProject}`,
-            created.id,
-          );
-        } catch {
-          // ignore
-        }
-        navTo(`/project/${targetProject}/iterm`);
-      } catch {
-        // ignore
-      }
+      const created = await createTerminalSession(
+        targetProject,
+        targetSessions,
+        opts,
+      );
+      if (created) navTo(`/project/${targetProject}/iterm`);
     },
     [projectName, terminal, navTo, allSessions],
   );
