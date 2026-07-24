@@ -15,6 +15,7 @@ import ProjectRedirect from "./features/projects/ProjectRedirect";
 import ProjectView from "./features/projects/ProjectView";
 import QuickFinder from "./features/search/QuickFinder";
 import QuickTerminalModal from "./features/terminal/QuickTerminalModal";
+import { TerminalDrawerProvider } from "./features/terminal/useTerminalDrawer";
 import { BreadcrumbActionsProvider } from "./features/shell/Breadcrumbs";
 import { FloatingActionProvider, Layout } from "./features/shell/Layout";
 import { useVisualViewport } from "./features/shell/useVisualViewport";
@@ -37,6 +38,7 @@ function AppShell() {
         <TimeTrackingProvider>
           <BreadcrumbActionsProvider>
             <FloatingActionProvider>
+            <TerminalDrawerProvider>
             <QuickFinder />
             <QuickTerminalModal />
             <FaviconUpdater />
@@ -63,6 +65,7 @@ function AppShell() {
               </Routes>
             </Layout>
             <ToastHost />
+            </TerminalDrawerProvider>
           </FloatingActionProvider>
         </BreadcrumbActionsProvider>
         </TimeTrackingProvider>
