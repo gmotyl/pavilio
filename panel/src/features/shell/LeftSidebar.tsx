@@ -271,7 +271,7 @@ export default function LeftSidebar() {
             </span>
           )}
           <NavLink
-            to={`/project/${project.name}/iterm`}
+            to={`/project/${project.name}`}
             className="flex-1 truncate text-[13px] py-0.5"
             style={({ isActive }) => ({
               color:
