@@ -50,6 +50,10 @@ export interface TerminalsSurfaceProps {
 
   // When true: fills from below the breadcrumb bar (no negative margins, no p-6 offset)
   standalone?: boolean;
+
+  // Fill the parent container's height instead of a viewport-relative calc.
+  // Used when embedded in the Cmd+B drawer.
+  fill?: boolean;
 }
 
 export function TerminalsSurface({
@@ -72,6 +76,7 @@ export function TerminalsSurface({
   onReorder,
   onSwap,
   standalone = false,
+  fill = false,
 }: TerminalsSurfaceProps) {
   // Dismiss attention state as soon as the user focuses a terminal — the
   // green "done" LED is a "check me" notification that clears on first look.
@@ -83,19 +88,21 @@ export function TerminalsSurface({
   return (
     <div
       className={`flex flex-col relative ${
-        standalone
-          ? "h-[calc(100dvh-2.25rem)]"
-          : "h-[calc(100dvh-5rem)] md:h-[calc(100dvh-10rem)]"
+        fill
+          ? "h-full"
+          : standalone
+            ? "h-[calc(100dvh-2.25rem)]"
+            : "h-[calc(100dvh-5rem)] md:h-[calc(100dvh-10rem)]"
       }`}
       style={{
-        ...(standalone ? {} : { margin: "-1.5rem", marginTop: 0 }),
+        ...(standalone || fill ? {} : { margin: "-1.5rem", marginTop: 0 }),
         touchAction: "pan-y",
         overscrollBehaviorX: "contain",
         // Cap to the visual viewport so the on-screen keyboard can never push
         // the shortcut bar or xterm cursor below the fold. `--vv-height` is
         // written by `useVisualViewport`; on desktop (or pre-hydration) the
         // fallback resolves to 100dvh so there's no functional change.
-        maxHeight: "var(--vv-height, 100dvh)",
+        ...(fill ? {} : { maxHeight: "var(--vv-height, 100dvh)" }),
       }}
     >
       {/* Desktop toolbar */}
