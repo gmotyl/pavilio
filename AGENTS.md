@@ -44,7 +44,7 @@ Provider-specific config file locations and session-tracking notes have moved to
   1. **Design → Plan** — [`skills/pavilio-grill/SKILL.md`](skills/pavilio-grill/SKILL.md): stress-test the design against the existing domain model (`CONTEXT.md`, `adr/`), sharpen terminology, and update docs inline. Once you approve the design, grill hands off **under the hood** to [`skills/pavilio-writing-plans/SKILL.md`](skills/pavilio-writing-plans/SKILL.md), which writes the bite-sized, test-first plan — you do not invoke the plan writer by hand.
   2. **Execute** — [`skills/pavilio-execute-plan/SKILL.md`](skills/pavilio-execute-plan/SKILL.md): run the plan task-by-task with review checkpoints; check off each step as it lands; stop and ask when blocked.
   3. **Implement** — red-green-refactor for every feature or bugfix: failing test → see it fail → minimal implementation → see it pass → commit. (This is the per-step rhythm inside Execute.)
-- **When writing design documents, always invoke the `mermaid-diagrams` skill and include Mermaid diagrams** — at minimum a `flowchart` for components and data flow, plus a `sequenceDiagram` when interaction ordering matters. ASCII box-and-arrow art is harder to skim and does not render in the panel. Follow `/mermaid-chart` patterns — the panel auto-colors subgraphs and sequence `rect` sections to visually separate grouped paths.
+- **When writing design documents, always invoke the `mermaid-diagrams` skill and include Mermaid diagrams** — at minimum a `flowchart` for components and data flow, plus a `sequenceDiagram` when interaction ordering matters. ASCII box-and-arrow art is harder to skim and does not render in the panel. Follow `/pavilio-mermaid-chart` patterns — the panel auto-colors subgraphs and sequence `rect` sections to visually separate grouped paths.
 
 **To override:** Add project-specific row below the default rules.
 
@@ -98,7 +98,7 @@ All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.m
 
 **Other project skills:**
 
-- [`mermaid-chart`](skills/mermaid-chart/SKILL.md) — patterns for diagrams that render well in the panel (`/mermaid-chart`)
+- [`pavilio-mermaid-chart`](skills/pavilio-mermaid-chart/SKILL.md) — patterns for diagrams that render well in the panel (`/pavilio-mermaid-chart`)
 
 ---
 

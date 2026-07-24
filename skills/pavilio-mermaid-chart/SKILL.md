@@ -1,6 +1,6 @@
 ---
-name: mermaid-chart
-description: Patterns for writing Mermaid diagrams that render well in the panel — subgraph/rect coloring, arrow conventions, and when to use flowcharts vs sequence diagrams. Use when authoring or reviewing design docs, or whenever the user invokes `/mermaid-chart`.
+name: pavilio-mermaid-chart
+description: Patterns for writing Mermaid diagrams that render well in the panel — subgraph/rect coloring, arrow conventions, and when to use flowcharts vs sequence diagrams. Use when authoring or reviewing design docs, or whenever the user invokes `/pavilio-mermaid-chart`.
 ---
 
 # Mermaid Chart Guide for Design Docs
