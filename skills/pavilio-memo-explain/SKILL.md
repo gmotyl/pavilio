@@ -35,7 +35,7 @@ Create a markdown memo that explains a topic with embedded mermaid diagrams. Sib
   - `flowchart TD` — step-by-step processes, branching logic, layout overviews
   - `sequenceDiagram` — multi-actor / multi-service interactions
   - Both — when a flow has both a structural and a temporal dimension
-- Use the conventions in [[mermaid-chart]] (subgraph colouring, solid/dashed arrows, rect blocks)
+- Use the conventions in [[pavilio-mermaid-chart]] (subgraph colouring, solid/dashed arrows, rect blocks)
 
 ### 3. Extract supporting code (optional)
 
@@ -85,7 +85,7 @@ Create a markdown memo that explains a topic with embedded mermaid diagrams. Sib
 
 ### 5. Apply diagram conventions
 
-- See [[mermaid-chart]] for the panel-rendering rules (colours, arrow styles, subgraph nesting)
+- See [[pavilio-mermaid-chart]] for the panel-rendering rules (colours, arrow styles, subgraph nesting)
 - Default colour rotation: first subgraph cyan, second red, third green
 - Solid arrow `->>` for calls, dashed `-->>` for responses
 - Use `rect` blocks in sequence diagrams to group related steps
