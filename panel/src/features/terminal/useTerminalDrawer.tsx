@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -69,24 +70,32 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const openRef = useRef(open);
+  const pathRef = useRef(location.pathname);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+  useEffect(() => {
+    pathRef.current = location.pathname;
+  }, [location.pathname]);
+
   const toggle = useCallback(() => setOpen(!open), [open, setOpen]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "B")) {
-        const match = matchProjectFromPath(location.pathname);
+        e.preventDefault();
+        const match = matchProjectFromPath(pathRef.current);
         if (!match || match.section === "iterm") {
-          e.preventDefault();
-          if (open) setOpen(false);
+          if (openRef.current) setOpen(false);
           return;
         }
-        e.preventDefault();
-        setOpen(!open);
+        setOpen(!openRef.current);
       }
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [location.pathname, open, setOpen]);
+  }, [setOpen]);
 
   useEffect(() => {
     if (!open) return;
