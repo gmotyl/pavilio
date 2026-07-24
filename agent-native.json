@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "apps": {
+    "visualize-repo": {
+      "mode": "local-files",
+      "root": ".agent-native/visual-docs",
+      "entry": ".agent-native/visual-docs/repo-overview",
+      "targets": [
+        {
+          "id": "architecture-md",
+          "name": "ARCHITECTURE",
+          "kind": "area",
+          "include": [
+            "ARCHITECTURE.md"
+          ],
+          "blocks": [
+            "file-tree",
+            "diagram",
+            "annotated-code"
+          ],
+          "policy": "seed"
+        },
+        {
+          "id": "panel-server-index-ts",
+          "name": "Index",
+          "kind": "area",
+          "include": [
+            "panel/server/index.ts"
+          ],
+          "blocks": [
+            "file-tree",
+            "diagram",
+            "annotated-code"
+          ],
+          "policy": "seed"
+        },
+        {
+          "id": "panel-server-routes",
+          "name": "Routes",
+          "kind": "area",
+          "include": [
+            "panel/server/routes"
+          ],
+          "blocks": [
+            "file-tree",
+            "diagram",
+            "annotated-code"
+          ],
+          "policy": "seed"
+        },
+        {
+          "id": "panel-src-features-projects-projectview-tsx",
+          "name": "ProjectView",
+          "kind": "area",
+          "include": [
+            "panel/src/features/projects/ProjectView.tsx"
+          ],
+          "blocks": [
+            "file-tree",
+            "diagram",
+            "annotated-code"
+          ],
+          "policy": "seed"
+        },
+        {
+          "id": "panel-src-features-terminal",
+          "name": "Terminal",
+          "kind": "area",
+          "include": [
+            "panel/src/features/terminal"
+          ],
+          "blocks": [
+            "file-tree",
+            "diagram",
+            "annotated-code"
+          ],
+          "policy": "seed"
+        }
+      ],
+      "hide": [
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.agent-native/**"
+      ]
+    }
+  }
+}

@@ -1,0 +1,97 @@
+---
+title: "Pavilio Repo Visual Docs"
+brief: "Repo-native visual documentation for the Pavilio panel — architecture, server API surface, and the live ProjectView."
+kind: "plan"
+localOnly: true
+---
+
+# Pavilio Repo Visual Docs
+
+Local, repo-backed visual docs for the Pavilio panel. MDX lives in-repo, comments stay beside it in `comments.json`, and the Plan UI reads through the localhost bridge — nothing is published.
+
+Manifest: `../../../agent-native.json`
+
+## Visualized Targets
+
+<FileTree id="visualized-targets" title="Visualized targets" entries={[{"path":"ARCHITECTURE.md","note":"system design principles"},{"path":"panel/server/index.ts","note":"express app + middleware chain + route mounts"},{"path":"panel/server/routes","note":"14 route modules → /api/*"},{"path":"panel/src/features/projects/ProjectView.tsx","note":"live main view (pages/ is dead)"},{"path":"panel/src/features/terminal","note":"embedded terminals surface"}]} />
+
+## 1. System Architecture
+
+Source anchors: `ARCHITECTURE.md`, `panel/`
+
+Pavilio is a pnpm monorepo. The `panel` workspace is a Vite + React SPA served by an Express server booted via `tsx server/index.ts` (no watch — server edits need a manual restart).
+
+<Diagram id="arch-overview" caption="Panel workspace: React SPA served by an Express server that fronts the project filesystem, git, agents, and terminals." data={{"html":"<div class=\"diagram-panel\"><div class=\"diagram-card\"><div class=\"diagram-node\">Browser SPA<br/><span class=\"diagram-muted\">src/features/*</span></div></div><div class=\"diagram-card\"><div class=\"diagram-node\">Express server<br/><span class=\"diagram-muted\">server/index.ts · tsx</span></div><div class=\"diagram-box\">Vite middleware (dev)</div></div><div class=\"diagram-card\"><div class=\"diagram-pill\">/api/projects</div><div class=\"diagram-pill\">/api/files</div><div class=\"diagram-pill\">/api/git</div><div class=\"diagram-pill\">/api/agents</div><div class=\"diagram-pill\">/api/terminal</div><div class=\"diagram-pill\">/api/search</div></div><div class=\"diagram-card\"><div class=\"diagram-node\">Project filesystem<br/><span class=\"diagram-muted\">notes · progress · plans · git</span></div></div></div>"}} />
+
+<Callout id="arch-note" tone="info" body="Provider-agnostic by design: each project picks its AI agent in `.agent/config.json`. The panel is the UI; providers (Claude Code, Kilo, Copilot, …) run against the same folder contract." />
+
+## 2. Panel Server
+
+Source anchors: `panel/server/index.ts`
+
+Every request passes a fixed middleware chain before hitting a route. Mobile auth runs before the public health/login endpoints; the main `authMiddleware` gates everything after `/api/auth/*`.
+
+<Mermaid id="server-pipeline" caption="Request pipeline in server/index.ts" source={`flowchart LR
+  req([Request]) --> json[express.json]
+  json --> mob[mobileAuthMiddleware]
+  mob --> pub{public?}
+  pub -->|/api/health, /api/auth/login| ok[handler]
+  pub -->|otherwise| auth[authMiddleware]
+  auth --> routes[/api/* routers]
+  routes --> vite[vite.middlewares SPA fallback]`} />
+
+<Table id="mount-surface" columns={["Mount","Router","Concern"]} rows={[["/api/projects","projects.ts","project list, context, plans tree"],["/api/files","files.ts","file read/tree"],["/api/git","git.ts","status, commits, diff"],["/api/agents","agents.ts","agent sessions"],["/api/agent-settings","agent-settings.ts","per-project agent config"],["/api/search","search.ts","content search"],["/api/images","images.ts","image serving"],["/api/terminal","terminal.ts","pty sessions (ws)"],["/api/auto-sync","auto-sync.ts","auto-commit sync"],["/api/archive","archive.ts","archived projects"],["/api/mobile-access","mobile-access.ts","LAN/mobile pairing"],["/api (scripts)","scripts.ts","workspace/project scripts"]]} />
+
+## 3. Projects API
+
+Source anchors: `panel/server/routes/projects.ts`
+
+<Endpoint id="ep-projects-list" method="GET" path="/api/projects" summary="List all projects" />
+
+<Endpoint id="ep-projects-context" method="GET" path="/api/projects/:name/context" summary="Resolve a project's context (PROJECT.md, index, paths)" />
+
+<Endpoint id="ep-plans-tree" method="GET" path="/api/projects/:name/plans-tree" summary="Plans directory tree for the Plans tab" />
+
+<Endpoint id="ep-plans-move" method="POST" path="/api/projects/:name/plans/move" summary="Move/reorder a plan file (drag-and-drop)" />
+
+<Endpoint id="ep-plans-current-set" method="POST" path="/api/projects/:name/plans/current/:planFile" summary="Mark a plan as current" />
+
+<Endpoint id="ep-plans-current-del" method="DELETE" path="/api/projects/:name/plans/current/:planFile" summary="Unset a current plan" />
+
+## 4. ProjectView
+
+Source anchors: `panel/src/features/projects/ProjectView.tsx`
+
+The live main view. It renders a tab bar (`ProjectTabsBar`), a search bar, a repo/commits block, an embedded terminals surface, and per-tab panels (Context, Plans, Files, FileViewer). `pages/` is dead — edits belong here.
+
+<WireframeBlock id="projectview-wf">
+  <Screen surface="desktop" caption="ProjectView: tab bar + search over a repo/commits block, terminals, and a file/markdown viewer.">
+    <Title text="Project — ProjectView" />
+    <Row>
+      <Pill label="Context" />
+      <Pill label="Plans" active />
+      <Pill label="Files" />
+      <Pill label="Terminal" />
+    </Row>
+    <Input placeholder="Search project…" />
+    <Row>
+      <Sidebar>
+        <NavItem label="RepoBlock / commits" active />
+        <NavItem label="SectionFilesList" />
+        <NavItem label="ScriptButtons" />
+      </Sidebar>
+      <Main>
+        <Title text="Plans / MarkdownRenderer" />
+        <Lines n={5} />
+      </Main>
+    </Row>
+  </Screen>
+</WireframeBlock>
+
+## 5. Terminal
+
+Source anchors: `panel/src/features/terminal`
+
+Embedded terminals surface mounted inside ProjectView; sessions are pty-backed over the `/api/terminal` websocket. One terminal handle per session is tracked in `terminalHandlesRef`.
+
+<Callout id="terminal-note" tone="info" body="Terminals are long-lived per project tab; scroll and session state are preserved across tab switches (see useTabScrollMemory)." />
