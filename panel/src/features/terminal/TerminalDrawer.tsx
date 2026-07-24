@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { X } from "lucide-react";
 import { matchProjectFromPath } from "../projects/matchProjectFromPath";
@@ -54,15 +54,6 @@ export default function TerminalDrawer() {
     [setWidth, width],
   );
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, setOpen]);
-
   if (!open || !match || match.section === "iterm") return null;
 
   return (
@@ -109,7 +100,7 @@ export default function TerminalDrawer() {
           onClick={() => setOpen(false)}
           className="w-5 h-5 flex items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
           style={{ color: "var(--text-tertiary)" }}
-          title="Close terminal drawer (Esc)"
+          title="Close terminal drawer"
           aria-label="Close terminal drawer"
         >
           <X size={13} />

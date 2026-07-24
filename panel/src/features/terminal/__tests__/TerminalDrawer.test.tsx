@@ -44,6 +44,13 @@ describe("TerminalDrawer", () => {
     expect(screen.queryByTestId("terminal-drawer")).not.toBeInTheDocument();
   });
 
+  it("does NOT close on Escape (passes through to the embedded terminal)", () => {
+    renderAt("/project/vector/memo", true);
+    expect(screen.getByTestId("terminal-drawer")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByTestId("terminal-drawer")).toBeInTheDocument();
+  });
+
   it("resizes and persists width via keyboard on the handle", () => {
     renderAt("/project/vector/memo", true, 480);
     const handle = screen.getByTestId("terminal-drawer-resize");
