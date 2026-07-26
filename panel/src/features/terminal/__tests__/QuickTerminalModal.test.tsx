@@ -6,6 +6,10 @@ import QuickTerminalModal, {
   pickFirstSessionId,
   pickInitialSessionId,
 } from "../QuickTerminalModal";
+import {
+  TerminalDrawerProvider,
+  useTerminalDrawer,
+} from "../useTerminalDrawer";
 import type { SessionMeta } from "../useTerminalSessions";
 
 vi.mock("../TerminalView", () => ({
@@ -45,12 +49,14 @@ function LocationSpy({ onLocation }: { onLocation: (pathname: string) => void })
 function renderAt(path: string, onLocation?: (p: string) => void) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <QuickTerminalModal />
-      {onLocation ? (
-        <Routes>
-          <Route path="*" element={<LocationSpy onLocation={onLocation} />} />
-        </Routes>
-      ) : null}
+      <TerminalDrawerProvider>
+        <QuickTerminalModal />
+        {onLocation ? (
+          <Routes>
+            <Route path="*" element={<LocationSpy onLocation={onLocation} />} />
+          </Routes>
+        ) : null}
+      </TerminalDrawerProvider>
     </MemoryRouter>,
   );
 }
@@ -366,5 +372,61 @@ describe("QuickTerminalModal", () => {
     );
     expect(currentPath).toBe("/project/metro/iterm");
     expect(localStorage.getItem("panel-terminal-focus-metro")).toBe("x1");
+  });
+});
+
+describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
+  function DrawerProbe() {
+    const { open } = useTerminalDrawer();
+    return <span data-testid="drawer-open">{String(open)}</span>;
+  }
+
+  function renderWithDrawer(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <TerminalDrawerProvider>
+          <DrawerProbe />
+          <QuickTerminalModal />
+        </TerminalDrawerProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("closes the drawer when the Cmd+O modal opens", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    }) as unknown as typeof fetch;
+    localStorage.setItem("panel:terminalDrawer:open", "true");
+
+    renderWithDrawer("/project/vector/memo");
+    expect(screen.getByTestId("drawer-open")).toHaveTextContent("true");
+
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("quick-terminal-modal")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("drawer-open")).toHaveTextContent("false");
+  });
+
+  it("closes the modal when the Cmd+B drawer opens", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    }) as unknown as typeof fetch;
+
+    renderWithDrawer("/project/vector/memo");
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("quick-terminal-modal")).toBeInTheDocument(),
+    );
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("drawer-open")).toHaveTextContent("true"),
+    );
+    expect(
+      screen.queryByTestId("quick-terminal-modal"),
+    ).not.toBeInTheDocument();
   });
 });

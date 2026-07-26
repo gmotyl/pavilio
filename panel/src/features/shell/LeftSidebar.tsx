@@ -32,10 +32,10 @@ import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import {
   TERMINAL_FOCUS_EVENT,
   dispatchTerminalFocus,
-  nextProjectName,
   type SessionMeta,
   type TerminalFocusEventDetail,
 } from "../terminal/useTerminalSessions";
+import { createTerminalSession } from "../terminal/createTerminalSession";
 
 function SectionHeader({
   icon: Icon,
@@ -143,35 +143,12 @@ export default function LeftSidebar() {
   const handleCreateTerminal = useCallback(
     async (project: string) => {
       const projectSessions = sessions.filter((s) => s.project === project);
-      const name = nextProjectName(project, projectSessions);
-      try {
-        const res = await fetch("/api/terminal/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project, name }),
-        });
-        if (res.ok) {
-          const data: SessionMeta = await res.json();
-          // Persist focus before navigating so the iTerm tab picks the
-          // new session as focusedId on initial mount (the focus event
-          // alone fires before the route mounts and is missed otherwise).
-          try {
-            localStorage.setItem(
-              `panel-terminal-focus-${project}`,
-              data.id,
-            );
-          } catch {
-            // ignore
-          }
-          dispatchTerminalFocus(project, data.id);
-          setExpanded(project, true);
-          navigate(`/project/${project}/iterm`);
-        } else {
-          setCreateError("Could not create terminal");
-          setTimeout(() => setCreateError(null), 4000);
-        }
-      } catch (err) {
-        console.warn("[sidebar] create terminal failed:", err);
+      const created = await createTerminalSession(project, projectSessions);
+      if (created) {
+        dispatchTerminalFocus(project, created.id);
+        setExpanded(project, true);
+        navigate(`/project/${project}/iterm`);
+      } else {
         setCreateError("Could not create terminal");
         setTimeout(() => setCreateError(null), 4000);
       }
@@ -271,7 +248,7 @@ export default function LeftSidebar() {
             </span>
           )}
           <NavLink
-            to={`/project/${project.name}/iterm`}
+            to={`/project/${project.name}`}
             className="flex-1 truncate text-[13px] py-0.5"
             style={({ isActive }) => ({
               color:

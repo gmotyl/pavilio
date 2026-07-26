@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import { useFileIndex } from "../explorer/useFileIndex";
@@ -17,7 +17,6 @@ import { useProjectTabs } from "./useProjectTabs";
 import { useProjectSearch } from "./useProjectSearch";
 import { useRepoSearch } from "./useRepoSearch";
 import { useFileViewer } from "./useFileViewer";
-import { useITermShortcuts } from "./useITermShortcuts";
 import { useCommitsOpenMap } from "./useCommitsOpenMap";
 import { useRepoOpenFile } from "./useRepoOpenFile";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
@@ -29,15 +28,7 @@ import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { useProjects } from "./useProjects";
 import { useTabScrollMemory } from "./useTabScrollMemory";
-import {
-  useTerminalSessions,
-  nextProjectName,
-} from "../terminal/useTerminalSessions";
-import type { CreateSessionOpts } from "../terminal/useTerminalSessions";
-import { useTerminalMaximized } from "../terminal/useTerminalMaximized";
-import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
-import type { TerminalHandle } from "../terminal/TerminalView";
-import TerminalsSurface from "../terminal/TerminalsSurface";
+import ProjectTerminalsSurface from "../terminal/ProjectTerminalsSurface";
 import { TimeTrackingLink } from "../time/TimeTrackingLink";
 import { useProjectTodayMinutes } from "../time/TimeTrackingProvider";
 
@@ -55,88 +46,9 @@ export default function ProjectView() {
   const project = projects.find((p) => p.name === name);
   const hasRepos = (project?.repos?.length ?? 0) > 0;
 
-  const terminal = useTerminalSessions(name || "");
-  const allTerminals = useAllTerminalSessions();
-  const { sessions: allSessions } = allTerminals;
-  const [maximized, toggleMaximized, setMaximized] = useTerminalMaximized(
-    name || "",
-  );
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
-
   // Per-tab scroll memory
   const scrollContainerRef = useScrollContainer();
   useTabScrollMemory(name, section, scrollContainerRef ?? { current: null });
-
-  // Create a session in ANY project and navigate if different from current.
-  const createTerminal = useCallback(
-    async (opts: CreateSessionOpts = {}) => {
-      const targetProject = opts.project ?? name ?? "";
-      console.info("[terminal] createTerminal called", {
-        opts,
-        targetProject,
-        currentProject: name,
-      });
-      if (!targetProject) {
-        console.warn("[terminal] createTerminal: no targetProject resolved");
-        return;
-      }
-      if (targetProject === (name || "")) {
-        await terminal.createSession(opts);
-        return;
-      }
-      // Cross-project: derive name from the target project's existing sessions.
-      const targetSessions = allSessions.filter(
-        (s) => s.project === targetProject,
-      );
-      const derivedName =
-        opts.name || nextProjectName(targetProject, targetSessions);
-      try {
-        const res = await fetch("/api/terminal/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cwd: opts.cwd,
-            name: derivedName,
-            project: targetProject,
-          }),
-        });
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          console.warn(
-            `[terminal] cross-project create returned ${res.status} ${text}`,
-          );
-          return;
-        }
-        const created = await res.json();
-        console.info("[terminal] cross-project session created", created);
-        try {
-          localStorage.setItem(
-            `panel-terminal-focus-${targetProject}`,
-            created.id,
-          );
-        } catch (err) {
-          console.warn("[terminal] persist focus for new project:", err);
-        }
-        navTo(`/project/${targetProject}/iterm`);
-      } catch (err) {
-        console.warn("[terminal] cross-project create failed:", err);
-      }
-    },
-    [name, terminal, navTo, allSessions],
-  );
-
-  useITermShortcuts({
-    active: section === "iterm",
-    sessions: terminal.sessions,
-    focusedId: terminal.focusedId,
-    setFocusedId: terminal.setFocusedId,
-    projects,
-    navTo,
-    maximized,
-    setMaximized,
-  });
 
   const [wide, toggleWide] = useWideMode(section || "overview");
   const [gitViewMode, setGitViewMode] = useGitViewMode();
@@ -358,28 +270,7 @@ export default function ProjectView() {
 
       {/* iTerm tab */}
       {section === "iterm" && (
-        <TerminalsSurface
-          currentProject={name || ""}
-          projects={projects}
-          repos={project?.repos}
-          sessions={terminal.sessions}
-          focusedId={terminal.focusedId}
-          onFocus={terminal.setFocusedId}
-          onDeleteSession={terminal.deleteSession}
-          onUpdateSession={terminal.updateSession}
-          allSessions={allTerminals.sessions}
-          maximized={maximized}
-          onToggleMaximize={toggleMaximized}
-          drawerOpen={drawerOpen}
-          onSetDrawerOpen={setDrawerOpen}
-          terminalHandlesRef={terminalHandlesRef}
-          onCreateTerminal={(opts) => {
-            void createTerminal(opts || {});
-          }}
-          onNavTo={navTo}
-          onReorder={terminal.reorder}
-          onSwap={terminal.swapOrder}
-        />
+        <ProjectTerminalsSurface projectName={name || ""} active />
       )}
 
       {/* Context tab — aggregates CONTEXT.md and ADRs from project + linked repos */}

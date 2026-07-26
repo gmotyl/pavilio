@@ -5,14 +5,8 @@ import TerminalView from "./TerminalView";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import type { SessionMeta } from "./useTerminalSessions";
 import { dispatchTerminalFocus } from "./useTerminalSessions";
-
-function matchProjectFromPath(
-  pathname: string,
-): { name: string; section: string | null } | null {
-  const m = /^\/project\/([^/]+)(?:\/([^/]+))?/.exec(pathname);
-  if (!m) return null;
-  return { name: decodeURIComponent(m[1]), section: m[2] ?? null };
-}
+import { matchProjectFromPath } from "../projects/matchProjectFromPath";
+import { useTerminalDrawer } from "./useTerminalDrawer";
 
 function readProjectOrder(project: string): string[] {
   try {
@@ -85,6 +79,7 @@ export default function QuickTerminalModal() {
   const menuRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const drawer = useTerminalDrawer();
 
   const match = matchProjectFromPath(location.pathname);
   const project = match?.name ?? null;
@@ -128,6 +123,19 @@ export default function QuickTerminalModal() {
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [project, onItermRoute]);
+
+  // Terminal overlays are mutually exclusive: the Cmd+O modal and the Cmd+B
+  // drawer both mount the single pooled terminal holder, so only one may be
+  // open at a time.
+  useEffect(() => {
+    if (open) drawer.setOpen(false);
+    // drawer.setOpen is a stable useCallback; depend on it (not the whole
+    // `drawer` value, which is a fresh object each render) so this fires only
+    // on modal-open transitions and never fights the reverse effect below.
+  }, [open, drawer.setOpen]);
+  useEffect(() => {
+    if (drawer.open) setOpen(false);
+  }, [drawer.open]);
 
   useEffect(() => {
     if (!open) return;

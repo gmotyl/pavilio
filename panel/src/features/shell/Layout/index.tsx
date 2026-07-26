@@ -10,6 +10,7 @@ import {
   FloatingActionProvider,
 } from "./FloatingActionProvider";
 import { ScrollContainerContext } from "./ScrollContainer";
+import TerminalDrawer from "../../terminal/TerminalDrawer";
 
 function FloatingOverlay() {
   const { action } = useContext(FloatingActionContext);
@@ -83,6 +84,8 @@ export function Layout({ children }: LayoutProps) {
         </ScrollContainerContext.Provider>
         <FloatingOverlay />
       </main>
+
+      <TerminalDrawer />
 
       <div className="hidden md:block">
         <button
