@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import {
@@ -32,6 +32,16 @@ function Probe() {
   );
 }
 
+const JSDOM_VIEWPORT = 1024;
+
+function setViewport(value: number) {
+  Object.defineProperty(window, "innerWidth", {
+    value,
+    writable: true,
+    configurable: true,
+  });
+}
+
 function setup(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -44,6 +54,11 @@ function setup(path: string) {
 
 describe("useTerminalDrawer", () => {
   beforeEach(() => localStorage.clear());
+
+  // runs even if a test throws mid-body, so a viewport override can't leak
+  afterEach(() => {
+    setViewport(JSDOM_VIEWPORT);
+  });
 
   it("starts closed and toggles open on Cmd+B when on a non-iterm project page", () => {
     setup("/project/vector/memo");
@@ -141,11 +156,7 @@ describe("useTerminalDrawer", () => {
     expect(screen.getByTestId("width")).toHaveTextContent("640");
 
     act(() => {
-      Object.defineProperty(window, "innerWidth", {
-        value: 800,
-        writable: true,
-        configurable: true,
-      });
+      setViewport(800);
       fireEvent(window, new Event("resize"));
     });
 
@@ -154,14 +165,11 @@ describe("useTerminalDrawer", () => {
     expect(screen.getByTestId("max")).toHaveTextContent("440");
     expect(localStorage.getItem("panel:terminalDrawer:width")).toBe("640");
 
-    // restore jsdom's default for the remaining tests
+    // regrowing the viewport restores the full stored preference
     act(() => {
-      Object.defineProperty(window, "innerWidth", {
-        value: 1024,
-        writable: true,
-        configurable: true,
-      });
+      setViewport(JSDOM_VIEWPORT);
       fireEvent(window, new Event("resize"));
     });
+    expect(screen.getByTestId("width")).toHaveTextContent("640");
   });
 });
