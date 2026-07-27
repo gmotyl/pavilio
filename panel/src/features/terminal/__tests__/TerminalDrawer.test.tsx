@@ -122,12 +122,28 @@ describe("TerminalDrawer", () => {
 
   it("computes width from the drawer's left offset when docked left", () => {
     renderAt("/project/vector/memo", true, 480, "left");
+    const drawer = screen.getByTestId("terminal-drawer");
     const handle = screen.getByTestId("terminal-drawer-resize");
-    // getBoundingClientRect() is all zeros in jsdom, so left offset is 0
-    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 480 });
-    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 600 });
-    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "600px" });
-    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 600 });
+    // jsdom's getBoundingClientRect() is all zeros, which makes
+    // clientX - rect.left indistinguishable from a bare clientX. Stub a
+    // non-zero left (as if a 240px sidebar sat beside the drawer) so the
+    // subtraction is actually pinned: 800 - 240 = 560, not 800.
+    vi.spyOn(drawer, "getBoundingClientRect").mockReturnValue({
+      x: 240,
+      y: 0,
+      left: 240,
+      top: 0,
+      right: 720,
+      bottom: 768,
+      width: 480,
+      height: 768,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 720 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 800 });
+    expect(drawer).toHaveStyle({ width: "560px" });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 800 });
   });
 
   it("shows a drop zone on the half being dragged into, then docks there", () => {
