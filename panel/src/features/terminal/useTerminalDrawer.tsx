@@ -14,7 +14,16 @@ const OPEN_KEY = "panel:terminalDrawer:open";
 const WIDTH_KEY = "panel:terminalDrawer:width";
 export const DRAWER_MIN_WIDTH = 320;
 export const DRAWER_DEFAULT_WIDTH = 480;
-export const DRAWER_MAX_WIDTH = 900;
+/** Floor for <main>: the drawer may never squeeze it narrower than this. */
+export const MAIN_MIN_WIDTH = 360;
+
+export function drawerMaxWidth(viewport: number): number {
+  return Math.max(DRAWER_MIN_WIDTH, viewport - MAIN_MIN_WIDTH);
+}
+
+function clampWidth(value: number, viewport: number): number {
+  return Math.min(drawerMaxWidth(viewport), Math.max(DRAWER_MIN_WIDTH, value));
+}
 
 function readOpen(): boolean {
   try {
@@ -27,9 +36,9 @@ function readWidth(): number {
   try {
     const raw = localStorage.getItem(WIDTH_KEY);
     const n = raw ? Number(raw) : NaN;
-    if (Number.isFinite(n)) {
-      return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, n));
-    }
+    // Only the floor is applied here — the ceiling depends on the live
+    // viewport and is applied when deriving the effective width.
+    if (Number.isFinite(n)) return Math.max(DRAWER_MIN_WIDTH, n);
   } catch {
     // ignore
   }
@@ -44,6 +53,7 @@ interface DrawerCtx {
   /** open && !suppressed — what the drawer actually renders on. */
   visible: boolean;
   width: number;
+  maxWidth: number;
   setOpen: (v: boolean) => void;
   toggle: () => void;
   setWidth: (v: number) => void;
@@ -54,7 +64,17 @@ const Ctx = createContext<DrawerCtx | null>(null);
 export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [open, setOpenState] = useState(readOpen);
-  const [width, setWidthState] = useState(readWidth);
+  const [storedWidth, setStoredWidth] = useState(readWidth);
+  const [viewport, setViewport] = useState(() => window.innerWidth);
+
+  useEffect(() => {
+    const onResize = () => setViewport(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const maxWidth = drawerMaxWidth(viewport);
+  const width = clampWidth(storedWidth, viewport);
 
   const setOpen = useCallback((v: boolean) => {
     setOpenState(v);
@@ -66,8 +86,8 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setWidth = useCallback((v: number) => {
-    const clamped = Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, v));
-    setWidthState(clamped);
+    const clamped = clampWidth(v, window.innerWidth);
+    setStoredWidth(clamped);
     try {
       localStorage.setItem(WIDTH_KEY, String(clamped));
     } catch {
@@ -105,7 +125,16 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider
-      value={{ open, suppressed, visible, width, setOpen, toggle, setWidth }}
+      value={{
+        open,
+        suppressed,
+        visible,
+        width,
+        maxWidth,
+        setOpen,
+        toggle,
+        setWidth,
+      }}
     >
       {children}
     </Ctx.Provider>

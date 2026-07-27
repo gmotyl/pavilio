@@ -3,14 +3,10 @@ import { useLocation } from "react-router-dom";
 import { X } from "lucide-react";
 import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 import ProjectTerminalsSurface from "./ProjectTerminalsSurface";
-import {
-  useTerminalDrawer,
-  DRAWER_MIN_WIDTH,
-  DRAWER_MAX_WIDTH,
-} from "./useTerminalDrawer";
+import { useTerminalDrawer, DRAWER_MIN_WIDTH } from "./useTerminalDrawer";
 
 export default function TerminalDrawer() {
-  const { open, width, setOpen, setWidth } = useTerminalDrawer();
+  const { open, width, maxWidth, setOpen, setWidth } = useTerminalDrawer();
   const location = useLocation();
   const match = matchProjectFromPath(location.pathname);
   const dragging = useRef(false);
@@ -25,9 +21,9 @@ export default function TerminalDrawer() {
     (e: React.PointerEvent) => {
       if (!dragging.current) return;
       const next = window.innerWidth - e.clientX;
-      setWidth(Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, next)));
+      setWidth(Math.min(maxWidth, Math.max(DRAWER_MIN_WIDTH, next)));
     },
-    [setWidth],
+    [maxWidth, setWidth],
   );
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
@@ -42,7 +38,7 @@ export default function TerminalDrawer() {
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       // Handle straddles the left (inner) edge: left grows, right shrinks.
-      // setWidth clamps to [DRAWER_MIN_WIDTH, DRAWER_MAX_WIDTH].
+      // setWidth clamps to [DRAWER_MIN_WIDTH, maxWidth].
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         setWidth(width + 16);

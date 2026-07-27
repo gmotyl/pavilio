@@ -7,7 +7,7 @@ import {
 } from "../useTerminalDrawer";
 
 function Probe() {
-  const { open, visible, suppressed, width } = useTerminalDrawer();
+  const { open, visible, suppressed, width, maxWidth, setWidth } = useTerminalDrawer();
   const navigate = useNavigate();
   return (
     <div>
@@ -15,6 +15,10 @@ function Probe() {
       <span data-testid="visible">{String(visible)}</span>
       <span data-testid="suppressed">{String(suppressed)}</span>
       <span data-testid="width">{width}</span>
+      <span data-testid="max">{maxWidth}</span>
+      <button data-testid="grow" onClick={() => setWidth(5000)}>
+        grow
+      </button>
       <button data-testid="to-iterm" onClick={() => navigate("/project/vector/iterm")}>
         iterm
       </button>
@@ -118,5 +122,46 @@ describe("useTerminalDrawer", () => {
     });
     expect(screen.getByTestId("open")).toHaveTextContent("true");
     expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+  });
+
+  it("caps width at viewport minus the main-content floor, not a fixed 900", () => {
+    setup("/project/vector/memo");
+    // jsdom viewport is 1024 wide → 1024 - 360 = 664
+    expect(screen.getByTestId("max")).toHaveTextContent("664");
+    act(() => {
+      fireEvent.click(screen.getByTestId("grow"));
+    });
+    expect(screen.getByTestId("width")).toHaveTextContent("664");
+    expect(localStorage.getItem("panel:terminalDrawer:width")).toBe("664");
+  });
+
+  it("re-clamps the effective width when the window shrinks, without rewriting the stored value", () => {
+    localStorage.setItem("panel:terminalDrawer:width", "640");
+    setup("/project/vector/memo");
+    expect(screen.getByTestId("width")).toHaveTextContent("640");
+
+    act(() => {
+      Object.defineProperty(window, "innerWidth", {
+        value: 800,
+        writable: true,
+        configurable: true,
+      });
+      fireEvent(window, new Event("resize"));
+    });
+
+    // 800 - 360 = 440
+    expect(screen.getByTestId("width")).toHaveTextContent("440");
+    expect(screen.getByTestId("max")).toHaveTextContent("440");
+    expect(localStorage.getItem("panel:terminalDrawer:width")).toBe("640");
+
+    // restore jsdom's default for the remaining tests
+    act(() => {
+      Object.defineProperty(window, "innerWidth", {
+        value: 1024,
+        writable: true,
+        configurable: true,
+      });
+      fireEvent(window, new Event("resize"));
+    });
   });
 });
