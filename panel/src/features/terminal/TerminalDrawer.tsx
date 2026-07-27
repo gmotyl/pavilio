@@ -87,7 +87,12 @@ export default function TerminalDrawer() {
   const onHeaderPointerMove = useCallback((e: React.PointerEvent) => {
     const origin = dragOriginX.current;
     if (origin === null) return;
-    if (Math.abs(e.clientX - origin) < SIDE_DRAG_GUARD) return;
+    // Back inside the guard is a click again, so drop any pending side —
+    // an out-and-back drag must not commit the far side it passed through.
+    if (Math.abs(e.clientX - origin) < SIDE_DRAG_GUARD) {
+      setDropSide(null);
+      return;
+    }
     setDropSide(e.clientX < window.innerWidth / 2 ? "left" : "right");
   }, []);
 
