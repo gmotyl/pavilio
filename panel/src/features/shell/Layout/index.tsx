@@ -64,6 +64,7 @@ export function Layout({ children }: LayoutProps) {
 
       <aside
         data-testid="layout-sidebar-left"
+        data-panel-region="sidebar-left"
         className={`sidebar sidebar-left flex-shrink-0 ${!left.expanded ? "sidebar-collapsed" : ""}`}
         style={{
           order: 1,
@@ -108,6 +109,7 @@ export function Layout({ children }: LayoutProps) {
 
       <aside
         data-testid="layout-sidebar-right"
+        data-panel-region="sidebar-right"
         className={`sidebar sidebar-right flex-shrink-0 ${!right.expanded ? "sidebar-collapsed" : ""}`}
         style={{
           order: 5,

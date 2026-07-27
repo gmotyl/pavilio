@@ -30,25 +30,29 @@ function renderAt(
 }
 
 /**
- * Stands in for Layout's sidebar. The drawer is rendered without Layout here,
- * and jsdom rects are all zeros, so the width has to be stubbed explicitly.
+ * Stands in for Layout's sidebar, which the drawer finds by its production
+ * attribute (not data-testid). The drawer is rendered without Layout here, and
+ * jsdom rects are all zeros, so the width has to be stubbed explicitly.
  */
 function mountSidebarStub(side: "left" | "right", width: number) {
   const el = document.createElement("div");
-  el.setAttribute("data-testid", `layout-sidebar-${side}`);
+  el.setAttribute("data-panel-region", `sidebar-${side}`);
   document.body.appendChild(el);
-  vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
-    x: 0,
-    y: 0,
-    left: 0,
-    top: 0,
-    right: width,
-    bottom: 768,
-    width,
-    height: 768,
-    toJSON: () => ({}),
-  } as DOMRect);
-  return el;
+  const rect = vi.spyOn(el, "getBoundingClientRect");
+  const setWidth = (w: number) =>
+    rect.mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: w,
+      bottom: 768,
+      width: w,
+      height: 768,
+      toJSON: () => ({}),
+    } as DOMRect);
+  setWidth(width);
+  return { el, setWidth };
 }
 
 describe("TerminalDrawer", () => {
@@ -61,7 +65,7 @@ describe("TerminalDrawer", () => {
 
   afterEach(() => {
     document
-      .querySelectorAll('[data-testid^="layout-sidebar-"]')
+      .querySelectorAll('[data-panel-region^="sidebar-"]')
       .forEach((el) => el.remove());
   });
 
@@ -252,6 +256,30 @@ describe("TerminalDrawer", () => {
     const zone = screen.getByTestId("terminal-drawer-dropzone");
     expect(zone).toHaveAttribute("data-side", "right");
     expect(zone).toHaveStyle({ right: "265px" });
+  });
+
+  it("measures the drop zone offset when the side is computed, not on every render", () => {
+    const sidebar = mountSidebarStub("left", 240);
+    renderAt("/project/vector/memo", true, 480);
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 800 });
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 200 });
+    expect(screen.getByTestId("terminal-drawer-dropzone")).toHaveStyle({
+      left: "240px",
+    });
+
+    // The sidebar changes size, but nothing recomputes the drop side. A
+    // re-render (here: an arrow-key resize) must not re-measure behind the
+    // drag's back — the hint keeps the offset taken when "left" was decided.
+    sidebar.setWidth(999);
+    fireEvent.keyDown(screen.getByTestId("terminal-drawer-resize"), {
+      key: "ArrowLeft",
+    });
+    const zone = screen.getByTestId("terminal-drawer-dropzone");
+    // proof the component really re-rendered
+    expect(zone).toHaveStyle({ width: "496px" });
+    expect(zone).toHaveStyle({ left: "240px" });
   });
 
   it("offsets the drop zone by 0 when the sidebar is collapsed to width 0", () => {

@@ -12,14 +12,18 @@ const RESIZE_STEP = 16;
 /** Pointer travel below this is a click, not a side drag. */
 const SIDE_DRAG_GUARD = 6;
 
+/** The pending dock side plus the sidebar offset measured when it was decided. */
+type DropTarget = { side: "left" | "right"; offset: number };
+
 /**
  * A docked drawer lands inside the sidebars, not against the viewport edge, so
  * the drop-zone hint has to start where the sidebar on that side ends. Measured
  * rather than hard-coded, so it tracks --sidebar-width and the collapsed state.
- * 0 when the sidebar is absent (e.g. the drawer rendered without Layout).
+ * Called from the pointer handler, never during render: layout reads belong in
+ * events. 0 when the sidebar is absent (e.g. the drawer rendered without Layout).
  */
 function sidebarWidth(side: "left" | "right") {
-  const el = document.querySelector(`[data-testid="layout-sidebar-${side}"]`);
+  const el = document.querySelector(`[data-panel-region="sidebar-${side}"]`);
   return el?.getBoundingClientRect().width ?? 0;
 }
 
@@ -30,7 +34,7 @@ export default function TerminalDrawer() {
   const match = matchProjectFromPath(location.pathname);
   const asideRef = useRef<HTMLElement>(null);
   const dragging = useRef(false);
-  const [dropSide, setDropSide] = useState<"left" | "right" | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const dragOriginX = useRef<number | null>(null);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
@@ -90,10 +94,11 @@ export default function TerminalDrawer() {
     // Back inside the guard is a click again, so drop any pending side —
     // an out-and-back drag must not commit the far side it passed through.
     if (Math.abs(e.clientX - origin) < SIDE_DRAG_GUARD) {
-      setDropSide(null);
+      setDropTarget(null);
       return;
     }
-    setDropSide(e.clientX < window.innerWidth / 2 ? "left" : "right");
+    const next = e.clientX < window.innerWidth / 2 ? "left" : "right";
+    setDropTarget({ side: next, offset: sidebarWidth(next) });
   }, []);
 
   const onHeaderPointerUp = useCallback(
@@ -105,10 +110,10 @@ export default function TerminalDrawer() {
       } catch {
         // ignore
       }
-      if (wasDragging && dropSide) setSide(dropSide);
-      setDropSide(null);
+      if (wasDragging && dropTarget) setSide(dropTarget.side);
+      setDropTarget(null);
     },
-    [dropSide, setSide],
+    [dropTarget, setSide],
   );
 
   /**
@@ -118,7 +123,7 @@ export default function TerminalDrawer() {
    */
   const onHeaderDragAbort = useCallback(() => {
     dragOriginX.current = null;
-    setDropSide(null);
+    setDropTarget(null);
   }, []);
 
   const onKeyDown = useCallback(
@@ -182,7 +187,7 @@ export default function TerminalDrawer() {
         onPointerUp={onHeaderPointerUp}
         onPointerCancel={onHeaderDragAbort}
         onLostPointerCapture={onHeaderDragAbort}
-        className={`flex items-center justify-between px-2 h-7 flex-shrink-0 select-none touch-none ${dropSide ? "cursor-grabbing" : "cursor-grab"}`}
+        className={`flex items-center justify-between px-2 h-7 flex-shrink-0 select-none touch-none ${dropTarget ? "cursor-grabbing" : "cursor-grab"}`}
         style={{ borderBottom: "1px solid var(--border-subtle)" }}
         title="Drag to move the drawer to the other side"
       >
@@ -208,17 +213,17 @@ export default function TerminalDrawer() {
       <div className="flex-1 min-h-0">
         <ProjectTerminalsSurface projectName={match.name} active={false} fill />
       </div>
-      {dropSide && (
+      {dropTarget && (
         <div
           data-testid="terminal-drawer-dropzone"
-          data-side={dropSide}
+          data-side={dropTarget.side}
           aria-hidden
           className="fixed top-0 bottom-0 z-40 pointer-events-none"
           style={{
             left:
-              dropSide === "left" ? `${sidebarWidth("left")}px` : undefined,
+              dropTarget.side === "left" ? `${dropTarget.offset}px` : undefined,
             right:
-              dropSide === "right" ? `${sidebarWidth("right")}px` : undefined,
+              dropTarget.side === "right" ? `${dropTarget.offset}px` : undefined,
             width: `${width}px`,
             background: "var(--accent)",
             opacity: 0.12,
