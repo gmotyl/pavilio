@@ -5,31 +5,47 @@ import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 import ProjectTerminalsSurface from "./ProjectTerminalsSurface";
 import { useTerminalDrawer, DRAWER_MIN_WIDTH } from "./useTerminalDrawer";
 
+/** Flex order slots in Layout: sidebars bracket main, drawer takes 2 or 4. */
+const ORDER_LEFT = 2;
+const ORDER_RIGHT = 4;
+const RESIZE_STEP = 16;
+
 export default function TerminalDrawer() {
-  const { open, width, maxWidth, setOpen, setWidth } = useTerminalDrawer();
+  const { visible, width, maxWidth, side, setOpen, setWidth } =
+    useTerminalDrawer();
   const location = useLocation();
   const match = matchProjectFromPath(location.pathname);
+  const asideRef = useRef<HTMLElement>(null);
   const dragging = useRef(false);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     dragging.current = true;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // ignore — jsdom and some browsers reject stale pointer ids
+    }
   }, []);
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (!dragging.current) return;
-      const next = window.innerWidth - e.clientX;
+      // The handle sits on the drawer's inner edge, so dragging toward
+      // <main> always grows it — the formula flips with the dock side.
+      const next =
+        side === "right"
+          ? window.innerWidth - e.clientX
+          : e.clientX - (asideRef.current?.getBoundingClientRect().left ?? 0);
       setWidth(Math.min(maxWidth, Math.max(DRAWER_MIN_WIDTH, next)));
     },
-    [maxWidth, setWidth],
+    [maxWidth, setWidth, side],
   );
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
     dragging.current = false;
     try {
-      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
       // ignore
     }
@@ -37,33 +53,40 @@ export default function TerminalDrawer() {
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      // Handle straddles the left (inner) edge: left grows, right shrinks.
-      // setWidth clamps to [DRAWER_MIN_WIDTH, maxWidth].
-      if (e.key === "ArrowLeft") {
+      const growKey = side === "right" ? "ArrowLeft" : "ArrowRight";
+      const shrinkKey = side === "right" ? "ArrowRight" : "ArrowLeft";
+      if (e.key === growKey) {
         e.preventDefault();
-        setWidth(width + 16);
-      } else if (e.key === "ArrowRight") {
+        setWidth(width + RESIZE_STEP);
+      } else if (e.key === shrinkKey) {
         e.preventDefault();
-        setWidth(width - 16);
+        setWidth(width - RESIZE_STEP);
       }
     },
-    [setWidth, width],
+    [setWidth, side, width],
   );
 
-  if (!open || !match || match.section === "iterm") return null;
+  if (!visible || !match) return null;
+
+  const dockedRight = side === "right";
 
   return (
     <aside
+      ref={asideRef}
       data-testid="terminal-drawer"
+      data-side={side}
       className="flex-shrink-0 relative flex flex-col h-full"
       style={{
         width: `${width}px`,
-        borderLeft: "1px solid var(--border-subtle)",
+        order: dockedRight ? ORDER_RIGHT : ORDER_LEFT,
+        borderLeft: dockedRight ? "1px solid var(--border-subtle)" : undefined,
+        borderRight: dockedRight ? undefined : "1px solid var(--border-subtle)",
         background: "var(--bg-surface)",
       }}
     >
       <div
         data-testid="terminal-drawer-resize"
+        data-edge={dockedRight ? "left" : "right"}
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize terminal drawer"
@@ -72,12 +95,12 @@ export default function TerminalDrawer() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onKeyDown={onKeyDown}
-        className="group absolute left-0 top-0 h-full w-2 cursor-col-resize z-10 focus-visible:outline-none"
+        className={`group absolute ${dockedRight ? "left-0" : "right-0"} top-0 h-full w-2 cursor-col-resize z-10 focus-visible:outline-none`}
         title="Drag to resize (or focus and use arrow keys)"
       >
         <span
           aria-hidden
-          className="absolute left-0 top-0 h-full w-px transition-colors group-hover:bg-[var(--border-strong)] group-focus-visible:bg-[var(--accent)]"
+          className={`absolute ${dockedRight ? "left-0" : "right-0"} top-0 h-full w-px transition-colors group-hover:bg-[var(--border-strong)] group-focus-visible:bg-[var(--accent)]`}
         />
       </div>
       <div

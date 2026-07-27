@@ -1,7 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { vi } from "vitest";
 import { TerminalDrawerProvider } from "../useTerminalDrawer";
 import TerminalDrawer from "../TerminalDrawer";
 
@@ -12,9 +11,15 @@ vi.mock("../ProjectTerminalsSurface", () => ({
   ),
 }));
 
-function renderAt(path: string, open: boolean, width = 480) {
+function renderAt(
+  path: string,
+  open: boolean,
+  width = 480,
+  side: "left" | "right" = "right",
+) {
   if (open) localStorage.setItem("panel:terminalDrawer:open", "true");
   localStorage.setItem("panel:terminalDrawer:width", String(width));
+  localStorage.setItem("panel:terminalDrawer:side", side);
   return render(
     <MemoryRouter initialEntries={[path]}>
       <TerminalDrawerProvider>
@@ -25,8 +30,20 @@ function renderAt(path: string, open: boolean, width = 480) {
 }
 
 describe("TerminalDrawer", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    // jsdom implements neither of these
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+  });
+
   it("renders nothing when closed", () => {
     renderAt("/project/vector/memo", false);
+    expect(screen.queryByTestId("terminal-drawer")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing on the iterm tab even when the intent is open", () => {
+    renderAt("/project/vector/iterm", true);
     expect(screen.queryByTestId("terminal-drawer")).not.toBeInTheDocument();
   });
 
@@ -51,14 +68,65 @@ describe("TerminalDrawer", () => {
     expect(screen.getByTestId("terminal-drawer")).toBeInTheDocument();
   });
 
-  it("resizes and persists width via keyboard on the handle", () => {
+  it("docks right by default: handle on the inner (left) edge, order after main", () => {
+    renderAt("/project/vector/memo", true);
+    const drawer = screen.getByTestId("terminal-drawer");
+    expect(drawer).toHaveAttribute("data-side", "right");
+    expect(drawer).toHaveStyle({ order: "4" });
+    expect(screen.getByTestId("terminal-drawer-resize")).toHaveAttribute(
+      "data-edge",
+      "left",
+    );
+  });
+
+  it("docks left: handle on the inner (right) edge, order before main", () => {
+    renderAt("/project/vector/memo", true, 480, "left");
+    const drawer = screen.getByTestId("terminal-drawer");
+    expect(drawer).toHaveAttribute("data-side", "left");
+    expect(drawer).toHaveStyle({ order: "2" });
+    expect(screen.getByTestId("terminal-drawer-resize")).toHaveAttribute(
+      "data-edge",
+      "right",
+    );
+  });
+
+  it("grows on ArrowLeft when docked right", () => {
     renderAt("/project/vector/memo", true, 480);
     const handle = screen.getByTestId("terminal-drawer-resize");
     handle.focus();
     fireEvent.keyDown(handle, { key: "ArrowLeft" });
-    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({
-      width: "496px",
-    });
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "496px" });
     expect(localStorage.getItem("panel:terminalDrawer:width")).toBe("496");
+  });
+
+  it("grows on ArrowRight when docked left", () => {
+    renderAt("/project/vector/memo", true, 480, "left");
+    const handle = screen.getByTestId("terminal-drawer-resize");
+    handle.focus();
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "496px" });
+
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "480px" });
+  });
+
+  it("computes width from the distance to the right edge when docked right", () => {
+    renderAt("/project/vector/memo", true, 480);
+    const handle = screen.getByTestId("terminal-drawer-resize");
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 544 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 424 });
+    // jsdom viewport 1024 → 1024 - 424 = 600
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "600px" });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 424 });
+  });
+
+  it("computes width from the drawer's left offset when docked left", () => {
+    renderAt("/project/vector/memo", true, 480, "left");
+    const handle = screen.getByTestId("terminal-drawer-resize");
+    // getBoundingClientRect() is all zeros in jsdom, so left offset is 0
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 480 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 600 });
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "600px" });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 600 });
   });
 });
