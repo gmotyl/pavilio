@@ -61,12 +61,19 @@ interface DrawerCtx {
   open: boolean;
   /** Current route cannot host the drawer. Derived every render, never stored. */
   suppressed: boolean;
-  /** open && !suppressed — what the drawer actually renders on. */
+  /**
+   * A conflicting overlay (the Cmd+O quick-terminal modal) is up and owns the
+   * single pooled xterm holder. Session-only — never persisted, so a conflict
+   * cannot outlive itself or a reload.
+   */
+  overlayActive: boolean;
+  /** open && !suppressed && !overlayActive — what the drawer actually renders on. */
   visible: boolean;
   width: number;
   maxWidth: number;
   side: DrawerSide;
   setOpen: (v: boolean) => void;
+  setOverlayActive: (v: boolean) => void;
   toggle: () => void;
   setWidth: (v: number) => void;
   setSide: (v: DrawerSide) => void;
@@ -80,6 +87,9 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   const [storedWidth, setStoredWidth] = useState(readWidth);
   const [viewport, setViewport] = useState(() => window.innerWidth);
   const [side, setSideState] = useState(readSide);
+  // Deliberately not seeded from — and never written to — localStorage: an
+  // overlay conflict is a transient fact about this session, not a preference.
+  const [overlayActive, setOverlayActive] = useState(false);
 
   useEffect(() => {
     const onResize = () => setViewport(window.innerWidth);
@@ -131,7 +141,7 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
 
   const match = matchProjectFromPath(location.pathname);
   const suppressed = !match || match.section === "iterm";
-  const visible = open && !suppressed;
+  const visible = open && !suppressed && !overlayActive;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -151,11 +161,13 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
       value={{
         open,
         suppressed,
+        overlayActive,
         visible,
         width,
         maxWidth,
         side,
         setOpen,
+        setOverlayActive,
         toggle,
         setWidth,
         setSide,

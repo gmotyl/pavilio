@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, cleanup } from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import {
   TerminalDrawerProvider,
@@ -7,14 +7,31 @@ import {
 } from "../useTerminalDrawer";
 
 function Probe() {
-  const { open, visible, suppressed, width, maxWidth, setWidth, side, setSide } =
-    useTerminalDrawer();
+  const {
+    open,
+    visible,
+    suppressed,
+    overlayActive,
+    setOverlayActive,
+    width,
+    maxWidth,
+    setWidth,
+    side,
+    setSide,
+  } = useTerminalDrawer();
   const navigate = useNavigate();
   return (
     <div>
       <span data-testid="open">{String(open)}</span>
       <span data-testid="visible">{String(visible)}</span>
       <span data-testid="suppressed">{String(suppressed)}</span>
+      <span data-testid="overlay-active">{String(overlayActive)}</span>
+      <button data-testid="overlay-on" onClick={() => setOverlayActive(true)}>
+        overlay on
+      </button>
+      <button data-testid="overlay-off" onClick={() => setOverlayActive(false)}>
+        overlay off
+      </button>
       <span data-testid="width">{width}</span>
       <span data-testid="max">{maxWidth}</span>
       <button data-testid="grow" onClick={() => setWidth(5000)}>
@@ -142,6 +159,40 @@ describe("useTerminalDrawer", () => {
     });
     expect(screen.getByTestId("open")).toHaveTextContent("true");
     expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+  });
+
+  it("lets an overlay suppress visibility without touching the stored open intent", () => {
+    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setup("/project/vector/memo");
+    expect(screen.getByTestId("visible")).toHaveTextContent("true");
+    expect(screen.getByTestId("overlay-active")).toHaveTextContent("false");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("overlay-on"));
+    });
+    expect(screen.getByTestId("overlay-active")).toHaveTextContent("true");
+    expect(screen.getByTestId("visible")).toHaveTextContent("false");
+    // intent untouched, in memory and on disk
+    expect(screen.getByTestId("open")).toHaveTextContent("true");
+    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("overlay-off"));
+    });
+    expect(screen.getByTestId("visible")).toHaveTextContent("true");
+  });
+
+  it("never persists overlayActive", () => {
+    setup("/project/vector/memo");
+    act(() => {
+      fireEvent.click(screen.getByTestId("overlay-on"));
+    });
+    const keys = Object.keys(localStorage);
+    expect(keys.some((k) => k.toLowerCase().includes("overlay"))).toBe(false);
+    // and a fresh mount starts with no overlay
+    cleanup();
+    setup("/project/vector/memo");
+    expect(screen.getByTestId("overlay-active")).toHaveTextContent("false");
   });
 
   it("caps width at viewport minus the main-content floor, not a fixed 900", () => {
