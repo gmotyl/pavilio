@@ -10,6 +10,7 @@ import {
   FloatingActionProvider,
 } from "./FloatingActionProvider";
 import { ScrollContainerContext } from "./ScrollContainer";
+import { LAYOUT_ORDER } from "./order";
 import TerminalDrawer from "../../terminal/TerminalDrawer";
 
 function FloatingOverlay() {
@@ -67,7 +68,7 @@ export function Layout({ children }: LayoutProps) {
         data-panel-region="sidebar-left"
         className={`sidebar sidebar-left flex-shrink-0 ${!left.expanded ? "sidebar-collapsed" : ""}`}
         style={{
-          order: 1,
+          order: LAYOUT_ORDER.sidebarLeft,
           width: left.expanded ? "var(--sidebar-width)" : "0",
           borderRight: left.expanded
             ? "1px solid var(--border-subtle)"
@@ -81,7 +82,7 @@ export function Layout({ children }: LayoutProps) {
       <main
         data-testid="layout-main"
         className="flex-1 min-w-0 relative"
-        style={{ order: 3 }}
+        style={{ order: LAYOUT_ORDER.main }}
       >
         <ScrollContainerContext.Provider value={scrollRef as React.RefObject<HTMLElement>}>
           <div ref={scrollRef} className="overflow-auto h-full isolate">
@@ -112,7 +113,7 @@ export function Layout({ children }: LayoutProps) {
         data-panel-region="sidebar-right"
         className={`sidebar sidebar-right flex-shrink-0 ${!right.expanded ? "sidebar-collapsed" : ""}`}
         style={{
-          order: 5,
+          order: LAYOUT_ORDER.sidebarRight,
           width: right.expanded ? "264px" : "0",
           borderLeft: right.expanded
             ? "1px solid var(--border-subtle)"

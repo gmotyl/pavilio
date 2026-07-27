@@ -3,11 +3,9 @@ import { useLocation } from "react-router-dom";
 import { X } from "lucide-react";
 import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 import ProjectTerminalsSurface from "./ProjectTerminalsSurface";
+import { LAYOUT_ORDER } from "../shell/Layout/order";
 import { useTerminalDrawer, DRAWER_MIN_WIDTH } from "./useTerminalDrawer";
 
-/** Flex order slots in Layout: sidebars bracket main, drawer takes 2 or 4. */
-const ORDER_LEFT = 2;
-const ORDER_RIGHT = 4;
 const RESIZE_STEP = 16;
 /** Pointer travel below this is a click, not a side drag. */
 const SIDE_DRAG_GUARD = 6;
@@ -153,7 +151,7 @@ export default function TerminalDrawer() {
       className="flex-shrink-0 relative flex flex-col h-full"
       style={{
         width: `${width}px`,
-        order: dockedRight ? ORDER_RIGHT : ORDER_LEFT,
+        order: dockedRight ? LAYOUT_ORDER.drawerRight : LAYOUT_ORDER.drawerLeft,
         borderLeft: dockedRight ? "1px solid var(--border-subtle)" : undefined,
         borderRight: dockedRight ? undefined : "1px solid var(--border-subtle)",
         background: "var(--bg-surface)",
