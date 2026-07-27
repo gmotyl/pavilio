@@ -63,8 +63,10 @@ export function Layout({ children }: LayoutProps) {
       </div>
 
       <aside
+        data-testid="layout-sidebar-left"
         className={`sidebar sidebar-left flex-shrink-0 ${!left.expanded ? "sidebar-collapsed" : ""}`}
         style={{
+          order: 1,
           width: left.expanded ? "var(--sidebar-width)" : "0",
           borderRight: left.expanded
             ? "1px solid var(--border-subtle)"
@@ -75,7 +77,11 @@ export function Layout({ children }: LayoutProps) {
         <LeftSidebar />
       </aside>
 
-      <main className="flex-1 min-w-0 relative">
+      <main
+        data-testid="layout-main"
+        className="flex-1 min-w-0 relative"
+        style={{ order: 3 }}
+      >
         <ScrollContainerContext.Provider value={scrollRef as React.RefObject<HTMLElement>}>
           <div ref={scrollRef} className="overflow-auto h-full isolate">
             <Breadcrumbs />
@@ -101,8 +107,10 @@ export function Layout({ children }: LayoutProps) {
       </div>
 
       <aside
+        data-testid="layout-sidebar-right"
         className={`sidebar sidebar-right flex-shrink-0 ${!right.expanded ? "sidebar-collapsed" : ""}`}
         style={{
+          order: 5,
           width: right.expanded ? "264px" : "0",
           borderLeft: right.expanded
             ? "1px solid var(--border-subtle)"
