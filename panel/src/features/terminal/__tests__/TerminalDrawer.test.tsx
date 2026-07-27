@@ -267,6 +267,53 @@ describe("TerminalDrawer", () => {
     expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("right");
   });
 
+  it("disarms the drag on pointercancel instead of leaving it primed", () => {
+    renderAt("/project/vector/memo", true);
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 800 });
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 200 });
+    expect(screen.getByTestId("terminal-drawer-dropzone")).toBeInTheDocument();
+
+    fireEvent.pointerCancel(header, { pointerId: 1, clientX: 200 });
+    expect(
+      screen.queryByTestId("terminal-drawer-dropzone"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("terminal-drawer")).toHaveAttribute(
+      "data-side",
+      "right",
+    );
+
+    // a plain click afterwards (down + up, no travel) must not commit the
+    // abandoned flip
+    fireEvent.pointerDown(header, { pointerId: 2, button: 0, clientX: 800 });
+    fireEvent.pointerUp(header, { pointerId: 2, clientX: 800 });
+    expect(screen.getByTestId("terminal-drawer")).toHaveAttribute(
+      "data-side",
+      "right",
+    );
+    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("right");
+  });
+
+  it("disarms the drag when pointer capture is lost", () => {
+    renderAt("/project/vector/memo", true);
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 800 });
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 200 });
+    expect(screen.getByTestId("terminal-drawer-dropzone")).toBeInTheDocument();
+
+    fireEvent.lostPointerCapture(header, { pointerId: 1 });
+    expect(
+      screen.queryByTestId("terminal-drawer-dropzone"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("terminal-drawer")).toHaveAttribute(
+      "data-side",
+      "right",
+    );
+    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("right");
+  });
+
   it("does not start a side drag from the close button", () => {
     renderAt("/project/vector/memo", true);
     const close = screen.getByTestId("terminal-drawer-close");

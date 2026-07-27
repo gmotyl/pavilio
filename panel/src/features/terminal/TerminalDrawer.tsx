@@ -98,6 +98,16 @@ export default function TerminalDrawer() {
     [dropSide, setSide],
   );
 
+  /**
+   * pointerup may never arrive (pointercancel, or the browser steals capture).
+   * Disarm without committing, otherwise the next plain header click would
+   * flip the side using a stale dropSide.
+   */
+  const onHeaderDragAbort = useCallback(() => {
+    dragOriginX.current = null;
+    setDropSide(null);
+  }, []);
+
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       const growKey = side === "right" ? "ArrowLeft" : "ArrowRight";
@@ -155,6 +165,8 @@ export default function TerminalDrawer() {
         onPointerDown={onHeaderPointerDown}
         onPointerMove={onHeaderPointerMove}
         onPointerUp={onHeaderPointerUp}
+        onPointerCancel={onHeaderDragAbort}
+        onLostPointerCapture={onHeaderDragAbort}
         className={`flex items-center justify-between px-2 h-7 flex-shrink-0 select-none touch-none ${dropSide ? "cursor-grabbing" : "cursor-grab"}`}
         style={{ borderBottom: "1px solid var(--border-subtle)" }}
         title="Drag to move the drawer to the other side"
