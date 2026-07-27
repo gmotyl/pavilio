@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TerminalDrawerProvider } from "../useTerminalDrawer";
@@ -29,12 +29,40 @@ function renderAt(
   );
 }
 
+/**
+ * Stands in for Layout's sidebar. The drawer is rendered without Layout here,
+ * and jsdom rects are all zeros, so the width has to be stubbed explicitly.
+ */
+function mountSidebarStub(side: "left" | "right", width: number) {
+  const el = document.createElement("div");
+  el.setAttribute("data-testid", `layout-sidebar-${side}`);
+  document.body.appendChild(el);
+  vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: 0,
+    left: 0,
+    top: 0,
+    right: width,
+    bottom: 768,
+    width,
+    height: 768,
+    toJSON: () => ({}),
+  } as DOMRect);
+  return el;
+}
+
 describe("TerminalDrawer", () => {
   beforeEach(() => {
     localStorage.clear();
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
+  });
+
+  afterEach(() => {
+    document
+      .querySelectorAll('[data-testid^="layout-sidebar-"]')
+      .forEach((el) => el.remove());
   });
 
   it("renders nothing when closed", () => {
@@ -171,6 +199,57 @@ describe("TerminalDrawer", () => {
     expect(
       screen.queryByTestId("terminal-drawer-dropzone"),
     ).not.toBeInTheDocument();
+  });
+
+  it("offsets the left drop zone by the measured left sidebar width", () => {
+    mountSidebarStub("left", 241);
+    renderAt("/project/vector/memo", true);
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 800 });
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 200 });
+
+    const zone = screen.getByTestId("terminal-drawer-dropzone");
+    expect(zone).toHaveAttribute("data-side", "left");
+    expect(zone).toHaveStyle({ left: "241px" });
+  });
+
+  it("offsets the right drop zone by the measured right sidebar width", () => {
+    mountSidebarStub("right", 265);
+    renderAt("/project/vector/memo", true, 480, "left");
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 200 });
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 800 });
+
+    const zone = screen.getByTestId("terminal-drawer-dropzone");
+    expect(zone).toHaveAttribute("data-side", "right");
+    expect(zone).toHaveStyle({ right: "265px" });
+  });
+
+  it("offsets the drop zone by 0 when the sidebar is collapsed to width 0", () => {
+    mountSidebarStub("left", 0);
+    renderAt("/project/vector/memo", true);
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 800 });
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 200 });
+
+    expect(screen.getByTestId("terminal-drawer-dropzone")).toHaveStyle({
+      left: "0px",
+    });
+  });
+
+  it("falls back to a 0 offset when no sidebar element exists", () => {
+    renderAt("/project/vector/memo", true);
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 800 });
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 200 });
+
+    expect(screen.getByTestId("terminal-drawer-dropzone")).toHaveStyle({
+      left: "0px",
+    });
   });
 
   it("treats movement under the guard distance as a click, not a side change", () => {

@@ -12,6 +12,17 @@ const RESIZE_STEP = 16;
 /** Pointer travel below this is a click, not a side drag. */
 const SIDE_DRAG_GUARD = 6;
 
+/**
+ * A docked drawer lands inside the sidebars, not against the viewport edge, so
+ * the drop-zone hint has to start where the sidebar on that side ends. Measured
+ * rather than hard-coded, so it tracks --sidebar-width and the collapsed state.
+ * 0 when the sidebar is absent (e.g. the drawer rendered without Layout).
+ */
+function sidebarWidth(side: "left" | "right") {
+  const el = document.querySelector(`[data-testid="layout-sidebar-${side}"]`);
+  return el?.getBoundingClientRect().width ?? 0;
+}
+
 export default function TerminalDrawer() {
   const { visible, width, maxWidth, side, setOpen, setWidth, setSide } =
     useTerminalDrawer();
@@ -177,8 +188,10 @@ export default function TerminalDrawer() {
           aria-hidden
           className="fixed top-0 bottom-0 z-40 pointer-events-none"
           style={{
-            left: dropSide === "left" ? 0 : undefined,
-            right: dropSide === "right" ? 0 : undefined,
+            left:
+              dropSide === "left" ? `${sidebarWidth("left")}px` : undefined,
+            right:
+              dropSide === "right" ? `${sidebarWidth("right")}px` : undefined,
             width: `${width}px`,
             background: "var(--accent)",
             opacity: 0.12,
