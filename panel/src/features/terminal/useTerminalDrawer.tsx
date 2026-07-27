@@ -37,7 +37,12 @@ function readWidth(): number {
 }
 
 interface DrawerCtx {
+  /** Persisted user intent. Navigation must never write this. */
   open: boolean;
+  /** Current route cannot host the drawer. Derived every render, never stored. */
+  suppressed: boolean;
+  /** open && !suppressed — what the drawer actually renders on. */
+  visible: boolean;
   width: number;
   setOpen: (v: boolean) => void;
   toggle: () => void;
@@ -81,15 +86,16 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
 
   const toggle = useCallback(() => setOpen(!open), [open, setOpen]);
 
+  const match = matchProjectFromPath(location.pathname);
+  const suppressed = !match || match.section === "iterm";
+  const visible = open && !suppressed;
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "B")) {
         e.preventDefault();
         const match = matchProjectFromPath(pathRef.current);
-        if (!match || match.section === "iterm") {
-          if (openRef.current) setOpen(false);
-          return;
-        }
+        if (!match || match.section === "iterm") return;
         setOpen(!openRef.current);
       }
     };
@@ -97,14 +103,10 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", handler, true);
   }, [setOpen]);
 
-  useEffect(() => {
-    if (!open) return;
-    const match = matchProjectFromPath(location.pathname);
-    if (!match || match.section === "iterm") setOpen(false);
-  }, [location.pathname, open, setOpen]);
-
   return (
-    <Ctx.Provider value={{ open, width, setOpen, toggle, setWidth }}>
+    <Ctx.Provider
+      value={{ open, suppressed, visible, width, setOpen, toggle, setWidth }}
+    >
       {children}
     </Ctx.Provider>
   );

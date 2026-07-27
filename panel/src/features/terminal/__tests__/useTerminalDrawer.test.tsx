@@ -1,17 +1,29 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import {
   TerminalDrawerProvider,
   useTerminalDrawer,
 } from "../useTerminalDrawer";
 
 function Probe() {
-  const { open, width } = useTerminalDrawer();
+  const { open, visible, suppressed, width } = useTerminalDrawer();
+  const navigate = useNavigate();
   return (
     <div>
       <span data-testid="open">{String(open)}</span>
+      <span data-testid="visible">{String(visible)}</span>
+      <span data-testid="suppressed">{String(suppressed)}</span>
       <span data-testid="width">{width}</span>
+      <button data-testid="to-iterm" onClick={() => navigate("/project/vector/iterm")}>
+        iterm
+      </button>
+      <button data-testid="to-memo" onClick={() => navigate("/project/vector/memo")}>
+        memo
+      </button>
+      <button data-testid="to-settings" onClick={() => navigate("/settings")}>
+        settings
+      </button>
     </div>
   );
 }
@@ -60,5 +72,51 @@ describe("useTerminalDrawer", () => {
     setup("/project/vector/memo");
     expect(screen.getByTestId("open")).toHaveTextContent("true");
     expect(screen.getByTestId("width")).toHaveTextContent("540");
+  });
+
+  it("keeps the open intent when navigating to the iterm tab, and restores it on the way back", () => {
+    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setup("/project/vector/memo");
+    expect(screen.getByTestId("visible")).toHaveTextContent("true");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("to-iterm"));
+    });
+    expect(screen.getByTestId("suppressed")).toHaveTextContent("true");
+    expect(screen.getByTestId("visible")).toHaveTextContent("false");
+    expect(screen.getByTestId("open")).toHaveTextContent("true");
+    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("to-memo"));
+    });
+    expect(screen.getByTestId("visible")).toHaveTextContent("true");
+  });
+
+  it("keeps the open intent when navigating to a non-project route", () => {
+    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setup("/project/vector/memo");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("to-settings"));
+    });
+    expect(screen.getByTestId("suppressed")).toHaveTextContent("true");
+    expect(screen.getByTestId("visible")).toHaveTextContent("false");
+    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("to-memo"));
+    });
+    expect(screen.getByTestId("visible")).toHaveTextContent("true");
+  });
+
+  it("makes Cmd+B a no-op while suppressed, leaving the stored intent alone", () => {
+    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setup("/project/vector/iterm");
+    act(() => {
+      fireEvent.keyDown(window, { key: "b", metaKey: true });
+    });
+    expect(screen.getByTestId("open")).toHaveTextContent("true");
+    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
   });
 });
