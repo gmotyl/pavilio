@@ -129,4 +129,73 @@ describe("TerminalDrawer", () => {
     expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "600px" });
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 600 });
   });
+
+  it("shows a drop zone on the half being dragged into, then docks there", () => {
+    renderAt("/project/vector/memo", true);
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 800 });
+    expect(
+      screen.queryByTestId("terminal-drawer-dropzone"),
+    ).not.toBeInTheDocument();
+
+    // jsdom viewport is 1024 → midpoint 512
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 200 });
+    expect(screen.getByTestId("terminal-drawer-dropzone")).toHaveAttribute(
+      "data-side",
+      "left",
+    );
+
+    fireEvent.pointerUp(header, { pointerId: 1, clientX: 200 });
+    expect(screen.getByTestId("terminal-drawer")).toHaveAttribute(
+      "data-side",
+      "left",
+    );
+    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("left");
+    expect(
+      screen.queryByTestId("terminal-drawer-dropzone"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("treats movement under the guard distance as a click, not a side change", () => {
+    renderAt("/project/vector/memo", true);
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 800 });
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 803 });
+    fireEvent.pointerUp(header, { pointerId: 1, clientX: 803 });
+
+    expect(screen.getByTestId("terminal-drawer")).toHaveAttribute(
+      "data-side",
+      "right",
+    );
+    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("right");
+  });
+
+  it("does not start a side drag from the close button", () => {
+    renderAt("/project/vector/memo", true);
+    const close = screen.getByTestId("terminal-drawer-close");
+
+    fireEvent.pointerDown(close, { pointerId: 1, button: 0, clientX: 990 });
+    fireEvent.pointerMove(screen.getByTestId("terminal-drawer-header"), {
+      pointerId: 1,
+      clientX: 100,
+    });
+    expect(
+      screen.queryByTestId("terminal-drawer-dropzone"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the same drawer element across a side flip (no remount)", () => {
+    renderAt("/project/vector/memo", true);
+    const before = screen.getByTestId("terminal-drawer");
+    const header = screen.getByTestId("terminal-drawer-header");
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 800 });
+    fireEvent.pointerMove(header, { pointerId: 1, clientX: 120 });
+    fireEvent.pointerUp(header, { pointerId: 1, clientX: 120 });
+
+    expect(screen.getByTestId("terminal-drawer")).toBe(before);
+    expect(before).toHaveAttribute("data-side", "left");
+  });
 });

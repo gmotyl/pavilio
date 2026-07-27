@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { X } from "lucide-react";
 import { matchProjectFromPath } from "../projects/matchProjectFromPath";
@@ -9,14 +9,18 @@ import { useTerminalDrawer, DRAWER_MIN_WIDTH } from "./useTerminalDrawer";
 const ORDER_LEFT = 2;
 const ORDER_RIGHT = 4;
 const RESIZE_STEP = 16;
+/** Pointer travel below this is a click, not a side drag. */
+const SIDE_DRAG_GUARD = 6;
 
 export default function TerminalDrawer() {
-  const { visible, width, maxWidth, side, setOpen, setWidth } =
+  const { visible, width, maxWidth, side, setOpen, setWidth, setSide } =
     useTerminalDrawer();
   const location = useLocation();
   const match = matchProjectFromPath(location.pathname);
   const asideRef = useRef<HTMLElement>(null);
   const dragging = useRef(false);
+  const [dropSide, setDropSide] = useState<"left" | "right" | null>(null);
+  const dragOriginX = useRef<number | null>(null);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -50,6 +54,38 @@ export default function TerminalDrawer() {
       // ignore
     }
   }, []);
+
+  const onHeaderPointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    dragOriginX.current = e.clientX;
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const onHeaderPointerMove = useCallback((e: React.PointerEvent) => {
+    const origin = dragOriginX.current;
+    if (origin === null) return;
+    if (Math.abs(e.clientX - origin) < SIDE_DRAG_GUARD) return;
+    setDropSide(e.clientX < window.innerWidth / 2 ? "left" : "right");
+  }, []);
+
+  const onHeaderPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      const wasDragging = dragOriginX.current !== null;
+      dragOriginX.current = null;
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+      if (wasDragging && dropSide) setSide(dropSide);
+      setDropSide(null);
+    },
+    [dropSide, setSide],
+  );
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -104,8 +140,13 @@ export default function TerminalDrawer() {
         />
       </div>
       <div
-        className="flex items-center justify-between px-2 h-7 flex-shrink-0"
+        data-testid="terminal-drawer-header"
+        onPointerDown={onHeaderPointerDown}
+        onPointerMove={onHeaderPointerMove}
+        onPointerUp={onHeaderPointerUp}
+        className={`flex items-center justify-between px-2 h-7 flex-shrink-0 select-none touch-none ${dropSide ? "cursor-grabbing" : "cursor-grab"}`}
         style={{ borderBottom: "1px solid var(--border-subtle)" }}
+        title="Drag to move the drawer to the other side"
       >
         <span
           className="text-[11px] font-semibold uppercase tracking-wider truncate"
@@ -116,6 +157,7 @@ export default function TerminalDrawer() {
         <button
           type="button"
           data-testid="terminal-drawer-close"
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={() => setOpen(false)}
           className="w-5 h-5 flex items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
           style={{ color: "var(--text-tertiary)" }}
@@ -128,6 +170,21 @@ export default function TerminalDrawer() {
       <div className="flex-1 min-h-0">
         <ProjectTerminalsSurface projectName={match.name} active={false} fill />
       </div>
+      {dropSide && (
+        <div
+          data-testid="terminal-drawer-dropzone"
+          data-side={dropSide}
+          aria-hidden
+          className="fixed top-0 bottom-0 z-40 pointer-events-none"
+          style={{
+            left: dropSide === "left" ? 0 : undefined,
+            right: dropSide === "right" ? 0 : undefined,
+            width: `${width}px`,
+            background: "var(--accent)",
+            opacity: 0.12,
+          }}
+        />
+      )}
     </aside>
   );
 }
