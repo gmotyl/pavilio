@@ -174,6 +174,33 @@ describe("TerminalDrawer", () => {
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 800 });
   });
 
+  it("stops resizing after the resize drag is cancelled", () => {
+    renderAt("/project/vector/memo", true, 480);
+    const handle = screen.getByTestId("terminal-drawer-resize");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 544 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 424 });
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "600px" });
+
+    fireEvent.pointerCancel(handle, { pointerId: 1, clientX: 424 });
+    // a button-less move over the handle must no longer resize anything
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 324 });
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "600px" });
+  });
+
+  it("stops resizing after the resize drag loses pointer capture", () => {
+    renderAt("/project/vector/memo", true, 480);
+    const handle = screen.getByTestId("terminal-drawer-resize");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 544 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 424 });
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "600px" });
+
+    fireEvent.lostPointerCapture(handle, { pointerId: 1 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 324 });
+    expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "600px" });
+  });
+
   it("shows a drop zone on the half being dragged into, then docks there", () => {
     renderAt("/project/vector/memo", true);
     const header = screen.getByTestId("terminal-drawer-header");

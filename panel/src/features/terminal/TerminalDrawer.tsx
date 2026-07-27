@@ -66,6 +66,14 @@ export default function TerminalDrawer() {
     }
   }, []);
 
+  /**
+   * pointerup may never arrive (pointercancel, or the browser steals capture).
+   * Disarm, otherwise later button-less moves over the handle keep resizing.
+   */
+  const onResizeDragAbort = useCallback(() => {
+    dragging.current = false;
+  }, []);
+
   const onHeaderPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0) return;
     dragOriginX.current = e.clientX;
@@ -151,6 +159,8 @@ export default function TerminalDrawer() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onResizeDragAbort}
+        onLostPointerCapture={onResizeDragAbort}
         onKeyDown={onKeyDown}
         className={`group absolute ${dockedRight ? "left-0" : "right-0"} top-0 h-full w-2 cursor-col-resize z-10 focus-visible:outline-none`}
         title="Drag to resize (or focus and use arrow keys)"
