@@ -7,7 +7,8 @@ import {
 } from "../useTerminalDrawer";
 
 function Probe() {
-  const { open, visible, suppressed, width, maxWidth, setWidth } = useTerminalDrawer();
+  const { open, visible, suppressed, width, maxWidth, setWidth, side, setSide } =
+    useTerminalDrawer();
   const navigate = useNavigate();
   return (
     <div>
@@ -18,6 +19,10 @@ function Probe() {
       <span data-testid="max">{maxWidth}</span>
       <button data-testid="grow" onClick={() => setWidth(5000)}>
         grow
+      </button>
+      <span data-testid="side">{side}</span>
+      <button data-testid="dock-left" onClick={() => setSide("left")}>
+        left
       </button>
       <button data-testid="to-iterm" onClick={() => navigate("/project/vector/iterm")}>
         iterm
@@ -171,5 +176,25 @@ describe("useTerminalDrawer", () => {
       fireEvent(window, new Event("resize"));
     });
     expect(screen.getByTestId("width")).toHaveTextContent("640");
+  });
+
+  it("defaults the dock side to right", () => {
+    setup("/project/vector/memo");
+    expect(screen.getByTestId("side")).toHaveTextContent("right");
+  });
+
+  it("persists the dock side and restores it", () => {
+    setup("/project/vector/memo");
+    act(() => {
+      fireEvent.click(screen.getByTestId("dock-left"));
+    });
+    expect(screen.getByTestId("side")).toHaveTextContent("left");
+    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("left");
+  });
+
+  it("falls back to right for an unrecognised stored side", () => {
+    localStorage.setItem("panel:terminalDrawer:side", "top");
+    setup("/project/vector/memo");
+    expect(screen.getByTestId("side")).toHaveTextContent("right");
   });
 });

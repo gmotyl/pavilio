@@ -12,6 +12,7 @@ import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 
 const OPEN_KEY = "panel:terminalDrawer:open";
 const WIDTH_KEY = "panel:terminalDrawer:width";
+const SIDE_KEY = "panel:terminalDrawer:side";
 export const DRAWER_MIN_WIDTH = 320;
 export const DRAWER_DEFAULT_WIDTH = 480;
 /** Floor for <main>: the drawer may never squeeze it narrower than this. */
@@ -45,6 +46,16 @@ function readWidth(): number {
   return DRAWER_DEFAULT_WIDTH;
 }
 
+export type DrawerSide = "left" | "right";
+
+function readSide(): DrawerSide {
+  try {
+    return localStorage.getItem(SIDE_KEY) === "left" ? "left" : "right";
+  } catch {
+    return "right";
+  }
+}
+
 interface DrawerCtx {
   /** Persisted user intent. Navigation must never write this. */
   open: boolean;
@@ -54,9 +65,11 @@ interface DrawerCtx {
   visible: boolean;
   width: number;
   maxWidth: number;
+  side: DrawerSide;
   setOpen: (v: boolean) => void;
   toggle: () => void;
   setWidth: (v: number) => void;
+  setSide: (v: DrawerSide) => void;
 }
 
 const Ctx = createContext<DrawerCtx | null>(null);
@@ -66,6 +79,7 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   const [open, setOpenState] = useState(readOpen);
   const [storedWidth, setStoredWidth] = useState(readWidth);
   const [viewport, setViewport] = useState(() => window.innerWidth);
+  const [side, setSideState] = useState(readSide);
 
   useEffect(() => {
     const onResize = () => setViewport(window.innerWidth);
@@ -90,6 +104,15 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
     setStoredWidth(clamped);
     try {
       localStorage.setItem(WIDTH_KEY, String(clamped));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const setSide = useCallback((v: DrawerSide) => {
+    setSideState(v);
+    try {
+      localStorage.setItem(SIDE_KEY, v);
     } catch {
       // ignore
     }
@@ -131,9 +154,11 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
         visible,
         width,
         maxWidth,
+        side,
         setOpen,
         toggle,
         setWidth,
+        setSide,
       }}
     >
       {children}
