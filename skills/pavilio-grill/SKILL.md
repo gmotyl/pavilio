@@ -17,7 +17,7 @@ Do NOT write implementation code, scaffold, or invoke any implementation skill u
 
 All docs are project-scoped under the workspace repo root:
 
-- Spec: `projects/<project>/specs/YYYY-MM-DD-<topic>-design.md`
+- Spec: `projects/<project>/plans/YYYY-MM-DD-<topic>-design.md` (same dir as the implementation plan it feeds — never a separate `specs/` dir)
 - Glossary: `projects/<project>/CONTEXT.md` (or `CONTEXT-MAP.md` if multi-context)
 - ADRs: `projects/<project>/adr/NNNN-slug.md`
 
@@ -59,7 +59,7 @@ Once you understand what's being built, present it in sections scaled to complex
 
 ## 5. Write + review the spec
 
-- Write the approved design to `projects/<project>/specs/YYYY-MM-DD-<topic>-design.md` and commit.
+- Write the approved design to `projects/<project>/plans/YYYY-MM-DD-<topic>-design.md` and commit. It lands in `plans/` next to the `-implementation.md` plan that [[pavilio-writing-plans]] will produce from it — the panel's Plans tab is where these get read.
 - **Self-review** with fresh eyes: placeholder scan (no TBD/TODO), internal consistency, scope (single plan or needs decomposition?), ambiguity (pick one interpretation, make it explicit). Fix inline.
 - **User review gate:** "Spec written and committed to `<path>`. Review it and tell me if you want changes before we write the implementation plan." Wait. On changes, edit + re-review. Only proceed on approval.
 
