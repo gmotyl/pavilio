@@ -15,9 +15,23 @@ vi.mock("../../terminal/ProjectTerminalsSurface", () => ({
   ),
 }));
 
-function setup(open: boolean, side: "left" | "right" = "right") {
+/** Inline offsets the toggles use when no drawer is docked on their side. */
+const TOGGLE_BASE_LEFT_EXPANDED = 228;
+const TOGGLE_BASE_RIGHT_EXPANDED = 252;
+const TOGGLE_BASE_COLLAPSED = 8;
+
+function setup(
+  open: boolean,
+  side: "left" | "right" = "right",
+  opts: { width?: number; leftExpanded?: boolean; rightExpanded?: boolean } = {},
+) {
   if (open) localStorage.setItem("panel:terminalDrawer:open", "true");
   localStorage.setItem("panel:terminalDrawer:side", side);
+  if (opts.width) {
+    localStorage.setItem("panel:terminalDrawer:width", String(opts.width));
+  }
+  if (opts.leftExpanded === false) localStorage.setItem("panel:leftSidebar", "false");
+  if (opts.rightExpanded === false) localStorage.setItem("panel:rightSidebar", "false");
   return render(
     <MemoryRouter initialEntries={["/project/vector/memo"]}>
       <FloatingActionProvider>
@@ -78,6 +92,48 @@ describe("Layout terminal drawer slot", () => {
     setup(true, "left");
     expect(screen.getByTestId("terminal-drawer")).toHaveStyle({
       order: String(LAYOUT_ORDER.drawerLeft),
+    });
+  });
+});
+
+describe("Layout sidebar toggles vs a docked drawer", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("keeps the toggles at their base offsets when the drawer is closed", () => {
+    setup(false);
+    expect(screen.getByTestId("sidebar-toggle-left")).toHaveStyle({
+      left: `${TOGGLE_BASE_LEFT_EXPANDED}px`,
+    });
+    expect(screen.getByTestId("sidebar-toggle-right")).toHaveStyle({
+      right: `${TOGGLE_BASE_RIGHT_EXPANDED}px`,
+    });
+  });
+
+  it("pushes the right toggle out past a drawer docked right", () => {
+    setup(true, "right", { width: 400 });
+    expect(screen.getByTestId("sidebar-toggle-right")).toHaveStyle({
+      right: `${TOGGLE_BASE_RIGHT_EXPANDED + 400}px`,
+    });
+    // The other side has no drawer over it, so it must not move.
+    expect(screen.getByTestId("sidebar-toggle-left")).toHaveStyle({
+      left: `${TOGGLE_BASE_LEFT_EXPANDED}px`,
+    });
+  });
+
+  it("pushes the left toggle out past a drawer docked left", () => {
+    setup(true, "left", { width: 400 });
+    expect(screen.getByTestId("sidebar-toggle-left")).toHaveStyle({
+      left: `${TOGGLE_BASE_LEFT_EXPANDED + 400}px`,
+    });
+    expect(screen.getByTestId("sidebar-toggle-right")).toHaveStyle({
+      right: `${TOGGLE_BASE_RIGHT_EXPANDED}px`,
+    });
+  });
+
+  it("offsets from the collapsed base when the sidebar is collapsed", () => {
+    setup(true, "right", { width: 400, rightExpanded: false });
+    expect(screen.getByTestId("sidebar-toggle-right")).toHaveStyle({
+      right: `${TOGGLE_BASE_COLLAPSED + 400}px`,
     });
   });
 });
