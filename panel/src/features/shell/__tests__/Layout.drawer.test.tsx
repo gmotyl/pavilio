@@ -96,6 +96,27 @@ describe("Layout terminal drawer slot", () => {
   });
 });
 
+describe("Layout data-panel-region contract", () => {
+  beforeEach(() => localStorage.clear());
+
+  // TerminalDrawer measures the sidebars via these attributes to place its
+  // drop-zone hint, so Layout must keep providing them.
+  it("marks both sidebars with the region attribute the drawer queries", () => {
+    setup(true);
+    expect(screen.getByTestId("layout-sidebar-left")).toHaveAttribute(
+      "data-panel-region",
+      "sidebar-left",
+    );
+    expect(screen.getByTestId("layout-sidebar-right")).toHaveAttribute(
+      "data-panel-region",
+      "sidebar-right",
+    );
+    expect(
+      document.querySelectorAll("[data-panel-region^='sidebar-']"),
+    ).toHaveLength(2);
+  });
+});
+
 describe("Layout sidebar toggles vs a docked drawer", () => {
   beforeEach(() => localStorage.clear());
 
