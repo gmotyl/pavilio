@@ -376,9 +376,19 @@ describe("QuickTerminalModal", () => {
 });
 
 describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
+  /**
+   * Mirrors TerminalDrawer, which renders null unless `visible` — so
+   * `drawer-surface` present == the drawer is actually showing.
+   */
   function DrawerProbe() {
-    const { open } = useTerminalDrawer();
-    return <span data-testid="drawer-open">{String(open)}</span>;
+    const { open, visible } = useTerminalDrawer();
+    return (
+      <>
+        <span data-testid="drawer-open">{String(open)}</span>
+        <span data-testid="drawer-visible">{String(visible)}</span>
+        {visible ? <div data-testid="drawer-surface" /> : null}
+      </>
+    );
   }
 
   function renderWithDrawer(path: string) {
@@ -392,7 +402,14 @@ describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
     );
   }
 
-  it("closes the drawer when the Cmd+O modal opens", async () => {
+  function bothShowing() {
+    return (
+      screen.queryByTestId("quick-terminal-modal") !== null &&
+      screen.queryByTestId("drawer-surface") !== null
+    );
+  }
+
+  it("hides the drawer while the Cmd+O modal is up, without wiping the stored preference", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => [],
@@ -400,13 +417,68 @@ describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
     localStorage.setItem("panel:terminalDrawer:open", "true");
 
     renderWithDrawer("/project/vector/memo");
-    expect(screen.getByTestId("drawer-open")).toHaveTextContent("true");
+    expect(screen.getByTestId("drawer-surface")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "o", metaKey: true });
     await waitFor(() =>
       expect(screen.getByTestId("quick-terminal-modal")).toBeInTheDocument(),
     );
-    expect(screen.getByTestId("drawer-open")).toHaveTextContent("false");
+
+    expect(screen.queryByTestId("drawer-surface")).not.toBeInTheDocument();
+    expect(screen.getByTestId("drawer-visible")).toHaveTextContent("false");
+    // the user's intent survives — only visibility was suppressed
+    expect(screen.getByTestId("drawer-open")).toHaveTextContent("true");
+    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+    expect(bothShowing()).toBe(false);
+  });
+
+  it("brings the drawer back when the modal closes, with no further user action", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    }) as unknown as typeof fetch;
+    localStorage.setItem("panel:terminalDrawer:open", "true");
+
+    renderWithDrawer("/project/vector/memo");
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("quick-terminal-modal")).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("drawer-surface")).not.toBeInTheDocument();
+
+    // Escape passes through to xterm; close the way the user would
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    await waitFor(() =>
+      expect(screen.getByTestId("drawer-surface")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByTestId("quick-terminal-modal"),
+    ).not.toBeInTheDocument();
+    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+  });
+
+  it("keeps mutual exclusion across a full open/close cycle", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    }) as unknown as typeof fetch;
+    localStorage.setItem("panel:terminalDrawer:open", "true");
+
+    renderWithDrawer("/project/vector/memo");
+    expect(bothShowing()).toBe(false);
+
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("quick-terminal-modal")).toBeInTheDocument(),
+    );
+    expect(bothShowing()).toBe(false);
+
+    // Cmd+O again closes the modal → drawer returns, still exclusive
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("drawer-surface")).toBeInTheDocument(),
+    );
+    expect(bothShowing()).toBe(false);
   });
 
   it("closes the modal when the Cmd+B drawer opens", async () => {
@@ -428,5 +500,8 @@ describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
     expect(
       screen.queryByTestId("quick-terminal-modal"),
     ).not.toBeInTheDocument();
+    // overlayActive cleared, so the drawer actually shows
+    expect(screen.getByTestId("drawer-surface")).toBeInTheDocument();
+    expect(bothShowing()).toBe(false);
   });
 });

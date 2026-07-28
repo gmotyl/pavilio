@@ -10,7 +10,17 @@ import {
   FloatingActionProvider,
 } from "./FloatingActionProvider";
 import { ScrollContainerContext } from "./ScrollContainer";
+import { LAYOUT_ORDER } from "./order";
 import TerminalDrawer from "../../terminal/TerminalDrawer";
+import {
+  useTerminalDrawer,
+  type DrawerSide,
+} from "../../terminal/useTerminalDrawer";
+
+/** Toggle offsets from the viewport edge, per sidebar state. */
+const TOGGLE_BASE_LEFT_EXPANDED = 228;
+const TOGGLE_BASE_RIGHT_EXPANDED = 252;
+const TOGGLE_BASE_COLLAPSED = 8;
 
 function FloatingOverlay() {
   const { action } = useContext(FloatingActionContext);
@@ -32,6 +42,16 @@ export function Layout({ children }: LayoutProps) {
   const left = useSidebarState("leftSidebar");
   const right = useSidebarState("rightSidebar");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const drawer = useTerminalDrawer();
+
+  /**
+   * The toggles are viewport-anchored, but a docked drawer sits between the
+   * sidebar and <main> — without this they float over the drawer's header and
+   * resize edge, covering its ✕. Push them outward by the drawer's width on
+   * whichever side it is actually visible on.
+   */
+  const drawerOffset = (dockedOn: DrawerSide) =>
+    drawer.visible && drawer.side === dockedOn ? drawer.width : 0;
 
   useEdgeSwipe({
     onSwipeRightFromLeftEdge: () => left.setExpanded(true),
@@ -55,7 +75,12 @@ export function Layout({ children }: LayoutProps) {
           data-testid="sidebar-toggle-left"
           onClick={left.toggle}
           className={`sidebar-toggle ${!left.expanded ? "visible" : ""}`}
-          style={{ left: left.expanded ? 228 : 8 }}
+          style={{
+            left:
+              (left.expanded
+                ? TOGGLE_BASE_LEFT_EXPANDED
+                : TOGGLE_BASE_COLLAPSED) + drawerOffset("left"),
+          }}
           title={left.expanded ? "Collapse sidebar" : "Expand sidebar"}
         >
           <PanelLeft size={14} />
@@ -63,8 +88,11 @@ export function Layout({ children }: LayoutProps) {
       </div>
 
       <aside
+        data-testid="layout-sidebar-left"
+        data-panel-region="sidebar-left"
         className={`sidebar sidebar-left flex-shrink-0 ${!left.expanded ? "sidebar-collapsed" : ""}`}
         style={{
+          order: LAYOUT_ORDER.sidebarLeft,
           width: left.expanded ? "var(--sidebar-width)" : "0",
           borderRight: left.expanded
             ? "1px solid var(--border-subtle)"
@@ -75,7 +103,11 @@ export function Layout({ children }: LayoutProps) {
         <LeftSidebar />
       </aside>
 
-      <main className="flex-1 min-w-0 relative">
+      <main
+        data-testid="layout-main"
+        className="flex-1 min-w-0 relative"
+        style={{ order: LAYOUT_ORDER.main }}
+      >
         <ScrollContainerContext.Provider value={scrollRef as React.RefObject<HTMLElement>}>
           <div ref={scrollRef} className="overflow-auto h-full isolate">
             <Breadcrumbs />
@@ -93,7 +125,12 @@ export function Layout({ children }: LayoutProps) {
           data-testid="sidebar-toggle-right"
           onClick={right.toggle}
           className={`sidebar-toggle ${!right.expanded ? "visible" : ""}`}
-          style={{ right: right.expanded ? 252 : 8 }}
+          style={{
+            right:
+              (right.expanded
+                ? TOGGLE_BASE_RIGHT_EXPANDED
+                : TOGGLE_BASE_COLLAPSED) + drawerOffset("right"),
+          }}
           title={right.expanded ? "Collapse file tree" : "Expand file tree"}
         >
           <PanelRight size={14} />
@@ -101,8 +138,11 @@ export function Layout({ children }: LayoutProps) {
       </div>
 
       <aside
+        data-testid="layout-sidebar-right"
+        data-panel-region="sidebar-right"
         className={`sidebar sidebar-right flex-shrink-0 ${!right.expanded ? "sidebar-collapsed" : ""}`}
         style={{
+          order: LAYOUT_ORDER.sidebarRight,
           width: right.expanded ? "264px" : "0",
           borderLeft: right.expanded
             ? "1px solid var(--border-subtle)"

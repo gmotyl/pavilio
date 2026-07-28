@@ -12,9 +12,19 @@ import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 
 const OPEN_KEY = "panel:terminalDrawer:open";
 const WIDTH_KEY = "panel:terminalDrawer:width";
+const SIDE_KEY = "panel:terminalDrawer:side";
 export const DRAWER_MIN_WIDTH = 320;
 export const DRAWER_DEFAULT_WIDTH = 480;
-export const DRAWER_MAX_WIDTH = 900;
+/** Floor for <main>: the drawer may never squeeze it narrower than this. */
+export const MAIN_MIN_WIDTH = 360;
+
+export function drawerMaxWidth(viewport: number): number {
+  return Math.max(DRAWER_MIN_WIDTH, viewport - MAIN_MIN_WIDTH);
+}
+
+function clampWidth(value: number, viewport: number): number {
+  return Math.min(drawerMaxWidth(viewport), Math.max(DRAWER_MIN_WIDTH, value));
+}
 
 function readOpen(): boolean {
   try {
@@ -27,21 +37,46 @@ function readWidth(): number {
   try {
     const raw = localStorage.getItem(WIDTH_KEY);
     const n = raw ? Number(raw) : NaN;
-    if (Number.isFinite(n)) {
-      return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, n));
-    }
+    // Only the floor is applied here — the ceiling depends on the live
+    // viewport and is applied when deriving the effective width.
+    if (Number.isFinite(n)) return Math.max(DRAWER_MIN_WIDTH, n);
   } catch {
     // ignore
   }
   return DRAWER_DEFAULT_WIDTH;
 }
 
+export type DrawerSide = "left" | "right";
+
+function readSide(): DrawerSide {
+  try {
+    return localStorage.getItem(SIDE_KEY) === "left" ? "left" : "right";
+  } catch {
+    return "right";
+  }
+}
+
 interface DrawerCtx {
+  /** Persisted user intent. Navigation must never write this. */
   open: boolean;
+  /** Current route cannot host the drawer. Derived every render, never stored. */
+  suppressed: boolean;
+  /**
+   * A conflicting overlay (the Cmd+O quick-terminal modal) is up and owns the
+   * single pooled xterm holder. Session-only — never persisted, so a conflict
+   * cannot outlive itself or a reload.
+   */
+  overlayActive: boolean;
+  /** open && !suppressed && !overlayActive — what the drawer actually renders on. */
+  visible: boolean;
   width: number;
+  maxWidth: number;
+  side: DrawerSide;
   setOpen: (v: boolean) => void;
+  setOverlayActive: (v: boolean) => void;
   toggle: () => void;
   setWidth: (v: number) => void;
+  setSide: (v: DrawerSide) => void;
 }
 
 const Ctx = createContext<DrawerCtx | null>(null);
@@ -49,7 +84,21 @@ const Ctx = createContext<DrawerCtx | null>(null);
 export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [open, setOpenState] = useState(readOpen);
-  const [width, setWidthState] = useState(readWidth);
+  const [storedWidth, setStoredWidth] = useState(readWidth);
+  const [viewport, setViewport] = useState(() => window.innerWidth);
+  const [side, setSideState] = useState(readSide);
+  // Deliberately not seeded from — and never written to — localStorage: an
+  // overlay conflict is a transient fact about this session, not a preference.
+  const [overlayActive, setOverlayActive] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => setViewport(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const maxWidth = drawerMaxWidth(viewport);
+  const width = clampWidth(storedWidth, viewport);
 
   const setOpen = useCallback((v: boolean) => {
     setOpenState(v);
@@ -61,10 +110,19 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setWidth = useCallback((v: number) => {
-    const clamped = Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, v));
-    setWidthState(clamped);
+    const clamped = clampWidth(v, window.innerWidth);
+    setStoredWidth(clamped);
     try {
       localStorage.setItem(WIDTH_KEY, String(clamped));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const setSide = useCallback((v: DrawerSide) => {
+    setSideState(v);
+    try {
+      localStorage.setItem(SIDE_KEY, v);
     } catch {
       // ignore
     }
@@ -81,15 +139,16 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
 
   const toggle = useCallback(() => setOpen(!open), [open, setOpen]);
 
+  const match = matchProjectFromPath(location.pathname);
+  const suppressed = !match || match.section === "iterm";
+  const visible = open && !suppressed && !overlayActive;
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "B")) {
         e.preventDefault();
         const match = matchProjectFromPath(pathRef.current);
-        if (!match || match.section === "iterm") {
-          if (openRef.current) setOpen(false);
-          return;
-        }
+        if (!match || match.section === "iterm") return;
         setOpen(!openRef.current);
       }
     };
@@ -97,14 +156,23 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", handler, true);
   }, [setOpen]);
 
-  useEffect(() => {
-    if (!open) return;
-    const match = matchProjectFromPath(location.pathname);
-    if (!match || match.section === "iterm") setOpen(false);
-  }, [location.pathname, open, setOpen]);
-
   return (
-    <Ctx.Provider value={{ open, width, setOpen, toggle, setWidth }}>
+    <Ctx.Provider
+      value={{
+        open,
+        suppressed,
+        overlayActive,
+        visible,
+        width,
+        maxWidth,
+        side,
+        setOpen,
+        setOverlayActive,
+        toggle,
+        setWidth,
+        setSide,
+      }}
+    >
       {children}
     </Ctx.Provider>
   );

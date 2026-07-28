@@ -126,13 +126,22 @@ export default function QuickTerminalModal() {
 
   // Terminal overlays are mutually exclusive: the Cmd+O modal and the Cmd+B
   // drawer both mount the single pooled terminal holder, so only one may be
-  // open at a time.
+  // showing at a time.
+  //
+  // Suppress via setOverlayActive, NEVER setOpen: setOpen persists the user's
+  // drawer preference, so using it here would make "the modal needs the holder
+  // right now" indistinguishable from "the user closed the drawer" — the
+  // drawer would then stay gone after the modal closes and across reloads.
+  // overlayActive is session-only and derived into `visible`, so closing the
+  // modal restores the drawer exactly as the user left it.
   useEffect(() => {
-    if (open) drawer.setOpen(false);
-    // drawer.setOpen is a stable useCallback; depend on it (not the whole
-    // `drawer` value, which is a fresh object each render) so this fires only
+    drawer.setOverlayActive(open);
+    // Release the suppression if this modal unmounts while open.
+    return () => drawer.setOverlayActive(false);
+    // setOverlayActive is a stable useState setter; depend on it rather than
+    // the whole `drawer` value (a fresh object each render) so this fires only
     // on modal-open transitions and never fights the reverse effect below.
-  }, [open, drawer.setOpen]);
+  }, [open, drawer.setOverlayActive]);
   useEffect(() => {
     if (drawer.open) setOpen(false);
   }, [drawer.open]);
