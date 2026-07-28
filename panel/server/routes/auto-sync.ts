@@ -36,7 +36,7 @@ router.post("/disable", (_req, res) => {
 
 router.post("/now", async (_req, res) => {
   const { repo, autoSync, hostname } = cfg();
-  const status = await syncRepo(repo, { dataPaths: autoSync.dataPaths, hostname });
+  const status = await syncRepo(repo, { dataPaths: autoSync.dataPaths, generatedPaths: autoSync.generatedPaths, hostname });
   res.json({ enabled: isEnabled(), ...status, stale: isStale(autoSync.intervalMinutes), intervalMinutes: autoSync.intervalMinutes });
 });
 

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { broadcast } from "../watcher.js";
+import { buildConflictPrompt } from "./buildConflictPrompt.js";
 
 export type SyncState =
   | "idle" | "syncing" | "synced" | "offline" | "conflict" | "push-failed" | "busy";
@@ -11,10 +12,16 @@ export interface SyncStatus {
   lastSync: string | null; // ISO of last successful sync
   detail: string;
   summary: string; // e.g. "↑2 ↓1"
+  /** Paths left unmerged by a failed rebase, read before the abort. Empty in every other state. */
+  conflictFiles: string[];
+  /** Ready-to-paste resolution instructions. Empty unless state is "conflict". */
+  conflictPrompt: string;
 }
 
 export interface SyncOpts {
   dataPaths: string[]; // e.g. ["projects/"]
+  /** Paths rsynced in by update.sh. Used only to classify conflicts in the prompt. */
+  generatedPaths?: string[];
   hostname: string;
   /** Hard per-git-command timeout. On expiry the whole process group (git + ssh) is SIGKILLed. */
   gitTimeoutMs?: number;
@@ -25,7 +32,7 @@ export interface SyncOpts {
 let running = false;
 let runningSince = 0;
 let generation = 0;
-let status: SyncStatus = { state: "idle", lastSync: null, detail: "", summary: "" };
+let status: SyncStatus = { state: "idle", lastSync: null, detail: "", summary: "", conflictFiles: [], conflictPrompt: "" };
 
 export function getSyncStatus(): SyncStatus {
   return status;
@@ -93,16 +100,16 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
   running = true;
   runningSince = Date.now();
   const myGen = ++generation;
-  setStatusFor(myGen, { state: "syncing", detail: "" });
+  setStatusFor(myGen, { state: "syncing", detail: "", conflictFiles: [], conflictPrompt: "" });
   try {
     if (midRebase(repo)) {
-      setStatusFor(myGen, { state: "conflict", detail: "Repo is mid-rebase — resolve manually." });
+      setStatusFor(myGen, { state: "conflict", detail: "Repo is mid-rebase — resolve manually.", conflictFiles: [], conflictPrompt: "" });
       return status;
     }
 
     const paths = opts.dataPaths.filter((p) => p && p.trim().length > 0);
     if (paths.length === 0) {
-      setStatusFor(myGen, { state: "push-failed", detail: "No data paths configured." });
+      setStatusFor(myGen, { state: "push-failed", detail: "No data paths configured.", conflictFiles: [], conflictPrompt: "" });
       return status;
     }
 
@@ -111,7 +118,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
     const attempt = async (): Promise<SyncStatus | null> => {
       // fetch (connectivity probe)
       if (!(await git(repo, ["fetch", "--quiet"], t)).ok) {
-        setStatusFor(myGen, { state: "offline", detail: "Remote unreachable." });
+        setStatusFor(myGen, { state: "offline", detail: "Remote unreachable.", conflictFiles: [], conflictPrompt: "" });
         return status;
       }
       // commits about to be pulled from remote (for summary)
@@ -124,7 +131,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
         const ts = new Date().toISOString();
         const commit = await git(repo, ["commit", "-m", `auto-sync ${opts.hostname} ${ts}`, "--", ...paths], t);
         if (!commit.ok) {
-          setStatusFor(myGen, { state: "push-failed", detail: `Commit failed: ${commit.stderr.trim() || "unknown error"}` });
+          setStatusFor(myGen, { state: "push-failed", detail: `Commit failed: ${commit.stderr.trim() || "unknown error"}`, conflictFiles: [], conflictPrompt: "" });
           return status;
         }
       }
@@ -134,13 +141,37 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       const pull = await git(repo, ["pull", "--rebase", "--autostash"], t);
       if (!pull.ok) {
         if (midRebase(repo)) {
+          // Unmerged paths exist only while the rebase is in progress — read them
+          // before the abort wipes them, so the UI can name what broke.
+          const unmerged = (await git(repo, ["diff", "--name-only", "--diff-filter=U"], t)).stdout
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          // Read the branch while the rebase is still active: mid-rebase HEAD is detached,
+          // so ask for the branch being rebased and fall back to the plain symbolic name.
+          const rebasing = (await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], t)).stdout.trim();
           await git(repo, ["rebase", "--abort"], t);
-          setStatusFor(myGen, { state: "conflict", detail: "Rebase conflict — manual sync needed." });
+          const branch =
+            rebasing && rebasing !== "HEAD"
+              ? rebasing
+              : (await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], t)).stdout.trim();
+          setStatusFor(myGen, {
+            state: "conflict",
+            detail: "Rebase conflict — manual sync needed.",
+            conflictFiles: unmerged,
+            conflictPrompt: buildConflictPrompt({
+              repoRoot: repo,
+              branch,
+              conflictFiles: unmerged,
+              dataPaths: paths,
+              generatedPaths: opts.generatedPaths ?? [],
+            }),
+          });
         } else if (pull.timedOut) {
-          setStatusFor(myGen, { state: "offline", detail: "Pull timed out — will retry next tick." });
+          setStatusFor(myGen, { state: "offline", detail: "Pull timed out — will retry next tick.", conflictFiles: [], conflictPrompt: "" });
         } else {
           const reason = pull.stderr.trim().split("\n")[0]?.slice(0, 160) || "network error";
-          setStatusFor(myGen, { state: "offline", detail: `Pull failed: ${reason}` });
+          setStatusFor(myGen, { state: "offline", detail: `Pull failed: ${reason}`, conflictFiles: [], conflictPrompt: "" });
         }
         return status;
       }
@@ -152,6 +183,8 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
         lastSync: new Date().toISOString(),
         detail: "",
         summary: `↑${ahead} ↓${behind}`,
+        conflictFiles: [],
+        conflictPrompt: "",
       });
       return status;
     };
@@ -161,11 +194,11 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
     // push rejected (remote moved) → one retry
     const second = await attempt();
     if (second) return second;
-    setStatusFor(myGen, { state: "push-failed", detail: "Push rejected after retry." });
+    setStatusFor(myGen, { state: "push-failed", detail: "Push rejected after retry.", conflictFiles: [], conflictPrompt: "" });
     return status;
   } catch (e: any) {
     // never leave the UI stuck in "syncing" on an unexpected throw
-    setStatusFor(myGen, { state: "push-failed", detail: `Sync error: ${e?.message ?? e}` });
+    setStatusFor(myGen, { state: "push-failed", detail: `Sync error: ${e?.message ?? e}`, conflictFiles: [], conflictPrompt: "" });
     return status;
   } finally {
     if (myGen === generation) running = false;

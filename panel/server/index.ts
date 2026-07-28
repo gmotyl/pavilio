@@ -137,6 +137,7 @@ async function start() {
       repo: resolve(c.projectsDir, ".."),
       hostname: machineHostname(),
       dataPaths: autoSync.dataPaths,
+      generatedPaths: autoSync.generatedPaths,
       intervalMinutes: autoSync.intervalMinutes,
       notifyCmd: autoSync.notifyCmd,
     });

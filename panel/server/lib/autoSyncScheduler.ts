@@ -42,6 +42,7 @@ export function startScheduler(opts: SchedulerOpts): void {
     try {
       const s = await syncRepo(opts.repo, {
         dataPaths: opts.dataPaths,
+        generatedPaths: opts.generatedPaths,
         hostname: opts.hostname,
         gitTimeoutMs: opts.gitTimeoutMs,
         watchdogMs: opts.watchdogMs,
