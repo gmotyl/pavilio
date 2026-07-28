@@ -40,14 +40,20 @@ Verify that the session's important context, decisions, and next steps are persi
    - Anything a future session would need to pick up smoothly
    - Do NOT duplicate info already in `PROJECT.md` or `AGENTS.md` — focus on what's unique to this session
    - **At the end, add or refresh a `## Notatka` section** — a narrative paragraph in Polish, casual blog-like tone for Greg. Summarize what happened as a story: what we set out to do, what problems we hit, how we solved them, where things stand now. 4–8 sentences, natural and readable.
-3. **Commit and push** the progress file to the projects repo. Commit message: `session: [project] [date]-[description]`. Only commit progress files, not full project notes (respect `.gitignore`).
-4. **Propose Todoist tasks** for remaining work in the format `[project-name] Task description`. Wait for explicit approval before adding any.
-5. Clear context and start a new session.
+3. **Rename the file if its slug is still `wip`** — a backstop for a session that never renamed it. `wip` means "theme unknown", so a file with content and a `wip` slug is unfinished bookkeeping, not a valid name. Derive the slug from what the file actually says (max 4 words, kebab-case) and rename before committing:
+   ```bash
+   cd <root> && git mv projects/[project]/progress/[date]-wip.md \
+                      projects/[project]/progress/[date]-<real-slug>.md
+   ```
+   Use `git mv` when the file is tracked (the hourly auto-sync commits progress files, so it usually is), a plain `mv` otherwise. Say which name you chose in one line. Only ever rename **today's** file — earlier days are closed records. If the session genuinely produced nothing worth naming, leave `wip` and say so.
+4. **Commit and push** the progress file to the projects repo. Commit message: `session: [project] [date]-[description]`. Only commit progress files, not full project notes (respect `.gitignore`).
+5. **Propose Todoist tasks** for remaining work in the format `[project-name] Task description`. Wait for explicit approval before adding any.
+6. Clear context and start a new session.
 
 ## Rules
 
 - The progress file is **append-only during a session, single-file**. Don't create a fresh file at end if one already exists for today's session — append/refresh it.
-- Slug should reflect the main session theme (max 4 words, kebab-case).
+- Slug should reflect the main session theme (max 4 words, kebab-case). `wip` is a placeholder only — rename it (step 3) rather than committing a `-wip.md` file that has real content.
 - Never auto-add Todoist tasks without explicit user approval.
 - Only commit progress files. Other project notes stay local.
 - Save only relevant information — context that helps resume the session, not a transcript.
