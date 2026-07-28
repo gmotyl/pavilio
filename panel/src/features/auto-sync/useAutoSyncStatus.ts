@@ -10,6 +10,8 @@ export interface AutoSyncStatus {
   detail: string;
   summary: string;
   intervalMinutes: number;
+  conflictFiles: string[];
+  conflictPrompt: string;
 }
 
 const ATTENTION_TEXT: Record<string, string> = {
