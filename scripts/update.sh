@@ -17,7 +17,23 @@ fi
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "Pulling latest from upstream at $UPSTREAM_DIR..."
-git -C "$UPSTREAM_DIR" pull origin main --quiet
+# rsync copies the upstream working tree, so main must be the checked-out branch.
+# A plain `git pull origin main` on a feature branch merges (or fails as divergent)
+# and would sync the wrong content — refuse instead.
+UPSTREAM_BRANCH="$(git -C "$UPSTREAM_DIR" rev-parse --abbrev-ref HEAD)"
+if [ "$UPSTREAM_BRANCH" != "main" ]; then
+  echo "Error: upstream clone is on branch '$UPSTREAM_BRANCH', not main."
+  echo "The sync copies its working tree, so switch it first:"
+  echo "  git -C \"$UPSTREAM_DIR\" checkout main"
+  exit 1
+fi
+git -C "$UPSTREAM_DIR" fetch origin main --quiet
+# --ff-only: never create a merge commit in the upstream clone.
+if ! git -C "$UPSTREAM_DIR" merge --ff-only FETCH_HEAD --quiet; then
+  echo "Error: upstream main cannot fast-forward to origin/main (local commits or dirty tree)."
+  echo "Resolve it in $UPSTREAM_DIR, then re-run."
+  exit 1
+fi
 
 echo ""
 echo "Syncing panel/..."
