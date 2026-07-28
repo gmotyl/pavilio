@@ -11,7 +11,7 @@ const router = Router();
 function cfg() {
   const c = getConfig();
   const repo = resolve(c.projectsDir, "..");
-  const autoSync = c.autoSync ?? { intervalMinutes: 30, dataPaths: ["projects/"] };
+  const autoSync = c.autoSync ?? { intervalMinutes: 15, dataPaths: ["projects/"], generatedPaths: [] };
   return { repo, autoSync, hostname: machineHostname() };
 }
 

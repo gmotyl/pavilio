@@ -26,6 +26,9 @@ export interface PanelConfig {
     intervalMinutes: number;
     /** Paths (relative to repo root) auto-committed each tick */
     dataPaths: string[];
+    /** Paths (relative to repo root) rsynced in by scripts/update.sh. Never committed by
+     *  auto-sync — used only to classify conflicts in the resolution prompt. */
+    generatedPaths?: string[];
     /** Optional shell command fired when sync needs attention (conflict/push-failed/stale).
      *  Gets SYNC_STATE + SYNC_DETAIL env vars. Example (macOS):
      *  `osascript -e "display notification \"$SYNC_DETAIL\" with title \"Pavilio sync: $SYNC_STATE\""` */
@@ -45,8 +48,17 @@ const defaults: PanelConfig = {
     "**/log/*.txt",
   ],
   autoSync: {
-    intervalMinutes: 30,
+    intervalMinutes: 15,
     dataPaths: ["projects/"],
+    generatedPaths: [
+      "panel/",
+      "skills/",
+      "scripts/",
+      "commands/",
+      ".opencode/",
+      ".claude/commands/",
+      "opencode.json",
+    ],
   },
 };
 

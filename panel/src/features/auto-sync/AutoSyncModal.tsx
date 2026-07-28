@@ -10,7 +10,7 @@ export function AutoSyncModal({ onClose }: { onClose: () => void }) {
         <div className="text-sm font-medium">Auto-sync</div>
         <div className="text-[12px]" style={{ color }}>State: {s}{status?.detail ? ` — ${status.detail}` : ""}</div>
         <div className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-          Last sync: {status?.lastSync ? new Date(status.lastSync).toLocaleTimeString() : "—"} · every {status?.intervalMinutes ?? 30} min · {status?.summary || "—"}
+          Last sync: {status?.lastSync ? new Date(status.lastSync).toLocaleTimeString() : "—"} · every {status?.intervalMinutes ?? 15} min · {status?.summary || "—"}
         </div>
         {s === "conflict" && (
           <div className="text-[12px]" style={{ color: "var(--red)" }}>
