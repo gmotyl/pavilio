@@ -1,157 +1,96 @@
-import { FileText, X } from "lucide-react";
 import type { FileEntry } from "../explorer/useFileIndex";
 import { useFileDragSource, useFileDropTarget } from "../explorer/useFileDrag";
-import ReviewRules from "../qa/ReviewRules";
+import FileRow from "./FileRow";
 
 interface Props {
   projectName: string;
   section: string;
   files: FileEntry[];
-  currentPlans?: string[];
+  selectedPath: string | null;
   onSelect: (relativePath: string) => void;
 }
 
-function PlansBanner({
-  projectName,
-  plans,
-  onSelect,
-}: {
-  projectName: string;
-  plans: string[];
-  onSelect: (relativePath: string) => void;
-}) {
-  return (
-    <div
-      className="mb-4 rounded-lg p-3"
-      style={{
-        background: "var(--bg-surface)",
-        border: "1px solid var(--accent)",
-        borderColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
-      }}
-    >
-      <h3
-        className="text-[11px] font-semibold uppercase tracking-widest mb-2"
-        style={{ color: "var(--accent)" }}
-      >
-        Active Plans
-      </h3>
-      <div className="space-y-0.5">
-        {plans.map((planFile) => {
-          const fileName = planFile.split("/").pop() ?? planFile;
-          const relativePath = `${projectName}/plans/${fileName}`;
-          const label = planFile
-            .replace(/\.md$/, "")
-            .replace(/^\d{4}-\d{2}-\d{2}-/, "")
-            .replace(/-/g, " ");
-          return (
-            <div key={planFile} className="flex items-center gap-1">
-              <button
-                data-testid={`section-files-plan-open-${planFile}`}
-                onClick={() => onSelect(relativePath)}
-                className="flex items-center gap-3 flex-1 px-3 py-1.5 rounded-md text-left transition-colors"
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--bg-hover)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <FileText
-                  size={14}
-                  className="shrink-0"
-                  style={{ color: "var(--accent)" }}
-                />
-                <span
-                  className="text-sm truncate flex-1 capitalize"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {label}
-                </span>
-              </button>
-              <button
-                data-testid={`section-files-plan-close-${planFile}`}
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  await fetch(
-                    `/api/projects/${projectName}/plans/current/${encodeURIComponent(planFile)}`,
-                    { method: "DELETE" },
-                  );
-                }}
-                className="shrink-0 p-1 rounded transition-colors"
-                style={{ color: "var(--text-muted)" }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = "var(--red)";
-                  e.currentTarget.style.background = "var(--red-dim)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = "var(--text-muted)";
-                  e.currentTarget.style.background = "transparent";
-                }}
-                title="Close plan (remove from active)"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function FileButton({
+/**
+ * Component boundary so `useFileDragSource` runs once per mounted row rather
+ * than inside the parent's map().
+ */
+function SectionFileRow({
   file,
   label,
   dateLabel,
   monoLabel,
+  selected,
   onSelect,
 }: {
   file: FileEntry;
   label: string;
-  dateLabel: string;
+  dateLabel?: string;
   monoLabel?: boolean;
-  onSelect: (path: string) => void;
+  selected: boolean;
+  onSelect: (relativePath: string) => void;
 }) {
   const drag = useFileDragSource(file.relativePath);
   return (
-    <button
-      {...drag}
-      data-testid={`section-files-file-${file.relativePath}`}
-      onClick={() => onSelect(file.relativePath)}
-      className="flex items-center gap-3 w-full px-3 py-2 rounded-md text-left transition-colors"
-      onMouseEnter={(e) =>
-        (e.currentTarget.style.background = "var(--bg-hover)")
-      }
-      onMouseLeave={(e) =>
-        (e.currentTarget.style.background = "transparent")
-      }
-    >
-      <FileText
-        size={14}
-        className="shrink-0"
-        style={{ color: "var(--text-tertiary)" }}
-      />
-      <span
-        className={`text-sm truncate flex-1 ${monoLabel ? "font-mono" : ""}`}
-        style={{ color: "var(--text-secondary)" }}
-      >
-        {label}
-      </span>
-      <span
-        className="text-[11px]"
-        style={{ color: "var(--text-muted)" }}
-      >
-        {dateLabel}
-      </span>
-    </button>
+    <FileRow
+      testId={`section-files-file-${file.relativePath}`}
+      label={label}
+      dateLabel={dateLabel}
+      monoLabel={monoLabel}
+      selected={selected}
+      title={file.relativePath}
+      dragProps={drag}
+      onSelect={() => onSelect(file.relativePath)}
+    />
   );
 }
+
+/**
+ * Compact strip above the rows that accepts file drops for this section. Keeps
+ * the `section-files-header-*` testid the drop-to-move behaviour is keyed on.
+ */
+function SectionDropStrip({
+  projectName,
+  section,
+}: {
+  projectName: string;
+  section: string;
+}) {
+  const { hover, dropHandlers } = useFileDropTarget(`${projectName}/${section}`);
+  return (
+    <div
+      {...dropHandlers}
+      data-testid={`section-files-header-${section}`}
+      className="text-[10px] uppercase tracking-widest mb-1 px-2 py-1 rounded-md transition-colors"
+      style={{
+        color: "var(--text-tertiary)",
+        background: hover
+          ? "var(--accent-dim, var(--bg-active))"
+          : "transparent",
+        outline: hover ? "1px solid var(--accent)" : undefined,
+      }}
+    >
+      {hover ? (
+        <span className="normal-case font-normal opacity-70">
+          drop to move here
+        </span>
+      ) : (
+        section
+      )}
+    </div>
+  );
+}
+
+const shortDate = (modified: number) =>
+  new Date(modified).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 
 export function SectionFilesList({
   projectName,
   section,
   files,
-  currentPlans,
+  selectedPath,
   onSelect,
 }: Props) {
   if (section === "qa") {
@@ -164,110 +103,50 @@ export function SectionFilesList({
       })
       .sort((a, b) => b.folderName.localeCompare(a.folderName));
 
+    if (runs.length === 0) {
+      return (
+        <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
+          No QA runs found.
+        </p>
+      );
+    }
+
     return (
-      <div>
-        <ReviewRules project={projectName} />
-        <h2
-          className="text-[11px] font-semibold uppercase tracking-widest mb-3"
-          style={{ color: "var(--text-tertiary)" }}
-        >
-          QA Runs ({runs.length})
-        </h2>
-        {runs.length === 0 ? (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            No QA runs found.
-          </p>
-        ) : (
-          <div className="space-y-0.5">
-            {runs.map(({ file, folderName }) => (
-              <FileButton
-                key={file.relativePath}
-                file={file}
-                label={folderName}
-                monoLabel
-                dateLabel={new Date(file.modified).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })}
-                onSelect={onSelect}
-              />
-            ))}
-          </div>
-        )}
+      <div className="space-y-0.5">
+        {runs.map(({ file, folderName }) => (
+          <SectionFileRow
+            key={file.relativePath}
+            file={file}
+            label={folderName}
+            monoLabel
+            dateLabel={shortDate(file.modified)}
+            selected={selectedPath === file.relativePath}
+            onSelect={onSelect}
+          />
+        ))}
       </div>
     );
   }
 
   return (
-    <SectionWithDropTarget
-      projectName={projectName}
-      section={section}
-      currentPlans={currentPlans}
-      onSelect={onSelect}
-      files={files}
-    />
-  );
-}
-
-function SectionWithDropTarget({
-  projectName,
-  section,
-  currentPlans,
-  files,
-  onSelect,
-}: {
-  projectName: string;
-  section: string;
-  currentPlans?: string[];
-  files: FileEntry[];
-  onSelect: (relativePath: string) => void;
-}) {
-  const { hover, dropHandlers } = useFileDropTarget(`${projectName}/${section}`);
-  return (
     <div>
-      {section === "plans" && currentPlans && currentPlans.length > 0 && (
-        <PlansBanner
-          projectName={projectName}
-          plans={currentPlans}
-          onSelect={onSelect}
-        />
-      )}
-      <h2
-        {...dropHandlers}
-        data-testid={`section-files-header-${section}`}
-        className="text-[11px] font-semibold uppercase tracking-widest mb-3 px-2 py-1 rounded-md transition-colors"
-        style={{
-          color: "var(--text-tertiary)",
-          background: hover ? "var(--accent-dim, var(--bg-active))" : "transparent",
-          outline: hover ? "1px solid var(--accent)" : undefined,
-        }}
-      >
-        {section} ({files.length} files){hover && <span className="ml-2 normal-case font-normal opacity-70">— drop to move here</span>}
-      </h2>
+      <SectionDropStrip projectName={projectName} section={section} />
       {files.length === 0 ? (
-        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+        <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
           No files in this section.
         </p>
       ) : (
         <div className="space-y-0.5">
-          {files.map((file) => {
-            const fileName =
-              file.relativePath.split("/").pop() ?? file.relativePath;
-            const date = new Date(file.modified).toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            });
-            return (
-              <FileButton
-                key={file.relativePath}
-                file={file}
-                label={fileName}
-                dateLabel={date}
-                onSelect={onSelect}
-              />
-            );
-          })}
+          {files.map((file) => (
+            <SectionFileRow
+              key={file.relativePath}
+              file={file}
+              label={file.relativePath.split("/").pop() ?? file.relativePath}
+              dateLabel={shortDate(file.modified)}
+              selected={selectedPath === file.relativePath}
+              onSelect={onSelect}
+            />
+          ))}
         </div>
       )}
     </div>

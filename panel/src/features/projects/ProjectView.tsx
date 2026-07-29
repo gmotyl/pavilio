@@ -7,8 +7,10 @@ import RepoBlock from "./RepoBlock";
 import ProjectSearchBar from "./ProjectSearchBar";
 import FileViewer from "./FileViewer";
 import SectionFilesList from "./SectionFilesList";
+import FileListSidebar from "./FileListSidebar";
 import ContextTab from "./ContextTab";
 import PlansTab from "./PlansTab";
+import ReviewRules from "../qa/ReviewRules";
 import { SPECIAL_SECTIONS } from "./sections";
 import ScriptButton from "./ScriptButton";
 import { useWorkspaceScripts } from "./useWorkspaceScripts";
@@ -283,25 +285,42 @@ export default function ProjectView() {
         <PlansTab projectName={name || ""} currentPlans={project?.currentPlans} />
       )}
 
-      {/* File section listing */}
-      {section && !SPECIAL_SECTIONS.has(section) && !selectedFile && (
-        <SectionFilesList
-          projectName={name || ""}
-          section={section}
-          files={sectionFiles}
-          currentPlans={project?.currentPlans}
-          onSelect={setSelectedFile}
-        />
-      )}
-
-      {/* Inline file viewer */}
-      {section && !SPECIAL_SECTIONS.has(section) && selectedFile && (
-        <FileViewer
-          filePath={selectedFile}
-          content={fileViewer.content}
-          absolutePath={fileViewer.absolutePath}
-          loading={fileViewer.loading}
-          onBack={() => setSelectedFile(null)}
+      {/* File sections (notes, memo, progress, qa) — list beside the viewer */}
+      {section && !SPECIAL_SECTIONS.has(section) && (
+        <FileListSidebar
+          testId="section-files"
+          title={section}
+          sources={[
+            {
+              id: section,
+              label: section,
+              count: sectionFiles.length,
+              rows: (
+                <SectionFilesList
+                  projectName={name || ""}
+                  section={section}
+                  files={sectionFiles}
+                  selectedPath={selectedFile}
+                  onSelect={setSelectedFile}
+                />
+              ),
+            },
+          ]}
+          aboveList={section === "qa" ? <ReviewRules project={name || ""} /> : null}
+          detail={
+            selectedFile ? (
+              <FileViewer
+                filePath={selectedFile}
+                content={fileViewer.content}
+                absolutePath={fileViewer.absolutePath}
+                loading={fileViewer.loading}
+              />
+            ) : (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                Select a file to view.
+              </p>
+            )
+          }
         />
       )}
 
