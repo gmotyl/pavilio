@@ -132,11 +132,12 @@ async function start() {
 
   if (isEnabled()) {
     const c = getConfig();
-    const autoSync = c.autoSync ?? { intervalMinutes: 30, dataPaths: ["projects/"] };
+    const autoSync = c.autoSync ?? { intervalMinutes: 15, dataPaths: ["projects/"], generatedPaths: [] };
     startScheduler({
       repo: resolve(c.projectsDir, ".."),
       hostname: machineHostname(),
       dataPaths: autoSync.dataPaths,
+      generatedPaths: autoSync.generatedPaths,
       intervalMinutes: autoSync.intervalMinutes,
       notifyCmd: autoSync.notifyCmd,
     });

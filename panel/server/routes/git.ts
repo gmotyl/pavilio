@@ -4,8 +4,6 @@ import { readFileSync } from "fs";
 import { join, resolve } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
-import { syncRepo } from "../lib/syncRepo.js";
-import { machineHostname } from "../lib/hostname.js";
 
 const router = Router();
 
@@ -232,26 +230,6 @@ router.post("/push", (req, res) => {
     git("push", repo);
     broadcast({ type: "git-change" });
     res.json({ ok: true });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Pull
-router.post("/pull", async (req, res) => {
-  try {
-    const { repo } = req.body || {};
-    const c = getConfig();
-    const autoSync = c.autoSync ?? { intervalMinutes: 30, dataPaths: ["projects/"] };
-    const status = await syncRepo(getRepoRoot(repo), {
-      dataPaths: autoSync.dataPaths,
-      hostname: machineHostname(),
-    });
-    broadcast({ type: "git-change" });
-    if (status.state === "conflict" || status.state === "push-failed" || status.state === "offline" || status.state === "busy") {
-      return res.status(409).json({ error: status.detail || status.state, output: status.detail, syncState: status.state });
-    }
-    res.json({ ok: true, output: status.summary, syncState: status.state });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

@@ -54,6 +54,8 @@ interface GitChangesProps {
   showListSidebar?: boolean;
   /** When true, render a compact nested view (no branch picker, commit form, worktrees, or sub-sidebar). */
   nested?: boolean;
+  /** When true, hide the stage/commit block behind a closed "Advanced" disclosure. */
+  advancedCommit?: boolean;
 }
 
 export function statusLabel(s: string) {
@@ -86,6 +88,7 @@ export default function GitChanges({
   showBranchCopy = false,
   showListSidebar = false,
   nested = false,
+  advancedCommit = false,
 }: GitChangesProps) {
   const [files, setFiles] = useState<GitFile[]>([]);
   const [branch, setBranch] = useState("");
@@ -99,6 +102,7 @@ export default function GitChanges({
   const [diffContent, setDiffContent] = useState("");
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
   const [diffLoading, setDiffLoading] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const qs = repo ? `?repo=${encodeURIComponent(repo)}` : "";
 
@@ -757,8 +761,19 @@ export default function GitChanges({
               : renderTreeNode(fileTree, 0)}
           </div>
 
-          {/* Stage + Commit */}
-          {!nested && showCommit && (
+          {/* Stage + Commit — behind a disclosure when advancedCommit is set, because
+              manual commits here are how generated code reached two hosts separately. */}
+          {!nested && showCommit && advancedCommit && !advancedOpen && (
+            <button
+              data-testid={`git-changes-advanced-toggle-${repo ?? "workspace"}`}
+              onClick={() => setAdvancedOpen(true)}
+              className="text-xs px-2 py-1 rounded-md transition-colors"
+              style={{ color: "var(--text-muted)", background: "var(--bg-elevated)" }}
+            >
+              ▸ Advanced: stage &amp; commit
+            </button>
+          )}
+          {!nested && showCommit && (!advancedCommit || advancedOpen) && (
             <>
               <div className="flex gap-2 mb-4">
                 <button

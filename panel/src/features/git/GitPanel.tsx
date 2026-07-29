@@ -1,76 +1,63 @@
-import { useEffect, useRef, useState } from "react";
-import { Download } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import GitChanges from "./GitChanges";
+import { useAutoSyncStatus } from "../auto-sync/useAutoSyncStatus";
+import { SyncConflictBanner } from "../auto-sync/SyncConflictBanner";
+
+const ATTENTION = new Set(["conflict", "push-failed"]);
 
 export default function GitPanel() {
-  const [pulling, setPulling] = useState(false);
-  const [pullMsg, setPullMsg] = useState<string | null>(null);
-  // Track the auto-dismiss timer so we can cancel it on unmount or re-pull,
-  // avoiding a leak / setState-on-unmounted warning.
-  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Same hook the sidebar uses, so this control reflects background ticks too —
+  // not just clicks. A tick used to be able to fail with nothing shown here.
+  const { status, syncNow, refresh } = useAutoSyncStatus();
+  const state = status?.state ?? "idle";
+  const syncing = state === "syncing";
+  const attention = ATTENTION.has(state);
 
-  useEffect(() => {
-    return () => {
-      if (dismissTimer.current) clearTimeout(dismissTimer.current);
-    };
-  }, []);
-
-  const pull = async () => {
-    setPulling(true);
-    setPullMsg(null);
-    if (dismissTimer.current) clearTimeout(dismissTimer.current);
-    try {
-      const res = await fetch("/api/git/pull", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPullMsg(`Pull failed: ${data.error ?? res.statusText}`);
-      } else {
-        const out = (data.output ?? "").trim();
-        setPullMsg(out || "Already up to date.");
-      }
-    } catch (e: any) {
-      setPullMsg(`Pull failed: ${e.message ?? e}`);
-    } finally {
-      setPulling(false);
-      dismissTimer.current = setTimeout(() => setPullMsg(null), 5000);
-    }
+  const onSync = async () => {
+    await syncNow();
+    refresh();
   };
+
+  const lastSync = status?.lastSync ? new Date(status.lastSync).toLocaleTimeString() : "—";
+  const trailing =
+    attention || state === "offline" ? status?.detail || state : status?.summary || "—";
 
   return (
     <div className="p-6 max-w-5xl">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">Changes</h1>
         <button
-          data-testid="git-pull"
-          onClick={pull}
-          disabled={pulling}
+          data-testid="git-sync"
+          onClick={onSync}
+          disabled={syncing}
+          title={status?.detail || "Commit project data, rebase on the remote, push"}
           className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
           style={{
-            color: "var(--text-secondary)",
+            color: attention ? "var(--red)" : "var(--text-secondary)",
             background: "var(--bg-hover)",
           }}
         >
-          <Download className="w-3.5 h-3.5" />
-          {pulling ? "Pulling…" : "Pull"}
+          <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+          {syncing ? "Syncing…" : "Sync"}
         </button>
       </div>
-      {pullMsg && (
-        <pre
-          data-testid="git-pull-output"
-          className="mb-4 text-xs px-3 py-2 rounded-md whitespace-pre-wrap"
-          style={{
-            background: "var(--bg-hover)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          {pullMsg}
-        </pre>
+
+      <p
+        data-testid="git-sync-status"
+        className="mb-4 text-xs"
+        style={{ color: attention ? "var(--red)" : "var(--text-muted)" }}
+      >
+        {state} · {lastSync} · {trailing}
+      </p>
+
+      {status && (
+        <SyncConflictBanner
+          conflictFiles={status.conflictFiles ?? []}
+          conflictPrompt={status.conflictPrompt ?? ""}
+        />
       )}
-      <GitChanges showCommit />
+
+      <GitChanges showCommit advancedCommit />
     </div>
   );
 }

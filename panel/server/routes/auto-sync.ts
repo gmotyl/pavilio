@@ -11,7 +11,7 @@ const router = Router();
 function cfg() {
   const c = getConfig();
   const repo = resolve(c.projectsDir, "..");
-  const autoSync = c.autoSync ?? { intervalMinutes: 30, dataPaths: ["projects/"] };
+  const autoSync = c.autoSync ?? { intervalMinutes: 15, dataPaths: ["projects/"], generatedPaths: [] };
   return { repo, autoSync, hostname: machineHostname() };
 }
 
@@ -36,7 +36,7 @@ router.post("/disable", (_req, res) => {
 
 router.post("/now", async (_req, res) => {
   const { repo, autoSync, hostname } = cfg();
-  const status = await syncRepo(repo, { dataPaths: autoSync.dataPaths, hostname });
+  const status = await syncRepo(repo, { dataPaths: autoSync.dataPaths, generatedPaths: autoSync.generatedPaths, hostname });
   res.json({ enabled: isEnabled(), ...status, stale: isStale(autoSync.intervalMinutes), intervalMinutes: autoSync.intervalMinutes });
 });
 

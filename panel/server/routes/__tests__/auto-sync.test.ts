@@ -16,8 +16,15 @@ vi.mock("../../lib/autoSyncScheduler", () => ({
   stopScheduler: vi.fn(),
   isRunning: vi.fn(() => true),
 }));
+// Hoisted so a test can drop `autoSync` entirely and exercise the route's own fallback,
+// which is where the interval default actually lives.
+const mocks = vi.hoisted(() => ({
+  autoSync: { intervalMinutes: 15, dataPaths: ["projects/"], notifyCmd: "echo hi" } as
+    | { intervalMinutes: number; dataPaths: string[]; notifyCmd?: string }
+    | undefined,
+}));
 vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/tmp/projects", autoSync: { intervalMinutes: 30, dataPaths: ["projects/"], notifyCmd: "echo hi" } }),
+  getConfig: () => ({ projectsDir: "/tmp/projects", autoSync: mocks.autoSync }),
 }));
 vi.mock("../../lib/hostname", () => ({ machineHostname: () => "testhost" }));
 
@@ -34,12 +41,22 @@ function makeApp() {
 }
 
 describe("auto-sync routes", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.autoSync = { intervalMinutes: 15, dataPaths: ["projects/"], notifyCmd: "echo hi" };
+  });
+
+  it("falls back to a 15-minute interval when autoSync is not configured", async () => {
+    mocks.autoSync = undefined;
+    const res = await request(makeApp()).get("/api/auto-sync/status");
+    expect(res.status).toBe(200);
+    expect(res.body.intervalMinutes).toBe(15);
+  });
 
   it("GET /status returns enabled + status + interval", async () => {
     const res = await request(makeApp()).get("/api/auto-sync/status");
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ enabled: true, state: "idle", stale: false, intervalMinutes: 30 });
+    expect(res.body).toMatchObject({ enabled: true, state: "idle", stale: false, intervalMinutes: 15 });
   });
 
   it("POST /enable persists, starts scheduler, triggers a sync", async () => {
@@ -52,7 +69,7 @@ describe("auto-sync routes", () => {
         repo: expect.any(String),
         hostname: "testhost",
         dataPaths: ["projects/"],
-        intervalMinutes: 30,
+        intervalMinutes: 15,
         notifyCmd: "echo hi",
       })
     );

@@ -1,4 +1,5 @@
 import { useAutoSyncStatus } from "./useAutoSyncStatus";
+import { SyncConflictBanner } from "./SyncConflictBanner";
 
 export function AutoSyncModal({ onClose }: { onClose: () => void }) {
   const { status, syncNow, refresh } = useAutoSyncStatus(3000);
@@ -10,12 +11,13 @@ export function AutoSyncModal({ onClose }: { onClose: () => void }) {
         <div className="text-sm font-medium">Auto-sync</div>
         <div className="text-[12px]" style={{ color }}>State: {s}{status?.detail ? ` — ${status.detail}` : ""}</div>
         <div className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-          Last sync: {status?.lastSync ? new Date(status.lastSync).toLocaleTimeString() : "—"} · every {status?.intervalMinutes ?? 30} min · {status?.summary || "—"}
+          Last sync: {status?.lastSync ? new Date(status.lastSync).toLocaleTimeString() : "—"} · every {status?.intervalMinutes ?? 15} min · {status?.summary || "—"}
         </div>
         {s === "conflict" && (
-          <div className="text-[12px]" style={{ color: "var(--red)" }}>
-            Manual sync needed: resolve in a terminal (<code>git rebase</code> / merge), then Sync now.
-          </div>
+          <SyncConflictBanner
+            conflictFiles={status?.conflictFiles ?? []}
+            conflictPrompt={status?.conflictPrompt ?? ""}
+          />
         )}
         <div className="flex gap-2">
           <button data-testid="auto-sync-sync-now" className="text-[12px] px-2 py-1 rounded-md" style={{ background: "var(--accent)", color: "#fff" }}

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, appendFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, appendFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syncRepo, isStale } from "../syncRepo.js";
@@ -83,6 +83,73 @@ describe("syncRepo", () => {
     expect(() => git(win, "status")).not.toThrow();
     const status = git(win, "status", "--porcelain=v2", "--branch");
     expect(status).not.toContain("rebase");
+  }, 30_000);
+
+  it("captures the conflicted paths before aborting the rebase", async () => {
+    writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
+    expect((await syncRepo(mac, opts("mac"))).state).toBe("synced");
+
+    writeFileSync(join(win, "projects/p/note.md"), "win edit\n");
+    const r = await syncRepo(win, opts("win"));
+
+    expect(r.state).toBe("conflict");
+    expect(r.conflictFiles).toEqual(["projects/p/note.md"]);
+    // the abort still ran: nothing is half-applied
+    expect(existsSync(join(win, ".git/rebase-merge"))).toBe(false);
+    expect(existsSync(join(win, ".git/rebase-apply"))).toBe(false);
+  }, 30_000);
+
+  it("clears conflictFiles once a later sync succeeds", async () => {
+    writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
+    await syncRepo(mac, opts("mac"));
+    writeFileSync(join(win, "projects/p/note.md"), "win edit\n");
+    expect((await syncRepo(win, opts("win"))).conflictFiles).toHaveLength(1);
+
+    // discard win's conflicting commit, then sync cleanly
+    git(win, "reset", "--hard", "origin/main");
+    const r = await syncRepo(win, opts("win"));
+
+    expect(r.state).toBe("synced");
+    expect(r.conflictFiles).toEqual([]);
+  }, 30_000);
+
+  it("builds a conflict prompt classifying the conflicted path", async () => {
+    writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
+    await syncRepo(mac, opts("mac"));
+    writeFileSync(join(win, "projects/p/note.md"), "win edit\n");
+
+    const r = await syncRepo(win, { ...opts("win"), generatedPaths: ["panel/"] });
+
+    expect(r.conflictPrompt).toContain("Data files");
+    expect(r.conflictPrompt).toContain("projects/p/note.md");
+    expect(r.conflictPrompt).toContain(win);
+    expect(r.conflictPrompt).toContain("branch main");
+  }, 30_000);
+
+  it("names the files and hands over a prompt when the repo is already mid-rebase", async () => {
+    // Leave win genuinely mid-rebase, the way a crashed earlier tick would.
+    writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
+    await syncRepo(mac, opts("mac"));
+    writeFileSync(join(win, "projects/p/note.md"), "win edit\n");
+    git(win, "add", "-A");
+    git(win, "commit", "-qm", "win edit");
+    git(win, "fetch", "--quiet");
+    try {
+      git(win, "pull", "--rebase");
+    } catch {
+      // expected: the rebase stops on the conflict
+    }
+    expect(existsSync(join(win, ".git/rebase-merge"))).toBe(true);
+
+    const r = await syncRepo(win, { ...opts("win"), generatedPaths: ["panel/"] });
+
+    expect(r.state).toBe("conflict");
+    expect(r.conflictFiles).toEqual(["projects/p/note.md"]);
+    expect(r.conflictPrompt).toContain("projects/p/note.md");
+    expect(r.conflictPrompt).toContain("already mid-rebase");
+    expect(r.conflictPrompt).toContain("rebase --abort");
+    // it must NOT abort someone else's in-progress rebase
+    expect(existsSync(join(win, ".git/rebase-merge"))).toBe(true);
   }, 30_000);
 
   it("reports offline when the remote is unreachable", async () => {
