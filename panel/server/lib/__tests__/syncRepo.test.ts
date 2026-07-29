@@ -1,8 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, appendFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+// Capture broadcasts so the tests can assert which realtime events a sync emits.
+const sent = vi.hoisted(() => ({ messages: [] as { type: string }[] }));
+vi.mock("../../watcher.js", () => ({
+  broadcast: (m: { type: string }) => {
+    sent.messages.push(m);
+  },
+}));
+
 import { syncRepo, isStale } from "../syncRepo.js";
 
 function git(cwd: string, ...args: string[]) {
@@ -150,6 +158,49 @@ describe("syncRepo", () => {
     expect(r.conflictPrompt).toContain("rebase --abort");
     // it must NOT abort someone else's in-progress rebase
     expect(existsSync(join(win, ".git/rebase-merge"))).toBe(true);
+  }, 30_000);
+
+  /**
+   * Regression: a successful sync only broadcast sync-status, so open file lists kept
+   * showing files it had just committed. Reported 2026-07-29 as "I clicked the sync
+   * button and they are still there".
+   */
+  it("broadcasts git-change after committing, so open file lists refetch", async () => {
+    writeFileSync(join(mac, "projects/p/new-note.md"), "mac\n");
+    sent.messages.length = 0;
+
+    const r = await syncRepo(mac, opts("mac"));
+
+    expect(r.state).toBe("synced");
+    expect(sent.messages.filter((m) => m.type === "git-change")).toHaveLength(1);
+  }, 30_000);
+
+  it("broadcasts git-change when a sync only pulls commits in", async () => {
+    writeFileSync(join(mac, "projects/p/from-mac.md"), "mac\n");
+    await syncRepo(mac, opts("mac"));
+    sent.messages.length = 0;
+
+    // win commits nothing of its own; it only receives mac's commit.
+    const r = await syncRepo(win, opts("win"));
+
+    expect(r.state).toBe("synced");
+    expect(r.summary).toContain("↓1");
+    expect(sent.messages.filter((m) => m.type === "git-change")).toHaveLength(1);
+  }, 30_000);
+
+  it("does not broadcast git-change on a no-op sync", async () => {
+    // Nothing dirty, nothing ahead, nothing behind.
+    const first = await syncRepo(mac, opts("mac"));
+    expect(first.state).toBe("synced");
+    sent.messages.length = 0;
+
+    const r = await syncRepo(mac, opts("mac"));
+
+    expect(r.state).toBe("synced");
+    expect(r.summary).toBe("↑0 ↓0");
+    expect(sent.messages.filter((m) => m.type === "git-change")).toHaveLength(0);
+    // status still broadcast, so the UI keeps its lastSync fresh
+    expect(sent.messages.filter((m) => m.type === "sync-status").length).toBeGreaterThan(0);
   }, 30_000);
 
   it("reports offline when the remote is unreachable", async () => {

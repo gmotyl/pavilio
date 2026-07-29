@@ -19,6 +19,7 @@ import CopyIconButton from "../shell/CopyIconButton";
 import FileChangeList from "./FileChangeList";
 import { buildFileTree, countFiles, type TreeNode } from "./file-tree";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
+import { useWebSocket } from "../realtime/useWebSocket";
 
 interface GitFile {
   status: string;
@@ -151,10 +152,21 @@ export default function GitChanges({
     setLoading("");
   };
 
+  const { lastMessage } = useWebSocket();
+
   useEffect(() => {
     fetchStatus();
     fetchBranches();
   }, [repo]);
+
+  // A commit/push from anywhere — the Sync button, a background auto-sync tick, another
+  // client — leaves this list showing files that no longer differ. Only git-change is
+  // honoured: sync-status fires on every tick and would refetch for nothing.
+  useEffect(() => {
+    if (lastMessage?.type !== "git-change") return;
+    fetchStatus();
+    fetchBranches();
+  }, [lastMessage]);
   useEffect(() => {
     setCommitMsg(suggestion);
   }, [suggestion]);
