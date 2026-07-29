@@ -102,18 +102,39 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
   const myGen = ++generation;
   setStatusFor(myGen, { state: "syncing", detail: "", conflictFiles: [], conflictPrompt: "" });
   try {
+    const paths = opts.dataPaths.filter((p) => p && p.trim().length > 0);
+    const t = opts.gitTimeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
+
     if (midRebase(repo)) {
-      setStatusFor(myGen, { state: "conflict", detail: "Repo is mid-rebase — resolve manually.", conflictFiles: [], conflictPrompt: "" });
+      // Name the files and hand over a prompt here too — otherwise this path is the
+      // "no files, no route out" dead-end. Do NOT abort: this rebase is not ours (a
+      // crashed earlier tick, or a human mid-resolve), and aborting would discard
+      // their work. buildConflictPrompt's aborted:false branch says so.
+      const unmerged = (await git(repo, ["diff", "--name-only", "--diff-filter=U"], t)).stdout
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      // Mid-rebase HEAD is detached, so ask for the branch being rebased.
+      const rebasing = (await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], t)).stdout.trim();
+      setStatusFor(myGen, {
+        state: "conflict",
+        detail: "Repo is mid-rebase — resolve manually.",
+        conflictFiles: unmerged,
+        conflictPrompt: buildConflictPrompt({
+          repoRoot: repo,
+          branch: rebasing || "HEAD",
+          conflictFiles: unmerged,
+          dataPaths: paths,
+          generatedPaths: opts.generatedPaths ?? [],
+          aborted: false,
+        }),
+      });
       return status;
     }
-
-    const paths = opts.dataPaths.filter((p) => p && p.trim().length > 0);
     if (paths.length === 0) {
       setStatusFor(myGen, { state: "push-failed", detail: "No data paths configured.", conflictFiles: [], conflictPrompt: "" });
       return status;
     }
-
-    const t = opts.gitTimeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
 
     const attempt = async (): Promise<SyncStatus | null> => {
       // fetch (connectivity probe)

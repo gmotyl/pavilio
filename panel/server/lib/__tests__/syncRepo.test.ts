@@ -126,6 +126,32 @@ describe("syncRepo", () => {
     expect(r.conflictPrompt).toContain("branch main");
   }, 30_000);
 
+  it("names the files and hands over a prompt when the repo is already mid-rebase", async () => {
+    // Leave win genuinely mid-rebase, the way a crashed earlier tick would.
+    writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
+    await syncRepo(mac, opts("mac"));
+    writeFileSync(join(win, "projects/p/note.md"), "win edit\n");
+    git(win, "add", "-A");
+    git(win, "commit", "-qm", "win edit");
+    git(win, "fetch", "--quiet");
+    try {
+      git(win, "pull", "--rebase");
+    } catch {
+      // expected: the rebase stops on the conflict
+    }
+    expect(existsSync(join(win, ".git/rebase-merge"))).toBe(true);
+
+    const r = await syncRepo(win, { ...opts("win"), generatedPaths: ["panel/"] });
+
+    expect(r.state).toBe("conflict");
+    expect(r.conflictFiles).toEqual(["projects/p/note.md"]);
+    expect(r.conflictPrompt).toContain("projects/p/note.md");
+    expect(r.conflictPrompt).toContain("already mid-rebase");
+    expect(r.conflictPrompt).toContain("rebase --abort");
+    // it must NOT abort someone else's in-progress rebase
+    expect(existsSync(join(win, ".git/rebase-merge"))).toBe(true);
+  }, 30_000);
+
   it("reports offline when the remote is unreachable", async () => {
     git(mac, "remote", "set-url", "origin", join(root, "does-not-exist.git"));
     writeFileSync(join(mac, "projects/p/x.md"), "x\n");
