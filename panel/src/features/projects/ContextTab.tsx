@@ -1,112 +1,135 @@
-import { useMemo, useState, type ReactElement } from "react";
-import { BookOpen, FileText, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { BookOpen } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import {
   useProjectContext,
   fetchContextFile,
   type AdrFile,
   type ContextFile,
-  type ContextSource,
 } from "./useProjectContext";
+import FileListSidebar, { type FileListSource } from "./FileListSidebar";
+import FileRow from "./FileRow";
 
 interface Props {
   projectName: string;
 }
 
-function SourceGroup<T extends { source: string }>({
-  source,
-  items,
-  render,
-  emptyLabel,
-}: {
-  source: ContextSource;
-  items: T[];
-  render: (item: T) => ReactElement;
-  emptyLabel: string;
-}) {
-  return (
-    <div className="mb-5">
-      <h3
-        className="text-[11px] font-semibold uppercase tracking-widest mb-2"
-        style={{ color: "var(--text-tertiary)" }}
-      >
-        {source.label}
-        {source.id !== "project" && (
-          <span className="ml-2 font-normal lowercase opacity-60">
-            (linked repo at <code>{source.absoluteRoot}</code>)
-          </span>
-        )}
-      </h3>
-      {items.length === 0 ? (
-        <p className="text-xs px-2" style={{ color: "var(--text-muted)" }}>
-          {emptyLabel}
-        </p>
-      ) : (
-        <div className="space-y-0.5">{items.map(render)}</div>
-      )}
-    </div>
-  );
+function adrLabel(a: AdrFile): string {
+  return a.adrNumber !== null
+    ? `${String(a.adrNumber).padStart(4, "0")} — ${a.slug.replace(/-/g, " ")}`
+    : a.filename;
 }
 
-function FileRow({
-  icon: Icon,
-  label,
-  testId,
-  selected,
-  onClick,
+function SourceRows({
+  contexts,
+  adrs,
+  selectedPath,
+  onSelect,
 }: {
-  icon: typeof FileText;
-  label: string;
-  testId: string;
-  selected: boolean;
-  onClick: () => void;
+  contexts: ContextFile[];
+  adrs: AdrFile[];
+  selectedPath: string | null;
+  onSelect: (absolutePath: string) => void;
 }) {
+  if (contexts.length === 0 && adrs.length === 0) {
+    return (
+      <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
+        (no context or decisions)
+      </p>
+    );
+  }
   return (
-    <button
-      data-testid={testId}
-      onClick={onClick}
-      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left transition-colors"
-      style={{
-        background: selected ? "var(--bg-active)" : "transparent",
-        color: selected ? "var(--text-primary)" : "var(--text-secondary)",
-      }}
-      onMouseEnter={(e) => {
-        if (!selected) e.currentTarget.style.background = "var(--bg-hover)";
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) e.currentTarget.style.background = "transparent";
-      }}
-    >
-      <Icon size={13} style={{ color: "var(--text-tertiary)" }} />
-      <span className="text-sm truncate">{label}</span>
-    </button>
+    <>
+      {contexts.map((c) => (
+        <FileRow
+          key={c.absolutePath}
+          testId={`context-tab-file-${c.source}-${c.filename}`}
+          label={c.filename}
+          title={c.absolutePath}
+          selected={selectedPath === c.absolutePath}
+          onSelect={() => onSelect(c.absolutePath)}
+        />
+      ))}
+      {adrs.length > 0 && (
+        <p
+          className="text-[10px] uppercase tracking-widest px-2 pt-2 pb-0.5"
+          style={{ color: "var(--text-tertiary)" }}
+        >
+          Decisions
+        </p>
+      )}
+      {adrs.map((a) => (
+        <FileRow
+          key={a.absolutePath}
+          testId={`context-tab-adr-${a.source}-${a.filename}`}
+          label={adrLabel(a)}
+          title={a.absolutePath}
+          selected={selectedPath === a.absolutePath}
+          onSelect={() => onSelect(a.absolutePath)}
+        />
+      ))}
+    </>
   );
 }
 
 export default function ContextTab({ projectName }: Props) {
   const { data, loading, error, refresh } = useProjectContext(projectName);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedBasePath, setSelectedBasePath] = useState<string | undefined>(undefined);
+  // Selection lives in `?file=` (absolute path) so a context file can be
+  // deep-linked and restored, same as plans/notes.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedPath = searchParams.get("file");
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+
+  const setSelectedPath = useCallback(
+    (path: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (path) next.set("file", path);
+          else next.delete("file");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   // basePath drives relative-link/image resolution in MarkdownRenderer. The renderer
   // resolves against the projectsDir-rooted /view/ and /api/files/raw/ endpoints, so
   // we only pass a basePath when the file actually lives under projectsDir (i.e.
   // project-local CONTEXT.md or ADRs). For linked-repo files we leave basePath
   // undefined — relative refs won't rewrite, but the markdown still renders.
-  const onOpenFile = async (absolutePath: string, relativeToProjectsDir: string | null) => {
-    setSelectedPath(absolutePath);
-    setSelectedBasePath(relativeToProjectsDir ?? undefined);
+  const selectedBasePath = useMemo(() => {
+    if (!data || !selectedPath) return undefined;
+    const hit = [...data.contexts, ...data.adrs].find(
+      (f) => f.absolutePath === selectedPath,
+    );
+    return hit?.relativeToProjectsDir ?? undefined;
+  }, [data, selectedPath]);
+
+  useEffect(() => {
+    if (!selectedPath) {
+      setFileContent(null);
+      setFileError(null);
+      return;
+    }
+    let cancelled = false;
     setFileContent(null);
     setFileError(null);
-    try {
-      const r = await fetchContextFile(projectName, absolutePath);
-      setFileContent(r.content);
-    } catch (e) {
-      setFileError(e instanceof Error ? e.message : String(e));
-    }
-  };
+    fetchContextFile(projectName, selectedPath)
+      .then((r) => {
+        if (!cancelled) setFileContent(r.content);
+      })
+      .catch((e) => {
+        if (!cancelled) setFileError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectName, selectedPath]);
 
   const grouped = useMemo(() => {
     if (!data) return null;
@@ -133,35 +156,44 @@ export default function ContextTab({ projectName }: Props) {
   }
   if (!data || !grouped) return null;
 
-  const anyContext = data.contexts.length > 0;
-  const anyAdr = data.adrs.length > 0;
+  const anyFile = data.contexts.length > 0 || data.adrs.length > 0;
+
+  const sources: FileListSource[] = !anyFile
+    ? []
+    : data.sources.flatMap((s) => {
+        const bucket = grouped.get(s.id);
+        if (!bucket) return [];
+        return [
+          {
+            id: s.id,
+            label: s.label,
+            count: bucket.contexts.length + bucket.adrs.length,
+            hint: s.id !== "project" ? "(linked repo)" : undefined,
+            renderHeader:
+              s.id === "project"
+                ? undefined
+                : (header) => <div title={s.absoluteRoot}>{header}</div>,
+            rows: (
+              <SourceRows
+                contexts={bucket.contexts}
+                adrs={bucket.adrs}
+                selectedPath={selectedPath}
+                onSelect={setSelectedPath}
+              />
+            ),
+          },
+        ];
+      });
 
   return (
-    <div className="flex flex-col md:flex-row gap-6">
-      <aside className="md:w-72 shrink-0">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold flex items-center gap-2">
-            <BookOpen size={16} style={{ color: "var(--accent)" }} />
-            Context
-          </h2>
-          <button
-            data-testid="context-tab-refresh"
-            onClick={refresh}
-            className="p-1.5 rounded transition-colors"
-            style={{ color: "var(--text-muted)" }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.background = "var(--bg-hover)")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.background = "transparent")
-            }
-            title="Refresh"
-          >
-            <RefreshCw size={14} />
-          </button>
-        </div>
-
-        {!anyContext && !anyAdr ? (
+    <FileListSidebar
+      testId="context-tab"
+      title="Context"
+      icon={<BookOpen size={16} style={{ color: "var(--accent)" }} />}
+      sources={sources}
+      onRefresh={refresh}
+      aboveList={
+        !anyFile ? (
           <div
             className="rounded-md p-4 text-sm"
             style={{
@@ -171,90 +203,32 @@ export default function ContextTab({ projectName }: Props) {
             }}
           >
             No context or decisions recorded yet. See <code>AGENTS.md</code> →
-            <em> Domain Context & Decisions</em> for the convention.
+            <em> Domain Context &amp; Decisions</em> for the convention.
           </div>
-        ) : (
-          <>
-            {data.sources.map((s) => {
-              const bucket = grouped.get(s.id);
-              if (!bucket) return null;
-              return (
-                <SourceGroup
-                  key={`ctx-${s.id}`}
-                  source={s}
-                  items={bucket.contexts}
-                  emptyLabel="(no CONTEXT.md)"
-                  render={(c) => (
-                    <FileRow
-                      key={c.absolutePath}
-                      icon={BookOpen}
-                      label={c.filename}
-                      testId={`context-tab-file-${c.source}-${c.filename}`}
-                      selected={selectedPath === c.absolutePath}
-                      onClick={() => onOpenFile(c.absolutePath, c.relativeToProjectsDir)}
-                    />
-                  )}
-                />
-              );
-            })}
-
-            <h2 className="text-base font-semibold mb-3 mt-6 flex items-center gap-2">
-              <FileText size={16} style={{ color: "var(--accent)" }} />
-              Decisions
-            </h2>
-            {data.sources.map((s) => {
-              const bucket = grouped.get(s.id);
-              if (!bucket) return null;
-              return (
-                <SourceGroup
-                  key={`adr-${s.id}`}
-                  source={s}
-                  items={bucket.adrs}
-                  emptyLabel="(no ADRs)"
-                  render={(a) => (
-                    <FileRow
-                      key={a.absolutePath}
-                      icon={FileText}
-                      label={
-                        a.adrNumber !== null
-                          ? `${String(a.adrNumber).padStart(4, "0")} — ${a.slug.replace(/-/g, " ")}`
-                          : a.filename
-                      }
-                      testId={`context-tab-adr-${a.source}-${a.filename}`}
-                      selected={selectedPath === a.absolutePath}
-                      onClick={() => onOpenFile(a.absolutePath, a.relativeToProjectsDir)}
-                    />
-                  )}
-                />
-              );
-            })}
-          </>
-        )}
-      </aside>
-
-      <section className="flex-1 min-w-0">
-        {!selectedPath && (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Select a file to view.
-          </p>
-        )}
-        {selectedPath && fileError && (
-          <p className="text-sm" style={{ color: "var(--red)" }}>
-            Failed to load file: {fileError}
-          </p>
-        )}
-        {selectedPath && !fileError && fileContent === null && (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Loading…
-          </p>
-        )}
-        {fileContent !== null && (
-          <MarkdownRenderer
-            content={fileContent}
-            basePath={selectedBasePath}
-          />
-        )}
-      </section>
-    </div>
+        ) : undefined
+      }
+      detail={
+        <>
+          {!selectedPath && (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Select a file to view.
+            </p>
+          )}
+          {selectedPath && fileError && (
+            <p className="text-sm" style={{ color: "var(--red)" }}>
+              Failed to load file: {fileError}
+            </p>
+          )}
+          {selectedPath && !fileError && fileContent === null && (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Loading…
+            </p>
+          )}
+          {fileContent !== null && (
+            <MarkdownRenderer content={fileContent} basePath={selectedBasePath} />
+          )}
+        </>
+      }
+    />
   );
 }
