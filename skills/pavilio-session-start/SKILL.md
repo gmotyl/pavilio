@@ -69,7 +69,23 @@ Right after the project is resolved, **open `<root>/projects/[project]/progress/
 - next steps and blockers as they emerge
 - context a future session would need
 
-[[pavilio-session-end]] then just verifies completeness and commits — it should not be the moment when context is first dumped from memory.
+### `wip` is a placeholder, not a filename
+
+A slug of `wip` means *"the theme isn't known yet"*. It is not allowed to survive a session that produced content. **The moment the session's actual theme is clear — the first real decision, the task being confirmed, the first file touched — rename the file** and say so in one line. Don't wait for session end, and don't ask permission: a slug is not a decision that needs approving.
+
+```bash
+# already committed (hourly auto-sync commits progress files) — use git mv
+cd <root> && git mv projects/<project>/progress/2026-07-28-wip.md \
+                   projects/<project>/progress/2026-07-28-unified-file-list-sidebar.md
+```
+
+Rules for the rename:
+- Slug = the session's theme, max 4 words, kebab-case, no date repetition.
+- Use `git mv` when the file is already tracked so history follows; a plain `mv` otherwise.
+- Never rename a progress file from a *previous* day — those are closed records, even if their slug is `wip`.
+- Renaming once is enough. If the theme shifts later, keep the name unless it is now actively misleading.
+
+[[pavilio-session-end]] then just verifies completeness and commits — it should not be the moment when context is first dumped from memory, nor the moment the file finally gets a real name.
 
 ## Rules
 
@@ -77,3 +93,4 @@ Right after the project is resolved, **open `<root>/projects/[project]/progress/
 - Use the `context-mode` MCP (`ctx_search`, `ctx_execute`, `ctx_execute_file`) for codebase exploration and any operation that would otherwise dump a large output into context. Do **not** fall back to `ls`/`find`/glob browsing. If `context-mode` is not installed, prompt the user to install it from https://github.com/mksglu/context-mode and run `/context-mode:ctx-doctor` to verify.
 - Enter planning mode after start — begin with Design ([[pavilio-grill]]), never jump straight to code
 - Keep the in-session progress file focused on resume-context, not a transcript
+- A `-wip.md` progress file must be renamed to its real theme as soon as that theme exists — same session, without being asked

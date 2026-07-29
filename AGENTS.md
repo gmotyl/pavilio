@@ -71,6 +71,8 @@ Sessions are bracketed by two skills: [`pavilio-session-start`](skills/pavilio-s
 
 **Continuous-write model:** the progress file `<root>/projects/[project]/progress/[date]-slug.md` is **opened at session start and appended to throughout the session**. Decisions, problems, resolutions, and next steps go in as they happen — not dumped from memory at the end. `/pavilio-session-end` ("session end" / "end session") then verifies completeness, commits, and proposes any Todoist follow-ups. Save only what's relevant to picking up later — not a transcript.
 
+**`[date]-wip.md` is a placeholder name.** When a session opens with no clear theme the slug starts as `wip`, but it must be renamed (`git mv`) to the real theme as soon as one exists — same session, unprompted. `/pavilio-session-end` renames it as a backstop. A committed `-wip.md` with real content in it is a bug in the bookkeeping, not a valid filename.
+
 ## Skills
 
 All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.md` with YAML frontmatter. The right sidebar of the panel lists them; `pnpm setup:claude-code` and `pnpm setup:opencode` derive one slash command per skill for each agent (`pnpm pull` re-runs both for configured agents).
