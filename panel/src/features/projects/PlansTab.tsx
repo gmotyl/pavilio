@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import {
-  ChevronRight,
-  ChevronDown,
-  FileText,
-  ClipboardList,
-  RefreshCw,
-  Star,
-} from "lucide-react";
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import { useSearchParams } from "react-router-dom";
+import { ClipboardList, Star } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import {
   clearLastSectionFile,
@@ -21,13 +20,93 @@ import {
 } from "./usePlansTree";
 import { usePlanDragSource, usePlanDropTarget } from "./usePlanDrag";
 import PathActions from "./PathActions";
+import FileListSidebar, { type FileListSource } from "./FileListSidebar";
+import FileRow from "./FileRow";
 
 interface Props {
   projectName: string;
   currentPlans?: string[];
 }
 
-function PlanFileRow({
+function PlanStar({
+  file,
+  currentEntry,
+  onStar,
+  onUnstar,
+}: {
+  file: PlanFile;
+  currentEntry: string | undefined;
+  onStar: (file: PlanFile) => void;
+  onUnstar: (entry: string) => void;
+}) {
+  const isCurrent = currentEntry !== undefined;
+  return (
+    <button
+      data-testid={`plans-tab-star-${file.filename}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (isCurrent && currentEntry) onUnstar(currentEntry);
+        else onStar(file);
+      }}
+      title={isCurrent ? "Active plan — click to remove" : "Mark as active plan"}
+      className={`shrink-0 p-1 rounded transition-all ${isCurrent ? "" : "opacity-0 group-hover:opacity-100"}`}
+      style={{ color: isCurrent ? "var(--accent)" : "var(--text-muted)" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    >
+      <Star size={12} fill={isCurrent ? "currentColor" : "none"} />
+    </button>
+  );
+}
+
+function PlanRows({
+  source,
+  projectName,
+  selectedPath,
+  currentByFilename,
+  onOpen,
+  onStar,
+  onUnstar,
+}: {
+  source: PlanSource;
+  projectName: string;
+  selectedPath: string | null;
+  currentByFilename: Map<string, string>;
+  onOpen: (file: PlanFile) => void;
+  onStar: (file: PlanFile) => void;
+  onUnstar: (entry: string) => void;
+}) {
+  void projectName;
+  if (source.files.length === 0) {
+    return (
+      <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
+        (no plans)
+      </p>
+    );
+  }
+  return (
+    <>
+      {source.files.map((file) => {
+        const currentEntry = currentByFilename.get(file.filename);
+        return (
+          <PlanRow
+            key={file.absolutePath}
+            file={file}
+            sourceId={source.id}
+            selected={selectedPath === file.absolutePath}
+            currentEntry={currentEntry}
+            starrable={source.id === "project"}
+            onOpen={onOpen}
+            onStar={onStar}
+            onUnstar={onUnstar}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function PlanRow({
   file,
   sourceId,
   selected,
@@ -46,140 +125,52 @@ function PlanFileRow({
   onStar: (file: PlanFile) => void;
   onUnstar: (entry: string) => void;
 }) {
-  const isCurrent = currentEntry !== undefined;
   const drag = usePlanDragSource(file.absolutePath);
   return (
-    <div className="group flex items-center gap-0.5">
-      <button
-        {...drag}
-        data-testid={`plans-tab-file-${sourceId}-${file.filename}`}
-        onClick={() => onOpen(file)}
-        title={file.absolutePath}
-        className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1 rounded-md text-left text-xs transition-colors"
-        style={{
-          background: selected ? "var(--bg-active)" : "transparent",
-          color: selected
-            ? "var(--text-primary)"
-            : isCurrent
-              ? "var(--accent)"
-              : "var(--text-secondary)",
-          fontWeight: isCurrent ? 600 : 400,
-        }}
-        onMouseEnter={(e) => {
-          if (!selected) e.currentTarget.style.background = "var(--bg-hover)";
-        }}
-        onMouseLeave={(e) => {
-          if (!selected) e.currentTarget.style.background = "transparent";
-        }}
-      >
-        <FileText
-          size={13}
-          className="shrink-0"
-          style={{ color: isCurrent ? "var(--accent)" : "var(--text-tertiary)" }}
-        />
-        <span className="truncate">{file.filename}</span>
-      </button>
-      {starrable && (
-        <button
-          data-testid={`plans-tab-star-${file.filename}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (isCurrent && currentEntry) onUnstar(currentEntry);
-            else onStar(file);
-          }}
-          title={isCurrent ? "Active plan — click to remove" : "Mark as active plan"}
-          className={`shrink-0 p-1 rounded transition-all ${isCurrent ? "" : "opacity-0 group-hover:opacity-100"}`}
-          style={{ color: isCurrent ? "var(--accent)" : "var(--text-muted)" }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-        >
-          <Star size={12} fill={isCurrent ? "currentColor" : "none"} />
-        </button>
-      )}
-    </div>
+    <FileRow
+      testId={`plans-tab-file-${sourceId}-${file.filename}`}
+      label={file.filename}
+      selected={selected}
+      isCurrent={currentEntry !== undefined}
+      title={file.absolutePath}
+      dragProps={drag}
+      star={
+        starrable ? (
+          <PlanStar
+            file={file}
+            currentEntry={currentEntry}
+            onStar={onStar}
+            onUnstar={onUnstar}
+          />
+        ) : undefined
+      }
+      onSelect={() => onOpen(file)}
+    />
   );
 }
 
-function PlanSourceNode({
-  source,
+function PlanSourceHeader({
   projectName,
-  selectedPath,
-  currentByFilename,
-  onOpen,
-  onStar,
-  onUnstar,
+  sourceId,
   onMoved,
+  header,
 }: {
-  source: PlanSource;
   projectName: string;
-  selectedPath: string | null;
-  currentByFilename: Map<string, string>;
-  onOpen: (file: PlanFile) => void;
-  onStar: (file: PlanFile) => void;
-  onUnstar: (entry: string) => void;
+  sourceId: string;
   onMoved: () => void;
+  header: ReactNode;
 }) {
-  const starrable = source.id === "project";
-  const [open, setOpen] = useState(source.id === "project" || source.files.length > 0);
-  const repoHint = source.id !== "project" && source.id !== "claude";
-  const { hover, dropHandlers } = usePlanDropTarget(projectName, source.id, onMoved);
+  const { hover, dropHandlers } = usePlanDropTarget(projectName, sourceId, onMoved);
   return (
-    <div className="mb-0.5">
-      <button
-        {...dropHandlers}
-        data-testid={`plans-tab-source-${source.id}`}
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 w-full px-1 py-1 rounded-md text-xs font-medium transition-colors duration-100"
-        style={{
-          color: "var(--text-primary)",
-          background: hover ? "var(--accent-dim, var(--bg-active))" : undefined,
-          outline: hover ? "1px solid var(--accent)" : undefined,
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = hover ? "var(--accent-dim, var(--bg-active))" : "var(--bg-hover)")}
-        onMouseLeave={(e) => (e.currentTarget.style.background = hover ? "var(--accent-dim, var(--bg-active))" : "transparent")}
-      >
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <span className="truncate">
-          {source.id === "project" ? "projects (current)" : source.label}
-        </span>
-        {repoHint && (
-          <span className="font-normal" style={{ color: "var(--text-muted)" }}>
-            &nbsp;(.kilo)
-          </span>
-        )}
-        <span className="ml-auto text-[10px]" style={{ color: "var(--text-muted)" }}>
-          {source.files.length}
-        </span>
-      </button>
-      {open && (
-        <div
-          className="ml-3 pl-1"
-          style={{ borderLeft: "1px solid var(--border-subtle)" }}
-        >
-          {source.files.length === 0 ? (
-            <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
-              (no plans)
-            </p>
-          ) : (
-            source.files.map((file) => {
-              const currentEntry = currentByFilename.get(file.filename);
-              return (
-                <PlanFileRow
-                  key={file.absolutePath}
-                  file={file}
-                  sourceId={source.id}
-                  selected={selectedPath === file.absolutePath}
-                  currentEntry={currentEntry}
-                  starrable={starrable}
-                  onOpen={onOpen}
-                  onStar={onStar}
-                  onUnstar={onUnstar}
-                />
-              );
-            })
-          )}
-        </div>
-      )}
+    <div
+      {...dropHandlers}
+      style={{
+        borderRadius: 6,
+        background: hover ? "var(--accent-dim, var(--bg-active))" : undefined,
+        outline: hover ? "1px solid var(--accent)" : undefined,
+      }}
+    >
+      {header}
     </div>
   );
 }
@@ -289,81 +280,78 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
   }
   if (!data) return null;
 
+  const sources: FileListSource[] = data.sources.map((s) => ({
+    id: s.id,
+    label: s.id === "project" ? "projects (current)" : s.label,
+    count: s.files.length,
+    hint: s.id !== "project" && s.id !== "claude" ? "(.kilo)" : undefined,
+    renderHeader: (header) => (
+      <PlanSourceHeader
+        projectName={projectName}
+        sourceId={s.id}
+        onMoved={refresh}
+        header={header}
+      />
+    ),
+    rows: (
+      <PlanRows
+        source={s}
+        projectName={projectName}
+        selectedPath={selectedPath}
+        currentByFilename={s.id === "project" ? currentByFilename : new Map()}
+        onOpen={onOpen}
+        onStar={onStar}
+        onUnstar={onUnstar}
+      />
+    ),
+  }));
+
   return (
-    <div className="flex flex-col md:flex-row gap-6">
-      <aside className="md:w-72 shrink-0">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold flex items-center gap-2">
-            <ClipboardList size={16} style={{ color: "var(--accent)" }} />
-            Plans
-          </h2>
-          <button
-            data-testid="plans-tab-refresh"
-            onClick={refresh}
-            className="p-1.5 rounded transition-colors"
-            style={{ color: "var(--text-muted)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            title="Refresh"
-          >
-            <RefreshCw size={14} />
-          </button>
-        </div>
-
-        <div className="text-sm">
-          {data.sources.map((s) => (
-            <PlanSourceNode
-              key={s.id}
-              source={s}
-              projectName={projectName}
-              selectedPath={selectedPath}
-              currentByFilename={s.id === "project" ? currentByFilename : new Map()}
-              onOpen={onOpen}
-              onStar={onStar}
-              onUnstar={onUnstar}
-              onMoved={refresh}
-            />
-          ))}
-        </div>
-      </aside>
-
-      <section className="flex-1 min-w-0">
-        {!selectedPath && (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Select a plan to view.
-          </p>
-        )}
-        {selectedPath && (
-          <div
-            className="flex items-center gap-2 mb-4 pb-3"
-            style={{ borderBottom: "1px solid var(--border-subtle)" }}
-          >
-            <span
-              className="text-sm font-mono truncate flex-1"
-              style={{ color: "var(--text-tertiary)" }}
+    <FileListSidebar
+      testId="plans-tab"
+      title="Plans"
+      icon={<ClipboardList size={16} style={{ color: "var(--accent)" }} />}
+      sources={sources}
+      onRefresh={refresh}
+      detail={
+        <>
+          {!selectedPath && (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Select a plan to view.
+            </p>
+          )}
+          {selectedPath && (
+            <div
+              className="flex items-center gap-2 mb-4 pb-3"
+              style={{ borderBottom: "1px solid var(--border-subtle)" }}
             >
-              {selectedPath.split("/").pop()}
-            </span>
-            <PathActions absolutePath={selectedPath} />
-          </div>
-        )}
-        {selectedPath && fileError && (
-          <p className="text-sm" style={{ color: "var(--red)" }}>
-            Failed to load file: {fileError}
-          </p>
-        )}
-        {selectedPath && !fileError && fileContent === null && (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Loading…
-          </p>
-        )}
-        {fileContent !== null && (
-          <MarkdownRenderer
-            content={fileContent}
-            basePath={selectedFile?.relativeToProjectsDir ?? undefined}
-          />
-        )}
-      </section>
-    </div>
+              <span
+                className="text-sm font-mono truncate flex-1"
+                style={{ color: "var(--text-tertiary)" }}
+              >
+                {selectedPath.split("/").pop()}
+              </span>
+              <PathActions absolutePath={selectedPath} />
+            </div>
+          )}
+          {selectedPath && fileError && (
+            <p className="text-sm" style={{ color: "var(--red)" }}>
+              Failed to load file: {fileError}
+            </p>
+          )}
+          {selectedPath && !fileError && fileContent === null && (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Loading…
+            </p>
+          )}
+          {fileContent !== null && (
+            <MarkdownRenderer
+              content={fileContent}
+              basePath={selectedFile?.relativeToProjectsDir ?? undefined}
+            />
+          )}
+        </>
+      }
+    />
   );
 }
