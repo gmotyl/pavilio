@@ -112,14 +112,15 @@ rm -rf "$root"
 
 # --- live run (no dead collections) ---
 root="$(setup)"
-# drop `ghost` so the live path is exercised without the dead-collection guard
-python3 - "$root/config/index.yml" <<'PY'
-import sys, re
-p = sys.argv[1]
-s = open(p).read()
-s = re.sub(r'  ghost:\n    path: [^\n]*\n    pattern: [^\n]*\n', '', s)
-open(p, "w").write(s)
-PY
+# drop `ghost` so the live path is exercised without the dead-collection guard.
+# awk, not python3: this is a bash test suite and python3 is not a dependency of it.
+awk '
+  /^  ghost:$/ { skip = 1; next }
+  skip && /^  [A-Za-z0-9_-]+:$/ { skip = 0 }
+  skip && /^    / { next }
+  { print }
+' "$root/config/index.yml" > "$root/config/index.yml.tmp"
+mv "$root/config/index.yml.tmp" "$root/config/index.yml"
 out="$(run "$root")"
 log="$(cat "$root/qmd.log")"
 assert_contains "$log" "collection add $root/projects/beta --name beta --mask **/*.md" "adds the missing collection via qmd"
@@ -145,6 +146,52 @@ out="$(run "$root")"
 log="$(cat "$root/qmd.log")"
 assert_not_contains "$log" "collection add" "a second run with everything registered adds nothing"
 assert_contains "$out" "ok: beta" "the newly registered collection reports as ok"
+rm -rf "$root"
+
+# --- a project directory containing spaces ---
+root="$(setup)"
+mkdir -p "$root/projects/my app"
+echo "# my app" > "$root/projects/my app/PROJECT.md"
+out="$(run "$root" --repoint-dead)"
+log="$(cat "$root/qmd.log")"
+assert_contains "$out" "add: my app $root/projects/my app" "reports a spaced project name whole"
+assert_contains "$log" "collection add $root/projects/my app --name my app" "registers it with the full name and path"
+assert_not_contains "$out" "add: my $root" "does not split the name on the space"
+rm -rf "$root"
+
+# --- --dry-run --repoint-dead shows the repoint plan ---
+root="$(setup)"
+out="$(run "$root" --dry-run --repoint-dead)"
+assert_contains "$out" "would repoint: ghost -> $root/projects/archived/ghost" "dry run shows what repointing would do"
+assert_contains "$out" "plan-only (dry run)" "still reports it changed nothing"
+assert_contains "$(cat "$root/config/index.yml")" "path: $root/projects/deleted-long-ago" "leaves index.yml untouched"
+if [[ ! -s "$root/qmd.log" ]]; then pass "dry run invokes no qmd"; else fail "invoked qmd: $(cat "$root/qmd.log")"; fi
+rm -rf "$root"
+
+# --- dry run reports the refusal it would hit ---
+root="$(setup)"
+out="$(run "$root" --dry-run)"
+assert_contains "$out" "would refuse to run qmd update" "dry run warns about the dead collection"
+rm -rf "$root"
+
+# --- a missing qmd is named, not a bare "command not found" ---
+root="$(setup)"
+rm "$root/bin/qmd"
+# PATH is emptied so the real qmd (installed via bun) cannot satisfy the check either
+out="$(PATH="$root/bin:/usr/bin:/bin" QMD_LOG="$root/qmd.log" \
+  bash "$SCRIPT" --projects-dir "$root/projects" --config "$root/config/index.yml" --repoint-dead 2>&1)"
+rc=$?
+assert_contains "$out" "qmd not found on PATH" "says which dependency is missing"
+assert_not_contains "$out" "command not found" "does not surface a bare shell error"
+if [[ $rc -ne 0 ]]; then pass "exits non-zero when qmd is missing"; else fail "expected non-zero exit, got $rc"; fi
+rm -rf "$root"
+
+# --- --help does not depend on line numbers in the header ---
+root="$(setup)"
+out="$(run "$root" --help)"
+assert_contains "$out" "Usage: qmd-ensure.sh" "help prints usage"
+assert_contains "$out" "--repoint-dead" "help lists every flag"
+assert_not_contains "$out" "#!/usr/bin/env" "help does not leak the shebang"
 rm -rf "$root"
 
 echo ""

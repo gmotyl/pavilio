@@ -19,7 +19,11 @@ label results by project. Archived projects are excluded unless the user asks fo
 
 ### 1. Refresh the index — always
 
-Run: `bash skills/pavilio-search/qmd-ensure.sh`
+Run: `bash "$(git rev-parse --show-toplevel)"/skills/pavilio-search/qmd-ensure.sh`
+
+The repo-root form works from any directory. The script derives the projects dir from its
+own location, not from the working directory, so only *finding* it depends on where you
+are — and `bash skills/…` from anywhere but the repo root just fails to find the file.
 
 Never skip this. It registers any project missing a collection, reports collections whose
 path has moved, and re-indexes incrementally. Skipping it is how a search silently returns
@@ -45,6 +49,12 @@ material, which is theirs to decide:
 `qmd query "<question>" -c <project> --md -n 8`
 
 Then widen **only chunks that scored**: `qmd get <file>:<line> -l 60`.
+
+A `qmd get` can fail because the file was deleted or renamed after it was indexed. That is
+information, not an error to retry: cite the hit from the query snippet, mark it
+`(stale index — file no longer at <path>)`, and carry on with the other hits. Do not abandon
+the pack over one dead path, and do not silently drop the hit either — a moved file often
+means the answer now lives somewhere else worth finding.
 
 Never read a folder wholesale. metro alone holds ~280 markdown files; reading them is how
 a context window dies and it is the failure this skill exists to prevent.
