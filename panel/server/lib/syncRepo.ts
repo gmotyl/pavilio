@@ -148,6 +148,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       // manually-staged files (e.g. half-edited panel code) are never swept in.
       await git(repo, ["add", "--", ...paths], t);
       const staged = await git(repo, ["diff", "--cached", "--quiet", "--", ...paths], t);
+      const didCommit = staged.status === 1;
       if (staged.status === 1) {
         const ts = new Date().toISOString();
         const commit = await git(repo, ["commit", "-m", `auto-sync ${opts.hostname} ${ts}`, "--", ...paths], t);
@@ -207,6 +208,13 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
         conflictFiles: [],
         conflictPrompt: "",
       });
+      // The working tree moved (we committed, or the rebase brought commits in), so any
+      // open file list is now stale. sync-status alone does not tell views that; without
+      // this the /git page keeps showing files that are already committed until a reload.
+      // Skipped on a no-op sync so an idle tick does not make every client refetch.
+      if (didCommit || ahead !== "0" || behind !== "0") {
+        broadcast({ type: "git-change" });
+      }
       return status;
     };
 
