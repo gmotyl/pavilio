@@ -6,7 +6,7 @@ import { useGitViewMode } from "../git/useGitViewMode";
 import RepoBlock from "./RepoBlock";
 import ProjectSearchBar from "./ProjectSearchBar";
 import FileViewer from "./FileViewer";
-import SectionFilesList from "./SectionFilesList";
+import SectionFilesList, { sectionRows } from "./SectionFilesList";
 import FileListSidebar from "./FileListSidebar";
 import ContextTab from "./ContextTab";
 import PlansTab from "./PlansTab";
@@ -33,6 +33,10 @@ import { useTabScrollMemory } from "./useTabScrollMemory";
 import ProjectTerminalsSurface from "../terminal/ProjectTerminalsSurface";
 import { TimeTrackingLink } from "../time/TimeTrackingLink";
 import { useProjectTodayMinutes } from "../time/TimeTrackingProvider";
+
+/** Sidebar headings read like the sibling tabs ("Plans", "Context"). */
+const sectionTitle = (section: string) =>
+  section === "qa" ? "QA" : section.charAt(0).toUpperCase() + section.slice(1);
 
 export default function ProjectView() {
   const { name, section } = useParams<{ name: string; section?: string }>();
@@ -289,12 +293,13 @@ export default function ProjectView() {
       {section && !SPECIAL_SECTIONS.has(section) && (
         <FileListSidebar
           testId="section-files"
-          title={section}
+          title={sectionTitle(section)}
           sources={[
             {
               id: section,
-              label: section,
-              count: sectionFiles.length,
+              label: sectionTitle(section),
+              // Same helper the rows come from, so the badge counts what renders.
+              count: sectionRows(section, sectionFiles).length,
               rows: (
                 <SectionFilesList
                   projectName={name || ""}

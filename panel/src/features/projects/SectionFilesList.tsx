@@ -80,11 +80,40 @@ function SectionDropStrip({
   );
 }
 
-const shortDate = (modified: number) =>
+/** qa rows are dated folders, so the folder name already carries the year. */
+const shortDate = (modified: number, withYear: boolean) =>
   new Date(modified).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+    ...(withYear ? { year: "numeric" as const } : {}),
   });
+
+export interface SectionRow {
+  file: FileEntry;
+  label: string;
+  monoLabel?: boolean;
+}
+
+/**
+ * The one list a section renders. The sidebar's count badge and the rows both
+ * derive from this, so they cannot drift: `qa` indexes .md/.txt/.json but only
+ * shows one row per run.md, which used to make the badge overcount.
+ */
+export function sectionRows(section: string, files: FileEntry[]): SectionRow[] {
+  if (section === "qa") {
+    return files
+      .filter((f) => f.relativePath.endsWith("/run.md"))
+      .map((f) => {
+        const parts = f.relativePath.split("/");
+        return { file: f, label: parts[parts.length - 2], monoLabel: true };
+      })
+      .sort((a, b) => b.label.localeCompare(a.label));
+  }
+  return files.map((f) => ({
+    file: f,
+    label: f.relativePath.split("/").pop() ?? f.relativePath,
+  }));
+}
 
 export function SectionFilesList({
   projectName,
@@ -93,61 +122,45 @@ export function SectionFilesList({
   selectedPath,
   onSelect,
 }: Props) {
-  if (section === "qa") {
-    const runs = files
-      .filter((f) => f.relativePath.endsWith("/run.md"))
-      .map((f) => {
-        const parts = f.relativePath.split("/");
-        const folderName = parts[parts.length - 2];
-        return { file: f, folderName };
-      })
-      .sort((a, b) => b.folderName.localeCompare(a.folderName));
+  const rows = sectionRows(section, files);
+  const withYear = section !== "qa";
 
-    if (runs.length === 0) {
+  const rowList = (
+    <div className="space-y-0.5">
+      {rows.map(({ file, label, monoLabel }) => (
+        <SectionFileRow
+          key={file.relativePath}
+          file={file}
+          label={label}
+          monoLabel={monoLabel}
+          dateLabel={shortDate(file.modified, withYear)}
+          selected={selectedPath === file.relativePath}
+          onSelect={onSelect}
+        />
+      ))}
+    </div>
+  );
+
+  if (section === "qa") {
+    if (rows.length === 0) {
       return (
         <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
           No QA runs found.
         </p>
       );
     }
-
-    return (
-      <div className="space-y-0.5">
-        {runs.map(({ file, folderName }) => (
-          <SectionFileRow
-            key={file.relativePath}
-            file={file}
-            label={folderName}
-            monoLabel
-            dateLabel={shortDate(file.modified)}
-            selected={selectedPath === file.relativePath}
-            onSelect={onSelect}
-          />
-        ))}
-      </div>
-    );
+    return rowList;
   }
 
   return (
     <div>
       <SectionDropStrip projectName={projectName} section={section} />
-      {files.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
           No files in this section.
         </p>
       ) : (
-        <div className="space-y-0.5">
-          {files.map((file) => (
-            <SectionFileRow
-              key={file.relativePath}
-              file={file}
-              label={file.relativePath.split("/").pop() ?? file.relativePath}
-              dateLabel={shortDate(file.modified)}
-              selected={selectedPath === file.relativePath}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
+        rowList
       )}
     </div>
   );
