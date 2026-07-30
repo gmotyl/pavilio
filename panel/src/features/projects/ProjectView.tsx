@@ -6,9 +6,11 @@ import { useGitViewMode } from "../git/useGitViewMode";
 import RepoBlock from "./RepoBlock";
 import ProjectSearchBar from "./ProjectSearchBar";
 import FileViewer from "./FileViewer";
-import SectionFilesList from "./SectionFilesList";
+import SectionFilesList, { sectionRows } from "./SectionFilesList";
+import FileListSidebar from "./FileListSidebar";
 import ContextTab from "./ContextTab";
 import PlansTab from "./PlansTab";
+import ReviewRules from "../qa/ReviewRules";
 import { SPECIAL_SECTIONS } from "./sections";
 import ScriptButton from "./ScriptButton";
 import { useWorkspaceScripts } from "./useWorkspaceScripts";
@@ -31,6 +33,10 @@ import { useTabScrollMemory } from "./useTabScrollMemory";
 import ProjectTerminalsSurface from "../terminal/ProjectTerminalsSurface";
 import { TimeTrackingLink } from "../time/TimeTrackingLink";
 import { useProjectTodayMinutes } from "../time/TimeTrackingProvider";
+
+/** Sidebar headings read like the sibling tabs ("Plans", "Context"). */
+const sectionTitle = (section: string) =>
+  section === "qa" ? "QA" : section.charAt(0).toUpperCase() + section.slice(1);
 
 export default function ProjectView() {
   const { name, section } = useParams<{ name: string; section?: string }>();
@@ -283,25 +289,43 @@ export default function ProjectView() {
         <PlansTab projectName={name || ""} currentPlans={project?.currentPlans} />
       )}
 
-      {/* File section listing */}
-      {section && !SPECIAL_SECTIONS.has(section) && !selectedFile && (
-        <SectionFilesList
-          projectName={name || ""}
-          section={section}
-          files={sectionFiles}
-          currentPlans={project?.currentPlans}
-          onSelect={setSelectedFile}
-        />
-      )}
-
-      {/* Inline file viewer */}
-      {section && !SPECIAL_SECTIONS.has(section) && selectedFile && (
-        <FileViewer
-          filePath={selectedFile}
-          content={fileViewer.content}
-          absolutePath={fileViewer.absolutePath}
-          loading={fileViewer.loading}
-          onBack={() => setSelectedFile(null)}
+      {/* File sections (notes, memo, progress, qa) — list beside the viewer */}
+      {section && !SPECIAL_SECTIONS.has(section) && (
+        <FileListSidebar
+          testId="section-files"
+          title={sectionTitle(section)}
+          sources={[
+            {
+              id: section,
+              label: sectionTitle(section),
+              // Same helper the rows come from, so the badge counts what renders.
+              count: sectionRows(section, sectionFiles).length,
+              rows: (
+                <SectionFilesList
+                  projectName={name || ""}
+                  section={section}
+                  files={sectionFiles}
+                  selectedPath={selectedFile}
+                  onSelect={setSelectedFile}
+                />
+              ),
+            },
+          ]}
+          aboveList={section === "qa" ? <ReviewRules project={name || ""} /> : null}
+          detail={
+            selectedFile ? (
+              <FileViewer
+                filePath={selectedFile}
+                content={fileViewer.content}
+                absolutePath={fileViewer.absolutePath}
+                loading={fileViewer.loading}
+              />
+            ) : (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                Select a file to view.
+              </p>
+            )
+          }
         />
       )}
 

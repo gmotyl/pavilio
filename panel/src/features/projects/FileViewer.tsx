@@ -1,4 +1,3 @@
-import { ArrowLeft } from "lucide-react";
 import ImageDropZone from "../markdown/ImageDropZone";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import PathActions from "./PathActions";
@@ -8,7 +7,6 @@ interface Props {
   content: string;
   absolutePath: string;
   loading: boolean;
-  onBack: () => void;
 }
 
 const isMarkdown = (p: string) => p.endsWith(".md");
@@ -19,7 +17,6 @@ export function FileViewer({
   content,
   absolutePath,
   loading,
-  onBack,
 }: Props) {
   return (
     <div>
@@ -27,23 +24,6 @@ export function FileViewer({
         className="flex items-center gap-2 mb-4 pb-3"
         style={{ borderBottom: "1px solid var(--border-subtle)" }}
       >
-        <button
-          data-testid="file-viewer-back"
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors"
-          style={{ color: "var(--text-secondary)" }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "var(--bg-hover)";
-            e.currentTarget.style.color = "var(--text-primary)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color = "var(--text-secondary)";
-          }}
-        >
-          <ArrowLeft size={14} />
-          Back
-        </button>
         <span
           className="text-sm font-mono truncate flex-1"
           style={{ color: "var(--text-tertiary)" }}

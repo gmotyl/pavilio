@@ -1,0 +1,85 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
+import ContextTab from "../ContextTab";
+
+// Mirrors ContextResponse from useProjectContext.ts
+const CONTEXT = {
+  project: "alokai",
+  sources: [
+    { id: "project", label: "alokai", absoluteRoot: "/p/projects/alokai" },
+    { id: "repo", label: "storefront", absoluteRoot: "/r/storefront" },
+  ],
+  contexts: [
+    {
+      source: "project",
+      filename: "CONTEXT.md",
+      absolutePath: "/p/projects/alokai/CONTEXT.md",
+      modified: 2,
+      relativeToProjectsDir: "alokai/CONTEXT.md",
+    },
+    {
+      source: "repo",
+      filename: "CONTEXT.md",
+      absolutePath: "/r/storefront/CONTEXT.md",
+      modified: 1,
+      relativeToProjectsDir: null,
+    },
+  ],
+  adrs: [
+    {
+      source: "project",
+      filename: "0001-use-pnpm.md",
+      absolutePath: "/p/projects/alokai/docs/adr/0001-use-pnpm.md",
+      modified: 3,
+      adrNumber: 1,
+      slug: "use-pnpm",
+      relativeToProjectsDir: "alokai/docs/adr/0001-use-pnpm.md",
+    },
+  ],
+};
+
+beforeEach(() => {
+  mockFetchResponses({
+    "context/read": { content: "# Hello context body" },
+    "/context": CONTEXT,
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("ContextTab", () => {
+  it("selects and renders the file named in ?file=", async () => {
+    renderWithRouter(<ContextTab projectName="alokai" />, {
+      initialEntries: [
+        `/?file=${encodeURIComponent("/p/projects/alokai/CONTEXT.md")}`,
+      ],
+    });
+    expect(
+      await screen.findByTestId("context-tab-file-project-CONTEXT.md"),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByText("Hello context body")).toBeTruthy(),
+    );
+  });
+
+  it("renders a source group per context source", async () => {
+    renderWithRouter(<ContextTab projectName="alokai" />);
+    expect(await screen.findByTestId("context-tab-source-project")).toBeTruthy();
+    expect(screen.getByTestId("context-tab-source-repo")).toBeTruthy();
+    expect(screen.getByTestId("context-tab-refresh")).toBeTruthy();
+  });
+
+  it("keeps the adr row testids and loads an adr on click", async () => {
+    renderWithRouter(<ContextTab projectName="alokai" />);
+    const adr = await screen.findByTestId(
+      "context-tab-adr-project-0001-use-pnpm.md",
+    );
+    fireEvent.click(adr);
+    await waitFor(() =>
+      expect(screen.getByText("Hello context body")).toBeTruthy(),
+    );
+  });
+});
