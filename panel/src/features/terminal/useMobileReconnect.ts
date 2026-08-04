@@ -4,19 +4,28 @@ interface Options {
   ws: WebSocket | null
   getDims: () => { cols: number; rows: number }
   reopen: () => void
+  /** True when xterm's buffer has nothing to repaint from — see viewportBlank.ts. */
+  isViewportBlank: () => boolean
 }
 
 const WATCHDOG_STALE_MS = 25_000
 const WATCHDOG_CHECK_MS = 2_000
 
-export function useMobileReconnect({ ws, getDims, reopen }: Options): void {
+export function useMobileReconnect({
+  ws,
+  getDims,
+  reopen,
+  isViewportBlank,
+}: Options): void {
   const lastMessageAtRef = useRef(Date.now())
   const getDimsRef = useRef(getDims)
   const reopenRef = useRef(reopen)
+  const isViewportBlankRef = useRef(isViewportBlank)
 
   useEffect(() => {
     getDimsRef.current = getDims
     reopenRef.current = reopen
+    isViewportBlankRef.current = isViewportBlank
   })
 
   useEffect(() => {
@@ -38,6 +47,11 @@ export function useMobileReconnect({ ws, getDims, reopen }: Options): void {
         reopenRef.current()
         return
       }
+      // A nudge resizes the PTY twice so the TUI redraws from scratch — that
+      // costs a visible flicker, so spend it only when the local repaint
+      // (`terminal.refresh()` on the visibilitychange refit) cannot help
+      // because the buffer itself came back empty.
+      if (!isViewportBlankRef.current()) return
       const { cols, rows } = getDimsRef.current()
       ws.send(JSON.stringify({ type: "mobile-nudge", cols, rows }))
       lastMessageAtRef.current = Date.now()
