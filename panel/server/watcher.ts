@@ -71,10 +71,30 @@ export function setupWebSocket(server: Server): WebSocketServer {
     }
 
     // Broadcast subscription connection (file-change, agent-change)
-    ws.send(JSON.stringify({ type: "connected" }));
+    attachBroadcastSocket(ws);
   });
 
   return wss;
+}
+
+const BROADCAST_HEARTBEAT_MS = 10_000;
+
+/**
+ * Broadcast subscribers (file-change / agent-change) get the same heartbeat the
+ * terminal sockets have: without periodic traffic a socket that went half-open
+ * across a laptop sleep never fires `close` in the browser, so the tab keeps a
+ * dead connection and silently stops refreshing until a manual reload.
+ */
+export function attachBroadcastSocket(ws: WebSocket): void {
+  ws.send(JSON.stringify({ type: "connected" }));
+
+  const heartbeat = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "ping" }));
+    }
+  }, BROADCAST_HEARTBEAT_MS);
+
+  ws.on("close", () => clearInterval(heartbeat));
 }
 
 export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {
