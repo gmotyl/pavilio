@@ -229,9 +229,12 @@ export function isContextPathAllowed(absolutePath: string, allowlist: string[]):
   const name = basename(absolutePath);
   if (name === "CONTEXT.md" || name === "CONTEXT-MAP.md") return true;
   if (!/\.md$/i.test(name)) return false;
-  // ADR files must live under <root>/adr/ or <root>/docs/adr/; living specs under <root>/specs/
-  const mdRoots = [join(containingRoot, "adr"), join(containingRoot, "docs", "adr"), join(containingRoot, "specs")];
-  return mdRoots.some((r) => isPathUnder(absolutePath, r) && absolutePath !== r);
+  // ADR files must live under <root>/adr/ or <root>/docs/adr/
+  const adrRoots = [join(containingRoot, "adr"), join(containingRoot, "docs", "adr")];
+  if (adrRoots.some((r) => isPathUnder(absolutePath, r) && absolutePath !== r)) return true;
+  // Living specs: direct children of <root>/specs/ only — mirrors the top-level-only listing,
+  // so nothing is readable that the sidebar can't surface.
+  return dirname(absolutePath) === join(containingRoot, "specs");
 }
 
 router.get("/:name/context", (req, res) => {

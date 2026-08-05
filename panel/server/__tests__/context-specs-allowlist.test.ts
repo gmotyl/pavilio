@@ -10,12 +10,16 @@ describe("isContextPathAllowed — specs/", () => {
     expect(isContextPathAllowed(join(ROOT, "specs", "checkout-tax.md"), ALLOWLIST)).toBe(true);
   });
 
-  it("rejects non-markdown files under specs/", () => {
-    expect(isContextPathAllowed(join(ROOT, "specs", "notes.txt"), ALLOWLIST)).toBe(false);
+  it("rejects a markdown file nested deeper under specs/ (listing is top-level-only)", () => {
+    expect(isContextPathAllowed(join(ROOT, "specs", "area", "nested.md"), ALLOWLIST)).toBe(false);
   });
 
-  it("rejects the specs dir itself", () => {
-    expect(isContextPathAllowed(join(ROOT, "specs"), ALLOWLIST)).toBe(false);
+  it("rejects a sibling file named specs.md outside the specs dir", () => {
+    expect(isContextPathAllowed(join(ROOT, "specs.md"), ALLOWLIST)).toBe(false);
+  });
+
+  it("rejects non-markdown files anywhere (global extension check)", () => {
+    expect(isContextPathAllowed(join(ROOT, "specs", "notes.txt"), ALLOWLIST)).toBe(false);
   });
 
   it("rejects a specs path outside every allowlisted root", () => {

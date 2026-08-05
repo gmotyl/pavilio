@@ -9,7 +9,10 @@ Lightweight by design. You are the executing subagent for a task handed off by [
 
 ## Wrong-skill guard — check this first
 
-This skill requires an **explicit handoff file path**. If you got here from anything else — the user said "resume", "resume <project>", "resume work on X", or the router matched on the word *resume* alone — **stop, do not read anything, and switch to [[pavilio-session-start]]** with that project. Say one line: "`resume <project>` → using /pavilio-session-start." Then continue there.
+This skill requires an **explicit handoff file path**. Two distinct wrong-entry cases:
+
+- **Router matched on the word "resume"** ("resume", "resume <project>", "resume work on X") → stop, do not read anything, switch to [[pavilio-session-start]]. Say one line: "`resume` → using /pavilio-session-start." Pass the project if one was named; if not, session-start asks which project — don't invent one.
+- **Explicit `/pavilio-resume` with no file path** → the user chose THIS skill; don't silently re-route. Ask for the handoff file path (one question, then stop). If they don't have one, point at /pavilio-session-start.
 
 Only proceed below when the user typed `/pavilio-resume` **and** named a handoff file (or a handoff file is the unambiguous subject of the request).
 
