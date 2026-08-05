@@ -1,6 +1,6 @@
 ---
 name: pavilio-session-start
-description: Start/resume a project session by loading recent progress, PROJECT.md, and plans/CURRENT.md, then entering planning mode. Use when the user invokes `/pavilio-session-start`, says "resume <project>", or wants to pick up in-progress work. Fast-entry form `/pavilio-session-start <project> <task>` skips the summary and jumps straight to designing the task.
+description: THE skill for the word "resume" — "resume", "resume <project>", "resume work on X", "pick up where we left off" all mean this, never /pavilio-resume (that one needs an explicit handoff file path). Starts/resumes a project session by loading recent progress, PROJECT.md, and plans/CURRENT.md, then entering planning mode. Also on explicit `/pavilio-session-start`. Fast-entry form `/pavilio-session-start <project> <task>` skips the summary and jumps straight to designing the task.
 ---
 
 # Pavilio Session Start

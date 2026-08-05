@@ -37,6 +37,15 @@ const CONTEXT = {
       relativeToProjectsDir: "alokai/docs/adr/0001-use-pnpm.md",
     },
   ],
+  specs: [
+    {
+      source: "project",
+      filename: "checkout-tax.md",
+      absolutePath: "/p/projects/alokai/specs/checkout-tax.md",
+      modified: 4,
+      relativeToProjectsDir: "alokai/specs/checkout-tax.md",
+    },
+  ],
 };
 
 beforeEach(() => {
@@ -81,5 +90,28 @@ describe("ContextTab", () => {
     await waitFor(() =>
       expect(screen.getByText("Hello context body")).toBeTruthy(),
     );
+  });
+
+  it("renders spec rows under a Specs header and loads one on click", async () => {
+    renderWithRouter(<ContextTab projectName="alokai" />);
+    const spec = await screen.findByTestId(
+      "context-tab-spec-project-checkout-tax.md",
+    );
+    expect(screen.getByText("Specs")).toBeTruthy();
+    fireEvent.click(spec);
+    await waitFor(() =>
+      expect(screen.getByText("Hello context body")).toBeTruthy(),
+    );
+  });
+
+  it("tolerates a context response without a specs field", async () => {
+    const { specs: _omitted, ...legacy } = CONTEXT;
+    mockFetchResponses({
+      "context/read": { content: "# Hello context body" },
+      "/context": legacy,
+    });
+    renderWithRouter(<ContextTab projectName="alokai" />);
+    expect(await screen.findByTestId("context-tab-source-project")).toBeTruthy();
+    expect(screen.queryByText("Specs")).toBeNull();
   });
 });

@@ -55,6 +55,8 @@ interface AdrFile {
   /** Forward-slash path relative to projectsDir when source is "project"; null otherwise. */
   relativeToProjectsDir: string | null;
 }
+/** Living spec (current behavior of a feature area) under <root>/specs/. */
+type SpecFile = ContextFile;
 
 interface PlanFile {
   source: string;
@@ -102,6 +104,25 @@ function listContextFilesInRoot(absoluteRoot: string, sourceId: string, projects
       });
     }
   }
+  return out;
+}
+
+function listSpecFilesInRoot(absoluteRoot: string, sourceId: string, projectsDir: string): SpecFile[] {
+  const specsDir = join(absoluteRoot, "specs");
+  if (!existsSync(specsDir) || !statSync(specsDir).isDirectory()) return [];
+  const out: SpecFile[] = [];
+  for (const e of readdirSync(specsDir, { withFileTypes: true })) {
+    if (!e.isFile() || !e.name.endsWith(".md")) continue;
+    const abs = join(specsDir, e.name);
+    out.push({
+      source: sourceId,
+      filename: e.name,
+      absolutePath: abs,
+      modified: statSync(abs).mtimeMs,
+      relativeToProjectsDir: relativeToProjects(abs, projectsDir),
+    });
+  }
+  out.sort((a, b) => a.filename.localeCompare(b.filename));
   return out;
 }
 
@@ -210,7 +231,10 @@ export function isContextPathAllowed(absolutePath: string, allowlist: string[]):
   if (!/\.md$/i.test(name)) return false;
   // ADR files must live under <root>/adr/ or <root>/docs/adr/
   const adrRoots = [join(containingRoot, "adr"), join(containingRoot, "docs", "adr")];
-  return adrRoots.some((r) => isPathUnder(absolutePath, r) && absolutePath !== r);
+  if (adrRoots.some((r) => isPathUnder(absolutePath, r) && absolutePath !== r)) return true;
+  // Living specs: direct children of <root>/specs/ only — mirrors the top-level-only listing,
+  // so nothing is readable that the sidebar can't surface.
+  return dirname(absolutePath) === join(containingRoot, "specs");
 }
 
 router.get("/:name/context", (req, res) => {
@@ -228,13 +252,15 @@ router.get("/:name/context", (req, res) => {
 
   const contexts: ContextFile[] = [];
   const adrs: AdrFile[] = [];
+  const specs: SpecFile[] = [];
   for (const s of sources) {
     if (!existsSync(s.absoluteRoot)) continue;
     contexts.push(...listContextFilesInRoot(s.absoluteRoot, s.id, projectsDir));
     adrs.push(...listAdrFilesInRoot(s.absoluteRoot, s.id, projectsDir));
+    specs.push(...listSpecFilesInRoot(s.absoluteRoot, s.id, projectsDir));
   }
 
-  res.json({ project: req.params.name, sources, contexts, adrs });
+  res.json({ project: req.params.name, sources, contexts, adrs, specs });
 });
 
 router.get("/:name/context/read", (req, res) => {

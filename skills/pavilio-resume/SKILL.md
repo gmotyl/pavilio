@@ -1,11 +1,20 @@
 ---
 name: pavilio-resume
-description: Lightweight execution entry that picks up a handoff file prebaked by /pavilio-manager. Reads only the handoff file and the files it points at, works the todo list top-down, logs into the same file, and marks the handoff done in BRIEFING.md when the goal is complete. Use when the user invokes `/pavilio-resume <handoff-file>` or wants to execute a handed-off task. For exploratory resumes without a handoff file, use /pavilio-session-start instead.
+description: EXPLICIT INVOCATION ONLY — use solely when the user literally types `/pavilio-resume <handoff-file>`. A bare "resume", "resume <project>", or "resume work on X" is NOT this skill; that is /pavilio-session-start. Executes a handoff file prebaked by /pavilio-manager or /pavilio-handoff: reads only that file and the files it points at, works the todo list top-down, logs into the same file, and marks the handoff done in BRIEFING.md when the goal is complete.
 ---
 
 # Pavilio Resume
 
 Lightweight by design. You are the executing subagent for a task handed off by [[pavilio-manager]].
+
+## Wrong-skill guard — check this first
+
+This skill requires an **explicit handoff file path**. Two distinct wrong-entry cases:
+
+- **Router matched on the word "resume"** ("resume", "resume <project>", "resume work on X") → stop, do not read anything, switch to [[pavilio-session-start]]. Say one line: "`resume` → using /pavilio-session-start." Pass the project if one was named; if not, session-start asks which project — don't invent one.
+- **Explicit `/pavilio-resume` with no file path** → the user chose THIS skill; don't silently re-route. Ask for the handoff file path (one question, then stop). If they don't have one, point at /pavilio-session-start.
+
+Only proceed below when the user typed `/pavilio-resume` **and** named a handoff file (or a handoff file is the unambiguous subject of the request).
 
 ## Usage
 

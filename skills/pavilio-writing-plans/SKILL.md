@@ -1,6 +1,6 @@
 ---
 name: pavilio-writing-plans
-description: Write a comprehensive, bite-sized implementation plan from an approved spec, saved under projects/<project>/plans/. Use when the user invokes `/pavilio-writing-plans` or has a spec/requirements ready to turn into an executable plan.
+description: Write a bite-sized, contract-style implementation plan from an approved spec, saved under projects/<project>/plans/. Tasks carry files, WHEN/THEN acceptance criteria, and test names — not pre-written code. Use when the user invokes `/pavilio-writing-plans` or has a spec/requirements ready to turn into an executable plan.
 ---
 
 # pavilio-writing-plans
@@ -13,7 +13,9 @@ Turn an approved spec into a bite-sized, test-first implementation plan. The one
 
 ## Overview
 
-Write plans assuming the engineer has zero context for the codebase and questionable taste. Document everything: which files to touch per task, the actual code, how to test it, docs to check. Bite-sized tasks. DRY. YAGNI. TDD. Frequent commits. Assume a skilled developer who knows almost nothing about our toolset or domain and isn't strong on test design.
+The plan is a **contract, not a transcript of the implementation**. It is executed by capable implementer sub-agents ([[pavilio-execute-plan]]) that read the repo themselves — so the plan defines *what must be true when a task is done* (files, acceptance criteria, tests), and delegates *how* to the executor. Pre-written implementation code in a plan gets written twice (plan + diff), reviewed twice, and is stale by execution time. Don't write the software in markdown.
+
+Budget: the plan should not be longer than the design doc it came from. If it is, it's carrying implementation, not intent.
 
 ## Scope check
 
@@ -25,7 +27,7 @@ Before defining tasks, map which files are created/modified and each one's singl
 
 ## Bite-sized task granularity
 
-Each step is one action (2-5 min): write the failing test → run it, see it fail → minimal implementation → run it, see it pass → commit.
+One task = one testable component or behavior: write the failing tests → see them fail → minimal implementation → see them pass → commit.
 
 ## Plan document header
 
@@ -42,6 +44,8 @@ Every plan MUST start with:
 
 **Tech Stack:** [Key technologies/libraries]
 
+**Spec:** [relative link to the -design.md this plan implements]
+
 ---
 ```
 
@@ -52,32 +56,44 @@ Every plan MUST start with:
 
 **Files:**
 - Create: `exact/path/to/file.ts`
-- Modify: `exact/path/to/existing.ts:123-145`
+- Modify: `exact/path/to/existing.ts` (`functionOrSymbolName`)
 - Test: `exact/path/to/__tests__/file.test.ts`
 
-- [ ] **Step 1: Write the failing test**
-```ts
-// actual test code
-```
-- [ ] **Step 2: Run test to verify it fails** — Run: `<cmd>` — Expected: FAIL with "<msg>"
-- [ ] **Step 3: Write minimal implementation**
-```ts
-// actual code
-```
-- [ ] **Step 4: Run test to verify it passes** — Run: `<cmd>` — Expected: PASS
-- [ ] **Step 5: Commit**
-```bash
-git add <paths> && git commit -m "feat: ..."
-```
+**Acceptance criteria:**
+- WHEN [trigger/input] THEN [observable result]
+- WHEN [edge case] THEN [behavior]
+
+**Tests (names only — red first):**
+- "test name describing the behavior it verifies"
+
+- [ ] **Step 1: Write the failing tests** — Run: `<cmd>` — Expected: FAIL
+- [ ] **Step 2: Minimal implementation** — Run: `<cmd>` — Expected: PASS
+- [ ] **Step 3: Commit** — `git add <paths> && git commit -m "feat: ..."`
 ````
+
+Anchor Modify refs to **symbols, not line numbers** — line numbers rot the moment anything else lands.
 
 Note: tests live in a `__tests__` subfolder next to the file under test (shared harness may stay in `src/test/`).
 
-## No placeholders
+## When inline code IS warranted
 
-These are plan failures — never write them: "TBD"/"TODO"/"implement later"; "add appropriate error handling / validation / edge cases"; "write tests for the above" without the test code; "similar to Task N" (repeat the code); steps that say what without showing how; references to types/functions not defined in any task.
+Include code only where the code itself is the decision being locked in:
+
+- Public API signatures / exported types the rest of the plan depends on
+- Wire formats, schemas, exact config values
+- A genuinely tricky algorithm where the approach was the point of the design
+
+Mark these as a **Contract:** block inside the task. Everything else — test bodies, implementations, boilerplate — is the implementer's job.
+
+## No vague criteria
+
+These are plan failures — never write them: "handle errors appropriately"; "add validation / edge cases" without naming them as WHEN/THEN criteria; "test the above" without test names; acceptance criteria that can't be checked against a diff; references to types/functions not defined in any task's Contract or in existing code.
+
+## Plan shelf-life
+
+Plans are written **just-in-time** — write the plan when you're about to execute it. Never park a plan: parked plans rot silently as other work lands on the same files. If work must wait, park the **spec** (behavior-level, rots slower) and write the plan when execution starts. A plan is fresh only in the session that wrote it; dispatched in any later session, it is presumed stale and must pass the staleness check in [[pavilio-execute-plan]] step 1.
 
 ## Remember
 
-- Exact file paths always. Complete code in every code step. Exact commands + expected output. DRY, YAGNI, TDD, frequent commits.
+- Exact file paths, symbol anchors, WHEN/THEN criteria, test names. Exact commands + expected outcome per step. DRY, YAGNI, TDD, frequent commits.
 - Plans in implementation are FIXED — new work becomes a new ticket, not a plan amendment.
