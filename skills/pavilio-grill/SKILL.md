@@ -84,6 +84,8 @@ Once you understand what's being built, present it in sections scaled to complex
   ````
 
   Scenarios are the acceptance criteria [[pavilio-writing-plans]] will carry into tasks and the reviewer will verify diffs against. If the project has living specs under `projects/<project>/specs/`, write deltas relative to them; [[pavilio-archive-plan]] folds them back in after the change ships.
+
+  **Recognizing living specs:** only undated per-area files (`specs/<area>.md`) containing `### Requirement:` sections count. Dated `YYYY-MM-DD-*-design.md` files found in `specs/` are legacy change specs in the wrong place — ignore them as a delta base and suggest moving them to `plans/`; never treat one as living truth.
 - **Self-review** with fresh eyes: placeholder scan (no TBD/TODO), internal consistency, scope (single plan or needs decomposition?), ambiguity (pick one interpretation, make it explicit). Fix inline.
 - **User review gate:** "Spec written and committed to `<path>`. Review it and tell me if you want changes before we write the implementation plan." Wait. On changes, edit + re-review. Only proceed on approval.
 
