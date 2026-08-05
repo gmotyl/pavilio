@@ -95,6 +95,13 @@ export function attachBroadcastSocket(ws: WebSocket): void {
   }, BROADCAST_HEARTBEAT_MS);
 
   ws.on("close", () => clearInterval(heartbeat));
+  // An `error` with no listener is an uncaught exception on a Node ws socket,
+  // and the socket may sit between `error` and `close` with the interval still
+  // ticking. Stop the heartbeat and close it out.
+  ws.on("error", () => {
+    clearInterval(heartbeat);
+    ws.close();
+  });
 }
 
 export function attachTerminalSocket(ws: WebSocket, sessionId: string): void {

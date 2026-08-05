@@ -46,6 +46,17 @@ describe("attachBroadcastSocket", () => {
     expect(ws.sent).toHaveLength(before);
   });
 
+  it("stops pinging and closes on error", () => {
+    const ws = new FakeWs();
+    attachBroadcastSocket(ws as never);
+    ws.emit("error", new Error("boom"));
+
+    expect(ws.readyState).toBe(3);
+    const before = ws.sent.length;
+    vi.advanceTimersByTime(60_000);
+    expect(ws.sent).toHaveLength(before);
+  });
+
   it("does not send once the socket is no longer OPEN", () => {
     const ws = new FakeWs();
     attachBroadcastSocket(ws as never);

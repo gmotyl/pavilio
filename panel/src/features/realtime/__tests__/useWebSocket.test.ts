@@ -128,4 +128,14 @@ describe("useWebSocket", () => {
     });
     expect(FakeWebSocket.instances).toHaveLength(count);
   });
+
+  it("leaves no timer behind after unmount, even mid-reconnect", () => {
+    const { unmount } = renderHook(() => useWebSocket());
+    // Stall the socket so a reconnect timer is pending at unmount time.
+    act(() => {
+      vi.advanceTimersByTime(40_000);
+    });
+    act(() => unmount());
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

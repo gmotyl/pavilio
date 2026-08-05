@@ -34,6 +34,7 @@ export function useWebSocket() {
     let disposed = false;
     let connections = 0;
     let lastMessageAt = Date.now();
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     function connect() {
       if (disposed) return;
@@ -57,7 +58,7 @@ export function useWebSocket() {
 
       ws.onclose = () => {
         if (disposed) return;
-        setTimeout(connect, RECONNECT_MS);
+        reconnectTimer = setTimeout(connect, RECONNECT_MS);
       };
 
       ws.onerror = () => {
@@ -85,6 +86,7 @@ export function useWebSocket() {
     return () => {
       disposed = true;
       clearInterval(watchdog);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       document.removeEventListener("visibilitychange", onVisible);
       wsRef.current?.close();
     };
