@@ -17,7 +17,8 @@ Do NOT write implementation code, scaffold, or invoke any implementation skill u
 
 All docs are project-scoped under the workspace repo root:
 
-- Spec: `projects/<project>/plans/YYYY-MM-DD-<topic>-design.md` (same dir as the implementation plan it feeds — never a separate `specs/` dir)
+- Change spec (the design doc grill writes): `projects/<project>/plans/YYYY-MM-DD-<topic>-design.md` — always in `plans/`, same dir as the implementation plan it feeds; the change spec never gets its own directory
+- Living specs (current behavior per area, distinct from the change spec): `projects/<project>/specs/<area>.md` — the base grill writes deltas against when present; maintained only by [[pavilio-archive-plan]], never written by grill
 - Glossary: `projects/<project>/CONTEXT.md` (or `CONTEXT-MAP.md` if multi-context)
 - ADRs: `projects/<project>/adr/NNNN-slug.md`
 
@@ -77,6 +78,9 @@ Once you understand what's being built, present it in sections scaled to complex
 
   ## REMOVED Requirements
   ### Requirement: <behavior that stops existing> — <why>
+  #### Scenario: <case>
+  - **WHEN** <trigger>
+  - **THEN** <behavior no longer occurs>
   ````
 
   Scenarios are the acceptance criteria [[pavilio-writing-plans]] will carry into tasks and the reviewer will verify diffs against. If the project has living specs under `projects/<project>/specs/`, write deltas relative to them; [[pavilio-archive-plan]] folds them back in after the change ships.

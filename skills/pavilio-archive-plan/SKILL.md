@@ -23,7 +23,7 @@ No args → resolve project from the session, then read `projects/<project>/plan
 
 2. **Fold spec deltas into living specs.** Read the plan's `-design.md`. For each requirement in its delta sections:
    - `ADDED` → append the requirement + scenarios to `projects/<project>/specs/<area>.md` (create the file lazily; pick `<area>` by feature domain, follow existing spec filenames first).
-   - `MODIFIED` → find the requirement in `specs/` and rewrite it to the new behavior. Missing from specs → add it (the delta is the best record of current truth).
+   - `MODIFIED` → find the requirement in `specs/` and rewrite it to the new behavior. Target missing from specs → do NOT silently reclassify: add it with a `<!-- folded from MODIFIED delta <plan>; prior behavior was undocumented -->` marker and flag it in the report + commit message so the was→is trail isn't lost.
    - `REMOVED` → delete the requirement from `specs/`.
    - Spec files are behavior-level: requirement statements + WHEN/THEN scenarios, no implementation detail.
    - Design doc has no delta sections (older spec) → distill its behavior into requirement + scenarios form first, then fold. Say you did this.

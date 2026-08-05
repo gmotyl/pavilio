@@ -91,7 +91,7 @@ These are plan failures — never write them: "handle errors appropriately"; "ad
 
 ## Plan shelf-life
 
-Plans are written **just-in-time** — write the plan when you're about to execute it. Never park a plan: parked plans rot silently as other work lands on the same files. If work must wait, park the **spec** (behavior-level, rots slower) and write the plan when execution starts. A plan not executed promptly after writing is presumed stale and must be re-validated against HEAD ([[pavilio-execute-plan]] step 1).
+Plans are written **just-in-time** — write the plan when you're about to execute it. Never park a plan: parked plans rot silently as other work lands on the same files. If work must wait, park the **spec** (behavior-level, rots slower) and write the plan when execution starts. A plan is fresh only in the session that wrote it; dispatched in any later session, it is presumed stale and must pass the staleness check in [[pavilio-execute-plan]] step 1.
 
 ## Remember
 
