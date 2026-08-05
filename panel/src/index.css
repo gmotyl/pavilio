@@ -225,6 +225,22 @@ code, pre, .font-mono {
   border-radius: 0 8px 8px 0;
 }
 
+/* Markdown tables: zebra rows + visible column lines */
+.prose table {
+  border-collapse: collapse;
+}
+.prose thead th {
+  background: var(--bg-elevated);
+}
+.prose th,
+.prose td {
+  border: 1px solid var(--border-default);
+  padding: 0.45em 0.75em;
+}
+.prose tbody tr:nth-child(even) {
+  background: var(--bg-surface);
+}
+
 /* Custom checkbox */
 input[type="checkbox"] {
   accent-color: var(--accent);
