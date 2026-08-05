@@ -29,8 +29,8 @@ If no path is given, use the in-progress plan referenced by `projects/<project>/
 
 ### Step 1 — Load and review the plan (main thread)
 1. Read the plan file end-to-end.
-2. Review it critically — surface any questions, gaps, or concerns.
-3. If concerns exist, raise them with the user **before** starting and wait.
+2. **Staleness check** — plans rot as other work lands. Verify against current HEAD: the files/symbols each task references still exist as described, and no commit since the plan was written touched the same areas in a way that invalidates a task's premise (`git log --oneline -- <paths>` since the plan's date). Anything stale → treat as a concern in 3.
+3. Review it critically — surface any questions, gaps, or concerns. If concerns exist, raise them with the user **before** starting and wait.
 4. If none, create a todo per task (checkbox `- [ ]` items in the plan map 1:1 to todos).
 5. Ensure an isolated workspace — a dedicated branch or git worktree, never `main`/`master`.
 
@@ -39,7 +39,7 @@ For each task, in order:
 
 1. **Mark it in-progress** (main thread).
 2. **Dispatch an implementer sub-agent** (general-purpose). Give it: the task's steps verbatim, the plan context it needs, the repo/project conventions, and TDD discipline (write the failing test → see it fail → minimal implementation → see it pass → commit within the task). Require a structured result: files changed, the diff range / commit SHA(s), the test/verification output pasted, and anything it could not complete.
-3. **Dispatch a reviewer sub-agent** on that task's diff. Give it the plan task + acceptance criteria, the standards sources (`qa/REVIEW_RULES.md`, `CONTEXT.md`, ADRs), and the implementer's diff range. It reports: does the diff implement the task correctly and meet documented standards? Separate **blocking** issues from nits.
+3. **Dispatch a reviewer sub-agent** on that task's diff. Give it the plan task's **WHEN/THEN acceptance criteria**, the standards sources (`qa/REVIEW_RULES.md`, `CONTEXT.md`, ADRs), and the implementer's diff range. It verifies the diff **against the acceptance criteria and standards — not against any code sketched in the plan**; divergence from plan detail is fine when the criteria are met. It reports: does each AC hold? Separate **blocking** issues from nits.
 4. **Read the review (main thread) and decide:**
    - **Clean** → mark the todo complete, update the progress note, keep the task's commit, move on.
    - **Blocking issues** → dispatch a fresh implementer sub-agent with the reviewer's findings to fix, then re-review. **Bound the loop to ~2–3 rounds**; if it doesn't converge, stop and escalate to the user.
@@ -54,7 +54,8 @@ After all tasks are complete and reviewed:
 1. Run the full test/build suite and confirm it's green — paste the actual result, don't assert success without evidence.
 2. Optionally dispatch [[pavilio-code-review]] for a branch-level two-axis (Standards + Spec) review across the whole diff.
 3. Present the completion options and let the user choose: **merge**, **open a PR**, or **leave the branch as-is**. Execute the chosen option; never merge to `main`/`master` without explicit consent.
-4. Hand off to [[pavilio-session-end]] to verify the progress note, commit, and propose any follow-ups.
+4. Once the change is merged, [[pavilio-archive-plan]] folds the spec's requirement deltas into the project's living specs and marks the plan Done in CURRENT.md — suggest it (don't run it unasked).
+5. Hand off to [[pavilio-session-end]] to verify the progress note, commit, and propose any follow-ups.
 
 ## When to stop and ask
 

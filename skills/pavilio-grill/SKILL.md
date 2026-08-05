@@ -60,6 +60,26 @@ Once you understand what's being built, present it in sections scaled to complex
 ## 5. Write + review the spec
 
 - Write the approved design to `projects/<project>/plans/YYYY-MM-DD-<topic>-design.md` and commit. It lands in `plans/` next to the `-implementation.md` plan that [[pavilio-writing-plans]] will produce from it — the panel's Plans tab is where these get read.
+- **Requirements section uses delta format** (OpenSpec-style) — state what this change does to system behavior, each requirement with concrete WHEN/THEN scenarios:
+
+  ````markdown
+  ## ADDED Requirements
+  ### Requirement: <name>
+  <one-line statement>
+  #### Scenario: <case>
+  - **WHEN** <trigger/input>
+  - **THEN** <observable result>
+
+  ## MODIFIED Requirements
+  ### Requirement: <existing behavior being changed>
+  <was → is>
+  #### Scenario: ...
+
+  ## REMOVED Requirements
+  ### Requirement: <behavior that stops existing> — <why>
+  ````
+
+  Scenarios are the acceptance criteria [[pavilio-writing-plans]] will carry into tasks and the reviewer will verify diffs against. If the project has living specs under `projects/<project>/specs/`, write deltas relative to them; [[pavilio-archive-plan]] folds them back in after the change ships.
 - **Self-review** with fresh eyes: placeholder scan (no TBD/TODO), internal consistency, scope (single plan or needs decomposition?), ambiguity (pick one interpretation, make it explicit). Fix inline.
 - **User review gate:** "Spec written and committed to `<path>`. Review it and tell me if you want changes before we write the implementation plan." Wait. On changes, edit + re-review. Only proceed on approval.
 

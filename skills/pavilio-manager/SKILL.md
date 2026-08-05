@@ -52,6 +52,7 @@ Some workspace projects are **aggregated** under one Todoist project and disting
 - Todoist task **done** → underlying work is complete; remove from focus.
 - Work open in notes/plans but **absent from Todoist** (milestone-level only) → flag with `⚠ not in Todoist` in the brief. **Right after presenting the brief, ask ONE confirm question listing all missing tasks** ("Create these N in Todoist? …"); create on confirm (mapped project + prefix), then update the brief entries with the new task links.
 - **Stale threads** — in-progress plan untouched across sessions, blocker recurring in progress files, decision pending — surface under Risks.
+- **Merged but unarchived** — when a `plans/CURRENT.md` active plan references a PR, check its state (one `gh pr view` per referenced PR; use the right token for the repo). Merged PR + plan still active → suggest `/pavilio-archive-plan <project> <plan>` under Risks ("shipped, not archived"). Suggest only — never run the archive yourself.
 - Todoist tasks due today/overdue → candidates for Top 3.
 - Handoffs checklist in existing BRIEFING.md: checked items are done (subagents check them off) — carry status forward, don't re-open.
 - **No silent drops.** Before overwriting BRIEFING.md, read the existing one. Every open item from the previous brief (Top 3, Risks, Open items, unchecked Handoffs) MUST reappear in the new brief — an item may only leave when its Todoist task is done or the user explicitly drops it. Items that fall out of Top 3 move to `## Open items`, never vanish.
