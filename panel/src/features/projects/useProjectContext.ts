@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useWebSocket } from "../realtime/useWebSocket";
 
 export interface ContextSource {
   id: string;
@@ -31,6 +32,7 @@ export interface ContextResponse {
 }
 
 export function useProjectContext(projectName: string | undefined) {
+  const { lastMessage } = useWebSocket();
   const [data, setData] = useState<ContextResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +58,11 @@ export function useProjectContext(projectName: string | undefined) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // A CONTEXT.md / ADR written while this tab is open must appear without a reload.
+  useEffect(() => {
+    if (lastMessage?.type === "file-change") refresh();
+  }, [lastMessage, refresh]);
 
   return { data, loading, error, refresh };
 }

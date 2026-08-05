@@ -7,6 +7,7 @@ import {
 } from "./terminalInstances";
 import { captureBufferSnapshot } from "./bufferSnapshot";
 import { useMobileReconnect } from "./useMobileReconnect";
+import { viewportLooksBlank } from "./viewportBlank";
 
 interface TerminalViewProps {
   sessionId: string;
@@ -154,7 +155,13 @@ export function TerminalView({
     instRef.current?.reopen();
   }, []);
 
-  useMobileReconnect({ ws, getDims, reopen });
+  const isViewportBlank = useCallback(() => {
+    const inst = instRef.current;
+    // No instance yet is not evidence of a blank screen — don't ask for a nudge.
+    return inst ? viewportLooksBlank(inst.terminal) : false;
+  }, []);
+
+  useMobileReconnect({ ws, getDims, reopen, isViewportBlank });
 
   return (
     <div

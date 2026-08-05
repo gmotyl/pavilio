@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useWebSocket } from "../realtime/useWebSocket";
 
 export interface PlanFile {
   source: string;
@@ -20,6 +21,7 @@ export interface PlansTreeResponse {
 }
 
 export function usePlansTree(projectName: string | undefined) {
+  const { lastMessage } = useWebSocket();
   const [data, setData] = useState<PlansTreeResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +47,11 @@ export function usePlansTree(projectName: string | undefined) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // A plan an agent writes while this tab is open must appear without a reload.
+  useEffect(() => {
+    if (lastMessage?.type === "file-change") refresh();
+  }, [lastMessage, refresh]);
 
   return { data, loading, error, refresh };
 }

@@ -28,16 +28,7 @@ describe("useMobileReconnect", () => {
     });
   });
 
-  it("sends mobile-nudge when tab becomes visible and ws is open", () => {
-    const { ws, sent } = fakeWs(1);
-    const reopen = vi.fn();
-    renderHook(() =>
-      useMobileReconnect({
-        ws,
-        getDims: () => ({ cols: 100, rows: 30 }),
-        reopen,
-      }),
-    );
+  function becomeVisible() {
     act(() => {
       Object.defineProperty(document, "visibilityState", {
         configurable: true,
@@ -45,9 +36,42 @@ describe("useMobileReconnect", () => {
       });
       document.dispatchEvent(new Event("visibilitychange"));
     });
+  }
+
+  // The nudge resizes the PTY twice, so the TUI fully redraws — visible as a
+  // flicker. It is only worth that when the buffer has nothing to repaint from.
+  it("does not nudge a healthy terminal that still has content", () => {
+    const { ws, sent } = fakeWs(1);
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+        isViewportBlank: () => false,
+      }),
+    );
+    becomeVisible();
+    expect(sent).toEqual([]);
+    expect(reopen).not.toHaveBeenCalled();
+  });
+
+  it("sends mobile-nudge when the viewport came back blank", () => {
+    const { ws, sent } = fakeWs(1);
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+        isViewportBlank: () => true,
+      }),
+    );
+    becomeVisible();
     expect(sent.some((m) => JSON.parse(m).type === "mobile-nudge")).toBe(true);
     expect(reopen).not.toHaveBeenCalled();
   });
+
 
   it("calls reopen when ws is closed on visibility return", () => {
     const { ws } = fakeWs(3); // CLOSED
@@ -57,6 +81,7 @@ describe("useMobileReconnect", () => {
         ws,
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
+        isViewportBlank: () => false,
       }),
     );
     act(() => {
@@ -73,6 +98,7 @@ describe("useMobileReconnect", () => {
         ws,
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
+        isViewportBlank: () => false,
       }),
     );
     // No "message" events pushed → lastMessageAt stays at init.
@@ -90,6 +116,7 @@ describe("useMobileReconnect", () => {
         ws,
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
+        isViewportBlank: () => false,
       }),
     );
     act(() => {
