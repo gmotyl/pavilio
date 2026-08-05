@@ -24,11 +24,15 @@ export interface AdrFile {
   /** Set when the file lives under projectsDir; null for linked-repo files. */
   relativeToProjectsDir: string | null;
 }
+/** Living spec (current behavior of a feature area) under <project>/specs/. */
+export type SpecFile = ContextFile;
 export interface ContextResponse {
   project: string;
   sources: ContextSource[];
   contexts: ContextFile[];
   adrs: AdrFile[];
+  /** Absent from older servers — treat as empty. */
+  specs?: SpecFile[];
 }
 
 export function useProjectContext(projectName: string | undefined) {

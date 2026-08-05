@@ -26,7 +26,7 @@ Determine `<project>` from the conversation / cwd / an in-progress `plans/CURREN
 
 ## 1. Auto-detect entry mode
 
-Explore context first: read recent commits, `projects/<project>/plans/CURRENT.md`, any spec/draft the user points at, `CONTEXT.md`, and the `adr/` listing (don't pre-read every ADR — open one only when the topic touches it).
+Explore context first: read recent commits, `projects/<project>/plans/CURRENT.md`, any spec/draft the user points at, `CONTEXT.md`, the `adr/` listing (don't pre-read every ADR — open one only when the topic touches it), and the `specs/` listing — read the living spec file(s) for the area(s) the topic touches; they describe shipped behavior and are the base the new design's deltas are written against.
 
 - **Plan/spec/draft exists** → **grill mode**: stress-test what's there.
 - **Only a raw idea** → **design mode**: build the design first, applying grill tactics throughout.

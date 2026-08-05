@@ -7,6 +7,7 @@ import {
   fetchContextFile,
   type AdrFile,
   type ContextFile,
+  type SpecFile,
 } from "./useProjectContext";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
@@ -24,15 +25,17 @@ function adrLabel(a: AdrFile): string {
 function SourceRows({
   contexts,
   adrs,
+  specs,
   selectedPath,
   onSelect,
 }: {
   contexts: ContextFile[];
   adrs: AdrFile[];
+  specs: SpecFile[];
   selectedPath: string | null;
   onSelect: (absolutePath: string) => void;
 }) {
-  if (contexts.length === 0 && adrs.length === 0) {
+  if (contexts.length === 0 && adrs.length === 0 && specs.length === 0) {
     return (
       <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
         (no context or decisions)
@@ -49,6 +52,24 @@ function SourceRows({
           title={c.absolutePath}
           selected={selectedPath === c.absolutePath}
           onSelect={() => onSelect(c.absolutePath)}
+        />
+      ))}
+      {specs.length > 0 && (
+        <p
+          className="text-[10px] uppercase tracking-widest px-2 pt-2 pb-0.5"
+          style={{ color: "var(--text-tertiary)" }}
+        >
+          Specs
+        </p>
+      )}
+      {specs.map((s) => (
+        <FileRow
+          key={s.absolutePath}
+          testId={`context-tab-spec-${s.source}-${s.filename}`}
+          label={s.filename}
+          title={s.absolutePath}
+          selected={selectedPath === s.absolutePath}
+          onSelect={() => onSelect(s.absolutePath)}
         />
       ))}
       {adrs.length > 0 && (
@@ -104,7 +125,7 @@ export default function ContextTab({ projectName }: Props) {
   // undefined — relative refs won't rewrite, but the markdown still renders.
   const selectedBasePath = useMemo(() => {
     if (!data || !selectedPath) return undefined;
-    const hit = [...data.contexts, ...data.adrs].find(
+    const hit = [...data.contexts, ...data.adrs, ...(data.specs ?? [])].find(
       (f) => f.absolutePath === selectedPath,
     );
     return hit?.relativeToProjectsDir ?? undefined;
@@ -133,10 +154,14 @@ export default function ContextTab({ projectName }: Props) {
 
   const grouped = useMemo(() => {
     if (!data) return null;
-    const bySource = new Map<string, { contexts: ContextFile[]; adrs: AdrFile[] }>();
-    for (const s of data.sources) bySource.set(s.id, { contexts: [], adrs: [] });
+    const bySource = new Map<
+      string,
+      { contexts: ContextFile[]; adrs: AdrFile[]; specs: SpecFile[] }
+    >();
+    for (const s of data.sources) bySource.set(s.id, { contexts: [], adrs: [], specs: [] });
     for (const c of data.contexts) bySource.get(c.source)?.contexts.push(c);
     for (const a of data.adrs) bySource.get(a.source)?.adrs.push(a);
+    for (const sp of data.specs ?? []) bySource.get(sp.source)?.specs.push(sp);
     return bySource;
   }, [data]);
 
@@ -156,7 +181,8 @@ export default function ContextTab({ projectName }: Props) {
   }
   if (!data || !grouped) return null;
 
-  const anyFile = data.contexts.length > 0 || data.adrs.length > 0;
+  const anyFile =
+    data.contexts.length > 0 || data.adrs.length > 0 || (data.specs ?? []).length > 0;
 
   const sources: FileListSource[] = !anyFile
     ? []
@@ -167,7 +193,7 @@ export default function ContextTab({ projectName }: Props) {
           {
             id: s.id,
             label: s.label,
-            count: bucket.contexts.length + bucket.adrs.length,
+            count: bucket.contexts.length + bucket.adrs.length + bucket.specs.length,
             hint: s.id !== "project" ? "(linked repo)" : undefined,
             renderHeader:
               s.id === "project"
@@ -177,6 +203,7 @@ export default function ContextTab({ projectName }: Props) {
               <SourceRows
                 contexts={bucket.contexts}
                 adrs={bucket.adrs}
+                specs={bucket.specs}
                 selectedPath={selectedPath}
                 onSelect={setSelectedPath}
               />
