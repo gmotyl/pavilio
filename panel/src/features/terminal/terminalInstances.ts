@@ -154,18 +154,47 @@ export function refitAllAndFollow(): void {
  *
  * Exported as a pure helper so it can be unit-tested without a real
  * Terminal/jsdom wiring.
+ *
+ * Also owns the Ctrl+C / Ctrl+Shift+C split (Windows convention: Ctrl+C
+ * copies when text is selected, Ctrl+Shift+C always cancels):
+ *   - Ctrl+C with a selection: return false to stop xterm sending its own
+ *     `\x03` (xterm's default handler would send it regardless of
+ *     selection), but deliberately skip preventDefault so the browser's
+ *     native copy-on-Ctrl+C still fires. Net effect: copy only.
+ *   - Ctrl+C with no selection: nothing to copy, so fall back to sending
+ *     the interrupt — a bare Ctrl+C still cancels a runaway process,
+ *     matching native Windows Terminal/cmd.exe muscle memory.
+ *   - Ctrl+Shift+C: always sends the interrupt, regardless of selection —
+ *     an explicit, unambiguous cancel chord. preventDefault/stopPropagation
+ *     are required here (unlike the plain-Ctrl+C branch) because this key
+ *     isn't a native copy shortcut; nothing else should react to it.
  */
-export function shiftEnterHandler(sendToPty: (data: string) => void) {
-  return (e: { type: string; key: string; shiftKey: boolean; ctrlKey?: boolean }) => {
+export function shiftEnterHandler(
+  sendToPty: (data: string) => void,
+  hasSelection: () => boolean = () => false,
+) {
+  return (e: {
+    type: string;
+    key: string;
+    shiftKey: boolean;
+    ctrlKey?: boolean;
+    preventDefault?: () => void;
+    stopPropagation?: () => void;
+  }) => {
     if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
       sendToPty("\\\r");
       return false; // stop xterm from also sending \r
     }
-    // Windows fix: xterm's default Ctrl+C copies selected text instead of
-    // sending ^C when there is a selection. Always send interrupt here so
-    // Ctrl+C reliably interrupts a running process on all platforms.
-    // Ctrl+Shift+C is left unhandled so xterm can use it for clipboard copy.
-    if (e.type === "keydown" && e.ctrlKey && !e.shiftKey && e.key === "c") {
+    if (e.type === "keydown" && e.ctrlKey && e.key.toLowerCase() === "c") {
+      if (e.shiftKey) {
+        sendToPty("\x03");
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        return false;
+      }
+      if (hasSelection()) {
+        return false; // let the browser's native copy handle it
+      }
       sendToPty("\x03");
       return false;
     }
@@ -513,7 +542,9 @@ function createInstance(sessionId: string): InternalInstance {
     },
   };
 
-  terminal.attachCustomKeyEventHandler(shiftEnterHandler(inst.send));
+  terminal.attachCustomKeyEventHandler(
+    shiftEnterHandler(inst.send, () => terminal.hasSelection()),
+  );
   sendToPtyRef.current = inst.send;
 
   // Windows fix — Ctrl+V: intercept keydown in capture phase before xterm
