@@ -10,6 +10,7 @@ import WideToggle from "../shell/WideToggle";
 import ImageDropZone from "./ImageDropZone";
 import MarkdownRenderer from "./MarkdownRenderer";
 import { copyToClipboard } from "../../lib/clipboard";
+import { openInVSCode as openPathInVSCode } from "../../lib/vscode";
 
 /**
  * Build the /api/files/read/... URL from a route path.
@@ -65,7 +66,7 @@ export default function MarkdownViewer() {
   }, [lastMessage]);
 
   const openInVSCode = useCallback(() => {
-    window.open(`vscode://file/${absolutePath}`, "_self");
+    void openPathInVSCode(absolutePath);
   }, [absolutePath]);
 
   const copyPath = useCallback(async () => {
