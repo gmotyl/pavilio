@@ -248,4 +248,78 @@ describe("shiftEnterHandler", () => {
     expect(send).not.toHaveBeenCalled();
     expect(result).toBe(true);
   });
+
+  // The copy is xterm's own `copy` DOM listener, which this helper never
+  // touches — all it must do is claim the keydown (return false, so xterm
+  // does not also emit \x03) without suppressing it (no preventDefault /
+  // stopPropagation, so the browser still fires `copy`). Those three
+  // assertions are the whole contract that keeps copy-on-selection working;
+  // asserting on the clipboard itself would be testing xterm, not us.
+  it("Ctrl+C with a selection: claims the keydown without suppressing its default", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const send = vi.fn();
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const handler = shiftEnterHandler(send, () => true);
+
+    const result = handler({
+      type: "keydown",
+      key: "c",
+      shiftKey: false,
+      ctrlKey: true,
+      preventDefault,
+      stopPropagation,
+    });
+
+    expect(send).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(stopPropagation).not.toHaveBeenCalled();
+    expect(result).toBe(false);
+  });
+
+  it("Ctrl+C with no selection: sends interrupt (cancel fallback)", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const send = vi.fn();
+    const handler = shiftEnterHandler(send, () => false);
+
+    const result = handler({ type: "keydown", key: "c", shiftKey: false, ctrlKey: true });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("\x03");
+    expect(result).toBe(false);
+  });
+
+  it("Ctrl+Shift+C: always sends interrupt and prevents default, even with a selection", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const send = vi.fn();
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const handler = shiftEnterHandler(send, () => true);
+
+    const result = handler({
+      type: "keydown",
+      key: "C",
+      shiftKey: true,
+      ctrlKey: true,
+      preventDefault,
+      stopPropagation,
+    });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("\x03");
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(stopPropagation).toHaveBeenCalledTimes(1);
+    expect(result).toBe(false);
+  });
+
+  it("plain 'c' with no ctrl: does not intercept", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const send = vi.fn();
+    const handler = shiftEnterHandler(send, () => true);
+
+    const result = handler({ type: "keydown", key: "c", shiftKey: false, ctrlKey: false });
+
+    expect(send).not.toHaveBeenCalled();
+    expect(result).toBe(true);
+  });
 });
