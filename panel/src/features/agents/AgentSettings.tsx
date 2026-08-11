@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ExternalLink, Copy, Check, FileText, ChevronDown, ChevronRight, Save, Pencil, X, Play, AlertTriangle } from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
+import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 
 interface SettingsFile {
   name: string;
@@ -280,7 +281,7 @@ function FileViewer({ file }: { file: SettingsFile }) {
 
   const openInVSCode = (e: React.MouseEvent) => {
     e.stopPropagation();
-    window.open(`vscode://file/${file.path}`, "_self");
+    void openPathInVSCode(file.path);
   };
 
   const copyPath = async (e: React.MouseEvent) => {
