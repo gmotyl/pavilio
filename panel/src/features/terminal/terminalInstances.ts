@@ -159,15 +159,30 @@ export function refitAllAndFollow(): void {
  * copies when text is selected, Ctrl+Shift+C always cancels):
  *   - Ctrl+C with a selection: return false to stop xterm sending its own
  *     `\x03` (xterm's default handler would send it regardless of
- *     selection), but deliberately skip preventDefault so the browser's
- *     native copy-on-Ctrl+C still fires. Net effect: copy only.
+ *     selection), but deliberately skip preventDefault so the browser
+ *     still issues its copy command. Net effect: copy only.
+ *
+ *     The copy itself is xterm's, not the DOM's: `Terminal._initGlobal`
+ *     registers a `copy` listener on `terminal.element` whose handler is
+ *     `clipboardData.setData("text/plain", selectionService.selectionText)`
+ *     (@xterm/xterm 6.0.0). It reads xterm's own selection model, so it
+ *     does not depend on the canvas selection being bridged into a DOM
+ *     range, and behaves the same on every browser/OS. All this branch has
+ *     to do is not swallow the keydown: `Terminal._keyDown` bails at
+ *     `if (this._customKeyEventHandler(e) === false) return false` before
+ *     `evaluateKeyboardEvent` can emit `\x03`, while the un-prevented
+ *     default still fires the `copy` event. This is unchanged from the
+ *     pre-PR behaviour — the bug was the extra `\x03` alongside the copy,
+ *     never the copy itself.
  *   - Ctrl+C with no selection: nothing to copy, so fall back to sending
  *     the interrupt — a bare Ctrl+C still cancels a runaway process,
  *     matching native Windows Terminal/cmd.exe muscle memory.
  *   - Ctrl+Shift+C: always sends the interrupt, regardless of selection —
- *     an explicit, unambiguous cancel chord. preventDefault/stopPropagation
- *     are required here (unlike the plain-Ctrl+C branch) because this key
- *     isn't a native copy shortcut; nothing else should react to it.
+ *     an explicit, unambiguous cancel chord. This deliberately takes the
+ *     chord away from xterm's stock copy binding; Ctrl+C above is the copy
+ *     chord now, so no copy capability is lost. preventDefault/
+ *     stopPropagation are required here (unlike the plain-Ctrl+C branch)
+ *     because this key is no longer meant to reach anything else.
  */
 export function shiftEnterHandler(
   sendToPty: (data: string) => void,
@@ -193,7 +208,9 @@ export function shiftEnterHandler(
         return false;
       }
       if (hasSelection()) {
-        return false; // let the browser's native copy handle it
+        // No preventDefault/stopPropagation: the un-prevented default is
+        // what fires the `copy` event xterm listens for (see above).
+        return false;
       }
       sendToPty("\x03");
       return false;

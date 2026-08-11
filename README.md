@@ -263,6 +263,19 @@ Shows `git status` for each project. Stage files, write a commit message, and pu
 
 Right-hand sidebar showing the file tree for the active project. Click to navigate, right-click for basic file operations.
 
+### Terminal
+
+Full terminal sessions in the browser, one per agent. Keyboard shortcuts differ from stock xterm.js so that copy and cancel never fire from the same chord on Windows:
+
+| Chord | Action |
+| --- | --- |
+| `Ctrl+C` | Copies the selection. With nothing selected, sends the interrupt (`^C`) instead. |
+| `Ctrl+Shift+C` | Always sends the interrupt, even with a selection — the unambiguous cancel chord. |
+| `Ctrl+V` | Pastes. |
+| `Shift+Enter` | Inserts a continuation (`\` + newline) rather than submitting. |
+
+Note that `Ctrl+Shift+C` is **not** copy here, which is where it differs from most terminals — `Ctrl+C` took over that job.
+
 ## Using as Your Upstream
 
 Fork this repo as the foundation for your private workspace. Upgrades sync via rsync — your private files are never touched.

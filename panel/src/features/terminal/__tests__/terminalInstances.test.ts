@@ -249,10 +249,17 @@ describe("shiftEnterHandler", () => {
     expect(result).toBe(true);
   });
 
-  it("Ctrl+C with a selection: does not send interrupt, does not preventDefault (lets native copy fire)", async () => {
+  // The copy is xterm's own `copy` DOM listener, which this helper never
+  // touches — all it must do is claim the keydown (return false, so xterm
+  // does not also emit \x03) without suppressing it (no preventDefault /
+  // stopPropagation, so the browser still fires `copy`). Those three
+  // assertions are the whole contract that keeps copy-on-selection working;
+  // asserting on the clipboard itself would be testing xterm, not us.
+  it("Ctrl+C with a selection: claims the keydown without suppressing its default", async () => {
     const { shiftEnterHandler } = await import("../terminalInstances");
     const send = vi.fn();
     const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
     const handler = shiftEnterHandler(send, () => true);
 
     const result = handler({
@@ -261,10 +268,12 @@ describe("shiftEnterHandler", () => {
       shiftKey: false,
       ctrlKey: true,
       preventDefault,
+      stopPropagation,
     });
 
     expect(send).not.toHaveBeenCalled();
     expect(preventDefault).not.toHaveBeenCalled();
+    expect(stopPropagation).not.toHaveBeenCalled();
     expect(result).toBe(false);
   });
 
