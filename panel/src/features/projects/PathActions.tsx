@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ExternalLink, Copy, Check } from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
-import { openInVSCode } from "../../lib/vscode";
+import { openInVSCode } from "../shell/vscode";
 
 /** "VS Code" + "Copy path" buttons shared by the file viewers. */
 export function PathActions({ absolutePath }: { absolutePath: string }) {

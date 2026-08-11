@@ -10,7 +10,7 @@ import WideToggle from "../shell/WideToggle";
 import ImageDropZone from "./ImageDropZone";
 import MarkdownRenderer from "./MarkdownRenderer";
 import { copyToClipboard } from "../../lib/clipboard";
-import { openInVSCode as openPathInVSCode } from "../../lib/vscode";
+import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 
 /**
  * Build the /api/files/read/... URL from a route path.

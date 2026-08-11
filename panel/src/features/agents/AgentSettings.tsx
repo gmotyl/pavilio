@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ExternalLink, Copy, Check, FileText, ChevronDown, ChevronRight, Save, Pencil, X, Play, AlertTriangle } from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
-import { openInVSCode as openPathInVSCode } from "../../lib/vscode";
+import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 
 interface SettingsFile {
   name: string;

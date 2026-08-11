@@ -28,7 +28,7 @@ import { useFloatingAction, useScrollContainer } from "../shell/Layout";
 import { useReposTabMemory } from "../shell/useReposTabMemory";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
-import { openInVSCode } from "../../lib/vscode";
+import { openInVSCode } from "../shell/vscode";
 import { useProjects } from "./useProjects";
 import { useTabScrollMemory } from "./useTabScrollMemory";
 import ProjectTerminalsSurface from "../terminal/ProjectTerminalsSurface";
