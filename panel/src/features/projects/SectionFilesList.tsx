@@ -1,11 +1,13 @@
 import type { FileEntry } from "../explorer/useFileIndex";
 import { useFileDragSource, useFileDropTarget } from "../explorer/useFileDrag";
 import FileRow from "./FileRow";
+import { filterAndSortFiles, type SortKey, type SortDir } from "./fileListControls";
 
 interface Props {
   projectName: string;
   section: string;
-  files: FileEntry[];
+  rows: SectionRow[];
+  filterActive: boolean;
   selectedPath: string | null;
   onSelect: (relativePath: string) => void;
 }
@@ -115,14 +117,28 @@ export function sectionRows(section: string, files: FileEntry[]): SectionRow[] {
   }));
 }
 
+export function visibleSectionRows(
+  section: string,
+  files: FileEntry[],
+  controls: { query: string; sortKey: SortKey; sortDir: SortDir },
+): SectionRow[] {
+  return filterAndSortFiles(sectionRows(section, files), {
+    getName: (r) => r.label,
+    getMtime: (r) => r.file.modified,
+    query: controls.query,
+    sortKey: controls.sortKey,
+    sortDir: controls.sortDir,
+  });
+}
+
 export function SectionFilesList({
   projectName,
   section,
-  files,
+  rows,
+  filterActive,
   selectedPath,
   onSelect,
 }: Props) {
-  const rows = sectionRows(section, files);
   const withYear = section !== "qa";
 
   const rowList = (
@@ -141,11 +157,17 @@ export function SectionFilesList({
     </div>
   );
 
+  const emptyMessage = filterActive
+    ? "No files match."
+    : section === "qa"
+      ? "No QA runs found."
+      : "No files in this section.";
+
   if (section === "qa") {
     if (rows.length === 0) {
       return (
         <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
-          No QA runs found.
+          {emptyMessage}
         </p>
       );
     }
@@ -157,7 +179,7 @@ export function SectionFilesList({
       <SectionDropStrip projectName={projectName} section={section} />
       {rows.length === 0 ? (
         <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
-          No files in this section.
+          {emptyMessage}
         </p>
       ) : (
         rowList
