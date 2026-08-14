@@ -33,6 +33,8 @@ interface Props {
   onRefresh?: () => void;
   /** Rendered above the source list, e.g. the QA review-rules block. */
   aboveList?: ReactNode;
+  /** Filter/sort bar rendered above the source list (expanded view only). */
+  controls?: ReactNode;
 }
 
 function SourceGroup({
@@ -85,6 +87,7 @@ export default function FileListSidebar({
   detail,
   onRefresh,
   aboveList,
+  controls,
 }: Props) {
   const { collapsed, toggle } = useFileListSidebar();
   const total = sources.reduce((sum, s) => sum + s.count, 0);
@@ -150,6 +153,7 @@ export default function FileListSidebar({
           </div>
         </div>
 
+        {controls}
         {aboveList}
 
         <div className="text-sm">
