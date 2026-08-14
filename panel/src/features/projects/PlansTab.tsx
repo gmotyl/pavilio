@@ -19,6 +19,8 @@ import {
   type PlanSource,
 } from "./usePlansTree";
 import { usePlanDragSource, usePlanDropTarget } from "./usePlanDrag";
+import { useFileListControls, filterAndSortFiles } from "./fileListControls";
+import { useAutoSelectNewest } from "./useAutoSelectNewest";
 import PathActions from "./PathActions";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
@@ -264,6 +266,36 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
     refresh();
   };
 
+  const controls = useFileListControls();
+
+  const sortOpts = {
+    getName: (f: PlanFile) => f.filename,
+    getMtime: (f: PlanFile) => f.modified,
+    query: controls.debouncedQuery,
+    sortKey: controls.sortKey,
+    sortDir: controls.sortDir,
+  };
+
+  const projectFiles = data?.sources.find((s) => s.id === "project")?.files ?? [];
+  const starred = projectFiles.filter((f) => currentByFilename.has(f.filename));
+  const preferredKey = starred.length
+    ? starred.reduce((a, b) => (b.modified > a.modified ? b : a)).absolutePath
+    : null;
+
+  const candidates = useMemo(
+    () =>
+      (data?.sources ?? [])
+        .flatMap((s) => filterAndSortFiles(s.files, sortOpts))
+        .map((f) => ({ key: f.absolutePath, mtime: f.modified })),
+    [data, controls.debouncedQuery, controls.sortKey, controls.sortDir],
+  );
+  useAutoSelectNewest({
+    candidates,
+    selectedPath,
+    onSelect: setSelectedPath,
+    preferredKey,
+  });
+
   if (loading && !data) {
     return (
       <p className="text-sm" style={{ color: "var(--text-muted)" }}>
@@ -280,31 +312,34 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
   }
   if (!data) return null;
 
-  const sources: FileListSource[] = data.sources.map((s) => ({
-    id: s.id,
-    label: s.id === "project" ? "projects (current)" : s.label,
-    count: s.files.length,
-    hint: s.id !== "project" && s.id !== "claude" ? "(.kilo)" : undefined,
-    renderHeader: (header) => (
-      <PlanSourceHeader
-        projectName={projectName}
-        sourceId={s.id}
-        onMoved={refresh}
-        header={header}
-      />
-    ),
-    rows: (
-      <PlanRows
-        source={s}
-        projectName={projectName}
-        selectedPath={selectedPath}
-        currentByFilename={s.id === "project" ? currentByFilename : new Map()}
-        onOpen={onOpen}
-        onStar={onStar}
-        onUnstar={onUnstar}
-      />
-    ),
-  }));
+  const sources: FileListSource[] = data.sources.map((s) => {
+    const files = filterAndSortFiles(s.files, sortOpts);
+    return {
+      id: s.id,
+      label: s.id === "project" ? "projects (current)" : s.label,
+      count: files.length,
+      hint: s.id !== "project" && s.id !== "claude" ? "(.kilo)" : undefined,
+      renderHeader: (header) => (
+        <PlanSourceHeader
+          projectName={projectName}
+          sourceId={s.id}
+          onMoved={refresh}
+          header={header}
+        />
+      ),
+      rows: (
+        <PlanRows
+          source={{ ...s, files }}
+          projectName={projectName}
+          selectedPath={selectedPath}
+          currentByFilename={s.id === "project" ? currentByFilename : new Map()}
+          onOpen={onOpen}
+          onStar={onStar}
+          onUnstar={onUnstar}
+        />
+      ),
+    };
+  });
 
   return (
     <FileListSidebar
@@ -312,6 +347,7 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
       title="Plans"
       icon={<ClipboardList size={16} style={{ color: "var(--accent)" }} />}
       sources={sources}
+      controls={controls.controlsBar}
       onRefresh={refresh}
       detail={
         <>
