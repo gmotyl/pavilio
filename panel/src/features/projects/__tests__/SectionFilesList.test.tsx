@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import SectionFilesList, { sectionRows } from "../SectionFilesList";
+import SectionFilesList, { sectionRows, visibleSectionRows } from "../SectionFilesList";
 
 const files = [
   { relativePath: "p/notes/a.md", modified: Date.parse("2026-07-14T00:00:00.000Z") },
@@ -39,7 +39,8 @@ describe("SectionFilesList rows", () => {
       <SectionFilesList
         projectName="p"
         section="notes"
-        files={files}
+        rows={sectionRows("notes", files)}
+        filterActive={false}
         selectedPath={null}
         onSelect={onSelect}
       />,
@@ -54,7 +55,8 @@ describe("SectionFilesList rows", () => {
       <SectionFilesList
         projectName="p"
         section="notes"
-        files={files}
+        rows={sectionRows("notes", files)}
+        filterActive={false}
         selectedPath="p/notes/a.md"
         onSelect={() => {}}
       />,
@@ -68,7 +70,8 @@ describe("SectionFilesList rows", () => {
       <SectionFilesList
         projectName="p"
         section="notes"
-        files={files}
+        rows={sectionRows("notes", files)}
+        filterActive={false}
         selectedPath={null}
         onSelect={() => {}}
       />,
@@ -81,7 +84,8 @@ describe("SectionFilesList rows", () => {
       <SectionFilesList
         projectName="p"
         section="notes"
-        files={files}
+        rows={sectionRows("notes", files)}
+        filterActive={false}
         selectedPath={null}
         onSelect={() => {}}
       />,
@@ -99,7 +103,8 @@ describe("SectionFilesList qa branch", () => {
       <SectionFilesList
         projectName="p"
         section="qa"
-        files={qaFiles}
+        rows={sectionRows("qa", qaFiles)}
+        filterActive={false}
         selectedPath={null}
         onSelect={onSelect}
       />,
@@ -135,7 +140,8 @@ describe("SectionFilesList qa branch", () => {
       <SectionFilesList
         projectName="p"
         section="qa"
-        files={qaFiles}
+        rows={sectionRows("qa", qaFiles)}
+        filterActive={false}
         selectedPath={null}
         onSelect={() => {}}
       />,
@@ -153,7 +159,8 @@ describe("SectionFilesList qa branch", () => {
       <SectionFilesList
         projectName="p"
         section="qa"
-        files={[{ relativePath: "p/qa/REVIEW_RULES.md", modified: 0 }] as never[]}
+        rows={sectionRows("qa", [{ relativePath: "p/qa/REVIEW_RULES.md", modified: 0 }] as never[])}
+        filterActive={false}
         selectedPath={null}
         onSelect={() => {}}
       />,
@@ -176,7 +183,8 @@ describe("sectionRows drives both the count and the rows", () => {
       <SectionFilesList
         projectName="p"
         section="qa"
-        files={qaFiles}
+        rows={sectionRows("qa", qaFiles)}
+        filterActive={false}
         selectedPath={null}
         onSelect={() => {}}
       />,
@@ -191,4 +199,44 @@ describe("sectionRows drives both the count and the rows", () => {
       "b.md",
     ]);
   });
+});
+
+it("shows the no-match line when a filter is active and rows are empty", () => {
+  render(
+    <SectionFilesList
+      projectName="proj"
+      section="notes"
+      rows={[]}
+      filterActive
+      selectedPath={null}
+      onSelect={() => {}}
+    />,
+  );
+  expect(screen.getByText("No files match.")).toBeInTheDocument();
+});
+
+it("visibleSectionRows filters and sorts qa runs by folder label", () => {
+  const qaFiles = [
+    { relativePath: "proj/qa/2026-01-02-run/run.md", project: "proj", modified: 5 },
+    { relativePath: "proj/qa/2026-01-01-run/run.md", project: "proj", modified: 9 },
+  ];
+  const out = visibleSectionRows("qa", qaFiles, {
+    query: "",
+    sortKey: "date",
+    sortDir: "desc",
+  });
+  expect(out.map((r) => r.label)).toEqual(["2026-01-01-run", "2026-01-02-run"]); // newest mtime first
+});
+
+it("visibleSectionRows filters notes by substring", () => {
+  const files = [
+    { relativePath: "proj/notes/alpha.md", project: "proj", modified: 2 },
+    { relativePath: "proj/notes/beta.md", project: "proj", modified: 1 },
+  ];
+  const out = visibleSectionRows("notes", files, {
+    query: "alph",
+    sortKey: "date",
+    sortDir: "desc",
+  });
+  expect(out.map((r) => r.label)).toEqual(["alpha.md"]);
 });

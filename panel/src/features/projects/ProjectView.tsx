@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import { useFileIndex } from "../explorer/useFileIndex";
@@ -6,7 +6,9 @@ import { useGitViewMode } from "../git/useGitViewMode";
 import RepoBlock from "./RepoBlock";
 import ProjectSearchBar from "./ProjectSearchBar";
 import FileViewer from "./FileViewer";
-import SectionFilesList, { sectionRows } from "./SectionFilesList";
+import SectionFilesList, { visibleSectionRows } from "./SectionFilesList";
+import { useFileListControls } from "./fileListControls";
+import { useAutoSelectNewest } from "./useAutoSelectNewest";
 import FileListSidebar from "./FileListSidebar";
 import ContextTab from "./ContextTab";
 import PlansTab from "./PlansTab";
@@ -143,6 +145,34 @@ export default function ProjectView() {
           })
           .sort((a, b) => b.modified - a.modified)
       : [];
+
+  const sectionControls = useFileListControls();
+  const visibleRows = useMemo(
+    () =>
+      section && !SPECIAL_SECTIONS.has(section)
+        ? visibleSectionRows(section, sectionFiles, {
+            query: sectionControls.debouncedQuery,
+            sortKey: sectionControls.sortKey,
+            sortDir: sectionControls.sortDir,
+          })
+        : [],
+    [
+      section,
+      sectionFiles,
+      sectionControls.debouncedQuery,
+      sectionControls.sortKey,
+      sectionControls.sortDir,
+    ],
+  );
+  const sectionCandidates = useMemo(
+    () => visibleRows.map((r) => ({ key: r.file.relativePath, mtime: r.file.modified })),
+    [visibleRows],
+  );
+  useAutoSelectNewest({
+    candidates: sectionCandidates,
+    selectedPath: selectedFile,
+    onSelect: setSelectedFile,
+  });
 
   const { tabs, activeTab } = useProjectTabs({
     projectName: name,
@@ -292,17 +322,19 @@ export default function ProjectView() {
         <FileListSidebar
           testId="section-files"
           title={sectionTitle(section)}
+          controls={sectionControls.controlsBar}
           sources={[
             {
               id: section,
               label: sectionTitle(section),
               // Same helper the rows come from, so the badge counts what renders.
-              count: sectionRows(section, sectionFiles).length,
+              count: visibleRows.length,
               rows: (
                 <SectionFilesList
                   projectName={name || ""}
                   section={section}
-                  files={sectionFiles}
+                  rows={visibleRows}
+                  filterActive={sectionControls.debouncedQuery.trim().length > 0}
                   selectedPath={selectedFile}
                   onSelect={setSelectedFile}
                 />

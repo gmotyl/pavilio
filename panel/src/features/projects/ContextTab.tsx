@@ -11,6 +11,8 @@ import {
 } from "./useProjectContext";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
+import { useFileListControls, filterAndSortFiles } from "./fileListControls";
+import { useAutoSelectNewest } from "./useAutoSelectNewest";
 
 interface Props {
   projectName: string;
@@ -165,6 +167,26 @@ export default function ContextTab({ projectName }: Props) {
     return bySource;
   }, [data]);
 
+  const controls = useFileListControls();
+
+  const autoSelectCandidates = useMemo(() => {
+    if (!data) return [];
+    const q = controls.debouncedQuery.trim().toLowerCase();
+    const match = (name: string) => !q || name.toLowerCase().includes(q);
+    const items = [
+      ...data.contexts.filter((c) => match(c.filename)),
+      ...(data.specs ?? []).filter((s) => match(s.filename)),
+      ...data.adrs.filter((a) => match(adrLabel(a))),
+    ];
+    return items.map((f) => ({ key: f.absolutePath, mtime: f.modified }));
+  }, [data, controls.debouncedQuery]);
+
+  useAutoSelectNewest({
+    candidates: autoSelectCandidates,
+    selectedPath,
+    onSelect: setSelectedPath,
+  });
+
   if (loading && !data) {
     return (
       <p className="text-sm" style={{ color: "var(--text-muted)" }}>
@@ -184,16 +206,37 @@ export default function ContextTab({ projectName }: Props) {
   const anyFile =
     data.contexts.length > 0 || data.adrs.length > 0 || (data.specs ?? []).length > 0;
 
+  const applyBucket = <T extends { filename: string; modified: number }>(
+    items: T[],
+    getName: (i: T) => string,
+  ) =>
+    filterAndSortFiles(items, {
+      getName,
+      getMtime: (i) => i.modified,
+      query: controls.debouncedQuery,
+      sortKey: controls.sortKey,
+      sortDir: controls.sortDir,
+    });
+
   const sources: FileListSource[] = !anyFile
     ? []
     : data.sources.flatMap((s) => {
         const bucket = grouped.get(s.id);
         if (!bucket) return [];
+        const contexts = applyBucket(bucket.contexts, (c) => c.filename);
+        const specs = applyBucket(bucket.specs, (sp) => sp.filename);
+        const adrs = applyBucket(bucket.adrs, (a) => adrLabel(a));
+        if (
+          controls.debouncedQuery.trim() &&
+          contexts.length + specs.length + adrs.length === 0
+        ) {
+          return []; // hide a source with no matches under an active filter
+        }
         return [
           {
             id: s.id,
             label: s.label,
-            count: bucket.contexts.length + bucket.adrs.length + bucket.specs.length,
+            count: contexts.length + specs.length + adrs.length,
             hint: s.id !== "project" ? "(linked repo)" : undefined,
             renderHeader:
               s.id === "project"
@@ -201,9 +244,9 @@ export default function ContextTab({ projectName }: Props) {
                 : (header) => <div title={s.absoluteRoot}>{header}</div>,
             rows: (
               <SourceRows
-                contexts={bucket.contexts}
-                adrs={bucket.adrs}
-                specs={bucket.specs}
+                contexts={contexts}
+                adrs={adrs}
+                specs={specs}
                 selectedPath={selectedPath}
                 onSelect={setSelectedPath}
               />
@@ -219,6 +262,7 @@ export default function ContextTab({ projectName }: Props) {
       icon={<BookOpen size={16} style={{ color: "var(--accent)" }} />}
       sources={sources}
       onRefresh={refresh}
+      controls={controls.controlsBar}
       aboveList={
         !anyFile ? (
           <div
