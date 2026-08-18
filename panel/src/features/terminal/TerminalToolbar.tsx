@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, Maximize2, Minimize2, X, ChevronDown, FolderGit2 } from "lucide-react";
+import { Plus, Maximize2, Minimize2, X, ChevronDown, FolderGit2, RotateCw } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { nextProjectName } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
@@ -30,6 +30,7 @@ interface Props {
   onRename: (id: string, name: string) => void;
   onToggleMaximize: () => void;
   onReorder: (fromId: string, toId: string) => void;
+  onReconnect?: () => void;
 }
 
 export function TerminalToolbar({
@@ -46,6 +47,7 @@ export function TerminalToolbar({
   onRename,
   onToggleMaximize,
   onReorder,
+  onReconnect,
 }: Props) {
   const [newOpen, setNewOpen] = useState(false);
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
@@ -415,6 +417,24 @@ export function TerminalToolbar({
         className="flex items-stretch shrink-0"
         style={{ borderLeft: "1px solid var(--border-subtle)" }}
       >
+        <button
+          type="button"
+          data-testid="terminal-toolbar-reconnect"
+          onClick={() => onReconnect?.()}
+          disabled={!focusedId}
+          className="flex items-center gap-1.5 px-3 text-[11px] transition-colors disabled:opacity-40"
+          style={{ color: "var(--text-secondary)" }}
+          onMouseEnter={(e) => {
+            if (focusedId) e.currentTarget.style.background = "var(--bg-hover)";
+          }}
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.background = "transparent")
+          }
+          title="Reconnect focused terminal (rebuild its connection)"
+        >
+          <RotateCw size={12} />
+          <span className="uppercase tracking-widest">Reconnect</span>
+        </button>
         <button
           type="button"
           data-testid="terminal-toolbar-maximize"

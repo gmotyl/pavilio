@@ -7,6 +7,8 @@ import {
   readClipboardImage,
   uploadPastedImage,
 } from "./imagePaste";
+import { viewportLooksBlank } from "./viewportBlank";
+import { WATCHDOG_STALE_MS } from "./useMobileReconnect";
 
 // Shared cache of live xterm instances, keyed by sessionId.
 // The Terminal (+ its DOM node) survive React unmounts so that scrollback
@@ -71,6 +73,13 @@ interface InternalInstance extends LiveTerminal {
   exitCode: number | undefined;
   // Subscriptions tied to the current ws — disposed before each reopen.
   dataDisposable: IDisposable | null;
+  // Epoch ms of the last message received on the terminal ws (incl. pings).
+  // Read by reconnectSession() to compute staleness metrics at click time.
+  lastMessageAt: number;
+  // Epoch ms of the last NON-ping frame (output/exit). Since the server pings
+  // every 10s, lastMessageAt rarely goes stale; lastFrameAt distinguishes
+  // "TUI idle but server alive" from "actually frozen" for gate tuning.
+  lastFrameAt: number;
 }
 
 const instances = new Map<string, InternalInstance>();
@@ -318,8 +327,13 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
   };
 
   ws.onmessage = (event) => {
+    // Stamp every inbound frame (output, exit, ping) so staleness metrics and
+    // the reconnect watchdog share one notion of "last heard from the server".
+    inst.lastMessageAt = Date.now();
     try {
       const msg = JSON.parse(event.data);
+      // Everything except the keep-alive ping is a "real" frame from the PTY.
+      if (msg.type !== "ping") inst.lastFrameAt = Date.now();
       if (msg.type === "output") {
         inst.terminal.write(msg.data);
       } else if (msg.type === "exit") {
@@ -484,6 +498,8 @@ function createInstance(sessionId: string): InternalInstance {
     exited: false,
     exitCode: undefined,
     dataDisposable: null,
+    lastMessageAt: Date.now(),
+    lastFrameAt: Date.now(),
     send: (data: string) => {
       const currentWs = inst.ws;
       if (currentWs && currentWs.readyState === WebSocket.OPEN) {
@@ -625,6 +641,47 @@ function createInstance(sessionId: string): InternalInstance {
 
   instances.set(sessionId, inst);
   return inst;
+}
+
+/**
+ * Manually reopen a session's ws (the toolbar Reconnect button). Captures
+ * state-at-click metrics and POSTs them to the reconnect log — best-effort,
+ * fire-and-forget — before tearing down and rebuilding the socket. The log is
+ * how we'll later judge whether the auto-reconnect gate should have fired.
+ */
+export function reconnectSession(sessionId: string): void {
+  const inst = instances.get(sessionId);
+  if (!inst) return;
+
+  const now = Date.now();
+  // pingMs includes keep-alive pings (matches the watchdog's own signal);
+  // frameMs counts only real PTY frames, so it stays high while the TUI is
+  // frozen even though pings keep pingMs fresh.
+  const pingMs = now - inst.lastMessageAt;
+  const frameMs = now - inst.lastFrameAt;
+  const metric = {
+    sessionId,
+    blankAtClick: viewportLooksBlank(inst.terminal),
+    wsReadyState: inst.ws?.readyState,
+    pingMs,
+    frameMs,
+    cols: inst.terminal.cols,
+    rows: inst.terminal.rows,
+    stale: pingMs > WATCHDOG_STALE_MS,
+    trigger: "manual",
+  };
+
+  try {
+    void fetch("/api/terminal/reconnect-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metric),
+    }).catch(() => {});
+  } catch {
+    // Logging must never block a reconnect.
+  }
+
+  inst.reopen();
 }
 
 export function sendDismiss(sessionId: string): void {

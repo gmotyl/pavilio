@@ -10,6 +10,7 @@ import {
   destroySession,
   updateSession,
 } from "../lib/terminal-manager.js";
+import { appendReconnectMetric } from "../lib/reconnect-log.js";
 import { getConfig } from "../config.js";
 
 function expandPath(p: string): string {
@@ -51,6 +52,29 @@ router.delete("/sessions/:id", (req, res) => {
   const ok = destroySession(req.params.id);
   if (!ok) return res.status(404).json({ error: "Session not found" });
   res.json({ ok: true });
+});
+
+router.post("/reconnect-log", (req, res) => {
+  const b = req.body ?? {};
+  const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+  const bool = (v: unknown) => (typeof v === "boolean" ? v : undefined);
+  try {
+    appendReconnectMetric({
+      sessionId: typeof b.sessionId === "string" ? b.sessionId : undefined,
+      blankAtClick: bool(b.blankAtClick),
+      wsReadyState: num(b.wsReadyState),
+      pingMs: num(b.pingMs),
+      frameMs: num(b.frameMs),
+      cols: num(b.cols),
+      rows: num(b.rows),
+      stale: bool(b.stale),
+      trigger: typeof b.trigger === "string" ? b.trigger : "manual",
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.warn("[terminal] reconnect-log append failed:", err);
+    res.status(500).json({ ok: false });
+  }
 });
 
 router.get("/start-dirs", (req, res) => {

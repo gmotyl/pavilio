@@ -8,7 +8,7 @@ interface Options {
   isViewportBlank: () => boolean
 }
 
-const WATCHDOG_STALE_MS = 25_000
+export const WATCHDOG_STALE_MS = 25_000
 const WATCHDOG_CHECK_MS = 2_000
 
 export function useMobileReconnect({
@@ -68,7 +68,11 @@ export function useMobileReconnect({
       if (!ws || ws.readyState !== WebSocket.OPEN) return
       if (Date.now() - lastMessageAtRef.current > WATCHDOG_STALE_MS) {
         lastMessageAtRef.current = Date.now()
-        reopenRef.current()
+        // Only auto-reopen when there is nothing on screen to lose. Reopening
+        // over live content flickers and interrupts work; when content is
+        // present we stay silent and leave recovery to the manual Reconnect
+        // button (see reconnectSession in terminalInstances.ts).
+        if (isViewportBlankRef.current()) reopenRef.current()
       }
     }, WATCHDOG_CHECK_MS)
     return () => clearInterval(id)
