@@ -5,7 +5,7 @@ import { TerminalShortcutBar } from "./TerminalShortcutBar";
 import { TerminalMobileRail } from "./TerminalMobileRail";
 import { TerminalSpine } from "./TerminalSpine";
 import { TerminalSpineDrawer } from "./TerminalSpineDrawer";
-import { sendDismiss } from "./terminalInstances";
+import { sendDismiss, reconnectSession } from "./terminalInstances";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
 import type { Project } from "../projects/useProjects";
@@ -123,6 +123,9 @@ export function TerminalsSurface({
           onRename={(id, n) => onUpdateSession(id, { name: n })}
           onToggleMaximize={onToggleMaximize}
           onReorder={onReorder ?? (() => {})}
+          onReconnect={() => {
+            if (focusedId) reconnectSession(focusedId);
+          }}
         />
       </div>
 

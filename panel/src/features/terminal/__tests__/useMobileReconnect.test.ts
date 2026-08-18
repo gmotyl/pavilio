@@ -90,7 +90,9 @@ describe("useMobileReconnect", () => {
     expect(reopen).toHaveBeenCalledTimes(1);
   });
 
-  it("watchdog triggers reopen after >25s of ws silence when visible", () => {
+  it("watchdog does NOT reopen after >25s of silence while content is on screen", () => {
+    // The flicker fix: reopening over live content interrupts work, so a stale
+    // socket with a non-blank viewport is left for the manual Reconnect button.
     const { ws } = fakeWs(1);
     const reopen = vi.fn();
     renderHook(() =>
@@ -102,6 +104,23 @@ describe("useMobileReconnect", () => {
       }),
     );
     // No "message" events pushed → lastMessageAt stays at init.
+    act(() => {
+      vi.advanceTimersByTime(26_000);
+    });
+    expect(reopen).not.toHaveBeenCalled();
+  });
+
+  it("watchdog reopens after >25s of silence only when the viewport is blank", () => {
+    const { ws } = fakeWs(1);
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+        isViewportBlank: () => true,
+      }),
+    );
     act(() => {
       vi.advanceTimersByTime(26_000);
     });

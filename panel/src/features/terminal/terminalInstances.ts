@@ -7,6 +7,8 @@ import {
   readClipboardImage,
   uploadPastedImage,
 } from "./imagePaste";
+import { viewportLooksBlank } from "./viewportBlank";
+import { WATCHDOG_STALE_MS } from "./useMobileReconnect";
 
 // Shared cache of live xterm instances, keyed by sessionId.
 // The Terminal (+ its DOM node) survive React unmounts so that scrollback
@@ -71,6 +73,9 @@ interface InternalInstance extends LiveTerminal {
   exitCode: number | undefined;
   // Subscriptions tied to the current ws — disposed before each reopen.
   dataDisposable: IDisposable | null;
+  // Epoch ms of the last message received on the terminal ws (incl. pings).
+  // Read by reconnectSession() to compute staleness metrics at click time.
+  lastMessageAt: number;
 }
 
 const instances = new Map<string, InternalInstance>();
@@ -318,6 +323,9 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
   };
 
   ws.onmessage = (event) => {
+    // Stamp every inbound frame (output, exit, ping) so staleness metrics and
+    // the reconnect watchdog share one notion of "last heard from the server".
+    inst.lastMessageAt = Date.now();
     try {
       const msg = JSON.parse(event.data);
       if (msg.type === "output") {
@@ -484,6 +492,7 @@ function createInstance(sessionId: string): InternalInstance {
     exited: false,
     exitCode: undefined,
     dataDisposable: null,
+    lastMessageAt: Date.now(),
     send: (data: string) => {
       const currentWs = inst.ws;
       if (currentWs && currentWs.readyState === WebSocket.OPEN) {
@@ -625,6 +634,42 @@ function createInstance(sessionId: string): InternalInstance {
 
   instances.set(sessionId, inst);
   return inst;
+}
+
+/**
+ * Manually reopen a session's ws (the toolbar Reconnect button). Captures
+ * state-at-click metrics and POSTs them to the reconnect log — best-effort,
+ * fire-and-forget — before tearing down and rebuilding the socket. The log is
+ * how we'll later judge whether the auto-reconnect gate should have fired.
+ */
+export function reconnectSession(sessionId: string): void {
+  const inst = instances.get(sessionId);
+  if (!inst) return;
+
+  const now = Date.now();
+  const msSinceLastWsMsg = now - inst.lastMessageAt;
+  const metric = {
+    sessionId,
+    blankAtClick: viewportLooksBlank(inst.terminal),
+    wsReadyState: inst.ws?.readyState,
+    msSinceLastWsMsg,
+    cols: inst.terminal.cols,
+    rows: inst.terminal.rows,
+    stale: msSinceLastWsMsg > WATCHDOG_STALE_MS,
+    trigger: "manual",
+  };
+
+  try {
+    void fetch("/api/terminal/reconnect-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metric),
+    }).catch(() => {});
+  } catch {
+    // Logging must never block a reconnect.
+  }
+
+  inst.reopen();
 }
 
 export function sendDismiss(sessionId: string): void {
