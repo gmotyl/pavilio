@@ -1,4 +1,4 @@
-import { Plus, Menu } from "lucide-react";
+import { Plus, Menu, RotateCw } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { mobileShortName } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
@@ -12,6 +12,7 @@ interface Props {
   onFocus: (id: string) => void;
   onCreate: (opts?: CreateSessionOpts) => void;
   onOpenDrawer: () => void;
+  onReconnect?: () => void;
 }
 
 /**
@@ -26,6 +27,7 @@ export function TerminalMobileRail({
   onFocus,
   onCreate,
   onOpenDrawer,
+  onReconnect,
 }: Props) {
   const activity = useAggregateActivity();
   return (
@@ -87,6 +89,23 @@ export function TerminalMobileRail({
       })}
 
       <div className="flex-1" />
+
+      {focusedId && onReconnect && (
+        <button
+          type="button"
+          data-testid="terminal-mobile-rail-reconnect"
+          onClick={() => onReconnect()}
+          className="shrink-0 w-7 h-7 rounded-md flex items-center justify-center active:scale-95 transition-transform"
+          style={{
+            background: "var(--bg-base)",
+            border: "1px solid var(--border-subtle)",
+            color: "var(--text-secondary)",
+          }}
+          title="Reconnect focused terminal"
+        >
+          <RotateCw size={13} />
+        </button>
+      )}
 
       <div className="relative shrink-0">
         <button

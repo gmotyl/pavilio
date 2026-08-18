@@ -140,6 +140,9 @@ export function TerminalsSurface({
             onCreateTerminal(opts || {});
           }}
           onOpenDrawer={() => onSetDrawerOpen(!drawerOpen)}
+          onReconnect={() => {
+            if (focusedId) reconnectSession(focusedId);
+          }}
         />
       </div>
 

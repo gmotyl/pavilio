@@ -76,6 +76,10 @@ interface InternalInstance extends LiveTerminal {
   // Epoch ms of the last message received on the terminal ws (incl. pings).
   // Read by reconnectSession() to compute staleness metrics at click time.
   lastMessageAt: number;
+  // Epoch ms of the last NON-ping frame (output/exit). Since the server pings
+  // every 10s, lastMessageAt rarely goes stale; lastFrameAt distinguishes
+  // "TUI idle but server alive" from "actually frozen" for gate tuning.
+  lastFrameAt: number;
 }
 
 const instances = new Map<string, InternalInstance>();
@@ -328,6 +332,8 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
     inst.lastMessageAt = Date.now();
     try {
       const msg = JSON.parse(event.data);
+      // Everything except the keep-alive ping is a "real" frame from the PTY.
+      if (msg.type !== "ping") inst.lastFrameAt = Date.now();
       if (msg.type === "output") {
         inst.terminal.write(msg.data);
       } else if (msg.type === "exit") {
@@ -493,6 +499,7 @@ function createInstance(sessionId: string): InternalInstance {
     exitCode: undefined,
     dataDisposable: null,
     lastMessageAt: Date.now(),
+    lastFrameAt: Date.now(),
     send: (data: string) => {
       const currentWs = inst.ws;
       if (currentWs && currentWs.readyState === WebSocket.OPEN) {
@@ -647,15 +654,20 @@ export function reconnectSession(sessionId: string): void {
   if (!inst) return;
 
   const now = Date.now();
-  const msSinceLastWsMsg = now - inst.lastMessageAt;
+  // pingMs includes keep-alive pings (matches the watchdog's own signal);
+  // frameMs counts only real PTY frames, so it stays high while the TUI is
+  // frozen even though pings keep pingMs fresh.
+  const pingMs = now - inst.lastMessageAt;
+  const frameMs = now - inst.lastFrameAt;
   const metric = {
     sessionId,
     blankAtClick: viewportLooksBlank(inst.terminal),
     wsReadyState: inst.ws?.readyState,
-    msSinceLastWsMsg,
+    pingMs,
+    frameMs,
     cols: inst.terminal.cols,
     rows: inst.terminal.rows,
-    stale: msSinceLastWsMsg > WATCHDOG_STALE_MS,
+    stale: pingMs > WATCHDOG_STALE_MS,
     trigger: "manual",
   };
 
