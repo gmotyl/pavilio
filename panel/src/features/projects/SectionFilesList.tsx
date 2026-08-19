@@ -21,6 +21,7 @@ function SectionFileRow({
   label,
   dateLabel,
   monoLabel,
+  kind,
   selected,
   onSelect,
 }: {
@@ -28,6 +29,7 @@ function SectionFileRow({
   label: string;
   dateLabel?: string;
   monoLabel?: boolean;
+  kind?: string;
   selected: boolean;
   onSelect: (relativePath: string) => void;
 }) {
@@ -38,6 +40,7 @@ function SectionFileRow({
       label={label}
       dateLabel={dateLabel}
       monoLabel={monoLabel}
+      kind={kind}
       selected={selected}
       title={file.relativePath}
       dragProps={drag}
@@ -94,6 +97,7 @@ export interface SectionRow {
   file: FileEntry;
   label: string;
   monoLabel?: boolean;
+  kind?: "review" | "run";
 }
 
 /**
@@ -103,13 +107,34 @@ export interface SectionRow {
  */
 export function sectionRows(section: string, files: FileEntry[]): SectionRow[] {
   if (section === "qa") {
-    return files
+    const runRows: SectionRow[] = files
       .filter((f) => f.relativePath.endsWith("/run.md"))
       .map((f) => {
         const parts = f.relativePath.split("/");
-        return { file: f, label: parts[parts.length - 2], monoLabel: true };
+        return {
+          file: f,
+          label: parts[parts.length - 2],
+          monoLabel: true,
+          kind: "run",
+        };
+      });
+    const reviewRows: SectionRow[] = files
+      .filter((f) => {
+        const parts = f.relativePath.split("/");
+        return (
+          parts[parts.length - 2] === "reviews" && f.relativePath.endsWith(".md")
+        );
       })
-      .sort((a, b) => b.label.localeCompare(a.label));
+      .map((f) => {
+        const base = f.relativePath.split("/").pop() ?? f.relativePath;
+        const label = base
+          .replace(/\.md$/, "")
+          .replace(/^\d{4}-\d{2}-\d{2}_CODE_REVIEW_/, "");
+        return { file: f, label, monoLabel: true, kind: "review" };
+      });
+    return [...reviewRows, ...runRows].sort(
+      (a, b) => b.file.modified - a.file.modified,
+    );
   }
   return files.map((f) => ({
     file: f,
@@ -143,12 +168,13 @@ export function SectionFilesList({
 
   const rowList = (
     <div className="space-y-0.5">
-      {rows.map(({ file, label, monoLabel }) => (
+      {rows.map(({ file, label, monoLabel, kind }) => (
         <SectionFileRow
           key={file.relativePath}
           file={file}
           label={label}
           monoLabel={monoLabel}
+          kind={kind}
           dateLabel={shortDate(file.modified, withYear)}
           selected={selectedPath === file.relativePath}
           onSelect={onSelect}
@@ -160,7 +186,7 @@ export function SectionFilesList({
   const emptyMessage = filterActive
     ? "No files match."
     : section === "qa"
-      ? "No QA runs found."
+      ? "No QA reviews or runs found."
       : "No files in this section.";
 
   if (section === "qa") {

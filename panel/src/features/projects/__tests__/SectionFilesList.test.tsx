@@ -110,7 +110,7 @@ describe("SectionFilesList qa branch", () => {
       />,
     );
 
-    const rows = screen.getAllByTestId(/^section-files-file-/);
+    const rows = screen.getAllByTestId(/^section-files-file-.*(?<!-kind)$/);
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
       "section-files-file-p/qa/runs/2026-07-21-beta/run.md",
@@ -165,8 +165,127 @@ describe("SectionFilesList qa branch", () => {
         onSelect={() => {}}
       />,
     );
-    expect(screen.getByText("No QA runs found.")).toBeTruthy();
+    expect(screen.getByText("No QA reviews or runs found.")).toBeTruthy();
     expect(screen.queryByTestId("section-files-header-qa")).toBeNull();
+  });
+});
+
+describe("SectionFilesList qa reviews", () => {
+  /** Runs + reviews + REVIEW_RULES.md, with known mtimes for order checks. */
+  const qaReviewFiles = [
+    {
+      relativePath: "p/qa/runs/2026-07-20-alpha/run.md",
+      modified: Date.parse("2026-07-20T00:00:00.000Z"),
+    },
+    {
+      relativePath: "p/qa/runs/2026-07-20-alpha/meta.json",
+      modified: Date.parse("2026-07-20T00:00:00.000Z"),
+    },
+    {
+      relativePath: "p/qa/runs/2026-07-21-beta/run.md",
+      modified: Date.parse("2026-07-21T00:00:00.000Z"),
+    },
+    {
+      relativePath: "p/qa/reviews/2026-08-19_CODE_REVIEW_feat-x_1e2ca0f.md",
+      modified: Date.parse("2026-08-19T00:00:00.000Z"),
+    },
+    {
+      relativePath: "p/qa/reviews/plain-review.md",
+      modified: Date.parse("2026-07-19T00:00:00.000Z"),
+    },
+    {
+      relativePath: "p/qa/REVIEW_RULES.md",
+      modified: Date.parse("2026-07-01T00:00:00.000Z"),
+    },
+  ] as never[];
+
+  it("lists qa reviews with a review badge and stripped label", () => {
+    render(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={sectionRows("qa", qaReviewFiles)}
+        filterActive={false}
+        selectedPath={null}
+        onSelect={() => {}}
+      />,
+    );
+    const testId =
+      "section-files-file-p/qa/reviews/2026-08-19_CODE_REVIEW_feat-x_1e2ca0f.md";
+    const label = screen.getByTestId(testId).querySelector("span.font-mono");
+    expect(label?.textContent).toBe("feat-x_1e2ca0f");
+    expect(screen.getByTestId(`${testId}-kind`).textContent).toBe("review");
+  });
+
+  it("merges reviews and runs into one list sorted by mtime desc", () => {
+    render(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={sectionRows("qa", qaReviewFiles)}
+        filterActive={false}
+        selectedPath={null}
+        onSelect={() => {}}
+      />,
+    );
+    const rows = screen.getAllByTestId(/^section-files-file-.*(?<!-kind)$/);
+    expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
+      "section-files-file-p/qa/reviews/2026-08-19_CODE_REVIEW_feat-x_1e2ca0f.md",
+      "section-files-file-p/qa/runs/2026-07-21-beta/run.md",
+      "section-files-file-p/qa/runs/2026-07-20-alpha/run.md",
+      "section-files-file-p/qa/reviews/plain-review.md",
+    ]);
+  });
+
+  it("keeps run rows unchanged and excludes REVIEW_RULES.md and json", () => {
+    render(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={sectionRows("qa", qaReviewFiles)}
+        filterActive={false}
+        selectedPath={null}
+        onSelect={() => {}}
+      />,
+    );
+    const runTestId = "section-files-file-p/qa/runs/2026-07-21-beta/run.md";
+    expect(
+      screen.getByTestId(runTestId).querySelector("span.font-mono")?.textContent,
+    ).toBe("2026-07-21-beta");
+    expect(screen.getByTestId(`${runTestId}-kind`).textContent).toBe("run");
+    expect(
+      screen.queryByTestId("section-files-file-p/qa/REVIEW_RULES.md"),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId(
+        "section-files-file-p/qa/runs/2026-07-20-alpha/meta.json",
+      ),
+    ).toBeNull();
+  });
+
+  it("shows the reviews-or-runs empty message when qa is empty", () => {
+    render(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={sectionRows("qa", [] as never[])}
+        filterActive={false}
+        selectedPath={null}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText("No QA reviews or runs found.")).toBeTruthy();
+  });
+
+  it("sectionRows count for qa includes reviews and runs only", () => {
+    const out = sectionRows("qa", qaReviewFiles);
+    expect(out).toHaveLength(4);
+    expect(out.map((r) => r.kind).sort()).toEqual([
+      "review",
+      "review",
+      "run",
+      "run",
+    ]);
   });
 });
 
@@ -189,7 +308,7 @@ describe("sectionRows drives both the count and the rows", () => {
         onSelect={() => {}}
       />,
     );
-    expect(screen.getAllByTestId(/^section-files-file-/)).toHaveLength(count);
+    expect(screen.getAllByTestId(/^section-files-file-.*(?<!-kind)$/)).toHaveLength(count);
   });
 
   it("passes non-qa sections through unfiltered", () => {
