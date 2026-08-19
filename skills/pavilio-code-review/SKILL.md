@@ -85,18 +85,63 @@ If the spec is missing, skip the Spec sub-agent and note it.
 
 ### 6. Aggregate
 
-Render one scannable report. Do **not** merge or rerank across axes — Standards and Spec stay separate — but present each as its sub-agent's table.
+Do **not** merge or rerank across axes — Standards and Spec stay separate, each presented as its sub-agent's table. Persist the full report to a file, then print a slim summary to the conversation.
+
+#### Resolve the output path
+
+Write the report to:
 
 ```
-## 🔎 Code review — <branch> vs <fixed-point> (<N> commits, <M> files)
+<workspace>/projects/<name>/qa/reviews/<YYYY-MM-DD>_CODE_REVIEW_<branch>_<shortSHA>.md
+```
 
-🔴 hard · 🟡 judgement · 💡 nit · ✅ pass
+where:
 
-### Standards
+- `<YYYY-MM-DD>` = `date +%F`.
+- `<branch>` = `git rev-parse --abbrev-ref HEAD` with `/` replaced by `-` (on `main`/detached this is just `main`/`HEAD`).
+- `<shortSHA>` = `git rev-parse --short HEAD`.
+- `<workspace>` = the nearest ancestor/sibling directory containing **both** `AGENTS.md` **and** a `projects/` subdirectory. `/pavilio-code-review` is usually run with cwd inside a **code repo**, NOT the workspace root, so resolve the path from `<workspace>` — never relative to cwd.
+
+`mkdir -p` the `qa/reviews/` directory before writing. Re-running on the same branch at the same HEAD SHA yields the same filename (overwrite = idempotent); a new commit yields a new file, preserving branch history.
+
+#### File contents (in this exact order)
+
+The file must stand alone in a markdown viewer:
+
+```
+# Code review — <branch> vs <fixed-point>
+
+- **Branch:** <branch>
+- **Fixed point:** <fixed-point>
+- **Scope:** <N> commits / <M> files
+- **Date:** <YYYY-MM-DD>
+
+## Standards
 <Standards table>
 
-### Spec
+## Spec
 <Spec table, or "_No spec available — Spec axis skipped._">
+
+## Verdict
+| Axis | 🔴 | 🟡 | 💡 |
+|------|----|----|----|
+| Standards | n | n | n |
+| Spec | n | n | n |
+
+**Worst issue:** <one line — the single most important 🔴, with the fix.>
+**Recommendation:** <ship / ship-with-follow-up-ticket / fix-first>
+```
+
+If there are zero 🔴/🟡/💡 on an axis, still show the table (all ✅) so the reader sees it was actually reviewed.
+
+#### Slim inline output
+
+After writing the file, print to the conversation **only**:
+
+```
+✅ Review written to <workspace>/projects/<name>/qa/reviews/<YYYY-MM-DD>_CODE_REVIEW_<branch>_<shortSHA>.md
+
+🔴 hard · 🟡 judgement · 💡 nit · ✅ pass
 
 ### Verdict
 | Axis | 🔴 | 🟡 | 💡 |
@@ -108,7 +153,7 @@ Render one scannable report. Do **not** merge or rerank across axes — Standard
 **Recommendation:** <ship / ship-with-follow-up-ticket / fix-first>
 ```
 
-If there are zero 🔴/🟡/💡 on an axis, still show the table (all ✅) so the reader sees it was actually reviewed.
+Do **not** print the full Standards/Spec tables inline — those live in the file. The inline output is the file pointer, the Verdict table, the worst-issue line, and the recommendation.
 
 ## Why two axes
 
