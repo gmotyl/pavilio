@@ -26,13 +26,22 @@ function matchesMobile(): boolean {
 }
 
 export interface FileListSidebarState {
-  /** Effective visibility. */
+  /** Effective visibility. Desktop: stored pref unless a peek is active. */
   collapsed: boolean;
   isMobile: boolean;
-  /** User pressed the chevron. Persists on desktop only. */
+  /**
+   * Desktop-only transient overlay peek is open. Distinct from the mobile
+   * `transient` fold: the peek floats over the detail and never reflows layout.
+   */
+  peeking: boolean;
+  /** User pressed the chevron. Flips (and persists) the stored pref; clears any peek. */
   toggle: () => void;
   /** A file was opened on mobile — fold the list away without touching the stored pref. */
   collapseTransient: () => void;
+  /** Hovering the collapsed rail (desktop) opens the peek overlay. No-op on mobile. */
+  startPeek: () => void;
+  /** Leaving the overlay or selecting a file closes the peek. No-op on mobile. */
+  endPeek: () => void;
 }
 
 export function useFileListSidebar(): FileListSidebarState {
@@ -42,6 +51,8 @@ export function useFileListSidebar(): FileListSidebarState {
   const [transient, setTransient] = useState<boolean | null>(() =>
     matchesMobile() ? true : null,
   );
+  // Desktop-only hover peek. Never set on mobile.
+  const [peeking, setPeeking] = useState(false);
 
   useEffect(() => {
     const mql = window.matchMedia?.(MOBILE_QUERY);
@@ -50,6 +61,7 @@ export function useFileListSidebar(): FileListSidebarState {
       const mobile = e.matches;
       setIsMobile(mobile);
       setTransient(mobile ? true : null);
+      setPeeking(false);
     };
     mql.addEventListener("change", onChange as (e: MediaQueryListEvent) => void);
     return () =>
@@ -59,24 +71,48 @@ export function useFileListSidebar(): FileListSidebarState {
       );
   }, []);
 
-  const collapsed = transient !== null ? transient : storedCollapsed;
+  // Mobile follows the transient fold; desktop follows the stored pref unless a
+  // peek is temporarily expanding it. effective expanded = pinnedOpen || peeking.
+  const collapsed =
+    transient !== null ? transient : storedCollapsed && !peeking;
 
   const toggle = useCallback(() => {
     if (isMobile) {
       setTransient(!collapsed);
       return;
     }
-    const next = !collapsed;
+    // Operate on the stored/pinned pref, independent of the transient peek.
+    const next = !storedCollapsed;
+    setPeeking(false);
     setTransient(null);
     setStoredCollapsed(next);
     writeStored(next);
-  }, [collapsed, isMobile]);
+  }, [collapsed, isMobile, storedCollapsed]);
 
   const collapseTransient = useCallback(() => {
     if (isMobile) setTransient(true);
   }, [isMobile]);
 
-  return { collapsed, isMobile, toggle, collapseTransient };
+  const startPeek = useCallback(() => {
+    // A peek only makes sense while the sidebar is collapsed by the stored
+    // pref on desktop. Pinned open (storedCollapsed === false) or mobile: no-op,
+    // otherwise the overlay popup would render over the inline sidebar.
+    if (!isMobile && storedCollapsed) setPeeking(true);
+  }, [isMobile, storedCollapsed]);
+
+  const endPeek = useCallback(() => {
+    if (!isMobile) setPeeking(false);
+  }, [isMobile]);
+
+  return {
+    collapsed,
+    isMobile,
+    peeking,
+    toggle,
+    collapseTransient,
+    startPeek,
+    endPeek,
+  };
 }
 
 export default useFileListSidebar;

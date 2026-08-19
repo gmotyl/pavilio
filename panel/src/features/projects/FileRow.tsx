@@ -8,6 +8,8 @@ export interface FileRowProps {
   /** Right-aligned secondary label (mtime). Plans pass none — their filenames carry dates. */
   dateLabel?: string;
   monoLabel?: boolean;
+  /** Type marker rendered as a small badge (e.g. "review" | "run"). */
+  kind?: string;
   selected?: boolean;
   /** Listed in the project's CURRENT.md. */
   isCurrent?: boolean;
@@ -24,6 +26,7 @@ export default function FileRow({
   label,
   dateLabel,
   monoLabel,
+  kind,
   selected = false,
   isCurrent = false,
   title,
@@ -36,6 +39,7 @@ export default function FileRow({
       <button
         {...dragProps}
         data-testid={testId}
+        data-file-row=""
         onClick={onSelect}
         title={title}
         className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1 rounded-md text-left text-xs transition-colors"
@@ -70,6 +74,18 @@ export default function FileRow({
             style={{ color: "var(--accent)" }}
           >
             current
+          </span>
+        )}
+        {kind && (
+          <span
+            data-testid={`${testId}-kind`}
+            className="shrink-0 text-[9px] uppercase tracking-wider"
+            style={{
+              color:
+                kind === "review" ? "var(--accent)" : "var(--text-tertiary)",
+            }}
+          >
+            {kind}
           </span>
         )}
         {dateLabel && (
