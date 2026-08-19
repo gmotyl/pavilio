@@ -129,4 +129,114 @@ describe("FileListSidebar", () => {
     );
     expect(screen.queryByText("rows")).toBeNull();
   });
+
+  // --- desktop hover-peek popup -------------------------------------------
+  const peekSingle = [
+    {
+      id: "project",
+      label: "projects (current)",
+      count: 1,
+      rows: (
+        <button data-file-row data-testid="section-files-file-a.md">
+          a.md
+        </button>
+      ),
+    },
+  ];
+
+  function renderCollapsed(sources = peekSingle) {
+    render(
+      <FileListSidebar
+        testId="plans-tab"
+        title="Plans"
+        sources={sources}
+        detail={<p>the document</p>}
+      />,
+    );
+    // Collapse (pins to a stored-collapsed rail) on desktop.
+    fireEvent.click(screen.getByTestId("file-list-sidebar-toggle"));
+  }
+
+  it("opens the file list as an overlay popup when the collapsed rail is hovered", () => {
+    renderCollapsed();
+    expect(screen.queryByTestId("section-files-file-a.md")).toBeNull();
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-rail"));
+    // Overlay popup renders the full list content.
+    expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
+    expect(screen.getByTestId("section-files-file-a.md")).toBeTruthy();
+    // Toggle now reflects the effective-expanded state.
+    expect(
+      screen.getByTestId("file-list-sidebar-toggle").getAttribute("aria-expanded"),
+    ).toBe("true");
+    // The detail pane stays mounted behind the popup (no reflow away).
+    expect(screen.getByText("the document")).toBeTruthy();
+  });
+
+  it("collapses the peek when the mouse leaves the overlay", () => {
+    renderCollapsed();
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-rail"));
+    expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
+    fireEvent.mouseLeave(screen.getByTestId("file-list-sidebar-peek"));
+    expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
+    expect(screen.queryByTestId("section-files-file-a.md")).toBeNull();
+  });
+
+  it("collapses the peek when a file row is selected", () => {
+    renderCollapsed();
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-rail"));
+    fireEvent.click(screen.getByTestId("section-files-file-a.md"));
+    expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
+    expect(screen.queryByTestId("section-files-file-a.md")).toBeNull();
+  });
+
+  it("keeps the peek open when a non-row control inside it is clicked", () => {
+    const sources = [
+      {
+        ...peekSingle[0],
+        rows: (
+          <div>
+            <button data-testid="not-a-row">group</button>
+            <button data-file-row data-testid="section-files-file-a.md">
+              a.md
+            </button>
+          </div>
+        ),
+      },
+    ];
+    renderCollapsed(sources);
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-rail"));
+    fireEvent.click(screen.getByTestId("not-a-row"));
+    expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
+  });
+
+  it("renders the pinned-open sidebar inline, not as an overlay popup", () => {
+    // Default desktop state is expanded (pinned open) — never an overlay.
+    render(
+      <FileListSidebar
+        testId="plans-tab"
+        title="Plans"
+        sources={peekSingle}
+        detail={<p>the document</p>}
+      />,
+    );
+    expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
+    expect(screen.getByTestId("section-files-file-a.md")).toBeTruthy();
+  });
+
+  it("does not peek on mobile hover", () => {
+    stubMatchMedia(true);
+    render(
+      <FileListSidebar
+        testId="plans-tab"
+        title="Plans"
+        sources={peekSingle}
+        detail={<p>the document</p>}
+      />,
+    );
+    // Mobile starts collapsed; the rail exists but hover must do nothing.
+    const rail = screen.getByTestId("file-list-sidebar-rail");
+    fireEvent.mouseEnter(rail);
+    expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
+    expect(screen.queryByTestId("section-files-file-a.md")).toBeNull();
+  });
 });

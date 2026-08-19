@@ -39,6 +39,7 @@ export default function FileRow({
       <button
         {...dragProps}
         data-testid={testId}
+        data-file-row=""
         onClick={onSelect}
         title={title}
         className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1 rounded-md text-left text-xs transition-colors"

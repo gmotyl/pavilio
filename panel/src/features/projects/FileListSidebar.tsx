@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -89,7 +89,8 @@ export default function FileListSidebar({
   aboveList,
   controls,
 }: Props) {
-  const { collapsed, toggle } = useFileListSidebar();
+  const { collapsed, peeking, toggle, startPeek, endPeek } =
+    useFileListSidebar();
   const total = sources.reduce((sum, s) => sum + s.count, 0);
 
   const toggleButton = (
@@ -107,10 +108,95 @@ export default function FileListSidebar({
     </button>
   );
 
+  // Shared expanded content — identical in the pinned-open (inline) view and the
+  // hover-peek overlay, so the popup reads as the same list floating over detail.
+  const listContent = (
+    <>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-semibold flex items-center gap-2">
+          {icon}
+          {title}
+          <span
+            data-testid={`${testId}-count`}
+            className="text-[10px] font-normal"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {total}
+          </span>
+        </h2>
+        <div className="flex items-center">
+          {onRefresh && (
+            <button
+              data-testid={`${testId}-refresh`}
+              onClick={onRefresh}
+              className="p-1.5 rounded transition-colors"
+              style={{ color: "var(--text-muted)" }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "var(--bg-hover)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "transparent")
+              }
+              title="Refresh"
+            >
+              <RefreshCw size={14} />
+            </button>
+          )}
+          {toggleButton}
+        </div>
+      </div>
+
+      {controls}
+      {aboveList}
+
+      <div className="text-sm">
+        {sources.length === 1 ? (
+          sources[0].rows
+        ) : (
+          sources.map((s) => (
+            <SourceGroup key={s.id} testId={testId} source={s} />
+          ))
+        )}
+      </div>
+    </>
+  );
+
   if (collapsed) {
     return (
       <div className="flex flex-row gap-2 md:gap-4">
-        <aside className="shrink-0">{toggleButton}</aside>
+        <aside
+          data-testid="file-list-sidebar-rail"
+          className="shrink-0"
+          onMouseEnter={startPeek}
+        >
+          {toggleButton}
+        </aside>
+        <section className="flex-1 min-w-0">{detail}</section>
+      </div>
+    );
+  }
+
+  // Effective-expanded via a hover peek: float the list over the detail as an
+  // absolutely-positioned popup so the detail content does not reflow. Collapse
+  // on leaving the overlay or on selecting a file row (data-file-row marker).
+  if (peeking) {
+    const onRowClickCapture = (e: MouseEvent<HTMLElement>) => {
+      if ((e.target as HTMLElement).closest("[data-file-row]")) endPeek();
+    };
+    return (
+      <div className="relative flex flex-row gap-2 md:gap-4">
+        <aside
+          data-testid="file-list-sidebar-peek"
+          className="absolute top-0 left-0 z-30 md:w-72 max-w-[90%] rounded-md p-3 shadow-lg"
+          style={{
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-subtle)",
+          }}
+          onMouseLeave={endPeek}
+          onClickCapture={onRowClickCapture}
+        >
+          {listContent}
+        </aside>
         <section className="flex-1 min-w-0">{detail}</section>
       </div>
     );
@@ -118,55 +204,7 @@ export default function FileListSidebar({
 
   return (
     <div className="flex flex-col md:flex-row gap-6">
-      <aside className="md:w-72 shrink-0">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold flex items-center gap-2">
-            {icon}
-            {title}
-            <span
-              data-testid={`${testId}-count`}
-              className="text-[10px] font-normal"
-              style={{ color: "var(--text-muted)" }}
-            >
-              {total}
-            </span>
-          </h2>
-          <div className="flex items-center">
-            {onRefresh && (
-              <button
-                data-testid={`${testId}-refresh`}
-                onClick={onRefresh}
-                className="p-1.5 rounded transition-colors"
-                style={{ color: "var(--text-muted)" }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--bg-hover)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-                title="Refresh"
-              >
-                <RefreshCw size={14} />
-              </button>
-            )}
-            {toggleButton}
-          </div>
-        </div>
-
-        {controls}
-        {aboveList}
-
-        <div className="text-sm">
-          {sources.length === 1 ? (
-            sources[0].rows
-          ) : (
-            sources.map((s) => (
-              <SourceGroup key={s.id} testId={testId} source={s} />
-            ))
-          )}
-        </div>
-      </aside>
-
+      <aside className="md:w-72 shrink-0">{listContent}</aside>
       <section className="flex-1 min-w-0">{detail}</section>
     </div>
   );
