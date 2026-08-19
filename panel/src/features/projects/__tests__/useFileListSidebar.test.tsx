@@ -180,6 +180,17 @@ describe("useFileListSidebar", () => {
     expect(stored()).toBeNull();
   });
 
+  it("startPeek is a no-op when the sidebar is pinned open", () => {
+    installMatchMedia(false);
+    // stored expanded (pinned open) on desktop
+    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "false");
+    render(<Probe />);
+    expect(collapsed()).toBe("false");
+    fireEvent.click(screen.getByTestId("start-peek"));
+    expect(peeking()).toBe("false");
+    expect(collapsed()).toBe("false");
+  });
+
   it("startPeek and endPeek are no-ops on mobile", () => {
     installMatchMedia(true);
     render(<Probe />);

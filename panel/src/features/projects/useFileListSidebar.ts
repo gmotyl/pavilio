@@ -94,8 +94,11 @@ export function useFileListSidebar(): FileListSidebarState {
   }, [isMobile]);
 
   const startPeek = useCallback(() => {
-    if (!isMobile) setPeeking(true);
-  }, [isMobile]);
+    // A peek only makes sense while the sidebar is collapsed by the stored
+    // pref on desktop. Pinned open (storedCollapsed === false) or mobile: no-op,
+    // otherwise the overlay popup would render over the inline sidebar.
+    if (!isMobile && storedCollapsed) setPeeking(true);
+  }, [isMobile, storedCollapsed]);
 
   const endPeek = useCallback(() => {
     if (!isMobile) setPeeking(false);
