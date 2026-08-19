@@ -187,7 +187,7 @@ export default function FileListSidebar({
       <div className="relative flex flex-row gap-2 md:gap-4">
         <aside
           data-testid="file-list-sidebar-peek"
-          className="absolute top-0 left-0 z-30 md:w-72 max-w-[90%] rounded-md p-3 shadow-lg"
+          className="absolute top-0 left-0 z-30 md:w-72 max-w-[90%] max-h-[calc(100vh-2rem)] overflow-y-auto rounded-md p-3 shadow-lg"
           style={{
             background: "var(--bg-elevated)",
             border: "1px solid var(--border-subtle)",
