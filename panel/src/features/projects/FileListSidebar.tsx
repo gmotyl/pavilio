@@ -22,6 +22,10 @@ import useFileListSidebar from "./useFileListSidebar";
  */
 const PEEK_CLOSE_DELAY_MS = 120;
 
+/** Toggle-chevron size. Shared by the button and the peeking spacer so their
+ *  boxes stay identical — the no-reflow guarantee depends on it. */
+const TOGGLE_ICON_SIZE = 14;
+
 export interface FileListSource {
   id: string;
   label: string;
@@ -133,6 +137,7 @@ export default function FileListSidebar({
     cancelClose();
     endPeek();
   }, [cancelClose, endPeek]);
+  // Clear any pending close timer on unmount so it can't fire against a torn-down component.
   useEffect(() => cancelClose, [cancelClose]);
 
   const toggleButton = (
@@ -146,7 +151,11 @@ export default function FileListSidebar({
       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
     >
-      {collapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
+      {collapsed ? (
+        <ChevronsRight size={TOGGLE_ICON_SIZE} />
+      ) : (
+        <ChevronsLeft size={TOGGLE_ICON_SIZE} />
+      )}
     </button>
   );
 
@@ -227,7 +236,7 @@ export default function FileListSidebar({
               position — never changes. */}
           {peeking ? (
             <div aria-hidden className="p-1.5" style={{ visibility: "hidden" }}>
-              <ChevronsRight size={14} />
+              <ChevronsRight size={TOGGLE_ICON_SIZE} />
             </div>
           ) : (
             toggleButton

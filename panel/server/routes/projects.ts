@@ -193,7 +193,14 @@ function plansSources(
   ];
 }
 
-/** Directories a project may surface plan files from. */
+/**
+ * Directories a project may surface plan files from.
+ *
+ * NOTE: `plans/archived/` is intentionally NOT listed separately — archived plan reads are
+ * admitted because `isPlanPathAllowed` uses a depth-agnostic `isPathUnder` check against
+ * `plans/`. If that check is ever tightened to direct-children-only, add `plans/archived`
+ * here explicitly. The "reads an archived plan file (nested under plans/)" test guards this.
+ */
 export function buildPlansAllowlist(projectDir: string, projectsDir: string): string[] {
   const repoRoot = resolve(projectsDir, "..");
   const repos = readReposJson(projectDir);

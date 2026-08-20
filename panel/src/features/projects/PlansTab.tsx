@@ -25,6 +25,12 @@ import PathActions from "./PathActions";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
 
+/**
+ * Server source id for archived plans (see `plansSources` in server/routes/projects.ts).
+ * The server and panel agree on this literal by contract; kept in one place on the panel side.
+ */
+const ARCHIVED_SOURCE_ID = "project:archived";
+
 interface Props {
   projectName: string;
   currentPlans?: string[];
@@ -286,7 +292,7 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
     () =>
       (data?.sources ?? [])
         // Archived plans are history — never auto-select-newest into one.
-        .filter((s) => s.id !== "project:archived")
+        .filter((s) => s.id !== ARCHIVED_SOURCE_ID)
         .flatMap((s) => filterAndSortFiles(s.files, sortOpts))
         .map((f) => ({ key: f.absolutePath, mtime: f.modified })),
     [data, controls.debouncedQuery, controls.sortKey, controls.sortDir],
@@ -316,14 +322,11 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
 
   const sources: FileListSource[] = data.sources.map((s) => {
     const files = filterAndSortFiles(s.files, sortOpts);
-    const isArchived = s.id === "project:archived";
+    const isArchived = s.id === ARCHIVED_SOURCE_ID;
     return {
       id: s.id,
-      label: isArchived
-        ? "Archived"
-        : s.id === "project"
-          ? "projects (current)"
-          : s.label,
+      // Archived's label ("Archived") already comes from the server source.
+      label: s.id === "project" ? "projects (current)" : s.label,
       count: files.length,
       hint:
         !isArchived && s.id !== "project" && s.id !== "claude"
