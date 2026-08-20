@@ -100,12 +100,23 @@ describe("PlansTab", () => {
 
   it("persists the open plan to sessionStorage and shows path actions", async () => {
     renderWithRouter(<PlansTab projectName="alokai" />);
-    fireEvent.click(await screen.findByTestId("plans-tab-file-workspace-woo.md"));
+    // The tab auto-opens the newest plan (foo.md) on load. Wait for that to
+    // settle before clicking, otherwise the auto-select effect races the click
+    // and can clobber the user's choice back to the default.
+    await screen.findByTestId("plans-tab-file-workspace-woo.md");
+    await waitFor(() =>
+      expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+        "/p/projects/alokai/plans/2026-01-01-foo.md",
+      ),
+    );
+    fireEvent.click(screen.getByTestId("plans-tab-file-workspace-woo.md"));
     await waitFor(() => expect(screen.getByText("Hello plan body")).toBeTruthy());
     expect(screen.getByTestId("file-viewer-vscode")).toBeTruthy();
     expect(screen.getByTestId("file-viewer-copy-path")).toBeTruthy();
-    expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
-      "/p/.kilo/plans/woo.md",
+    await waitFor(() =>
+      expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+        "/p/.kilo/plans/woo.md",
+      ),
     );
   });
 

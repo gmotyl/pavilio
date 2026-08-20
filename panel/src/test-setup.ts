@@ -28,6 +28,10 @@ function createMemoryStorage(): Storage {
 }
 
 const storage = createMemoryStorage();
+// sessionStorage needs its own independent store — jsdom's real one otherwise
+// leaks across tests in a file (e.g. panel:lastFile:*), making order-dependent
+// assertions flaky.
+const sessionStorageMock = createMemoryStorage();
 
 Object.defineProperty(globalThis, "localStorage", {
   value: storage,
@@ -39,11 +43,22 @@ Object.defineProperty(window, "localStorage", {
   configurable: true,
 });
 
+Object.defineProperty(globalThis, "sessionStorage", {
+  value: sessionStorageMock,
+  configurable: true,
+});
+
+Object.defineProperty(window, "sessionStorage", {
+  value: sessionStorageMock,
+  configurable: true,
+});
+
 // jsdom does not implement scrollIntoView
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
 
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  sessionStorage.clear();
   vi.restoreAllMocks();
 });

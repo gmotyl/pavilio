@@ -135,6 +135,13 @@ describe("syncRepo", () => {
   }, 30_000);
 
   it("names the files and hands over a prompt when the repo is already mid-rebase", async () => {
+    // A mid-rebase repo lives under .git/rebase-merge (merge backend, git ≥2.26
+    // default) OR .git/rebase-apply (apply backend, the default on older git like
+    // 2.25). Mirror syncRepo's own backend-agnostic check instead of assuming one.
+    const midRebase = () =>
+      existsSync(join(win, ".git/rebase-merge")) ||
+      existsSync(join(win, ".git/rebase-apply"));
+
     // Leave win genuinely mid-rebase, the way a crashed earlier tick would.
     writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
     await syncRepo(mac, opts("mac"));
@@ -147,7 +154,7 @@ describe("syncRepo", () => {
     } catch {
       // expected: the rebase stops on the conflict
     }
-    expect(existsSync(join(win, ".git/rebase-merge"))).toBe(true);
+    expect(midRebase()).toBe(true);
 
     const r = await syncRepo(win, { ...opts("win"), generatedPaths: ["panel/"] });
 
@@ -157,7 +164,7 @@ describe("syncRepo", () => {
     expect(r.conflictPrompt).toContain("already mid-rebase");
     expect(r.conflictPrompt).toContain("rebase --abort");
     // it must NOT abort someone else's in-progress rebase
-    expect(existsSync(join(win, ".git/rebase-merge"))).toBe(true);
+    expect(midRebase()).toBe(true);
   }, 30_000);
 
   /**

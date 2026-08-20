@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
 import PlansTab from "../PlansTab";
 
@@ -24,8 +24,11 @@ describe("PlansTab filter + auto-open", () => {
     renderWithRouter(<PlansTab projectName="demo" />, { initialEntries: ["/"] });
     expect(await screen.findByTestId("plans-tab-file-project-2026-02-02-new.md")).toBeInTheDocument();
     fireEvent.change(screen.getByTestId("file-list-filter-input"), { target: { value: "old" } });
-    await new Promise((r) => setTimeout(r, 250));
-    expect(screen.queryByTestId("plans-tab-file-project-2026-02-02-new.md")).not.toBeInTheDocument();
+    // The query is debounced; poll until the filter settles instead of racing a
+    // fixed delay (which also lets debounce/auto-select state updates run in act).
+    await waitFor(() =>
+      expect(screen.queryByTestId("plans-tab-file-project-2026-02-02-new.md")).not.toBeInTheDocument(),
+    );
     expect(screen.getByTestId("plans-tab-file-project-2026-01-01-old.md")).toBeInTheDocument();
   });
 

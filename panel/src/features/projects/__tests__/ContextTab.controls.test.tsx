@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
 import ContextTab from "../ContextTab";
 
@@ -20,8 +20,11 @@ describe("ContextTab filter", () => {
     renderWithRouter(<ContextTab projectName="demo" />, { initialEntries: ["/"] });
     expect(await screen.findByTestId("context-tab-file-project-GLOSSARY.md")).toBeInTheDocument();
     fireEvent.change(screen.getByTestId("file-list-filter-input"), { target: { value: "gloss" } });
-    await new Promise((r) => setTimeout(r, 250));
-    expect(screen.queryByTestId("context-tab-file-project-CONTEXT.md")).not.toBeInTheDocument();
+    // The query is debounced; poll until the filter settles instead of racing a
+    // fixed delay (which also lets debounce/auto-select state updates run in act).
+    await waitFor(() =>
+      expect(screen.queryByTestId("context-tab-file-project-CONTEXT.md")).not.toBeInTheDocument(),
+    );
     expect(screen.getByTestId("context-tab-file-project-GLOSSARY.md")).toBeInTheDocument();
   });
 });

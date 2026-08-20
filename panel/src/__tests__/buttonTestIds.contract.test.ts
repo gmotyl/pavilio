@@ -29,10 +29,15 @@ interface ButtonHit {
 function walkTsx(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
+    // The contract covers production buttons "rendered by the panel" only.
+    // Skip test trees, whose fixtures legitimately reuse literal testids
+    // (e.g. the same section-files-<file> row rendered by several cases).
+    if (entry === "__tests__") continue;
     const full = join(dir, entry);
     const s = statSync(full);
     if (s.isDirectory()) out.push(...walkTsx(full));
-    else if (entry.endsWith(".tsx")) out.push(full);
+    else if (entry.endsWith(".tsx") && !/\.(test|spec)\.tsx$/.test(entry))
+      out.push(full);
   }
   return out;
 }
