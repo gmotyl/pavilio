@@ -120,6 +120,44 @@ describe("PlansTab", () => {
     );
   });
 
+  it("renders archived plans as a default-collapsed 'Archived' group", async () => {
+    const ARCHIVED_FILE = "2025-12-01-old-design.md";
+    mockFetchResponses({
+      "plans-tree": {
+        project: "alokai",
+        sources: [
+          TREE.sources[0],
+          {
+            id: "project:archived",
+            label: "Archived",
+            absoluteRoot: "/p/projects/alokai/plans/archived",
+            files: [
+              {
+                source: "project:archived",
+                filename: ARCHIVED_FILE,
+                absolutePath: `/p/projects/alokai/plans/archived/${ARCHIVED_FILE}`,
+                modified: 1,
+                relativeToProjectsDir: `alokai/plans/archived/${ARCHIVED_FILE}`,
+              },
+            ],
+          },
+        ],
+      },
+      "plans/read": { absolutePath: "/p/projects/alokai/plans/2026-01-01-foo.md", content: "# body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    const header = await screen.findByTestId("plans-tab-source-project:archived");
+    expect(screen.getByText("Archived")).toBeTruthy();
+    // Collapsed by default — the archived file is not rendered until expanded.
+    expect(
+      screen.queryByTestId(`plans-tab-file-project:archived-${ARCHIVED_FILE}`),
+    ).toBeNull();
+    fireEvent.click(header);
+    expect(
+      screen.getByTestId(`plans-tab-file-project:archived-${ARCHIVED_FILE}`),
+    ).toBeTruthy();
+  });
+
   it("adds a plan to active via POST when an unstarred project plan's star is clicked", async () => {
     const mockFetch = mockFetchResponses({
       "plans-tree": TREE,

@@ -285,6 +285,8 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
   const candidates = useMemo(
     () =>
       (data?.sources ?? [])
+        // Archived plans are history — never auto-select-newest into one.
+        .filter((s) => s.id !== "project:archived")
         .flatMap((s) => filterAndSortFiles(s.files, sortOpts))
         .map((f) => ({ key: f.absolutePath, mtime: f.modified })),
     [data, controls.debouncedQuery, controls.sortKey, controls.sortDir],
@@ -314,19 +316,32 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
 
   const sources: FileListSource[] = data.sources.map((s) => {
     const files = filterAndSortFiles(s.files, sortOpts);
+    const isArchived = s.id === "project:archived";
     return {
       id: s.id,
-      label: s.id === "project" ? "projects (current)" : s.label,
+      label: isArchived
+        ? "Archived"
+        : s.id === "project"
+          ? "projects (current)"
+          : s.label,
       count: files.length,
-      hint: s.id !== "project" && s.id !== "claude" ? "(.kilo)" : undefined,
-      renderHeader: (header) => (
-        <PlanSourceHeader
-          projectName={projectName}
-          sourceId={s.id}
-          onMoved={refresh}
-          header={header}
-        />
-      ),
+      hint:
+        !isArchived && s.id !== "project" && s.id !== "claude"
+          ? "(.kilo)"
+          : undefined,
+      // History: collapsed by default, and no drag-move header (archiving is
+      // done by /pavilio-archive-plan, not by dragging in the panel).
+      defaultOpen: isArchived ? false : undefined,
+      renderHeader: isArchived
+        ? undefined
+        : (header) => (
+            <PlanSourceHeader
+              projectName={projectName}
+              sourceId={s.id}
+              onMoved={refresh}
+              header={header}
+            />
+          ),
       rows: (
         <PlanRows
           source={{ ...s, files }}

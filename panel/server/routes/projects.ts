@@ -180,6 +180,9 @@ function plansSources(
   const repos = readReposJson(projectDir);
   return [
     { id: "project", label: name, absoluteRoot: join(projectDir, "plans") },
+    // Archived plans, moved here by /pavilio-archive-plan. Listed right after the
+    // active project plans; the panel renders it as a default-collapsed group.
+    { id: "project:archived", label: "Archived", absoluteRoot: join(projectDir, "plans", "archived") },
     { id: "workspace", label: "workspace (.kilo)", absoluteRoot: join(repoRoot, ".kilo", "plans") },
     ...repos.map((r) => ({
       id: `repo:${r.name}`,

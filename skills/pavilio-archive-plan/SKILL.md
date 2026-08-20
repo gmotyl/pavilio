@@ -32,7 +32,9 @@ No args → resolve project from the session, then read `projects/<project>/plan
 
 4. **Mark Done in CURRENT.md.** Move the plan out of the active section to a `Done:` line with PR number + merge date (existing convention). Promote a follow-on candidate to active only if the user confirms.
 
-5. **Commit** the specs/CONTEXT/CURRENT.md changes in the workspace repo: `chore(<project>): archive <plan-name>`.
+5. **Move the plan files to `plans/archived/`.** `mkdir -p projects/<project>/plans/archived/`, then `git mv` **every file of the plan's `<date>-<slug>` stem** — `-design.md`, `-implementation.md`, `-plan.md`, or the bare `<stem>.md` — into it. A plan with no file (ad-hoc bugfix session) has nothing to move; say so. CURRENT.md stays the state authority; the subfolder is where the panel's plans tab groups archived plans (default-collapsed "Archived" group). Use `git mv` so history follows (plain `mv` only if the file is untracked).
+
+6. **Commit** the specs/CONTEXT/CURRENT.md changes **and the moved plan files** in the workspace repo: `chore(<project>): archive <plan-name>`.
 
 ## Living specs layout
 
@@ -49,6 +51,6 @@ Area files are **undated kebab-case names** (`checkout-tax.md`, `realtime-refres
 ## Non-goals
 
 - Does not archive unshipped plans — merge first.
-- Does not move or delete plan/design files; `plans/` is the history, CURRENT.md is the state.
+- Moves the plan's files into `plans/archived/` (step 5) but never **deletes** them; `plans/` (incl. `archived/`) is the history, CURRENT.md is the state.
 - Does not write or modify code.
 - Does not replace [[pavilio-session-end]] — archive is per-plan, session-end is per-session.

@@ -35,6 +35,8 @@ export interface FileListSource {
   renderHeader?: (defaultHeader: ReactNode) => ReactNode;
   /** Suffix after the label, e.g. "(.kilo)". */
   hint?: string;
+  /** Initial expand state of the group header. Defaults to open. */
+  defaultOpen?: boolean;
 }
 
 interface Props {
@@ -58,7 +60,7 @@ function SourceGroup({
   testId: string;
   source: FileListSource;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(source.defaultOpen ?? true);
   const header = (
     <button
       data-testid={`${testId}-source-${source.id}`}
