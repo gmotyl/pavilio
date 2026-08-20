@@ -54,8 +54,8 @@ Conventions: description frontmatter must name the slash command and trigger phr
 
 3. **Generate the command wrappers** — do NOT hand-write them. The per-agent setup scripts derive one wrapper per `skills/*/SKILL.md` automatically:
 
-- Claude Code: `bash scripts/setup:claude-code` → `.claude/commands/<name>.md`
-- opencode: `bash scripts/setup:opencode` → `.opencode/commands/<name>.md` + registers it in `opencode.json`'s `command` block
+- Claude Code: `bash scripts/setup:claude-code` → `.claude/commands/<name>.md` **and** a `~/.claude/skills/<name>` symlink (this symlink is what makes the skill model-invocable by name in both Claude Code and opencode — opencode discovers skills from `~/.claude/skills/`, not from `opencode.json`'s command block).
+- opencode: `bash scripts/setup:opencode` → `.opencode/commands/<name>.md` + registers it in `opencode.json`'s `command` block (slash-command only; skill invocation still relies on the `~/.claude/skills/` symlink above).
 
 4. **Commit:** `git add skills/<name>`, commit as `feat: <name> skill`. Only the SKILL.md is committed — `.claude/` and `.opencode/` (and `opencode.json`) are generated per-user and gitignored.
 

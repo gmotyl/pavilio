@@ -38,6 +38,23 @@ if [ -d "skills" ]; then
     done
 fi
 
+# Symlink every skill into the user-level skills dir (~/.claude/skills/). This is
+# what makes a skill model-INVOCABLE by name — both Claude Code and opencode
+# discover skills from here. Slash-command wrappers alone (above / opencode.json)
+# are NOT enough: without this symlink the model gets "Skill <name> not found".
+SKILLS_DIR="$HOME/.claude/skills"
+mkdir -p "$SKILLS_DIR"
+echo "🔗 Linking skills into $SKILLS_DIR ..."
+if [ -d "skills" ]; then
+    for skill_md in skills/*/SKILL.md; do
+        [ -e "$skill_md" ] || continue
+        skill_dir="$(cd "$(dirname "$skill_md")" && pwd)"
+        name="$(basename "$skill_dir")"
+        ln -sfn "$skill_dir" "$SKILLS_DIR/$name"
+        echo "  ✓ ${name} -> ${skill_dir}"
+    done
+fi
+
 # Create .claude/settings.json if it doesn't exist
 if [ ! -f ".claude/settings.json" ]; then
     cat > ".claude/settings.json" << 'EOFCONFIG'
