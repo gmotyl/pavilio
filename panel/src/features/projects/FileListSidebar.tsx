@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { PeekTriggerContext } from "./peekTrigger";
 import {
   ChevronDown,
   ChevronRight,
@@ -140,6 +142,19 @@ export default function FileListSidebar({
   // Clear any pending close timer on unmount so it can't fire against a torn-down component.
   useEffect(() => cancelClose, [cancelClose]);
 
+  // The open file's name (inside `detail`) is the peek trigger — hovering it
+  // opens the list. A small, deliberate target, unlike a full-height rail strip
+  // that fired on any left→right mouse travel.
+  const peekTrigger = useMemo(
+    () => ({ onEnter: openPeek, onLeave: scheduleClose }),
+    [openPeek, scheduleClose],
+  );
+  const wrappedDetail = (
+    <PeekTriggerContext.Provider value={peekTrigger}>
+      {detail}
+    </PeekTriggerContext.Provider>
+  );
+
   const toggleButton = (
     <button
       data-testid="file-list-sidebar-toggle"
@@ -227,13 +242,11 @@ export default function FileListSidebar({
     };
     return (
       <div className="relative flex flex-row gap-2 md:gap-4">
-        <aside
-          data-testid="file-list-sidebar-rail"
-          className="shrink-0 flex flex-col self-stretch"
-        >
+        <aside data-testid="file-list-sidebar-rail" className="shrink-0">
           {/* While peeking, the overlay carries the live toggle; the rail keeps
               an invisible same-size spacer so its width — and the detail's
-              position — never changes. */}
+              position — never changes. The peek is opened by hovering the open
+              file's name (see PeekTriggerContext), not the rail. */}
           {peeking ? (
             <div aria-hidden className="p-1.5" style={{ visibility: "hidden" }}>
               <ChevronsRight size={TOGGLE_ICON_SIZE} />
@@ -241,16 +254,8 @@ export default function FileListSidebar({
           ) : (
             toggleButton
           )}
-          {/* Hover trigger — everything in the rail EXCEPT the toggle button, so
-              the button stays a pure manual toggle and never opens the peek. */}
-          <div
-            data-testid="file-list-sidebar-peek-trigger"
-            aria-hidden
-            className="flex-1 min-h-[1.5rem]"
-            onMouseEnter={openPeek}
-          />
         </aside>
-        <section className="flex-1 min-w-0">{detail}</section>
+        <section className="flex-1 min-w-0">{wrappedDetail}</section>
         {peeking && (
           <aside
             data-testid="file-list-sidebar-peek"
@@ -275,7 +280,7 @@ export default function FileListSidebar({
   return (
     <div className="flex flex-col md:flex-row gap-6">
       <aside className="md:w-72 shrink-0">{listContent}</aside>
-      <section className="flex-1 min-w-0">{detail}</section>
+      <section className="flex-1 min-w-0">{wrappedDetail}</section>
     </div>
   );
 }
