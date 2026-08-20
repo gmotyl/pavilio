@@ -1,4 +1,11 @@
-import { useState, type MouseEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -7,6 +14,13 @@ import {
   RefreshCw,
 } from "lucide-react";
 import useFileListSidebar from "./useFileListSidebar";
+
+/**
+ * Grace period before a hover-peek closes on mouse-leave. A re-enter (of the
+ * overlay or the rail trigger strip) within this window cancels the close, so
+ * crossing the seam between the strip and a short overlay never flickers.
+ */
+const PEEK_CLOSE_DELAY_MS = 120;
 
 export interface FileListSource {
   id: string;
@@ -93,6 +107,32 @@ export default function FileListSidebar({
     useFileListSidebar();
   const total = sources.reduce((sum, s) => sum + s.count, 0);
 
+  // Delayed close so a re-enter cancels it — kills the leave/enter flicker at
+  // the seam between the rail trigger strip and a short overlay.
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelClose = useCallback(() => {
+    if (closeTimer.current !== null) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+  const openPeek = useCallback(() => {
+    cancelClose();
+    startPeek();
+  }, [cancelClose, startPeek]);
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null;
+      endPeek();
+    }, PEEK_CLOSE_DELAY_MS);
+  }, [cancelClose, endPeek]);
+  const closeNow = useCallback(() => {
+    cancelClose();
+    endPeek();
+  }, [cancelClose, endPeek]);
+  useEffect(() => cancelClose, [cancelClose]);
+
   const toggleButton = (
     <button
       data-testid="file-list-sidebar-toggle"
@@ -161,43 +201,62 @@ export default function FileListSidebar({
     </>
   );
 
-  if (collapsed) {
-    return (
-      <div className="flex flex-row gap-2 md:gap-4">
-        <aside
-          data-testid="file-list-sidebar-rail"
-          className="shrink-0"
-          onMouseEnter={startPeek}
-        >
-          {toggleButton}
-        </aside>
-        <section className="flex-1 min-w-0">{detail}</section>
-      </div>
-    );
-  }
+  // Rail mode = the sidebar is stored-collapsed (with or without an active peek).
+  // The rail — toggle button + a hover trigger strip — stays IN FLOW in both
+  // states, so opening a peek never reflows the detail pane. The peek overlay is
+  // absolutely positioned, floating over the detail without shifting it.
+  const railMode = collapsed || peeking;
 
-  // Effective-expanded via a hover peek: float the list over the detail as an
-  // absolutely-positioned popup so the detail content does not reflow. Collapse
-  // on leaving the overlay or on selecting a file row (data-file-row marker).
-  if (peeking) {
-    const onRowClickCapture = (e: MouseEvent<HTMLElement>) => {
-      if ((e.target as HTMLElement).closest("[data-file-row]")) endPeek();
+  if (railMode) {
+    // Bubble-phase (not capture): the file row's own onClick — selection /
+    // navigation — runs first; only then do we collapse the peek. Capturing here
+    // unmounted the row before its click could select anything.
+    const onOverlayClick = (e: MouseEvent<HTMLElement>) => {
+      if ((e.target as HTMLElement).closest("[data-file-row]")) closeNow();
     };
     return (
       <div className="relative flex flex-row gap-2 md:gap-4">
         <aside
-          data-testid="file-list-sidebar-peek"
-          className="absolute top-0 left-0 z-30 md:w-72 max-w-[90%] max-h-[calc(100vh-2rem)] overflow-y-auto rounded-md p-3 shadow-lg"
-          style={{
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border-subtle)",
-          }}
-          onMouseLeave={endPeek}
-          onClickCapture={onRowClickCapture}
+          data-testid="file-list-sidebar-rail"
+          className="shrink-0 flex flex-col self-stretch"
         >
-          {listContent}
+          {/* While peeking, the overlay carries the live toggle; the rail keeps
+              an invisible same-size spacer so its width — and the detail's
+              position — never changes. */}
+          {peeking ? (
+            <div aria-hidden className="p-1.5" style={{ visibility: "hidden" }}>
+              <ChevronsRight size={14} />
+            </div>
+          ) : (
+            toggleButton
+          )}
+          {/* Hover trigger — everything in the rail EXCEPT the toggle button, so
+              the button stays a pure manual toggle and never opens the peek. */}
+          <div
+            data-testid="file-list-sidebar-peek-trigger"
+            aria-hidden
+            className="flex-1 min-h-[1.5rem]"
+            onMouseEnter={openPeek}
+          />
         </aside>
         <section className="flex-1 min-w-0">{detail}</section>
+        {peeking && (
+          <aside
+            data-testid="file-list-sidebar-peek"
+            // Floats over the detail, so width is free: size to content (full
+            // filenames) between a readable minimum and a viewport-bounded cap.
+            className="absolute top-0 left-0 z-30 min-w-[18rem] w-max max-w-[min(42rem,90vw)] max-h-[calc(100vh-2rem)] overflow-y-auto rounded-md p-3 shadow-lg"
+            style={{
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-subtle)",
+            }}
+            onMouseEnter={cancelClose}
+            onMouseLeave={scheduleClose}
+            onClick={onOverlayClick}
+          >
+            {listContent}
+          </aside>
+        )}
       </div>
     );
   }
