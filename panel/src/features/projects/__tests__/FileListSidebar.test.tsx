@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ClipboardList } from "lucide-react";
 import FileListSidebar from "../FileListSidebar";
 import { FILE_LIST_SIDEBAR_KEY, MOBILE_QUERY } from "../useFileListSidebar";
@@ -157,10 +157,10 @@ describe("FileListSidebar", () => {
     fireEvent.click(screen.getByTestId("file-list-sidebar-toggle"));
   }
 
-  it("opens the file list as an overlay popup when the collapsed rail is hovered", () => {
+  it("opens the file list as an overlay popup when the rail trigger strip is hovered", () => {
     renderCollapsed();
     expect(screen.queryByTestId("section-files-file-a.md")).toBeNull();
-    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-rail"));
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-peek-trigger"));
     // Overlay popup renders the full list content.
     expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
     expect(screen.getByTestId("section-files-file-a.md")).toBeTruthy();
@@ -172,21 +172,82 @@ describe("FileListSidebar", () => {
     expect(screen.getByText("the document")).toBeTruthy();
   });
 
-  it("collapses the peek when the mouse leaves the overlay", () => {
+  it("does not open the peek when the toggle button itself is hovered", () => {
+    // Bug 2: the button is a pure manual toggle — hovering it must never peek,
+    // otherwise the peek gets in the way of a deliberate click.
     renderCollapsed();
-    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-rail"));
-    expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
-    fireEvent.mouseLeave(screen.getByTestId("file-list-sidebar-peek"));
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-toggle"));
     expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
-    expect(screen.queryByTestId("section-files-file-a.md")).toBeNull();
   });
 
-  it("collapses the peek when a file row is selected", () => {
+  it("keeps the rail in flow while peeking so the detail does not reflow", () => {
+    // Bug 3: the rail (button + trigger) stays mounted in-flow whether or not a
+    // peek is active, so opening the overlay never shifts the detail pane.
     renderCollapsed();
-    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-rail"));
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-peek-trigger"));
+    expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
+    expect(screen.getByTestId("file-list-sidebar-rail")).toBeTruthy();
+    expect(screen.getByTestId("file-list-sidebar-peek-trigger")).toBeTruthy();
+    expect(screen.getByText("the document")).toBeTruthy();
+  });
+
+  it("fires the file row's own onClick before collapsing the peek", () => {
+    // Bug 1: previously an onClickCapture collapse unmounted the row before its
+    // own click could select the file, so nothing was ever opened.
+    const onSelect = vi.fn();
+    const sources = [
+      {
+        id: "project",
+        label: "projects (current)",
+        count: 1,
+        rows: (
+          <button
+            data-file-row
+            data-testid="section-files-file-a.md"
+            onClick={onSelect}
+          >
+            a.md
+          </button>
+        ),
+      },
+    ];
+    renderCollapsed(sources);
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-peek-trigger"));
     fireEvent.click(screen.getByTestId("section-files-file-a.md"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
-    expect(screen.queryByTestId("section-files-file-a.md")).toBeNull();
+  });
+
+  it("collapses the peek after the mouse leaves the overlay (grace delay)", () => {
+    vi.useFakeTimers();
+    try {
+      renderCollapsed();
+      fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-peek-trigger"));
+      expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
+      fireEvent.mouseLeave(screen.getByTestId("file-list-sidebar-peek"));
+      // Still open during the grace window.
+      expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
+      act(() => vi.advanceTimersByTime(200));
+      expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not collapse when re-entered within the grace window (no flicker)", () => {
+    // Bug 4: leaving the overlay onto the exposed trigger strip re-enters within
+    // the grace window and cancels the pending close instead of flickering.
+    vi.useFakeTimers();
+    try {
+      renderCollapsed();
+      fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-peek-trigger"));
+      fireEvent.mouseLeave(screen.getByTestId("file-list-sidebar-peek"));
+      fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-peek-trigger"));
+      act(() => vi.advanceTimersByTime(200));
+      expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the peek open when a non-row control inside it is clicked", () => {
@@ -204,7 +265,7 @@ describe("FileListSidebar", () => {
       },
     ];
     renderCollapsed(sources);
-    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-rail"));
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-peek-trigger"));
     fireEvent.click(screen.getByTestId("not-a-row"));
     expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
   });
@@ -233,9 +294,8 @@ describe("FileListSidebar", () => {
         detail={<p>the document</p>}
       />,
     );
-    // Mobile starts collapsed; the rail exists but hover must do nothing.
-    const rail = screen.getByTestId("file-list-sidebar-rail");
-    fireEvent.mouseEnter(rail);
+    // Mobile starts collapsed; the trigger exists but hover must do nothing.
+    fireEvent.mouseEnter(screen.getByTestId("file-list-sidebar-peek-trigger"));
     expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
     expect(screen.queryByTestId("section-files-file-a.md")).toBeNull();
   });
