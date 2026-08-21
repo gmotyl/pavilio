@@ -22,6 +22,7 @@ import { usePlanDragSource, usePlanDropTarget } from "./usePlanDrag";
 import { useFileListControls, filterAndSortFiles } from "./fileListControls";
 import { useAutoSelectNewest } from "./useAutoSelectNewest";
 import PathActions from "./PathActions";
+import { usePeekTriggerProps } from "./peekTrigger";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
 
@@ -179,6 +180,27 @@ function PlanSourceHeader({
       }}
     >
       {header}
+    </div>
+  );
+}
+
+/** Open-file header: the filename doubles as the hover-peek trigger (see PeekTriggerContext). */
+function PlanDetailHeader({ path }: { path: string }) {
+  const peek = usePeekTriggerProps();
+  return (
+    <div
+      className="flex items-center gap-2 mb-4 pb-3"
+      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+    >
+      <span
+        {...peek}
+        data-testid="file-list-peek-trigger"
+        className="text-sm font-mono truncate flex-1 cursor-default"
+        style={{ color: "var(--text-tertiary)" }}
+      >
+        {path.split("/").pop()}
+      </span>
+      <PathActions absolutePath={path} />
     </div>
   );
 }
@@ -374,20 +396,7 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
               Select a plan to view.
             </p>
           )}
-          {selectedPath && (
-            <div
-              className="flex items-center gap-2 mb-4 pb-3"
-              style={{ borderBottom: "1px solid var(--border-subtle)" }}
-            >
-              <span
-                className="text-sm font-mono truncate flex-1"
-                style={{ color: "var(--text-tertiary)" }}
-              >
-                {selectedPath.split("/").pop()}
-              </span>
-              <PathActions absolutePath={selectedPath} />
-            </div>
-          )}
+          {selectedPath && <PlanDetailHeader path={selectedPath} />}
           {selectedPath && fileError && (
             <p className="text-sm" style={{ color: "var(--red)" }}>
               Failed to load file: {fileError}

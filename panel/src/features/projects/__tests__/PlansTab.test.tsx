@@ -158,6 +158,17 @@ describe("PlansTab", () => {
     ).toBeTruthy();
   });
 
+  it("opens the peek when the open file's name is hovered (collapsed desktop)", async () => {
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    // A plan auto-selects; collapse the sidebar so a hover-peek is possible.
+    const toggle = await screen.findByTestId("file-list-sidebar-toggle");
+    fireEvent.click(toggle);
+    const name = await screen.findByTestId("file-list-peek-trigger");
+    expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
+    fireEvent.mouseEnter(name);
+    expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
+  });
+
   it("adds a plan to active via POST when an unstarred project plan's star is clicked", async () => {
     const mockFetch = mockFetchResponses({
       "plans-tree": TREE,
