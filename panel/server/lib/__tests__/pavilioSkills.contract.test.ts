@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 
 // From panel/server/lib/__tests__ up 4 levels reaches the repo root, then skills/.
-const SKILLS_DIR = join(__dirname, "../../../../skills");
+const REPO_ROOT = join(__dirname, "../../../../");
+const SKILLS_DIR = join(REPO_ROOT, "skills");
+const OPENCODE_CMD_DIR = join(REPO_ROOT, ".opencode/commands");
 
 const read = (name: string): string =>
   readFileSync(join(SKILLS_DIR, name, "SKILL.md"), "utf8");
@@ -116,5 +118,26 @@ describe("pavilio skills — OpenSpec storage contract", () => {
   it("configuration switch never implies automatic migration", () => {
     expect(storage).toMatch(/migrat/i);
     expect(storage).toMatch(/(never|without|not).{0,60}migrat/i);
+  });
+
+  it("generated OpenCode wrappers point to every authoritative Pavilio skill", () => {
+    // Authoritative skills are the skills/pavilio-* directories that contain a SKILL.md.
+    const authoritative = readdirSync(SKILLS_DIR)
+      .filter((name) => name.startsWith("pavilio-"))
+      .filter((name) => statSync(join(SKILLS_DIR, name)).isDirectory())
+      .filter((name) => existsSync(join(SKILLS_DIR, name, "SKILL.md")));
+
+    // The two new skills must be part of the authoritative set.
+    expect(authoritative).toContain("pavilio-openspec-storage");
+    expect(authoritative).toContain("pavilio-openspec-migrate");
+
+    // Every authoritative skill must have a generated OpenCode wrapper.
+    const missing = authoritative.filter(
+      (name) => !existsSync(join(OPENCODE_CMD_DIR, `${name}.md`)),
+    );
+    expect(
+      missing,
+      `missing generated .opencode/commands wrappers for: ${missing.join(", ")}`,
+    ).toEqual([]);
   });
 });

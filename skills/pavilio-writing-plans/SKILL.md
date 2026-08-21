@@ -1,6 +1,6 @@
 ---
 name: pavilio-writing-plans
-description: Write a bite-sized, contract-style implementation plan from an approved spec, saved under projects/<project>/plans/. Tasks carry files, WHEN/THEN acceptance criteria, and test names — not pre-written code. Use when the user invokes `/pavilio-writing-plans` or has a spec/requirements ready to turn into an executable plan.
+description: Write a bite-sized, contract-style implementation plan from an approved spec, saved as the change's tasks contract under `openspec/changes/<change-id>/`. Tasks carry files, WHEN/THEN acceptance criteria, and test names — not pre-written code. Use when the user invokes `/pavilio-writing-plans` or has a spec/requirements ready to turn into an executable plan.
 ---
 
 # pavilio-writing-plans
