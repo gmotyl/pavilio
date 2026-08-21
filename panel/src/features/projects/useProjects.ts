@@ -13,7 +13,6 @@ export interface Project {
   hasNotes: boolean;
   hasProgress: boolean;
   hasPlans: boolean;
-  currentPlans: string[];
   latestProgressDate: string | null;
   repos: RepoEntry[];
 }

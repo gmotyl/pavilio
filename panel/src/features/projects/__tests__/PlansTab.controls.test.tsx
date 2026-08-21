@@ -15,6 +15,31 @@ const tree = {
         { source: "project", filename: "2026-02-02-new.md", absolutePath: "/p/2026-02-02-new.md", modified: 20, relativeToProjectsDir: "demo/plans/2026-02-02-new.md" },
       ],
     },
+    {
+      id: "openspec:project",
+      label: "demo (OpenSpec)",
+      kind: "openspec",
+      mode: "store",
+      openspecDir: "/p/openspec",
+      changes: [
+        {
+          changeId: "add-checkout-tax",
+          source: "openspec:project",
+          status: "active",
+          archiveDate: null,
+          artifacts: [
+            {
+              kind: "spec",
+              capability: "checkout",
+              filename: "spec.md",
+              absolutePath: "/p/openspec/changes/add-checkout-tax/specs/checkout/spec.md",
+              modified: 5,
+              relativeToProjectsDir: null,
+            },
+          ],
+        },
+      ],
+    },
   ],
 };
 
@@ -32,15 +57,27 @@ describe("PlansTab filter + auto-open", () => {
     expect(screen.getByTestId("plans-tab-file-project-2026-01-01-old.md")).toBeInTheDocument();
   });
 
-  it("auto-opens the starred plan even when a newer plan exists", async () => {
-    mockFetchResponses({ "plans-tree": tree, "/plans/read": { content: "# starred" } });
-    renderWithRouter(
-      <PlansTab projectName="demo" currentPlans={["2026-01-01-old.md"]} />,
-      { initialEntries: ["/"] },
+  it("filters OpenSpec artifacts by capability", async () => {
+    mockFetchResponses({ "plans-tree": tree, "/plans/read": { content: "# hi" } });
+    renderWithRouter(<PlansTab projectName="demo" />, { initialEntries: ["/"] });
+    expect(
+      await screen.findByTestId(
+        "plans-tab-artifact-openspec:project-add-checkout-tax-spec-checkout",
+      ),
+    ).toBeInTheDocument();
+    // A capability-name query keeps the matching artifact and drops legacy files.
+    fireEvent.change(screen.getByTestId("file-list-filter-input"), {
+      target: { value: "checkout" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("plans-tab-file-project-2026-02-02-new.md"),
+      ).not.toBeInTheDocument(),
     );
-    // starred old.md opens (its content loads) even though new.md is newer.
-    // MarkdownRenderer renders "# starred" as an <h1>starred</h1>, so the
-    // heading text (sans "#") is what appears in the DOM.
-    expect(await screen.findByText("starred")).toBeInTheDocument();
+    expect(
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:project-add-checkout-tax-spec-checkout",
+      ),
+    ).toBeInTheDocument();
   });
 });

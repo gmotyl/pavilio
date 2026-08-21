@@ -8,6 +8,7 @@ import {
   type AdrFile,
   type ContextFile,
   type SpecFile,
+  type OpenSpecSpecFile,
 } from "./useProjectContext";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
@@ -28,16 +29,23 @@ function SourceRows({
   contexts,
   adrs,
   specs,
+  openspecSpecs,
   selectedPath,
   onSelect,
 }: {
   contexts: ContextFile[];
   adrs: AdrFile[];
   specs: SpecFile[];
+  openspecSpecs: OpenSpecSpecFile[];
   selectedPath: string | null;
   onSelect: (absolutePath: string) => void;
 }) {
-  if (contexts.length === 0 && adrs.length === 0 && specs.length === 0) {
+  if (
+    contexts.length === 0 &&
+    adrs.length === 0 &&
+    specs.length === 0 &&
+    openspecSpecs.length === 0
+  ) {
     return (
       <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
         (no context or decisions)
@@ -69,6 +77,24 @@ function SourceRows({
           key={s.absolutePath}
           testId={`context-tab-spec-${s.source}-${s.filename}`}
           label={s.filename}
+          title={s.absolutePath}
+          selected={selectedPath === s.absolutePath}
+          onSelect={() => onSelect(s.absolutePath)}
+        />
+      ))}
+      {openspecSpecs.length > 0 && (
+        <p
+          className="text-[10px] uppercase tracking-widest px-2 pt-2 pb-0.5"
+          style={{ color: "var(--text-tertiary)" }}
+        >
+          Specs
+        </p>
+      )}
+      {openspecSpecs.map((s) => (
+        <FileRow
+          key={s.absolutePath}
+          testId={`context-tab-openspec-${s.source}-${s.capability}`}
+          label={s.capability}
           title={s.absolutePath}
           selected={selectedPath === s.absolutePath}
           onSelect={() => onSelect(s.absolutePath)}
@@ -127,9 +153,12 @@ export default function ContextTab({ projectName }: Props) {
   // undefined — relative refs won't rewrite, but the markdown still renders.
   const selectedBasePath = useMemo(() => {
     if (!data || !selectedPath) return undefined;
-    const hit = [...data.contexts, ...data.adrs, ...(data.specs ?? [])].find(
-      (f) => f.absolutePath === selectedPath,
-    );
+    const hit = [
+      ...data.contexts,
+      ...data.adrs,
+      ...(data.specs ?? []),
+      ...(data.openspecSpecs ?? []),
+    ].find((f) => f.absolutePath === selectedPath);
     return hit?.relativeToProjectsDir ?? undefined;
   }, [data, selectedPath]);
 
@@ -158,12 +187,20 @@ export default function ContextTab({ projectName }: Props) {
     if (!data) return null;
     const bySource = new Map<
       string,
-      { contexts: ContextFile[]; adrs: AdrFile[]; specs: SpecFile[] }
+      {
+        contexts: ContextFile[];
+        adrs: AdrFile[];
+        specs: SpecFile[];
+        openspecSpecs: OpenSpecSpecFile[];
+      }
     >();
-    for (const s of data.sources) bySource.set(s.id, { contexts: [], adrs: [], specs: [] });
+    for (const s of data.sources)
+      bySource.set(s.id, { contexts: [], adrs: [], specs: [], openspecSpecs: [] });
     for (const c of data.contexts) bySource.get(c.source)?.contexts.push(c);
     for (const a of data.adrs) bySource.get(a.source)?.adrs.push(a);
     for (const sp of data.specs ?? []) bySource.get(sp.source)?.specs.push(sp);
+    for (const os of data.openspecSpecs ?? [])
+      bySource.get(os.source)?.openspecSpecs.push(os);
     return bySource;
   }, [data]);
 
@@ -176,6 +213,7 @@ export default function ContextTab({ projectName }: Props) {
     const items = [
       ...data.contexts.filter((c) => match(c.filename)),
       ...(data.specs ?? []).filter((s) => match(s.filename)),
+      ...(data.openspecSpecs ?? []).filter((s) => match(s.capability)),
       ...data.adrs.filter((a) => match(adrLabel(a))),
     ];
     return items.map((f) => ({ key: f.absolutePath, mtime: f.modified }));
@@ -204,7 +242,10 @@ export default function ContextTab({ projectName }: Props) {
   if (!data || !grouped) return null;
 
   const anyFile =
-    data.contexts.length > 0 || data.adrs.length > 0 || (data.specs ?? []).length > 0;
+    data.contexts.length > 0 ||
+    data.adrs.length > 0 ||
+    (data.specs ?? []).length > 0 ||
+    (data.openspecSpecs ?? []).length > 0;
 
   const applyBucket = <T extends { filename: string; modified: number }>(
     items: T[],
@@ -225,18 +266,17 @@ export default function ContextTab({ projectName }: Props) {
         if (!bucket) return [];
         const contexts = applyBucket(bucket.contexts, (c) => c.filename);
         const specs = applyBucket(bucket.specs, (sp) => sp.filename);
+        const openspecSpecs = applyBucket(bucket.openspecSpecs, (os) => os.capability);
         const adrs = applyBucket(bucket.adrs, (a) => adrLabel(a));
-        if (
-          controls.debouncedQuery.trim() &&
-          contexts.length + specs.length + adrs.length === 0
-        ) {
+        const count = contexts.length + specs.length + openspecSpecs.length + adrs.length;
+        if (controls.debouncedQuery.trim() && count === 0) {
           return []; // hide a source with no matches under an active filter
         }
         return [
           {
             id: s.id,
             label: s.label,
-            count: contexts.length + specs.length + adrs.length,
+            count,
             hint: s.id !== "project" ? "(linked repo)" : undefined,
             renderHeader:
               s.id === "project"
@@ -247,6 +287,7 @@ export default function ContextTab({ projectName }: Props) {
                 contexts={contexts}
                 adrs={adrs}
                 specs={specs}
+                openspecSpecs={openspecSpecs}
                 selectedPath={selectedPath}
                 onSelect={setSelectedPath}
               />

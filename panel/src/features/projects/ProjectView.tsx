@@ -312,10 +312,8 @@ export default function ProjectView() {
         <ContextTab projectName={name || ""} />
       )}
 
-      {/* Plans tab — foldable tree across project plans + .kilo/plans + ~/.claude/plans */}
-      {section === "plans" && (
-        <PlansTab projectName={name || ""} currentPlans={project?.currentPlans} />
-      )}
+      {/* Plans tab — legacy plan files plus coordinated OpenSpec changes */}
+      {section === "plans" && <PlansTab projectName={name || ""} />}
 
       {/* File sections (notes, memo, progress, qa) — list beside the viewer */}
       {section && !SPECIAL_SECTIONS.has(section) && (
