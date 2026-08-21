@@ -80,36 +80,6 @@ describe("GET /api/projects/:name/plans-tree", () => {
     expect(project.files[0].relativeToProjectsDir).toBe("alokai/plans/2026-01-01-foo.md");
   });
 
-  it("includes the workspace .kilo/plans source when it has files", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    seedFile(join(tmpRoot, "workspace", ".kilo", "plans", "woo.md"), "# woo");
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
-    const ws = res.body.sources.find((s: { id: string }) => s.id === "workspace");
-    expect(ws).toBeTruthy();
-    expect(ws.files[0].filename).toBe("woo.md");
-    expect(ws.files[0].relativeToProjectsDir).toBeNull();
-  });
-
-  it("omits the workspace source when it has no files", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
-    expect(res.body.sources.find((s: { id: string }) => s.id === "workspace")).toBeUndefined();
-  });
-
-  it("includes a per-repo .kilo/plans source from repos.json", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const repoPath = join(tmpRoot, "repos", "pavilio");
-    seedFile(join(repoPath, ".kilo", "plans", "checkout.md"), "# checkout");
-    writeFileSync(
-      join(projectsDir, "alokai", "repos.json"),
-      JSON.stringify([{ name: "pavilio", path: repoPath }]),
-    );
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
-    const repo = res.body.sources.find((s: { id: string }) => s.id === "repo:pavilio");
-    expect(repo).toBeTruthy();
-    expect(repo.files[0].filename).toBe("checkout.md");
-  });
-
   it("exposes plans/archived as a separate 'project:archived' source, not in project", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     seedFile(join(projectsDir, "alokai", "plans", "2026-01-01-active.md"), "# active");
@@ -158,17 +128,6 @@ describe("GET /api/projects/:name/plans/read", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body.content).toBe("# archived body");
-  });
-
-  it("reads a workspace .kilo/plans file", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const target = join(tmpRoot, "workspace", ".kilo", "plans", "woo.md");
-    seedFile(target, "# woo body");
-    const res = await request(makeApp()).get(
-      `/api/projects/alokai/plans/read?path=${encodeURIComponent(target)}`,
-    );
-    expect(res.status).toBe(200);
-    expect(res.body.content).toBe("# woo body");
   });
 
   it("rejects a path outside the allowlist with 403", async () => {
@@ -233,66 +192,6 @@ describe("POST /api/projects/:name/plans/current/:planFile", () => {
     const res = await request(makeApp()).post("/api/projects/alokai/plans/current/ghost.md");
     expect(res.status).toBe(404);
   });
-});
-
-describe("POST /api/projects/:name/plans/move", () => {
-  it("moves a workspace .kilo plan into the project plans dir", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const from = join(tmpRoot, "workspace", ".kilo", "plans", "woo.md");
-    seedFile(from, "# woo");
-    const res = await request(makeApp())
-      .post("/api/projects/alokai/plans/move")
-      .send({ from, toId: "project" });
-    expect(res.status).toBe(200);
-    expect(res.body.noop).toBeUndefined();
-    expect(existsSync(from)).toBe(false);
-    expect(existsSync(join(projectsDir, "alokai", "plans", "woo.md"))).toBe(true);
-  });
-
-  it("renames on collision at the destination", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    seedFile(join(projectsDir, "alokai", "plans", "woo.md"), "# existing");
-    const from = join(tmpRoot, "workspace", ".kilo", "plans", "woo.md");
-    seedFile(from, "# incoming");
-    const res = await request(makeApp())
-      .post("/api/projects/alokai/plans/move")
-      .send({ from, toId: "project" });
-    expect(res.status).toBe(200);
-    expect(res.body.renamed).toBe(true);
-    expect(existsSync(join(projectsDir, "alokai", "plans", "woo-1.md"))).toBe(true);
-  });
-
-  it("is a noop when source already lives in the destination", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const from = join(projectsDir, "alokai", "plans", "foo.md");
-    seedFile(from, "# foo");
-    const res = await request(makeApp())
-      .post("/api/projects/alokai/plans/move")
-      .send({ from, toId: "project" });
-    expect(res.status).toBe(200);
-    expect(res.body.noop).toBe(true);
-    expect(existsSync(from)).toBe(true);
-  });
-
-  it("rejects a source outside the plans allowlist with 403", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const from = join(tmpRoot, "elsewhere", "secret.md");
-    seedFile(from, "leak");
-    const res = await request(makeApp())
-      .post("/api/projects/alokai/plans/move")
-      .send({ from, toId: "project" });
-    expect(res.status).toBe(403);
-  });
-
-  it("returns 400 for an unknown destination source id", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const from = join(tmpRoot, "workspace", ".kilo", "plans", "woo.md");
-    seedFile(from, "# woo");
-    const res = await request(makeApp())
-      .post("/api/projects/alokai/plans/move")
-      .send({ from, toId: "nope" });
-    expect(res.status).toBe(400);
-  });
 
   it("strips path traversal in the plan name (basename only)", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
@@ -301,5 +200,168 @@ describe("POST /api/projects/:name/plans/move", () => {
       `/api/projects/alokai/plans/current/${encodeURIComponent("../../etc/passwd.md")}`,
     );
     expect(res.status).toBe(404);
+  });
+});
+
+// --- OpenSpec-aware plan sources (Task 2) --------------------------------------
+
+/** Seed a full change dir with proposal/design/tasks + a delta spec. */
+function seedChange(openspecDir: string, changeId: string) {
+  seedFile(join(openspecDir, "changes", changeId, "proposal.md"), "# proposal");
+  seedFile(join(openspecDir, "changes", changeId, "design.md"), "# design");
+  seedFile(join(openspecDir, "changes", changeId, "tasks.md"), "# tasks");
+  seedFile(join(openspecDir, "changes", changeId, "specs", "checkout", "spec.md"), "# delta");
+}
+
+describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
+  it("lists active and archived native OpenSpec change artifacts", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    const openspecDir = join(repoPath, "openspec");
+    seedChange(openspecDir, "add-checkout");
+    seedFile(join(openspecDir, "changes", "archive", "2026-08-01-old-thing", "proposal.md"), "# old");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "native" } }]),
+    );
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    expect(res.status).toBe(200);
+    const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
+    expect(src).toBeTruthy();
+    expect(src.kind).toBe("openspec");
+    expect(src.mode).toBe("native");
+
+    const active = src.changes.find((c: { changeId: string }) => c.changeId === "add-checkout");
+    expect(active.status).toBe("active");
+    const kinds = active.artifacts.map((a: { kind: string }) => a.kind).sort();
+    expect(kinds).toEqual(["design", "proposal", "spec", "tasks"]);
+    const delta = active.artifacts.find((a: { kind: string }) => a.kind === "spec");
+    expect(delta.capability).toBe("checkout");
+
+    const archived = src.changes.find((c: { changeId: string }) => c.changeId === "2026-08-01-old-thing");
+    expect(archived.status).toBe("archived");
+    expect(archived.archiveDate).toBe("2026-08-01");
+  });
+
+  it("lists a store OpenSpec tree with the same logical shape", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    // Store mode: tree mirrored under the project, NOT inside the repo.
+    const storeOpenspec = join(projectsDir, "alokai", "plans", "pavilio", "openspec");
+    seedChange(storeOpenspec, "add-checkout");
+    // Intentionally leave the repo without any openspec/ dir to prove no repo read.
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "store" } }]),
+    );
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
+    expect(src).toBeTruthy();
+    expect(src.mode).toBe("store");
+    expect(existsSync(join(repoPath, "openspec"))).toBe(false);
+    const change = src.changes.find((c: { changeId: string }) => c.changeId === "add-checkout");
+    expect(change.status).toBe("active");
+    expect(change.artifacts.map((a: { kind: string }) => a.kind).sort()).toEqual([
+      "design",
+      "proposal",
+      "spec",
+      "tasks",
+    ]);
+  });
+
+  it("carries the same change id across repository sources", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    // Same change id in the project store and in a native repo.
+    seedFile(join(projectsDir, "alokai", "plans", "openspec", "changes", "add-foo", "proposal.md"), "# a");
+    seedFile(join(repoPath, "openspec", "changes", "add-foo", "proposal.md"), "# b");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "native" } }]),
+    );
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const projectSrc = res.body.sources.find((s: { id: string }) => s.id === "openspec:project");
+    const repoSrc = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
+    const projChange = projectSrc.changes.find((c: { changeId: string }) => c.changeId === "add-foo");
+    const repoChange = repoSrc.changes.find((c: { changeId: string }) => c.changeId === "add-foo");
+    expect(projChange.changeId).toBe("add-foo");
+    expect(repoChange.changeId).toBe("add-foo");
+    expect(projChange.source).toBe("openspec:project");
+    expect(repoChange.source).toBe("openspec:repo:pavilio");
+  });
+
+  it("marks changes active vs archived by directory", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const openspecDir = join(projectsDir, "alokai", "plans", "openspec");
+    seedFile(join(openspecDir, "changes", "live-change", "proposal.md"), "# live");
+    seedFile(join(openspecDir, "changes", "archive", "2026-08-01-done-change", "proposal.md"), "# done");
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:project");
+    const live = src.changes.find((c: { changeId: string }) => c.changeId === "live-change");
+    const done = src.changes.find((c: { changeId: string }) => c.changeId === "2026-08-01-done-change");
+    expect(live.status).toBe("active");
+    expect(done.status).toBe("archived");
+  });
+
+  it("keeps legacy flat project plans readable", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const target = join(projectsDir, "alokai", "plans", "2026-01-01-foo.md");
+    seedFile(target, "# legacy body");
+    const tree = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const project = tree.body.sources.find((s: { id: string }) => s.id === "project");
+    expect(project.files.map((f: { filename: string }) => f.filename)).toContain("2026-01-01-foo.md");
+    const read = await request(makeApp()).get(
+      `/api/projects/alokai/plans/read?path=${encodeURIComponent(target)}`,
+    );
+    expect(read.status).toBe(200);
+    expect(read.body.content).toBe("# legacy body");
+  });
+
+  it("no longer exposes kilo/claude sources or the move endpoint", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    seedFile(join(tmpRoot, "workspace", ".kilo", "plans", "woo.md"), "# woo");
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    seedFile(join(repoPath, ".kilo", "plans", "x.md"), "# x");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath }]),
+    );
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const ids = res.body.sources.map((s: { id: string }) => s.id);
+    expect(ids).not.toContain("workspace");
+    expect(ids).not.toContain("claude");
+    expect(ids).not.toContain("repo:pavilio");
+
+    const move = await request(makeApp())
+      .post("/api/projects/alokai/plans/move")
+      .send({ from: join(tmpRoot, "workspace", ".kilo", "plans", "woo.md"), toId: "project" });
+    expect(move.status).toBe(404);
+  });
+
+  it("rejects OpenSpec-shaped traversal outside configured roots", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    // Repo has an openspec tree but is NOT configured for OpenSpec.
+    const rogue = join(repoPath, "openspec", "changes", "sneaky", "proposal.md");
+    seedFile(rogue, "# leak");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath }]),
+    );
+    const res = await request(makeApp()).get(
+      `/api/projects/alokai/plans/read?path=${encodeURIComponent(rogue)}`,
+    );
+    expect(res.status).toBe(403);
+
+    // Traversal that resolves outside the project store openspec root.
+    const traversal = join(projectsDir, "alokai", "plans", "openspec", "..", "..", "..", "..", "etc", "passwd.md");
+    const res2 = await request(makeApp()).get(
+      `/api/projects/alokai/plans/read?path=${encodeURIComponent(traversal)}`,
+    );
+    expect(res2.status).toBe(403);
   });
 });
