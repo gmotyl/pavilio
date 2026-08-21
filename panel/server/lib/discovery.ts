@@ -1,10 +1,12 @@
 import { readdirSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getConfig } from "../config.js";
+import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
 
 export interface RepoEntry {
   name: string;
   path: string;
+  openspec?: OpenSpecConfig;
 }
 
 export interface Project {
@@ -14,7 +16,6 @@ export interface Project {
   hasNotes: boolean;
   hasProgress: boolean;
   hasPlans: boolean;
-  currentPlans: string[];
   latestProgressDate: string | null;
   repos: RepoEntry[];
 }
@@ -28,14 +29,6 @@ export function discoverProjects(): Project[] {
     .filter((e) => existsSync(join(projectsDir, e.name, "PROJECT.md")))
     .map((e) => {
       const dir = join(projectsDir, e.name);
-      const currentMdPath = join(dir, "plans", "CURRENT.md");
-      let currentPlans: string[] = [];
-      if (existsSync(currentMdPath)) {
-        currentPlans = readFileSync(currentMdPath, "utf-8")
-          .split("\n")
-          .map((l) => l.trim())
-          .filter(Boolean);
-      }
 
       const progressDir = join(dir, "progress");
       let latestProgressDate: string | null = null;
@@ -52,7 +45,14 @@ export function discoverProjects(): Project[] {
       if (existsSync(reposPath)) {
         try {
           const raw = JSON.parse(readFileSync(reposPath, "utf-8"));
-          repos = Array.isArray(raw) ? raw : [];
+          repos = Array.isArray(raw)
+            ? raw.map((r) => {
+                const openspec = parseOpenSpecConfig(r);
+                const entry: RepoEntry = { name: r.name, path: r.path };
+                if (openspec) entry.openspec = openspec;
+                return entry;
+              })
+            : [];
         } catch { /* ignore malformed */ }
       }
 
@@ -63,7 +63,6 @@ export function discoverProjects(): Project[] {
         hasNotes: existsSync(join(dir, "notes")),
         hasProgress: existsSync(join(dir, "progress")),
         hasPlans: existsSync(join(dir, "plans")),
-        currentPlans,
         latestProgressDate,
         repos,
       };
