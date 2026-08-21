@@ -1,6 +1,6 @@
 ---
 name: pavilio-session-start
-description: THE skill for the word "resume" — "resume", "resume <project>", "resume work on X", "pick up where we left off" all mean this, never /pavilio-resume (that one needs an explicit handoff file path). Starts/resumes a project session by loading recent progress, PROJECT.md, and plans/CURRENT.md, then entering planning mode. Also on explicit `/pavilio-session-start`. Fast-entry form `/pavilio-session-start <project> <task>` skips the summary and jumps straight to designing the task.
+description: THE skill for the word "resume" — "resume", "resume <project>", "resume work on X", "pick up where we left off" all mean this, never /pavilio-resume (that one needs an explicit handoff file path). Starts/resumes a project session by loading recent progress, PROJECT.md, and the active (un-archived) OpenSpec change dirs, then entering planning mode. Also on explicit `/pavilio-session-start`. Fast-entry form `/pavilio-session-start <project> <task>` skips the summary and jumps straight to designing the task.
 ---
 
 # Pavilio Session Start
@@ -31,21 +31,21 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
    - `PROJECT.md` — overview, repos, key context (always)
    - `CONTEXT.md` (if present) — project-specific glossary (always; usually short)
    - `adr/` (if present) — **list filenames/titles only**, do not read bodies. You'll know which ADRs exist for later targeted reads.
-3. Read `<root>/projects/[project]/plans/CURRENT.md`
-4. **Branch on CURRENT.md content:**
+3. Derive **active work** from the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). There is no active-plan pointer file to read.
+4. **Branch on the active changes found:**
 
-   **Empty or missing** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then enter the workflow at **step 1: Design** (see below).
+   **None** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then enter the workflow at **step 1: Design** (see below).
 
-   **One plan path listed** → Skip summary. Show:
+   **One active change** → Skip summary. Show:
    ```
-   In-progress plan: <plan filename>
-   Next task: <task N title>
+   In-progress change: <change-id>
+   Next task: <next unchecked task in its tasks.md>
 
-   Continue this plan, or do you have a different task?
+   Continue this change, or do you have a different task?
    ```
-   Wait for reply. If confirmed → enter the workflow at **step 3: Execute** for that plan. If new task → treat as fast-entry with task description.
+   Wait for reply. If confirmed → enter the workflow at **step 3: Execute** for that change's `tasks.md`. If new task → treat as fast-entry with task description.
 
-   **Multiple plans listed** → Skip summary. Show numbered list, wait for selection.
+   **Multiple active changes** → Skip summary. Show numbered list, wait for selection.
 
 **Fast-entry variant** (`/pavilio-session-start [project] <task description>`):
 1. Load PROJECT.md silently (no display)
@@ -57,7 +57,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 Session start always lands in **planning mode**, never directly in code edits. Follow the four-step workflow:
 
 1. **Design → Plan** — [[pavilio-grill]]: stress-test the task against the project's `CONTEXT.md` and `adr/`. Sharpen terminology, surface hidden constraints, and update docs inline. Once you approve the design, grill hands off under the hood to [[pavilio-writing-plans]], which writes the bite-sized plan — don't invoke the plan writer by hand.
-2. **Execute** — [[pavilio-execute-plan]]: run the plan task-by-task with review checkpoints. Enter here directly when CURRENT.md already points at an in-progress plan; check off each step as it lands.
+2. **Execute** — [[pavilio-execute-plan]]: run the change's `tasks.md` task-by-task with review checkpoints. Enter here directly when an un-archived change dir already exists; check off each step as it lands.
 3. **Implement** — red-green-refactor for every feature or bugfix: write the failing test → see it fail → minimal implementation → see it pass → commit. (The per-step rhythm inside Execute.)
 
 ## Open a progress file for this session

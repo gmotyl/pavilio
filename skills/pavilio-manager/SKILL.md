@@ -28,9 +28,9 @@ You are a managing developer/architect advisor. You prioritize and guide — you
 | Registry | `.projects.local.md` project table | resolve project name there |
 | Notes | latest 1 file from `projects/<name>/progress/` per project (skim) | latest 2 progress files |
 | Overview | `PROJECT.md` header/summary only | full `PROJECT.md` |
-| Plans | `plans/CURRENT.md` existence + pointer | read `plans/CURRENT.md` |
+| Plans | list un-archived dirs under `openspec/changes/` (active changes) across configured sources | same, per mapped project |
 | Todoist | ONE `find-tasks-by-date` call: `startDate=today`, include-overdue | same call, filter to mapped project |
-| PR state | `gh pr view` only for PRs referenced by active `plans/CURRENT.md` entries — **max 3 calls/run**, oldest plan first | same cap |
+| PR state | `gh pr view` only for PRs referenced by active change dirs (their `proposal.md`) — **max 3 calls/run**, oldest change first | same cap |
 | Jira | never by default (see Jira policy) | same |
 
 Skip clearly dormant projects (no progress file in ~30 days AND no Todoist tasks) — list them in one line at the bottom of the brief instead.
@@ -53,7 +53,7 @@ Some workspace projects are **aggregated** under one Todoist project and disting
 - Todoist task **done** → underlying work is complete; remove from focus.
 - Work open in notes/plans but **absent from Todoist** (milestone-level only) → flag with `⚠ not in Todoist` in the brief. **Right after presenting the brief, ask ONE confirm question listing all missing tasks** ("Create these N in Todoist? …"); create on confirm (mapped project + prefix), then update the brief entries with the new task links.
 - **Stale threads** — in-progress plan untouched across sessions, blocker recurring in progress files, decision pending — surface under Risks.
-- **Merged but unarchived** — when a `plans/CURRENT.md` active plan references a PR, check its state within the PR-state budget row above (max 3/run, oldest first; use the right token for the repo). Merged PR + plan still active → suggest `/pavilio-archive-plan <project> <plan>` under Risks ("shipped, not archived"). Plans beyond the cap: note "PR state unchecked" instead of calling. Suggest only — never run the archive yourself.
+- **Merged but unarchived** — when an active change dir (un-archived under `openspec/changes/`) references a PR in its `proposal.md`, check its state within the PR-state budget row above (max 3/run, oldest first; use the right token for the repo). Merged PR + change still un-archived → suggest `/pavilio-archive-plan <project> <change-id>` under Risks ("shipped, not archived"). Changes beyond the cap: note "PR state unchecked" instead of calling. Suggest only — never run the archive yourself.
 - Todoist tasks due today/overdue → candidates for Top 3.
 - Handoffs checklist in existing BRIEFING.md: checked items are done (subagents check them off) — carry status forward, don't re-open.
 - **No silent drops.** Before overwriting BRIEFING.md, read the existing one. Every open item from the previous brief (Top 3, Risks, Open items, unchecked Handoffs) MUST reappear in the new brief — an item may only leave when its Todoist task is done or the user explicitly drops it. Items that fall out of Top 3 move to `## Open items`, never vanish.

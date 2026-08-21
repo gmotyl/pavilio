@@ -20,7 +20,7 @@ All `projects/<proj>/…` paths are relative to the **workspace repo root**. In 
 ## Behavior
 
 1. **Resolve inputs**: project + task from arguments; ask only for what's missing.
-2. **Fixed read budget** to fill Context (do not exceed): latest 1 file from `projects/<proj>/progress/` + `plans/CURRENT.md` pointer. Unknowns become `- [ ] discover …` todo items, not reading.
+2. **Fixed read budget** to fill Context (do not exceed): latest 1 file from `projects/<proj>/progress/` + the active (un-archived) change dir under `openspec/changes/`, referenced by its `<change-id>` (see [[pavilio-openspec-storage]]). Unknowns become `- [ ] discover …` todo items, not reading.
 3. Draft the handoff in the standard format:
 
 ```markdown

@@ -20,10 +20,10 @@ This follows [[subagent-driven-development]] — independent tasks fan out to su
 ## Usage
 
 ```
-/pavilio-execute-plan [path/to/plan.md]
+/pavilio-execute-plan [path/to/tasks.md]
 ```
 
-If no path is given, use the in-progress plan referenced by `projects/<project>/plans/CURRENT.md`; if that's empty or ambiguous, ask which plan — one question, then stop.
+If no path is given, locate the **active change** — an un-archived directory under the backend's `openspec/changes/` (see [[pavilio-openspec-storage]]) — and execute its `tasks.md`. Multiple un-archived changes, or an ambiguous scope → ask which change — one question, then stop. No `CURRENT.md` is read.
 
 ## The process
 
@@ -54,7 +54,7 @@ After all tasks are complete and reviewed:
 1. Run the full test/build suite and confirm it's green — paste the actual result, don't assert success without evidence.
 2. Optionally dispatch [[pavilio-code-review]] for a branch-level two-axis (Standards + Spec) review across the whole diff.
 3. Present the completion options and let the user choose: **merge**, **open a PR**, or **leave the branch as-is**. Execute the chosen option; never merge to `main`/`master` without explicit consent.
-4. If the user chose **merge** (the change landed in this session), suggest [[pavilio-archive-plan]] to fold the spec's requirement deltas into the project's living specs and mark the plan Done in CURRENT.md — suggest, don't run unasked. If the PR stays open, skip this: [[pavilio-manager]] flags merged-but-unarchived plans later.
+4. If the user chose **merge** (the change landed in this session), suggest [[pavilio-archive-plan]] to fold the change's delta specs into the living specs and move the change dir under `openspec/changes/archive/` — suggest, don't run unasked. If the PR stays open, skip this: [[pavilio-manager]] flags merged-but-unarchived changes later.
 5. Hand off to [[pavilio-session-end]] to verify the progress note, commit, and propose any follow-ups.
 
 ## When to stop and ask
