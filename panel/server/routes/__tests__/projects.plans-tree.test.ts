@@ -110,6 +110,27 @@ describe("GET /api/projects/:name/plans-tree", () => {
     expect(repo.files[0].filename).toBe("checkout.md");
   });
 
+  it("exposes plans/archived as a separate 'project:archived' source, not in project", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    seedFile(join(projectsDir, "alokai", "plans", "2026-01-01-active.md"), "# active");
+    seedFile(join(projectsDir, "alokai", "plans", "archived", "2026-01-01-old-design.md"), "# old");
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const project = res.body.sources.find((s: { id: string }) => s.id === "project");
+    const archived = res.body.sources.find((s: { id: string }) => s.id === "project:archived");
+    // The active plan stays in the project source; the subdir file is not double-listed there.
+    expect(project.files.map((f: { filename: string }) => f.filename)).toEqual(["2026-01-01-active.md"]);
+    expect(archived).toBeTruthy();
+    expect(archived.label).toBe("Archived");
+    expect(archived.files.map((f: { filename: string }) => f.filename)).toEqual(["2026-01-01-old-design.md"]);
+  });
+
+  it("omits the archived source when there are no archived plans", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    seedFile(join(projectsDir, "alokai", "plans", "2026-01-01-active.md"), "# active");
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    expect(res.body.sources.find((s: { id: string }) => s.id === "project:archived")).toBeUndefined();
+  });
+
   it("returns 404 for unknown project", async () => {
     const res = await request(makeApp()).get("/api/projects/ghost/plans-tree");
     expect(res.status).toBe(404);
@@ -126,6 +147,17 @@ describe("GET /api/projects/:name/plans/read", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body.content).toBe("# foo body");
+  });
+
+  it("reads an archived plan file (nested under plans/)", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const target = join(projectsDir, "alokai", "plans", "archived", "2026-01-01-old-design.md");
+    seedFile(target, "# archived body");
+    const res = await request(makeApp()).get(
+      `/api/projects/alokai/plans/read?path=${encodeURIComponent(target)}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.content).toBe("# archived body");
   });
 
   it("reads a workspace .kilo/plans file", async () => {

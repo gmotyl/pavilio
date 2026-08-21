@@ -1,6 +1,7 @@
 import ImageDropZone from "../markdown/ImageDropZone";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import PathActions from "./PathActions";
+import { usePeekTriggerProps } from "./peekTrigger";
 
 interface Props {
   filePath: string;
@@ -18,6 +19,7 @@ export function FileViewer({
   absolutePath,
   loading,
 }: Props) {
+  const peekTrigger = usePeekTriggerProps();
   return (
     <div>
       <div
@@ -25,7 +27,9 @@ export function FileViewer({
         style={{ borderBottom: "1px solid var(--border-subtle)" }}
       >
         <span
-          className="text-sm font-mono truncate flex-1"
+          {...peekTrigger}
+          data-testid="file-list-peek-trigger"
+          className="text-sm font-mono truncate flex-1 cursor-default"
           style={{ color: "var(--text-tertiary)" }}
         >
           {filePath.split("/").pop()}

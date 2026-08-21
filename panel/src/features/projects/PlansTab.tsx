@@ -22,8 +22,15 @@ import { usePlanDragSource, usePlanDropTarget } from "./usePlanDrag";
 import { useFileListControls, filterAndSortFiles } from "./fileListControls";
 import { useAutoSelectNewest } from "./useAutoSelectNewest";
 import PathActions from "./PathActions";
+import { usePeekTriggerProps } from "./peekTrigger";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
+
+/**
+ * Server source id for archived plans (see `plansSources` in server/routes/projects.ts).
+ * The server and panel agree on this literal by contract; kept in one place on the panel side.
+ */
+const ARCHIVED_SOURCE_ID = "project:archived";
 
 interface Props {
   projectName: string;
@@ -177,6 +184,27 @@ function PlanSourceHeader({
   );
 }
 
+/** Open-file header: the filename doubles as the hover-peek trigger (see PeekTriggerContext). */
+function PlanDetailHeader({ path }: { path: string }) {
+  const peek = usePeekTriggerProps();
+  return (
+    <div
+      className="flex items-center gap-2 mb-4 pb-3"
+      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+    >
+      <span
+        {...peek}
+        data-testid="file-list-peek-trigger"
+        className="text-sm font-mono truncate flex-1 cursor-default"
+        style={{ color: "var(--text-tertiary)" }}
+      >
+        {path.split("/").pop()}
+      </span>
+      <PathActions absolutePath={path} />
+    </div>
+  );
+}
+
 export default function PlansTab({ projectName, currentPlans }: Props) {
   const { data, loading, error, refresh } = usePlansTree(projectName);
   // Selection lives in the `?file=` URL param (like notes/memo) so the
@@ -285,6 +313,8 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
   const candidates = useMemo(
     () =>
       (data?.sources ?? [])
+        // Archived plans are history — never auto-select-newest into one.
+        .filter((s) => s.id !== ARCHIVED_SOURCE_ID)
         .flatMap((s) => filterAndSortFiles(s.files, sortOpts))
         .map((f) => ({ key: f.absolutePath, mtime: f.modified })),
     [data, controls.debouncedQuery, controls.sortKey, controls.sortDir],
@@ -314,19 +344,29 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
 
   const sources: FileListSource[] = data.sources.map((s) => {
     const files = filterAndSortFiles(s.files, sortOpts);
+    const isArchived = s.id === ARCHIVED_SOURCE_ID;
     return {
       id: s.id,
+      // Archived's label ("Archived") already comes from the server source.
       label: s.id === "project" ? "projects (current)" : s.label,
       count: files.length,
-      hint: s.id !== "project" && s.id !== "claude" ? "(.kilo)" : undefined,
-      renderHeader: (header) => (
-        <PlanSourceHeader
-          projectName={projectName}
-          sourceId={s.id}
-          onMoved={refresh}
-          header={header}
-        />
-      ),
+      hint:
+        !isArchived && s.id !== "project" && s.id !== "claude"
+          ? "(.kilo)"
+          : undefined,
+      // History: collapsed by default, and no drag-move header (archiving is
+      // done by /pavilio-archive-plan, not by dragging in the panel).
+      defaultOpen: isArchived ? false : undefined,
+      renderHeader: isArchived
+        ? undefined
+        : (header) => (
+            <PlanSourceHeader
+              projectName={projectName}
+              sourceId={s.id}
+              onMoved={refresh}
+              header={header}
+            />
+          ),
       rows: (
         <PlanRows
           source={{ ...s, files }}
@@ -356,20 +396,7 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
               Select a plan to view.
             </p>
           )}
-          {selectedPath && (
-            <div
-              className="flex items-center gap-2 mb-4 pb-3"
-              style={{ borderBottom: "1px solid var(--border-subtle)" }}
-            >
-              <span
-                className="text-sm font-mono truncate flex-1"
-                style={{ color: "var(--text-tertiary)" }}
-              >
-                {selectedPath.split("/").pop()}
-              </span>
-              <PathActions absolutePath={selectedPath} />
-            </div>
-          )}
+          {selectedPath && <PlanDetailHeader path={selectedPath} />}
           {selectedPath && fileError && (
             <p className="text-sm" style={{ color: "var(--red)" }}>
               Failed to load file: {fileError}

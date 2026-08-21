@@ -120,6 +120,55 @@ describe("PlansTab", () => {
     );
   });
 
+  it("renders archived plans as a default-collapsed 'Archived' group", async () => {
+    const ARCHIVED_FILE = "2025-12-01-old-design.md";
+    mockFetchResponses({
+      "plans-tree": {
+        project: "alokai",
+        sources: [
+          TREE.sources[0],
+          {
+            id: "project:archived",
+            label: "Archived",
+            absoluteRoot: "/p/projects/alokai/plans/archived",
+            files: [
+              {
+                source: "project:archived",
+                filename: ARCHIVED_FILE,
+                absolutePath: `/p/projects/alokai/plans/archived/${ARCHIVED_FILE}`,
+                modified: 1,
+                relativeToProjectsDir: `alokai/plans/archived/${ARCHIVED_FILE}`,
+              },
+            ],
+          },
+        ],
+      },
+      "plans/read": { absolutePath: "/p/projects/alokai/plans/2026-01-01-foo.md", content: "# body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    const header = await screen.findByTestId("plans-tab-source-project:archived");
+    expect(screen.getByText("Archived")).toBeTruthy();
+    // Collapsed by default — the archived file is not rendered until expanded.
+    expect(
+      screen.queryByTestId(`plans-tab-file-project:archived-${ARCHIVED_FILE}`),
+    ).toBeNull();
+    fireEvent.click(header);
+    expect(
+      screen.getByTestId(`plans-tab-file-project:archived-${ARCHIVED_FILE}`),
+    ).toBeTruthy();
+  });
+
+  it("opens the peek when the open file's name is hovered (collapsed desktop)", async () => {
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    // A plan auto-selects; collapse the sidebar so a hover-peek is possible.
+    const toggle = await screen.findByTestId("file-list-sidebar-toggle");
+    fireEvent.click(toggle);
+    const name = await screen.findByTestId("file-list-peek-trigger");
+    expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
+    fireEvent.mouseEnter(name);
+    expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
+  });
+
   it("adds a plan to active via POST when an unstarred project plan's star is clicked", async () => {
     const mockFetch = mockFetchResponses({
       "plans-tree": TREE,
