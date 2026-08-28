@@ -1,11 +1,11 @@
 ---
 name: pavilio-archive-plan
-description: Archive a shipped plan OpenSpec-style — fold its spec's requirement deltas into the project's living specs under projects/<project>/specs/, distill durable knowledge into CONTEXT.md/ADRs, and mark the plan Done in CURRENT.md. Use when the user invokes `/pavilio-archive-plan`, a plan's PR has merged, or [[pavilio-manager]] flags a merged-but-unarchived plan.
+description: Archive a shipped plan OpenSpec-style — fold its spec's requirement deltas into the project's living specs under projects/<project>/specs/, distill durable knowledge into CONTEXT.md/ADRs, mark the plan Done in CURRENT.md, and `git mv` the plan's files into projects/<project>/plans/archived/. Use when the user invokes `/pavilio-archive-plan`, a plan's PR has merged, or [[pavilio-manager]] flags a merged-but-unarchived plan.
 ---
 
 # pavilio-archive-plan
 
-Close the loop after a change ships: what the plan *changed* becomes part of what the project *is*. Analog of OpenSpec's archive step — deltas merge into living truth; the plan itself stays in `plans/` as history.
+Close the loop after a change ships: what the plan *changed* becomes part of what the project *is*. Analog of OpenSpec's archive step — deltas merge into living truth; the plan's own files move to `plans/archived/` and stay there as history (step 5).
 
 **Announce at start:** "Using pavilio-archive-plan to archive <plan>."
 
