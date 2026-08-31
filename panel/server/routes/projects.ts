@@ -6,6 +6,7 @@ import {
   readdirSync,
   statSync,
   lstatSync,
+  realpathSync,
 } from "fs";
 import { join, resolve, basename, relative, dirname, isAbsolute, sep } from "path";
 import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
@@ -219,8 +220,15 @@ function openSpecSources(projectDir: string): OpenSpecSourceDesc[] {
       if (resolution.mode === "unconfigured") continue;
       mode = resolution.mode;
       openspecDir = resolution.openspecDir;
-    } catch {
-      continue; // unknown mode / root escaping its boundary → not a valid source
+    } catch (err) {
+      // Unknown mode / root escaping its boundary → not a valid source. Logged
+      // (not just silently skipped) so a typo'd `openspec.mode` in repos.json
+      // doesn't disappear a repo's specs with zero signal.
+      console.warn(
+        `[openSpecSources] ${basename(projectDir)}: skipping repo ${r.name}:`,
+        (err as Error).message,
+      );
+      continue;
     }
     out.push({ id: `openspec:repo:${r.name}`, label: `${r.name} (OpenSpec)`, mode, openspecDir });
   }
@@ -409,6 +417,17 @@ export function isContextPathAllowed(
     for (const openspecDir of openspecDirs) {
       const specsRoot = join(openspecDir, "specs");
       if (isPathUnder(absolutePath, specsRoot) && dirname(dirname(absolutePath)) === specsRoot) {
+        // The depth/prefix check above is pure string math — a symlinked
+        // capability dir or spec.md file would otherwise sail through it and
+        // resolve outside specsRoot on read. Reject when the path exists and
+        // its realpath differs (i.e. a symlink is in the chain).
+        if (existsSync(absolutePath)) {
+          try {
+            if (realpathSync(absolutePath) !== absolutePath) continue;
+          } catch {
+            continue;
+          }
+        }
         return true;
       }
     }
@@ -585,7 +604,11 @@ router.post("/:name/plans/current/:planFile", (req, res) => {
 
 router.delete("/:name/plans/current/:planFile", (req, res) => {
   const { projectsDir } = getConfig();
-  const currentMdPath = join(projectsDir, req.params.name, "plans", "CURRENT.md");
+  const projectDir = resolve(projectsDir, req.params.name);
+  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  const currentMdPath = join(projectDir, "plans", "CURRENT.md");
   if (!existsSync(currentMdPath)) return res.status(404).json({ error: "CURRENT.md not found" });
 
   const planFile = decodeURIComponent(req.params.planFile);

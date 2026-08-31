@@ -27,6 +27,7 @@ No args → resolve project + backend from the session (see [[pavilio-openspec-s
    - `REMOVED` → delete the requirement from `openspec/specs/`.
    - Living specs are behavior-level: requirement statements + WHEN/THEN scenarios, no implementation detail.
    - Change has no delta sections (older change) → distill its behavior into requirement + scenarios form first, then fold. Say you did this.
+   - **Spec-worthy vs. CONTEXT-worthy.** Before distilling, decide where the change's content belongs — a capability with no `openspec/specs/<capability>/spec.md` yet is **not** a reason to skip: create it lazily, same as the ADDED case above. Apply this test: *if this shipped differently next month, would there be a right/wrong behavior to check it against?* Yes → distill into a requirement + scenarios in `openspec/specs/<capability>/spec.md` (new file if needed). No — a one-off action or decision with no forward-looking contract (a completed rename, a copy tweak, a test-coverage push, a migration) → `CONTEXT.md` gotcha instead, per step 3. Defaulting everything to CONTEXT.md because "this capability never had a spec before" is the failure mode this test exists to prevent.
 
    **All-or-nothing.** A fold or validation failure leaves the active change dir **and** the living specs unchanged (see [[pavilio-openspec-storage]]) — report the error and stop; do not move the change dir.
 

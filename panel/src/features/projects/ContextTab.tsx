@@ -87,7 +87,7 @@ function SourceRows({
           className="text-[10px] uppercase tracking-widest px-2 pt-2 pb-0.5"
           style={{ color: "var(--text-tertiary)" }}
         >
-          Specs
+          OpenSpec specs
         </p>
       )}
       {openspecSpecs.map((s) => (

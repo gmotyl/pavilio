@@ -46,14 +46,26 @@ export function discoverProjects(): Project[] {
         try {
           const raw = JSON.parse(readFileSync(reposPath, "utf-8"));
           repos = Array.isArray(raw)
-            ? raw.map((r) => {
-                const openspec = parseOpenSpecConfig(r);
-                const entry: RepoEntry = { name: r.name, path: r.path };
-                if (openspec) entry.openspec = openspec;
-                return entry;
+            ? raw.flatMap((r) => {
+                // Per-entry: a malformed `openspec` config on ONE repo must not
+                // drop every other repo in the array — skip just that entry.
+                try {
+                  const openspec = parseOpenSpecConfig(r);
+                  const entry: RepoEntry = { name: r.name, path: r.path };
+                  if (openspec) entry.openspec = openspec;
+                  return [entry];
+                } catch (err) {
+                  console.warn(
+                    `[discovery] ${e.name}/repos.json: invalid openspec config for repo ${String(r?.name)}:`,
+                    (err as Error).message,
+                  );
+                  return [];
+                }
               })
             : [];
-        } catch { /* ignore malformed */ }
+        } catch (err) {
+          console.warn(`[discovery] ${e.name}/repos.json: invalid JSON:`, (err as Error).message);
+        }
       }
 
       return {

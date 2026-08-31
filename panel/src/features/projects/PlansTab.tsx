@@ -270,9 +270,14 @@ export default function PlansTab({ projectName }: Props) {
           sourceLabel: src.label,
           artifacts: change.artifacts,
         });
-        // Active in ANY source keeps the coordinated change live.
-        if (change.status === "active") g.archived = false;
-        if (change.status === "archived" && change.archiveDate && !g.archiveDate) {
+        // Active in ANY source keeps the coordinated change live — and drops
+        // any archive date recorded from another source, so archived=false
+        // never carries a stale archiveDate along with it.
+        if (change.status === "active") {
+          g.archived = false;
+          g.archiveDate = null;
+        }
+        if (g.archived && change.status === "archived" && change.archiveDate && !g.archiveDate) {
           g.archiveDate = change.archiveDate;
         }
       }
@@ -338,10 +343,9 @@ export default function PlansTab({ projectName }: Props) {
       // Archived's label ("Archived") already comes from the server source.
       label: s.id === "project" ? "projects (current)" : s.label,
       count: files.length,
-      hint:
-        !isArchived && s.id !== "project" && s.id !== "claude"
-          ? "(.kilo)"
-          : undefined,
+      // No hint needed: legacySources is only ever "project" or "project:archived"
+      // now that the external `.kilo`/`~/.claude/plans` sources have been dropped.
+      hint: undefined,
       // History: collapsed by default. Archiving is done by
       // /pavilio-archive-plan, not in the panel.
       defaultOpen: isArchived ? false : undefined,
