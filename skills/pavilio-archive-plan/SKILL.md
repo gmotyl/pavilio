@@ -27,6 +27,7 @@ No args → resolve project from the session, then read `projects/<project>/plan
    - `REMOVED` → delete the requirement from `specs/`.
    - Spec files are behavior-level: requirement statements + WHEN/THEN scenarios, no implementation detail.
    - Design doc has no delta sections (older spec) → distill its behavior into requirement + scenarios form first, then fold. Say you did this.
+   - **Spec-worthy vs. CONTEXT-worthy.** Before distilling, decide where the plan's content belongs — a domain with no `specs/<area>.md` yet is **not** a reason to skip: create it lazily, same as the ADDED case above. Apply this test: *if this shipped differently next month, would there be a right/wrong behavior to check it against?* Yes → distill into a requirement + scenarios in `specs/<area>.md` (new file if needed). No — a one-off action or decision with no forward-looking contract (a completed rename, a copy tweak, a test-coverage push, a migration) → `CONTEXT.md` gotcha instead, per step 3. Defaulting everything to CONTEXT.md because "this domain never had a spec before" is the failure mode this test exists to prevent.
 
 3. **Distill durable knowledge.** Terms that crystallised → `CONTEXT.md`. A decision meeting the ADR bar (hard to reverse + surprising + real trade-off) that has no ADR yet → offer one. Don't force either.
 
