@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
 
@@ -96,8 +96,8 @@ function renderGrid(
     onSwap: vi.fn(),
     ...overrides,
   };
-  render(<TerminalLayoutGrid {...props} />);
-  return props;
+  const result = render(<TerminalLayoutGrid {...props} />);
+  return { ...props, ...result };
 }
 
 describe("TerminalLayoutGrid — confirm close flow", () => {
@@ -226,5 +226,179 @@ describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () 
 
     fireEvent.keyDown(window, { key: "u", metaKey: true });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("TerminalLayoutGrid — column layout", () => {
+  // jsdom's DragEvent has no real DataTransfer; the component's own
+  // onDragStart handler writes to it, so tests must supply a stand-in.
+  function dragStart(el: Element) {
+    fireEvent.dragStart(el, { dataTransfer: { effectAllowed: "", dropEffect: "" } });
+  }
+
+  // This jsdom build has no DragEvent constructor, so @testing-library's
+  // fireEvent.drop(el, { ctrlKey }) falls back to a plain Event whose
+  // constructor silently drops unknown init keys like ctrlKey. Dispatch a
+  // real MouseEvent (which jsdom does support) to get a readable ctrlKey.
+  function dropCtrl(el: Element, ctrlKey: boolean) {
+    fireEvent(el, new MouseEvent("drop", { bubbles: true, cancelable: true, ctrlKey }));
+  }
+
+  it("renders sessions.length matching cells for counts 1-7 with default columnSizes", () => {
+    for (let count = 1; count <= 7; count++) {
+      const sessions = Array.from({ length: count }, (_, i) =>
+        makeSession({ id: `count${count}-s${i}` }),
+      );
+      const { unmount } = renderGrid({ sessions, focusedId: sessions[0].id });
+      expect(screen.getAllByTestId(/^terminal-view-/)).toHaveLength(count);
+      unmount();
+    }
+  });
+
+  it("count=3 default groups session 0 alone in column 0 and sessions 1-2 in column 1", () => {
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+    ];
+    renderGrid({ sessions, focusedId: "a" });
+
+    const col0 = screen.getByTestId("terminal-grid-column-0");
+    const col1 = screen.getByTestId("terminal-grid-column-1");
+    expect(within(col0).getAllByTestId(/^terminal-view-/)).toHaveLength(1);
+    expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(2);
+    expect(within(col0).getByTestId("terminal-view-a")).toBeInTheDocument();
+    expect(within(col1).getByTestId("terminal-view-b")).toBeInTheDocument();
+    expect(within(col1).getByTestId("terminal-view-c")).toBeInTheDocument();
+  });
+
+  it("count=7 default groups sessions into 3 column wrappers of sizes 3, 2, 2", () => {
+    const sessions = Array.from({ length: 7 }, (_, i) =>
+      makeSession({ id: `s${i}` }),
+    );
+    renderGrid({ sessions, focusedId: "s0" });
+
+    const col0 = screen.getByTestId("terminal-grid-column-0");
+    const col1 = screen.getByTestId("terminal-grid-column-1");
+    const col2 = screen.getByTestId("terminal-grid-column-2");
+    expect(within(col0).getAllByTestId(/^terminal-view-/)).toHaveLength(3);
+    expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(2);
+    expect(within(col2).getAllByTestId(/^terminal-view-/)).toHaveLength(2);
+    expect(screen.queryByTestId("terminal-grid-column-3")).not.toBeInTheDocument();
+  });
+
+  it("an explicit columnSizes prop overrides the count-derived default", () => {
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+      makeSession({ id: "d" }),
+    ];
+    renderGrid({ sessions, focusedId: "a", columnSizes: [1, 3] });
+
+    const col0 = screen.getByTestId("terminal-grid-column-0");
+    const col1 = screen.getByTestId("terminal-grid-column-1");
+    expect(within(col0).getAllByTestId(/^terminal-view-/)).toHaveLength(1);
+    expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(3);
+  });
+
+  it("mobile/maximized rendering is unaffected by columnSizes", () => {
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+    ];
+    renderGrid({
+      sessions,
+      focusedId: "a",
+      maximized: true,
+      columnSizes: [1, 2],
+    });
+
+    expect(screen.queryByTestId("terminal-grid-column-0")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("terminal-grid-gutter-0")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId(/^terminal-view-/)).toHaveLength(3);
+  });
+
+  it("plain drop across a column boundary still calls onSwap, not onJoinColumn", () => {
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+    ];
+    const onSwap = vi.fn();
+    const onJoinColumn = vi.fn();
+    renderGrid({ sessions, focusedId: "a", onSwap, onJoinColumn });
+
+    dragStart(screen.getAllByTitle("Drag to swap")[0]);
+    fireEvent.drop(screen.getByTestId("terminal-view-b"));
+
+    expect(onSwap).toHaveBeenCalledWith("a", "b");
+    expect(onJoinColumn).not.toHaveBeenCalled();
+  });
+
+  it("Ctrl+drop onto a cell calls onJoinColumn instead of onSwap", () => {
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+    ];
+    const onSwap = vi.fn();
+    const onJoinColumn = vi.fn();
+    renderGrid({ sessions, focusedId: "a", onSwap, onJoinColumn });
+
+    dragStart(screen.getAllByTitle("Drag to swap")[0]);
+    dropCtrl(screen.getByTestId("terminal-view-b"), true);
+
+    expect(onJoinColumn).toHaveBeenCalledWith("a", "b");
+    expect(onSwap).not.toHaveBeenCalled();
+  });
+
+  it("Ctrl+drop onto a gutter calls onSplitColumn with the gutter's index", () => {
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+    ];
+    const onSplitColumn = vi.fn();
+    renderGrid({ sessions, focusedId: "a", onSplitColumn });
+
+    dragStart(screen.getAllByTitle("Drag to swap")[0]);
+    dropCtrl(screen.getByTestId("terminal-grid-gutter-1"), true);
+
+    expect(onSplitColumn).toHaveBeenCalledWith("a", 1);
+  });
+
+  it("a non-Ctrl drop onto a gutter fires no callback", () => {
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+    ];
+    const onSplitColumn = vi.fn();
+    const onSwap = vi.fn();
+    renderGrid({ sessions, focusedId: "a", onSplitColumn, onSwap });
+
+    dragStart(screen.getAllByTitle("Drag to swap")[0]);
+    fireEvent.drop(screen.getByTestId("terminal-grid-gutter-1"));
+
+    expect(onSplitColumn).not.toHaveBeenCalled();
+    expect(onSwap).not.toHaveBeenCalled();
+  });
+
+  it("Ctrl+drag works without throwing when onJoinColumn/onSplitColumn are omitted", () => {
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+    ];
+    renderGrid({ sessions, focusedId: "a" });
+
+    expect(() => {
+      dragStart(screen.getAllByTitle("Drag to swap")[0]);
+      dropCtrl(screen.getByTestId("terminal-view-b"), true);
+      dragStart(screen.getAllByTitle("Drag to swap")[0]);
+      dropCtrl(screen.getByTestId("terminal-grid-gutter-1"), true);
+    }).not.toThrow();
   });
 });
