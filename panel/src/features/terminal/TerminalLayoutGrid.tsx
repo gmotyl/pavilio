@@ -7,6 +7,8 @@ import { displayColor } from "./sessionColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
+import type { ColumnSizes } from "./columnLayout";
+import { columnsFromSizes, defaultColumnSizes } from "./columnLayout";
 
 interface Props {
   sessions: SessionMeta[];
@@ -17,6 +19,9 @@ interface Props {
   onToggleMaximize: () => void;
   onReady?: (sessionId: string, handle: TerminalHandle) => void;
   onSwap?: (idA: string, idB: string) => void;
+  columnSizes?: ColumnSizes;
+  onJoinColumn?: (sessionId: string, targetId: string) => void;
+  onSplitColumn?: (sessionId: string, gutterIndex: number) => void;
 }
 
 export function TerminalLayoutGrid({
@@ -28,6 +33,9 @@ export function TerminalLayoutGrid({
   onToggleMaximize,
   onReady,
   onSwap,
+  columnSizes,
+  onJoinColumn,
+  onSplitColumn,
 }: Props) {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia("(max-width: 767px)").matches,
@@ -100,9 +108,13 @@ export function TerminalLayoutGrid({
           setDropTargetId(session.id);
         }
       }}
-      onDrop={() => {
+      onDrop={(ctrlKey) => {
         if (draggedCellRef.current && draggedCellRef.current !== session.id) {
-          onSwap?.(draggedCellRef.current, session.id);
+          if (ctrlKey) {
+            onJoinColumn?.(draggedCellRef.current, session.id);
+          } else {
+            onSwap?.(draggedCellRef.current, session.id);
+          }
         }
         draggedCellRef.current = null;
         setDropTargetId(null);
@@ -138,61 +150,63 @@ export function TerminalLayoutGrid({
         ))}
       </div>
     );
-  } else if (count === 1) {
-    body = <div className="w-full h-full">{cell(sessions[0])}</div>;
-  } else if (count === 2) {
-    body = (
-      <div className="h-full grid grid-cols-2" style={{ gap: "4px" }}>
-        {cell(sessions[0])}
-        {cell(sessions[1])}
-      </div>
-    );
-  } else if (count === 3) {
-    body = (
-      <div className="h-full grid grid-cols-2" style={{ gap: "4px" }}>
-        {cell(sessions[0], { gridRow: "1 / 3" })}
-        {cell(sessions[1])}
-        {cell(sessions[2])}
-      </div>
-    );
-  } else if (count === 4) {
-    body = (
-      <div
-        className="h-full grid grid-cols-2 grid-rows-2"
-        style={{ gap: "4px" }}
-      >
-        {sessions.map((s) => cell(s))}
-      </div>
-    );
-  } else if (count === 5) {
-    body = (
-      <div
-        className="h-full grid grid-cols-2"
-        style={{ gap: "4px", gridTemplateRows: "1fr 1fr 1fr" }}
-      >
-        {cell(sessions[0], { gridRow: "1 / 2" })}
-        {cell(sessions[2], { gridRow: "1 / 2" })}
-        {cell(sessions[1], { gridRow: "2 / 4" })}
-        {cell(sessions[3], { gridRow: "2 / 3" })}
-        {cell(sessions[4], { gridRow: "3 / 4" })}
-      </div>
-    );
-  } else if (count === 6) {
-    body = (
-      <div
-        className="h-full grid grid-cols-3 grid-rows-2"
-        style={{ gap: "4px" }}
-      >
-        {sessions.map((s) => cell(s))}
-      </div>
-    );
   } else {
-    body = (
+    // Column-based layout: outer flex row of columns (+ Ctrl-drop gutters
+    // between/around them), inner CSS grid per column stacking that
+    // column's sessions evenly.
+    // `columnSizes` is always passed by the caller (as `[]` when no custom
+    // layout is stored), never `undefined` in practice — so `?? ` alone
+    // would never fall through and an empty array would render zero
+    // columns, hiding every session. Treat empty the same as absent.
+    const sizes =
+      columnSizes && columnSizes.length > 0
+        ? columnSizes
+        : defaultColumnSizes(count);
+    const order = sessions.map((s) => s.id);
+    const grouped = columnsFromSizes(order, sizes);
+    const sessionById = new Map(sessions.map((s) => [s.id, s]));
+
+    const handleGutterDrop = (gutterIndex: number) => (e: React.DragEvent) => {
+      e.preventDefault();
+      const draggedId = draggedCellRef.current;
+      draggedCellRef.current = null;
+      setDropTargetId(null);
+      if (draggedId && e.ctrlKey) {
+        onSplitColumn?.(draggedId, gutterIndex);
+      }
+    };
+
+    const gutter = (index: number) => (
       <div
-        className="h-full grid grid-cols-3"
-        style={{ gap: "4px", gridAutoRows: "1fr" }}
-      >
-        {sessions.map((s) => cell(s))}
+        key={`gutter-${index}`}
+        data-testid={`terminal-grid-gutter-${index}`}
+        style={{ width: "4px", flexShrink: 0, alignSelf: "stretch" }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleGutterDrop(index)}
+      />
+    );
+
+    const columnEls: React.ReactNode[] = [gutter(0)];
+    grouped.forEach((ids, i) => {
+      columnEls.push(
+        <div
+          key={`col-${i}`}
+          data-testid={`terminal-grid-column-${i}`}
+          className="h-full grid flex-1 min-w-0"
+          style={{ gap: "4px", gridTemplateRows: `repeat(${ids.length}, 1fr)` }}
+        >
+          {ids.map((id) => {
+            const s = sessionById.get(id);
+            return s ? cell(s) : null;
+          })}
+        </div>,
+      );
+      columnEls.push(gutter(i + 1));
+    });
+
+    body = (
+      <div className="h-full flex" style={{ gap: "4px" }}>
+        {columnEls}
       </div>
     );
   }
@@ -218,7 +232,7 @@ interface CellProps {
   onReady?: (id: string, handle: TerminalHandle) => void;
   onDragStart: () => void;
   onDragOver: () => void;
-  onDrop: () => void;
+  onDrop: (ctrlKey: boolean) => void;
   onDragEnd: () => void;
   style?: React.CSSProperties;
 }
@@ -291,7 +305,7 @@ function TerminalCell({
       }}
       onDrop={(e) => {
         e.preventDefault();
-        onDrop();
+        onDrop(e.ctrlKey);
       }}
       onDragEnd={onDragEnd}
     >

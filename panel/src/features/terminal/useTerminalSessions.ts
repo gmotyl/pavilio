@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { destroyTerminal } from "./terminalInstances";
 import { reorderIds, swapIds, mergeOrder } from "./sessionOrder";
+import {
+  mergeColumnSizes,
+  joinColumn as joinColumnLayout,
+  splitToColumn as splitToColumnLayout,
+  defaultColumnSizes,
+  type ColumnSizes,
+} from "./columnLayout";
 
 export const TERMINAL_FOCUS_EVENT = "panel-terminal-focus";
 
@@ -91,12 +98,25 @@ export function useTerminalSessions(project: string) {
   );
 
   const ORDER_KEY = `panel-terminal-order-${project}`;
+  const COLUMNS_KEY = `panel-terminal-columns-${project}`;
 
   const [sessionOrder, setSessionOrder] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem(`panel-terminal-order-${project}`);
       return stored ? (JSON.parse(stored) as string[]) : [];
     } catch {
+      return [];
+    }
+  });
+
+  const [columnSizes, setColumnSizes] = useState<ColumnSizes>(() => {
+    try {
+      const stored = localStorage.getItem(`panel-terminal-columns-${project}`);
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed) ? (parsed as ColumnSizes) : [];
+    } catch (err) {
+      console.warn(`[terminal] read columns from localStorage failed:`, err);
       return [];
     }
   });
@@ -114,7 +134,16 @@ export function useTerminalSessions(project: string) {
       const data: SessionMeta[] = await res.json();
       const filtered = data.filter((s) => s.project === project);
       setSessions(filtered);
-      setSessionOrder((prev) => mergeOrder(prev, filtered.map((s) => s.id)));
+      // Reconcile columnSizes against the PRE-merge sessionOrder (the `prev`
+      // that mergeOrder itself consumes below), in the same update cycle as
+      // the sessionOrder merge — see columnLayout.mergeColumnSizes contract.
+      setSessionOrder((prev) => {
+        const next = mergeOrder(prev, filtered.map((s) => s.id));
+        setColumnSizes((prevColumns) =>
+          mergeColumnSizes(prev, prevColumns, next),
+        );
+        return next;
+      });
     } catch (err) {
       console.warn(`[terminal] fetch sessions failed:`, err);
     }
@@ -133,9 +162,13 @@ export function useTerminalSessions(project: string) {
       setFocusedIdState(storedFocus);
       const storedOrder = localStorage.getItem(`panel-terminal-order-${project}`);
       setSessionOrder(storedOrder ? JSON.parse(storedOrder) : []);
+      const storedColumns = localStorage.getItem(`panel-terminal-columns-${project}`);
+      const parsedColumns = storedColumns ? JSON.parse(storedColumns) : [];
+      setColumnSizes(Array.isArray(parsedColumns) ? parsedColumns : []);
     } catch {
       setFocusedIdState(null);
       setSessionOrder([]);
+      setColumnSizes([]);
     }
   }, [project]);
 
@@ -200,9 +233,19 @@ export function useTerminalSessions(project: string) {
         const created: SessionMeta = await res.json();
         if (created.project === project) {
           setSessions((prev) => [...prev, created]);
-          setSessionOrder((prev) =>
-            prev.includes(created.id) ? prev : [...prev, created.id],
-          );
+          // Reconcile columnSizes the same way fetchSessions does (see its
+          // comment above) — otherwise a custom layout's columnSizes falls
+          // out of sync with sessionOrder and the new session is silently
+          // sliced off by columnsFromSizes until the next poll.
+          setSessionOrder((prev) => {
+            const next = prev.includes(created.id)
+              ? prev
+              : [...prev, created.id];
+            setColumnSizes((prevColumns) =>
+              mergeColumnSizes(prev, prevColumns, next),
+            );
+            return next;
+          });
           setFocusedId(created.id);
         }
         return created;
@@ -281,6 +324,21 @@ export function useTerminalSessions(project: string) {
     }
   }, [ORDER_KEY, sessionOrder]);
 
+  // Persist columnSizes to localStorage whenever it changes — remove the key
+  // entirely when empty, mirroring useTerminalMaximized's remove-when-falsy
+  // convention (an empty array means "no custom layout stored").
+  useEffect(() => {
+    try {
+      if (columnSizes.length === 0) {
+        localStorage.removeItem(COLUMNS_KEY);
+      } else {
+        localStorage.setItem(COLUMNS_KEY, JSON.stringify(columnSizes));
+      }
+    } catch (err) {
+      console.warn(`[terminal] write columns to localStorage failed:`, err);
+    }
+  }, [COLUMNS_KEY, columnSizes]);
+
   // O(N) index map for sort
   const orderIndex = useMemo(
     () => new Map(sessionOrder.map((id, i) => [id, i])),
@@ -333,6 +391,49 @@ export function useTerminalSessions(project: string) {
     [],
   );
 
+  const hasCustomColumns = columnSizes.length > 0;
+
+  // Both sessionOrder and columnSizes must move together, atomically. Unlike
+  // fetchSessions'/createSession's reconciliation (where the sessionOrder
+  // updater's return value — mergeOrder's result, or the appended array — is
+  // self-sufficient and the nested columnSizes updater only needs to *read*
+  // it), joinColumn/splitColumn's new *order* is itself an output of
+  // columnLayout.joinColumn/splitToColumn, which computes the new order and
+  // the new sizes together, atomically, from the *current* columnSizes. A
+  // functional setSessionOrder updater can only return one value (the new
+  // order), so nesting a setColumnSizes call inside it would still need that
+  // same join/split call run a second time (or its result threaded out via a
+  // ref) for the inner updater to see the new sizes — no real saving over
+  // just computing both up front. So instead we read the current
+  // sessionOrder/columnSizes directly from the closure (same established
+  // pattern as createSession's direct read of `sessions` above) and issue
+  // both setState calls with the already-computed result.
+  const joinColumn = useCallback(
+    (sessionId: string, targetId: string) => {
+      const effectiveSizes =
+        columnSizes.length > 0 ? columnSizes : defaultColumnSizes(sessionOrder.length);
+      const result = joinColumnLayout(sessionOrder, effectiveSizes, sessionId, targetId);
+      setSessionOrder(result.order);
+      setColumnSizes(result.sizes);
+    },
+    [sessionOrder, columnSizes],
+  );
+
+  const splitColumn = useCallback(
+    (sessionId: string, gutterIndex: number) => {
+      const effectiveSizes =
+        columnSizes.length > 0 ? columnSizes : defaultColumnSizes(sessionOrder.length);
+      const result = splitToColumnLayout(sessionOrder, effectiveSizes, sessionId, gutterIndex);
+      setSessionOrder(result.order);
+      setColumnSizes(result.sizes);
+    },
+    [sessionOrder, columnSizes],
+  );
+
+  const resetColumns = useCallback(() => {
+    setColumnSizes([]);
+  }, []);
+
   return {
     sessions: orderedSessions,
     grouped,
@@ -345,6 +446,11 @@ export function useTerminalSessions(project: string) {
     fetchSessions,
     reorder,
     swapOrder,
+    columnSizes,
+    hasCustomColumns,
+    joinColumn,
+    splitColumn,
+    resetColumns,
   };
 }
 
