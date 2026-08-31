@@ -396,13 +396,6 @@ export function useTerminalSessions(project: string) {
     [],
   );
 
-  const swapOrder = useCallback(
-    (idA: string, idB: string) => {
-      setSessionOrder((prev) => swapIds(prev, idA, idB));
-    },
-    [],
-  );
-
   // `ColumnLayout` v2 is self-contained (each entry names its own
   // sessionId), so unlike the shipped v1 — where joinColumn/splitColumn's
   // new *order* and new *sizes* were two correlated outputs of a single
@@ -464,7 +457,6 @@ export function useTerminalSessions(project: string) {
     updateSession,
     fetchSessions,
     reorder,
-    swapOrder,
     columnLayout,
     mergeColumn,
     joinColumn,
