@@ -38,28 +38,24 @@ function renderToolbar(overrides: Partial<Parameters<typeof TerminalToolbar>[0]>
   return props;
 }
 
-describe("TerminalToolbar — reset layout", () => {
-  it("renders a Reset layout button that is disabled when hasCustomColumns is false", () => {
-    renderToolbar({ hasCustomColumns: false });
+describe("TerminalToolbar — layout preset menu", () => {
+  it("no longer renders terminal-toolbar-reset-layout, renders LayoutPresetMenu instead", () => {
+    renderToolbar();
 
-    const button = screen.getByTestId("terminal-toolbar-reset-layout");
-    expect(button).toBeDisabled();
+    expect(screen.queryByTestId("terminal-toolbar-reset-layout")).not.toBeInTheDocument();
+    expect(screen.getByTestId("layout-preset-toggle")).toBeInTheDocument();
   });
 
-  it("enables the Reset layout button when hasCustomColumns is true", () => {
-    renderToolbar({ hasCustomColumns: true });
+  it("wires sessions.length and onApplyPreset into LayoutPresetMenu", () => {
+    const onApplyPreset = vi.fn();
+    const sessions = [makeSession({ id: "s1" }), makeSession({ id: "s2" }), makeSession({ id: "s3" })];
+    renderToolbar({ sessions, onApplyPreset });
 
-    const button = screen.getByTestId("terminal-toolbar-reset-layout");
-    expect(button).not.toBeDisabled();
-  });
+    fireEvent.click(screen.getByTestId("layout-preset-toggle"));
+    fireEvent.click(screen.getByTestId("layout-preset-option-0"));
 
-  it("clicking Reset layout calls onResetColumns", () => {
-    const onResetColumns = vi.fn();
-    renderToolbar({ hasCustomColumns: true, onResetColumns });
-
-    fireEvent.click(screen.getByTestId("terminal-toolbar-reset-layout"));
-
-    expect(onResetColumns).toHaveBeenCalledTimes(1);
+    expect(onApplyPreset).toHaveBeenCalledTimes(1);
+    expect(onApplyPreset).toHaveBeenCalledWith([1, 2]);
   });
 });
 

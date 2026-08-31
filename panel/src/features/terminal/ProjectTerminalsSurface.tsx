@@ -88,12 +88,12 @@ export default function ProjectTerminalsSurface({
       }}
       onNavTo={navTo}
       onReorder={terminal.reorder}
-      onSwap={terminal.swapOrder}
-      columnSizes={terminal.columnSizes}
-      hasCustomColumns={terminal.hasCustomColumns}
+      onSwap={terminal.swapSessions}
+      columnLayout={terminal.columnLayout}
+      onMergeColumn={terminal.mergeColumn}
       onJoinColumn={terminal.joinColumn}
       onSplitColumn={terminal.splitColumn}
-      onResetColumns={terminal.resetColumns}
+      onApplyPreset={terminal.applyPreset}
       fill={fill}
     />
   );

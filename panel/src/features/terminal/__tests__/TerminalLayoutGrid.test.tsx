@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
+import { getLayoutPresets, expandPreset } from "../columnLayout";
+import type { ColumnLayout } from "../columnLayout";
 
 // TerminalView pulls in xterm which cannot render in jsdom; stub it.
 // The stub also calls onReady with a fake handle that returns a one-line
@@ -244,57 +246,83 @@ describe("TerminalLayoutGrid — column layout", () => {
     fireEvent(el, new MouseEvent("drop", { bubbles: true, cancelable: true, ctrlKey }));
   }
 
-  it("renders sessions.length matching cells for counts 1-7 with default columnSizes", () => {
-    for (let count = 1; count <= 7; count++) {
-      const sessions = Array.from({ length: count }, (_, i) =>
-        makeSession({ id: `count${count}-s${i}` }),
-      );
-      const { unmount } = renderGrid({ sessions, focusedId: sessions[0].id });
-      expect(screen.getAllByTestId(/^terminal-view-/)).toHaveLength(count);
-      unmount();
-    }
-  });
+  // Same workaround as dropCtrl, for "dragover" — the component reads
+  // e.ctrlKey during dragover to compute the live preview.
+  function dragOverCtrl(el: Element, ctrlKey: boolean) {
+    fireEvent(el, new MouseEvent("dragover", { bubbles: true, cancelable: true, ctrlKey }));
+  }
 
-  it("count=3 default groups session 0 alone in column 0 and sessions 1-2 in column 1", () => {
+  function threeSessionsSameColumnAB(): { sessions: SessionMeta[]; columnLayout: ColumnLayout } {
+    // a, b share column 0 (weight 1 each); c alone in column 1.
     const sessions = [
       makeSession({ id: "a" }),
       makeSession({ id: "b" }),
       makeSession({ id: "c" }),
     ];
-    renderGrid({ sessions, focusedId: "a" });
+    const columnLayout: ColumnLayout = [
+      [
+        { sessionId: "a", weight: 1 },
+        { sessionId: "b", weight: 1 },
+      ],
+      [{ sessionId: "c", weight: 1 }],
+    ];
+    return { sessions, columnLayout };
+  }
 
-    const col0 = screen.getByTestId("terminal-grid-column-0");
-    const col1 = screen.getByTestId("terminal-grid-column-1");
-    expect(within(col0).getAllByTestId(/^terminal-view-/)).toHaveLength(1);
-    expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(2);
-    expect(within(col0).getByTestId("terminal-view-a")).toBeInTheDocument();
-    expect(within(col1).getByTestId("terminal-view-b")).toBeInTheDocument();
-    expect(within(col1).getByTestId("terminal-view-c")).toBeInTheDocument();
+  it("renders session count matching cells across counts 1-7 using the default preset", () => {
+    for (let count = 1; count <= 7; count++) {
+      const sessions = Array.from({ length: count }, (_, i) =>
+        makeSession({ id: `count${count}-s${i}` }),
+      );
+      const order = sessions.map((s) => s.id);
+      const expected = expandPreset(order, getLayoutPresets(count)[0].sizes);
+
+      const { unmount } = renderGrid({ sessions, focusedId: sessions[0].id });
+      expect(screen.getAllByTestId(/^terminal-view-/)).toHaveLength(count);
+      expected.forEach((column, i) => {
+        const col = screen.getByTestId(`terminal-grid-column-${i}`);
+        expect(within(col).getAllByTestId(/^terminal-view-/)).toHaveLength(column.length);
+      });
+      expect(screen.queryByTestId(`terminal-grid-column-${expected.length}`)).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
-  it("count=7 default groups sessions into 3 column wrappers of sizes 3, 2, 2", () => {
-    const sessions = Array.from({ length: 7 }, (_, i) =>
-      makeSession({ id: `s${i}` }),
-    );
-    renderGrid({ sessions, focusedId: "s0" });
+  it("a weighted column renders row tracks proportional to each entry's weight", () => {
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+    ];
+    const columnLayout: ColumnLayout = [
+      [
+        { sessionId: "a", weight: 2 },
+        { sessionId: "b", weight: 1 },
+      ],
+      [{ sessionId: "c", weight: 1 }],
+    ];
+    renderGrid({ sessions, focusedId: "a", columnLayout });
 
     const col0 = screen.getByTestId("terminal-grid-column-0");
-    const col1 = screen.getByTestId("terminal-grid-column-1");
-    const col2 = screen.getByTestId("terminal-grid-column-2");
-    expect(within(col0).getAllByTestId(/^terminal-view-/)).toHaveLength(3);
-    expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(2);
-    expect(within(col2).getAllByTestId(/^terminal-view-/)).toHaveLength(2);
-    expect(screen.queryByTestId("terminal-grid-column-3")).not.toBeInTheDocument();
+    expect(col0.style.gridTemplateRows).toBe("2fr 1fr");
   });
 
-  it("an explicit columnSizes prop overrides the count-derived default", () => {
+  it("an explicit columnLayout prop overrides the default preset expansion", () => {
     const sessions = [
       makeSession({ id: "a" }),
       makeSession({ id: "b" }),
       makeSession({ id: "c" }),
       makeSession({ id: "d" }),
     ];
-    renderGrid({ sessions, focusedId: "a", columnSizes: [1, 3] });
+    const columnLayout: ColumnLayout = [
+      [{ sessionId: "a", weight: 1 }],
+      [
+        { sessionId: "b", weight: 1 },
+        { sessionId: "c", weight: 1 },
+        { sessionId: "d", weight: 1 },
+      ],
+    ];
+    renderGrid({ sessions, focusedId: "a", columnLayout });
 
     const col0 = screen.getByTestId("terminal-grid-column-0");
     const col1 = screen.getByTestId("terminal-grid-column-1");
@@ -302,35 +330,24 @@ describe("TerminalLayoutGrid — column layout", () => {
     expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(3);
   });
 
-  it("an empty columnSizes array falls back to the default, not zero columns", () => {
-    // Regression: columnSizes is always passed by the real caller (as `[]`
-    // when no custom layout is stored), never `undefined` — a naive
-    // `columnSizes ?? defaultColumnSizes(count)` would render zero columns
-    // and hide every session.
+  it("mobile/maximized rendering is unaffected by columnLayout", () => {
     const sessions = [
       makeSession({ id: "a" }),
       makeSession({ id: "b" }),
       makeSession({ id: "c" }),
     ];
-    renderGrid({ sessions, focusedId: "a", columnSizes: [] });
-
-    const col0 = screen.getByTestId("terminal-grid-column-0");
-    const col1 = screen.getByTestId("terminal-grid-column-1");
-    expect(within(col0).getAllByTestId(/^terminal-view-/)).toHaveLength(1);
-    expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(2);
-  });
-
-  it("mobile/maximized rendering is unaffected by columnSizes", () => {
-    const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
+    const columnLayout: ColumnLayout = [
+      [{ sessionId: "a", weight: 1 }],
+      [
+        { sessionId: "b", weight: 1 },
+        { sessionId: "c", weight: 1 },
+      ],
     ];
     renderGrid({
       sessions,
       focusedId: "a",
       maximized: true,
-      columnSizes: [1, 2],
+      columnLayout,
     });
 
     expect(screen.queryByTestId("terminal-grid-column-0")).not.toBeInTheDocument();
@@ -338,48 +355,57 @@ describe("TerminalLayoutGrid — column layout", () => {
     expect(screen.getAllByTestId(/^terminal-view-/)).toHaveLength(3);
   });
 
-  it("plain drop across a column boundary still calls onSwap, not onJoinColumn", () => {
-    const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
-    ];
+  it("plain drop still calls onSwap regardless of column", () => {
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
     const onSwap = vi.fn();
+    const onMergeColumn = vi.fn();
     const onJoinColumn = vi.fn();
-    renderGrid({ sessions, focusedId: "a", onSwap, onJoinColumn });
+    renderGrid({ sessions, focusedId: "a", columnLayout, onSwap, onMergeColumn, onJoinColumn });
 
+    // a and b share a column — a plain drop still swaps, never merges/joins.
     dragStart(screen.getAllByTitle("Drag to swap")[0]);
     fireEvent.drop(screen.getByTestId("terminal-view-b"));
 
     expect(onSwap).toHaveBeenCalledWith("a", "b");
+    expect(onMergeColumn).not.toHaveBeenCalled();
     expect(onJoinColumn).not.toHaveBeenCalled();
   });
 
-  it("Ctrl+drop onto a cell calls onJoinColumn instead of onSwap", () => {
-    const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
-    ];
+  it("Ctrl+drop onto a same-column cell calls onMergeColumn", () => {
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
     const onSwap = vi.fn();
+    const onMergeColumn = vi.fn();
     const onJoinColumn = vi.fn();
-    renderGrid({ sessions, focusedId: "a", onSwap, onJoinColumn });
+    renderGrid({ sessions, focusedId: "a", columnLayout, onSwap, onMergeColumn, onJoinColumn });
 
     dragStart(screen.getAllByTitle("Drag to swap")[0]);
     dropCtrl(screen.getByTestId("terminal-view-b"), true);
 
-    expect(onJoinColumn).toHaveBeenCalledWith("a", "b");
+    expect(onMergeColumn).toHaveBeenCalledWith("a", "b");
+    expect(onJoinColumn).not.toHaveBeenCalled();
     expect(onSwap).not.toHaveBeenCalled();
   });
 
-  it("Ctrl+drop onto a gutter calls onSplitColumn with the gutter's index", () => {
-    const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
-    ];
+  it("Ctrl+drop onto a different-column cell calls onJoinColumn", () => {
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
+    const onSwap = vi.fn();
+    const onMergeColumn = vi.fn();
+    const onJoinColumn = vi.fn();
+    renderGrid({ sessions, focusedId: "a", columnLayout, onSwap, onMergeColumn, onJoinColumn });
+
+    // c is in a different column than a.
+    dragStart(screen.getAllByTitle("Drag to swap")[0]);
+    dropCtrl(screen.getByTestId("terminal-view-c"), true);
+
+    expect(onJoinColumn).toHaveBeenCalledWith("a", "c");
+    expect(onMergeColumn).not.toHaveBeenCalled();
+    expect(onSwap).not.toHaveBeenCalled();
+  });
+
+  it("Ctrl+drop onto a gutter calls onSplitColumn with its index", () => {
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
     const onSplitColumn = vi.fn();
-    renderGrid({ sessions, focusedId: "a", onSplitColumn });
+    renderGrid({ sessions, focusedId: "a", columnLayout, onSplitColumn });
 
     dragStart(screen.getAllByTitle("Drag to swap")[0]);
     dropCtrl(screen.getByTestId("terminal-grid-gutter-1"), true);
@@ -387,15 +413,24 @@ describe("TerminalLayoutGrid — column layout", () => {
     expect(onSplitColumn).toHaveBeenCalledWith("a", 1);
   });
 
+  it("gutter dragover sets dropEffect to move for cursor affordance", () => {
+    // Regression: the gutter's dragover handler used to skip setting
+    // dropEffect, unlike the cell path — no "drop here" cursor while
+    // hovering a gutter mid Ctrl-drag, even though the drop was accepted.
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
+    renderGrid({ sessions, focusedId: "a", columnLayout });
+
+    const dataTransfer = { effectAllowed: "", dropEffect: "" };
+    fireEvent.dragOver(screen.getByTestId("terminal-grid-gutter-1"), { dataTransfer });
+
+    expect(dataTransfer.dropEffect).toBe("move");
+  });
+
   it("a non-Ctrl drop onto a gutter fires no callback", () => {
-    const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
-    ];
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
     const onSplitColumn = vi.fn();
     const onSwap = vi.fn();
-    renderGrid({ sessions, focusedId: "a", onSplitColumn, onSwap });
+    renderGrid({ sessions, focusedId: "a", columnLayout, onSplitColumn, onSwap });
 
     dragStart(screen.getAllByTitle("Drag to swap")[0]);
     fireEvent.drop(screen.getByTestId("terminal-grid-gutter-1"));
@@ -404,17 +439,79 @@ describe("TerminalLayoutGrid — column layout", () => {
     expect(onSwap).not.toHaveBeenCalled();
   });
 
-  it("Ctrl+drag works without throwing when onJoinColumn/onSplitColumn are omitted", () => {
-    const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
-    ];
-    renderGrid({ sessions, focusedId: "a" });
+  it("dragover with Ctrl held renders a live preview without calling any commit callback", () => {
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
+    const onMergeColumn = vi.fn();
+    const onJoinColumn = vi.fn();
+    const onSplitColumn = vi.fn();
+    renderGrid({
+      sessions,
+      focusedId: "a",
+      columnLayout,
+      onMergeColumn,
+      onJoinColumn,
+      onSplitColumn,
+    });
+
+    // Before drag: 2 columns, column 0 has both a and b.
+    expect(screen.queryByTestId("terminal-grid-column-2")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("terminal-grid-column-0")).getAllByTestId(/^terminal-view-/),
+    ).toHaveLength(2);
+
+    dragStart(screen.getAllByTitle("Drag to swap")[0]);
+    dragOverCtrl(screen.getByTestId("terminal-view-b"), true);
+
+    // mergeInColumn(layout, "a", "b") collapses column 0 to a single (grown)
+    // slot and appends a new column holding the displaced "b" — rendered
+    // live, without committing anything.
+    expect(screen.getByTestId("terminal-grid-column-2")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("terminal-grid-column-0")).getAllByTestId(/^terminal-view-/),
+    ).toHaveLength(1);
+    expect(
+      within(screen.getByTestId("terminal-grid-column-2")).getByTestId("terminal-view-b"),
+    ).toBeInTheDocument();
+
+    expect(onMergeColumn).not.toHaveBeenCalled();
+    expect(onJoinColumn).not.toHaveBeenCalled();
+    expect(onSplitColumn).not.toHaveBeenCalled();
+  });
+
+  it("ending the drag without a drop reverts the preview to the real columnLayout", () => {
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
+    renderGrid({ sessions, focusedId: "a", columnLayout });
+
+    const dragHandle = screen.getAllByTitle("Drag to swap")[0];
+    dragStart(dragHandle);
+    dragOverCtrl(screen.getByTestId("terminal-view-b"), true);
+
+    // Preview is live: 3 columns now.
+    expect(screen.getByTestId("terminal-grid-column-2")).toBeInTheDocument();
+
+    fireEvent.dragEnd(dragHandle);
+
+    // Reverted to the real (committed) columnLayout: back to 2 columns,
+    // column 0 has both a and b again.
+    expect(screen.queryByTestId("terminal-grid-column-2")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("terminal-grid-column-0")).getAllByTestId(/^terminal-view-/),
+    ).toHaveLength(2);
+  });
+
+  it("Ctrl+drag works without throwing when onMergeColumn/onJoinColumn/onSplitColumn are omitted", () => {
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
+    renderGrid({ sessions, focusedId: "a", columnLayout });
 
     expect(() => {
       dragStart(screen.getAllByTitle("Drag to swap")[0]);
+      dragOverCtrl(screen.getByTestId("terminal-view-b"), true);
       dropCtrl(screen.getByTestId("terminal-view-b"), true);
+
+      dragStart(screen.getAllByTitle("Drag to swap")[0]);
+      dragOverCtrl(screen.getByTestId("terminal-view-c"), true);
+      dropCtrl(screen.getByTestId("terminal-view-c"), true);
+
       dragStart(screen.getAllByTitle("Drag to swap")[0]);
       dropCtrl(screen.getByTestId("terminal-grid-gutter-1"), true);
     }).not.toThrow();
