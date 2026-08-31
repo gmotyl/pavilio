@@ -10,7 +10,7 @@ import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
 import type { Project } from "../projects/useProjects";
 import type { RepoEntry } from "../projects/useProjects";
-import type { ColumnSizes } from "./columnLayout";
+import type { ColumnLayout } from "./columnLayout";
 
 export interface TerminalsSurfaceProps {
   // Current project context
@@ -50,11 +50,11 @@ export interface TerminalsSurfaceProps {
   onSwap?: (idA: string, idB: string) => void;
 
   // Column layout state + callbacks
-  columnSizes?: ColumnSizes;
-  hasCustomColumns?: boolean;
+  columnLayout?: ColumnLayout;
+  onMergeColumn?: (sessionId: string, targetId: string) => void;
   onJoinColumn?: (sessionId: string, targetId: string) => void;
   onSplitColumn?: (sessionId: string, gutterIndex: number) => void;
-  onResetColumns?: () => void;
+  onApplyPreset?: (sizes: number[]) => void;
 
   // When true: fills from below the breadcrumb bar (no negative margins, no p-6 offset)
   standalone?: boolean;
@@ -83,11 +83,11 @@ export function TerminalsSurface({
   onNavTo,
   onReorder,
   onSwap,
-  columnSizes,
-  hasCustomColumns,
+  columnLayout,
+  onMergeColumn,
   onJoinColumn,
   onSplitColumn,
-  onResetColumns,
+  onApplyPreset,
   standalone = false,
   fill = false,
 }: TerminalsSurfaceProps) {
@@ -139,8 +139,7 @@ export function TerminalsSurface({
           onReconnect={() => {
             if (focusedId) reconnectSession(focusedId);
           }}
-          hasCustomColumns={hasCustomColumns}
-          onResetColumns={onResetColumns}
+          onApplyPreset={onApplyPreset}
         />
       </div>
 
@@ -186,7 +185,8 @@ export function TerminalsSurface({
               terminalHandlesRef.current.set(sessionId, handle);
             }}
             onSwap={onSwap}
-            columnSizes={columnSizes}
+            columnLayout={columnLayout}
+            onMergeColumn={onMergeColumn}
             onJoinColumn={onJoinColumn}
             onSplitColumn={onSplitColumn}
           />
