@@ -7,8 +7,14 @@ import { displayColor } from "./sessionColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
-import type { ColumnSizes } from "./columnLayout";
-import { columnsFromSizes, defaultColumnSizes } from "./columnLayout";
+import type { ColumnLayout } from "./columnLayout";
+import {
+  expandPreset,
+  getLayoutPresets,
+  joinOtherColumn,
+  mergeInColumn,
+  splitToNewColumn,
+} from "./columnLayout";
 
 interface Props {
   sessions: SessionMeta[];
@@ -19,10 +25,18 @@ interface Props {
   onToggleMaximize: () => void;
   onReady?: (sessionId: string, handle: TerminalHandle) => void;
   onSwap?: (idA: string, idB: string) => void;
-  columnSizes?: ColumnSizes;
+  columnLayout?: ColumnLayout;
+  onMergeColumn?: (sessionId: string, targetId: string) => void;
   onJoinColumn?: (sessionId: string, targetId: string) => void;
   onSplitColumn?: (sessionId: string, gutterIndex: number) => void;
 }
+
+// Dry-run result of a Ctrl-held drag targeting a cell: which pure function
+// produced a change (same reference back means "not applicable" — see
+// mergeInColumn/joinOtherColumn's no-op contracts in columnLayout.ts).
+type CtrlCellAction =
+  | { kind: "merge"; layout: ColumnLayout }
+  | { kind: "join"; layout: ColumnLayout };
 
 export function TerminalLayoutGrid({
   sessions,
@@ -33,7 +47,8 @@ export function TerminalLayoutGrid({
   onToggleMaximize,
   onReady,
   onSwap,
-  columnSizes,
+  columnLayout,
+  onMergeColumn,
   onJoinColumn,
   onSplitColumn,
 }: Props) {
@@ -42,6 +57,7 @@ export function TerminalLayoutGrid({
   );
   const draggedCellRef = useRef<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [previewLayout, setPreviewLayout] = useState<ColumnLayout | null>(null);
   const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
   const pendingSession = sessions.find((s) => s.id === pendingCloseId);
 
@@ -53,6 +69,36 @@ export function TerminalLayoutGrid({
   }, []);
 
   const count = sessions.length;
+
+  // The committed layout: the caller's prop, or the default preset expanded
+  // against the current session order when omitted/empty. `columnLayout` is
+  // always passed by the real caller (as `[]` when no custom layout is
+  // stored), never `undefined` in practice — so `?? ` alone would never fall
+  // through and an empty array would render zero columns, hiding every
+  // session. Treat empty the same as absent.
+  const resolvedLayout: ColumnLayout =
+    columnLayout && columnLayout.length > 0
+      ? columnLayout
+      : expandPreset(
+          sessions.map((s) => s.id),
+          getLayoutPresets(count)[0]?.sizes ?? [],
+        );
+  // What actually renders: a live Ctrl-drag preview when one is in flight,
+  // otherwise the real committed layout.
+  const activeLayout = previewLayout ?? resolvedLayout;
+
+  // Dry-runs a Ctrl-held cell drop against the CURRENT committed layout
+  // (never against a live preview) to decide same-column merge vs
+  // cross-column join, reusing the pure functions' own no-op contracts
+  // (same reference back = "not applicable") instead of duplicating their
+  // column-lookup logic.
+  const ctrlCellAction = (sourceId: string, targetId: string): CtrlCellAction | null => {
+    const merged = mergeInColumn(resolvedLayout, sourceId, targetId);
+    if (merged !== resolvedLayout) return { kind: "merge", layout: merged };
+    const joined = joinOtherColumn(resolvedLayout, sourceId, targetId);
+    if (joined !== resolvedLayout) return { kind: "join", layout: joined };
+    return null;
+  };
 
   const modal = (
     <ConfirmCloseTerminalModal
@@ -103,25 +149,38 @@ export function TerminalLayoutGrid({
       onToggleMaximize={onToggleMaximize}
       onReady={onReady}
       onDragStart={() => { draggedCellRef.current = session.id; }}
-      onDragOver={() => {
-        if (draggedCellRef.current && draggedCellRef.current !== session.id) {
-          setDropTargetId(session.id);
+      onDragOver={(ctrlKey) => {
+        const draggedId = draggedCellRef.current;
+        if (!draggedId || draggedId === session.id) return;
+        setDropTargetId(session.id);
+        if (ctrlKey) {
+          const action = ctrlCellAction(draggedId, session.id);
+          setPreviewLayout(action ? action.layout : null);
+        } else {
+          // Plain drag is a simple 1:1 exchange — no preview needed. Clear
+          // any stale Ctrl-preview left over from earlier in the same drag.
+          setPreviewLayout(null);
         }
       }}
       onDrop={(ctrlKey) => {
-        if (draggedCellRef.current && draggedCellRef.current !== session.id) {
+        const draggedId = draggedCellRef.current;
+        if (draggedId && draggedId !== session.id) {
           if (ctrlKey) {
-            onJoinColumn?.(draggedCellRef.current, session.id);
+            const action = ctrlCellAction(draggedId, session.id);
+            if (action?.kind === "merge") onMergeColumn?.(draggedId, session.id);
+            else if (action?.kind === "join") onJoinColumn?.(draggedId, session.id);
           } else {
-            onSwap?.(draggedCellRef.current, session.id);
+            onSwap?.(draggedId, session.id);
           }
         }
         draggedCellRef.current = null;
         setDropTargetId(null);
+        setPreviewLayout(null);
       }}
       onDragEnd={() => {
         draggedCellRef.current = null;
         setDropTargetId(null);
+        setPreviewLayout(null);
       }}
       style={{ height: "100%", ...style }}
     />
@@ -152,18 +211,9 @@ export function TerminalLayoutGrid({
     );
   } else {
     // Column-based layout: outer flex row of columns (+ Ctrl-drop gutters
-    // between/around them), inner CSS grid per column stacking that
-    // column's sessions evenly.
-    // `columnSizes` is always passed by the caller (as `[]` when no custom
-    // layout is stored), never `undefined` in practice — so `?? ` alone
-    // would never fall through and an empty array would render zero
-    // columns, hiding every session. Treat empty the same as absent.
-    const sizes =
-      columnSizes && columnSizes.length > 0
-        ? columnSizes
-        : defaultColumnSizes(count);
-    const order = sessions.map((s) => s.id);
-    const grouped = columnsFromSizes(order, sizes);
+    // between/around them), inner CSS grid per column sizing each row track
+    // by that entry's weight (`${weight}fr`), so uneven ratios within a
+    // column render proportionally rather than always-equal.
     const sessionById = new Map(sessions.map((s) => [s.id, s]));
 
     const handleGutterDrop = (gutterIndex: number) => (e: React.DragEvent) => {
@@ -171,6 +221,7 @@ export function TerminalLayoutGrid({
       const draggedId = draggedCellRef.current;
       draggedCellRef.current = null;
       setDropTargetId(null);
+      setPreviewLayout(null);
       if (draggedId && e.ctrlKey) {
         onSplitColumn?.(draggedId, gutterIndex);
       }
@@ -181,22 +232,34 @@ export function TerminalLayoutGrid({
         key={`gutter-${index}`}
         data-testid={`terminal-grid-gutter-${index}`}
         style={{ width: "4px", flexShrink: 0, alignSelf: "stretch" }}
-        onDragOver={(e) => e.preventDefault()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          const draggedId = draggedCellRef.current;
+          if (draggedId && e.ctrlKey) {
+            const split = splitToNewColumn(resolvedLayout, draggedId, index);
+            setPreviewLayout(split !== resolvedLayout ? split : null);
+          } else {
+            setPreviewLayout(null);
+          }
+        }}
         onDrop={handleGutterDrop(index)}
       />
     );
 
     const columnEls: React.ReactNode[] = [gutter(0)];
-    grouped.forEach((ids, i) => {
+    activeLayout.forEach((column, i) => {
       columnEls.push(
         <div
           key={`col-${i}`}
           data-testid={`terminal-grid-column-${i}`}
           className="h-full grid flex-1 min-w-0"
-          style={{ gap: "4px", gridTemplateRows: `repeat(${ids.length}, 1fr)` }}
+          style={{
+            gap: "4px",
+            gridTemplateRows: column.map((entry) => `${entry.weight}fr`).join(" "),
+          }}
         >
-          {ids.map((id) => {
-            const s = sessionById.get(id);
+          {column.map((entry) => {
+            const s = sessionById.get(entry.sessionId);
             return s ? cell(s) : null;
           })}
         </div>,
@@ -231,7 +294,7 @@ interface CellProps {
   onToggleMaximize: () => void;
   onReady?: (id: string, handle: TerminalHandle) => void;
   onDragStart: () => void;
-  onDragOver: () => void;
+  onDragOver: (ctrlKey: boolean) => void;
   onDrop: (ctrlKey: boolean) => void;
   onDragEnd: () => void;
   style?: React.CSSProperties;
@@ -300,8 +363,11 @@ function TerminalCell({
       onClick={() => onFocus(session.id)}
       onDragOver={(e) => {
         e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        onDragOver();
+        // Tests exercising Ctrl-held dragover dispatch a raw MouseEvent
+        // (jsdom's DragEvent constructor silently drops ctrlKey), which has
+        // no dataTransfer — guard rather than assume it's present.
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        onDragOver(e.ctrlKey);
       }}
       onDrop={(e) => {
         e.preventDefault();
