@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { FileText, ExternalLink, Copy, Check, ArrowLeft, GitFork, Search, X } from "lucide-react";
+import { FileText, ExternalLink, Copy, Check, ArrowLeft, GitFork, Search } from "lucide-react";
 import MarkdownRenderer from "../components/MarkdownRenderer";
 import ImageDropZone from "../components/ImageDropZone";
 import GitChanges from "../components/GitChanges";
@@ -264,47 +264,6 @@ export default function ProjectView() {
       {/* File section listing */}
       {section && section !== "repos" && !selectedFile && (
         <div>
-          {/* Current Plans banner */}
-          {section === "plans" && project?.currentPlans && project.currentPlans.length > 0 && (
-            <div className="mb-4 rounded-lg p-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--accent)", borderColor: "color-mix(in srgb, var(--accent) 40%, transparent)" }}>
-              <h3 className="text-[11px] font-semibold uppercase tracking-widest mb-2" style={{ color: "var(--accent)" }}>
-                Active Plans
-              </h3>
-              <div className="space-y-0.5">
-                {project.currentPlans.map((planFile) => {
-                  const relativePath = `${name}/plans/${planFile}`;
-                  const label = planFile.replace(/\.md$/, "").replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/-/g, " ");
-                  return (
-                    <div key={planFile} className="flex items-center gap-1">
-                      <button
-                        onClick={() => setSelectedFile(relativePath)}
-                        className="flex items-center gap-3 flex-1 px-3 py-1.5 rounded-md text-left transition-colors"
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                      >
-                        <FileText size={14} className="shrink-0" style={{ color: "var(--accent)" }} />
-                        <span className="text-sm truncate flex-1 capitalize" style={{ color: "var(--text-primary)" }}>{label}</span>
-                      </button>
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          await fetch(`/api/projects/${name}/plans/current/${encodeURIComponent(planFile)}`, { method: "DELETE" });
-                        }}
-                        className="shrink-0 p-1 rounded transition-colors"
-                        style={{ color: "var(--text-muted)" }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.background = "var(--red-dim)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "transparent"; }}
-                        title="Close plan (remove from active)"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {section === "qa" ? (
             (() => {
               const runs = sectionFiles

@@ -9,12 +9,54 @@ export interface PlanFile {
   /** Set when the file lives under projectsDir; null for external (.kilo / ~/.claude) files. */
   relativeToProjectsDir: string | null;
 }
-export interface PlanSource {
+
+/** One legacy (flat) plans source: a directory of `.md` plan files. */
+export interface LegacyPlanSource {
   id: string;
   label: string;
   absoluteRoot: string;
   files: PlanFile[];
 }
+
+/** One Markdown artifact of an OpenSpec change (proposal/design/tasks, or a delta spec). */
+export interface PlanArtifact {
+  kind: "proposal" | "design" | "tasks" | "spec";
+  /** Capability name for delta specs; null for proposal/design/tasks. */
+  capability: string | null;
+  filename: string;
+  absolutePath: string;
+  modified: number;
+  relativeToProjectsDir: string | null;
+}
+
+/** One change directory within a single OpenSpec source. */
+export interface ChangeRecord {
+  /** Stable change identifier — the change dir name, shared across sources. */
+  changeId: string;
+  source: string;
+  /** active = under changes/; archived = under changes/archive/. Derived from directory. */
+  status: "active" | "archived";
+  archiveDate: string | null;
+  artifacts: PlanArtifact[];
+}
+
+/** An OpenSpec plans source: a project store or a linked repo's `openspec/` tree. */
+export interface OpenSpecPlanSource {
+  id: string;
+  label: string;
+  kind: "openspec";
+  mode: "native" | "store";
+  openspecDir: string;
+  changes: ChangeRecord[];
+}
+
+export type PlanSource = LegacyPlanSource | OpenSpecPlanSource;
+
+/** Narrow a plans source to its OpenSpec variant (carries `changes`, not `files`). */
+export function isOpenSpecSource(s: PlanSource): s is OpenSpecPlanSource {
+  return (s as OpenSpecPlanSource).kind === "openspec";
+}
+
 export interface PlansTreeResponse {
   project: string;
   sources: PlanSource[];

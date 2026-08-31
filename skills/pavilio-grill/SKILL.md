@@ -13,20 +13,25 @@ Design-and-harden in one pass. Grill-forward: relentless one-at-a-time interview
 Do NOT write implementation code, scaffold, or invoke any implementation skill until a design is presented AND the user approves it. Grilling ends by handing off to `pavilio-writing-plans`, never by coding.
 </HARD-GATE>
 
-## 0. Resolve the project
+## 0. Resolve the project and OpenSpec backend
 
-All docs are project-scoped under the workspace repo root:
+Determine `<project>` from the conversation / cwd / an un-archived change under a configured OpenSpec source. If ambiguous, ask which project — one question, then stop.
 
-- Change spec (the design doc grill writes): `projects/<project>/plans/YYYY-MM-DD-<topic>-design.md` — always in `plans/`, same dir as the implementation plan it feeds; the change spec never gets its own directory
-- Living specs (current behavior per area, distinct from the change spec): `projects/<project>/specs/<area>.md` — the base grill writes deltas against when present; maintained only by [[pavilio-archive-plan]], never written by grill
+Then **resolve the OpenSpec backend for the target scope before writing anything** — follow [[pavilio-openspec-storage]] (ask-once/persist/reuse; project-wide changes use the project store with no question). All change artifacts land in the resolved backend's `openspec/` tree:
+
+- Proposal: `openspec/changes/<change-id>/proposal.md`
+- Technical design (**keeps mermaid diagrams**): `openspec/changes/<change-id>/design.md`
+- Requirement deltas: `openspec/changes/<change-id>/specs/<capability>/spec.md`
+- Living specs (current behavior per capability, the base grill writes deltas against): `openspec/specs/<capability>/spec.md` — maintained only by [[pavilio-archive-plan]], never written by grill
+
+Other project-scoped docs live under the workspace repo root:
+
 - Glossary: `projects/<project>/CONTEXT.md` (or `CONTEXT-MAP.md` if multi-context)
 - ADRs: `projects/<project>/adr/NNNN-slug.md`
 
-Determine `<project>` from the conversation / cwd / an in-progress `plans/CURRENT.md`. If ambiguous, ask which project — one question, then stop.
-
 ## 1. Auto-detect entry mode
 
-Explore context first: read recent commits, `projects/<project>/plans/CURRENT.md`, any spec/draft the user points at, `CONTEXT.md`, the `adr/` listing (don't pre-read every ADR — open one only when the topic touches it), and the `specs/` listing — the filenames are the project's area index; open only the living spec(s) (undated `<area>.md` — see "Recognizing living specs" in §5, never dated `*-design.md` files) whose area the topic touches, never all of them. If no filename maps to the topic, ask which area (one question) before reading any. Living specs describe shipped behavior and are the base the new design's deltas are written against.
+Explore context first: read recent commits, the un-archived change dirs under the backend's `openspec/changes/`, any spec/draft the user points at, `CONTEXT.md`, the `adr/` listing (don't pre-read every ADR — open one only when the topic touches it), and the `openspec/specs/` listing — the capability filenames are the project's area index; open only the living spec(s) (`openspec/specs/<capability>/spec.md`) whose capability the topic touches, never all of them. If no capability maps to the topic, ask which one (one question) before reading any. Living specs describe shipped behavior and are the base the new design's deltas are written against.
 
 - **Plan/spec/draft exists** → **grill mode**: stress-test what's there.
 - **Only a raw idea** → **design mode**: build the design first, applying grill tactics throughout.
@@ -56,12 +61,19 @@ Capture decisions as they crystallise — don't batch.
 
 ## 4. Present the design
 
-Once you understand what's being built, present it in sections scaled to complexity (a few sentences if simple, up to ~300 words if nuanced). Cover architecture, components, data flow, error handling, testing. Ask after each section whether it looks right. Go back and clarify when something doesn't fit. YAGNI ruthlessly.
+Once you understand what's being built, present it in sections scaled to complexity (a few sentences if simple, up to ~300 words if nuanced). Cover architecture, components, data flow, error handling, testing. Ask after each section whether it looks right. Go back and clarify when something doesn't fit. YAGNI ruthlessly. Design docs **keep mermaid diagrams** where they aid understanding.
 
-## 5. Write + review the spec
+## 5. Write + review the change artifacts
 
-- Write the approved design to `projects/<project>/plans/YYYY-MM-DD-<topic>-design.md` and commit. It lands in `plans/` next to the `-implementation.md` plan that [[pavilio-writing-plans]] will produce from it — the panel's Plans tab is where these get read.
-- **Requirements section uses delta format** (OpenSpec-style) — state what this change does to system behavior, each requirement with concrete WHEN/THEN scenarios:
+Backend already resolved in §0 (per [[pavilio-openspec-storage]]). Write into the resolved `openspec/changes/<change-id>/` tree and commit:
+
+- `proposal.md` — the why/what of the change.
+- `design.md` — the technical design, **with mermaid diagrams** where they clarify architecture, data flow, or state.
+- `specs/<capability>/spec.md` — the requirement **deltas** (below). One file per capability the change touches.
+
+A coordinated multi-repository change reuses **one shared `<change-id>`** across each repository's independently-resolved backend (see [[pavilio-openspec-storage]]). The panel's Plans tab groups these change dirs.
+
+- **Delta specs use delta format** (OpenSpec-style) — state what this change does to system behavior, each requirement with concrete WHEN/THEN scenarios:
 
   ````markdown
   ## ADDED Requirements
@@ -83,15 +95,15 @@ Once you understand what's being built, present it in sections scaled to complex
   - **THEN** <behavior no longer occurs>
   ````
 
-  Scenarios are the acceptance criteria [[pavilio-writing-plans]] will carry into tasks and the reviewer will verify diffs against. If the project has living specs under `projects/<project>/specs/`, write deltas relative to them; [[pavilio-archive-plan]] folds them back in after the change ships.
+  Scenarios are the acceptance criteria [[pavilio-writing-plans]] will carry into `tasks.md` and the reviewer will verify diffs against. If the backend has living specs under `openspec/specs/<capability>/spec.md`, write deltas relative to them; [[pavilio-archive-plan]] folds them back in after the change ships.
 
-  **Recognizing living specs:** only undated per-area files (`specs/<area>.md`) containing `### Requirement:` sections count. Dated `YYYY-MM-DD-*-design.md` files found in `specs/` are legacy change specs in the wrong place — ignore them as a delta base and suggest moving them to `plans/`; never treat one as living truth.
-- **Self-review** with fresh eyes: placeholder scan (no TBD/TODO), internal consistency, scope (single plan or needs decomposition?), ambiguity (pick one interpretation, make it explicit). Fix inline.
-- **User review gate:** "Spec written and committed to `<path>`. Review it and tell me if you want changes before we write the implementation plan." Wait. On changes, edit + re-review. Only proceed on approval.
+  **Recognizing living specs:** the current-behavior files are `openspec/specs/<capability>/spec.md`, each containing `### Requirement:` sections. Delta specs (`changes/<id>/specs/<capability>/spec.md`) are the *change*, not living truth — never fold a delta into itself.
+- **Self-review** with fresh eyes: placeholder scan (no TBD/TODO), internal consistency, scope (single change or needs decomposition?), ambiguity (pick one interpretation, make it explicit). Fix inline.
+- **User review gate:** "Change artifacts written and committed to `openspec/changes/<change-id>/`. Review them and tell me if you want changes before we write the implementation contract." Wait. On changes, edit + re-review. Only proceed on approval.
 
 ## 6. Transition
 
-The only next skill is **pavilio-writing-plans**. Invoke it to turn the approved spec into an implementation plan under `projects/<project>/plans/`.
+The only next skill is **pavilio-writing-plans**. Invoke it to turn the approved design into the change's `tasks.md` implementation contract.
 
 ## Key principles
 

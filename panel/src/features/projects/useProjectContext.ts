@@ -26,6 +26,16 @@ export interface AdrFile {
 }
 /** Living spec (current behavior of a feature area) under <project>/specs/. */
 export type SpecFile = ContextFile;
+/** Living OpenSpec capability spec under `<openspec>/specs/<capability>/spec.md`. */
+export interface OpenSpecSpecFile {
+  source: string;
+  capability: string;
+  filename: string;
+  absolutePath: string;
+  modified: number;
+  /** Set when the file lives under projectsDir; null for linked-repo files. */
+  relativeToProjectsDir: string | null;
+}
 export interface ContextResponse {
   project: string;
   sources: ContextSource[];
@@ -33,6 +43,8 @@ export interface ContextResponse {
   adrs: AdrFile[];
   /** Absent from older servers — treat as empty. */
   specs?: SpecFile[];
+  /** Living OpenSpec capability specs, grouped by source. Absent from older servers. */
+  openspecSpecs?: OpenSpecSpecFile[];
 }
 
 export function useProjectContext(projectName: string | undefined) {

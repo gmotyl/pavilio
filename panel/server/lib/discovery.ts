@@ -1,10 +1,12 @@
 import { readdirSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getConfig } from "../config.js";
+import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
 
 export interface RepoEntry {
   name: string;
   path: string;
+  openspec?: OpenSpecConfig;
 }
 
 export interface Project {
@@ -14,7 +16,6 @@ export interface Project {
   hasNotes: boolean;
   hasProgress: boolean;
   hasPlans: boolean;
-  currentPlans: string[];
   latestProgressDate: string | null;
   repos: RepoEntry[];
 }
@@ -28,14 +29,6 @@ export function discoverProjects(): Project[] {
     .filter((e) => existsSync(join(projectsDir, e.name, "PROJECT.md")))
     .map((e) => {
       const dir = join(projectsDir, e.name);
-      const currentMdPath = join(dir, "plans", "CURRENT.md");
-      let currentPlans: string[] = [];
-      if (existsSync(currentMdPath)) {
-        currentPlans = readFileSync(currentMdPath, "utf-8")
-          .split("\n")
-          .map((l) => l.trim())
-          .filter(Boolean);
-      }
 
       const progressDir = join(dir, "progress");
       let latestProgressDate: string | null = null;
@@ -52,8 +45,27 @@ export function discoverProjects(): Project[] {
       if (existsSync(reposPath)) {
         try {
           const raw = JSON.parse(readFileSync(reposPath, "utf-8"));
-          repos = Array.isArray(raw) ? raw : [];
-        } catch { /* ignore malformed */ }
+          repos = Array.isArray(raw)
+            ? raw.flatMap((r) => {
+                // Per-entry: a malformed `openspec` config on ONE repo must not
+                // drop every other repo in the array — skip just that entry.
+                try {
+                  const openspec = parseOpenSpecConfig(r);
+                  const entry: RepoEntry = { name: r.name, path: r.path };
+                  if (openspec) entry.openspec = openspec;
+                  return [entry];
+                } catch (err) {
+                  console.warn(
+                    `[discovery] ${e.name}/repos.json: invalid openspec config for repo ${String(r?.name)}:`,
+                    (err as Error).message,
+                  );
+                  return [];
+                }
+              })
+            : [];
+        } catch (err) {
+          console.warn(`[discovery] ${e.name}/repos.json: invalid JSON:`, (err as Error).message);
+        }
       }
 
       return {
@@ -63,7 +75,6 @@ export function discoverProjects(): Project[] {
         hasNotes: existsSync(join(dir, "notes")),
         hasProgress: existsSync(join(dir, "progress")),
         hasPlans: existsSync(join(dir, "plans")),
-        currentPlans,
         latestProgressDate,
         repos,
       };

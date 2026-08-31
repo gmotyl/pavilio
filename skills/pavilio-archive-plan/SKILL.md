@@ -1,57 +1,56 @@
 ---
 name: pavilio-archive-plan
-description: Archive a shipped plan OpenSpec-style — fold its spec's requirement deltas into the project's living specs under projects/<project>/specs/, distill durable knowledge into CONTEXT.md/ADRs, mark the plan Done in CURRENT.md, and `git mv` the plan's files into projects/<project>/plans/archived/. Use when the user invokes `/pavilio-archive-plan`, a plan's PR has merged, or [[pavilio-manager]] flags a merged-but-unarchived plan.
+description: Archive a shipped change OpenSpec-style — fold its delta specs into the living specs under openspec/specs/, move the change dir into the archived-changes tree, and distill durable knowledge into CONTEXT.md/ADRs. Skill-owned (git-mv + markdown fold), no CLI. Use when the user invokes `/pavilio-archive-plan`, a change's PR has merged, or [[pavilio-manager]] flags a merged-but-unarchived change.
 ---
 
 # pavilio-archive-plan
 
-Close the loop after a change ships: what the plan *changed* becomes part of what the project *is*. Analog of OpenSpec's archive step — deltas merge into living truth; the plan's own files move to `plans/archived/` and stay there as history (step 5).
+Close the loop after a change ships: what the change *changed* becomes part of what the project *is*. **Skill-owned: git-mv + markdown fold, no CLI** (see [[pavilio-openspec-storage]]). OpenSpec's archive step — deltas merge into living truth; the change dir moves under the backend's archive as history.
 
-**Announce at start:** "Using pavilio-archive-plan to archive <plan>."
+**Announce at start:** "Using pavilio-archive-plan to archive <change-id>."
 
 ## Usage
 
 ```
-/pavilio-archive-plan [project] [plan-file]
+/pavilio-archive-plan [project] [change-id]
 ```
 
-No args → resolve project from the session, then read `projects/<project>/plans/CURRENT.md`: the active plan whose PR is merged is the candidate. Multiple candidates → list them, ask which. None → say so and stop.
+No args → resolve project + backend from the session (see [[pavilio-openspec-storage]]), then scan the un-archived dirs under `openspec/changes/`: the change whose PR is merged is the candidate. Multiple candidates → list them, ask which. None → say so and stop.
 
 ## Steps
 
-1. **Verify shipped.** Confirm the plan's change actually landed: PR merged / squash commit on the target repo's main. Not merged → stop ("archive is for shipped plans — PR #N is still open").
+1. **Verify shipped.** Confirm the change actually landed: PR merged / squash commit on the target repo's main. Not merged → stop ("archive is for shipped changes — PR #N is still open").
 
-2. **Fold spec deltas into living specs.** Read the plan's `-design.md`. For each requirement in its delta sections:
-   - `ADDED` → append the requirement + scenarios to `projects/<project>/specs/<area>.md` (create the file lazily; pick `<area>` by feature domain, follow existing **living** spec filenames first).
-   - `MODIFIED` → find the requirement in `specs/` and rewrite it to the new behavior. Search before declaring it missing: exact requirement name across all **living** spec files (undated `specs/<area>.md` — see Living specs layout below; never search or rewrite dated `*-design.md` legacy files), then keywords from the requirement statement and its scenarios (behavior may be documented under a different name or area). Only after that search comes up empty → add it with a `<!-- folded from MODIFIED delta <plan>; prior behavior was undocumented -->` marker, state in the report what was searched (names + keywords), and flag it in the commit message so the was→is trail isn't silently lost.
-   - `REMOVED` → delete the requirement from `specs/`.
-   - Spec files are behavior-level: requirement statements + WHEN/THEN scenarios, no implementation detail.
-   - Design doc has no delta sections (older spec) → distill its behavior into requirement + scenarios form first, then fold. Say you did this.
-   - **Spec-worthy vs. CONTEXT-worthy.** Before distilling, decide where the plan's content belongs — a domain with no `specs/<area>.md` yet is **not** a reason to skip: create it lazily, same as the ADDED case above. Apply this test: *if this shipped differently next month, would there be a right/wrong behavior to check it against?* Yes → distill into a requirement + scenarios in `specs/<area>.md` (new file if needed). No — a one-off action or decision with no forward-looking contract (a completed rename, a copy tweak, a test-coverage push, a migration) → `CONTEXT.md` gotcha instead, per step 3. Defaulting everything to CONTEXT.md because "this domain never had a spec before" is the failure mode this test exists to prevent.
+2. **Fold delta specs into living specs.** Read the change's delta specs `openspec/changes/<change-id>/specs/<capability>/spec.md`. For each requirement in the delta sections:
+   - `ADDED` → append the requirement + scenarios to `openspec/specs/<capability>/spec.md` (create the file lazily; pick `<capability>` by feature domain, follow existing living-spec capability names first).
+   - `MODIFIED` → find the requirement in `openspec/specs/` and rewrite it to the new behavior. Search before declaring it missing: exact requirement name across all living capability specs, then keywords from the requirement statement and its scenarios (behavior may be documented under a different name or capability). Only after that search comes up empty → add it with a `<!-- folded from MODIFIED delta <change-id>; prior behavior was undocumented -->` marker, state in the report what was searched (names + keywords), and flag it in the commit message so the was→is trail isn't silently lost.
+   - `REMOVED` → delete the requirement from `openspec/specs/`.
+   - Living specs are behavior-level: requirement statements + WHEN/THEN scenarios, no implementation detail.
+   - Change has no delta sections (older change) → distill its behavior into requirement + scenarios form first, then fold. Say you did this.
+   - **Spec-worthy vs. CONTEXT-worthy.** Before distilling, decide where the change's content belongs — a capability with no `openspec/specs/<capability>/spec.md` yet is **not** a reason to skip: create it lazily, same as the ADDED case above. Apply this test: *if this shipped differently next month, would there be a right/wrong behavior to check it against?* Yes → distill into a requirement + scenarios in `openspec/specs/<capability>/spec.md` (new file if needed). No — a one-off action or decision with no forward-looking contract (a completed rename, a copy tweak, a test-coverage push, a migration) → `CONTEXT.md` gotcha instead, per step 3. Defaulting everything to CONTEXT.md because "this capability never had a spec before" is the failure mode this test exists to prevent.
+
+   **All-or-nothing.** A fold or validation failure leaves the active change dir **and** the living specs unchanged (see [[pavilio-openspec-storage]]) — report the error and stop; do not move the change dir.
 
 3. **Distill durable knowledge.** Terms that crystallised → `CONTEXT.md`. A decision meeting the ADR bar (hard to reverse + surprising + real trade-off) that has no ADR yet → offer one. Don't force either.
 
-4. **Mark Done in CURRENT.md.** Move the plan out of the active section to a `Done:` line with PR number + merge date (existing convention). Promote a follow-on candidate to active only if the user confirms.
+4. **Move the change dir under `openspec/changes/archive/`.** `mkdir -p` the backend's `openspec/changes/archive/`, then `git mv openspec/changes/<change-id> openspec/changes/archive/YYYY-MM-DD-<change-id>` (merge date as the prefix). This move is what closes the loop and removes the change from the active set — there is no pointer file to update. Use `git mv` so history follows (plain `mv` only if untracked). A coordinated multi-repository change is archived per repository, each in its own resolved backend.
 
-5. **Move the plan files to `plans/archived/`.** `mkdir -p projects/<project>/plans/archived/`, then `git mv` **every file of the plan's `<date>-<slug>` stem** — `-design.md`, `-implementation.md`, `-plan.md`, or the bare `<stem>.md` — into it. A plan with no file (ad-hoc bugfix session) has nothing to move; say so. CURRENT.md stays the state authority; the subfolder is where the panel's plans tab groups archived plans (default-collapsed "Archived" group). Use `git mv` so history follows (plain `mv` only if the file is untracked).
-
-6. **Commit** the specs/CONTEXT/CURRENT.md changes **and the moved plan files** in the workspace repo: `chore(<project>): archive <plan-name>`.
+5. **Commit** the living-specs changes, `CONTEXT.md`, **and the moved change dir** in the workspace repo: `chore(<project>): archive <change-id>`.
 
 ## Living specs layout
 
 ```
-projects/<project>/specs/
-  <area>.md        — current behavior of one feature area:
-                     ### Requirement: ... / #### Scenario: WHEN/THEN
+openspec/specs/
+  <capability>/spec.md   — current behavior of one capability:
+                           ### Requirement: ... / #### Scenario: WHEN/THEN
 ```
 
-Area files are **undated kebab-case names** (`checkout-tax.md`, `realtime-refresh.md`) — never `YYYY-MM-DD-*` and never `-design`. Dated `*-design.md` files encountered in `specs/` are legacy change specs misfiled there (they belong in `plans/`): leave them alone, don't fold into them, and mention them in the report as move candidates.
-
-`specs/` is the base future [[pavilio-grill]] designs write their deltas against, and what a staleness check can compare a parked spec to.
+Capability files are **undated kebab-case names** (`checkout-tax`, `realtime-refresh`) — never `YYYY-MM-DD-*` and never `-design`. `openspec/specs/` is the base future [[pavilio-grill]] designs write their deltas against, and what a staleness check can compare a parked design to.
 
 ## Non-goals
 
-- Does not archive unshipped plans — merge first.
-- Moves the plan's files into `plans/archived/` (step 5) but never **deletes** them; `plans/` (incl. `archived/`) is the history, CURRENT.md is the state.
+- Does not archive unshipped changes — merge first.
+- Moves the change dir under `openspec/changes/archive/` (step 4) but never **deletes** it; the archive is the history.
 - Does not write or modify code.
-- Does not replace [[pavilio-session-end]] — archive is per-plan, session-end is per-session.
+- Does not shell out to an OpenSpec binary — fold + move are skill logic (see [[pavilio-openspec-storage]]).
+- Does not replace [[pavilio-session-end]] — archive is per-change, session-end is per-session.

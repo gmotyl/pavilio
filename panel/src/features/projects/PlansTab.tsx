@@ -1,12 +1,6 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ClipboardList, Star } from "lucide-react";
+import { ClipboardList } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import {
   clearLastSectionFile,
@@ -15,10 +9,12 @@ import {
 import {
   usePlansTree,
   fetchPlanFile,
+  isOpenSpecSource,
+  type PlanArtifact,
   type PlanFile,
-  type PlanSource,
+  type LegacyPlanSource,
+  type OpenSpecPlanSource,
 } from "./usePlansTree";
-import { usePlanDragSource, usePlanDropTarget } from "./usePlanDrag";
 import { useFileListControls, filterAndSortFiles } from "./fileListControls";
 import { useAutoSelectNewest } from "./useAutoSelectNewest";
 import PathActions from "./PathActions";
@@ -26,66 +22,29 @@ import { usePeekTriggerProps } from "./peekTrigger";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
 
-/**
- * Server source id for archived plans (see `plansSources` in server/routes/projects.ts).
- * The server and panel agree on this literal by contract; kept in one place on the panel side.
- */
-const ARCHIVED_SOURCE_ID = "project:archived";
-
 interface Props {
   projectName: string;
-  currentPlans?: string[];
 }
 
-function PlanStar({
-  file,
-  currentEntry,
-  onStar,
-  onUnstar,
-}: {
-  file: PlanFile;
-  currentEntry: string | undefined;
-  onStar: (file: PlanFile) => void;
-  onUnstar: (entry: string) => void;
-}) {
-  const isCurrent = currentEntry !== undefined;
-  return (
-    <button
-      data-testid={`plans-tab-star-${file.filename}`}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (isCurrent && currentEntry) onUnstar(currentEntry);
-        else onStar(file);
-      }}
-      title={isCurrent ? "Active plan — click to remove" : "Mark as active plan"}
-      className={`shrink-0 p-1 rounded transition-all ${isCurrent ? "" : "opacity-0 group-hover:opacity-100"}`}
-      style={{ color: isCurrent ? "var(--accent)" : "var(--text-muted)" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-    >
-      <Star size={12} fill={isCurrent ? "currentColor" : "none"} />
-    </button>
-  );
+/** Human-readable label for one change artifact row. */
+function artifactLabel(a: PlanArtifact): string {
+  return a.kind === "spec" ? `spec: ${a.capability ?? "?"}` : a.kind;
 }
 
-function PlanRows({
+/** Testid-safe key for one artifact within a (source, change) pair. */
+function artifactKey(a: PlanArtifact): string {
+  return a.kind === "spec" ? `spec-${a.capability ?? ""}` : a.kind;
+}
+
+function LegacyPlanRows({
   source,
-  projectName,
   selectedPath,
-  currentByFilename,
   onOpen,
-  onStar,
-  onUnstar,
 }: {
-  source: PlanSource;
-  projectName: string;
+  source: LegacyPlanSource;
   selectedPath: string | null;
-  currentByFilename: Map<string, string>;
-  onOpen: (file: PlanFile) => void;
-  onStar: (file: PlanFile) => void;
-  onUnstar: (entry: string) => void;
+  onOpen: (absolutePath: string) => void;
 }) {
-  void projectName;
   if (source.files.length === 0) {
     return (
       <p className="text-xs px-2 py-1" style={{ color: "var(--text-muted)" }}>
@@ -95,92 +54,66 @@ function PlanRows({
   }
   return (
     <>
-      {source.files.map((file) => {
-        const currentEntry = currentByFilename.get(file.filename);
-        return (
-          <PlanRow
-            key={file.absolutePath}
-            file={file}
-            sourceId={source.id}
-            selected={selectedPath === file.absolutePath}
-            currentEntry={currentEntry}
-            starrable={source.id === "project"}
-            onOpen={onOpen}
-            onStar={onStar}
-            onUnstar={onUnstar}
-          />
-        );
-      })}
+      {source.files.map((file) => (
+        <FileRow
+          key={file.absolutePath}
+          testId={`plans-tab-file-${source.id}-${file.filename}`}
+          label={file.filename}
+          selected={selectedPath === file.absolutePath}
+          title={file.absolutePath}
+          onSelect={() => onOpen(file.absolutePath)}
+        />
+      ))}
     </>
   );
 }
 
-function PlanRow({
-  file,
-  sourceId,
-  selected,
-  currentEntry,
-  starrable,
-  onOpen,
-  onStar,
-  onUnstar,
-}: {
-  file: PlanFile;
+/** One coordinated change: children keyed by owning source, artifacts under each. */
+interface ChangeGroupChild {
   sourceId: string;
-  selected: boolean;
-  currentEntry: string | undefined;
-  starrable: boolean;
-  onOpen: (file: PlanFile) => void;
-  onStar: (file: PlanFile) => void;
-  onUnstar: (entry: string) => void;
-}) {
-  const drag = usePlanDragSource(file.absolutePath);
-  return (
-    <FileRow
-      testId={`plans-tab-file-${sourceId}-${file.filename}`}
-      label={file.filename}
-      selected={selected}
-      isCurrent={currentEntry !== undefined}
-      title={file.absolutePath}
-      dragProps={drag}
-      star={
-        starrable ? (
-          <PlanStar
-            file={file}
-            currentEntry={currentEntry}
-            onStar={onStar}
-            onUnstar={onUnstar}
-          />
-        ) : undefined
-      }
-      onSelect={() => onOpen(file)}
-    />
-  );
+  sourceLabel: string;
+  artifacts: PlanArtifact[];
+}
+interface ChangeGroup {
+  changeId: string;
+  archived: boolean;
+  archiveDate: string | null;
+  children: ChangeGroupChild[];
 }
 
-function PlanSourceHeader({
-  projectName,
-  sourceId,
-  onMoved,
-  header,
+function ChangeGroupRows({
+  group,
+  selectedPath,
+  onOpen,
 }: {
-  projectName: string;
-  sourceId: string;
-  onMoved: () => void;
-  header: ReactNode;
+  group: ChangeGroup;
+  selectedPath: string | null;
+  onOpen: (absolutePath: string) => void;
 }) {
-  const { hover, dropHandlers } = usePlanDropTarget(projectName, sourceId, onMoved);
   return (
-    <div
-      {...dropHandlers}
-      style={{
-        borderRadius: 6,
-        background: hover ? "var(--accent-dim, var(--bg-active))" : undefined,
-        outline: hover ? "1px solid var(--accent)" : undefined,
-      }}
-    >
-      {header}
-    </div>
+    <>
+      {group.children.map((child) => (
+        <div key={child.sourceId} className="mb-1">
+          <p
+            data-testid={`plans-tab-change-src-${child.sourceId}-${group.changeId}`}
+            className="text-[10px] uppercase tracking-widest px-2 pt-1 pb-0.5"
+            style={{ color: "var(--text-tertiary)" }}
+          >
+            {child.sourceLabel}
+          </p>
+          {child.artifacts.map((a) => (
+            <FileRow
+              key={a.absolutePath}
+              testId={`plans-tab-artifact-${child.sourceId}-${group.changeId}-${artifactKey(a)}`}
+              label={artifactLabel(a)}
+              selected={selectedPath === a.absolutePath}
+              title={a.absolutePath}
+              onSelect={() => onOpen(a.absolutePath)}
+            />
+          ))}
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -205,7 +138,27 @@ function PlanDetailHeader({ path }: { path: string }) {
   );
 }
 
-export default function PlansTab({ projectName, currentPlans }: Props) {
+/** Does an artifact match the active filter? Searches repo, change, capability, filename. */
+function artifactMatches(
+  a: PlanArtifact,
+  changeId: string,
+  sourceLabel: string,
+  q: string,
+): boolean {
+  if (!q) return true;
+  const hay = [
+    changeId,
+    sourceLabel,
+    a.capability ?? "",
+    a.filename,
+    a.kind,
+  ]
+    .join(" ")
+    .toLowerCase();
+  return hay.includes(q);
+}
+
+export default function PlansTab({ projectName }: Props) {
   const { data, loading, error, refresh } = usePlansTree(projectName);
   // Selection lives in the `?file=` URL param (like notes/memo) so the
   // plans tab link built by useProjectTabs can restore the open plan.
@@ -229,14 +182,30 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
     [setSearchParams],
   );
 
-  const selectedFile = useMemo(() => {
-    if (!data || !selectedPath) return null;
+  // Every openable item (legacy plan file or OpenSpec artifact), keyed by path,
+  // so the detail pane can resolve basePath for whatever is selected.
+  const filesByPath = useMemo(() => {
+    const map = new Map<string, { relativeToProjectsDir: string | null }>();
+    if (!data) return map;
     for (const source of data.sources) {
-      const file = source.files.find((f) => f.absolutePath === selectedPath);
-      if (file) return file;
+      if (isOpenSpecSource(source)) {
+        for (const change of source.changes) {
+          for (const a of change.artifacts) {
+            map.set(a.absolutePath, { relativeToProjectsDir: a.relativeToProjectsDir });
+          }
+        }
+      } else {
+        for (const f of source.files) {
+          map.set(f.absolutePath, { relativeToProjectsDir: f.relativeToProjectsDir });
+        }
+      }
     }
-    return null;
-  }, [data, selectedPath]);
+    return map;
+  }, [data]);
+
+  const selectedBasePath = selectedPath
+    ? (filesByPath.get(selectedPath)?.relativeToProjectsDir ?? undefined)
+    : undefined;
 
   // Load plan content when selection changes
   useEffect(() => {
@@ -269,32 +238,58 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
     else clearLastSectionFile(projectName, "plans");
   }, [projectName, selectedPath]);
 
-  // Map current-plan filename → its original CURRENT.md entry (used by the DELETE call).
-  const currentByFilename = new Map<string, string>();
-  for (const entry of currentPlans ?? []) {
-    const filename = entry.split("/").pop() ?? entry;
-    currentByFilename.set(filename, entry);
-  }
-
-  const onOpen = (file: PlanFile) => setSelectedPath(file.absolutePath);
-
-  const onUnstar = async (entry: string) => {
-    await fetch(
-      `/api/projects/${projectName}/plans/current/${encodeURIComponent(entry)}`,
-      { method: "DELETE" },
-    );
-    refresh();
-  };
-
-  const onStar = async (file: PlanFile) => {
-    await fetch(
-      `/api/projects/${projectName}/plans/current/${encodeURIComponent(file.filename)}`,
-      { method: "POST" },
-    );
-    refresh();
-  };
+  const onOpen = useCallback(
+    (absolutePath: string) => setSelectedPath(absolutePath),
+    [setSelectedPath],
+  );
 
   const controls = useFileListControls();
+  const q = controls.debouncedQuery.trim().toLowerCase();
+
+  const legacySources = useMemo<LegacyPlanSource[]>(
+    () => (data?.sources ?? []).filter((s): s is LegacyPlanSource => !isOpenSpecSource(s)),
+    [data],
+  );
+  const openspecSources = useMemo<OpenSpecPlanSource[]>(
+    () => (data?.sources ?? []).filter(isOpenSpecSource),
+    [data],
+  );
+
+  // Coordinate the same change id across every OpenSpec source into one group.
+  const changeGroups = useMemo<ChangeGroup[]>(() => {
+    const byChange = new Map<string, ChangeGroup>();
+    for (const src of openspecSources) {
+      for (const change of src.changes) {
+        let g = byChange.get(change.changeId);
+        if (!g) {
+          g = { changeId: change.changeId, archived: true, archiveDate: null, children: [] };
+          byChange.set(change.changeId, g);
+        }
+        g.children.push({
+          sourceId: src.id,
+          sourceLabel: src.label,
+          artifacts: change.artifacts,
+        });
+        // Active in ANY source keeps the coordinated change live — and drops
+        // any archive date recorded from another source, so archived=false
+        // never carries a stale archiveDate along with it.
+        if (change.status === "active") {
+          g.archived = false;
+          g.archiveDate = null;
+        }
+        if (g.archived && change.status === "archived" && change.archiveDate && !g.archiveDate) {
+          g.archiveDate = change.archiveDate;
+        }
+      }
+    }
+    const groups = [...byChange.values()];
+    // Active first, then archived; stable-sorted by change id within each band.
+    groups.sort((a, b) => {
+      if (a.archived !== b.archived) return a.archived ? 1 : -1;
+      return a.changeId.localeCompare(b.changeId);
+    });
+    return groups;
+  }, [openspecSources]);
 
   const sortOpts = {
     getName: (f: PlanFile) => f.filename,
@@ -304,27 +299,25 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
     sortDir: controls.sortDir,
   };
 
-  const projectFiles = data?.sources.find((s) => s.id === "project")?.files ?? [];
-  const starred = projectFiles.filter((f) => currentByFilename.has(f.filename));
-  const preferredKey = starred.length
-    ? starred.reduce((a, b) => (b.modified > a.modified ? b : a)).absolutePath
-    : null;
-
-  const candidates = useMemo(
-    () =>
-      (data?.sources ?? [])
-        // Archived plans are history — never auto-select-newest into one.
-        .filter((s) => s.id !== ARCHIVED_SOURCE_ID)
-        .flatMap((s) => filterAndSortFiles(s.files, sortOpts))
-        .map((f) => ({ key: f.absolutePath, mtime: f.modified })),
-    [data, controls.debouncedQuery, controls.sortKey, controls.sortDir],
-  );
-  useAutoSelectNewest({
-    candidates,
-    selectedPath,
-    onSelect: setSelectedPath,
-    preferredKey,
-  });
+  // Auto-select the newest openable item (never an archived one).
+  const candidates = useMemo(() => {
+    const legacy = legacySources
+      .filter((s) => !s.id.endsWith(":archived"))
+      .flatMap((s) => filterAndSortFiles(s.files, sortOpts))
+      .map((f) => ({ key: f.absolutePath, mtime: f.modified }));
+    const artifacts = changeGroups
+      .filter((g) => !g.archived)
+      .flatMap((g) =>
+        g.children.flatMap((c) =>
+          c.artifacts
+            .filter((a) => artifactMatches(a, g.changeId, c.sourceLabel, q))
+            .map((a) => ({ key: a.absolutePath, mtime: a.modified })),
+        ),
+      );
+    return [...legacy, ...artifacts];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legacySources, changeGroups, controls.debouncedQuery, controls.sortKey, controls.sortDir]);
+  useAutoSelectNewest({ candidates, selectedPath, onSelect: setSelectedPath });
 
   if (loading && !data) {
     return (
@@ -342,44 +335,66 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
   }
   if (!data) return null;
 
-  const sources: FileListSource[] = data.sources.map((s) => {
+  const legacyFileSources: FileListSource[] = legacySources.map((s) => {
     const files = filterAndSortFiles(s.files, sortOpts);
-    const isArchived = s.id === ARCHIVED_SOURCE_ID;
+    const isArchived = s.id.endsWith(":archived");
     return {
       id: s.id,
       // Archived's label ("Archived") already comes from the server source.
       label: s.id === "project" ? "projects (current)" : s.label,
       count: files.length,
-      hint:
-        !isArchived && s.id !== "project" && s.id !== "claude"
-          ? "(.kilo)"
-          : undefined,
-      // History: collapsed by default, and no drag-move header (archiving is
-      // done by /pavilio-archive-plan, not by dragging in the panel).
+      // No hint needed: legacySources is only ever "project" or "project:archived"
+      // now that the external `.kilo`/`~/.claude/plans` sources have been dropped.
+      hint: undefined,
+      // History: collapsed by default. Archiving is done by
+      // /pavilio-archive-plan, not in the panel.
       defaultOpen: isArchived ? false : undefined,
-      renderHeader: isArchived
-        ? undefined
-        : (header) => (
-            <PlanSourceHeader
-              projectName={projectName}
-              sourceId={s.id}
-              onMoved={refresh}
-              header={header}
-            />
-          ),
       rows: (
-        <PlanRows
+        <LegacyPlanRows
           source={{ ...s, files }}
-          projectName={projectName}
           selectedPath={selectedPath}
-          currentByFilename={s.id === "project" ? currentByFilename : new Map()}
           onOpen={onOpen}
-          onStar={onStar}
-          onUnstar={onUnstar}
         />
       ),
     };
   });
+
+  const changeSources: FileListSource[] = changeGroups.flatMap((g) => {
+    // Apply the filter to each child's artifacts; drop empty children/groups.
+    const children = g.children
+      .map((c) => ({
+        ...c,
+        artifacts: c.artifacts.filter((a) =>
+          artifactMatches(a, g.changeId, c.sourceLabel, q),
+        ),
+      }))
+      .filter((c) => c.artifacts.length > 0);
+    if (children.length === 0) return [];
+    const count = children.reduce((n, c) => n + c.artifacts.length, 0);
+    return [
+      {
+        id: `change:${g.changeId}`,
+        label: g.changeId,
+        count,
+        hint: g.archived
+          ? g.archiveDate
+            ? `archived ${g.archiveDate}`
+            : "archived"
+          : undefined,
+        // Archived changes are history — collapsed by default; active stay open.
+        defaultOpen: g.archived ? false : undefined,
+        rows: (
+          <ChangeGroupRows
+            group={{ ...g, children }}
+            selectedPath={selectedPath}
+            onOpen={onOpen}
+          />
+        ),
+      },
+    ];
+  });
+
+  const sources: FileListSource[] = [...legacyFileSources, ...changeSources];
 
   return (
     <FileListSidebar
@@ -408,10 +423,7 @@ export default function PlansTab({ projectName, currentPlans }: Props) {
             </p>
           )}
           {fileContent !== null && (
-            <MarkdownRenderer
-              content={fileContent}
-              basePath={selectedFile?.relativeToProjectsDir ?? undefined}
-            />
+            <MarkdownRenderer content={fileContent} basePath={selectedBasePath} />
           )}
         </>
       }

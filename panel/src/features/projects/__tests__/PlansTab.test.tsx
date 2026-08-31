@@ -1,8 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
+import { ActiveFileProvider } from "../../explorer/useActiveFile";
+
+// Mock the socket so a `file-change` frame can be injected on demand (the plans
+// tree refreshes on that frame). `lastMessage` is a module-scope let the tests
+// flip, then rerender to let the hook's effect re-run.
+let lastMessage: { type: string } | null = null;
+vi.mock("../../realtime/useWebSocket", () => ({
+  useWebSocket: () => ({ lastMessage }),
+}));
+
 import PlansTab from "../PlansTab";
 
+// Legacy (flat) plan sources — files, not OpenSpec changes.
 const TREE = {
   project: "alokai",
   sources: [
@@ -37,7 +49,76 @@ const TREE = {
   ],
 };
 
+const artifact = (over: Record<string, unknown>) => ({
+  kind: "proposal",
+  capability: null,
+  filename: "proposal.md",
+  modified: 5,
+  relativeToProjectsDir: null,
+  ...over,
+});
+
+// Two OpenSpec sources that both carry the SAME change id → one coordinated group.
+const OPENSPEC_TREE = {
+  project: "alokai",
+  sources: [
+    TREE.sources[0],
+    {
+      id: "openspec:project",
+      label: "alokai (OpenSpec)",
+      kind: "openspec",
+      mode: "store",
+      openspecDir: "/p/projects/alokai/plans/openspec",
+      changes: [
+        {
+          changeId: "add-fulfillment-api",
+          source: "openspec:project",
+          status: "active",
+          archiveDate: null,
+          artifacts: [
+            artifact({
+              kind: "proposal",
+              filename: "proposal.md",
+              absolutePath: "/p/openspec/changes/add-fulfillment-api/proposal.md",
+            }),
+          ],
+        },
+      ],
+    },
+    {
+      id: "openspec:repo:storefront",
+      label: "storefront (OpenSpec)",
+      kind: "openspec",
+      mode: "native",
+      openspecDir: "/r/storefront/openspec",
+      changes: [
+        {
+          changeId: "add-fulfillment-api",
+          source: "openspec:repo:storefront",
+          status: "active",
+          archiveDate: null,
+          artifacts: [
+            artifact({
+              kind: "design",
+              filename: "design.md",
+              absolutePath: "/r/storefront/openspec/changes/add-fulfillment-api/design.md",
+            }),
+            artifact({
+              kind: "spec",
+              capability: "fulfillment",
+              filename: "spec.md",
+              absolutePath:
+                "/r/storefront/openspec/changes/add-fulfillment-api/specs/fulfillment/spec.md",
+            }),
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 beforeEach(() => {
+  lastMessage = null;
   mockFetchResponses({
     "plans-tree": TREE,
     "plans/read": { absolutePath: "/p/.kilo/plans/woo.md", content: "# Hello plan body" },
@@ -71,38 +152,15 @@ describe("PlansTab", () => {
     await waitFor(() => expect(screen.getByText("Hello plan body")).toBeTruthy());
   });
 
-  it("stars a project plan that is in currentPlans", async () => {
-    renderWithRouter(
-      <PlansTab
-        projectName="alokai"
-        currentPlans={["alokai/plans/2026-01-01-foo.md"]}
-      />,
-    );
-    expect(await screen.findByTestId("plans-tab-star-2026-01-01-foo.md")).toBeTruthy();
-    // workspace (non-project) files are not starrable
-    expect(screen.queryByTestId("plans-tab-star-woo.md")).toBeNull();
-  });
-
-  it("makes plan file rows draggable", async () => {
-    renderWithRouter(<PlansTab projectName="alokai" />);
-    const fileBtn = await screen.findByTestId("plans-tab-file-workspace-woo.md");
-    expect(fileBtn.getAttribute("draggable")).toBe("true");
-  });
-
   it("restores the open plan from the ?file= URL param", async () => {
     renderWithRouter(<PlansTab projectName="alokai" />, {
-      initialEntries: [
-        `/?file=${encodeURIComponent("/p/.kilo/plans/woo.md")}`,
-      ],
+      initialEntries: [`/?file=${encodeURIComponent("/p/.kilo/plans/woo.md")}`],
     });
     await waitFor(() => expect(screen.getByText("Hello plan body")).toBeTruthy());
   });
 
   it("persists the open plan to sessionStorage and shows path actions", async () => {
     renderWithRouter(<PlansTab projectName="alokai" />);
-    // The tab auto-opens the newest plan (foo.md) on load. Wait for that to
-    // settle before clicking, otherwise the auto-select effect races the click
-    // and can clobber the user's choice back to the default.
     await screen.findByTestId("plans-tab-file-workspace-woo.md");
     await waitFor(() =>
       expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
@@ -148,7 +206,6 @@ describe("PlansTab", () => {
     renderWithRouter(<PlansTab projectName="alokai" />);
     const header = await screen.findByTestId("plans-tab-source-project:archived");
     expect(screen.getByText("Archived")).toBeTruthy();
-    // Collapsed by default — the archived file is not rendered until expanded.
     expect(
       screen.queryByTestId(`plans-tab-file-project:archived-${ARCHIVED_FILE}`),
     ).toBeNull();
@@ -160,7 +217,6 @@ describe("PlansTab", () => {
 
   it("opens the peek when the open file's name is hovered (collapsed desktop)", async () => {
     renderWithRouter(<PlansTab projectName="alokai" />);
-    // A plan auto-selects; collapse the sidebar so a hover-peek is possible.
     const toggle = await screen.findByTestId("file-list-sidebar-toggle");
     fireEvent.click(toggle);
     const name = await screen.findByTestId("file-list-peek-trigger");
@@ -169,20 +225,257 @@ describe("PlansTab", () => {
     expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
   });
 
-  it("adds a plan to active via POST when an unstarred project plan's star is clicked", async () => {
-    const mockFetch = mockFetchResponses({
-      "plans-tree": TREE,
-      "plans/current": { ok: true },
+  it("groups equal OpenSpec change ids across sources", async () => {
+    mockFetchResponses({
+      "plans-tree": OPENSPEC_TREE,
+      "plans/read": { content: "# artifact body" },
     });
     renderWithRouter(<PlansTab projectName="alokai" />);
-    const star = await screen.findByTestId("plans-tab-star-2026-01-01-foo.md");
-    fireEvent.click(star);
-    await waitFor(() => {
-      const posted = mockFetch.mock.calls.find(
-        ([url, opts]) =>
-          String(url).includes("/plans/current/") && opts?.method === "POST",
-      );
-      expect(posted).toBeTruthy();
+    // A single coordinated change group carries both sources' artifacts.
+    expect(
+      await screen.findByTestId("plans-tab-source-change:add-fulfillment-api"),
+    ).toBeTruthy();
+    // Only ONE group for the shared change id.
+    expect(
+      screen.getAllByTestId("plans-tab-source-change:add-fulfillment-api"),
+    ).toHaveLength(1);
+    expect(
+      screen.getByTestId(
+        "plans-tab-change-src-openspec:project-add-fulfillment-api",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId(
+        "plans-tab-change-src-openspec:repo:storefront-add-fulfillment-api",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("keeps source children distinct inside a coordinated change", async () => {
+    mockFetchResponses({
+      "plans-tree": OPENSPEC_TREE,
+      "plans/read": { content: "# artifact body" },
     });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    // The project store's proposal and the repo's design/spec are separate rows,
+    // keyed by their owning source id.
+    expect(
+      await screen.findByTestId(
+        "plans-tab-artifact-openspec:project-add-fulfillment-api-proposal",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:repo:storefront-add-fulfillment-api-design",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:repo:storefront-add-fulfillment-api-spec-fulfillment",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("marks active vs archived changes from directory, not a pointer", async () => {
+    mockFetchResponses({
+      "plans-tree": {
+        project: "alokai",
+        sources: [
+          {
+            id: "openspec:project",
+            label: "alokai (OpenSpec)",
+            kind: "openspec",
+            mode: "store",
+            openspecDir: "/p/openspec",
+            changes: [
+              {
+                changeId: "live-change",
+                source: "openspec:project",
+                status: "active",
+                archiveDate: null,
+                artifacts: [
+                  artifact({
+                    kind: "proposal",
+                    absolutePath: "/p/openspec/changes/live-change/proposal.md",
+                  }),
+                ],
+              },
+              {
+                changeId: "done-change",
+                source: "openspec:project",
+                status: "archived",
+                archiveDate: "2026-01-05",
+                artifacts: [
+                  artifact({
+                    kind: "proposal",
+                    absolutePath:
+                      "/p/openspec/changes/archive/done-change/proposal.md",
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      "plans/read": { content: "# artifact body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    // Active change: artifact visible immediately (group open).
+    expect(
+      await screen.findByTestId(
+        "plans-tab-artifact-openspec:project-live-change-proposal",
+      ),
+    ).toBeTruthy();
+    // Archived change: group present but collapsed → artifact not rendered yet.
+    expect(screen.getByTestId("plans-tab-source-change:done-change")).toBeTruthy();
+    expect(
+      screen.queryByTestId(
+        "plans-tab-artifact-openspec:project-done-change-proposal",
+      ),
+    ).toBeNull();
+  });
+
+  it("collapses archived OpenSpec changes by default", async () => {
+    mockFetchResponses({
+      "plans-tree": {
+        project: "alokai",
+        sources: [
+          // The "project" legacy node is always present (server always emits it),
+          // so the sidebar renders per-source group headers.
+          TREE.sources[0],
+          {
+            id: "openspec:project",
+            label: "alokai (OpenSpec)",
+            kind: "openspec",
+            mode: "store",
+            openspecDir: "/p/openspec",
+            changes: [
+              {
+                changeId: "done-change",
+                source: "openspec:project",
+                status: "archived",
+                archiveDate: "2026-01-05",
+                artifacts: [
+                  artifact({
+                    kind: "proposal",
+                    absolutePath:
+                      "/p/openspec/changes/archive/done-change/proposal.md",
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      "plans/read": { content: "# artifact body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    const header = await screen.findByTestId(
+      "plans-tab-source-change:done-change",
+    );
+    expect(
+      screen.queryByTestId(
+        "plans-tab-artifact-openspec:project-done-change-proposal",
+      ),
+    ).toBeNull();
+    fireEvent.click(header);
+    expect(
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:project-done-change-proposal",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("retains legacy plan sources beside OpenSpec sources", async () => {
+    mockFetchResponses({
+      "plans-tree": OPENSPEC_TREE,
+      "plans/read": { content: "# body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    // Legacy flat source and the OpenSpec coordinated change both render.
+    expect(await screen.findByTestId("plans-tab-source-project")).toBeTruthy();
+    expect(
+      screen.getByTestId("plans-tab-file-project-2026-01-01-foo.md"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("plans-tab-source-change:add-fulfillment-api"),
+    ).toBeTruthy();
+  });
+
+  it("refreshes grouped artifacts after a file-change event", async () => {
+    mockFetchResponses({
+      "plans-tree": OPENSPEC_TREE,
+      "plans/read": { content: "# body" },
+    });
+    const { rerender } = renderWithRouter(<PlansTab projectName="alokai" />);
+    await screen.findByTestId(
+      "plans-tab-artifact-openspec:project-add-fulfillment-api-proposal",
+    );
+    // A teammate adds a change while the tab is open → server now returns it.
+    const withNewChange = {
+      project: "alokai",
+      sources: [
+        TREE.sources[0],
+        {
+          id: "openspec:project",
+          label: "alokai (OpenSpec)",
+          kind: "openspec",
+          mode: "store",
+          openspecDir: "/p/projects/alokai/plans/openspec",
+          changes: [
+            {
+              changeId: "add-fulfillment-api",
+              source: "openspec:project",
+              status: "active",
+              archiveDate: null,
+              artifacts: [
+                artifact({
+                  kind: "proposal",
+                  absolutePath:
+                    "/p/openspec/changes/add-fulfillment-api/proposal.md",
+                }),
+              ],
+            },
+            {
+              changeId: "add-tax-engine",
+              source: "openspec:project",
+              status: "active",
+              archiveDate: null,
+              artifacts: [
+                artifact({
+                  kind: "proposal",
+                  absolutePath: "/p/openspec/changes/add-tax-engine/proposal.md",
+                }),
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    mockFetchResponses({
+      "plans-tree": withNewChange,
+      "plans/read": { content: "# body" },
+    });
+    lastMessage = { type: "file-change" };
+    // rerender with the full wrapper so the Router context is preserved and the
+    // hook's file-change effect re-runs against the new server response.
+    rerender(
+      <MemoryRouter>
+        <ActiveFileProvider>
+          <PlansTab projectName="alokai" />
+        </ActiveFileProvider>
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByTestId("plans-tab-source-change:add-tax-engine"),
+    ).toBeTruthy();
+  });
+
+  it("removes the star control and CURRENT.md-based active plans", async () => {
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    await screen.findByTestId("plans-tab-file-project-2026-01-01-foo.md");
+    // No star toggle exists anymore on any plan row.
+    expect(screen.queryByTestId("plans-tab-star-2026-01-01-foo.md")).toBeNull();
+    expect(screen.queryByTestId("plans-tab-star-woo.md")).toBeNull();
   });
 });

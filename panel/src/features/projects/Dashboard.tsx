@@ -107,24 +107,10 @@ function ProjectCard({
         {project.hasIndex && <Badge label="Index" icon={Database} />}
       </div>
 
-      {project.currentPlans.length > 0 && (
-        <div className="mb-2">
-          <ul className="space-y-0.5">
-            {project.currentPlans.slice(0, 2).map((plan) => {
-              const name = plan.split("/").pop() ?? plan;
-              return (
-                <li
-                  key={plan}
-                  className="text-[11px] font-mono truncate"
-                  style={{ color: "var(--accent)", opacity: 0.7 }}
-                >
-                  {name}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+      {/* Active plans are no longer a project-level pointer (CURRENT.md is gone).
+          They live in un-archived OpenSpec change directories, surfaced on the
+          project's Plans tab; deriving them here would mean a plans-tree fetch
+          per card, so the dashboard no longer previews them. */}
 
       {formattedDate && (
         <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>

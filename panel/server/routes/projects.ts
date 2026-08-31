@@ -6,17 +6,13 @@ import {
   readdirSync,
   statSync,
   lstatSync,
-  mkdirSync,
-  renameSync,
-  copyFileSync,
-  unlinkSync,
+  realpathSync,
 } from "fs";
 import { join, resolve, basename, relative, dirname, isAbsolute, sep } from "path";
 import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
-import { resolveCollision } from "./files.js";
-import { rebuildIndex } from "../lib/file-index.js";
 import { getConfig } from "../config.js";
+import { parseOpenSpecConfig, resolveOpenSpecRoot } from "../lib/openspec.js";
 
 const router = Router();
 
@@ -170,46 +166,220 @@ function listPlanFilesInDir(absoluteRoot: string, sourceId: string, projectsDir:
   return out;
 }
 
-/** The ordered plan sources for a project: project plans + .kilo/plans roots + ~/.claude/plans. */
+/**
+ * The ordered legacy (flat) plan sources for a project: the project's own plans/
+ * directory and its archived/ subdirectory. Kept readable during migration to OpenSpec;
+ * the previous `.kilo`/`~/.claude/plans` roots have been dropped.
+ */
 function plansSources(
   projectDir: string,
-  projectsDir: string,
   name: string,
 ): { id: string; label: string; absoluteRoot: string }[] {
-  const repoRoot = resolve(projectsDir, "..");
-  const repos = readReposJson(projectDir);
   return [
     { id: "project", label: name, absoluteRoot: join(projectDir, "plans") },
     // Archived plans, moved here by /pavilio-archive-plan. Listed right after the
     // active project plans; the panel renders it as a default-collapsed group.
     { id: "project:archived", label: "Archived", absoluteRoot: join(projectDir, "plans", "archived") },
-    { id: "workspace", label: "workspace (.kilo)", absoluteRoot: join(repoRoot, ".kilo", "plans") },
-    ...repos.map((r) => ({
-      id: `repo:${r.name}`,
-      label: r.name,
-      absoluteRoot: join(resolve(expandHome(r.path)), ".kilo", "plans"),
-    })),
-    { id: "claude", label: "Claude plans (~/.claude/plans)", absoluteRoot: expandHome("~/.claude/plans") },
   ];
 }
 
+/** A resolved OpenSpec source: the project's own store plus each configured linked repo. */
+interface OpenSpecSourceDesc {
+  id: string;
+  label: string;
+  mode: "native" | "store";
+  openspecDir: string;
+}
+
 /**
- * Directories a project may surface plan files from.
- *
- * NOTE: `plans/archived/` is intentionally NOT listed separately — archived plan reads are
- * admitted because `isPlanPathAllowed` uses a depth-agnostic `isPathUnder` check against
- * `plans/`. If that check is ever tightened to direct-children-only, add `plans/archived`
- * here explicitly. The "reads an archived plan file (nested under plans/)" test guards this.
+ * The OpenSpec roots a project surfaces: its own project-local store
+ * (`plans/openspec/`) plus one per linked repo whose repos.json entry carries an
+ * `openspec` config (resolved to a native `<repo>/openspec` or a store
+ * `plans/<repo>/openspec`). Repos without an `openspec` key are skipped, and a
+ * malformed/escaping config is skipped rather than throwing.
  */
-export function buildPlansAllowlist(projectDir: string, projectsDir: string): string[] {
-  const repoRoot = resolve(projectsDir, "..");
-  const repos = readReposJson(projectDir);
-  return [
-    join(projectDir, "plans"),
-    join(repoRoot, ".kilo", "plans"),
-    ...repos.map((r) => join(resolve(expandHome(r.path)), ".kilo", "plans")),
-    expandHome("~/.claude/plans"),
+function openSpecSources(projectDir: string): OpenSpecSourceDesc[] {
+  const out: OpenSpecSourceDesc[] = [
+    {
+      id: "openspec:project",
+      label: `${basename(projectDir)} (OpenSpec)`,
+      mode: "store",
+      openspecDir: join(projectDir, "plans", "openspec"),
+    },
   ];
+  for (const r of readReposJson(projectDir)) {
+    let openspecDir: string;
+    let mode: "native" | "store";
+    try {
+      const config = parseOpenSpecConfig(r);
+      const resolution = resolveOpenSpecRoot({
+        projectPath: projectDir,
+        repo: { name: r.name, path: resolve(expandHome(r.path)) },
+        config,
+      });
+      if (resolution.mode === "unconfigured") continue;
+      mode = resolution.mode;
+      openspecDir = resolution.openspecDir;
+    } catch (err) {
+      // Unknown mode / root escaping its boundary → not a valid source. Logged
+      // (not just silently skipped) so a typo'd `openspec.mode` in repos.json
+      // doesn't disappear a repo's specs with zero signal.
+      console.warn(
+        `[openSpecSources] ${basename(projectDir)}: skipping repo ${r.name}:`,
+        (err as Error).message,
+      );
+      continue;
+    }
+    out.push({ id: `openspec:repo:${r.name}`, label: `${r.name} (OpenSpec)`, mode, openspecDir });
+  }
+  return out;
+}
+
+interface PlanArtifact {
+  /** proposal | design | tasks | spec (spec = a change's delta spec for a capability). */
+  kind: "proposal" | "design" | "tasks" | "spec";
+  /** Capability name for delta specs; null for proposal/design/tasks. */
+  capability: string | null;
+  filename: string;
+  absolutePath: string;
+  modified: number;
+  relativeToProjectsDir: string | null;
+}
+interface ChangeRecord {
+  /** Stable change identifier — the change directory name (shared across sources). */
+  changeId: string;
+  /** The owning source id, for UI grouping. */
+  source: string;
+  /** active = under changes/; archived = under changes/archive/. */
+  status: "active" | "archived";
+  /** YYYY-MM-DD prefix of an archived change dir, when present; null otherwise. */
+  archiveDate: string | null;
+  artifacts: PlanArtifact[];
+}
+interface OpenSpecSource {
+  id: string;
+  label: string;
+  kind: "openspec";
+  mode: "native" | "store";
+  openspecDir: string;
+  changes: ChangeRecord[];
+}
+/** A living capability spec under `<openspec>/specs/<capability>/spec.md`. */
+interface LivingSpecFile {
+  source: string;
+  capability: string;
+  filename: string;
+  absolutePath: string;
+  modified: number;
+  relativeToProjectsDir: string | null;
+}
+
+/** Read the known Markdown artifacts of one change directory. */
+function readChangeArtifacts(changeDir: string, projectsDir: string): PlanArtifact[] {
+  const out: PlanArtifact[] = [];
+  for (const kind of ["proposal", "design", "tasks"] as const) {
+    const abs = join(changeDir, `${kind}.md`);
+    if (existsSync(abs) && statSync(abs).isFile()) {
+      out.push({
+        kind,
+        capability: null,
+        filename: `${kind}.md`,
+        absolutePath: abs,
+        modified: statSync(abs).mtimeMs,
+        relativeToProjectsDir: relativeToProjects(abs, projectsDir),
+      });
+    }
+  }
+  // Delta specs: changes/<id>/specs/<capability>/spec.md
+  const specsDir = join(changeDir, "specs");
+  if (existsSync(specsDir) && statSync(specsDir).isDirectory()) {
+    for (const cap of readdirSync(specsDir, { withFileTypes: true })) {
+      if (!cap.isDirectory()) continue;
+      const abs = join(specsDir, cap.name, "spec.md");
+      if (existsSync(abs) && statSync(abs).isFile()) {
+        out.push({
+          kind: "spec",
+          capability: cap.name,
+          filename: "spec.md",
+          absolutePath: abs,
+          modified: statSync(abs).mtimeMs,
+          relativeToProjectsDir: relativeToProjects(abs, projectsDir),
+        });
+      }
+    }
+  }
+  return out;
+}
+
+const ARCHIVE_DATE_RE = /^(\d{4}-\d{2}-\d{2})-.+$/;
+
+/** Discover active and archived change records under one `openspec/` tree. */
+function listOpenSpecChanges(openspecDir: string, sourceId: string, projectsDir: string): ChangeRecord[] {
+  const changesDir = join(openspecDir, "changes");
+  if (!existsSync(changesDir) || !statSync(changesDir).isDirectory()) return [];
+  const out: ChangeRecord[] = [];
+  for (const e of readdirSync(changesDir, { withFileTypes: true })) {
+    if (!e.isDirectory() || e.name === "archive") continue;
+    const artifacts = readChangeArtifacts(join(changesDir, e.name), projectsDir);
+    if (artifacts.length === 0) continue;
+    out.push({ changeId: e.name, source: sourceId, status: "active", archiveDate: null, artifacts });
+  }
+  const archiveDir = join(changesDir, "archive");
+  if (existsSync(archiveDir) && statSync(archiveDir).isDirectory()) {
+    for (const e of readdirSync(archiveDir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const artifacts = readChangeArtifacts(join(archiveDir, e.name), projectsDir);
+      if (artifacts.length === 0) continue;
+      const m = ARCHIVE_DATE_RE.exec(e.name);
+      out.push({
+        changeId: e.name,
+        source: sourceId,
+        status: "archived",
+        archiveDate: m ? m[1] : null,
+        artifacts,
+      });
+    }
+  }
+  out.sort((a, b) => a.changeId.localeCompare(b.changeId));
+  return out;
+}
+
+/** Discover living capability specs under `<openspec>/specs/<capability>/spec.md`. */
+function listOpenSpecLivingSpecs(openspecDir: string, sourceId: string, projectsDir: string): LivingSpecFile[] {
+  const specsDir = join(openspecDir, "specs");
+  if (!existsSync(specsDir) || !statSync(specsDir).isDirectory()) return [];
+  const out: LivingSpecFile[] = [];
+  for (const cap of readdirSync(specsDir, { withFileTypes: true })) {
+    if (!cap.isDirectory()) continue;
+    const abs = join(specsDir, cap.name, "spec.md");
+    if (existsSync(abs) && statSync(abs).isFile()) {
+      out.push({
+        source: sourceId,
+        capability: cap.name,
+        filename: "spec.md",
+        absolutePath: abs,
+        modified: statSync(abs).mtimeMs,
+        relativeToProjectsDir: relativeToProjects(abs, projectsDir),
+      });
+    }
+  }
+  out.sort((a, b) => a.capability.localeCompare(b.capability));
+  return out;
+}
+
+/**
+ * Directories a project may surface plan files from: the legacy flat `plans/` tree
+ * (also covering `plans/archived/` and the project-local `plans/openspec/` store,
+ * which nest under it) plus each configured OpenSpec root (native repo trees live
+ * outside `plans/`). Unconfigured repos contribute nothing, so an `openspec/`-shaped
+ * path under them is rejected as traversal.
+ *
+ * NOTE: `isPlanPathAllowed` uses a depth-agnostic `isPathUnder` check, so nested
+ * artifacts (archived plans, `openspec/changes/<id>/...`) are admitted without listing
+ * every subdirectory here.
+ */
+export function buildPlansAllowlist(projectDir: string, _projectsDir?: string): string[] {
+  return [join(projectDir, "plans"), ...openSpecSources(projectDir).map((s) => s.openspecDir)];
 }
 
 /** A path is allowed if it is a `.md` file living strictly under one allowlisted plans dir. */
@@ -230,10 +400,38 @@ export function buildContextAllowlist(projectDir: string): string[] {
 
 /**
  * A path is allowed if (a) it lives under one of the allowlisted roots and
- * (b) it's a well-known context/ADR file shape.
+ * (b) it's a well-known context/ADR file shape, OR it is a living OpenSpec
+ * capability spec (`<openspecDir>/specs/<capability>/spec.md`) under one of the
+ * configured `openspecDirs`. OpenSpec living specs are gated only on the
+ * configured roots, so an `openspec/`-shaped path under an unconfigured repo is
+ * rejected even though the repo may appear in `allowlist` for its CONTEXT/ADRs.
  */
-export function isContextPathAllowed(absolutePath: string, allowlist: string[]): boolean {
+export function isContextPathAllowed(
+  absolutePath: string,
+  allowlist: string[],
+  openspecDirs: string[] = [],
+): boolean {
   if (absolutePath.includes("\0")) return false;
+  // OpenSpec living spec: <openspecDir>/specs/<capability>/spec.md (exact depth).
+  if (basename(absolutePath) === "spec.md") {
+    for (const openspecDir of openspecDirs) {
+      const specsRoot = join(openspecDir, "specs");
+      if (isPathUnder(absolutePath, specsRoot) && dirname(dirname(absolutePath)) === specsRoot) {
+        // The depth/prefix check above is pure string math — a symlinked
+        // capability dir or spec.md file would otherwise sail through it and
+        // resolve outside specsRoot on read. Reject when the path exists and
+        // its realpath differs (i.e. a symlink is in the chain).
+        if (existsSync(absolutePath)) {
+          try {
+            if (realpathSync(absolutePath) !== absolutePath) continue;
+          } catch {
+            continue;
+          }
+        }
+        return true;
+      }
+    }
+  }
   const containingRoot = allowlist.find((root) => isPathUnder(absolutePath, root));
   if (!containingRoot) return false;
   const name = basename(absolutePath);
@@ -270,7 +468,24 @@ router.get("/:name/context", (req, res) => {
     specs.push(...listSpecFilesInRoot(s.absoluteRoot, s.id, projectsDir));
   }
 
-  res.json({ project: req.params.name, sources, contexts, adrs, specs });
+  // Living OpenSpec capability specs, grouped by source (project store + linked repos).
+  const openspecSpecs: LivingSpecFile[] = [];
+  const openspecSources: ContextSource[] = [];
+  for (const os of openSpecSources(projectDir)) {
+    const living = listOpenSpecLivingSpecs(os.openspecDir, os.id, projectsDir);
+    if (living.length === 0) continue;
+    openspecSources.push({ id: os.id, label: os.label, absoluteRoot: os.openspecDir });
+    openspecSpecs.push(...living);
+  }
+
+  res.json({
+    project: req.params.name,
+    sources: [...sources, ...openspecSources],
+    contexts,
+    adrs,
+    specs,
+    openspecSpecs,
+  });
 });
 
 router.get("/:name/context/read", (req, res) => {
@@ -284,7 +499,8 @@ router.get("/:name/context/read", (req, res) => {
 
   const absPath = resolve(pathParam);
   const allowlist = buildContextAllowlist(projectDir);
-  if (!isContextPathAllowed(absPath, allowlist)) {
+  const openspecDirs = openSpecSources(projectDir).map((s) => s.openspecDir);
+  if (!isContextPathAllowed(absPath, allowlist, openspecDirs)) {
     return res.status(403).json({ error: "Path not in this project's context allowlist" });
   }
   if (!existsSync(absPath) || !statSync(absPath).isFile()) {
@@ -301,11 +517,25 @@ router.get("/:name/plans-tree", (req, res) => {
     return res.status(404).json({ error: "Project not found" });
   }
 
-  const sources: PlanSource[] = [];
-  for (const c of plansSources(projectDir, projectsDir, req.params.name)) {
+  const sources: (PlanSource | OpenSpecSource)[] = [];
+  for (const c of plansSources(projectDir, req.params.name)) {
     const files = listPlanFilesInDir(c.absoluteRoot, c.id, projectsDir);
     if (files.length === 0 && c.id !== "project") continue; // project node always shown
     sources.push({ id: c.id, label: c.label, absoluteRoot: c.absoluteRoot, files });
+  }
+
+  // OpenSpec sources: the project-local store and each configured linked repo.
+  for (const os of openSpecSources(projectDir)) {
+    const changes = listOpenSpecChanges(os.openspecDir, os.id, projectsDir);
+    if (changes.length === 0) continue;
+    sources.push({
+      id: os.id,
+      label: os.label,
+      kind: "openspec",
+      mode: os.mode,
+      openspecDir: os.openspecDir,
+      changes,
+    });
   }
 
   res.json({ project: req.params.name, sources });
@@ -338,56 +568,6 @@ router.get("/:name/plans/read", (req, res) => {
   }
   const content = readFileSync(absPath, "utf-8");
   res.json({ absolutePath: absPath, content });
-});
-
-// Move a plan file between plan sources (project plans <-> .kilo/plans <-> ~/.claude/plans).
-// Body: { from: string (absolute path), toId: string (a plans source id) }
-router.post("/:name/plans/move", (req, res) => {
-  const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
-  const fromParam = typeof req.body?.from === "string" ? req.body.from : "";
-  const toId = typeof req.body?.toId === "string" ? req.body.toId : "";
-  if (!fromParam || !toId) return res.status(400).json({ error: "Both 'from' and 'toId' are required" });
-
-  const absFrom = resolve(fromParam);
-  const allowlist = buildPlansAllowlist(projectDir, projectsDir);
-  if (!isPlanPathAllowed(absFrom, allowlist)) {
-    return res.status(403).json({ error: "Source not in this project's plans allowlist" });
-  }
-  if (!existsSync(absFrom)) return res.status(404).json({ error: "Source file not found" });
-  const fromStat = lstatSync(absFrom);
-  if (fromStat.isSymbolicLink()) return res.status(403).json({ error: "Symbolic links are not allowed" });
-  if (!fromStat.isFile()) return res.status(400).json({ error: "Source is not a regular file" });
-
-  const dest = plansSources(projectDir, projectsDir, req.params.name).find((s) => s.id === toId);
-  if (!dest) return res.status(400).json({ error: "Unknown destination source" });
-  const destDir = dest.absoluteRoot;
-
-  if (dirname(absFrom) === destDir) {
-    return res.json({ from: absFrom, to: absFrom, renamed: false, noop: true });
-  }
-
-  mkdirSync(destDir, { recursive: true });
-  const resolved = resolveCollision(destDir, basename(absFrom));
-  if (!resolved) return res.status(409).json({ error: "Too many collisions at destination" });
-
-  try {
-    renameSync(absFrom, resolved.absolutePath);
-  } catch (e: unknown) {
-    if ((e as NodeJS.ErrnoException).code === "EXDEV") {
-      copyFileSync(absFrom, resolved.absolutePath); // cross-device (e.g. ~/.claude on another fs)
-      unlinkSync(absFrom);
-    } else {
-      return res.status(500).json({ error: `Move failed: ${(e as Error).message}` });
-    }
-  }
-
-  // Keep the file index fresh when a file enters/leaves projectsDir.
-  if (isPathUnder(destDir, projectsDir) || isPathUnder(absFrom, projectsDir)) rebuildIndex();
-  res.json({ from: absFrom, to: resolved.absolutePath, renamed: resolved.renamed });
 });
 
 router.get("/", (_req, res) => {
@@ -424,7 +604,11 @@ router.post("/:name/plans/current/:planFile", (req, res) => {
 
 router.delete("/:name/plans/current/:planFile", (req, res) => {
   const { projectsDir } = getConfig();
-  const currentMdPath = join(projectsDir, req.params.name, "plans", "CURRENT.md");
+  const projectDir = resolve(projectsDir, req.params.name);
+  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  const currentMdPath = join(projectDir, "plans", "CURRENT.md");
   if (!existsSync(currentMdPath)) return res.status(404).json({ error: "CURRENT.md not found" });
 
   const planFile = decodeURIComponent(req.params.planFile);

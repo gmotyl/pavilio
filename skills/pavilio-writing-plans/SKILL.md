@@ -1,15 +1,17 @@
 ---
 name: pavilio-writing-plans
-description: Write a bite-sized, contract-style implementation plan from an approved spec, saved under projects/<project>/plans/. Tasks carry files, WHEN/THEN acceptance criteria, and test names — not pre-written code. Use when the user invokes `/pavilio-writing-plans` or has a spec/requirements ready to turn into an executable plan.
+description: Write a bite-sized, contract-style implementation plan from an approved spec, saved as the change's tasks contract under `openspec/changes/<change-id>/`. Tasks carry files, WHEN/THEN acceptance criteria, and test names — not pre-written code. Use when the user invokes `/pavilio-writing-plans` or has a spec/requirements ready to turn into an executable plan.
 ---
 
 # pavilio-writing-plans
 
-Turn an approved spec into a bite-sized, test-first implementation plan. The one workspace rule: **plans are saved project-scoped under `projects/<project>/plans/`.**
+Turn an approved design into a bite-sized, test-first implementation contract. Backend already resolved for the change's scope — follow [[pavilio-openspec-storage]]. The one workspace rule: **the contract is written as the change's `tasks.md` inside that resolved OpenSpec backend.**
 
-**Announce at start:** "Using pavilio-writing-plans to create the implementation plan."
+**Announce at start:** "Using pavilio-writing-plans to create the implementation contract."
 
-**Save plans to:** `projects/<project>/plans/YYYY-MM-DD-<feature-name>.md` (relative to the workspace repo root, i.e. the same location as `plans/CURRENT.md`). Resolve `<project>` from the spec path, the conversation, or `plans/CURRENT.md`; if ambiguous, ask once.
+**Resolve the backend first:** the change's `openspec/changes/<change-id>/` already exists (grill created `proposal.md` / `design.md` / delta specs there). Reuse the backend already resolved for that scope — follow [[pavilio-openspec-storage]] (a configured scope is reused without asking; project-wide changes use the project store). Resolve `<change-id>` from the design's change dir, the conversation, or the sole un-archived change; if ambiguous, ask once.
+
+**Save the contract to:** `openspec/changes/<change-id>/tasks.md` in the resolved backend, alongside the change's `proposal.md` and `design.md`. A coordinated multi-repository change writes a `tasks.md` under each repository's own change dir, sharing the change identifier.
 
 ## Overview
 
@@ -44,7 +46,7 @@ Every plan MUST start with:
 
 **Tech Stack:** [Key technologies/libraries]
 
-**Spec:** [relative link to the -design.md this plan implements]
+**Design:** [relative link to the sibling `design.md` in this change dir]
 
 ---
 ```
