@@ -1,101 +1,252 @@
 import { describe, it, expect } from "vitest";
 import {
-  defaultColumnSizes,
-  columnsFromSizes,
-  mergeColumnSizes,
-  joinColumn,
-  splitToColumn,
-  type ColumnSizes,
+  getLayoutPresets,
+  expandPreset,
+  reconcileLayout,
+  mergeInColumn,
+  joinOtherColumn,
+  splitToNewColumn,
+  swapInLayout,
+  type ColumnLayout,
 } from "../columnLayout";
 
-describe("defaultColumnSizes", () => {
-  it("returns the documented shape for counts 0-9", () => {
-    expect(defaultColumnSizes(0)).toEqual([]);
-    expect(defaultColumnSizes(1)).toEqual([1]);
-    expect(defaultColumnSizes(2)).toEqual([1, 1]);
-    expect(defaultColumnSizes(3)).toEqual([1, 2]);
-    expect(defaultColumnSizes(4)).toEqual([2, 2]);
-    expect(defaultColumnSizes(5)).toEqual([2, 3]);
-    expect(defaultColumnSizes(6)).toEqual([2, 2, 2]);
-    expect(defaultColumnSizes(7)).toEqual([3, 2, 2]);
-    expect(defaultColumnSizes(8)).toEqual([3, 3, 2]);
-    expect(defaultColumnSizes(9)).toEqual([3, 3, 3]);
+describe("getLayoutPresets", () => {
+  it("returns the documented rows for counts 1, 2, 3, 4, 5, 6, 7, 8, 10", () => {
+    expect(getLayoutPresets(1)).toEqual([{ label: "Default", sizes: [1] }]);
+
+    expect(getLayoutPresets(2)).toEqual([{ label: "Default", sizes: [1, 1] }]);
+
+    expect(getLayoutPresets(3)).toEqual([
+      { label: "Default", sizes: [1, 2] },
+      { label: "Alt 1", sizes: [1, 1, 1] },
+    ]);
+
+    expect(getLayoutPresets(4)).toEqual([
+      { label: "Default", sizes: [2, 2] },
+      { label: "Alt 1", sizes: [1, 3] },
+      { label: "Alt 2", sizes: [1, 1, 2] },
+    ]);
+
+    expect(getLayoutPresets(5)).toEqual([
+      { label: "Default", sizes: [2, 3] },
+      { label: "Alt 1", sizes: [1, 4] },
+      { label: "Alt 2", sizes: [1, 1, 3] },
+    ]);
+
+    expect(getLayoutPresets(6)).toEqual([
+      { label: "Default", sizes: [2, 2, 2] },
+      { label: "Alt 1", sizes: [1, 5] },
+      { label: "Alt 2", sizes: [1, 1, 4] },
+    ]);
+
+    expect(getLayoutPresets(7)).toEqual([
+      { label: "Default", sizes: [3, 2, 2] },
+      { label: "Alt 1", sizes: [1, 3, 3] },
+    ]);
+
+    expect(getLayoutPresets(8)).toEqual([
+      { label: "Default", sizes: [3, 3, 2] },
+      { label: "Alt 1", sizes: [1, 4, 3] },
+    ]);
+
+    expect(getLayoutPresets(10)).toEqual([
+      { label: "Default", sizes: [4, 3, 3] },
+      { label: "Alt 1", sizes: [1, 5, 4] },
+    ]);
   });
 });
 
-describe("columnsFromSizes", () => {
-  it("slices order into per-column id arrays", () => {
-    expect(columnsFromSizes(["a", "b", "c"], [1, 2])).toEqual([["a"], ["b", "c"]]);
-  });
-
-  it("ignores ids beyond the sum of sizes", () => {
-    expect(columnsFromSizes(["a", "b", "c", "d"], [1, 2])).toEqual([["a"], ["b", "c"]]);
+describe("expandPreset", () => {
+  it("produces weight-1 entries consumed in order", () => {
+    expect(expandPreset(["a", "b", "c"], [1, 2])).toEqual([
+      [{ sessionId: "a", weight: 1 }],
+      [
+        { sessionId: "b", weight: 1 },
+        { sessionId: "c", weight: 1 },
+      ],
+    ]);
   });
 });
 
-describe("mergeColumnSizes", () => {
-  it("returns the same reference when prevSizes is empty", () => {
-    const prevSizes: ColumnSizes = [];
-    expect(mergeColumnSizes(["A", "B"], prevSizes, ["A", "B"])).toBe(prevSizes);
+describe("reconcileLayout", () => {
+  it("returns the same reference when prevLayout is empty", () => {
+    const prevLayout: ColumnLayout = [];
+    expect(reconcileLayout(["A", "B"], prevLayout, ["A", "B"])).toBe(prevLayout);
   });
 
   it("drops a column emptied by a closed session", () => {
-    expect(mergeColumnSizes(["A", "B", "C"], [1, 2], ["B", "C"])).toEqual([2]);
+    const prevLayout: ColumnLayout = [
+      [{ sessionId: "A", weight: 1 }],
+      [
+        { sessionId: "B", weight: 1 },
+        { sessionId: "C", weight: 1 },
+      ],
+    ];
+    expect(reconcileLayout(["A", "B", "C"], prevLayout, ["B", "C"])).toEqual([
+      [
+        { sessionId: "B", weight: 1 },
+        { sessionId: "C", weight: 1 },
+      ],
+    ]);
   });
 
-  it("shrinks a shared column when one of its sessions closes", () => {
-    expect(mergeColumnSizes(["A", "B", "C"], [1, 2], ["A", "C"])).toEqual([1, 1]);
+  it("shrinks a shared column without touching sibling weights", () => {
+    const prevLayout: ColumnLayout = [
+      [{ sessionId: "A", weight: 1 }],
+      [
+        { sessionId: "B", weight: 5 },
+        { sessionId: "C", weight: 2 },
+      ],
+    ];
+    expect(reconcileLayout(["A", "B", "C"], prevLayout, ["A", "C"])).toEqual([
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "C", weight: 2 }],
+    ]);
   });
 
-  it("grows the last column when a new session opens", () => {
-    expect(mergeColumnSizes(["A", "B"], [1, 1], ["A", "B", "C"])).toEqual([1, 2]);
+  it("appends a weight-1 entry to the last column for a new session", () => {
+    const prevLayout: ColumnLayout = [
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "B", weight: 1 }],
+    ];
+    expect(reconcileLayout(["A", "B"], prevLayout, ["A", "B", "C"])).toEqual([
+      [{ sessionId: "A", weight: 1 }],
+      [
+        { sessionId: "B", weight: 1 },
+        { sessionId: "C", weight: 1 },
+      ],
+    ]);
   });
 
   it("returns [] when every column is emptied", () => {
-    expect(mergeColumnSizes(["A", "B"], [1, 1], [])).toEqual([]);
+    const prevLayout: ColumnLayout = [
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "B", weight: 1 }],
+    ];
+    expect(reconcileLayout(["A", "B"], prevLayout, [])).toEqual([]);
   });
 });
 
-describe("joinColumn", () => {
-  it("is a no-op when session and target already share a column", () => {
-    const order = ["A", "B", "C"];
-    const sizes: ColumnSizes = [2, 1];
-    const result = joinColumn(order, sizes, "A", "B");
-    expect(result.order).toBe(order);
-    expect(result.sizes).toBe(sizes);
+describe("mergeInColumn", () => {
+  it("is a no-op when sessionId and targetId are in different columns", () => {
+    const layout: ColumnLayout = [
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "B", weight: 1 }],
+    ];
+    expect(mergeInColumn(layout, "A", "B")).toBe(layout);
   });
 
-  it("moves a session into a different column and updates both sizes", () => {
-    const result = joinColumn(["A", "B", "C", "D"], [2, 2], "B", "D");
-    expect(result.order).toEqual(["A", "C", "D", "B"]);
-    expect(result.sizes).toEqual([1, 3]);
+  it("sums weights into the target's slot and appends the displaced session as a new column", () => {
+    const layout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 2 },
+        { sessionId: "B", weight: 3 },
+      ],
+    ];
+    expect(mergeInColumn(layout, "A", "B")).toEqual([
+      [{ sessionId: "A", weight: 5 }],
+      [{ sessionId: "B", weight: 1 }],
+    ]);
   });
 
-  it("drops the source column when it was the sole occupant", () => {
-    const result = joinColumn(["A", "B", "C"], [1, 2], "A", "C");
-    expect(result.order).toEqual(["B", "C", "A"]);
-    expect(result.sizes).toEqual([3]);
+  it("compounds weight across repeated merges into the same slot", () => {
+    const layout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 1 },
+        { sessionId: "B", weight: 1 },
+        { sessionId: "C", weight: 1 },
+      ],
+    ];
+    const afterFirst = mergeInColumn(layout, "A", "B");
+    expect(afterFirst).toEqual([
+      [
+        { sessionId: "A", weight: 2 },
+        { sessionId: "C", weight: 1 },
+      ],
+      [{ sessionId: "B", weight: 1 }],
+    ]);
+
+    const afterSecond = mergeInColumn(afterFirst, "C", "A");
+    expect(afterSecond).toEqual([
+      [{ sessionId: "C", weight: 3 }],
+      [{ sessionId: "B", weight: 1 }],
+      [{ sessionId: "A", weight: 1 }],
+    ]);
   });
 });
 
-describe("splitToColumn", () => {
-  it("inserts a new size-1 column at gutterIndex", () => {
-    const result = splitToColumn(["A", "B", "C", "D"], [2, 2], "B", 1);
-    expect(result.order).toEqual(["A", "B", "C", "D"]);
-    expect(result.sizes).toEqual([1, 1, 2]);
+describe("joinOtherColumn", () => {
+  it("is a no-op when sessionId and targetId already share a column", () => {
+    const layout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 1 },
+        { sessionId: "B", weight: 1 },
+      ],
+    ];
+    expect(joinOtherColumn(layout, "A", "B")).toBe(layout);
+  });
+
+  it("moves a session to weight 1 in a different column", () => {
+    const layout: ColumnLayout = [
+      [{ sessionId: "A", weight: 3 }],
+      [
+        { sessionId: "B", weight: 1 },
+        { sessionId: "C", weight: 1 },
+      ],
+    ];
+    expect(joinOtherColumn(layout, "A", "B")).toEqual([
+      [
+        { sessionId: "B", weight: 1 },
+        { sessionId: "C", weight: 1 },
+        { sessionId: "A", weight: 1 },
+      ],
+    ]);
+  });
+});
+
+describe("splitToNewColumn", () => {
+  it("resets weight to 1 regardless of the session's prior weight", () => {
+    const layout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 5 },
+        { sessionId: "B", weight: 1 },
+      ],
+    ];
+    expect(splitToNewColumn(layout, "A", 1)).toEqual([
+      [{ sessionId: "B", weight: 1 }],
+      [{ sessionId: "A", weight: 1 }],
+    ]);
   });
 
   it("accounts for index shift when the source column precedes gutterIndex", () => {
-    const result = splitToColumn(["A", "B", "C"], [1, 1, 1], "A", 2);
-    expect(result.order).toEqual(["B", "A", "C"]);
-    expect(result.sizes).toEqual([1, 1, 1]);
+    const layout: ColumnLayout = [
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "B", weight: 1 }],
+      [{ sessionId: "C", weight: 1 }],
+    ];
+    expect(splitToNewColumn(layout, "A", 2)).toEqual([
+      [{ sessionId: "B", weight: 1 }],
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "C", weight: 1 }],
+    ]);
   });
+});
 
-  it("is a no-op when sessionId is not found in order", () => {
-    const order = ["A", "B"];
-    const sizes: ColumnSizes = [1, 1];
-    const result = splitToColumn(order, sizes, "Z", 1);
-    expect(result.order).toBe(order);
-    expect(result.sizes).toBe(sizes);
+describe("swapInLayout", () => {
+  it("exchanges sessionIds at two slots without changing weights", () => {
+    const layout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 2 },
+        { sessionId: "B", weight: 3 },
+      ],
+      [{ sessionId: "C", weight: 1 }],
+    ];
+    expect(swapInLayout(layout, "A", "C")).toEqual([
+      [
+        { sessionId: "C", weight: 2 },
+        { sessionId: "B", weight: 3 },
+      ],
+      [{ sessionId: "A", weight: 1 }],
+    ]);
   });
 });
