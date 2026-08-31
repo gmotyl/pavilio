@@ -31,7 +31,7 @@ async function setup(project: string) {
   return hook;
 }
 
-describe("useTerminalSessions columns", () => {
+describe("useTerminalSessions columnLayout", () => {
   beforeEach(() => {
     localStorage.clear();
     global.fetch = vi.fn();
@@ -41,65 +41,79 @@ describe("useTerminalSessions columns", () => {
     vi.restoreAllMocks();
   });
 
-  it("columnSizes initializes from localStorage for the given project", async () => {
+  it("columnLayout initializes from panel-terminal-layout-<project> in localStorage", async () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["a", "b"]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([[{ sessionId: "a", weight: 1 }, { sessionId: "b", weight: 2 }]]),
+    );
+    mockFetchSessions([session("a"), session("b")]);
+    const { result } = await setup("vector");
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "a", weight: 1 }, { sessionId: "b", weight: 2 }],
+    ]);
+  });
+
+  it("columnLayout defaults to [] when localStorage has no entry", async () => {
+    mockFetchSessions([]);
+    const { result } = await setup("vector");
+    expect(result.current.columnLayout).toEqual([]);
+  });
+
+  it("the old panel-terminal-columns-<project> key is removed on init", async () => {
     localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([1, 2]));
     mockFetchSessions([]);
-    const { result } = await setup("vector");
-    expect(result.current.columnSizes).toEqual([1, 2]);
+    await setup("vector");
+    expect(localStorage.getItem("panel-terminal-columns-vector")).toBeNull();
   });
 
-  it("columnSizes defaults to [] when localStorage has no entry", async () => {
-    mockFetchSessions([]);
-    const { result } = await setup("vector");
-    expect(result.current.columnSizes).toEqual([]);
-  });
-
-  it("fetchSessions reconciles columnSizes via mergeColumnSizes using the pre-merge sessionOrder", async () => {
+  it("fetchSessions reconciles columnLayout via reconcileLayout using the pre-merge sessionOrder", async () => {
     // Stored order has 3 sessions across 2 columns; the server now only
     // reports 2 of them (A closed). If the implementation mistakenly used
-    // the POST-merge order (["B","C"], length 2) as mergeColumnSizes'
-    // `prevOrder`, its sum check (1+2=3 !== 2) would bail out and leave
-    // columnSizes at the stale [1, 2] instead of reconciling to [2].
+    // the POST-merge order (["B","C"]) as reconcileLayout's `prevOrder`, its
+    // added-session detection would misfire and B/C would be re-appended as
+    // stray weight-1 entries instead of the stored layout being reconciled.
     localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
-    localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([1, 2]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([
+        [{ sessionId: "A", weight: 1 }],
+        [{ sessionId: "B", weight: 1 }, { sessionId: "C", weight: 1 }],
+      ]),
+    );
     mockFetchSessions([session("B"), session("C")]);
     const { result } = await setup("vector");
     expect(result.current.sessions.map((s) => s.id)).toEqual(["B", "C"]);
-    expect(result.current.columnSizes).toEqual([2]);
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "B", weight: 1 }, { sessionId: "C", weight: 1 }],
+    ]);
   });
 
-  it("columnSizes changes persist to panel-terminal-columns-<project>", async () => {
-    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B"]));
-    mockFetchSessions([session("A"), session("B")]);
-    const { result } = await setup("vector");
-    expect(localStorage.getItem("panel-terminal-columns-vector")).toBeNull();
-
-    act(() => {
-      result.current.splitColumn("A", 1);
-    });
-
-    expect(result.current.columnSizes.length).toBeGreaterThan(0);
-    expect(localStorage.getItem("panel-terminal-columns-vector")).toBe(
-      JSON.stringify(result.current.columnSizes),
-    );
-  });
-
-  it("createSession grows the last column when a custom layout is active", async () => {
+  it("createSession reconciles columnLayout the same way fetchSessions does", async () => {
     // Regression: createSession used to append only to sessionOrder, leaving
-    // columnSizes stale — the new session was silently sliced off by
-    // columnsFromSizes until the next fetchSessions poll caught up.
+    // columnLayout stale — the new session was silently missing from the
+    // grid until the next fetchSessions poll caught up.
     localStorage.setItem(
       "panel-terminal-order-vector",
       JSON.stringify(["A", "B", "C", "D"]),
     );
-    localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([2, 2]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([
+        [{ sessionId: "A", weight: 1 }, { sessionId: "B", weight: 1 }],
+        [{ sessionId: "C", weight: 1 }, { sessionId: "D", weight: 1 }],
+      ]),
+    );
     const existing = [session("A"), session("B"), session("C"), session("D")];
     (global.fetch as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ok: true, json: async () => existing })
       .mockResolvedValueOnce({ ok: true, json: async () => session("E") });
 
     const { result } = await setup("vector");
-    expect(result.current.columnSizes).toEqual([2, 2]);
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "A", weight: 1 }, { sessionId: "B", weight: 1 }],
+      [{ sessionId: "C", weight: 1 }, { sessionId: "D", weight: 1 }],
+    ]);
 
     await act(async () => {
       await result.current.createSession({});
@@ -112,41 +126,91 @@ describe("useTerminalSessions columns", () => {
       "D",
       "E",
     ]);
-    expect(result.current.columnSizes).toEqual([2, 3]);
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "A", weight: 1 }, { sessionId: "B", weight: 1 }],
+      [{ sessionId: "C", weight: 1 }, { sessionId: "D", weight: 1 }, { sessionId: "E", weight: 1 }],
+    ]);
   });
 
-  it("columnSizes becoming [] removes the localStorage key", async () => {
-    localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([1, 1]));
-    mockFetchSessions([]);
+  it("columnLayout changes persist to panel-terminal-layout-<project>, removed when empty", async () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B"]));
+    mockFetchSessions([session("A"), session("B")]);
     const { result } = await setup("vector");
-    expect(localStorage.getItem("panel-terminal-columns-vector")).toBe(JSON.stringify([1, 1]));
+    expect(localStorage.getItem("panel-terminal-layout-vector")).toBeNull();
 
     act(() => {
-      result.current.resetColumns();
+      result.current.applyPreset([1, 1]);
     });
 
-    expect(result.current.columnSizes).toEqual([]);
-    expect(localStorage.getItem("panel-terminal-columns-vector")).toBeNull();
+    expect(result.current.columnLayout.length).toBeGreaterThan(0);
+    expect(localStorage.getItem("panel-terminal-layout-vector")).toBe(
+      JSON.stringify(result.current.columnLayout),
+    );
+
+    act(() => {
+      result.current.applyPreset([]);
+    });
+
+    expect(result.current.columnLayout).toEqual([]);
+    expect(localStorage.getItem("panel-terminal-layout-vector")).toBeNull();
   });
 
-  it("joinColumn updates both sessionOrder and columnSizes together", async () => {
+  it("mergeColumn applies mergeInColumn without touching sessionOrder", async () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([
+        [{ sessionId: "A", weight: 1 }, { sessionId: "B", weight: 1 }],
+        [{ sessionId: "C", weight: 1 }],
+      ]),
+    );
+    mockFetchSessions([session("A"), session("B"), session("C")]);
+    const { result } = await setup("vector");
+
+    act(() => {
+      result.current.mergeColumn("B", "A");
+    });
+
+    expect(result.current.sessions.map((s) => s.id)).toEqual(["A", "B", "C"]);
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "B", weight: 2 }],
+      [{ sessionId: "C", weight: 1 }],
+      [{ sessionId: "A", weight: 1 }],
+    ]);
+  });
+
+  it("joinColumn applies joinOtherColumn", async () => {
     localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C", "D"]));
-    localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([2, 2]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([
+        [{ sessionId: "A", weight: 1 }, { sessionId: "B", weight: 1 }],
+        [{ sessionId: "C", weight: 1 }, { sessionId: "D", weight: 1 }],
+      ]),
+    );
     mockFetchSessions([session("A"), session("B"), session("C"), session("D")]);
     const { result } = await setup("vector");
-    expect(result.current.columnSizes).toEqual([2, 2]);
 
     act(() => {
       result.current.joinColumn("B", "D");
     });
 
-    expect(result.current.sessions.map((s) => s.id)).toEqual(["A", "C", "D", "B"]);
-    expect(result.current.columnSizes).toEqual([1, 3]);
+    expect(result.current.sessions.map((s) => s.id)).toEqual(["A", "B", "C", "D"]);
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "C", weight: 1 }, { sessionId: "D", weight: 1 }, { sessionId: "B", weight: 1 }],
+    ]);
   });
 
-  it("splitColumn updates both sessionOrder and columnSizes together", async () => {
+  it("splitColumn applies splitToNewColumn", async () => {
     localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C", "D"]));
-    localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([2, 2]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([
+        [{ sessionId: "A", weight: 1 }, { sessionId: "B", weight: 1 }],
+        [{ sessionId: "C", weight: 1 }, { sessionId: "D", weight: 1 }],
+      ]),
+    );
     mockFetchSessions([session("A"), session("B"), session("C"), session("D")]);
     const { result } = await setup("vector");
 
@@ -155,31 +219,48 @@ describe("useTerminalSessions columns", () => {
     });
 
     expect(result.current.sessions.map((s) => s.id)).toEqual(["A", "B", "C", "D"]);
-    expect(result.current.columnSizes).toEqual([1, 1, 2]);
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "B", weight: 1 }],
+      [{ sessionId: "C", weight: 1 }, { sessionId: "D", weight: 1 }],
+    ]);
   });
 
-  it("resetColumns clears columnSizes to [] and removes the localStorage key", async () => {
+  it("applyPreset sets columnLayout via expandPreset against the current sessionOrder", async () => {
     localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
-    localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([2, 3]));
     mockFetchSessions([session("A"), session("B"), session("C")]);
     const { result } = await setup("vector");
-    expect(result.current.columnSizes).toEqual([2, 3]);
 
     act(() => {
-      result.current.resetColumns();
+      result.current.applyPreset([1, 2]);
     });
 
-    expect(result.current.columnSizes).toEqual([]);
-    expect(localStorage.getItem("panel-terminal-columns-vector")).toBeNull();
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "B", weight: 1 }, { sessionId: "C", weight: 1 }],
+    ]);
   });
 
-  it("hasCustomColumns is false when columnSizes is [] and true otherwise", async () => {
-    mockFetchSessions([]);
-    const { result: emptyResult } = await setup("vector-empty");
-    expect(emptyResult.current.hasCustomColumns).toBe(false);
+  it("swapSessions updates both sessionOrder and columnLayout together", async () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([
+        [{ sessionId: "A", weight: 1 }, { sessionId: "B", weight: 1 }],
+        [{ sessionId: "C", weight: 1 }],
+      ]),
+    );
+    mockFetchSessions([session("A"), session("B"), session("C")]);
+    const { result } = await setup("vector");
 
-    localStorage.setItem("panel-terminal-columns-vector-custom", JSON.stringify([1, 1]));
-    const { result: customResult } = await setup("vector-custom");
-    expect(customResult.current.hasCustomColumns).toBe(true);
+    act(() => {
+      result.current.swapSessions("A", "C");
+    });
+
+    expect(result.current.sessions.map((s) => s.id)).toEqual(["C", "B", "A"]);
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "C", weight: 1 }, { sessionId: "B", weight: 1 }],
+      [{ sessionId: "A", weight: 1 }],
+    ]);
   });
 });
