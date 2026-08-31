@@ -302,6 +302,24 @@ describe("TerminalLayoutGrid — column layout", () => {
     expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(3);
   });
 
+  it("an empty columnSizes array falls back to the default, not zero columns", () => {
+    // Regression: columnSizes is always passed by the real caller (as `[]`
+    // when no custom layout is stored), never `undefined` — a naive
+    // `columnSizes ?? defaultColumnSizes(count)` would render zero columns
+    // and hide every session.
+    const sessions = [
+      makeSession({ id: "a" }),
+      makeSession({ id: "b" }),
+      makeSession({ id: "c" }),
+    ];
+    renderGrid({ sessions, focusedId: "a", columnSizes: [] });
+
+    const col0 = screen.getByTestId("terminal-grid-column-0");
+    const col1 = screen.getByTestId("terminal-grid-column-1");
+    expect(within(col0).getAllByTestId(/^terminal-view-/)).toHaveLength(1);
+    expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(2);
+  });
+
   it("mobile/maximized rendering is unaffected by columnSizes", () => {
     const sessions = [
       makeSession({ id: "a" }),

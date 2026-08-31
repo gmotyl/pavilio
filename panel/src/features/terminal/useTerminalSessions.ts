@@ -233,9 +233,19 @@ export function useTerminalSessions(project: string) {
         const created: SessionMeta = await res.json();
         if (created.project === project) {
           setSessions((prev) => [...prev, created]);
-          setSessionOrder((prev) =>
-            prev.includes(created.id) ? prev : [...prev, created.id],
-          );
+          // Reconcile columnSizes the same way fetchSessions does (see its
+          // comment above) — otherwise a custom layout's columnSizes falls
+          // out of sync with sessionOrder and the new session is silently
+          // sliced off by columnsFromSizes until the next poll.
+          setSessionOrder((prev) => {
+            const next = prev.includes(created.id)
+              ? prev
+              : [...prev, created.id];
+            setColumnSizes((prevColumns) =>
+              mergeColumnSizes(prev, prevColumns, next),
+            );
+            return next;
+          });
           setFocusedId(created.id);
         }
         return created;
@@ -384,18 +394,20 @@ export function useTerminalSessions(project: string) {
   const hasCustomColumns = columnSizes.length > 0;
 
   // Both sessionOrder and columnSizes must move together, atomically. Unlike
-  // fetchSessions' reconciliation (where the sessionOrder updater's return
-  // value is self-sufficient — it doesn't need anything back from the nested
-  // columnSizes updater), joinColumn/splitColumn's new *order* is itself an
-  // output of columnLayout.joinColumn/splitToColumn, which also needs the
-  // *current* columnSizes as an input. Nesting a setColumnSizes call inside
-  // the setSessionOrder updater doesn't work for that: React fully runs and
-  // returns from the outer (sessionOrder) updater before it invokes the
-  // nested (columnSizes) one, so a value assigned inside the nested callback
-  // isn't visible yet when the outer one returns. So instead we read the
-  // current sessionOrder/columnSizes directly from the closure (same
-  // established pattern as createSession's direct read of `sessions` above)
-  // and issue both setState calls with already-computed values.
+  // fetchSessions'/createSession's reconciliation (where the sessionOrder
+  // updater's return value — mergeOrder's result, or the appended array — is
+  // self-sufficient and the nested columnSizes updater only needs to *read*
+  // it), joinColumn/splitColumn's new *order* is itself an output of
+  // columnLayout.joinColumn/splitToColumn, which computes the new order and
+  // the new sizes together, atomically, from the *current* columnSizes. A
+  // functional setSessionOrder updater can only return one value (the new
+  // order), so nesting a setColumnSizes call inside it would still need that
+  // same join/split call run a second time (or its result threaded out via a
+  // ref) for the inner updater to see the new sizes — no real saving over
+  // just computing both up front. So instead we read the current
+  // sessionOrder/columnSizes directly from the closure (same established
+  // pattern as createSession's direct read of `sessions` above) and issue
+  // both setState calls with the already-computed result.
   const joinColumn = useCallback(
     (sessionId: string, targetId: string) => {
       const effectiveSizes =

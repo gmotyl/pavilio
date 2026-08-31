@@ -84,6 +84,37 @@ describe("useTerminalSessions columns", () => {
     );
   });
 
+  it("createSession grows the last column when a custom layout is active", async () => {
+    // Regression: createSession used to append only to sessionOrder, leaving
+    // columnSizes stale — the new session was silently sliced off by
+    // columnsFromSizes until the next fetchSessions poll caught up.
+    localStorage.setItem(
+      "panel-terminal-order-vector",
+      JSON.stringify(["A", "B", "C", "D"]),
+    );
+    localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([2, 2]));
+    const existing = [session("A"), session("B"), session("C"), session("D")];
+    (global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ok: true, json: async () => existing })
+      .mockResolvedValueOnce({ ok: true, json: async () => session("E") });
+
+    const { result } = await setup("vector");
+    expect(result.current.columnSizes).toEqual([2, 2]);
+
+    await act(async () => {
+      await result.current.createSession({});
+    });
+
+    expect(result.current.sessions.map((s) => s.id)).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+    ]);
+    expect(result.current.columnSizes).toEqual([2, 3]);
+  });
+
   it("columnSizes becoming [] removes the localStorage key", async () => {
     localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([1, 1]));
     mockFetchSessions([]);

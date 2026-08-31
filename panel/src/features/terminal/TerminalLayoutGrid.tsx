@@ -154,7 +154,14 @@ export function TerminalLayoutGrid({
     // Column-based layout: outer flex row of columns (+ Ctrl-drop gutters
     // between/around them), inner CSS grid per column stacking that
     // column's sessions evenly.
-    const sizes = columnSizes ?? defaultColumnSizes(count);
+    // `columnSizes` is always passed by the caller (as `[]` when no custom
+    // layout is stored), never `undefined` in practice — so `?? ` alone
+    // would never fall through and an empty array would render zero
+    // columns, hiding every session. Treat empty the same as absent.
+    const sizes =
+      columnSizes && columnSizes.length > 0
+        ? columnSizes
+        : defaultColumnSizes(count);
     const order = sessions.map((s) => s.id);
     const grouped = columnsFromSizes(order, sizes);
     const sessionById = new Map(sessions.map((s) => [s.id, s]));
