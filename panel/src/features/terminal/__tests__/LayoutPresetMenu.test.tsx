@@ -40,4 +40,27 @@ describe("LayoutPresetMenu", () => {
     expect(onApply).not.toHaveBeenCalled();
     expect(screen.queryByTestId("layout-preset-menu")).not.toBeInTheDocument();
   });
+
+  it("disables the toggle and never opens when count is 0 (no presets)", () => {
+    const onApply = vi.fn();
+    render(<LayoutPresetMenu count={0} onApply={onApply} />);
+
+    const toggle = screen.getByTestId("layout-preset-toggle");
+    expect(toggle).toBeDisabled();
+
+    fireEvent.click(toggle);
+    expect(screen.queryByTestId("layout-preset-menu")).not.toBeInTheDocument();
+  });
+
+  it("pressing Escape closes the menu", () => {
+    const onApply = vi.fn();
+    render(<LayoutPresetMenu count={3} onApply={onApply} />);
+
+    fireEvent.click(screen.getByTestId("layout-preset-toggle"));
+    expect(screen.getByTestId("layout-preset-menu")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByTestId("layout-preset-menu")).not.toBeInTheDocument();
+  });
 });

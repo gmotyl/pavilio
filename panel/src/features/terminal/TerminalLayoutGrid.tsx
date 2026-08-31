@@ -234,6 +234,7 @@ export function TerminalLayoutGrid({
         style={{ width: "4px", flexShrink: 0, alignSelf: "stretch" }}
         onDragOver={(e) => {
           e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
           const draggedId = draggedCellRef.current;
           if (draggedId && e.ctrlKey) {
             const split = splitToNewColumn(resolvedLayout, draggedId, index);

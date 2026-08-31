@@ -138,7 +138,14 @@ export function mergeInColumn(
 ): ColumnLayout {
   const source = locate(layout, sessionId);
   const target = locate(layout, targetId);
-  if (!source || !target || source.column !== target.column) return layout;
+  if (
+    !source ||
+    !target ||
+    source.column !== target.column ||
+    source.index === target.index
+  ) {
+    return layout;
+  }
 
   const sessionWeight = layout[source.column][source.index].weight;
   const targetWeight = layout[target.column][target.index].weight;

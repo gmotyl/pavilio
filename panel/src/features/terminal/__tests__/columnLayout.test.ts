@@ -149,6 +149,19 @@ describe("mergeInColumn", () => {
     ]);
   });
 
+  it("is a no-op when sessionId and targetId are the same session", () => {
+    // Regression: without this guard, the same-entry overwrite-then-filter
+    // sequence drops the session from its column and re-adds it as a new
+    // column, silently relocating it instead of no-op'ing.
+    const layout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 1 },
+        { sessionId: "B", weight: 1 },
+      ],
+    ];
+    expect(mergeInColumn(layout, "A", "A")).toBe(layout);
+  });
+
   it("compounds weight across repeated merges into the same slot", () => {
     const layout: ColumnLayout = [
       [

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, LayoutGrid } from "lucide-react";
 import { getLayoutPresets } from "./columnLayout";
 
@@ -14,28 +14,44 @@ interface Props {
 export function LayoutPresetMenu({ count, onApply }: Props) {
   const [open, setOpen] = useState(false);
   const presets = getLayoutPresets(count);
+  const disabled = presets.length === 0;
+
+  // Escape closes the menu — the backdrop click alone doesn't cover keyboard use.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   return (
     <div className="relative flex items-stretch">
       <button
         type="button"
         data-testid="layout-preset-toggle"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 px-3 text-[11px] transition-colors"
+        onClick={() => {
+          if (!disabled) setOpen((o) => !o);
+        }}
+        disabled={disabled}
+        className="flex items-center gap-1.5 px-3 text-[11px] transition-colors disabled:opacity-40"
         style={{ color: "var(--text-secondary)" }}
-        onMouseEnter={(e) =>
-          (e.currentTarget.style.background = "var(--bg-hover)")
-        }
+        onMouseEnter={(e) => {
+          if (!disabled) e.currentTarget.style.background = "var(--bg-hover)";
+        }}
         onMouseLeave={(e) =>
           (e.currentTarget.style.background = "transparent")
         }
         title="Grid layout presets"
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
         <LayoutGrid size={12} />
         <span className="uppercase tracking-widest">Layout</span>
         <ChevronDown size={12} />
       </button>
-      {open && (
+      {open && !disabled && (
         <>
           <div
             className="fixed inset-0 z-30"
@@ -43,6 +59,7 @@ export function LayoutPresetMenu({ count, onApply }: Props) {
           />
           <div
             data-testid="layout-preset-menu"
+            role="menu"
             className="absolute right-0 top-full z-40 mt-1 min-w-[140px] rounded-md py-1 shadow-lg"
             style={{
               background: "var(--bg-surface)",
@@ -53,6 +70,7 @@ export function LayoutPresetMenu({ count, onApply }: Props) {
               <button
                 key={preset.label}
                 type="button"
+                role="menuitem"
                 data-testid={`layout-preset-option-${i}`}
                 onClick={() => {
                   onApply(preset.sizes);

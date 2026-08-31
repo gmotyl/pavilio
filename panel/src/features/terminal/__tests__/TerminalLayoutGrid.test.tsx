@@ -413,6 +413,19 @@ describe("TerminalLayoutGrid — column layout", () => {
     expect(onSplitColumn).toHaveBeenCalledWith("a", 1);
   });
 
+  it("gutter dragover sets dropEffect to move for cursor affordance", () => {
+    // Regression: the gutter's dragover handler used to skip setting
+    // dropEffect, unlike the cell path — no "drop here" cursor while
+    // hovering a gutter mid Ctrl-drag, even though the drop was accepted.
+    const { sessions, columnLayout } = threeSessionsSameColumnAB();
+    renderGrid({ sessions, focusedId: "a", columnLayout });
+
+    const dataTransfer = { effectAllowed: "", dropEffect: "" };
+    fireEvent.dragOver(screen.getByTestId("terminal-grid-gutter-1"), { dataTransfer });
+
+    expect(dataTransfer.dropEffect).toBe("move");
+  });
+
   it("a non-Ctrl drop onto a gutter fires no callback", () => {
     const { sessions, columnLayout } = threeSessionsSameColumnAB();
     const onSplitColumn = vi.fn();
