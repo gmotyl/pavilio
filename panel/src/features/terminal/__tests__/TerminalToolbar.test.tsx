@@ -38,6 +38,31 @@ function renderToolbar(overrides: Partial<Parameters<typeof TerminalToolbar>[0]>
   return props;
 }
 
+describe("TerminalToolbar — reset layout", () => {
+  it("renders a Reset layout button that is disabled when hasCustomColumns is false", () => {
+    renderToolbar({ hasCustomColumns: false });
+
+    const button = screen.getByTestId("terminal-toolbar-reset-layout");
+    expect(button).toBeDisabled();
+  });
+
+  it("enables the Reset layout button when hasCustomColumns is true", () => {
+    renderToolbar({ hasCustomColumns: true });
+
+    const button = screen.getByTestId("terminal-toolbar-reset-layout");
+    expect(button).not.toBeDisabled();
+  });
+
+  it("clicking Reset layout calls onResetColumns", () => {
+    const onResetColumns = vi.fn();
+    renderToolbar({ hasCustomColumns: true, onResetColumns });
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-reset-layout"));
+
+    expect(onResetColumns).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("TerminalToolbar — confirm close flow", () => {
   it("× click opens confirm modal and does NOT call onDelete", () => {
     const onDelete = vi.fn();

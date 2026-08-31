@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, Maximize2, Minimize2, X, ChevronDown, FolderGit2, RotateCw } from "lucide-react";
+import { Plus, Maximize2, Minimize2, X, ChevronDown, FolderGit2, RotateCw, LayoutGrid } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { nextProjectName } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
@@ -31,6 +31,8 @@ interface Props {
   onToggleMaximize: () => void;
   onReorder: (fromId: string, toId: string) => void;
   onReconnect?: () => void;
+  hasCustomColumns?: boolean;
+  onResetColumns?: () => void;
 }
 
 export function TerminalToolbar({
@@ -48,6 +50,8 @@ export function TerminalToolbar({
   onToggleMaximize,
   onReorder,
   onReconnect,
+  hasCustomColumns,
+  onResetColumns,
 }: Props) {
   const [newOpen, setNewOpen] = useState(false);
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
@@ -459,6 +463,24 @@ export function TerminalToolbar({
           <span className="uppercase tracking-widest">
             {maximized ? "Grid" : "Max"}
           </span>
+        </button>
+        <button
+          type="button"
+          data-testid="terminal-toolbar-reset-layout"
+          onClick={() => onResetColumns?.()}
+          disabled={!hasCustomColumns}
+          className="flex items-center gap-1.5 px-3 text-[11px] transition-colors disabled:opacity-40"
+          style={{ color: "var(--text-secondary)" }}
+          onMouseEnter={(e) => {
+            if (hasCustomColumns) e.currentTarget.style.background = "var(--bg-hover)";
+          }}
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.background = "transparent")
+          }
+          title="Reset grid layout to default columns"
+        >
+          <LayoutGrid size={12} />
+          <span className="uppercase tracking-widest">Reset</span>
         </button>
       </div>
 
