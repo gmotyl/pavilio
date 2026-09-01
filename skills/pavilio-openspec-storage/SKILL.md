@@ -62,6 +62,8 @@ Resolve **before** writing any artifact:
    - Answer *store* → save `{ mode: "store" }` with **no `root`** — the default already resolves to `plans/<repo>/` inside the project.
 5. **Persist first, then write.** Save the validated mode/root to `repos.json` before the first artifact write. Later grill / writing-plans / execute / archive on that scope reuse it silently.
 
+A `root` that escapes its boundary (`../sibling` for native, an absolute path, anything outside the project for a store) is **rejected outright** — the repo contributes no specs at all. The Plans tab shows both failure shapes (rejected config, and a valid-but-missing directory) rather than silently omitting the repo.
+
 **After saving, verify the resolved directory** — create the change dir under it and confirm the path you write to is the one the config resolves to. The panel now flags a configured-but-missing OpenSpec dir in the Plans tab, but a wrong `root` still means artifacts written to a path nothing else reads.
 
 **Validation gates:**

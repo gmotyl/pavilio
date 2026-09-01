@@ -197,14 +197,36 @@ interface OpenSpecSourceDesc {
   configured: boolean;
 }
 
+/** A repos.json `openspec` config that could not be resolved into a source. */
+interface InvalidOpenSpecSourceDesc {
+  id: string;
+  label: string;
+  /** The `root` exactly as written in repos.json; null when it wasn't a string. */
+  configuredRoot: string | null;
+  message: string;
+}
+
+/** The `root` a repos.json entry asked for, before resolution. */
+function configuredRootOf(entry: unknown): string | null {
+  const raw = (entry as { openspec?: { root?: unknown } })?.openspec?.root;
+  return typeof raw === "string" ? raw : null;
+}
+
 /**
  * The OpenSpec roots a project surfaces: its own project-local store
  * (`plans/openspec/`) plus one per linked repo whose repos.json entry carries an
  * `openspec` config (resolved to a native `<repo>/openspec` or a store
- * `plans/<repo>/openspec`). Repos without an `openspec` key are skipped, and a
- * malformed/escaping config is skipped rather than throwing.
+ * `plans/<repo>/openspec`). Repos without an `openspec` key contribute nothing.
+ *
+ * A malformed or boundary-escaping config never becomes a source — it is
+ * returned under `invalid` instead, so callers that read the filesystem stay on
+ * validated roots while the Plans tab can still show the user their typo.
  */
-function openSpecSources(projectDir: string): OpenSpecSourceDesc[] {
+function openSpecSources(projectDir: string): {
+  sources: OpenSpecSourceDesc[];
+  invalid: InvalidOpenSpecSourceDesc[];
+} {
+  const invalid: InvalidOpenSpecSourceDesc[] = [];
   const out: OpenSpecSourceDesc[] = [
     {
       id: "openspec:project",
@@ -228,13 +250,17 @@ function openSpecSources(projectDir: string): OpenSpecSourceDesc[] {
       mode = resolution.mode;
       openspecDir = resolution.openspecDir;
     } catch (err) {
-      // Unknown mode / root escaping its boundary → not a valid source. Logged
-      // (not just silently skipped) so a typo'd `openspec.mode` in repos.json
-      // doesn't disappear a repo's specs with zero signal.
-      console.warn(
-        `[openSpecSources] ${basename(projectDir)}: skipping repo ${r.name}:`,
-        (err as Error).message,
-      );
+      // Unknown mode / root escaping its boundary → not a valid source, so it is
+      // never read from. Reported (not silently skipped) so a typo'd
+      // `openspec.root` doesn't disappear a repo's specs with zero signal.
+      const message = (err as Error).message;
+      console.warn(`[openSpecSources] ${basename(projectDir)}: skipping repo ${r.name}:`, message);
+      invalid.push({
+        id: `openspec:repo:${r.name}`,
+        label: `${r.name} (OpenSpec)`,
+        configuredRoot: configuredRootOf(r),
+        message,
+      });
       continue;
     }
     out.push({
@@ -245,7 +271,7 @@ function openSpecSources(projectDir: string): OpenSpecSourceDesc[] {
       configured: true,
     });
   }
-  return out;
+  return { sources: out, invalid };
 }
 
 interface PlanArtifact {
@@ -283,6 +309,18 @@ interface OpenSpecSource {
    * rather than rendered as "no changes".
    */
   missing?: true;
+}
+/**
+ * A repos.json `openspec` config the server refused to resolve (unknown mode, or
+ * a root escaping its repository/project). Carries no path to read — only what
+ * was configured and why it was rejected.
+ */
+interface InvalidOpenSpecSource {
+  id: string;
+  label: string;
+  kind: "openspec-error";
+  configuredRoot: string | null;
+  message: string;
 }
 /** A living capability spec under `<openspec>/specs/<capability>/spec.md`. */
 interface LivingSpecFile {
@@ -399,7 +437,7 @@ function listOpenSpecLivingSpecs(openspecDir: string, sourceId: string, projects
  * every subdirectory here.
  */
 export function buildPlansAllowlist(projectDir: string, _projectsDir?: string): string[] {
-  return [join(projectDir, "plans"), ...openSpecSources(projectDir).map((s) => s.openspecDir)];
+  return [join(projectDir, "plans"), ...openSpecSources(projectDir).sources.map((s) => s.openspecDir)];
 }
 
 /** A path is allowed if it is a `.md` file living strictly under one allowlisted plans dir. */
@@ -491,7 +529,7 @@ router.get("/:name/context", (req, res) => {
   // Living OpenSpec capability specs, grouped by source (project store + linked repos).
   const openspecSpecs: LivingSpecFile[] = [];
   const openspecSources: ContextSource[] = [];
-  for (const os of openSpecSources(projectDir)) {
+  for (const os of openSpecSources(projectDir).sources) {
     const living = listOpenSpecLivingSpecs(os.openspecDir, os.id, projectsDir);
     if (living.length === 0) continue;
     openspecSources.push({ id: os.id, label: os.label, absoluteRoot: os.openspecDir });
@@ -519,7 +557,7 @@ router.get("/:name/context/read", (req, res) => {
 
   const absPath = resolve(pathParam);
   const allowlist = buildContextAllowlist(projectDir);
-  const openspecDirs = openSpecSources(projectDir).map((s) => s.openspecDir);
+  const openspecDirs = openSpecSources(projectDir).sources.map((s) => s.openspecDir);
   if (!isContextPathAllowed(absPath, allowlist, openspecDirs)) {
     return res.status(403).json({ error: "Path not in this project's context allowlist" });
   }
@@ -537,7 +575,7 @@ router.get("/:name/plans-tree", (req, res) => {
     return res.status(404).json({ error: "Project not found" });
   }
 
-  const sources: (PlanSource | OpenSpecSource)[] = [];
+  const sources: (PlanSource | OpenSpecSource | InvalidOpenSpecSource)[] = [];
   for (const c of plansSources(projectDir, req.params.name)) {
     const files = listPlanFilesInDir(c.absoluteRoot, c.id, projectsDir);
     if (files.length === 0 && c.id !== "project") continue; // project node always shown
@@ -545,7 +583,18 @@ router.get("/:name/plans-tree", (req, res) => {
   }
 
   // OpenSpec sources: the project-local store and each configured linked repo.
-  for (const os of openSpecSources(projectDir)) {
+  const openspec = openSpecSources(projectDir);
+  // Rejected configs first — an invisible typo is the whole reason they surface.
+  for (const bad of openspec.invalid) {
+    sources.push({
+      id: bad.id,
+      label: bad.label,
+      kind: "openspec-error",
+      configuredRoot: bad.configuredRoot,
+      message: bad.message,
+    });
+  }
+  for (const os of openspec.sources) {
     const base = {
       id: os.id,
       label: os.label,

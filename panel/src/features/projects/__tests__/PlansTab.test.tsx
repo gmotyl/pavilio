@@ -257,6 +257,31 @@ describe("PlansTab", () => {
     expect(screen.getByText(/repos\.json/)).toBeTruthy();
   });
 
+  it("surfaces an OpenSpec config the server rejected", async () => {
+    mockFetchResponses({
+      "plans-tree": {
+        project: "alokai",
+        sources: [
+          {
+            id: "openspec:repo:storefront",
+            label: "storefront (OpenSpec)",
+            kind: "openspec-error",
+            configuredRoot: "../sibling",
+            message: "OpenSpec root escapes its boundary: /r/sibling is not under /r/storefront",
+          },
+          TREE.sources[0],
+        ],
+      },
+      "plans/read": { content: "# body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    expect(await screen.findByTestId("plans-tab-source-openspec:repo:storefront")).toBeTruthy();
+    expect(screen.getByText(/escapes its boundary/)).toBeTruthy();
+    expect(screen.getByText("../sibling")).toBeTruthy();
+    // The legacy sources still render — a bad config disables one repo, not the tab.
+    expect(screen.getByTestId("plans-tab-file-project-2026-01-01-foo.md")).toBeTruthy();
+  });
+
   it("groups equal OpenSpec change ids across sources", async () => {
     mockFetchResponses({
       "plans-tree": OPENSPEC_TREE,

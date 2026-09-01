@@ -10,10 +10,12 @@ import {
   usePlansTree,
   fetchPlanFile,
   isOpenSpecSource,
+  isInvalidOpenSpecSource,
   type PlanArtifact,
   type PlanFile,
   type LegacyPlanSource,
   type OpenSpecPlanSource,
+  type InvalidOpenSpecPlanSource,
 } from "./usePlansTree";
 import { useFileListControls, filterAndSortFiles } from "./fileListControls";
 import { useAutoSelectNewest } from "./useAutoSelectNewest";
@@ -41,6 +43,31 @@ function artifactKey(a: PlanArtifact): string {
  * path because the cause is almost always a wrong `openspec.root` in repos.json
  * (a store root is resolved relative to the project dir, not the workspace).
  */
+/**
+ * An `openspec` config the server rejected outright (unknown mode, or a root
+ * escaping its repository/project). Nothing was read from it, so there is no
+ * path to show — only what repos.json asked for and why it was refused.
+ */
+function InvalidSourceRows({ source }: { source: InvalidOpenSpecPlanSource }) {
+  return (
+    <p
+      className="text-xs px-2 py-1 break-all"
+      style={{ color: "var(--text-muted)" }}
+      data-testid={`plans-tab-invalid-${source.id}`}
+    >
+      OpenSpec config rejected: <span style={{ color: "var(--red)" }}>{source.message}</span>
+      {source.configuredRoot !== null && (
+        <>
+          {" — repos.json asks for "}
+          <code>{source.configuredRoot}</code>
+        </>
+      )}
+      . A native root must stay inside the repository; a store root is relative to the
+      project directory.
+    </p>
+  );
+}
+
 function MissingSourceRows({ source }: { source: OpenSpecPlanSource }) {
   return (
     <p
@@ -208,6 +235,8 @@ export default function PlansTab({ projectName }: Props) {
     const map = new Map<string, { relativeToProjectsDir: string | null }>();
     if (!data) return map;
     for (const source of data.sources) {
+      // A rejected config opens nothing — it has neither artifacts nor files.
+      if (isInvalidOpenSpecSource(source)) continue;
       if (isOpenSpecSource(source)) {
         for (const change of source.changes) {
           for (const a of change.artifacts) {
@@ -267,11 +296,18 @@ export default function PlansTab({ projectName }: Props) {
   const q = controls.debouncedQuery.trim().toLowerCase();
 
   const legacySources = useMemo<LegacyPlanSource[]>(
-    () => (data?.sources ?? []).filter((s): s is LegacyPlanSource => !isOpenSpecSource(s)),
+    () =>
+      (data?.sources ?? []).filter(
+        (s): s is LegacyPlanSource => !isOpenSpecSource(s) && !isInvalidOpenSpecSource(s),
+      ),
     [data],
   );
   const openspecSources = useMemo<OpenSpecPlanSource[]>(
     () => (data?.sources ?? []).filter(isOpenSpecSource),
+    [data],
+  );
+  const invalidSources = useMemo<InvalidOpenSpecPlanSource[]>(
+    () => (data?.sources ?? []).filter(isInvalidOpenSpecSource),
     [data],
   );
 
@@ -380,6 +416,14 @@ export default function PlansTab({ projectName }: Props) {
   });
 
   // Misconfigured sources first: an invisible typo is the whole reason they exist.
+  const rejectedSources: FileListSource[] = invalidSources.map((s) => ({
+    id: s.id,
+    label: s.label,
+    count: 0,
+    hint: "config rejected",
+    rows: <InvalidSourceRows source={s} />,
+  }));
+
   const missingSources: FileListSource[] = openspecSources
     .filter((s) => s.missing)
     .map((s) => ({
@@ -425,7 +469,12 @@ export default function PlansTab({ projectName }: Props) {
     ];
   });
 
-  const sources: FileListSource[] = [...missingSources, ...legacyFileSources, ...changeSources];
+  const sources: FileListSource[] = [
+    ...rejectedSources,
+    ...missingSources,
+    ...legacyFileSources,
+    ...changeSources,
+  ];
 
   return (
     <FileListSidebar
