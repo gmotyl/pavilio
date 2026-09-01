@@ -36,6 +36,26 @@ function artifactKey(a: PlanArtifact): string {
   return a.kind === "spec" ? `spec-${a.capability ?? ""}` : a.kind;
 }
 
+/**
+ * A configured OpenSpec source whose directory is not there. Shows the resolved
+ * path because the cause is almost always a wrong `openspec.root` in repos.json
+ * (a store root is resolved relative to the project dir, not the workspace).
+ */
+function MissingSourceRows({ source }: { source: OpenSpecPlanSource }) {
+  return (
+    <p
+      className="text-xs px-2 py-1 break-all"
+      style={{ color: "var(--text-muted)" }}
+      data-testid={`plans-tab-missing-${source.id}`}
+    >
+      Configured OpenSpec directory not found:{" "}
+      <code style={{ color: "var(--red)" }}>{source.openspecDir}</code> — check this
+      repo&apos;s <code>openspec.root</code> in repos.json (a store root is relative to
+      the project directory).
+    </p>
+  );
+}
+
 function LegacyPlanRows({
   source,
   selectedPath,
@@ -359,6 +379,17 @@ export default function PlansTab({ projectName }: Props) {
     };
   });
 
+  // Misconfigured sources first: an invisible typo is the whole reason they exist.
+  const missingSources: FileListSource[] = openspecSources
+    .filter((s) => s.missing)
+    .map((s) => ({
+      id: s.id,
+      label: s.label,
+      count: 0,
+      hint: "not found",
+      rows: <MissingSourceRows source={s} />,
+    }));
+
   const changeSources: FileListSource[] = changeGroups.flatMap((g) => {
     // Apply the filter to each child's artifacts; drop empty children/groups.
     const children = g.children
@@ -394,7 +425,7 @@ export default function PlansTab({ projectName }: Props) {
     ];
   });
 
-  const sources: FileListSource[] = [...legacyFileSources, ...changeSources];
+  const sources: FileListSource[] = [...missingSources, ...legacyFileSources, ...changeSources];
 
   return (
     <FileListSidebar

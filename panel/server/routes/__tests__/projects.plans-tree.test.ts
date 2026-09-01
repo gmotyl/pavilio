@@ -271,6 +271,54 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
     ]);
   });
 
+  it("surfaces a configured repo source whose OpenSpec dir does not exist", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    // The change lives under plans/pavilio/, but the config points elsewhere —
+    // the classic workspace-relative `root` typo. Nothing to list, and the
+    // source must still be surfaced so the typo is visible.
+    seedChange(join(projectsDir, "alokai", "plans", "pavilio", "openspec"), "add-checkout");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([
+        {
+          name: "pavilio",
+          path: repoPath,
+          openspec: { mode: "store", root: "projects/alokai/plans/pavilio" },
+        },
+      ]),
+    );
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
+    expect(src).toBeTruthy();
+    expect(src.missing).toBe(true);
+    expect(src.changes).toHaveLength(0);
+    expect(src.openspecDir).toBe(
+      join(projectsDir, "alokai", "projects", "alokai", "plans", "pavilio", "openspec"),
+    );
+  });
+
+  it("omits a configured source whose OpenSpec dir exists but holds no changes", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    mkdirSync(join(projectsDir, "alokai", "plans", "pavilio", "openspec"), { recursive: true });
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "store" } }]),
+    );
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    expect(res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio")).toBeUndefined();
+  });
+
+  it("never reports the implicit project store as missing", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    // plans/openspec/ was never created and was never configured — not a typo.
+    expect(res.body.sources.find((s: { id: string }) => s.id === "openspec:project")).toBeUndefined();
+  });
+
   it("carries the same change id across repository sources", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     const repoPath = join(tmpRoot, "repos", "pavilio");

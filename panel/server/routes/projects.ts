@@ -189,6 +189,12 @@ interface OpenSpecSourceDesc {
   label: string;
   mode: "native" | "store";
   openspecDir: string;
+  /**
+   * True when the source comes from an explicit `openspec` entry in repos.json.
+   * The project-local store is implicit, so its absence is normal — a configured
+   * root that does not exist is a typo worth surfacing.
+   */
+  configured: boolean;
 }
 
 /**
@@ -205,6 +211,7 @@ function openSpecSources(projectDir: string): OpenSpecSourceDesc[] {
       label: `${basename(projectDir)} (OpenSpec)`,
       mode: "store",
       openspecDir: join(projectDir, "plans", "openspec"),
+      configured: false,
     },
   ];
   for (const r of readReposJson(projectDir)) {
@@ -230,7 +237,13 @@ function openSpecSources(projectDir: string): OpenSpecSourceDesc[] {
       );
       continue;
     }
-    out.push({ id: `openspec:repo:${r.name}`, label: `${r.name} (OpenSpec)`, mode, openspecDir });
+    out.push({
+      id: `openspec:repo:${r.name}`,
+      label: `${r.name} (OpenSpec)`,
+      mode,
+      openspecDir,
+      configured: true,
+    });
   }
   return out;
 }
@@ -263,6 +276,13 @@ interface OpenSpecSource {
   mode: "native" | "store";
   openspecDir: string;
   changes: ChangeRecord[];
+  /**
+   * Set when repos.json configures this source but `openspecDir` does not exist.
+   * An empty configured tree is normal (nothing written yet) and stays hidden; a
+   * missing one is almost always a wrong `openspec.root`, so it is surfaced
+   * rather than rendered as "no changes".
+   */
+  missing?: true;
 }
 /** A living capability spec under `<openspec>/specs/<capability>/spec.md`. */
 interface LivingSpecFile {
@@ -526,16 +546,22 @@ router.get("/:name/plans-tree", (req, res) => {
 
   // OpenSpec sources: the project-local store and each configured linked repo.
   for (const os of openSpecSources(projectDir)) {
-    const changes = listOpenSpecChanges(os.openspecDir, os.id, projectsDir);
-    if (changes.length === 0) continue;
-    sources.push({
+    const base = {
       id: os.id,
       label: os.label,
-      kind: "openspec",
+      kind: "openspec" as const,
       mode: os.mode,
       openspecDir: os.openspecDir,
-      changes,
-    });
+    };
+    // A configured root that isn't there: surface it, don't let a typo look like
+    // an empty backend.
+    if (os.configured && !existsSync(os.openspecDir)) {
+      sources.push({ ...base, changes: [], missing: true });
+      continue;
+    }
+    const changes = listOpenSpecChanges(os.openspecDir, os.id, projectsDir);
+    if (changes.length === 0) continue;
+    sources.push({ ...base, changes });
   }
 
   res.json({ project: req.params.name, sources });

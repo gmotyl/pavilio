@@ -41,7 +41,16 @@ A store is just a directory tree — there is **no registered store id** and **n
 
 ## Backend resolution (ask once, persist, reuse)
 
-Persisted per linked repository in `repos.json` as an `openspec` object: `{ "mode": "native" | "store", "root"?: string }`. `root` defaults to the repository root for native mode and `projects/<project>/plans/<repo>/` for a store.
+Persisted per linked repository in `repos.json` as an `openspec` object: `{ "mode": "native" | "store", "root"?: string }`.
+
+**`root` is optional, and it is always relative — never a workspace-root path.** Omit it unless the tree genuinely sits somewhere other than the default:
+
+| mode | `root` omitted (the default) | `root` given → resolved against |
+|---|---|---|
+| `native` | the repository root, i.e. `<repo>/openspec/` | the **repository** directory; a value escaping it is rejected |
+| `store` | `plans/<repo>/openspec/` inside the project | the **project** directory (`projects/<project>/`), *not* the workspace root |
+
+So a store root for repo `cbp-commerce-api` is `"plans/cbp-commerce-api"` — writing the workspace-relative `"projects/vector/plans/cbp-commerce-api"` resolves to `projects/vector/projects/vector/plans/...`, which exists nowhere and makes the change vanish from the panel's Plans tab. **Prefer omitting `root` entirely**; the default already points at `plans/<repo>/`.
 
 Resolve **before** writing any artifact:
 
@@ -50,8 +59,10 @@ Resolve **before** writing any artifact:
 3. **Repo scope with a valid saved `openspec` config** → reuse it without asking.
 4. **Repo scope, unconfigured** → ask **one question**: "Has `<repo>` adopted OpenSpec (native `<repo>/openspec/`), or should Pavilio keep its artifacts in a project-local store?" Then stop and wait.
    - Answer *native* → validate the repository's `openspec/` root exists/is reachable, then save `{ mode: "native", root }`.
-   - Answer *store* → save `{ mode: "store" }` (default store root under `plans/<repo>/`).
+   - Answer *store* → save `{ mode: "store" }` with **no `root`** — the default already resolves to `plans/<repo>/` inside the project.
 5. **Persist first, then write.** Save the validated mode/root to `repos.json` before the first artifact write. Later grill / writing-plans / execute / archive on that scope reuse it silently.
+
+**After saving, verify the resolved directory** — create the change dir under it and confirm the path you write to is the one the config resolves to. The panel now flags a configured-but-missing OpenSpec dir in the Plans tab, but a wrong `root` still means artifacts written to a path nothing else reads.
 
 **Validation gates:**
 - User selects native but the expected root/tree cannot be validated → **stop before writing** and report the mismatch.

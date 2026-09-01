@@ -48,6 +48,12 @@ export interface OpenSpecPlanSource {
   mode: "native" | "store";
   openspecDir: string;
   changes: ChangeRecord[];
+  /**
+   * Set when repos.json configures this source but `openspecDir` does not exist
+   * — almost always a wrong `openspec.root`. Rendered as a warning group so the
+   * typo is visible instead of looking like an empty backend.
+   */
+  missing?: true;
 }
 
 export type PlanSource = LegacyPlanSource | OpenSpecPlanSource;

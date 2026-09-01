@@ -225,6 +225,38 @@ describe("PlansTab", () => {
     expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
   });
 
+  it("surfaces a configured OpenSpec source whose directory is missing", async () => {
+    mockFetchResponses({
+      "plans-tree": {
+        project: "alokai",
+        sources: [
+          TREE.sources[0],
+          {
+            id: "openspec:repo:storefront",
+            label: "storefront (OpenSpec)",
+            kind: "openspec",
+            mode: "store",
+            openspecDir: "/p/projects/alokai/projects/alokai/plans/storefront/openspec",
+            changes: [],
+            missing: true,
+          },
+        ],
+      },
+      "plans/read": { content: "# body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    const header = await screen.findByTestId("plans-tab-source-openspec:repo:storefront");
+    expect(header).toBeTruthy();
+    // The configured path is on screen so a wrong repos.json root is fixable
+    // without reading server logs.
+    expect(
+      screen.getByText(
+        /\/p\/projects\/alokai\/projects\/alokai\/plans\/storefront\/openspec/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/repos\.json/)).toBeTruthy();
+  });
+
   it("groups equal OpenSpec change ids across sources", async () => {
     mockFetchResponses({
       "plans-tree": OPENSPEC_TREE,
