@@ -3,7 +3,13 @@ import type { SessionMeta } from "./useTerminalSessions";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { useTerminalOrdering } from "./useTerminalOrdering";
 
-/** Scope key for the cross-project terminals page. */
+/**
+ * Scope key for the cross-project terminals page. Shared verbatim with
+ * `useTerminalMaximized("__all__")` and the shipped `panel-terminal-order-__all__`
+ * key, so it cannot be renamed without orphaning stored state. Invariant: no
+ * project may be named `__all__` — it would share order/layout storage with
+ * this page.
+ */
 const ALL_SCOPE = "__all__";
 
 export function useAllTerminalSessions(pollMs = 8000) {

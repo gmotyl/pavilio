@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { reorderIds, swapIds, mergeOrder } from "./sessionOrder";
 import {
   reconcileLayout,
@@ -86,13 +86,20 @@ export function useTerminalOrdering(
   // route navigations (no remount), so switching project must swap in that
   // project's stored order/layout; on mount the useState initialisers have
   // already done it.
-  const loadedScope = useRef(scopeKey);
-  useEffect(() => {
-    if (loadedScope.current === scopeKey) return;
-    loadedScope.current = scopeKey;
+  //
+  // Adjusted during render (React's documented "reset state when a prop
+  // changes" pattern) rather than in an effect: an effect would only *queue*
+  // the swap, and the persist effects below run in that same commit — writing
+  // the previous scope's order and layout to the NEW scope's keys before the
+  // queued state landed. Self-correcting on the next render, but an unmount
+  // inside that one-commit window (navigate twice quickly) leaves the new
+  // scope's storage holding the old scope's data.
+  const [loadedScope, setLoadedScope] = useState(scopeKey);
+  if (loadedScope !== scopeKey) {
+    setLoadedScope(scopeKey);
     setSessionOrder(readOrder(scopeKey));
     setColumnLayout(readLayout(scopeKey));
-  }, [scopeKey]);
+  }
 
   // Persist order to localStorage whenever it changes
   useEffect(() => {
@@ -203,6 +210,10 @@ export function useTerminalOrdering(
   // as a no-op or a layout missing live sessions.
   const applyPreset = useCallback(
     (sizes: number[]) => {
+      // `applyPreset([])` is the deliberate reset: expandPreset returns [],
+      // the persist effect drops the key, and the grid falls back to the
+      // default preset. Do not "guard" the empty case — it is the contract
+      // (see useTerminalSessions.columns.test.ts).
       setColumnLayout(expandPreset(orderedSessions.map((s) => s.id), sizes));
     },
     [orderedSessions],

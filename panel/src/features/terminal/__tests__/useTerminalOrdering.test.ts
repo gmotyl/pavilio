@@ -125,6 +125,16 @@ describe("useTerminalOrdering", () => {
     expect(result.current.sessionOrder).toEqual(["a", "b"]);
   });
 
+  it("applyPreset([]) resets to the sentinel and drops the stored key", () => {
+    const sessions = [session("a"), session("b")];
+    const { result } = renderHook(() => useTerminalOrdering("vector", sessions));
+    act(() => result.current.applyPreset([1, 1]));
+    expect(localStorage.getItem("panel-terminal-layout-vector")).not.toBeNull();
+    act(() => result.current.applyPreset([]));
+    expect(result.current.columnLayout).toEqual([]);
+    expect(localStorage.getItem("panel-terminal-layout-vector")).toBeNull();
+  });
+
   it("re-initialises when the scope key changes", () => {
     localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["a"]));
     localStorage.setItem("panel-terminal-order-metro", JSON.stringify(["z"]));
