@@ -7,6 +7,7 @@ import {
   joinOtherColumn,
   splitToNewColumn,
   expandPreset,
+  getLayoutPresets,
   swapInLayout,
   type ColumnLayout,
 } from "./columnLayout";
@@ -410,25 +411,39 @@ export function useTerminalSessions(project: string) {
   // `sessions` above), rather than mixing that style with functional
   // updaters elsewhere in this hook — one calling convention for every
   // "commit a layout op" callback.
+  // An empty `columnLayout` is the "no custom layout stored" sentinel, and
+  // TerminalLayoutGrid resolves it to the default preset for both rendering
+  // and its live Ctrl+drag preview. The commit callbacks below must resolve
+  // the SAME layout the user is looking at — handed a literal [], every pure
+  // function takes its documented "id not found" no-op path, so the preview
+  // was correct while the drop silently changed nothing. Expanded against
+  // `orderedSessions` (not `sessionOrder`) to match the grid's own resolution
+  // id-for-id even before the mount-time fetch has merged the stored order.
+  const resolvedLayout = useMemo(() => {
+    if (columnLayout.length > 0) return columnLayout;
+    const order = orderedSessions.map((s) => s.id);
+    return expandPreset(order, getLayoutPresets(order.length)[0]?.sizes ?? []);
+  }, [columnLayout, orderedSessions]);
+
   const mergeColumn = useCallback(
     (sessionId: string, targetId: string) => {
-      setColumnLayout(mergeInColumn(columnLayout, sessionId, targetId));
+      setColumnLayout(mergeInColumn(resolvedLayout, sessionId, targetId));
     },
-    [columnLayout],
+    [resolvedLayout],
   );
 
   const joinColumn = useCallback(
     (sessionId: string, targetId: string) => {
-      setColumnLayout(joinOtherColumn(columnLayout, sessionId, targetId));
+      setColumnLayout(joinOtherColumn(resolvedLayout, sessionId, targetId));
     },
-    [columnLayout],
+    [resolvedLayout],
   );
 
   const splitColumn = useCallback(
     (sessionId: string, gutterIndex: number) => {
-      setColumnLayout(splitToNewColumn(columnLayout, sessionId, gutterIndex));
+      setColumnLayout(splitToNewColumn(resolvedLayout, sessionId, gutterIndex));
     },
-    [columnLayout],
+    [resolvedLayout],
   );
 
   const applyPreset = useCallback(
@@ -438,6 +453,13 @@ export function useTerminalSessions(project: string) {
     [sessionOrder],
   );
 
+  // Reads raw `columnLayout`, not `resolvedLayout`, on purpose: a plain swap is
+  // the one op fully expressible through sessionOrder, which the default
+  // resolution already consumes — so with no custom layout stored it stays a
+  // no-op here and the grid re-derives the preset against the swapped order.
+  // Resolving would spend the sentinel on a swap that needs no layout of its
+  // own, and later session-count changes would then follow reconcileLayout
+  // (append to the last column) instead of re-defaulting to the preset.
   const swapSessions = useCallback(
     (idA: string, idB: string) => {
       setSessionOrder(swapIds(sessionOrder, idA, idB));
