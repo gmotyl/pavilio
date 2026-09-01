@@ -1,16 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { destroyTerminal } from "./terminalInstances";
-import { reorderIds, swapIds, mergeOrder } from "./sessionOrder";
-import {
-  reconcileLayout,
-  mergeInColumn,
-  joinOtherColumn,
-  splitToNewColumn,
-  expandPreset,
-  getLayoutPresets,
-  swapInLayout,
-  type ColumnLayout,
-} from "./columnLayout";
+import { useTerminalOrdering } from "./useTerminalOrdering";
 
 export const TERMINAL_FOCUS_EVENT = "panel-terminal-focus";
 
@@ -100,38 +90,10 @@ export function useTerminalSessions(project: string) {
     [project],
   );
 
-  const ORDER_KEY = `panel-terminal-order-${project}`;
-  const LAYOUT_KEY = `panel-terminal-layout-${project}`;
-  const OLD_COLUMNS_KEY = `panel-terminal-columns-${project}`;
-
-  const [sessionOrder, setSessionOrder] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem(`panel-terminal-order-${project}`);
-      return stored ? (JSON.parse(stored) as string[]) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [columnLayout, setColumnLayout] = useState<ColumnLayout>(() => {
-    // The old count-only `panel-terminal-columns-<project>` key is a
-    // different shape (number[]) and isn't migrated — just discarded.
-    try {
-      localStorage.removeItem(OLD_COLUMNS_KEY);
-    } catch {
-      // ignore
-    }
-    try {
-      const stored = localStorage.getItem(LAYOUT_KEY);
-      if (!stored) return [];
-      const parsed = JSON.parse(stored);
-      return Array.isArray(parsed) ? (parsed as ColumnLayout) : [];
-    } catch (err) {
-      console.warn(`[terminal] read layout from localStorage failed:`, err);
-      return [];
-    }
-  });
-
+  // Order + column layout for this project's scope, shared with the
+  // cross-project terminals page (see useTerminalOrdering).
+  const ordering = useTerminalOrdering(project, sessions);
+  const { syncIds, appendId } = ordering;
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -145,20 +107,11 @@ export function useTerminalSessions(project: string) {
       const data: SessionMeta[] = await res.json();
       const filtered = data.filter((s) => s.project === project);
       setSessions(filtered);
-      // Reconcile columnLayout against the PRE-merge sessionOrder (the `prev`
-      // that mergeOrder itself consumes below), in the same update cycle as
-      // the sessionOrder merge — see columnLayout.reconcileLayout contract.
-      setSessionOrder((prev) => {
-        const next = mergeOrder(prev, filtered.map((s) => s.id));
-        setColumnLayout((prevLayout) =>
-          reconcileLayout(prev, prevLayout, next),
-        );
-        return next;
-      });
+      syncIds(filtered.map((s) => s.id));
     } catch (err) {
       console.warn(`[terminal] fetch sessions failed:`, err);
     }
-  }, [project]);
+  }, [project, syncIds]);
 
   useEffect(() => {
     fetchSessions();
@@ -166,22 +119,15 @@ export function useTerminalSessions(project: string) {
 
   // When the project changes (no remount — same component instance reused
   // across route navigations), reset state to the new project's stored values.
+  // Order and layout reset themselves inside useTerminalOrdering, keyed on the
+  // same project string.
   useEffect(() => {
     setSessions([]);
     try {
       const storedFocus = localStorage.getItem(`panel-terminal-focus-${project}`);
       setFocusedIdState(storedFocus);
-      const storedOrder = localStorage.getItem(`panel-terminal-order-${project}`);
-      setSessionOrder(storedOrder ? JSON.parse(storedOrder) : []);
-      // The old count-only key is a different shape and isn't migrated.
-      localStorage.removeItem(OLD_COLUMNS_KEY);
-      const storedLayout = localStorage.getItem(LAYOUT_KEY);
-      const parsedLayout = storedLayout ? JSON.parse(storedLayout) : [];
-      setColumnLayout(Array.isArray(parsedLayout) ? parsedLayout : []);
     } catch {
       setFocusedIdState(null);
-      setSessionOrder([]);
-      setColumnLayout([]);
     }
   }, [project]);
 
@@ -246,19 +192,10 @@ export function useTerminalSessions(project: string) {
         const created: SessionMeta = await res.json();
         if (created.project === project) {
           setSessions((prev) => [...prev, created]);
-          // Reconcile columnLayout the same way fetchSessions does (see its
-          // comment above) — otherwise a custom layout falls out of sync
-          // with sessionOrder and the new session is silently missing from
-          // the grid until the next poll.
-          setSessionOrder((prev) => {
-            const next = prev.includes(created.id)
-              ? prev
-              : [...prev, created.id];
-            setColumnLayout((prevLayout) =>
-              reconcileLayout(prev, prevLayout, next),
-            );
-            return next;
-          });
+          // Reconcile columnLayout the same way fetchSessions does — otherwise
+          // a custom layout falls out of sync with sessionOrder and the new
+          // session is silently missing from the grid until the next poll.
+          appendId(created.id);
           setFocusedId(created.id);
         }
         return created;
@@ -266,7 +203,7 @@ export function useTerminalSessions(project: string) {
         console.warn(`[terminal] create session failed:`, err);
       }
     },
-    [project, sessions, setFocusedId],
+    [project, sessions, setFocusedId, appendId],
   );
 
   const deleteSession = useCallback(async (id: string) => {
@@ -328,45 +265,7 @@ export function useTerminalSessions(project: string) {
     [],
   );
 
-  // Persist order to localStorage whenever it changes
-  useEffect(() => {
-    try {
-      localStorage.setItem(ORDER_KEY, JSON.stringify(sessionOrder));
-    } catch {
-      // ignore
-    }
-  }, [ORDER_KEY, sessionOrder]);
-
-  // Persist columnLayout to localStorage whenever it changes — remove the key
-  // entirely when empty, mirroring useTerminalMaximized's remove-when-falsy
-  // convention (an empty array means "no custom layout stored").
-  useEffect(() => {
-    try {
-      if (columnLayout.length === 0) {
-        localStorage.removeItem(LAYOUT_KEY);
-      } else {
-        localStorage.setItem(LAYOUT_KEY, JSON.stringify(columnLayout));
-      }
-    } catch (err) {
-      console.warn(`[terminal] write layout to localStorage failed:`, err);
-    }
-  }, [LAYOUT_KEY, columnLayout]);
-
-  // O(N) index map for sort
-  const orderIndex = useMemo(
-    () => new Map(sessionOrder.map((id, i) => [id, i])),
-    [sessionOrder],
-  );
-
-  // Sort sessions by persisted order
-  const orderedSessions = useMemo(() => {
-    if (sessionOrder.length === 0) return sessions;
-    return [...sessions].sort((a, b) => {
-      const ai = orderIndex.get(a.id) ?? sessions.length;
-      const bi = orderIndex.get(b.id) ?? sessions.length;
-      return ai - bi;
-    });
-  }, [sessions, sessionOrder, orderIndex]);
+  const orderedSessions = ordering.orderedSessions;
 
   // Group sessions by color
   const colorMap = new Map<string, SessionMeta[]>();
@@ -390,84 +289,6 @@ export function useTerminalSessions(project: string) {
     }),
   );
 
-  const reorder = useCallback(
-    (fromId: string, toId: string) => {
-      setSessionOrder((prev) => reorderIds(prev, fromId, toId));
-    },
-    [],
-  );
-
-  // `ColumnLayout` v2 is self-contained (each entry names its own
-  // sessionId), so unlike the shipped v1 — where joinColumn/splitColumn's
-  // new *order* and new *sizes* were two correlated outputs of a single
-  // pure-function call, and a functional setSessionOrder updater could only
-  // return one of them — these callbacks now each touch at most one piece
-  // of state computed by a single pure function. swapSessions is the
-  // exception: it drives two genuinely independent structures
-  // (sessionOrder via swapIds, columnLayout via swapInLayout) from one user
-  // action. We still read sessionOrder/columnLayout directly from the
-  // closure and issue precomputed setState calls for all four callbacks
-  // below (the same established pattern as createSession's direct read of
-  // `sessions` above), rather than mixing that style with functional
-  // updaters elsewhere in this hook — one calling convention for every
-  // "commit a layout op" callback.
-  // An empty `columnLayout` is the "no custom layout stored" sentinel, and
-  // TerminalLayoutGrid resolves it to the default preset for both rendering
-  // and its live Ctrl+drag preview. The commit callbacks below must resolve
-  // the SAME layout the user is looking at — handed a literal [], every pure
-  // function takes its documented "id not found" no-op path, so the preview
-  // was correct while the drop silently changed nothing. Expanded against
-  // `orderedSessions` (not `sessionOrder`) to match the grid's own resolution
-  // id-for-id even before the mount-time fetch has merged the stored order.
-  const resolvedLayout = useMemo(() => {
-    if (columnLayout.length > 0) return columnLayout;
-    const order = orderedSessions.map((s) => s.id);
-    return expandPreset(order, getLayoutPresets(order.length)[0]?.sizes ?? []);
-  }, [columnLayout, orderedSessions]);
-
-  const mergeColumn = useCallback(
-    (sessionId: string, targetId: string) => {
-      setColumnLayout(mergeInColumn(resolvedLayout, sessionId, targetId));
-    },
-    [resolvedLayout],
-  );
-
-  const joinColumn = useCallback(
-    (sessionId: string, targetId: string) => {
-      setColumnLayout(joinOtherColumn(resolvedLayout, sessionId, targetId));
-    },
-    [resolvedLayout],
-  );
-
-  const splitColumn = useCallback(
-    (sessionId: string, gutterIndex: number) => {
-      setColumnLayout(splitToNewColumn(resolvedLayout, sessionId, gutterIndex));
-    },
-    [resolvedLayout],
-  );
-
-  const applyPreset = useCallback(
-    (sizes: number[]) => {
-      setColumnLayout(expandPreset(sessionOrder, sizes));
-    },
-    [sessionOrder],
-  );
-
-  // Reads raw `columnLayout`, not `resolvedLayout`, on purpose: a plain swap is
-  // the one op fully expressible through sessionOrder, which the default
-  // resolution already consumes — so with no custom layout stored it stays a
-  // no-op here and the grid re-derives the preset against the swapped order.
-  // Resolving would spend the sentinel on a swap that needs no layout of its
-  // own, and later session-count changes would then follow reconcileLayout
-  // (append to the last column) instead of re-defaulting to the preset.
-  const swapSessions = useCallback(
-    (idA: string, idB: string) => {
-      setSessionOrder(swapIds(sessionOrder, idA, idB));
-      setColumnLayout(swapInLayout(columnLayout, idA, idB));
-    },
-    [sessionOrder, columnLayout],
-  );
-
   return {
     sessions: orderedSessions,
     grouped,
@@ -478,13 +299,13 @@ export function useTerminalSessions(project: string) {
     deleteSession,
     updateSession,
     fetchSessions,
-    reorder,
-    columnLayout,
-    mergeColumn,
-    joinColumn,
-    splitColumn,
-    applyPreset,
-    swapSessions,
+    reorder: ordering.reorder,
+    columnLayout: ordering.columnLayout,
+    mergeColumn: ordering.mergeColumn,
+    joinColumn: ordering.joinColumn,
+    splitColumn: ordering.splitColumn,
+    applyPreset: ordering.applyPreset,
+    swapSessions: ordering.swapSessions,
   };
 }
 

@@ -1,22 +1,25 @@
-import { useEffect, useCallback, useMemo, useState } from "react";
+import { useEffect, useCallback, useState } from "react";
 import type { SessionMeta } from "./useTerminalSessions";
 import { useWebSocket } from "../realtime/useWebSocket";
-import { mergeOrder, reorderIds, swapIds } from "./sessionOrder";
+import { useTerminalOrdering } from "./useTerminalOrdering";
 
-const ALL_ORDER_KEY = "panel-terminal-order-__all__";
+/**
+ * Scope key for the cross-project terminals page. Shared verbatim with
+ * `useTerminalMaximized("__all__")` and the shipped `panel-terminal-order-__all__`
+ * key, so it cannot be renamed without orphaning stored state. Invariant: no
+ * project may be named `__all__` — it would share order/layout storage with
+ * this page.
+ */
+const ALL_SCOPE = "__all__";
 
 export function useAllTerminalSessions(pollMs = 8000) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const { lastMessage } = useWebSocket();
 
-  const [sessionOrder, setSessionOrder] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem(ALL_ORDER_KEY);
-      return stored ? (JSON.parse(stored) as string[]) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Same ordering model as a per-project surface, under the `__all__` scope —
+  // so Ctrl+drag merge/join/split and the preset picker commit here too.
+  const ordering = useTerminalOrdering(ALL_SCOPE, sessions);
+  const { syncIds } = ordering;
 
   const fetchAll = useCallback(async () => {
     try {
@@ -29,11 +32,11 @@ export function useAllTerminalSessions(pollMs = 8000) {
       }
       const data: SessionMeta[] = await res.json();
       setSessions(data);
-      setSessionOrder((prev) => mergeOrder(prev, data.map((s) => s.id)));
+      syncIds(data.map((s) => s.id));
     } catch (err) {
       console.warn(`[terminal] useAllTerminalSessions fetch failed:`, err);
     }
-  }, []);
+  }, [syncIds]);
 
   useEffect(() => {
     fetchAll();
@@ -49,35 +52,17 @@ export function useAllTerminalSessions(pollMs = 8000) {
     if (lastMessage) fetchAll();
   }, [lastMessage, fetchAll]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(ALL_ORDER_KEY, JSON.stringify(sessionOrder));
-    } catch {
-      // ignore
-    }
-  }, [sessionOrder]);
-
-  const orderIndex = useMemo(
-    () => new Map(sessionOrder.map((id, i) => [id, i])),
-    [sessionOrder],
-  );
-
-  const orderedSessions = useMemo(() => {
-    if (sessionOrder.length === 0) return sessions;
-    return [...sessions].sort((a, b) => {
-      const ai = orderIndex.get(a.id) ?? sessions.length;
-      const bi = orderIndex.get(b.id) ?? sessions.length;
-      return ai - bi;
-    });
-  }, [sessions, sessionOrder, orderIndex]);
-
-  const reorder = useCallback((fromId: string, toId: string) => {
-    setSessionOrder((prev) => reorderIds(prev, fromId, toId));
-  }, []);
-
-  const swapOrder = useCallback((idA: string, idB: string) => {
-    setSessionOrder((prev) => swapIds(prev, idA, idB));
-  }, []);
-
-  return { sessions: orderedSessions, refresh: fetchAll, reorder, swapOrder };
+  return {
+    sessions: ordering.orderedSessions,
+    refresh: fetchAll,
+    reorder: ordering.reorder,
+    // A plain drag swaps identity in the order *and* in the layout, matching
+    // the per-project surface's swapSessions.
+    swapOrder: ordering.swapSessions,
+    columnLayout: ordering.columnLayout,
+    mergeColumn: ordering.mergeColumn,
+    joinColumn: ordering.joinColumn,
+    splitColumn: ordering.splitColumn,
+    applyPreset: ordering.applyPreset,
+  };
 }
