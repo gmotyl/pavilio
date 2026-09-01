@@ -241,6 +241,101 @@ describe("useTerminalSessions columnLayout", () => {
     ]);
   });
 
+  // Regression: `columnLayout` is `[]` until the user picks a preset — the
+  // "no custom layout stored" sentinel. The grid resolves that sentinel to the
+  // default preset for rendering AND for its live Ctrl+drag preview, so the
+  // preview looked right while every commit callback ran the pure function
+  // against a literal `[]`, hit its "id not found" no-op path and changed
+  // nothing. The Ctrl+drag ops resolve the same default the grid renders, so
+  // the first Ctrl+drag materializes a concrete layout instead of dying.
+  it("mergeColumn resolves the default preset when no layout is stored", async () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
+    mockFetchSessions([session("A"), session("B"), session("C")]);
+    const { result } = await setup("vector");
+    expect(result.current.columnLayout).toEqual([]);
+
+    // Default preset for 3 sessions is [1, 2] => [[A], [B, C]]; C onto B is a
+    // same-column merge.
+    act(() => {
+      result.current.mergeColumn("C", "B");
+    });
+
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "C", weight: 2 }],
+      [{ sessionId: "B", weight: 1 }],
+    ]);
+  });
+
+  it("joinColumn resolves the default preset when no layout is stored", async () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
+    mockFetchSessions([session("A"), session("B"), session("C")]);
+    const { result } = await setup("vector");
+
+    // [[A], [B, C]] — A onto C is a cross-column join that empties column 0.
+    act(() => {
+      result.current.joinColumn("A", "C");
+    });
+
+    expect(result.current.columnLayout).toEqual([
+      [
+        { sessionId: "B", weight: 1 },
+        { sessionId: "C", weight: 1 },
+        { sessionId: "A", weight: 1 },
+      ],
+    ]);
+  });
+
+  it("splitColumn resolves the default preset when no layout is stored", async () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
+    mockFetchSessions([session("A"), session("B"), session("C")]);
+    const { result } = await setup("vector");
+
+    // [[A], [B, C]] — C out to a new column at the leftmost gutter.
+    act(() => {
+      result.current.splitColumn("C", 0);
+    });
+
+    expect(result.current.columnLayout).toEqual([
+      [{ sessionId: "C", weight: 1 }],
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "B", weight: 1 }],
+    ]);
+  });
+
+  it("a resolved Ctrl+drag layout persists, so the sentinel is only spent on a real change", async () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
+    mockFetchSessions([session("A"), session("B"), session("C")]);
+    const { result } = await setup("vector");
+    expect(localStorage.getItem("panel-terminal-layout-vector")).toBeNull();
+
+    act(() => {
+      result.current.mergeColumn("C", "B");
+    });
+
+    expect(localStorage.getItem("panel-terminal-layout-vector")).toBe(
+      JSON.stringify(result.current.columnLayout),
+    );
+  });
+
+  // Deliberate asymmetry: plain drag is the one op that is fully expressible
+  // through sessionOrder, which the default resolution already reads — so it
+  // stays a no-op on the layout and leaves the "no custom layout" sentinel
+  // intact, keeping later session-count changes on the preset track.
+  it("swapSessions leaves the layout sentinel untouched when no layout is stored", async () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
+    mockFetchSessions([session("A"), session("B"), session("C")]);
+    const { result } = await setup("vector");
+
+    act(() => {
+      result.current.swapSessions("A", "C");
+    });
+
+    expect(result.current.sessions.map((s) => s.id)).toEqual(["C", "B", "A"]);
+    expect(result.current.columnLayout).toEqual([]);
+    expect(localStorage.getItem("panel-terminal-layout-vector")).toBeNull();
+  });
+
   it("swapSessions updates both sessionOrder and columnLayout together", async () => {
     localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["A", "B", "C"]));
     localStorage.setItem(
