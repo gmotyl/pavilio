@@ -34,6 +34,7 @@ If no path is given, locate the **active change** — an un-archived directory u
 3. Review it critically — surface any questions, gaps, or concerns. If concerns exist, raise them with the user **before** starting and wait.
 4. If none, create a todo per task (checkbox `- [ ]` items in the plan map 1:1 to todos).
 5. Ensure an isolated workspace — a dedicated branch or git worktree, never `main`/`master`.
+6. **Record what is already dirty.** `git status --short` before dispatching anything, and note any uncommitted work the user had in flight. A file an agent reverts rather than commits leaves no trace in `git log`, so this snapshot is the only way to notice later that it went missing.
 
 ### Step 2 — Per task: implement → review → loop (dispatch sub-agents)
 For each task, in order:
@@ -46,7 +47,27 @@ For each task, in order:
    - **Blocking issues** → dispatch a fresh implementer sub-agent with the reviewer's findings to fix, then re-review. **Bound the loop to ~2–3 rounds**; if it doesn't converge, stop and escalate to the user.
 5. Never let one task's review-fail bleed into the next task.
 
-**Parallelism:** independent tasks (different files/areas) may run their implement→review cycles concurrently — spawn in one message. Tasks touching the same file/area run sequentially to avoid conflicts. Prefer git worktrees when running implementers in parallel.
+**Parallelism:** independent tasks (different files/areas) may run their implement→review cycles concurrently — spawn in one message. Tasks touching the same file/area run sequentially to avoid conflicts.
+
+#### Any agent that mutates files to probe gets its own worktree
+
+The obvious hazard is two implementers editing the same file. The one that actually bites is subtler: **a reviewer temporarily reverting code to see what fails.** That is exactly what you want reviewers to do — the strongest findings come from "I reverted the fix and no test failed" — but a reviewer doing it in the shared tree is indistinguishable from corruption, and a concurrently running implementer will "helpfully" restore the file mid-probe, wrecking both.
+
+So the rule is about *behaviour*, not role: **dispatch with `isolation: "worktree"` for any agent that will mutate files it does not own** — every reviewer asked to run a mutation check, and any implementer told to verify by deleting a line and re-running. A read-only reviewer does not need one.
+
+Tell probing agents explicitly:
+
+- **Restore by exact path, never broadly.** `git checkout -- <the one file you touched>`, never `git checkout -- .`, `git restore .`, or `git stash`. A broad restore silently discards the user's unrelated uncommitted work — a stray dependency pin, a scratch edit — which no commit will show you swept in, because nothing did.
+- **Report what you changed and confirm you restored it**, so the orchestrator can verify rather than trust.
+- **Clean up the worktree** (`git worktree remove --force <path>`), and prune leftovers yourself if they don't.
+
+#### Commits are serial even when work is parallel
+
+Two agents committing to the same branch race `.git/index.lock`. Parallelise *work*, but let only one agent be in its commit step at a time — in practice, don't spawn a second implementer for the same branch until the first has reported. Fold a small follow-up (a test addendum, a reviewer nit) into the next agent's brief as a separate commit rather than running it alongside.
+
+#### Verify the tree after every agent, not just its diff
+
+`git status --short` after each task, compared against what you expected to be dirty. An agent's own report is the *first* signal that something was clobbered, not the last word — and a file reverted rather than committed leaves no trace in `git log`. If the user had uncommitted changes when execution started, note them at Step 1 so you can tell later whether they survived.
 
 Keep the session progress file (opened by [[pavilio-session-start]]) updated as you orchestrate — decisions, sub-agent outcomes, review loops, problems.
 
@@ -77,6 +98,10 @@ Return to Step 1 (review) when the user updates the plan based on your feedback,
 - Review the plan critically first; follow its steps exactly; never skip verifications.
 - **Plans in implementation are FIXED** — new work becomes a new ticket/plan, not an amendment to the running plan.
 - Prefer an isolated workspace (a dedicated branch or git worktree) over building on `main`/`master`.
+- **Any agent that mutates files to probe gets `isolation: "worktree"`** — reviewers running mutation checks above all. Probing is the behaviour worth encouraging; doing it in the shared tree is what breaks.
+- **Never let an agent restore broadly.** `git checkout -- <exact path>`, never `.` — a broad restore discards the user's unrelated uncommitted work and no commit will show you did it.
+- **Serialise commits** even when work is parallel; two agents on one branch race `.git/index.lock`.
+- **Check `git status` after each agent**, against the Step 1 snapshot — an agent's own report is the first signal something was clobbered, not the last word.
 - Stop when blocked; bound the fix loop; never guess your way past a failure.
 
 ## Non-goals
