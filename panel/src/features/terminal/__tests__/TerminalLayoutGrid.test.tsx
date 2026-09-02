@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset } from "../columnLayout";
 import type { ColumnLayout } from "../columnLayout";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession } from "../terminalInstances";
+import {
+  TEST_PROJECT_COLORS,
+  installProjectColors,
+  rgb,
+} from "./projectColors.harness";
 
 // Connection state is per-browser and lives in the terminal instance pool.
 // Stub the two leaf reads the disconnected badge makes so a cell can be put
@@ -103,7 +108,6 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {
     id: "s1",
     name: "claude-ch",
-    color: null,
     project: "ch",
     cwd: "/tmp",
     pid: 1234,
@@ -561,5 +565,170 @@ describe("TerminalLayoutGrid — disconnected badge", () => {
 
     expect(reconnectSession).toHaveBeenCalledWith("abc-123");
     expect(onFocus).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalLayoutGrid — project colour", () => {
+  beforeEach(() => installProjectColors());
+
+  // The cell header is tinted with the project's accent; it is the only
+  // element in the cell that carries the colour, and it has no test id.
+  const headerColor = (index: number) =>
+    (screen.getAllByTitle("Drag to swap")[index] as HTMLElement).style.background;
+
+  it("all sessions of one project share its colour", async () => {
+    renderGrid({
+      sessions: [
+        makeSession({ id: "s1", project: "alpha" }),
+        makeSession({ id: "s2", project: "alpha", name: "claude-alpha-2" }),
+      ],
+      focusedId: "s1",
+    });
+
+    await waitFor(() =>
+      expect(headerColor(0)).toContain(rgb(TEST_PROJECT_COLORS.alpha)),
+    );
+    expect(headerColor(1)).toContain(rgb(TEST_PROJECT_COLORS.alpha));
+    expect(headerColor(0)).toBe(headerColor(1));
+  });
+
+  it("sessions of different projects differ in colour", async () => {
+    renderGrid({
+      sessions: [
+        makeSession({ id: "s1", project: "alpha" }),
+        makeSession({ id: "s2", project: "beta", name: "claude-beta" }),
+      ],
+      focusedId: "s1",
+    });
+
+    await waitFor(() =>
+      expect(headerColor(0)).toContain(rgb(TEST_PROJECT_COLORS.alpha)),
+    );
+    expect(headerColor(1)).toContain(rgb(TEST_PROJECT_COLORS.beta));
+    expect(headerColor(0)).not.toBe(headerColor(1));
+  });
+});
+
+describe("TerminalLayoutGrid — project colour picker", () => {
+  beforeEach(() => installProjectColors());
+
+  it("sits between the eye and maximize buttons, sized like its siblings", () => {
+    const session = makeSession({ id: "s-pick", project: "alpha" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    const eye = screen.getByTestId("terminal-cell-eye-s-pick");
+    const color = screen.getByTestId("terminal-cell-color-s-pick");
+    const maximize = screen.getByTestId("terminal-cell-maximize-s-pick");
+
+    // The control needs a positioning wrapper for its popover, so compare the
+    // slot it occupies in the group rather than the button itself.
+    const group = Array.from(eye.parentElement!.children);
+    const slot = group.findIndex((el) => el.contains(color));
+    expect(slot).toBe(group.indexOf(eye) + 1);
+    expect(group.indexOf(maximize)).toBe(slot + 1);
+
+    // The old picker hung off the 6x6px activity LED. This one is a real
+    // control: same padding and icon size as the buttons beside it.
+    expect(color.className).toBe(eye.className);
+    expect(color.querySelector("svg")?.getAttribute("width")).toBe(
+      eye.querySelector("svg")?.getAttribute("width"),
+    );
+  });
+
+  it("opens a picker naming the cell's project without focusing the cell", () => {
+    const session = makeSession({ id: "s-pick2", project: "beta" });
+    const { onFocus } = renderGrid({ sessions: [session], focusedId: null });
+
+    fireEvent.click(screen.getByTestId("terminal-cell-color-s-pick2"));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("beta");
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalLayoutGrid — rename from the cell header", () => {
+  // jsdom's DragEvent has no real DataTransfer; the header's own onDragStart
+  // writes to it, so a stand-in has to be supplied (same helper as the
+  // column-layout block above).
+  function dragStart(el: Element) {
+    fireEvent.dragStart(el, { dataTransfer: { effectAllowed: "", dropEffect: "" } });
+  }
+
+  function twoSessions() {
+    return [
+      makeSession({ id: "a", name: "claude-a" }),
+      makeSession({ id: "b", name: "claude-b" }),
+    ];
+  }
+
+  it("renames a session from the cell header", () => {
+    const onRename = vi.fn();
+    renderGrid({
+      sessions: [makeSession({ id: "s-ren", name: "claude-ch" })],
+      focusedId: "s-ren",
+      onRename,
+    });
+
+    // Single click must not start an edit — the header is a drag handle.
+    fireEvent.click(screen.getByText("claude-ch"));
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+
+    fireEvent.doubleClick(screen.getByText("claude-ch"));
+
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    expect(input).toHaveValue("claude-ch");
+
+    fireEvent.change(input, { target: { value: "  builder  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onRename).toHaveBeenCalledWith("s-ren", "builder");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("keeps the previous name when the edit is cancelled with Escape", () => {
+    const onRename = vi.fn();
+    renderGrid({
+      sessions: [makeSession({ id: "s-esc", name: "claude-ch" })],
+      focusedId: "s-esc",
+      onRename,
+    });
+
+    fireEvent.doubleClick(screen.getByText("claude-ch"));
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "discarded" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.blur(input);
+
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByText("claude-ch")).toBeInTheDocument();
+  });
+
+  it("dragging the header still swaps cells", () => {
+    const onSwap = vi.fn();
+    const onRename = vi.fn();
+    renderGrid({ sessions: twoSessions(), focusedId: "a", onSwap, onRename });
+
+    dragStart(screen.getAllByTitle("Drag to swap")[0]);
+    fireEvent.drop(screen.getByTestId("terminal-view-b"));
+
+    expect(onSwap).toHaveBeenCalledWith("a", "b");
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("selecting text in the rename input does not start a cell drag", () => {
+    const onSwap = vi.fn();
+    renderGrid({ sessions: twoSessions(), focusedId: "a", onSwap, onRename: vi.fn() });
+
+    fireEvent.doubleClick(screen.getByText("claude-a"));
+    const input = screen.getByRole("textbox");
+
+    // The input lives inside a `draggable` header; without a stop, dragging
+    // to select its text starts a cell drag instead.
+    dragStart(input);
+    fireEvent.drop(screen.getByTestId("terminal-view-b"));
+
+    expect(onSwap).not.toHaveBeenCalled();
   });
 });

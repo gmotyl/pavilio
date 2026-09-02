@@ -30,7 +30,6 @@ function makeSession(): SessionMeta {
   return {
     id: "s1",
     name: "claude-ch",
-    color: null,
     project: "ch",
     cwd: "/tmp",
     pid: 1234,

@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   createSession,
   destroySession,
+  listSessions,
   nudgeSession,
   shouldSuppressRecord,
+  updateSession,
 } from "../terminal-manager"
 import {
   serializeReplay,
@@ -100,5 +102,36 @@ describe("replay buffer wiring", () => {
     await flushReplay(meta.id)
     destroySession(meta.id)
     expect(serializeReplay(meta.id)).toBe("")
+  })
+})
+
+describe("session model", () => {
+  it("the session model carries no colour", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alpha" })
+
+    // Colour identifies a project now, and lives in the committed store. A PTY
+    // dies with the server, so a colour kept on a session could never outlive
+    // the thing it labelled.
+    expect(Object.hasOwn(meta, "color")).toBe(false)
+    const listed = listSessions().find((s) => s.id === meta.id)
+    expect(listed).toBeDefined()
+    expect(Object.hasOwn(listed!, "color")).toBe(false)
+
+    destroySession(meta.id)
+  })
+
+  it("ignores a colour in an update instead of persisting it", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alpha" })
+
+    const ok = updateSession(meta.id, { name: "renamed", color: "#f0c674" } as {
+      name?: string
+    })
+
+    expect(ok).toBe(true)
+    const listed = listSessions().find((s) => s.id === meta.id)!
+    expect(listed.name).toBe("renamed")
+    expect(Object.hasOwn(listed, "color")).toBe(false)
+
+    destroySession(meta.id)
   })
 })

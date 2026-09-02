@@ -42,8 +42,11 @@ router.post("/sessions", (req, res) => {
 });
 
 router.patch("/sessions/:id", (req, res) => {
-  const { name, color } = req.body ?? {};
-  const ok = updateSession(req.params.id, { name, color });
+  // Only `name` is read. A `color` from a stale client is ignored rather than
+  // rejected: PATCH is a partial update, and failing the whole request over one
+  // field the model no longer has would break that client's renames too.
+  const { name } = req.body ?? {};
+  const ok = updateSession(req.params.id, { name });
   if (!ok) return res.status(404).json({ error: "Session not found" });
   res.json({ ok: true });
 });

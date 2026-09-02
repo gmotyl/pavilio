@@ -2,21 +2,11 @@ import { useState, useRef, useEffect } from "react";
 import { Plus, Maximize2, Minimize2, X, ChevronDown, FolderGit2, RotateCw } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { nextProjectName } from "./useTerminalSessions";
-import { displayColor } from "./sessionColors";
+import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { LayoutPresetMenu } from "./LayoutPresetMenu";
-
-const COLOR_PRESETS = [
-  { name: "Off", hex: null as string | null },
-  { name: "Gold", hex: "#f0c674" },
-  { name: "Coral", hex: "#e06c75" },
-  { name: "Purple", hex: "#c678dd" },
-  { name: "Blue", hex: "#61afef" },
-  { name: "Teal", hex: "#56b6c2" },
-  { name: "Green", hex: "#98c379" },
-];
 
 interface Props {
   sessions: SessionMeta[];
@@ -28,7 +18,6 @@ interface Props {
   onFocus: (id: string) => void;
   onCreate: (opts?: CreateSessionOpts) => void;
   onDelete: (id: string) => void;
-  onColorChange: (id: string, color: string | null) => void;
   onRename: (id: string, name: string) => void;
   onToggleMaximize: () => void;
   onReorder: (fromId: string, toId: string) => void;
@@ -46,7 +35,6 @@ export function TerminalToolbar({
   onFocus,
   onCreate,
   onDelete,
-  onColorChange,
   onRename,
   onToggleMaximize,
   onReorder,
@@ -56,12 +44,12 @@ export function TerminalToolbar({
   const [newOpen, setNewOpen] = useState(false);
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
   const pendingSession = sessions.find((s) => s.id === pendingCloseId);
   const draggedIdRef = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const { colorFor } = useProjectColors();
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -69,7 +57,6 @@ export function TerminalToolbar({
       if (!rootRef.current.contains(e.target as Node)) {
         setNewOpen(false);
         setRepoMenuOpen(false);
-        setColorPickerFor(null);
       }
     };
     document.addEventListener("mousedown", onClick);
@@ -265,18 +252,18 @@ export function TerminalToolbar({
         {sessions.map((s) => {
           const focused = s.id === focusedId;
           const editing = editingId === s.id;
-          const dotColor = displayColor(s, sessions);
+          const chipColor = colorFor(s.project);
           return (
             <div
               key={s.id}
+              data-testid={`terminal-toolbar-chip-${s.id}`}
               className="group relative flex items-center gap-1.5 px-2.5 text-[12px] shrink-0 transition-colors"
               style={{
                 borderRight: "1px solid var(--border-subtle)",
                 borderLeft: dragOverId === s.id ? "2px solid var(--accent, #f0c674)" : "2px solid transparent",
                 background: focused ? "var(--bg-base)" : "transparent",
-                borderTop: focused
-                  ? `1.5px solid ${dotColor}`
-                  : "1.5px solid transparent",
+                borderTop: `1.5px solid ${chipColor}`,
+                opacity: focused ? 1 : 0.75,
                 color: focused
                   ? "var(--text-primary)"
                   : "var(--text-secondary)",
@@ -315,24 +302,7 @@ export function TerminalToolbar({
                   e.currentTarget.style.background = "transparent";
               }}
             >
-              <button
-                type="button"
-                data-testid={`terminal-toolbar-color-${s.id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setColorPickerFor(
-                    colorPickerFor === s.id ? null : s.id,
-                  );
-                }}
-                className="shrink-0 flex items-center"
-                title={
-                  s.color
-                    ? "Group color — click to change"
-                    : "Click to pin a group color"
-                }
-              >
-                <TerminalActivityLed sessionId={s.id} />
-              </button>
+              <TerminalActivityLed sessionId={s.id} />
               {editing ? (
                 <input
                   autoFocus
@@ -384,36 +354,6 @@ export function TerminalToolbar({
               >
                 <X size={10} />
               </button>
-
-              {colorPickerFor === s.id && (
-                <div
-                  className="absolute top-full left-0 mt-[1px] z-50 flex gap-1 p-1.5 rounded-md shadow-lg"
-                  style={{
-                    background: "var(--bg-surface)",
-                    border: "1px solid var(--border-subtle)",
-                  }}
-                >
-                  {COLOR_PRESETS.map((c) => (
-                    <button
-                      key={c.name}
-                      data-testid={`terminal-toolbar-color-preset-${c.name.toLowerCase()}-${s.id}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onColorChange(s.id, c.hex);
-                        setColorPickerFor(null);
-                      }}
-                      className="w-4 h-4 rounded-full transition-transform hover:scale-110"
-                      style={{
-                        background: c.hex || "transparent",
-                        border: c.hex
-                          ? "none"
-                          : "1.5px solid var(--text-muted)",
-                      }}
-                      title={c.name}
-                    />
-                  ))}
-                </div>
-              )}
             </div>
           );
         })}

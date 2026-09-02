@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TerminalToolbar } from "../TerminalToolbar";
 import type { SessionMeta } from "../useTerminalSessions";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession } from "../terminalInstances";
+import {
+  TEST_PROJECT_COLORS,
+  installProjectColors,
+  rgb,
+} from "./projectColors.harness";
 
 // Connection state is per-browser and lives in the terminal instance pool.
 // Stub the two leaf reads the disconnected badge makes so a chip can be put
@@ -36,7 +41,6 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {
     id: "s1",
     name: "claude-ch",
-    color: null,
     project: "ch",
     cwd: "/tmp",
     pid: 1234,
@@ -57,7 +61,6 @@ function renderToolbar(overrides: Partial<Parameters<typeof TerminalToolbar>[0]>
     onFocus: vi.fn(),
     onCreate: vi.fn(),
     onDelete: vi.fn(),
-    onColorChange: vi.fn(),
     onRename: vi.fn(),
     onToggleMaximize: vi.fn(),
     onReorder: vi.fn(),
@@ -137,5 +140,49 @@ describe("TerminalToolbar — disconnected badge", () => {
 
     expect(reconnectSession).toHaveBeenCalledWith("abc-123");
     expect(onFocus).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalToolbar — project colour", () => {
+  beforeEach(() => installProjectColors());
+
+  const chipColor = (id: string) =>
+    (screen.getByTestId(`terminal-toolbar-chip-${id}`) as HTMLElement).style
+      .borderTopColor;
+
+  it("all sessions of one project share its colour", async () => {
+    const sessions = [
+      makeSession({ id: "s1", project: "alpha" }),
+      makeSession({ id: "s2", project: "alpha", name: "claude-alpha-2" }),
+    ];
+    renderToolbar({ sessions, focusedId: "s1", currentProject: "alpha" });
+
+    await waitFor(() =>
+      expect(chipColor("s1")).toBe(rgb(TEST_PROJECT_COLORS.alpha)),
+    );
+    // The unfocused chip carries the same colour: a global terminals view is
+    // scanned by colour, so a chip that only shows one when focused shows none.
+    expect(chipColor("s2")).toBe(rgb(TEST_PROJECT_COLORS.alpha));
+  });
+
+  it("sessions of different projects differ in colour", async () => {
+    const sessions = [
+      makeSession({ id: "s1", project: "alpha" }),
+      makeSession({ id: "s2", project: "beta", name: "claude-beta" }),
+    ];
+    renderToolbar({ sessions, focusedId: "s1", currentProject: "alpha" });
+
+    await waitFor(() =>
+      expect(chipColor("s1")).toBe(rgb(TEST_PROJECT_COLORS.alpha)),
+    );
+    expect(chipColor("s2")).toBe(rgb(TEST_PROJECT_COLORS.beta));
+    expect(chipColor("s1")).not.toBe(chipColor("s2"));
+  });
+
+  it("no longer offers a per-session colour picker", () => {
+    const sessions = [makeSession({ id: "s1", project: "alpha" })];
+    renderToolbar({ sessions, focusedId: "s1", currentProject: "alpha" });
+
+    expect(screen.queryByTestId("terminal-toolbar-color-s1")).not.toBeInTheDocument();
   });
 });

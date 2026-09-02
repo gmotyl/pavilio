@@ -1,7 +1,7 @@
 import { Plus, Menu, RotateCw } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { mobileShortName } from "./useTerminalSessions";
-import { displayColor } from "./sessionColors";
+import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { useAggregateActivity } from "../favicon/useAggregateActivity";
@@ -31,6 +31,7 @@ export function TerminalMobileRail({
   onReconnect,
 }: Props) {
   const activity = useAggregateActivity();
+  const { colorFor } = useProjectColors();
   return (
     <div
       className="flex items-center gap-2 px-2.5 py-2 shrink-0 overflow-x-auto scrollbar-none"
@@ -55,7 +56,7 @@ export function TerminalMobileRail({
 
       {sessions.map((s) => {
         const active = s.id === focusedId;
-        const accent = displayColor(s, sessions);
+        const accent = colorFor(s.project);
         const label = mobileShortName(s, sessions);
         return (
           // The pill is itself a button, so the badge cannot nest inside it.
@@ -73,9 +74,15 @@ export function TerminalMobileRail({
                 background: active
                   ? "var(--bg-elevated, var(--bg-active))"
                   : "var(--bg-base)",
+                // The unselected dot is 28px, and the rail is the one surface
+                // that lists sessions from *every* project side by side. At
+                // that size a 1px ring of Orange against Gold is
+                // indistinguishable, so the ring is deliberately 2px — a
+                // border, not a box-shadow, so the rail's overflow-x-auto
+                // scroller cannot clip it.
                 border: active
-                  ? `1px solid ${s.color || accent}`
-                  : "1px solid var(--border-subtle)",
+                  ? `1px solid ${accent}`
+                  : `2px solid ${accent}`,
                 color: active ? "var(--text-primary)" : "var(--text-secondary)",
               }}
             >

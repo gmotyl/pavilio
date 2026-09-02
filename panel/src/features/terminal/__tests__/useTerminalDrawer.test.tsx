@@ -229,7 +229,16 @@ describe("useTerminalDrawer", () => {
     expect(screen.getByTestId("width")).toHaveTextContent("640");
   });
 
-  it("defaults the dock side to right", () => {
+  it("defaults the drawer to the left", () => {
+    setup("/project/vector/memo");
+    expect(screen.getByTestId("side")).toHaveTextContent("left");
+  });
+
+  it("keeps a stored right-side preference", () => {
+    // A stored value is only ever written by an explicit drag, so a browser
+    // that already docks right keeps docking right — the default flip must
+    // not override a choice the user made.
+    localStorage.setItem("panel:terminalDrawer:side", "right");
     setup("/project/vector/memo");
     expect(screen.getByTestId("side")).toHaveTextContent("right");
   });
@@ -243,9 +252,9 @@ describe("useTerminalDrawer", () => {
     expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("left");
   });
 
-  it("falls back to right for an unrecognised stored side", () => {
+  it("falls back to the default for an unrecognised stored side", () => {
     localStorage.setItem("panel:terminalDrawer:side", "top");
     setup("/project/vector/memo");
-    expect(screen.getByTestId("side")).toHaveTextContent("right");
+    expect(screen.getByTestId("side")).toHaveTextContent("left");
   });
 });

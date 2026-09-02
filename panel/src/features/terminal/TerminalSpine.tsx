@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import type { SessionMeta } from "./useTerminalSessions";
-import { displayColor } from "./sessionColors";
+import { useProjectColors } from "./useProjectColors";
 
 interface Props {
   sessions: SessionMeta[];
@@ -46,6 +46,7 @@ export function TerminalSpine({
   onOpenDrawer,
 }: Props) {
   const swipe = useEdgeSwipe(onOpenDrawer);
+  const { colorFor } = useProjectColors();
 
   if (sessions.length === 0) {
     return (
@@ -77,7 +78,7 @@ export function TerminalSpine({
     >
       {sessions.map((s) => {
         const active = s.id === focusedId;
-        const color = displayColor(s, sessions);
+        const color = colorFor(s.project);
         return (
           <button
             key={s.id}

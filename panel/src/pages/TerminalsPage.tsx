@@ -49,12 +49,9 @@ export default function TerminalsPage() {
     [refresh, focusedId],
   );
 
-  // Global-view rename/recolor: same shape as the per-project update.
+  // Global-view rename: same shape as the per-project update.
   const handleUpdate = useCallback(
-    async (
-      id: string,
-      patch: { name?: string; color?: string | null },
-    ) => {
+    async (id: string, patch: { name?: string }) => {
       try {
         const res = await fetch(`/api/terminal/sessions/${id}`, {
           method: "PATCH",

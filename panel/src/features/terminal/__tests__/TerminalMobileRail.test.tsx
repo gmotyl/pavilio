@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import type { ConnectionState } from "../terminalInstances";
 
 // The rail's own dependencies are stubbed: what is under test is where the
@@ -28,25 +28,33 @@ vi.mock("../../favicon/useAggregateActivity", () => ({
 
 import { TerminalMobileRail } from "../TerminalMobileRail";
 import type { SessionMeta } from "../useTerminalSessions";
+import {
+  TEST_PROJECT_COLORS,
+  installProjectColors,
+  rgb,
+} from "./projectColors.harness";
 
-function makeSession(): SessionMeta {
+function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {
     id: "s1",
     name: "claude-ch",
-    color: null,
     project: "ch",
     cwd: "/tmp",
     pid: 1234,
     createdAt: new Date().toISOString(),
+    ...overrides,
   };
 }
 
-function renderRail() {
+function renderRail(
+  sessions: SessionMeta[] = [makeSession()],
+  focusedId: string | null = sessions[0]?.id ?? null,
+) {
   render(
     <TerminalMobileRail
-      sessions={[makeSession()]}
-      focusedId="s1"
-      currentProject="ch"
+      sessions={sessions}
+      focusedId={focusedId}
+      currentProject={sessions[0]?.project ?? "ch"}
       onFocus={vi.fn()}
       onCreate={vi.fn()}
       onOpenDrawer={vi.fn()}
@@ -57,6 +65,7 @@ function renderRail() {
 beforeEach(() => {
   conn.state = "connected";
   conn.exited = false;
+  installProjectColors();
 });
 
 describe("TerminalMobileRail — disconnected badge", () => {
@@ -82,5 +91,48 @@ describe("TerminalMobileRail — disconnected badge", () => {
     expect(
       screen.getByTestId("terminal-mobile-rail-session-s1"),
     ).toBeInTheDocument();
+  });
+});
+
+describe("TerminalMobileRail — project colour", () => {
+  it("rings the active pill in its project's colour", async () => {
+    renderRail([makeSession({ id: "s1", project: "beta" })]);
+
+    const pill = screen.getByTestId("terminal-mobile-rail-session-s1");
+    await waitFor(() =>
+      expect((pill as HTMLElement).style.borderTopColor).toBe(
+        rgb(TEST_PROJECT_COLORS.beta),
+      ),
+    );
+  });
+
+  it("rings an unselected dot in its project's colour", async () => {
+    renderRail(
+      [
+        makeSession({ id: "s1", project: "alpha" }),
+        makeSession({ id: "s2", project: "beta", name: "claude-beta" }),
+        makeSession({ id: "s3", project: "alpha", name: "claude-alpha-2" }),
+      ],
+      "s1",
+    );
+
+    const dot = (id: string) =>
+      screen.getByTestId(`terminal-mobile-rail-session-${id}`) as HTMLElement;
+
+    await waitFor(() =>
+      expect(dot("s2").style.borderTopColor).toBe(rgb(TEST_PROJECT_COLORS.beta)),
+    );
+    expect(dot("s3").style.borderTopColor).toBe(rgb(TEST_PROJECT_COLORS.alpha));
+    expect(dot("s2").style.borderTopColor).not.toBe(dot("s3").style.borderTopColor);
+
+    // Thickness is the point: at 28px a 1px ring of two nearby presets is
+    // indistinguishable, so the unselected ring is deliberately heavier.
+    expect(dot("s2").style.borderTopWidth).toBe("2px");
+    expect(dot("s3").style.borderTopWidth).toBe("2px");
+
+    // The ring says which project; the LED still says what the session is
+    // doing. They stay orthogonal.
+    expect(dot("s2").querySelector('[data-testid="activity-led"]')).toBeTruthy();
+    expect(dot("s3").querySelector('[data-testid="activity-led"]')).toBeTruthy();
   });
 });

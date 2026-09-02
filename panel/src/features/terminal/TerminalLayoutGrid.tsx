@@ -3,9 +3,10 @@ import { Eye, X, Maximize2, Minimize2 } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import type { SessionMeta } from "./useTerminalSessions";
-import { displayColor } from "./sessionColors";
+import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
+import { ProjectColorPicker } from "./ProjectColorPicker";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
 import type { ColumnLayout } from "./columnLayout";
@@ -26,6 +27,7 @@ interface Props {
   onToggleMaximize: () => void;
   onReady?: (sessionId: string, handle: TerminalHandle) => void;
   onSwap?: (idA: string, idB: string) => void;
+  onRename?: (id: string, name: string) => void;
   columnLayout?: ColumnLayout;
   onMergeColumn?: (sessionId: string, targetId: string) => void;
   onJoinColumn?: (sessionId: string, targetId: string) => void;
@@ -48,6 +50,7 @@ export function TerminalLayoutGrid({
   onToggleMaximize,
   onReady,
   onSwap,
+  onRename,
   columnLayout,
   onMergeColumn,
   onJoinColumn,
@@ -140,7 +143,6 @@ export function TerminalLayoutGrid({
     <TerminalCell
       key={session.id}
       session={session}
-      allSessions={sessions}
       focused={session.id === focusedId}
       maximized={maximized}
       isDropTarget={dropTargetId === session.id}
@@ -149,6 +151,7 @@ export function TerminalLayoutGrid({
       onRequestExit={setPendingCloseId}
       onToggleMaximize={onToggleMaximize}
       onReady={onReady}
+      onRename={onRename}
       onDragStart={() => { draggedCellRef.current = session.id; }}
       onDragOver={(ctrlKey) => {
         const draggedId = draggedCellRef.current;
@@ -286,7 +289,6 @@ export function TerminalLayoutGrid({
 
 interface CellProps {
   session: SessionMeta;
-  allSessions: SessionMeta[];
   focused: boolean;
   maximized: boolean;
   isDropTarget: boolean;
@@ -295,6 +297,7 @@ interface CellProps {
   onRequestExit: (id: string) => void;
   onToggleMaximize: () => void;
   onReady?: (id: string, handle: TerminalHandle) => void;
+  onRename?: (id: string, name: string) => void;
   onDragStart: () => void;
   onDragOver: (ctrlKey: boolean) => void;
   onDrop: (ctrlKey: boolean) => void;
@@ -304,7 +307,6 @@ interface CellProps {
 
 function TerminalCell({
   session,
-  allSessions,
   focused,
   maximized,
   isDropTarget,
@@ -313,16 +315,32 @@ function TerminalCell({
   onRequestExit,
   onToggleMaximize,
   onReady,
+  onRename,
   onDragStart,
   onDragOver,
   onDrop,
   onDragEnd,
   style,
 }: CellProps) {
-  const accentColor = displayColor(session, allSessions);
+  const { colorFor } = useProjectColors();
+  const accentColor = colorFor(session.project);
   const headerBg = `color-mix(in srgb, ${accentColor} 22%, rgb(15,16,20))`;
   const handleRef = useRef<TerminalHandle | null>(null);
   const [snapshot, setSnapshot] = useState<BufferSnapshot | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  // Escape and Enter both end the edit by unmounting the input, which can
+  // fire a blur on the way out. Commit exactly once: whichever key handled
+  // it raises this flag and the blur that follows is ignored.
+  const blurHandledRef = useRef(false);
+
+  const commitRename = useCallback(
+    (value: string) => {
+      setEditingName(false);
+      const next = value.trim();
+      if (next && next !== session.name) onRename?.(session.id, next);
+    },
+    [onRename, session.id, session.name],
+  );
 
   const openViewport = useCallback(() => {
     const snap = handleRef.current?.getBufferSnapshot();
@@ -389,12 +407,55 @@ function TerminalCell({
         }}
       >
         <TerminalActivityLed sessionId={session.id} />
-        <span
-          className="text-[10.5px] font-mono tracking-wide uppercase truncate flex-1"
-          style={{ color: "var(--text-secondary)", letterSpacing: "0.08em" }}
-        >
-          {session.name}
-        </span>
+        {editingName ? (
+          <input
+            autoFocus
+            defaultValue={session.name}
+            data-testid={`terminal-cell-name-input-${session.id}`}
+            aria-label={`Rename ${session.name}`}
+            className="text-[10.5px] font-mono tracking-wide truncate flex-1 bg-transparent outline-none min-w-0"
+            style={{ color: "var(--text-primary)", letterSpacing: "0.08em" }}
+            onClick={(e) => e.stopPropagation()}
+            // The header is `draggable`, so mouse-selecting the text here
+            // would start a cell drag instead of a selection. HTML5 drag is
+            // initiated from the nearest draggable ancestor, so only
+            // cancelling `dragstart` stops it — the same guard the colour
+            // picker's hex field needs.
+            onDragStart={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                blurHandledRef.current = true;
+                commitRename(e.currentTarget.value);
+              } else if (e.key === "Escape") {
+                blurHandledRef.current = true;
+                setEditingName(false);
+              }
+            }}
+            onBlur={(e) => {
+              if (blurHandledRef.current) {
+                blurHandledRef.current = false;
+                return;
+              }
+              commitRename(e.target.value);
+            }}
+          />
+        ) : (
+          <span
+            className="text-[10.5px] font-mono tracking-wide uppercase truncate flex-1"
+            style={{ color: "var(--text-secondary)", letterSpacing: "0.08em" }}
+            title={`${session.name} — double-click to rename`}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              blurHandledRef.current = false;
+              setEditingName(true);
+            }}
+          >
+            {session.name}
+          </span>
+        )}
         <div className="flex gap-0.5">
           {/* Leads the eye · maximize · kill group. Renders nothing while the
               socket is healthy, so the group's usual width is unchanged. */}
@@ -409,6 +470,12 @@ function TerminalCell({
           >
             <Eye size={11} />
           </CellIconButton>
+          {/* Colour is a property of the project, not of this cell — the
+              picker names the project so that is not a surprise. */}
+          <ProjectColorPicker
+            project={session.project}
+            testId={`terminal-cell-color-${session.id}`}
+          />
           <CellIconButton
             testId={`terminal-cell-maximize-${session.id}`}
             title={maximized ? "Restore" : "Maximize"}

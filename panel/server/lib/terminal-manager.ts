@@ -18,7 +18,6 @@ import {
 export interface TerminalSession {
   id: string;
   name: string;
-  color: string | null;
   project: string;
   cwd: string;
   pid: number;
@@ -63,7 +62,6 @@ export function createSession(opts: {
   const session: TerminalSession = {
     id,
     name: opts.name || `shell-${sessions.size + 1}`,
-    color: null,
     project: opts.project,
     cwd: opts.cwd,
     pid: ptyProcess.pid,
@@ -128,14 +126,18 @@ export function destroySession(id: string): boolean {
   return true;
 }
 
+/**
+ * A session's name is the only mutable part of its model. Colour used to live
+ * here too; it identifies a *project* now and lives in the committed store
+ * behind `project-colors.ts`.
+ */
 export function updateSession(
   id: string,
-  updates: { name?: string; color?: string | null },
+  updates: { name?: string },
 ): boolean {
   const session = sessions.get(id);
   if (!session) return false;
   if (updates.name !== undefined) session.name = updates.name;
-  if (updates.color !== undefined) session.color = updates.color;
   return true;
 }
 

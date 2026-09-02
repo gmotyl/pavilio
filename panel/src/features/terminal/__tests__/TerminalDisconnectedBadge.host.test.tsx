@@ -81,7 +81,6 @@ function session(): SessionMeta {
   return {
     id: SESSION_ID,
     name: "claude-ch",
-    color: null,
     project: "ch",
     cwd: "/tmp",
     pid: 1234,
@@ -120,7 +119,6 @@ describe("TerminalDisconnectedBadge in its real host", () => {
         onFocus={onFocus}
         onCreate={vi.fn()}
         onDelete={vi.fn()}
-        onColorChange={vi.fn()}
         onRename={vi.fn()}
         onToggleMaximize={vi.fn()}
         onReorder={vi.fn()}

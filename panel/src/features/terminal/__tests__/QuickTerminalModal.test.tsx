@@ -31,7 +31,6 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {
     id: "s1",
     name: "claude-pavilio",
-    color: null,
     project: "pavilio",
     cwd: "/tmp",
     pid: 1,
