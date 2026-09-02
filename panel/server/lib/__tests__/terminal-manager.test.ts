@@ -31,6 +31,28 @@ let lastPtyExitCallback: (() => void) | undefined
 function emitPtyData(data: string): void {
   for (const cb of lastPtyDataCallbacks) cb(data)
 }
+// Every test in this file goes through createSession, and createSession
+// always writes an identity file (writeName) regardless of which describe
+// block is exercising it. Redirecting PANEL_AUTH_STATE_DIR must therefore be
+// a file-level concern, not scoped to one describe block — otherwise any
+// test outside that block resolves namesDir() to the real
+// homedir()/.panel/terminals, and a failed assertion (which skips the
+// trailing destroySession) leaks a file into the user's real home directory.
+let previousStateDir: string | undefined
+let tempDir: string
+
+beforeEach(() => {
+  previousStateDir = process.env.PANEL_AUTH_STATE_DIR
+  tempDir = mkdtempSync(join(tmpdir(), "panel-terminal-manager-test-"))
+  process.env.PANEL_AUTH_STATE_DIR = tempDir
+})
+
+afterEach(() => {
+  if (previousStateDir === undefined) delete process.env.PANEL_AUTH_STATE_DIR
+  else process.env.PANEL_AUTH_STATE_DIR = previousStateDir
+  rmSync(tempDir, { recursive: true, force: true })
+})
+
 vi.mock("node-pty", () => ({
   spawn: (file: string, args: string[], options: Record<string, unknown>) => {
     lastSpawnCall = { file, args, options }
@@ -199,6 +221,22 @@ describe("default session names", () => {
     expect(meta.name).toBe("deploy-watch")
     destroySession(meta.id)
   })
+
+  it("an empty explicit name falls through to the project allocator", () => {
+    // Reset so this test's expected alokai-1 doesn't depend on how many
+    // alokai-project names earlier tests in this describe block already
+    // assigned.
+    _resetAssignedNamesForTests()
+    const meta = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      name: "",
+    })
+    expect(meta.name).toBe("alokai-1")
+    destroySession(meta.id)
+  })
 })
 
 describe("session name allocator persists across the process", () => {
@@ -254,20 +292,9 @@ describe("session name allocator persists across the process", () => {
 })
 
 describe("identity file lifecycle", () => {
-  let previousStateDir: string | undefined
-  let tempDir: string
-
-  beforeEach(() => {
-    previousStateDir = process.env.PANEL_AUTH_STATE_DIR
-    tempDir = mkdtempSync(join(tmpdir(), "panel-terminal-manager-test-"))
-    process.env.PANEL_AUTH_STATE_DIR = tempDir
-  })
-
-  afterEach(() => {
-    if (previousStateDir === undefined) delete process.env.PANEL_AUTH_STATE_DIR
-    else process.env.PANEL_AUTH_STATE_DIR = previousStateDir
-    rmSync(tempDir, { recursive: true, force: true })
-  })
+  // File-level beforeEach/afterEach (above) already redirects
+  // PANEL_AUTH_STATE_DIR to a fresh temp dir per test — no per-describe
+  // redirect needed here.
 
   function readIdentityFile(id: string): string | undefined {
     const file = join(namesDir(), id)

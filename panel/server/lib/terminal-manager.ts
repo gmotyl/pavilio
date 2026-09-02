@@ -96,7 +96,7 @@ export function createSession(opts: {
 
   const session: TerminalSession = {
     id,
-    name: opts.name ?? nextSessionName(opts.project, priorNames),
+    name: opts.name || nextSessionName(opts.project, priorNames),
     project: opts.project,
     cwd: opts.cwd,
     pid: ptyProcess.pid,
