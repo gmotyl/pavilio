@@ -60,9 +60,19 @@ echo "Syncing panel/..."
 #     exists on both sides and so would not be pruned anyway, but an upstream
 #     clone that has not run install yet does not have it, and without this
 #     exclude the prune would take the downstream git hooks with it.
-if [ ! -d "$UPSTREAM_DIR/panel" ] || [ -z "$(ls -A "$UPSTREAM_DIR/panel")" ]; then
-  echo "Error: $UPSTREAM_DIR/panel is missing or empty — refusing to mirror it with --delete."
-  echo "Check that $UPSTREAM_DIR is really the pavilio repo."
+# Structural check rather than an emptiness check: a panel/ holding only a
+# hidden placeholder (.gitkeep) counts as non-empty, so an emptiness test would
+# pass and --delete would then wipe the downstream tree — the exact failure this
+# guard exists to stop. package.json is what makes the directory the panel app.
+if [ ! -f "$UPSTREAM_DIR/panel/package.json" ]; then
+  echo "Error: $UPSTREAM_DIR/panel does not look like the panel app (no package.json)."
+  echo "Refusing to mirror it with --delete — check that $UPSTREAM_DIR is really the pavilio repo."
+  exit 1
+fi
+# rsync --delete from a directory onto itself empties it. Refuse when both sides
+# resolve to the same path (e.g. update.sh run from inside the upstream clone).
+if [ "$(readlink -f "$UPSTREAM_DIR/panel")" = "$(readlink -f "$REPO_ROOT/panel")" ]; then
+  echo "Error: source and destination panel/ resolve to the same directory — refusing to sync."
   exit 1
 fi
 rsync -a --delete --max-delete=100 \
