@@ -42,13 +42,30 @@ echo "Syncing panel/..."
 # (routes/skills.ts, routes/commands.ts, features/skills/, features/commands/,
 # usePlanDrag.ts, TerminalNavList.tsx, sessionColors.ts) linger downstream as
 # tracked dead code that nothing imports.
-# Excluded paths are protected from --delete by default (we never pass
-# --delete-excluded), so node_modules/, dist/ and husky's generated .husky/_
-# all survive the prune.
+#
 # Deliberately NOT applied to skills/, scripts/ or commands/ below: those hold
 # legitimate downstream-only content (private skills, local helper scripts)
 # that --delete would destroy.
-rsync -a --delete \
+#
+# --delete is destructive, so it gets guards rather than trust:
+#   * refuse a missing or empty source. UPSTREAM_DIR is only validated for
+#     .git/, so a repo without panel/ would otherwise mirror "nothing" over the
+#     downstream tree and --delete would erase it.
+#   * --max-delete caps the blast radius. A real sync retires a handful of
+#     files; a larger prune means the source is wrong, and rsync exits non-zero
+#     (set -e aborts) instead of completing the damage.
+#   * excluded paths are protected from --delete by default — we never pass
+#     --delete-excluded — so node_modules/ and dist/ survive.
+#   * .husky/_ is husky's generated, untracked hook directory. It normally
+#     exists on both sides and so would not be pruned anyway, but an upstream
+#     clone that has not run install yet does not have it, and without this
+#     exclude the prune would take the downstream git hooks with it.
+if [ ! -d "$UPSTREAM_DIR/panel" ] || [ -z "$(ls -A "$UPSTREAM_DIR/panel")" ]; then
+  echo "Error: $UPSTREAM_DIR/panel is missing or empty — refusing to mirror it with --delete."
+  echo "Check that $UPSTREAM_DIR is really the pavilio repo."
+  exit 1
+fi
+rsync -a --delete --max-delete=100 \
   --exclude='node_modules/' \
   --exclude='dist/' \
   --exclude='.DS_Store' \
