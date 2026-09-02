@@ -199,16 +199,39 @@ describe("useTerminalConnection", () => {
     act(() => closeSocket(currentSocket("reopen-session")));
     expect(result.current).toBe("disconnected");
 
+    // reopen() reports "connected" optimistically at the ws identity swap.
     act(() => {
       inst.reopen();
-      // reopen() reports "connected" optimistically at the ws identity swap;
-      // the browser then reports it again on open. The second emit must be a
-      // no-op, not a wrong state or a state flip-flop.
+    });
+    expect(result.current).toBe("connected");
+    const rendersAfterSwap = renders.length;
+
+    // The browser then reports "connected" again on open. That second emit
+    // must cost ZERO renders — `seq()` collapses duplicates and so cannot see
+    // the difference between "no re-render" and "re-rendered with the same
+    // value", which is exactly the regression this pins.
+    act(() => {
       currentSocket("reopen-session").onopen?.(new Event("open"));
     });
+    expect(renders).toHaveLength(rendersAfterSwap);
 
     expect(result.current).toBe("connected");
     expect(seq(renders)).toEqual(["connected", "disconnected", "connected"]);
+  });
+
+  it("re-renders with unattached when the session is destroyed", () => {
+    // "unattached" was only ever observed as a MOUNT-time value for a session
+    // this browser never attached. Reaching it as a transition matters just as
+    // much: the badge renders nothing for it, so a live terminal being
+    // destroyed must clear the warning rather than freeze it as "disconnected".
+    attach("destroy-session");
+    const { result, renders } = renderConnection("destroy-session");
+    expect(result.current).toBe("connected");
+
+    act(() => destroyTerminal("destroy-session"));
+
+    expect(result.current).toBe("unattached");
+    expect(seq(renders)).toEqual(["connected", "unattached"]);
   });
 
   it("resubscribes when the session id changes", () => {
@@ -230,10 +253,11 @@ describe("useTerminalConnection", () => {
     const before = renders.length;
     rerender({ id: "id-b" });
 
-    // Not one render may show id-a's "connected" after the switch.
-    expect(renders.slice(before)).toEqual(
-      renders.slice(before).map(() => "disconnected"),
-    );
+    // Not one render may show id-a's "connected" after the switch. Asserted
+    // against a literal, not against a map over the same slice — that form
+    // passes vacuously when the slice is empty and would miss the hook failing
+    // to render at all.
+    expect(renders.slice(before)).toEqual(["disconnected"]);
     expect(result.current).toBe("disconnected");
 
     // The old id is no longer listened to...
