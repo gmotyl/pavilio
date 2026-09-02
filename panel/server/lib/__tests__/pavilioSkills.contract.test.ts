@@ -10,6 +10,28 @@ const OPENCODE_CMD_DIR = join(REPO_ROOT, ".opencode/commands");
 const read = (name: string): string =>
   readFileSync(join(SKILLS_DIR, name, "SKILL.md"), "utf8");
 
+/**
+ * A skill's *procedure*, with its declarative preamble removed: the YAML
+ * frontmatter and any `<UPPERCASE-TAG>` block.
+ *
+ * The ordering assertions below index into the text, and both of those places
+ * legitimately *name* the artifacts a skill produces without being where they
+ * are written — the frontmatter `description` summarises the output ("a
+ * complete OpenSpec change dir — proposal.md, design.md..."), and a
+ * `<DEFINITION-OF-DONE>` block lists what must exist for the skill to be
+ * finished. Indexing the whole file mistakes either for a write, and reports
+ * it as happening before the resolution step that in fact precedes every real
+ * one.
+ */
+const body = (content: string): string => {
+  let out = content;
+  if (out.startsWith("---")) {
+    const end = out.indexOf("\n---", 3);
+    if (end !== -1) out = out.slice(end + 4);
+  }
+  return out.replace(/<([A-Z][A-Z-]*)>[\s\S]*?<\/\1>/g, "");
+};
+
 const storage = read("pavilio-openspec-storage");
 const grill = read("pavilio-grill");
 const writingPlans = read("pavilio-writing-plans");
@@ -40,7 +62,8 @@ describe("pavilio skills — OpenSpec storage contract", () => {
       ["writing-plans", writingPlans, "tasks.md"],
       ["archive", archive, "changes/archive"],
     ];
-    for (const [label, content, writeToken] of cases) {
+    for (const [label, raw, writeToken] of cases) {
+      const content = body(raw);
       expect(content, `${label} references [[pavilio-openspec-storage]]`).toContain(
         "[[pavilio-openspec-storage]]",
       );
