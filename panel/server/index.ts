@@ -36,6 +36,8 @@ import { isEnabled } from "./lib/autoSyncState.js";
 import { setupWebSocket, setupFileWatcher, getWss } from "./watcher.js";
 import { pruneDeadAgents } from "./lib/agent-registry.js";
 import { registerPanelServer } from "./lib/panel-listener.js";
+import { sweepNames } from "./lib/terminal-identity.js";
+import { listSessions } from "./lib/terminal-manager.js";
 
 async function findFreePort(start: number, span = 50): Promise<number> {
   for (let candidate = start; candidate < start + span; candidate++) {
@@ -55,6 +57,9 @@ async function start() {
   await loadConfig();
   await loadAuthState();
   rebuildIndex();
+  // Sessions don't survive a restart, so every identity file left on disk at
+  // boot belongs to a session that's already gone — sweep them now.
+  sweepNames(listSessions().map((s) => s.id));
   const { port: configuredPort, tlsCert, tlsKey } = getConfig();
   const port = await findFreePort(configuredPort);
   if (port !== configuredPort) {
