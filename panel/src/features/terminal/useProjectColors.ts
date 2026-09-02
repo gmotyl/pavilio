@@ -76,9 +76,31 @@ function subscribe(onStoreChange: () => void): () => void {
  *
  * Rejects on failure (after rolling back) so the caller can report it; callers
  * that do not care must still `.catch()`.
+ *
+ * The rollback restores *this project's key only*, onto whatever the map holds
+ * at the moment it fails. Snapshotting the whole map and republishing it would
+ * undo any other project's write that landed while this one was in flight —
+ * two pickers moving at once, and the loser's colour silently reappears.
  */
 async function setProjectColor(project: string, hex: string): Promise<void> {
-  const previous = colors;
+  // The map only ever holds hex strings, so `undefined` unambiguously means
+  // "this project had no entry" — and rolling that back has to *remove* the
+  // key. An own key set to `undefined` would defeat `colorFor`'s `??`
+  // placeholder fallback and survive into any JSON the map is written to.
+  const previous: string | undefined = Object.prototype.hasOwnProperty.call(
+    colors,
+    project,
+  )
+    ? colors[project]
+    : undefined;
+
+  const rollback = (): void => {
+    const next = { ...colors };
+    if (previous === undefined) delete next[project];
+    else next[project] = previous;
+    publish(next);
+  };
+
   publish({ ...colors, [project]: hex });
   let res: Response;
   try {
@@ -88,11 +110,11 @@ async function setProjectColor(project: string, hex: string): Promise<void> {
       body: JSON.stringify({ hex }),
     });
   } catch (err) {
-    publish(previous);
+    rollback();
     throw err;
   }
   if (!res.ok) {
-    publish(previous);
+    rollback();
     throw new Error(`Failed to set colour for ${project} (${res.status})`);
   }
 }

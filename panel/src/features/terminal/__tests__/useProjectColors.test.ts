@@ -225,4 +225,91 @@ describe("useProjectColors", () => {
 
     expectNoSnapshotWarning();
   });
+
+  it("a failed write does not revert another project's successful write", async () => {
+    // Both writes are held open so the interleaving is decided here, not by
+    // whichever mock promise happened to settle first.
+    const pending = new Map<string, (res: Response) => void>();
+    const deferredFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === COLORS_URL) return jsonResponse({ colors: { ...STORED } });
+      const match = /\/api\/projects\/([^/]+)\/color$/.exec(url);
+      if (match) {
+        const project = decodeURIComponent(match[1]);
+        return await new Promise<Response>((resolve) => {
+          pending.set(project, resolve);
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", deferredFetch);
+
+    let a!: ReturnType<typeof mountConsumer>;
+    let b!: ReturnType<typeof mountConsumer>;
+    await act(async () => {
+      a = mountConsumer("alpha");
+      b = mountConsumer("beta");
+    });
+
+    // alpha starts first, so beta's write captures a map that already carries
+    // alpha's optimistic value — the interleaving that loses data.
+    let alphaWrite!: Promise<void>;
+    let betaWrite!: Promise<void>;
+    await act(async () => {
+      alphaWrite = a.result.current.setColor("alpha", "#111111");
+      // Attach a handler now; the assertion below still observes the rejection.
+      void alphaWrite.catch(() => {});
+      betaWrite = b.result.current.setColor("beta", "#222222");
+    });
+    expect(a.result.current.color).toBe("#111111");
+    expect(b.result.current.color).toBe("#222222");
+
+    // beta lands first and stays.
+    await act(async () => {
+      pending.get("beta")?.(jsonResponse({ ok: true }));
+      await betaWrite;
+    });
+
+    // alpha then fails: only alpha may move.
+    await act(async () => {
+      pending.get("alpha")?.(
+        jsonResponse({ error: "store failed" }, false, 500),
+      );
+      await expect(alphaWrite).rejects.toThrow();
+    });
+
+    expect(a.result.current.color).toBe("#f0c674");
+    expect(b.result.current.color).toBe("#222222");
+    expect(b.result.current.colors).toEqual({
+      alpha: "#f0c674",
+      beta: "#222222",
+    });
+
+    expectNoSnapshotWarning();
+  });
+
+  it("rolling back a project that had no colour removes the key", async () => {
+    installFetch({ putOk: false });
+
+    let ghost!: ReturnType<typeof mountConsumer>;
+    await act(async () => {
+      ghost = mountConsumer("ghost");
+    });
+    expect("ghost" in ghost.result.current.colors).toBe(false);
+
+    await act(async () => {
+      await expect(
+        ghost.result.current.setColor("ghost", "#123456"),
+      ).rejects.toThrow();
+    });
+
+    // An own key holding `undefined` would satisfy `toBeUndefined()` while
+    // still defeating the `??` placeholder fallback and serialising as a key.
+    expect("ghost" in ghost.result.current.colors).toBe(false);
+    expect(ghost.result.current.color).toBe(PROJECT_COLOR_PLACEHOLDER);
+    // Untouched projects are unaffected.
+    expect(ghost.result.current.colors).toEqual(STORED);
+
+    expectNoSnapshotWarning();
+  });
 });
