@@ -98,13 +98,24 @@ export function orderingReducer(state: OrderingState, action: OrderingAction): O
       // Reads the RAW layout, not a resolved one, on purpose: a plain swap is the
       // one op fully expressible through `order`, which the default resolution
       // already consumes — so with no custom layout stored it stays a no-op here
-      // and the grid re-derives the preset against the swapped order.
+      // and the grid re-derives the preset against the swapped order. Resolving
+      // would spend the sentinel on a swap that needs no layout of its own, and
+      // later session-count changes would then follow `reconcileLayout` (append to
+      // the last column) instead of re-defaulting to the preset.
       return commit(
         state,
         swapIds(state.order, action.idA, action.idB),
         swapInLayout(state.layout, action.idA, action.idB),
       );
 
+    // Boundary of the atomicity fix, for `merge`/`join`/`split` below: `action.resolved`
+    // is a render-time snapshot taken from the caller's closure, not something this
+    // reducer can derive (only the caller knows how the grid resolved the empty-layout
+    // sentinel). So unlike `sync`/`append`/`reorder`/`swap` — which read `state` and
+    // therefore compose — two of these three ops dispatched in the SAME commit do not
+    // compose: both carry the same pre-commit `resolved`, and the second overwrites the
+    // first. That is inherent to the `resolved` payload and an accepted limit, not a
+    // defect; do not read the reducer as having made every action atomic.
     case "merge":
       return commit(
         state,

@@ -13,9 +13,30 @@ const state = (order: string[], columns: ColumnLayout): OrderingState => ({
 // The layout a caller resolves the empty sentinel to before dispatching a layout op.
 const resolved = layout([["A", 1], ["B", 1]], [["C", 1]]);
 
+/**
+ * Freeze a state and everything reachable from it — the `order` array, every layout
+ * column, and every entry inside those columns. React state is shared, not owned by the
+ * reducer, so an in-place write is the impurity that actually corrupts it; under a frozen
+ * input such a write throws instead of silently succeeding.
+ */
+function deepFreezeState(input: OrderingState): OrderingState {
+  Object.freeze(input.order);
+  for (const column of input.layout) {
+    for (const entry of column) Object.freeze(entry);
+    Object.freeze(column);
+  }
+  Object.freeze(input.layout);
+  return Object.freeze(input);
+}
+
 describe("orderingReducer", () => {
   it("applying the same action twice equals applying it once", () => {
-    const base = state(["A", "B", "C"], layout([["A", 1]], [["B", 1], ["C", 1]]));
+    // Frozen so that a reducer which mutates the state it was handed throws here rather
+    // than corrupting React's copy in the app. Comparing two fresh calls to *each other*
+    // would not catch that: a consistently-mutating reducer returns consistent results.
+    const base = deepFreezeState(
+      state(["A", "B", "C"], layout([["A", 1]], [["B", 1], ["C", 1]])),
+    );
 
     const actions: OrderingAction[] = [
       { type: "sync", ids: ["A", "B", "C", "D"] },
@@ -38,10 +59,12 @@ describe("orderingReducer", () => {
       // double-*invokes* the reducer with the same state and action and keeps the
       // second result. Sequential idempotence above is a stronger, separate claim
       // that not every kind can make (see `swap`), so assert purity for all of them.
+      // Compared against `once` — the first invocation, several calls back — rather than a
+      // sibling call, so drift accumulated across invocations shows up too.
       expect(
         orderingReducer(base, action),
         `${action.type} is not a pure function of (state, action)`,
-      ).toEqual(orderingReducer(base, action));
+      ).toEqual(once);
     }
 
     // `swap` is deliberately excluded above: it is an involution by contract
@@ -50,8 +73,9 @@ describe("orderingReducer", () => {
     // the reducer call itself — same state in, same state out — so that is the
     // property asserted for it.
     const swap: OrderingAction = { type: "swap", idA: "A", idB: "C" };
-    expect(orderingReducer(base, swap)).toEqual(orderingReducer(base, swap));
-    expect(orderingReducer(orderingReducer(base, swap), swap)).toEqual(base);
+    const swappedOnce = orderingReducer(base, swap);
+    expect(orderingReducer(base, swap)).toEqual(swappedOnce);
+    expect(orderingReducer(swappedOnce, swap)).toEqual(base);
   });
 
   it("sync removes closed sessions from order and layout together", () => {

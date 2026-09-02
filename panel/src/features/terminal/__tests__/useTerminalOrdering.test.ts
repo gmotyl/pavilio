@@ -160,6 +160,68 @@ describe("useTerminalOrdering", () => {
     expect(result.current.sessionOrder).toEqual(["b", "a"]);
   });
 
+  // `reconcileLayout` rebuilds its columns with `.map().filter()`, and `dedupeLayout`
+  // hands back the argument it was given when nothing was dropped — so even a *no-op*
+  // reconcile yields a fresh array. Piped straight into `setColumnLayout`, that
+  // re-rendered and re-fired the layout-persist effect on every 8s poll tick and every
+  // WebSocket refetch. The reducer's `commit` compares structurally and collapses to the
+  // state it already held, so the reference survives. Hence `toBe`, not `toEqual`.
+  it("keeps the layout reference across a no-op sync", () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["a", "b"]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([[{ sessionId: "a", weight: 1 }], [{ sessionId: "b", weight: 2 }]]),
+    );
+    const { result } = renderHook(
+      () => useTerminalOrdering("vector", [session("a"), session("b")]),
+      { wrapper: StrictMode },
+    );
+
+    const before = result.current.columnLayout;
+    // The id set already stored — nothing about the model actually moves.
+    act(() => result.current.syncIds(["a", "b"]));
+
+    expect(result.current.columnLayout).toBe(before);
+  });
+
+  // The old `swapSessions` read `sessionOrder`/`columnLayout` out of the render closure
+  // (deps `[sessionOrder, columnLayout]`), so two swaps issued in one commit both computed
+  // from the same pre-batch snapshot and the second discarded the first — a lost update,
+  // landing `['a','b','d','c']`. Sequential dispatches each see the previous transition's
+  // result, so both swaps compose.
+  it("applies two swaps issued in the same commit", () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["a", "b", "c", "d"]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([
+        [{ sessionId: "a", weight: 1 }, { sessionId: "b", weight: 1 }],
+        [{ sessionId: "c", weight: 2 }, { sessionId: "d", weight: 1 }],
+      ]),
+    );
+    const { result } = renderHook(
+      () =>
+        useTerminalOrdering("vector", [
+          session("a"),
+          session("b"),
+          session("c"),
+          session("d"),
+        ]),
+      { wrapper: StrictMode },
+    );
+
+    act(() => {
+      result.current.swapSessions("a", "b");
+      result.current.swapSessions("c", "d");
+    });
+
+    expect(result.current.sessionOrder).toEqual(["b", "a", "d", "c"]);
+    // `swapInLayout` runs on the custom layout too, so both halves must have moved.
+    expect(ids(result.current.columnLayout)).toEqual([
+      ["b", "a"],
+      ["d", "c"],
+    ]);
+  });
+
   it("syncIds reconciles the layout against the pre-merge order", () => {
     localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["a", "b"]));
     localStorage.setItem(
