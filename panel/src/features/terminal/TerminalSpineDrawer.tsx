@@ -128,8 +128,11 @@ export function TerminalSpineDrawer({
                     const active = s.id === focusedId && isCurrent;
                     return (
                       // The row is itself a button, so the badge sits beside
-                      // it rather than inside it.
-                      <li key={s.id} className="flex items-center">
+                      // it rather than inside it. The gap lives on the row, not
+                      // on a wrapper around the badge: the badge renders
+                      // nothing while the socket is healthy, and a wrapper
+                      // would still spend its width on every healthy row.
+                      <li key={s.id} className="flex items-center gap-1.5">
                         <button
                           type="button"
                           data-testid={`terminal-spine-drawer-session-${s.id}`}
@@ -161,9 +164,7 @@ export function TerminalSpineDrawer({
                             </span>
                           )}
                         </button>
-                        <span className="pr-1.5">
-                          <TerminalDisconnectedBadge sessionId={s.id} />
-                        </span>
+                        <TerminalDisconnectedBadge sessionId={s.id} />
                       </li>
                     );
                   })}

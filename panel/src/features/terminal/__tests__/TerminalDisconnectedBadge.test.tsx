@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ConnectionState } from "../terminalInstances";
@@ -75,30 +74,7 @@ describe("TerminalDisconnectedBadge", () => {
     expect(reconnectMock).toHaveBeenCalledWith("abc-123");
   });
 
-  it("clears without remounting the surrounding surface when the session reconnects", () => {
-    stub.state = "disconnected";
-
-    function Host() {
-      const [, bump] = useState(0);
-      return (
-        <div data-testid="host">
-          <TerminalDisconnectedBadge sessionId="s1" />
-          <button type="button" data-testid="rerender" onClick={() => bump((n) => n + 1)}>
-            rerender
-          </button>
-        </div>
-      );
-    }
-
-    render(<Host />);
-    const host = screen.getByTestId("host");
-    expect(screen.getByTestId("terminal-disconnected-s1")).toBeInTheDocument();
-
-    stub.state = "connected";
-    fireEvent.click(screen.getByTestId("rerender"));
-
-    expect(screen.queryByTestId("terminal-disconnected-s1")).not.toBeInTheDocument();
-    // Same DOM node: the host surface re-rendered, it did not remount.
-    expect(screen.getByTestId("host")).toBe(host);
-  });
+  // The "clears without remounting its host" property lives in
+  // TerminalDisconnectedBadge.host.test.tsx: it needs the real toolbar and the
+  // real store, neither of which this file has (both are stubbed above).
 });

@@ -50,17 +50,28 @@ export function TerminalDisconnectedBadge({ sessionId, size = "sm" }: Props) {
       data-testid={`terminal-disconnected-${sessionId}`}
       aria-label={DISCONNECTED_LABEL}
       title={DISCONNECTED_LABEL}
-      // The hosts that carry this badge are themselves interactive: the
-      // toolbar chip focuses on click and is a drag handle, the cell header
-      // focuses and drags too. Swallow the gestures the same way the close
-      // and eye controls beside it do, so activating the badge only reconnects.
-      onPointerDown={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
+      // The hosts that carry this badge click through to focus, so the click
+      // is swallowed the same way the close and eye controls beside it do.
+      // Only the click: no host binds mousedown or pointerdown on an ancestor,
+      // and their drag-to-reorder is HTML5 `draggable` + onDragStart, which the
+      // browser starts independently of React's synthetic propagation.
       onClick={(e) => {
         e.stopPropagation();
         reconnectSession(sessionId);
       }}
-      className="shrink-0 flex items-center p-0.5 rounded transition-colors"
+      // p-1 matches the icon buttons it sits beside (the cell header's
+      // CellIconButton row), so its presence does not shorten the row.
+      //
+      // "lg" is the mobile rail — the only touch-first host, where the visual
+      // pill is 21px. The extra target is a transparent ::after inset outwards
+      // rather than more padding: it lifts the tap area past the 24px minimum
+      // without growing the badge's box, which rides on the corner of a 28px
+      // pill inside a horizontally scrolling row.
+      className={`shrink-0 flex items-center rounded transition-colors p-1 ${
+        size === "lg"
+          ? "relative after:absolute after:-inset-1 after:content-['']"
+          : ""
+      }`}
       style={{ color: "var(--yellow, #e0af68)" }}
       onMouseEnter={(e) => {
         e.currentTarget.style.color = "var(--orange, #ff9e64)";
@@ -75,5 +86,3 @@ export function TerminalDisconnectedBadge({ sessionId, size = "sm" }: Props) {
     </button>
   );
 }
-
-export default TerminalDisconnectedBadge;
