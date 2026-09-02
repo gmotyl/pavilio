@@ -6,6 +6,7 @@ import type { SessionMeta } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
+import { ProjectColorPicker } from "./ProjectColorPicker";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
 import type { ColumnLayout } from "./columnLayout";
@@ -407,6 +408,12 @@ function TerminalCell({
           >
             <Eye size={11} />
           </CellIconButton>
+          {/* Colour is a property of the project, not of this cell — the
+              picker names the project so that is not a surprise. */}
+          <ProjectColorPicker
+            project={session.project}
+            testId={`terminal-cell-color-${session.id}`}
+          />
           <CellIconButton
             testId={`terminal-cell-maximize-${session.id}`}
             title={maximized ? "Restore" : "Maximize"}

@@ -608,3 +608,40 @@ describe("TerminalLayoutGrid — project colour", () => {
     expect(headerColor(0)).not.toBe(headerColor(1));
   });
 });
+
+describe("TerminalLayoutGrid — project colour picker", () => {
+  beforeEach(() => installProjectColors());
+
+  it("sits between the eye and maximize buttons, sized like its siblings", () => {
+    const session = makeSession({ id: "s-pick", project: "alpha" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+
+    const eye = screen.getByTestId("terminal-cell-eye-s-pick");
+    const color = screen.getByTestId("terminal-cell-color-s-pick");
+    const maximize = screen.getByTestId("terminal-cell-maximize-s-pick");
+
+    // The control needs a positioning wrapper for its popover, so compare the
+    // slot it occupies in the group rather than the button itself.
+    const group = Array.from(eye.parentElement!.children);
+    const slot = group.findIndex((el) => el.contains(color));
+    expect(slot).toBe(group.indexOf(eye) + 1);
+    expect(group.indexOf(maximize)).toBe(slot + 1);
+
+    // The old picker hung off the 6x6px activity LED. This one is a real
+    // control: same padding and icon size as the buttons beside it.
+    expect(color.className).toBe(eye.className);
+    expect(color.querySelector("svg")?.getAttribute("width")).toBe(
+      eye.querySelector("svg")?.getAttribute("width"),
+    );
+  });
+
+  it("opens a picker naming the cell's project without focusing the cell", () => {
+    const session = makeSession({ id: "s-pick2", project: "beta" });
+    const { onFocus } = renderGrid({ sessions: [session], focusedId: null });
+
+    fireEvent.click(screen.getByTestId("terminal-cell-color-s-pick2"));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("beta");
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+});
