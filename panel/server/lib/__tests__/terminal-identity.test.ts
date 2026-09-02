@@ -46,6 +46,30 @@ describe("terminal-identity", () => {
     expect(() => removeName(UUID)).not.toThrow();
   });
 
+  it("removeName rejects a non-uuid id without touching the filesystem", () => {
+    // "../escape" resolves (via namesDir()/../escape) to a path sibling to
+    // namesDir() — this file must survive untouched if the id is rejected
+    // before ever reaching rmSync.
+    const escapee = join(dir, "escape");
+    writeFileSync(escapee, "should survive");
+    removeName("../escape");
+    removeName("");
+    expect(existsSync(escapee)).toBe(true);
+    expect(existsSync(namesDir())).toBe(false);
+  });
+
+  it("removeName swallows filesystem errors", () => {
+    // Same "point the state dir at a file" trick as writeName's error test:
+    // namesDir() then resolves under a plain file, so rmSync's own lstat
+    // fails with ENOTDIR instead of the missing-file ENOENT that
+    // {force:true} already tolerates.
+    writeName(UUID, "alokai-1");
+    const blocker = join(dir, "blocker");
+    writeFileSync(blocker, "not a dir");
+    process.env.PANEL_AUTH_STATE_DIR = blocker;
+    expect(() => removeName(UUID)).not.toThrow();
+  });
+
   it("writeName rejects a non-uuid id without touching the filesystem", () => {
     writeName("../escape", "evil");
     writeName("", "evil");
@@ -84,6 +108,16 @@ describe("terminal-identity", () => {
     expect(existsSync(namesDir())).toBe(false);
     expect(() => sweepNames([UUID])).not.toThrow();
     expect(existsSync(namesDir())).toBe(false);
+  });
+
+  it("sweepNames swallows filesystem errors", () => {
+    // Make namesDir() itself a plain file rather than a directory: the
+    // `existsSync` early-return check still passes (the path exists), but
+    // `readdirSync` on it throws ENOTDIR — a real throw from inside the
+    // scan, not the missing-directory case above.
+    writeFileSync(join(dir, "terminals"), "not a dir");
+    expect(existsSync(namesDir())).toBe(true);
+    expect(() => sweepNames([])).not.toThrow();
   });
 
   it("nextSessionName numbers the first session in a project 1", () => {
