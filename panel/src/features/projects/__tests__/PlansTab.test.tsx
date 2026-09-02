@@ -225,6 +225,63 @@ describe("PlansTab", () => {
     expect(screen.getByTestId("file-list-sidebar-peek")).toBeTruthy();
   });
 
+  it("surfaces a configured OpenSpec source whose directory is missing", async () => {
+    mockFetchResponses({
+      "plans-tree": {
+        project: "alokai",
+        sources: [
+          TREE.sources[0],
+          {
+            id: "openspec:repo:storefront",
+            label: "storefront (OpenSpec)",
+            kind: "openspec",
+            mode: "store",
+            openspecDir: "/p/projects/alokai/projects/alokai/plans/storefront/openspec",
+            changes: [],
+            missing: true,
+          },
+        ],
+      },
+      "plans/read": { content: "# body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    const header = await screen.findByTestId("plans-tab-source-openspec:repo:storefront");
+    expect(header).toBeTruthy();
+    // The configured path is on screen so a wrong repos.json root is fixable
+    // without reading server logs.
+    expect(
+      screen.getByText(
+        /\/p\/projects\/alokai\/projects\/alokai\/plans\/storefront\/openspec/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/repos\.json/)).toBeTruthy();
+  });
+
+  it("surfaces an OpenSpec config the server rejected", async () => {
+    mockFetchResponses({
+      "plans-tree": {
+        project: "alokai",
+        sources: [
+          {
+            id: "openspec:repo:storefront",
+            label: "storefront (OpenSpec)",
+            kind: "openspec-error",
+            configuredRoot: "../sibling",
+            message: "OpenSpec root escapes its boundary: /r/sibling is not under /r/storefront",
+          },
+          TREE.sources[0],
+        ],
+      },
+      "plans/read": { content: "# body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    expect(await screen.findByTestId("plans-tab-source-openspec:repo:storefront")).toBeTruthy();
+    expect(screen.getByText(/escapes its boundary/)).toBeTruthy();
+    expect(screen.getByText("../sibling")).toBeTruthy();
+    // The legacy sources still render — a bad config disables one repo, not the tab.
+    expect(screen.getByTestId("plans-tab-file-project-2026-01-01-foo.md")).toBeTruthy();
+  });
+
   it("groups equal OpenSpec change ids across sources", async () => {
     mockFetchResponses({
       "plans-tree": OPENSPEC_TREE,

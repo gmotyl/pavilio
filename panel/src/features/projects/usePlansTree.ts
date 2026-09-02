@@ -48,13 +48,38 @@ export interface OpenSpecPlanSource {
   mode: "native" | "store";
   openspecDir: string;
   changes: ChangeRecord[];
+  /**
+   * Set when repos.json configures this source but `openspecDir` does not exist
+   * — almost always a wrong `openspec.root`. Rendered as a warning group so the
+   * typo is visible instead of looking like an empty backend.
+   */
+  missing?: true;
 }
 
-export type PlanSource = LegacyPlanSource | OpenSpecPlanSource;
+/**
+ * An `openspec` entry in repos.json the server refused to resolve — unknown mode,
+ * or a root escaping its repository/project. It has no directory to list: the
+ * point is to show the user the config that was rejected and why.
+ */
+export interface InvalidOpenSpecPlanSource {
+  id: string;
+  label: string;
+  kind: "openspec-error";
+  /** The `root` exactly as written in repos.json; null when none was given. */
+  configuredRoot: string | null;
+  message: string;
+}
+
+export type PlanSource = LegacyPlanSource | OpenSpecPlanSource | InvalidOpenSpecPlanSource;
 
 /** Narrow a plans source to its OpenSpec variant (carries `changes`, not `files`). */
 export function isOpenSpecSource(s: PlanSource): s is OpenSpecPlanSource {
   return (s as OpenSpecPlanSource).kind === "openspec";
+}
+
+/** Narrow a plans source to a rejected OpenSpec config (no directory, no files). */
+export function isInvalidOpenSpecSource(s: PlanSource): s is InvalidOpenSpecPlanSource {
+  return (s as InvalidOpenSpecPlanSource).kind === "openspec-error";
 }
 
 export interface PlansTreeResponse {
