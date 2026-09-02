@@ -8,7 +8,7 @@ import {
   uploadPastedImage,
 } from "./imagePaste";
 import { viewportLooksBlank } from "./viewportBlank";
-import { WATCHDOG_STALE_MS } from "./useMobileReconnect";
+import { WATCHDOG_STALE_MS } from "./watchdogConfig";
 
 // Shared cache of live xterm instances, keyed by sessionId.
 // The Terminal (+ its DOM node) survive React unmounts so that scrollback
@@ -40,6 +40,29 @@ export const THEME = {
 
 type ExitListener = (code: number | undefined) => void;
 type WsListener = (ws: WebSocket) => void;
+
+/**
+ * Liveness of this browser's socket for a session.
+ *
+ * "unattached" is reported for a session with no pooled instance in this
+ * browser — no `TerminalView` has ever mounted it here, so there is no socket
+ * to be alive or dead. That is a normal, frequent state (every session not
+ * mounted in this tab) and must never read as a fault.
+ */
+export type ConnectionState = "connected" | "disconnected" | "unattached";
+
+/**
+ * What produced a reconnect-log record. Mirrors the server-side enum in
+ * `server/lib/reconnect-log.ts`; the endpoint coerces anything else to
+ * "manual", so an out-of-sync client cannot widen the column.
+ *
+ * - `manual` — the user clicked Reconnect (or the disconnected badge).
+ * - `disconnect` — an attached session's socket died on its own.
+ * - `auto-blank` — a blank-gated path reopened the session unasked.
+ */
+export type ReconnectTrigger = "manual" | "disconnect" | "auto-blank";
+
+type ConnectionListener = (state: ConnectionState) => void;
 
 export interface LiveTerminal {
   sessionId: string;
@@ -80,9 +103,196 @@ interface InternalInstance extends LiveTerminal {
   // every 10s, lastMessageAt rarely goes stale; lastFrameAt distinguishes
   // "TUI idle but server alive" from "actually frozen" for gate tuning.
   lastFrameAt: number;
+  // Liveness of `ws` as last reported by its own open/close/error events.
+  // Only ever "connected" or "disconnected" — "unattached" is the absence of
+  // an instance, so it has no representation here.
+  connectionState: Exclude<ConnectionState, "unattached">;
 }
 
 const instances = new Map<string, InternalInstance>();
+
+// Connection-state subscribers, keyed by sessionId and deliberately NOT held
+// on the instance: a subscriber (the badge in the chrome) can outlive the
+// pooled instance, and can subscribe to a session that has no instance yet.
+// Entries are removed once their set empties, so nothing accumulates.
+const connectionListeners = new Map<string, Set<ConnectionListener>>();
+
+/**
+ * Snapshot the terminal's state right now, in the exact field set the log has
+ * used since #58. `blankAtClick` keeps its click-era name for the automatic
+ * triggers too: renaming it would split the file into two incomparable eras,
+ * which is the opposite of why the log exists.
+ */
+function buildReconnectMetric(
+  inst: InternalInstance,
+  trigger: ReconnectTrigger,
+) {
+  const now = Date.now();
+  // pingMs includes keep-alive pings (matches the watchdog's own signal);
+  // frameMs counts only real PTY frames, so it stays high while the TUI is
+  // frozen even though pings keep pingMs fresh.
+  const pingMs = now - inst.lastMessageAt;
+  const frameMs = now - inst.lastFrameAt;
+  return {
+    sessionId: inst.sessionId,
+    blankAtClick: viewportLooksBlank(inst.terminal),
+    // -1, never undefined: JSON.stringify drops an undefined value, so an
+    // absent socket would silently remove the key and break the frozen field
+    // set the log's readers group by.
+    wsReadyState: inst.ws ? inst.ws.readyState : -1,
+    pingMs,
+    frameMs,
+    cols: inst.terminal.cols,
+    rows: inst.terminal.rows,
+    stale: pingMs > WATCHDOG_STALE_MS,
+    trigger,
+  };
+}
+
+/**
+ * Append one line to the reconnect log. Strictly fire-and-forget: never
+ * awaited, and every failure mode — a throwing metric read, a synchronous
+ * fetch throw, a rejected promise — is swallowed here so that no caller's real
+ * work (a reconnect, a socket close) can be blocked by diagnostics.
+ */
+function logReconnectMetric(
+  inst: InternalInstance,
+  trigger: ReconnectTrigger,
+): void {
+  try {
+    void fetch("/api/terminal/reconnect-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildReconnectMetric(inst, trigger)),
+    }).catch(() => {});
+  } catch {
+    // Logging must never block the caller.
+  }
+}
+
+/**
+ * Record a reopen that a blank-gated path performed on its own, identified by
+ * the socket the caller holds — `useMobileReconnect` is handed a ws, not a
+ * session id, and the pool is the only thing that can map one to the other.
+ *
+ * Call it BEFORE the reopen, so the metric describes the state that prompted
+ * the reopen rather than the fresh socket. A ws belonging to no pooled
+ * instance (or none at all) is a silent no-op.
+ *
+ * That no-op is a real, accepted gap: a null ws, or one already superseded by
+ * a later reopen, matches no instance, so the reopen it precedes goes
+ * UNLOGGED. The log therefore under-counts auto-blank reopens — it never
+ * mis-attributes one to the wrong session, which is the trade this identity
+ * lookup buys. Read the auto-blank count as a floor, not a total.
+ */
+export function reportAutoBlankReopen(ws: WebSocket | null): void {
+  if (!ws) return;
+  for (const inst of instances.values()) {
+    if (inst.ws === ws) {
+      logReconnectMetric(inst, "auto-blank");
+      return;
+    }
+  }
+}
+
+/**
+ * Report a connection-state transition to every subscriber for the session.
+ * A throwing subscriber must not starve the rest — same contract (and same
+ * console.warn shape) as the `wsListeners` loop in connectWs.
+ */
+function emitConnectionState(sessionId: string, state: ConnectionState): void {
+  const listeners = connectionListeners.get(sessionId);
+  if (!listeners) return;
+  // Snapshot: a subscriber is allowed to unsubscribe from inside its callback.
+  for (const l of [...listeners]) {
+    try {
+      l(state);
+    } catch (err) {
+      console.warn(
+        `[terminal:${sessionId}] connectionChange listener threw:`,
+        err,
+      );
+    }
+  }
+}
+
+function setConnectionState(
+  inst: InternalInstance,
+  state: Exclude<ConnectionState, "unattached">,
+): void {
+  // Log on the TRANSITION into disconnected, not on the events that cause it.
+  // A browser can deliver `error` and then `close` for a single socket death,
+  // and the transition is what dedupes them: one death, one row. It also bounds
+  // volume structurally — a socket can only die once, so no path can loop.
+  //
+  // A cleanly exited process is excluded. `[Process exited]` is already on
+  // screen and the server closes the socket right behind the exit frame
+  // (watcher.ts enqueues both in one synchronous block), so those closes would
+  // be the most common rows in the file while telling us nothing about the
+  // question the log exists to answer: did a *live* terminal die, and was there
+  // content on screen when it did?
+  if (
+    state === "disconnected" &&
+    inst.connectionState !== "disconnected" &&
+    !inst.exited
+  ) {
+    logReconnectMetric(inst, "disconnect");
+  }
+  inst.connectionState = state;
+  emitConnectionState(inst.sessionId, state);
+}
+
+/**
+ * Current liveness of this browser's socket for `sessionId`. Never throws for
+ * an unknown session — see {@link ConnectionState}.
+ */
+export function getConnectionState(sessionId: string): ConnectionState {
+  const inst = instances.get(sessionId);
+  if (!inst) return "unattached";
+  return inst.connectionState;
+}
+
+/**
+ * True when the session's process has exited normally (an exit frame was
+ * received). `false` for a session with no pooled instance in this browser.
+ *
+ * Deliberately separate from {@link ConnectionState}: an exit frame does not
+ * touch connection state, so a cleanly exited shell reads "connected" until
+ * the server closes the socket and then "disconnected" — indistinguishable
+ * from a socket that died under a live process. Callers that mean "looks alive
+ * but isn't" must exclude an exited session with this, since the terminal
+ * already says `[Process exited]` on screen.
+ */
+export function hasExited(sessionId: string): boolean {
+  return instances.get(sessionId)?.exited ?? false;
+}
+
+/**
+ * Subscribe to connection-state changes for a session. Fires on the ws
+ * open / close / error events, on reopen()'s identity swap, and when the
+ * instance is destroyed ("unattached"). Does NOT fire synchronously on
+ * subscription — prime with {@link getConnectionState} first.
+ *
+ * Safe (and expected) to call for a session with no instance. Returns an
+ * unsubscribe function; calling it more than once is harmless.
+ */
+export function onConnectionChange(
+  sessionId: string,
+  cb: ConnectionListener,
+): () => void {
+  let listeners = connectionListeners.get(sessionId);
+  if (!listeners) {
+    listeners = new Set();
+    connectionListeners.set(sessionId, listeners);
+  }
+  listeners.add(cb);
+  return () => {
+    const current = connectionListeners.get(sessionId);
+    if (!current) return;
+    current.delete(cb);
+    if (current.size === 0) connectionListeners.delete(sessionId);
+  };
+}
 
 // Optional WebSocket constructor override (for tests that don't run in a
 // real browser). Falls back to the global constructor.
@@ -317,13 +527,28 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
     );
   };
 
+  // A handler must only speak for the socket it was registered on: a late
+  // event from a superseded (reopen) or destroyed socket must not overwrite
+  // state that belongs to its successor.
+  const isCurrent = () => instances.get(sessionId) === inst && inst.ws === ws;
+
   ws.onopen = () => {
+    // The SECOND of two intentional "connected" emits (the first is the
+    // optimistic one at the `inst.ws` swap below). Do NOT dedupe the pair:
+    // dropping the swap emit would strand first attach at "unattached" until
+    // the handshake lands, and dropping this one would leave a failed-then-
+    // retried handshake permanently optimistic.
+    if (isCurrent()) setConnectionState(inst, "connected");
     try {
       inst.fitAddon.fit();
     } catch (err) {
       console.warn(`[terminal:${sessionId}] fit on ws open failed:`, err);
     }
     sendResize();
+  };
+
+  ws.onclose = () => {
+    if (isCurrent()) setConnectionState(inst, "disconnected");
   };
 
   ws.onmessage = (event) => {
@@ -357,6 +582,10 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
   ws.onerror = (event) => {
     console.warn(`[terminal:${sessionId}] websocket error:`, event);
     inst.terminal.write("\r\n\x1b[31m[WebSocket error]\x1b[0m\r\n");
+    // An error can arrive while readyState is still OPEN, and a browser does
+    // not always follow it with a close we can observe — so the error itself
+    // is the disconnect signal, not a hint to re-read readyState.
+    if (isCurrent()) setConnectionState(inst, "disconnected");
   };
 
   // Re-register the terminal.onData → ws.send binding against the fresh
@@ -369,6 +598,19 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
   });
 
   inst.ws = ws;
+
+  // The identity swap itself is a connection-state event: an attach
+  // (unattached → connected) or a reopen of a socket that had died. Reported
+  // optimistically, before the socket has finished its handshake, so that a
+  // terminal being connected right now does not wear a disconnected badge for
+  // the duration of the handshake; a handshake that fails reports itself
+  // through the error/close handlers above.
+  //
+  // The FIRST of two intentional "connected" emits — ws.onopen above fires the
+  // second. The pair must not be deduped (see that comment), and this one only
+  // reaches a snapshot-reading consumer because createInstance pools the
+  // instance before calling connectWs.
+  setConnectionState(inst, "connected");
 
   // Notify subscribers (TerminalView) that the ws identity changed so
   // they can feed the new reference into useMobileReconnect.
@@ -500,6 +742,9 @@ function createInstance(sessionId: string): InternalInstance {
     dataDisposable: null,
     lastMessageAt: Date.now(),
     lastFrameAt: Date.now(),
+    // Temporary placeholder; replaced synchronously by connectWs() together
+    // with `ws`, which it describes.
+    connectionState: "disconnected",
     send: (data: string) => {
       const currentWs = inst.ws;
       if (currentWs && currentWs.readyState === WebSocket.OPEN) {
@@ -637,50 +882,38 @@ function createInstance(sessionId: string): InternalInstance {
     { capture: true },
   );
 
+  // Pool BEFORE connecting — the ordering is load-bearing, twice over:
+  //   • connectWs's `isCurrent()` guard is `instances.get(sessionId) === inst`,
+  //     and that must be true for the whole time connectWs runs, so the fresh
+  //     socket's own handlers recognise themselves as current.
+  //   • connectWs emits "connected" at the `inst.ws` swap. Emitting while the
+  //     instance is not yet pooled means getConnectionState() still answers
+  //     "unattached" at that instant, so a useSyncExternalStore consumer
+  //     re-reads an unchanged snapshot and DROPS the emit rather than merely
+  //     wasting it. `inst` is fully constructed here, so there is no reason to
+  //     wait.
+  instances.set(sessionId, inst);
+
   connectWs(sessionId, inst);
 
-  instances.set(sessionId, inst);
   return inst;
 }
 
 /**
- * Manually reopen a session's ws (the toolbar Reconnect button). Captures
- * state-at-click metrics and POSTs them to the reconnect log — best-effort,
- * fire-and-forget — before tearing down and rebuilding the socket. The log is
- * how we'll later judge whether the auto-reconnect gate should have fired.
+ * Manually reopen a session's ws (the toolbar Reconnect button, and the
+ * disconnected badge). Captures state-at-click metrics and POSTs them to the
+ * reconnect log — best-effort, fire-and-forget — before tearing down and
+ * rebuilding the socket.
+ *
+ * Deliberately logs before `reopen()`, which is also what keeps this from
+ * double-counting: `reopen()` nulls the old socket's `onclose` before closing
+ * it, so the close it causes is never observed and never adds a `disconnect`
+ * row beside this `manual` one.
  */
 export function reconnectSession(sessionId: string): void {
   const inst = instances.get(sessionId);
   if (!inst) return;
-
-  const now = Date.now();
-  // pingMs includes keep-alive pings (matches the watchdog's own signal);
-  // frameMs counts only real PTY frames, so it stays high while the TUI is
-  // frozen even though pings keep pingMs fresh.
-  const pingMs = now - inst.lastMessageAt;
-  const frameMs = now - inst.lastFrameAt;
-  const metric = {
-    sessionId,
-    blankAtClick: viewportLooksBlank(inst.terminal),
-    wsReadyState: inst.ws?.readyState,
-    pingMs,
-    frameMs,
-    cols: inst.terminal.cols,
-    rows: inst.terminal.rows,
-    stale: pingMs > WATCHDOG_STALE_MS,
-    trigger: "manual",
-  };
-
-  try {
-    void fetch("/api/terminal/reconnect-log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(metric),
-    }).catch(() => {});
-  } catch {
-    // Logging must never block a reconnect.
-  }
-
+  logReconnectMetric(inst, "manual");
   inst.reopen();
 }
 
@@ -719,7 +952,17 @@ export function destroyTerminal(sessionId: string): void {
   } catch (err) {
     console.warn(`[terminal:${sessionId}] dispose onData during destroy:`, err);
   }
+  // Drop the instance from the pool BEFORE closing, so the socket's own
+  // handlers see themselves as superseded and stay silent, and so a
+  // getConnectionState() from inside a listener already reads "unattached".
+  instances.delete(sessionId);
   try {
+    // Detach handlers as reopen() does: a browser's close event lands on a
+    // later tick, and nothing about a destroyed instance should still speak.
+    inst.ws.onopen = null;
+    inst.ws.onmessage = null;
+    inst.ws.onerror = null;
+    inst.ws.onclose = null;
     inst.ws.close();
   } catch (err) {
     console.warn(`[terminal:${sessionId}] ws.close during destroy:`, err);
@@ -730,5 +973,8 @@ export function destroyTerminal(sessionId: string): void {
     console.warn(`[terminal:${sessionId}] terminal.dispose:`, err);
   }
   inst.holder.remove();
-  instances.delete(sessionId);
+  // The session is no longer attached in this browser: no socket, no fault.
+  // Subscribers keep their subscription (they outlive the instance) but must
+  // stop showing a stale disconnected state for a terminal that is gone.
+  emitConnectionState(sessionId, "unattached");
 }

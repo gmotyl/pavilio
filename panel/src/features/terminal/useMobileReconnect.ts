@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react"
+import { reportAutoBlankReopen } from "./terminalInstances"
+import { WATCHDOG_STALE_MS } from "./watchdogConfig"
 
 interface Options {
   ws: WebSocket | null
@@ -8,7 +10,10 @@ interface Options {
   isViewportBlank: () => boolean
 }
 
-export const WATCHDOG_STALE_MS = 25_000
+// Re-exported from the leaf module that owns it: this hook was the original
+// home, so existing importers keep working, while `terminalInstances` reads it
+// straight from the leaf instead of importing this module back.
+export { WATCHDOG_STALE_MS } from "./watchdogConfig"
 const WATCHDOG_CHECK_MS = 2_000
 
 export function useMobileReconnect({
@@ -43,7 +48,18 @@ export function useMobileReconnect({
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return
+      // Anything we could do from here repaints the screen, so the blank check
+      // gates every path — including a dead socket. Refocusing with content on
+      // screen used to reopen unconditionally, scrolling away live output; a
+      // socket that died is now reported as connection state instead (see
+      // onConnectionChange in terminalInstances.ts) and repaired on demand.
+      if (!isViewportBlankRef.current()) return
       if (!ws || ws.readyState !== WebSocket.OPEN) {
+        // Blank, and there is no live socket to nudge over — rebuild it.
+        // Reported before the reopen so the record describes the state that
+        // prompted it; this is one of only two paths that reconnect without
+        // the user asking, and an unreported one is invisible in the log.
+        reportAutoBlankReopen(ws)
         reopenRef.current()
         return
       }
@@ -51,7 +67,6 @@ export function useMobileReconnect({
       // costs a visible flicker, so spend it only when the local repaint
       // (`terminal.refresh()` on the visibilitychange refit) cannot help
       // because the buffer itself came back empty.
-      if (!isViewportBlankRef.current()) return
       const { cols, rows } = getDimsRef.current()
       ws.send(JSON.stringify({ type: "mobile-nudge", cols, rows }))
       lastMessageAtRef.current = Date.now()
@@ -72,7 +87,11 @@ export function useMobileReconnect({
         // over live content flickers and interrupts work; when content is
         // present we stay silent and leave recovery to the manual Reconnect
         // button (see reconnectSession in terminalInstances.ts).
-        if (isViewportBlankRef.current()) reopenRef.current()
+        if (isViewportBlankRef.current()) {
+          // The other unasked reopen — same reporting, same ordering.
+          reportAutoBlankReopen(ws)
+          reopenRef.current()
+        }
       }
     }, WATCHDOG_CHECK_MS)
     return () => clearInterval(id)

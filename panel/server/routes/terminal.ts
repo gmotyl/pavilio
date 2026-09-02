@@ -68,7 +68,11 @@ router.post("/reconnect-log", (req, res) => {
       cols: num(b.cols),
       rows: num(b.rows),
       stale: bool(b.stale),
-      trigger: typeof b.trigger === "string" ? b.trigger : "manual",
+      // Forwarded as sent. Keeping the trigger column an enum is the log's
+      // job, in one place: appendReconnectMetric coerces a present value and
+      // leaves an absent one absent. Normalising here too would default an
+      // unattributed POST to "manual" — recording a click that never happened.
+      trigger: b.trigger,
     });
     res.json({ ok: true });
   } catch (err) {

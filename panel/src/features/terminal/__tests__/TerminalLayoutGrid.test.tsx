@@ -1,9 +1,38 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset } from "../columnLayout";
 import type { ColumnLayout } from "../columnLayout";
+import type { ConnectionState } from "../terminalInstances";
+import { reconnectSession } from "../terminalInstances";
+
+// Connection state is per-browser and lives in the terminal instance pool.
+// Stub the two leaf reads the disconnected badge makes so a cell can be put
+// into the disconnected state without standing up a socket.
+const conn = vi.hoisted(() => ({
+  state: "connected" as ConnectionState,
+  exited: false,
+}));
+
+vi.mock("../useTerminalConnection", () => ({
+  useTerminalConnection: () => conn.state,
+}));
+
+vi.mock("../terminalInstances", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../terminalInstances")>();
+  return {
+    ...actual,
+    hasExited: () => conn.exited,
+    reconnectSession: vi.fn(),
+  };
+});
+
+beforeEach(() => {
+  conn.state = "connected";
+  conn.exited = false;
+  vi.mocked(reconnectSession).mockClear();
+});
 
 // TerminalView pulls in xterm which cannot render in jsdom; stub it.
 // The stub also calls onReady with a fake handle that returns a one-line
@@ -515,5 +544,22 @@ describe("TerminalLayoutGrid — column layout", () => {
       dragStart(screen.getAllByTitle("Drag to swap")[0]);
       dropCtrl(screen.getByTestId("terminal-grid-gutter-1"), true);
     }).not.toThrow();
+  });
+});
+
+describe("TerminalLayoutGrid — disconnected badge", () => {
+  it("shows the badge on a disconnected cell header", () => {
+    conn.state = "disconnected";
+    const session = makeSession({ id: "abc-123" });
+    const { onFocus } = renderGrid({ sessions: [session], focusedId: null });
+
+    const header = screen.getAllByTitle("Drag to swap")[0];
+    const badge = within(header).getByTestId("terminal-disconnected-abc-123");
+    expect(badge).toBeInTheDocument();
+
+    fireEvent.click(badge);
+
+    expect(reconnectSession).toHaveBeenCalledWith("abc-123");
+    expect(onFocus).not.toHaveBeenCalled();
   });
 });

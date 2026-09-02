@@ -4,6 +4,7 @@ import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { nextProjectName } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { LayoutPresetMenu } from "./LayoutPresetMenu";
 
@@ -361,6 +362,9 @@ export function TerminalToolbar({
                   {s.name}
                 </span>
               )}
+              {/* Sits before the close ×, and unlike it is never hover-gated:
+                  a warning the user has to hover to find is not a warning. */}
+              <TerminalDisconnectedBadge sessionId={s.id} />
               <button
                 type="button"
                 data-testid={`terminal-toolbar-close-${s.id}`}

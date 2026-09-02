@@ -1,5 +1,11 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The hook reports its own automatic reopens to the reconnect log. Stub the
+// pool module rather than importing xterm into this jsdom-only test.
+const reportAutoBlankReopen = vi.hoisted(() => vi.fn());
+vi.mock("../terminalInstances", () => ({ reportAutoBlankReopen }));
+
 import { useMobileReconnect } from "../useMobileReconnect";
 
 function fakeWs(state: number) {
@@ -19,7 +25,10 @@ describe("useMobileReconnect", () => {
   // The synthetic ws uses vi.fn() for addEventListener, so the hook's internal
   // "message" listener is stubbed; the watchdog tests exploit that fact to
   // simulate silence (no message events ever reach the ref).
-  beforeEach(() => vi.useFakeTimers());
+  beforeEach(() => {
+    reportAutoBlankReopen.mockClear();
+    vi.useFakeTimers();
+  });
   afterEach(() => {
     vi.useRealTimers();
     Object.defineProperty(document, "visibilityState", {
@@ -73,8 +82,12 @@ describe("useMobileReconnect", () => {
   });
 
 
-  it("calls reopen when ws is closed on visibility return", () => {
-    const { ws } = fakeWs(3); // CLOSED
+  // A dead socket is not on its own a reason to repaint: reopening scrolls
+  // away live output. The socket's own close event marks the session
+  // disconnected (see onConnectionChange in terminalInstances.ts) and the UI
+  // offers a manual reconnect instead.
+  it("does not reopen on refocus when the socket is closed and the viewport has content", () => {
+    const { ws, sent } = fakeWs(3); // CLOSED
     const reopen = vi.fn();
     renderHook(() =>
       useMobileReconnect({
@@ -84,10 +97,28 @@ describe("useMobileReconnect", () => {
         isViewportBlank: () => false,
       }),
     );
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
+    becomeVisible();
+    expect(reopen).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
+  });
+
+  // Removing the ungated path must not eat the blank-gated one: a terminal
+  // that came back empty still refills itself. It must reopen rather than
+  // nudge, because send() on a CLOSED socket throws.
+  it("still reopens on refocus when the socket is closed and the viewport is blank", () => {
+    const { ws, sent } = fakeWs(3); // CLOSED
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+        isViewportBlank: () => true,
+      }),
+    );
+    becomeVisible();
     expect(reopen).toHaveBeenCalledTimes(1);
+    expect(sent).toEqual([]);
   });
 
   it("watchdog does NOT reopen after >25s of silence while content is on screen", () => {
@@ -142,5 +173,71 @@ describe("useMobileReconnect", () => {
       vi.advanceTimersByTime(26_000);
     });
     expect(reopen).not.toHaveBeenCalled();
+  });
+
+  // Both blank-gated paths reopen without anyone clicking anything. Unreported,
+  // they are invisible in the log — the very gap that makes today's nine
+  // manual-only lines unable to answer whether automation would have helped.
+  it("reports the blank-gated refocus reopen to the log", () => {
+    const { ws } = fakeWs(3); // CLOSED
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+        isViewportBlank: () => true,
+      }),
+    );
+    becomeVisible();
+    expect(reopen).toHaveBeenCalledTimes(1);
+    expect(reportAutoBlankReopen).toHaveBeenCalledTimes(1);
+    // Reported with the socket it holds, and BEFORE the reopen, so the metric
+    // describes the state that prompted it rather than the fresh socket.
+    expect(reportAutoBlankReopen).toHaveBeenCalledWith(ws);
+    expect(reportAutoBlankReopen.mock.invocationCallOrder[0]).toBeLessThan(
+      reopen.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("reports the watchdog's blank-gated reopen to the log", () => {
+    const { ws } = fakeWs(1);
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+        isViewportBlank: () => true,
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(26_000);
+    });
+    expect(reopen).toHaveBeenCalled();
+    expect(reportAutoBlankReopen).toHaveBeenCalledWith(ws);
+    // Same ordering contract as the refocus path: reported first, so the
+    // metric describes the stale socket rather than its replacement.
+    expect(reportAutoBlankReopen.mock.invocationCallOrder[0]).toBeLessThan(
+      reopen.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("reports nothing on the paths that do not reopen", () => {
+    const { ws } = fakeWs(1);
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen: vi.fn(),
+        // Content on screen: the nudge path and the silent watchdog path.
+        isViewportBlank: () => false,
+      }),
+    );
+    becomeVisible();
+    act(() => {
+      vi.advanceTimersByTime(26_000);
+    });
+    expect(reportAutoBlankReopen).not.toHaveBeenCalled();
   });
 });

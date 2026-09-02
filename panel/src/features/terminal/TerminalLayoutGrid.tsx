@@ -5,6 +5,7 @@ import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import type { SessionMeta } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
 import type { ColumnLayout } from "./columnLayout";
@@ -395,6 +396,9 @@ function TerminalCell({
           {session.name}
         </span>
         <div className="flex gap-0.5">
+          {/* Leads the eye · maximize · kill group. Renders nothing while the
+              socket is healthy, so the group's usual width is unchanged. */}
+          <TerminalDisconnectedBadge sessionId={session.id} />
           <CellIconButton
             testId={`terminal-cell-eye-${session.id}`}
             title={`View viewport text (read aloud / print) — ${navigator.platform.includes("Mac") ? "⌘" : "Ctrl+"}U`}
