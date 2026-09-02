@@ -3,7 +3,13 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "fs
 import { tmpdir } from "os";
 import { join } from "path";
 
-import { namesDir, writeName, removeName, sweepNames } from "../terminal-identity";
+import {
+  namesDir,
+  writeName,
+  removeName,
+  sweepNames,
+  nextSessionName,
+} from "../terminal-identity";
 
 let dir = "";
 const UUID = "11111111-1111-4111-8111-111111111111";
@@ -78,5 +84,30 @@ describe("terminal-identity", () => {
     expect(existsSync(namesDir())).toBe(false);
     expect(() => sweepNames([UUID])).not.toThrow();
     expect(existsSync(namesDir())).toBe(false);
+  });
+
+  it("nextSessionName numbers the first session in a project 1", () => {
+    expect(nextSessionName("alokai", [])).toBe("alokai-1");
+  });
+
+  it("nextSessionName skips gaps left by closed sessions", () => {
+    expect(nextSessionName("alokai", ["alokai-1", "alokai-3"])).toBe(
+      "alokai-4",
+    );
+  });
+
+  it("nextSessionName counts only the given project", () => {
+    expect(nextSessionName("alokai", ["motyl-1", "motyl-2"])).toBe(
+      "alokai-1",
+    );
+  });
+
+  it("nextSessionName ignores renamed and prefix-lookalike names", () => {
+    expect(nextSessionName("alokai", ["alokai-1", "deploy-watch"])).toBe(
+      "alokai-2",
+    );
+    expect(
+      nextSessionName("alokai", ["alokai-1", "alokai-1-old", "alokai-x"]),
+    ).toBe("alokai-2");
   });
 });

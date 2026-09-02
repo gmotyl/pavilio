@@ -56,6 +56,30 @@ export function removeName(id: string): void {
   }
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * `<project>-<max existing suffix + 1>`, counting only names that match
+ * `^<project>-(\d+)$` exactly. A renamed session (`deploy-watch`) or a
+ * lookalike (`alokai-1-old`, `alokai-x`) doesn't count and keeps its name —
+ * only the counter's own numbering scheme participates. Taking the max
+ * suffix rather than the count means a closed session's number is never
+ * reused within a server lifetime, so two live sessions never share a name.
+ */
+export function nextSessionName(project: string, existingNames: string[]): string {
+  const pattern = new RegExp(`^${escapeRegExp(project)}-(\\d+)$`);
+  let max = 0;
+  for (const name of existingNames) {
+    const match = pattern.exec(name);
+    if (!match) continue;
+    const n = Number(match[1]);
+    if (n > max) max = n;
+  }
+  return `${project}-${max + 1}`;
+}
+
 /**
  * Delete every identity file whose id is not in `liveIds` — the cleanup for
  * sessions that vanished without going through `removeName` (a crashed
