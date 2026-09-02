@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useTerminalOrdering } from "../useTerminalOrdering";
@@ -198,5 +199,95 @@ describe("useTerminalOrdering", () => {
     rerender({ scope: "metro" });
     expect(result.current.sessionOrder).toEqual(["z"]);
     expect(ids(result.current.columnLayout)).toEqual([["z"]]);
+  });
+
+  // StrictMode double-invokes state updaters and reducers. A `setColumnLayout` call nested
+  // inside a `setSessionOrder` updater is therefore replayed, which is how one session came
+  // to render in two grid cells. The state transition must be a pure function of
+  // {order, layout} + action so that a replayed invocation is indistinguishable from one.
+  it("appends exactly one layout entry for a new session under StrictMode", () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["a", "b"]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([[{ sessionId: "a", weight: 1 }], [{ sessionId: "b", weight: 1 }]]),
+    );
+    const { result } = renderHook(
+      () => useTerminalOrdering("vector", [session("a"), session("b"), session("c")]),
+      { wrapper: StrictMode },
+    );
+
+    act(() => result.current.appendId("c"));
+
+    expect(result.current.sessionOrder).toEqual(["a", "b", "c"]);
+    const flat = result.current.columnLayout.flat().map((entry) => entry.sessionId);
+    expect(flat.filter((id) => id === "c")).toHaveLength(1);
+    expect(flat).toEqual(["a", "b", "c"]);
+    expect(ids(result.current.columnLayout)).toEqual([["a"], ["b", "c"]]);
+  });
+
+  // The real sequence when a terminal is created: the create call appends the id
+  // optimistically, then the refetch syncs the server's id set over the top. Both
+  // reconcile the layout, so a non-idempotent transition appends the id twice.
+  it("does not duplicate a session when sync follows append for the same id", () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["a", "b"]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([[{ sessionId: "a", weight: 1 }], [{ sessionId: "b", weight: 1 }]]),
+    );
+    const { result } = renderHook(
+      () => useTerminalOrdering("vector", [session("a"), session("b"), session("c")]),
+      { wrapper: StrictMode },
+    );
+
+    act(() => result.current.appendId("c"));
+    act(() => result.current.syncIds(["a", "b", "c"]));
+
+    expect(result.current.sessionOrder).toEqual(["a", "b", "c"]);
+    const flat = result.current.columnLayout.flat().map((entry) => entry.sessionId);
+    expect(flat).toEqual(["a", "b", "c"]);
+    expect(
+      JSON.parse(localStorage.getItem("panel-terminal-layout-vector")!),
+    ).toEqual([
+      [{ sessionId: "a", weight: 1 }],
+      [{ sessionId: "b", weight: 1 }, { sessionId: "c", weight: 1 }],
+    ]);
+  });
+
+  // The scope swap is adjusted during render, not in an effect: an effect would only queue
+  // the swap while the persist effects run in that same commit, writing the previous scope's
+  // order and layout under the NEW scope's keys.
+  it("swapping scope loads the new scope's stored state without cross-writing keys", () => {
+    const vectorLayout = [
+      [{ sessionId: "a", weight: 1 }],
+      [{ sessionId: "b", weight: 1 }],
+    ];
+    const metroLayout = [[{ sessionId: "z", weight: 3 }]];
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["a", "b"]));
+    localStorage.setItem("panel-terminal-layout-vector", JSON.stringify(vectorLayout));
+    localStorage.setItem("panel-terminal-order-metro", JSON.stringify(["z"]));
+    localStorage.setItem("panel-terminal-layout-metro", JSON.stringify(metroLayout));
+
+    const { result, rerender } = renderHook(
+      ({ scope }: { scope: string }) => useTerminalOrdering(scope, []),
+      { initialProps: { scope: "vector" }, wrapper: StrictMode },
+    );
+    expect(result.current.sessionOrder).toEqual(["a", "b"]);
+
+    rerender({ scope: "metro" });
+
+    expect(result.current.sessionOrder).toEqual(["z"]);
+    expect(result.current.columnLayout).toEqual(metroLayout);
+    // Neither scope's keys may hold the other scope's data.
+    expect(JSON.parse(localStorage.getItem("panel-terminal-order-metro")!)).toEqual(["z"]);
+    expect(JSON.parse(localStorage.getItem("panel-terminal-layout-metro")!)).toEqual(
+      metroLayout,
+    );
+    expect(JSON.parse(localStorage.getItem("panel-terminal-order-vector")!)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(JSON.parse(localStorage.getItem("panel-terminal-layout-vector")!)).toEqual(
+      vectorLayout,
+    );
   });
 });
