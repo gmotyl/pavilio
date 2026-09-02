@@ -128,6 +128,16 @@ interface ChangeGroup {
   children: ChangeGroupChild[];
 }
 
+/**
+ * A change directory has no mtime of its own, so a group's date is the newest
+ * artifact it contains — across ALL its sources, not just the first child's.
+ */
+function groupMtime(g: ChangeGroup): number {
+  let max = 0;
+  for (const c of g.children) for (const a of c.artifacts) if (a.modified > max) max = a.modified;
+  return max;
+}
+
 function ChangeGroupRows({
   group,
   selectedPath,
@@ -373,13 +383,18 @@ export default function PlansTab({ projectName }: Props) {
       }
     }
     const groups = [...byChange.values()];
-    // Active first, then archived; stable-sorted by change id within each band.
+    // Active first, then archived — the band split is unconditional; the sort
+    // control only breaks ties within a band.
     groups.sort((a, b) => {
       if (a.archived !== b.archived) return a.archived ? 1 : -1;
-      return a.changeId.localeCompare(b.changeId);
+      const cmp =
+        controls.sortKey === "date"
+          ? groupMtime(a) - groupMtime(b)
+          : a.changeId.localeCompare(b.changeId, undefined, { sensitivity: "base" });
+      return controls.sortDir === "desc" ? -cmp : cmp;
     });
     return groups;
-  }, [openspecSources]);
+  }, [openspecSources, controls.sortKey, controls.sortDir]);
 
   const sortOpts = {
     getName: (f: PlanFile) => f.filename,
