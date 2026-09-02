@@ -92,6 +92,16 @@ describe("useTerminalOrdering", () => {
     expect(JSON.parse(localStorage.getItem("panel-terminal-layout-vector")!)).toEqual(clean);
   });
 
+  // An array of non-arrays passes the top-level `Array.isArray` guard, so the shape check
+  // lands inside `dedupeLayout`'s `column.filter` — which throws, and `readLayout`'s catch
+  // turns that into a warn plus the empty sentinel. Before the de-dupe on read it leaked
+  // through as a bogus `ColumnLayout`.
+  it("discards an array of non-columns", () => {
+    localStorage.setItem("panel-terminal-layout-vector", JSON.stringify([1, 2]));
+    const { result } = renderHook(() => useTerminalOrdering("vector", []));
+    expect(result.current.columnLayout).toEqual([]);
+  });
+
   it("removes the legacy count-only columns key on mount", () => {
     localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([1, 2]));
     renderHook(() => useTerminalOrdering("vector", []));
