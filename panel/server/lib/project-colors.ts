@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { join, dirname } from "node:path";
 import { getConfig } from "../config.js";
 
@@ -32,20 +39,35 @@ function storePath(): string {
   return join(getConfig().projectsDir, ".panel", "project-colors.json");
 }
 
-/** Absent, empty, malformed, or not an object all mean "no colours assigned yet". */
+/**
+ * A map with **no prototype**. Project names come from directory names, so
+ * `constructor`, `toString` and friends are all legal ones: on a plain object
+ * literal `colors["constructor"]` would resolve up the prototype chain, the
+ * project would look already-assigned, and the value handed to a consumer
+ * would be a *function* rather than a hex string.
+ */
+function emptyStore(): Record<string, string> {
+  return Object.create(null) as Record<string, string>;
+}
+
+/**
+ * Absent, empty, malformed, or not an object all mean "no colours assigned yet".
+ * A single bad *entry*, though, only discards that entry: dropping the whole
+ * file would silently recolour every project in a git-tracked file.
+ */
 function readStore(): Record<string, string> {
   const file = storePath();
-  if (!existsSync(file)) return {};
+  const out = emptyStore();
+  if (!existsSync(file)) return out;
   try {
     const parsed = JSON.parse(readFileSync(file, "utf-8"));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out: Record<string, string> = {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
     for (const [name, hex] of Object.entries(parsed)) {
       if (typeof hex === "string" && HEX_RE.test(hex)) out[name] = hex;
     }
     return out;
   } catch {
-    return {};
+    return emptyStore();
   }
 }
 
@@ -58,8 +80,19 @@ function writeStore(colors: Record<string, string>): void {
   const file = storePath();
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp.${process.pid}`;
-  writeFileSync(tmp, JSON.stringify(colors, null, 2) + "\n", "utf-8");
-  renameSync(tmp, file);
+  try {
+    writeFileSync(tmp, JSON.stringify(colors, null, 2) + "\n", "utf-8");
+    renameSync(tmp, file);
+  } catch (err) {
+    // Never leave `<file>.tmp.<pid>` behind: this directory is auto-committed,
+    // so an orphan would be committed as if it were a real artefact.
+    try {
+      rmSync(tmp, { force: true, recursive: true });
+    } catch {
+      // Best effort — the original failure is the one worth reporting.
+    }
+    throw err;
+  }
 }
 
 /**
