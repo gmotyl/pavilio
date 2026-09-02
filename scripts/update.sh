@@ -37,10 +37,22 @@ fi
 
 echo ""
 echo "Syncing panel/..."
-rsync -a \
+# --delete: panel/ is a pure mirror, so a file retired upstream must disappear
+# downstream too. Without it deletions never propagate, and retired modules
+# (routes/skills.ts, routes/commands.ts, features/skills/, features/commands/,
+# usePlanDrag.ts, TerminalNavList.tsx, sessionColors.ts) linger downstream as
+# tracked dead code that nothing imports.
+# Excluded paths are protected from --delete by default (we never pass
+# --delete-excluded), so node_modules/, dist/ and husky's generated .husky/_
+# all survive the prune.
+# Deliberately NOT applied to skills/, scripts/ or commands/ below: those hold
+# legitimate downstream-only content (private skills, local helper scripts)
+# that --delete would destroy.
+rsync -a --delete \
   --exclude='node_modules/' \
   --exclude='dist/' \
   --exclude='.DS_Store' \
+  --exclude='.husky/_' \
   "$UPSTREAM_DIR/panel/" "$REPO_ROOT/panel/"
 
 echo "Syncing skills/..."
