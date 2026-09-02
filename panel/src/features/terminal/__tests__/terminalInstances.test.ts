@@ -446,6 +446,45 @@ describe("terminalInstances", () => {
     expect(logged[0].stale).toBe(false);
   });
 
+  it("logs a second disconnect after a reopen", async () => {
+    // The dedupe is transition-based, not "one line per socket ever": a
+    // session that is repaired and dies again is two deaths and must be two
+    // rows. Without this, a dedupe that simply went quiet after the first
+    // close would look identical to the correct one.
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+
+    closeSocket(createdSockets[0]);
+    expect(loggedMetrics()).toHaveLength(1);
+
+    // Repaired: reopen() swaps in a live socket and moves the state back.
+    inst.reopen();
+    expect(mod.getConnectionState("test-session")).toBe("connected");
+
+    closeSocket(createdSockets[1]);
+
+    const logged = loggedMetrics();
+    expect(logged.map((m) => m.trigger)).toEqual(["disconnect", "disconnect"]);
+  });
+
+  it("stamps wsReadyState even when the instance holds no socket", async () => {
+    // `undefined` would be dropped by JSON.stringify, silently shrinking the
+    // frozen field set; the sentinel keeps every line the same shape.
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+    // The only state in which the pool has an instance but no socket. Written
+    // directly because no public path parks an instance there for long enough
+    // to log from — reopen() fills the field back in on the next line.
+    (inst as { ws: WebSocket | null }).ws = null;
+
+    mod.reconnectSession("test-session");
+
+    const logged = loggedMetrics();
+    expect(logged).toHaveLength(1);
+    expect(Object.keys(logged[0]).sort()).toEqual(METRIC_KEYS);
+    expect(logged[0].wsReadyState).toBe(-1);
+  });
+
   it("logs a ws error as a single disconnect line, not one per event", async () => {
     // A browser can deliver `error` and then `close` for one socket death.
     // The line is emitted on the transition INTO disconnected, so the second

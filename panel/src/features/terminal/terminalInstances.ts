@@ -8,7 +8,7 @@ import {
   uploadPastedImage,
 } from "./imagePaste";
 import { viewportLooksBlank } from "./viewportBlank";
-import { WATCHDOG_STALE_MS } from "./useMobileReconnect";
+import { WATCHDOG_STALE_MS } from "./watchdogConfig";
 
 // Shared cache of live xterm instances, keyed by sessionId.
 // The Terminal (+ its DOM node) survive React unmounts so that scrollback
@@ -136,7 +136,10 @@ function buildReconnectMetric(
   return {
     sessionId: inst.sessionId,
     blankAtClick: viewportLooksBlank(inst.terminal),
-    wsReadyState: inst.ws?.readyState,
+    // -1, never undefined: JSON.stringify drops an undefined value, so an
+    // absent socket would silently remove the key and break the frozen field
+    // set the log's readers group by.
+    wsReadyState: inst.ws ? inst.ws.readyState : -1,
     pingMs,
     frameMs,
     cols: inst.terminal.cols,
@@ -175,6 +178,12 @@ function logReconnectMetric(
  * Call it BEFORE the reopen, so the metric describes the state that prompted
  * the reopen rather than the fresh socket. A ws belonging to no pooled
  * instance (or none at all) is a silent no-op.
+ *
+ * That no-op is a real, accepted gap: a null ws, or one already superseded by
+ * a later reopen, matches no instance, so the reopen it precedes goes
+ * UNLOGGED. The log therefore under-counts auto-blank reopens — it never
+ * mis-attributes one to the wrong session, which is the trade this identity
+ * lookup buys. Read the auto-blank count as a floor, not a total.
  */
 export function reportAutoBlankReopen(ws: WebSocket | null): void {
   if (!ws) return;

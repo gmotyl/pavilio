@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { reportAutoBlankReopen } from "./terminalInstances"
+import { WATCHDOG_STALE_MS } from "./watchdogConfig"
 
 interface Options {
   ws: WebSocket | null
@@ -9,7 +10,10 @@ interface Options {
   isViewportBlank: () => boolean
 }
 
-export const WATCHDOG_STALE_MS = 25_000
+// Re-exported from the leaf module that owns it: this hook was the original
+// home, so existing importers keep working, while `terminalInstances` reads it
+// straight from the leaf instead of importing this module back.
+export { WATCHDOG_STALE_MS } from "./watchdogConfig"
 const WATCHDOG_CHECK_MS = 2_000
 
 export function useMobileReconnect({

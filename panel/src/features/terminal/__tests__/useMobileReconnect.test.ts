@@ -216,6 +216,11 @@ describe("useMobileReconnect", () => {
     });
     expect(reopen).toHaveBeenCalled();
     expect(reportAutoBlankReopen).toHaveBeenCalledWith(ws);
+    // Same ordering contract as the refocus path: reported first, so the
+    // metric describes the stale socket rather than its replacement.
+    expect(reportAutoBlankReopen.mock.invocationCallOrder[0]).toBeLessThan(
+      reopen.mock.invocationCallOrder[0],
+    );
   });
 
   it("reports nothing on the paths that do not reopen", () => {

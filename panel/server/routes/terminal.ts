@@ -10,10 +10,7 @@ import {
   destroySession,
   updateSession,
 } from "../lib/terminal-manager.js";
-import {
-  appendReconnectMetric,
-  normalizeTrigger,
-} from "../lib/reconnect-log.js";
+import { appendReconnectMetric } from "../lib/reconnect-log.js";
 import { getConfig } from "../config.js";
 
 function expandPath(p: string): string {
@@ -71,9 +68,11 @@ router.post("/reconnect-log", (req, res) => {
       cols: num(b.cols),
       rows: num(b.rows),
       stale: bool(b.stale),
-      // Not `typeof === "string"`: an unrecognised trigger is recorded as
-      // "manual" rather than stored verbatim, so the column stays an enum.
-      trigger: normalizeTrigger(b.trigger),
+      // Forwarded as sent. Keeping the trigger column an enum is the log's
+      // job, in one place: appendReconnectMetric coerces a present value and
+      // leaves an absent one absent. Normalising here too would default an
+      // unattributed POST to "manual" — recording a click that never happened.
+      trigger: b.trigger,
     });
     res.json({ ok: true });
   } catch (err) {

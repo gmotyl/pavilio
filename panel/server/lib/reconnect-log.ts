@@ -25,10 +25,11 @@ export type ReconnectTrigger = "manual" | "disconnect" | "auto-blank";
 const TRIGGERS: readonly string[] = ["manual", "disconnect", "auto-blank"];
 
 /**
- * Coerce a client-supplied trigger to the enum. Anything unrecognised — a
- * typo, an older client, a hand-rolled POST — is recorded as `"manual"` rather
- * than stored verbatim, so a future query never has to guess what a stray
- * value meant.
+ * Coerce a *present* client-supplied trigger to the enum. Anything
+ * unrecognised — a typo, an older client, a hand-rolled POST — is recorded as
+ * `"manual"` rather than stored verbatim, so a future query never has to guess
+ * what a stray value meant. An absent trigger never reaches here: the caller
+ * omits the field instead (see {@link appendReconnectMetric}).
  */
 export function normalizeTrigger(value: unknown): ReconnectTrigger {
   return typeof value === "string" && TRIGGERS.includes(value)
@@ -52,7 +53,11 @@ export interface ReconnectMetric {
    * triggers write it too — old and new lines have to stay comparable.
    */
   blankAtClick?: boolean;
-  /** WebSocket.readyState (0..3) of the terminal socket at that moment. */
+  /**
+   * WebSocket.readyState (0..3) of the terminal socket at that moment, or -1
+   * when there was no socket — the client sends a sentinel rather than
+   * omitting the field, so every line carries the same key set.
+   */
   wsReadyState?: number;
   /** ms since the last ws message (incl. keep-alive pings). */
   pingMs?: number;
@@ -80,7 +85,8 @@ export function appendReconnectMetric(metric: ReconnectMetric): void {
   const file = logFile();
   // An absent trigger stays absent — the pre-#58 lines have no such field, and
   // inventing "manual" for an unattributed record would misreport it as a
-  // click. A *present* one is coerced to the enum.
+  // click. A *present* one is coerced to the enum. This is the only place that
+  // decides either way: the endpoint hands `trigger` through untouched.
   const line =
     JSON.stringify({
       ts: new Date().toISOString(),
