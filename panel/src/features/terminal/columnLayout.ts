@@ -83,12 +83,41 @@ export function expandPreset(order: string[], sizes: number[]): ColumnLayout {
   return columns;
 }
 
+// Enforces the layout invariant "a ColumnLayout names each session at most once": keeps each
+// session's FIRST entry (with its weight), drops later ones, and removes any column the repair
+// empties. Returns the same reference when there is nothing to repair, so callers that store the
+// result do not churn renders on every clean pass.
+export function dedupeLayout(layout: ColumnLayout): ColumnLayout {
+  const seen = new Set<string>();
+  let dropped = false;
+
+  const columns: ColumnLayout = [];
+  for (const column of layout) {
+    const next = column.filter((entry) => {
+      if (seen.has(entry.sessionId)) {
+        dropped = true;
+        return false;
+      }
+      seen.add(entry.sessionId);
+      return true;
+    });
+    if (next.length > 0) columns.push(next);
+  }
+
+  return dropped ? columns : layout;
+}
+
 // Reconciles a stored layout against a fresh session order (closed-session removal +
 // new-session growth), mirroring the shipped mergeColumnSizes:
 // - ids in prevOrder absent from nextOrder: remove their entry; drop the column if emptied
 //   (weights of untouched entries in that column are unaffected).
 // - ids in nextOrder absent from prevOrder: append a weight-1 entry to the LAST column.
 // - if prevLayout is empty, or every column empties, return [] (caller applies a default preset).
+// Idempotent by construction: the result is passed through dedupeLayout, so an id that is stale
+// in prevOrder but already carried by prevLayout keeps its existing entry (and weight) instead of
+// being appended a second time. Reconciling a result against the same prevOrder/nextOrder is
+// therefore a no-op — which is what keeps a replayed caller (StrictMode double-invoke, a retried
+// state updater) from rendering one session in two cells.
 export function reconcileLayout(
   prevOrder: string[],
   prevLayout: ColumnLayout,
@@ -112,7 +141,7 @@ export function reconcileLayout(
     ];
   }
 
-  return columns;
+  return dedupeLayout(columns);
 }
 
 // Locates a sessionId's current column/entry index, or null if not present.

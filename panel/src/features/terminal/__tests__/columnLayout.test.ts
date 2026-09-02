@@ -3,6 +3,7 @@ import {
   getLayoutPresets,
   expandPreset,
   reconcileLayout,
+  dedupeLayout,
   mergeInColumn,
   joinOtherColumn,
   splitToNewColumn,
@@ -124,6 +125,103 @@ describe("reconcileLayout", () => {
       [{ sessionId: "B", weight: 1 }],
     ];
     expect(reconcileLayout(["A", "B"], prevLayout, [])).toEqual([]);
+  });
+
+  it("does not re-append an id that is already present in the layout", () => {
+    // StrictMode replays the caller's updater, so reconcile can be handed a
+    // layout that already carries the "new" id while prevOrder is still stale.
+    const prevLayout: ColumnLayout = [
+      [{ sessionId: "A", weight: 1 }],
+      [
+        { sessionId: "B", weight: 1 },
+        { sessionId: "C", weight: 1 },
+      ],
+    ];
+    expect(reconcileLayout(["A", "B"], prevLayout, ["A", "B", "C"])).toEqual([
+      [{ sessionId: "A", weight: 1 }],
+      [
+        { sessionId: "B", weight: 1 },
+        { sessionId: "C", weight: 1 },
+      ],
+    ]);
+  });
+
+  it("reconciling its own result is a no-op", () => {
+    const prevOrder = ["A", "B"];
+    const nextOrder = ["A", "B", "C"];
+    const prevLayout: ColumnLayout = [
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "B", weight: 1 }],
+    ];
+    const first = reconcileLayout(prevOrder, prevLayout, nextOrder);
+    const second = reconcileLayout(prevOrder, first, nextOrder);
+    expect(second).toEqual(first);
+  });
+
+  it("undoes a replayed append without disturbing the surviving entry's weight", () => {
+    // The already-present entry carries a non-default weight and sits in a column
+    // other than the append site, so "keep the FIRST entry, with its weight" is
+    // pinned here and not only through dedupeLayout directly: a "last wins" or
+    // "collapse to the append site" repair would move C or reset it to weight 1.
+    const prevLayout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 1 },
+        { sessionId: "C", weight: 3 },
+      ],
+      [{ sessionId: "B", weight: 1 }],
+    ];
+    expect(reconcileLayout(["A", "B"], prevLayout, ["A", "B", "C"])).toEqual([
+      [
+        { sessionId: "A", weight: 1 },
+        { sessionId: "C", weight: 3 },
+      ],
+      [{ sessionId: "B", weight: 1 }],
+    ]);
+  });
+});
+
+describe("dedupeLayout", () => {
+  it("dedupeLayout keeps the first entry and drops later duplicates", () => {
+    const layout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 3 },
+        { sessionId: "B", weight: 1 },
+      ],
+      [
+        { sessionId: "A", weight: 1 },
+        { sessionId: "C", weight: 2 },
+      ],
+    ];
+    expect(dedupeLayout(layout)).toEqual([
+      [
+        { sessionId: "A", weight: 3 },
+        { sessionId: "B", weight: 1 },
+      ],
+      [{ sessionId: "C", weight: 2 }],
+    ]);
+  });
+
+  it("dedupeLayout removes a column emptied by the repair", () => {
+    const layout: ColumnLayout = [
+      [{ sessionId: "A", weight: 2 }],
+      [{ sessionId: "A", weight: 1 }],
+      [{ sessionId: "B", weight: 1 }],
+    ];
+    expect(dedupeLayout(layout)).toEqual([
+      [{ sessionId: "A", weight: 2 }],
+      [{ sessionId: "B", weight: 1 }],
+    ]);
+  });
+
+  it("dedupeLayout returns the same reference when there is nothing to repair", () => {
+    const layout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 2 },
+        { sessionId: "B", weight: 1 },
+      ],
+      [{ sessionId: "C", weight: 1 }],
+    ];
+    expect(dedupeLayout(layout)).toBe(layout);
   });
 });
 

@@ -1,15 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { reorderIds, swapIds, mergeOrder } from "./sessionOrder";
+import { useState, useReducer, useEffect, useCallback, useMemo } from "react";
 import {
-  reconcileLayout,
-  mergeInColumn,
-  joinOtherColumn,
-  splitToNewColumn,
+  dedupeLayout,
   expandPreset,
   getLayoutPresets,
-  swapInLayout,
   type ColumnLayout,
 } from "./columnLayout";
+import { orderingReducer, type OrderingState } from "./orderingReducer";
 import type { SessionMeta } from "./useTerminalSessions";
 
 export interface TerminalOrdering {
@@ -49,11 +45,22 @@ function readLayout(scopeKey: string): ColumnLayout {
     const stored = localStorage.getItem(`panel-terminal-layout-${scopeKey}`);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? (parsed as ColumnLayout) : [];
+    if (!Array.isArray(parsed)) return [];
+    // Keys written before the layout uniqueness invariant landed can already name a
+    // session twice (a replayed reconcile appended it again), which renders that session
+    // in two grid cells. Repair silently on read — the persist effect then writes the
+    // clean shape back, so the key heals on the first load after this fix. Idempotent, so
+    // an already-clean layout comes back byte-identical (same reference).
+    return dedupeLayout(parsed as ColumnLayout);
   } catch (err) {
     console.warn(`[terminal] read layout from localStorage failed:`, err);
     return [];
   }
+}
+
+/** Both halves of one scope's stored ordering model, read together. */
+function readScope(scopeKey: string): OrderingState {
+  return { order: readOrder(scopeKey), layout: readLayout(scopeKey) };
 }
 
 /**
@@ -75,16 +82,19 @@ export function useTerminalOrdering(
   const ORDER_KEY = `panel-terminal-order-${scopeKey}`;
   const LAYOUT_KEY = `panel-terminal-layout-${scopeKey}`;
 
-  const [sessionOrder, setSessionOrder] = useState<string[]>(() =>
-    readOrder(scopeKey),
-  );
-  const [columnLayout, setColumnLayout] = useState<ColumnLayout>(() =>
-    readLayout(scopeKey),
+  // The flat order and the weighted layout must always move together — a layout
+  // op reconciles against the order it was resolved from — so they are one
+  // reducer state, mutated by one pure transition per user action. See
+  // orderingReducer.
+  const [{ order: sessionOrder, layout: columnLayout }, dispatch] = useReducer(
+    orderingReducer,
+    scopeKey,
+    readScope,
   );
 
   // Re-read on a scope change only. The consumer component is reused across
   // route navigations (no remount), so switching project must swap in that
-  // project's stored order/layout; on mount the useState initialisers have
+  // project's stored order/layout; on mount the useReducer initialiser has
   // already done it.
   //
   // Adjusted during render (React's documented "reset state when a prop
@@ -97,8 +107,7 @@ export function useTerminalOrdering(
   const [loadedScope, setLoadedScope] = useState(scopeKey);
   if (loadedScope !== scopeKey) {
     setLoadedScope(scopeKey);
-    setSessionOrder(readOrder(scopeKey));
-    setColumnLayout(readLayout(scopeKey));
+    dispatch({ type: "reset", state: readScope(scopeKey) });
   }
 
   // Persist order to localStorage whenever it changes
@@ -140,28 +149,16 @@ export function useTerminalOrdering(
     });
   }, [sessions, sessionOrder, orderIndex]);
 
-  // Reconcile columnLayout against the PRE-merge sessionOrder (the `prev` that
-  // mergeOrder itself consumes), in the same update cycle as the sessionOrder
-  // merge — see columnLayout.reconcileLayout's contract.
   const syncIds = useCallback((ids: string[]) => {
-    setSessionOrder((prev) => {
-      const next = mergeOrder(prev, ids);
-      setColumnLayout((prevLayout) => reconcileLayout(prev, prevLayout, next));
-      return next;
-    });
+    dispatch({ type: "sync", ids });
   }, []);
 
   const appendId = useCallback((id: string) => {
-    setSessionOrder((prev) => {
-      if (prev.includes(id)) return prev;
-      const next = [...prev, id];
-      setColumnLayout((prevLayout) => reconcileLayout(prev, prevLayout, next));
-      return next;
-    });
+    dispatch({ type: "append", id });
   }, []);
 
   const reorder = useCallback((fromId: string, toId: string) => {
-    setSessionOrder((prev) => reorderIds(prev, fromId, toId));
+    dispatch({ type: "reorder", fromId, toId });
   }, []);
 
   // An empty `columnLayout` is the "no custom layout stored" sentinel, and
@@ -178,61 +175,57 @@ export function useTerminalOrdering(
     return expandPreset(order, getLayoutPresets(order.length)[0]?.sizes ?? []);
   }, [columnLayout, orderedSessions]);
 
-  // `ColumnLayout` v2 is self-contained (each entry names its own sessionId),
-  // so these callbacks each touch at most one piece of state computed by a
-  // single pure function; we read state directly from the closure and issue
-  // precomputed setState calls rather than mixing in functional updaters —
-  // one calling convention for every "commit a layout op" callback.
+  // Each layout op carries `resolvedLayout` as its `resolved` payload — the
+  // reducer commits against the layout the user is actually looking at, and
+  // cannot derive that itself (only the caller knows how the grid resolved the
+  // sentinel).
   const mergeColumn = useCallback(
     (sessionId: string, targetId: string) => {
-      setColumnLayout(mergeInColumn(resolvedLayout, sessionId, targetId));
+      dispatch({ type: "merge", sessionId, targetId, resolved: resolvedLayout });
     },
     [resolvedLayout],
   );
 
   const joinColumn = useCallback(
     (sessionId: string, targetId: string) => {
-      setColumnLayout(joinOtherColumn(resolvedLayout, sessionId, targetId));
+      dispatch({ type: "join", sessionId, targetId, resolved: resolvedLayout });
     },
     [resolvedLayout],
   );
 
   const splitColumn = useCallback(
     (sessionId: string, gutterIndex: number) => {
-      setColumnLayout(splitToNewColumn(resolvedLayout, sessionId, gutterIndex));
+      dispatch({ type: "split", sessionId, gutterIndex, resolved: resolvedLayout });
     },
     [resolvedLayout],
   );
 
-  // Expands over `orderedSessions`, like every other commit callback: before
-  // the first fetch merge `sessionOrder` is still [], and after a close it can
-  // name sessions that no longer exist — either way a preset click would land
-  // as a no-op or a layout missing live sessions.
+  // `preset.order` is the expansion *source*, not the state's order half: it is
+  // `orderedSessions` ids, like every other commit callback. Before the first
+  // fetch merge `sessionOrder` is still [], and after a close it can name
+  // sessions that no longer exist — either way a preset click would land as a
+  // no-op or a layout missing live sessions.
+  //
+  // `applyPreset([])` is the deliberate reset: expandPreset returns [], the
+  // persist effect drops the key, and the grid falls back to the default
+  // preset. Do not "guard" the empty case — it is the contract (see
+  // useTerminalSessions.columns.test.ts).
   const applyPreset = useCallback(
     (sizes: number[]) => {
-      // `applyPreset([])` is the deliberate reset: expandPreset returns [],
-      // the persist effect drops the key, and the grid falls back to the
-      // default preset. Do not "guard" the empty case — it is the contract
-      // (see useTerminalSessions.columns.test.ts).
-      setColumnLayout(expandPreset(orderedSessions.map((s) => s.id), sizes));
+      dispatch({ type: "preset", order: orderedSessions.map((s) => s.id), sizes });
     },
     [orderedSessions],
   );
 
-  // Reads raw `columnLayout`, not `resolvedLayout`, on purpose: a plain swap is
-  // the one op fully expressible through sessionOrder, which the default
-  // resolution already consumes — so with no custom layout stored it stays a
-  // no-op here and the grid re-derives the preset against the swapped order.
-  // Resolving would spend the sentinel on a swap that needs no layout of its
-  // own, and later session-count changes would then follow reconcileLayout
-  // (append to the last column) instead of re-defaulting to the preset.
-  const swapSessions = useCallback(
-    (idA: string, idB: string) => {
-      setSessionOrder(swapIds(sessionOrder, idA, idB));
-      setColumnLayout(swapInLayout(columnLayout, idA, idB));
-    },
-    [sessionOrder, columnLayout],
-  );
+  // No `resolved` payload: the reducer's `swap` reads the raw layout on purpose,
+  // since a plain swap is the one op fully expressible through sessionOrder,
+  // which the default resolution already consumes. Dispatched once per user
+  // action — `swapIds`/`swapInLayout` are involutions, so a second *sequential*
+  // dispatch would visibly undo the first. (StrictMode double-invokes the
+  // reducer, which is safe; it does not double-dispatch.)
+  const swapSessions = useCallback((idA: string, idB: string) => {
+    dispatch({ type: "swap", idA, idB });
+  }, []);
 
   return {
     sessionOrder,
