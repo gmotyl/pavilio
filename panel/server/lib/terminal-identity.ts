@@ -40,7 +40,7 @@ export function writeName(id: string, name: string): void {
   if (!isValidId(id)) return;
   try {
     const dir = namesDir();
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, id), `${name}\n`);
   } catch {
     // best-effort — see file header.
@@ -66,7 +66,10 @@ function escapeRegExp(value: string): string {
  * lookalike (`alokai-1-old`, `alokai-x`) doesn't count and keeps its name —
  * only the counter's own numbering scheme participates. Taking the max
  * suffix rather than the count means a closed session's number is never
- * reused within a server lifetime, so two live sessions never share a name.
+ * reused within a server lifetime — the allocator never hands out the same
+ * name twice. That guarantee is about allocation only: a user-supplied
+ * rename (via `updateSession`) isn't constrained by it and can collide with
+ * a name already in use by another live session.
  */
 export function nextSessionName(project: string, existingNames: string[]): string {
   const pattern = new RegExp(`^${escapeRegExp(project)}-(\\d+)$`);

@@ -93,10 +93,11 @@ export function createSession(opts: {
   });
 
   const priorNames = assignedNames.get(opts.project) ?? [];
+  const providedName = opts.name === undefined || opts.name === "" ? undefined : opts.name;
 
   const session: TerminalSession = {
     id,
-    name: opts.name || nextSessionName(opts.project, priorNames),
+    name: providedName ?? nextSessionName(opts.project, priorNames),
     project: opts.project,
     cwd: opts.cwd,
     pid: ptyProcess.pid,

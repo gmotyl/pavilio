@@ -237,6 +237,26 @@ describe("default session names", () => {
     expect(meta.name).toBe("alokai-1")
     destroySession(meta.id)
   })
+
+  it('an explicit name of "0" is kept verbatim', () => {
+    // Reset so this test's expected alokai-1 for the follow-up default
+    // session doesn't depend on earlier tests in this describe block.
+    _resetAssignedNamesForTests()
+    const zero = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      name: "0",
+    })
+    expect(zero.name).toBe("0")
+
+    const next = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(next.name).toBe("alokai-1")
+
+    destroySession(zero.id)
+    destroySession(next.id)
+  })
 })
 
 describe("session name allocator persists across the process", () => {
