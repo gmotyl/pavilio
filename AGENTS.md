@@ -38,10 +38,11 @@ Provider-specific config file locations and session-tracking notes have moved to
 
 **Planning Mode:**
 
-- Agent enters planning mode after every session resume
+- Agent enters planning mode after every session resume **that is build work** — a feature, change request, bugfix, or refactor, i.e. anything ending in a diff.
 - Provide architecture clarity before implementation
+- **Not every session is build work.** Questions about the project, meeting prep, note-digging, reviewing someone else's work, memos and tickets → **skip grill entirely**; answer directly with the skill that fits (`pavilio-question`, `pavilio-search`, `pavilio-memo`, `pavilio-code-review`, …). No change dir, no `tasks.md`. If it's unclear which kind of session it is, ask once, then wait. A non-build session that becomes build work switches to the workflow at that point.
 - **Workflow (in order):** local skill copies live under [`skills/`](skills/) — read them directly if the plugin-cached versions aren't available.
-  1. **Design → Plan** — [`skills/pavilio-grill/SKILL.md`](skills/pavilio-grill/SKILL.md): stress-test the design against the existing domain model (`CONTEXT.md`, `adr/`), sharpen terminology, and update docs inline. Once you approve the design, grill hands off **under the hood** to [`skills/pavilio-writing-plans/SKILL.md`](skills/pavilio-writing-plans/SKILL.md), which writes the bite-sized, test-first plan — you do not invoke the plan writer by hand.
+  1. **Design → Plan** — [`skills/pavilio-grill/SKILL.md`](skills/pavilio-grill/SKILL.md): stress-test the design against the existing domain model (`CONTEXT.md`, `adr/`), sharpen terminology, and update docs inline. Once you approve the design, grill invokes [`skills/pavilio-writing-plans/SKILL.md`](skills/pavilio-writing-plans/SKILL.md) **itself** (its §6, mandatory once grill is running) to write the bite-sized, test-first plan — you do not invoke the plan writer by hand. Grill is done only when the change dir holds `proposal.md`, `design.md`, `specs/<capability>/spec.md`, and `tasks.md`.
   2. **Execute** — [`skills/pavilio-execute-plan/SKILL.md`](skills/pavilio-execute-plan/SKILL.md): run the plan task-by-task with review checkpoints; check off each step as it lands; stop and ask when blocked.
   3. **Implement** — red-green-refactor for every feature or bugfix: failing test → see it fail → minimal implementation → see it pass → commit. (This is the per-step rhythm inside Execute.)
 - **When writing design documents, always invoke the `pavilio-mermaid-chart` skill and include Mermaid diagrams** — at minimum a `flowchart` for components and data flow, plus a `sequenceDiagram` when interaction ordering matters. ASCII box-and-arrow art is harder to skim and does not render in the panel. Follow `/pavilio-mermaid-chart` patterns — the panel auto-colors subgraphs and sequence `rect` sections to visually separate grouped paths.
@@ -82,7 +83,7 @@ All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.m
 - [`pavilio-session-start`](skills/pavilio-session-start/SKILL.md) — start/resume a project; opens the session's progress file (`/pavilio-session-start`)
 - [`pavilio-session-end`](skills/pavilio-session-end/SKILL.md) — verify the progress file is complete, commit + push, optionally propose Todoist tasks (`/pavilio-session-end`)
 - [`pavilio-grill`](skills/pavilio-grill/SKILL.md) — design: stress-test against `CONTEXT.md` and ADRs (`/pavilio-grill`)
-- [`pavilio-writing-plans`](skills/pavilio-writing-plans/SKILL.md) — produce the bite-sized, test-first plan document before coding; usually invoked under the hood by `pavilio-grill` (`/pavilio-writing-plans`)
+- [`pavilio-writing-plans`](skills/pavilio-writing-plans/SKILL.md) — produce the bite-sized, test-first plan document before coding; normally invoked by `pavilio-grill` itself, not by hand (`/pavilio-writing-plans`)
 - [`pavilio-execute-plan`](skills/pavilio-execute-plan/SKILL.md) — execute a written plan task-by-task with review checkpoints; stop and ask when blocked (`/pavilio-execute-plan`)
 - [`pavilio-handoff`](skills/pavilio-handoff/SKILL.md) — prebake a handoff file to delegate a task for later execution (`/pavilio-handoff`)
 - [`pavilio-compact`](skills/pavilio-compact/SKILL.md) — package remaining session work into a handoff before context runs out (`/pavilio-compact`)

@@ -1,6 +1,6 @@
 ---
 name: pavilio-execute-plan
-description: Orchestrate execution of a written implementation plan by dispatching implementer and reviewer sub-agents task-by-task, keeping the main thread for orchestration only. Use when the user invokes `/pavilio-execute-plan`, or has a plan under projects/<project>/plans/ ready to build. This is the Execute step after [[pavilio-grill]] → [[pavilio-writing-plans]] have produced the plan.
+description: Orchestrate execution of a written implementation plan by dispatching implementer and reviewer sub-agents task-by-task, keeping the main thread for orchestration only. Use when the user invokes `/pavilio-execute-plan`, or an un-archived change dir under an OpenSpec backend's `openspec/changes/<change-id>/` has a `tasks.md` ready to build. This is the Execute step after [[pavilio-grill]] (which invokes [[pavilio-writing-plans]] itself) has produced the change dir.
 ---
 
 # Pavilio Execute Plan
@@ -23,11 +23,12 @@ This follows [[subagent-driven-development]] — independent tasks fan out to su
 /pavilio-execute-plan [path/to/tasks.md]
 ```
 
-If no path is given, locate the **active change** — an un-archived directory under the backend's `openspec/changes/` (see [[pavilio-openspec-storage]]) — and execute its `tasks.md`. Multiple un-archived changes, or an ambiguous scope → ask which change — one question, then stop. No `CURRENT.md` is read.
+If no path is given, locate the **active change** — an un-archived directory under the backend's `openspec/changes/` (see [[pavilio-openspec-storage]]) — and execute its `tasks.md`. Multiple un-archived changes, or an ambiguous scope → ask which change — one question, then stop. No `CURRENT.md` is read. If the resolved change dir has no `tasks.md`, see step 1.0 — write the contract, don't bail.
 
 ## The process
 
 ### Step 1 — Load and review the plan (main thread)
+0. **No `tasks.md` in the change dir?** The change dir has `proposal.md` / `design.md` / delta specs but no tasks contract — that is an **unfinished grill**, not a dead end. Do not stop and report "nothing to execute". Instead: say "This change has no `tasks.md` — writing the implementation contract first", invoke [[pavilio-writing-plans]] against that change dir, commit the result, then continue at 1. Only escalate to the user if the design itself is too thin to write a contract from (then route to [[pavilio-grill]]).
 1. Read the plan file end-to-end.
 2. **Staleness check** — plans rot as other work lands. Verify against current HEAD: the files/symbols each task references still exist as described, and no commit since the plan was written touched the same areas in a way that invalidates a task's premise (`git log --oneline -- <paths>` since the plan's date). Anything stale → treat as a concern in 3.
 3. Review it critically — surface any questions, gaps, or concerns. If concerns exist, raise them with the user **before** starting and wait.

@@ -1,17 +1,23 @@
 ---
 name: pavilio-grill
-description: Stress-test an idea or plan into a sharp, domain-aligned design. Auto-detects whether you have a raw idea (design it first) or an existing plan/draft (grill it), then interviews relentlessly one question at a time, challenges terminology against the project glossary, cross-references code, and captures the result as a spec doc plus inline CONTEXT.md / ADR updates. Use when the user invokes `/pavilio-grill` or wants to harden a plan before writing an implementation plan.
+description: Stress-test an idea or plan into a sharp, domain-aligned design, then chain straight into the implementation contract. Auto-detects whether you have a raw idea (design it first) or an existing plan/draft (grill it), then interviews relentlessly one question at a time, challenges terminology against the project glossary, cross-references code, and captures the result as a complete OpenSpec change dir — proposal.md, design.md, delta specs, and `tasks.md` (written by [[pavilio-writing-plans]], which grill invokes itself) — plus inline CONTEXT.md / ADR updates. Use when the user invokes `/pavilio-grill` or wants to harden a plan before implementing.
 ---
 
 # pavilio-grill
 
-Design-and-harden in one pass. Grill-forward: relentless one-at-a-time interview with a recommended answer per question, project-scoped domain docs, spec doc as the durable artifact.
+Design-and-harden in one pass. Grill-forward: relentless one-at-a-time interview with a recommended answer per question, project-scoped domain docs, and a complete OpenSpec change dir as the durable artifact.
 
 **Announce at start:** "Using pavilio-grill to sharpen this into a design."
 
 <HARD-GATE>
-Do NOT write implementation code, scaffold, or invoke any implementation skill until a design is presented AND the user approves it. Grilling ends by handing off to `pavilio-writing-plans`, never by coding.
+Do NOT write, scaffold, or edit **implementation code** (source, tests, config of the thing being built) until a design is presented AND the user approves it. Grilling ends by coding nothing.
+
+This gate is about **code only**. [[pavilio-writing-plans]] is explicitly exempt: it writes markdown, not code, and grill is **required** to invoke it in §6 once the user approves the change artifacts. Stopping after §5 is a failure of this skill, not compliance with this gate.
 </HARD-GATE>
+
+<DEFINITION-OF-DONE>
+Grill is complete only when the change dir contains **all four**: `proposal.md`, `design.md`, `specs/<capability>/spec.md`, and `tasks.md`. A change dir without `tasks.md` is an unfinished grill — [[pavilio-execute-plan]] has nothing to run.
+</DEFINITION-OF-DONE>
 
 ## 0. Resolve the project and OpenSpec backend
 
@@ -99,11 +105,23 @@ A coordinated multi-repository change reuses **one shared `<change-id>`** across
 
   **Recognizing living specs:** the current-behavior files are `openspec/specs/<capability>/spec.md`, each containing `### Requirement:` sections. Delta specs (`changes/<id>/specs/<capability>/spec.md`) are the *change*, not living truth — never fold a delta into itself.
 - **Self-review** with fresh eyes: placeholder scan (no TBD/TODO), internal consistency, scope (single change or needs decomposition?), ambiguity (pick one interpretation, make it explicit). Fix inline.
-- **User review gate:** "Change artifacts written and committed to `openspec/changes/<change-id>/`. Review them and tell me if you want changes before we write the implementation contract." Wait. On changes, edit + re-review. Only proceed on approval.
+- **User review gate:** "Change artifacts written and committed to `openspec/changes/<change-id>/`. Review them and tell me if you want changes — otherwise I'll write the implementation contract next." Wait. On changes, edit + re-review. **On approval, do not end the turn — continue immediately to §6 in that same turn.** Approval is the trigger for §6, not the end of grill.
 
-## 6. Transition
+## 6. Write the implementation contract (MANDATORY)
 
-The only next skill is **pavilio-writing-plans**. Invoke it to turn the approved design into the change's `tasks.md` implementation contract.
+Not a suggestion and not a handoff to the user — grill performs this step itself, in the turn where approval lands.
+
+1. **Invoke [[pavilio-writing-plans]]** (`Skill` tool, `skill: pavilio-writing-plans`) with the approved change dir. Announce it: "Design approved — writing the implementation contract."
+2. Follow that skill to produce `openspec/changes/<change-id>/tasks.md` in the same resolved backend, and commit it alongside the other change artifacts.
+3. **Exit checklist — verify on disk before reporting done:**
+   - [ ] `openspec/changes/<change-id>/proposal.md`
+   - [ ] `openspec/changes/<change-id>/design.md`
+   - [ ] `openspec/changes/<change-id>/specs/<capability>/spec.md` (one per touched capability)
+   - [ ] `openspec/changes/<change-id>/tasks.md`
+   - [ ] all four committed
+4. Report the change dir path and the task count, then offer [[pavilio-execute-plan]] as the next step.
+
+**The only permitted exit without `tasks.md`** is the user explicitly saying they want to stop at the spec (parking the work for a later session). In that case say so in one line — "parked at spec; `tasks.md` will be written just-in-time when execution starts" — so the gap is deliberate and recorded, never silent.
 
 ## Key principles
 
@@ -111,4 +129,5 @@ The only next skill is **pavilio-writing-plans**. Invoke it to turn the approved
 - Read code before asking what code can tell you.
 - Multiple choice / 2-3 approaches at real forks; don't manufacture them.
 - Domain docs are project-scoped and written inline, not at the end.
-- YAGNI. Incremental validation. Terminal state = pavilio-writing-plans.
+- YAGNI. Incremental validation.
+- Grill does not stop *at* pavilio-writing-plans — it **runs** it. Terminal state = a change dir with `tasks.md` in it.

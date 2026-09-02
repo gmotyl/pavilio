@@ -1,6 +1,6 @@
 ---
 name: pavilio-session-start
-description: THE skill for the word "resume" — "resume", "resume <project>", "resume work on X", "pick up where we left off" all mean this, never /pavilio-resume (that one needs an explicit handoff file path). Starts/resumes a project session by loading recent progress, PROJECT.md, and the active (un-archived) OpenSpec change dirs, then entering planning mode. Also on explicit `/pavilio-session-start`. Fast-entry form `/pavilio-session-start <project> <task>` skips the summary and jumps straight to designing the task.
+description: THE skill for the word "resume" — "resume", "resume <project>", "resume work on X", "pick up where we left off" all mean this, never /pavilio-resume (that one needs an explicit handoff file path). Starts/resumes a project session by loading recent progress, PROJECT.md, and the active (un-archived) OpenSpec change dirs, then classifying the session's intent: build work enters planning mode via [[pavilio-grill]], while questions, meeting prep, note-digging, or reviews are answered directly with no grill and no change dir. Also on explicit `/pavilio-session-start`. Fast-entry form `/pavilio-session-start <project> <task>` skips the summary and goes straight at the task.
 ---
 
 # Pavilio Session Start
@@ -34,7 +34,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 3. Derive **active work** from the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). There is no active-plan pointer file to read.
 4. **Branch on the active changes found:**
 
-   **None** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then enter the workflow at **step 1: Design** (see below).
+   **None** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.
 
    **One active change** → Skip summary. Show:
    ```
@@ -50,14 +50,26 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 **Fast-entry variant** (`/pavilio-session-start [project] <task description>`):
 1. Load PROJECT.md silently (no display)
 2. Skip progress summary
-3. Enter the workflow at **step 1: Design** with the task description in hand
+3. Classify the argument: a build task → enter the workflow at **step 1: Design** with it in hand. A question or a non-build ask ("what did we decide about X", "prep me for the call with Y") → answer it directly in the non-build lane; fast-entry is a shortcut past the summary, not a commitment to grill.
 
-## Workflow after start
+## Classify the intent before choosing a workflow
 
-Session start always lands in **planning mode**, never directly in code edits. Follow the four-step workflow:
+Not every session is build work. Once you know what the user wants to do, put it in one of two lanes — say which lane in one short line, then proceed.
 
-1. **Design → Plan** — [[pavilio-grill]]: stress-test the task against the project's `CONTEXT.md` and `adr/`. Sharpen terminology, surface hidden constraints, and update docs inline. Once you approve the design, grill hands off under the hood to [[pavilio-writing-plans]], which writes the bite-sized plan — don't invoke the plan writer by hand.
-2. **Execute** — [[pavilio-execute-plan]]: run the change's `tasks.md` task-by-task with review checkpoints. Enter here directly when an un-archived change dir already exists; check off each step as it lands.
+**Build lane** — a new feature, a change request, a bugfix, a refactor: anything that will end in a diff. → the four-step workflow below, starting at Design.
+
+**Non-build lane** — a question about the project, meeting prep, reading/summarising notes, digging through history, reviewing someone else's work, writing a memo or a ticket, planning-adjacent thinking with no code outcome. → **no grill, no change dir, no `tasks.md`.** Just do the thing, using the loaded context and whatever skill actually fits ([[pavilio-question]], [[pavilio-search]], [[pavilio-memo]], [[pavilio-memo-explain]], [[pavilio-code-review]], …). Don't route a question through a design process.
+
+**Unclear which lane?** Ask once — "Is this something we're going to build, or do you just want to talk it through?" — then stop and wait. Don't default to grilling.
+
+The one thing that holds in **both** lanes: never jump straight into editing source. In the build lane that means Design first; in the non-build lane it means there is nothing to edit in the first place. A non-build session that turns into build work mid-conversation switches lanes at that moment — grill then, not before.
+
+## Workflow after start (build lane)
+
+Build work lands in **planning mode**, never directly in code edits. Follow the four-step workflow:
+
+1. **Design → Plan** — [[pavilio-grill]]: stress-test the task against the project's `CONTEXT.md` and `adr/`. Sharpen terminology, surface hidden constraints, and update docs inline. Once you approve the design, grill invokes [[pavilio-writing-plans]] itself (its §6, mandatory) to write the bite-sized plan — don't invoke the plan writer by hand. Grill is finished only when the change dir holds all four of `proposal.md`, `design.md`, `specs/<capability>/spec.md`, `tasks.md`.
+2. **Execute** — [[pavilio-execute-plan]]: run the change's `tasks.md` task-by-task with review checkpoints. Enter here directly when an un-archived change dir already exists; if it is missing `tasks.md`, execute-plan writes the contract first (its step 1.0) rather than stalling. Check off each step as it lands.
 3. **Implement** — red-green-refactor for every feature or bugfix: write the failing test → see it fail → minimal implementation → see it pass → commit. (The per-step rhythm inside Execute.)
 
 ## Open a progress file for this session
@@ -91,6 +103,6 @@ Rules for the rename:
 
 - Always remember the project for subsequent [[pavilio-session-end]] calls in this conversation
 - Use the `context-mode` MCP (`ctx_search`, `ctx_execute`, `ctx_execute_file`) for codebase exploration and any operation that would otherwise dump a large output into context. Do **not** fall back to `ls`/`find`/glob browsing. If `context-mode` is not installed, prompt the user to install it from https://github.com/mksglu/context-mode and run `/context-mode:ctx-doctor` to verify.
-- Enter planning mode after start — begin with Design ([[pavilio-grill]]), never jump straight to code
+- Classify the intent before picking a workflow — **build work** begins with Design ([[pavilio-grill]]) and never jumps straight to code; **questions, meeting prep, note-digging, reviews, memos** skip grill entirely and are answered directly
 - Keep the in-session progress file focused on resume-context, not a transcript
 - A `-wip.md` progress file must be renamed to its real theme as soon as that theme exists — same session, without being asked

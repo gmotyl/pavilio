@@ -93,7 +93,11 @@ These are plan failures — never write them: "handle errors appropriately"; "ad
 
 ## Plan shelf-life
 
-Plans are written **just-in-time** — write the plan when you're about to execute it. Never park a plan: parked plans rot silently as other work lands on the same files. If work must wait, park the **spec** (behavior-level, rots slower) and write the plan when execution starts. A plan is fresh only in the session that wrote it; dispatched in any later session, it is presumed stale and must pass the staleness check in [[pavilio-execute-plan]] step 1.
+The default is that the plan is written **as soon as the design is approved** — [[pavilio-grill]] §6 invokes this skill itself, so every change dir carries a `tasks.md`. Do not skip writing the plan on shelf-life grounds; a change dir without `tasks.md` is an unfinished grill, not a deliberately parked one.
+
+The one exception: **the user explicitly says to park the work** for a later session. Then park the **spec** (behavior-level, rots slower) and skip `tasks.md` — but say so out loud so the gap is recorded.
+
+Plans do age. A plan is fresh only in the session that wrote it; dispatched in any later session, it is presumed stale and must pass the staleness check in [[pavilio-execute-plan]] step 1 — which is where rot is caught, rather than by refusing to write the plan up front.
 
 ## Remember
 
