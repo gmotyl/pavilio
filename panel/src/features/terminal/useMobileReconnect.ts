@@ -43,7 +43,14 @@ export function useMobileReconnect({
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return
+      // Anything we could do from here repaints the screen, so the blank check
+      // gates every path — including a dead socket. Refocusing with content on
+      // screen used to reopen unconditionally, scrolling away live output; a
+      // socket that died is now reported as connection state instead (see
+      // onConnectionChange in terminalInstances.ts) and repaired on demand.
+      if (!isViewportBlankRef.current()) return
       if (!ws || ws.readyState !== WebSocket.OPEN) {
+        // Blank, and there is no live socket to nudge over — rebuild it.
         reopenRef.current()
         return
       }
@@ -51,7 +58,6 @@ export function useMobileReconnect({
       // costs a visible flicker, so spend it only when the local repaint
       // (`terminal.refresh()` on the visibilitychange refit) cannot help
       // because the buffer itself came back empty.
-      if (!isViewportBlankRef.current()) return
       const { cols, rows } = getDimsRef.current()
       ws.send(JSON.stringify({ type: "mobile-nudge", cols, rows }))
       lastMessageAtRef.current = Date.now()

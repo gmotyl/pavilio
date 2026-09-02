@@ -73,8 +73,12 @@ describe("useMobileReconnect", () => {
   });
 
 
-  it("calls reopen when ws is closed on visibility return", () => {
-    const { ws } = fakeWs(3); // CLOSED
+  // A dead socket is not on its own a reason to repaint: reopening scrolls
+  // away live output. The socket's own close event marks the session
+  // disconnected (see onConnectionChange in terminalInstances.ts) and the UI
+  // offers a manual reconnect instead.
+  it("does not reopen on refocus when the socket is closed and the viewport has content", () => {
+    const { ws, sent } = fakeWs(3); // CLOSED
     const reopen = vi.fn();
     renderHook(() =>
       useMobileReconnect({
@@ -84,10 +88,28 @@ describe("useMobileReconnect", () => {
         isViewportBlank: () => false,
       }),
     );
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
+    becomeVisible();
+    expect(reopen).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
+  });
+
+  // Removing the ungated path must not eat the blank-gated one: a terminal
+  // that came back empty still refills itself. It must reopen rather than
+  // nudge, because send() on a CLOSED socket throws.
+  it("still reopens on refocus when the socket is closed and the viewport is blank", () => {
+    const { ws, sent } = fakeWs(3); // CLOSED
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+        isViewportBlank: () => true,
+      }),
+    );
+    becomeVisible();
     expect(reopen).toHaveBeenCalledTimes(1);
+    expect(sent).toEqual([]);
   });
 
   it("watchdog does NOT reopen after >25s of silence while content is on screen", () => {
