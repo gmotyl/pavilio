@@ -220,8 +220,10 @@ describe("PlansTab sort control over change groups", () => {
     fireEvent.click(screen.getByTestId("file-list-sort-dir")); // ascending
     // "multi"'s first child holds the oldest artifact in the whole tree
     // (modified 1); keyed on the max (900) it must still sort last.
-    expect(groupOrder()).toEqual(["beta", "alpha", "multi"]);
-    expect(groupOrder().at(-1)).toBe("multi");
+    const order = groupOrder();
+    expect(order).toEqual(["beta", "alpha", "multi"]);
+    // Index expression, not `.at(-1)` — tsconfig's lib target is ES2020.
+    expect(order[order.length - 1]).toBe("multi");
   });
 
   it("never lifts an archived group above an active one, whatever the sort", async () => {

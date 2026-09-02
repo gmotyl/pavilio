@@ -182,6 +182,70 @@ const ARCHIVED_TREE = {
   ],
 };
 
+// Same shape as ARCHIVED_TREE, but the archived items are the NEWEST things in
+// the tree — the archived OpenSpec artifact (99) and the archived legacy file
+// (98) both out-rank the active artifact (10) and the active flat file (2).
+// An auto-select that took plain max-mtime over everything would land on an
+// archived path here, so this fixture is what makes the candidate set's
+// active-only filters observable.
+const NEWEST_ARCHIVED_LEGACY_FILE = "2025-11-01-ancient.md";
+const ACTIVE_ARTIFACT_PATH = "/p/openspec/changes/live-change/proposal.md";
+const ARCHIVED_NEWEST_TREE = {
+  project: "alokai",
+  sources: [
+    TREE.sources[0],
+    {
+      id: "project:archived",
+      label: "Archived",
+      absoluteRoot: "/p/projects/alokai/plans/archived",
+      files: [
+        {
+          source: "project:archived",
+          filename: NEWEST_ARCHIVED_LEGACY_FILE,
+          absolutePath: `/p/projects/alokai/plans/archived/${NEWEST_ARCHIVED_LEGACY_FILE}`,
+          modified: 98,
+          relativeToProjectsDir: `alokai/plans/archived/${NEWEST_ARCHIVED_LEGACY_FILE}`,
+        },
+      ],
+    },
+    {
+      id: "openspec:project",
+      label: "alokai (OpenSpec)",
+      kind: "openspec",
+      mode: "store",
+      openspecDir: "/p/openspec",
+      changes: [
+        {
+          changeId: "live-change",
+          source: "openspec:project",
+          status: "active",
+          archiveDate: null,
+          artifacts: [
+            artifact({
+              kind: "proposal",
+              modified: 10,
+              absolutePath: ACTIVE_ARTIFACT_PATH,
+            }),
+          ],
+        },
+        {
+          changeId: "done-change",
+          source: "openspec:project",
+          status: "archived",
+          archiveDate: "2026-01-05",
+          artifacts: [
+            artifact({
+              kind: "proposal",
+              modified: 99,
+              absolutePath: "/p/openspec/changes/archive/done-change/proposal.md",
+            }),
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 /** The `archived` checkbox inside the contract-fixed toggle label. */
 const archivedCheckbox = () =>
   within(screen.getByTestId("plans-tab-archived-toggle")).getByRole(
@@ -729,6 +793,54 @@ describe("PlansTab archived toggle", () => {
       ).style.background,
     ).toBe("transparent");
     expect(openRow().style.background).toBe("var(--bg-active)");
+  });
+
+  // The half the test above cannot reach: it mounts with `?file=` already set,
+  // so useAutoSelectNewest short-circuits and never picks anything. Here nothing
+  // is preselected, so auto-select actually runs — over a tree whose newest
+  // items are archived.
+  it("auto-selects the newest ACTIVE plan even when archived ones are newer", async () => {
+    sessionStorage.clear();
+    mockFetchResponses({
+      "plans-tree": ARCHIVED_NEWEST_TREE,
+      "plans/read": { content: "# artifact body" },
+    });
+    // No `?file=` — auto-select is free to run.
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    await screen.findByTestId("plans-tab-archived-toggle");
+    const activeRow = () =>
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:project-live-change-proposal",
+      );
+    // Toggle off: the active artifact is what opened, not the newer archived one.
+    await waitFor(() =>
+      expect(activeRow().style.background).toBe("var(--bg-active)"),
+    );
+    await waitFor(() =>
+      expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+        ACTIVE_ARTIFACT_PATH,
+      ),
+    );
+
+    // Toggle on: the archived history appears, but the candidate set is
+    // unchanged — the active artifact stays open and nothing archived is picked.
+    fireEvent.click(archivedCheckbox());
+    expect(activeRow().style.background).toBe("var(--bg-active)");
+    fireEvent.click(screen.getByTestId("plans-tab-source-change:done-change"));
+    fireEvent.click(screen.getByTestId("plans-tab-source-project:archived"));
+    expect(
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:project-done-change-proposal",
+      ).style.background,
+    ).toBe("transparent");
+    expect(
+      screen.getByTestId(
+        `plans-tab-file-project:archived-${NEWEST_ARCHIVED_LEGACY_FILE}`,
+      ).style.background,
+    ).toBe("transparent");
+    expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+      ACTIVE_ARTIFACT_PATH,
+    );
   });
 
   it("checking the box changes nothing for a project with no archived plans", async () => {
