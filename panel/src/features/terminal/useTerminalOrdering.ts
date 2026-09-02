@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { reorderIds, swapIds, mergeOrder } from "./sessionOrder";
 import {
   reconcileLayout,
+  dedupeLayout,
   mergeInColumn,
   joinOtherColumn,
   splitToNewColumn,
@@ -49,7 +50,13 @@ function readLayout(scopeKey: string): ColumnLayout {
     const stored = localStorage.getItem(`panel-terminal-layout-${scopeKey}`);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? (parsed as ColumnLayout) : [];
+    if (!Array.isArray(parsed)) return [];
+    // Keys written before the layout uniqueness invariant landed can already name a
+    // session twice (a replayed reconcile appended it again), which renders that session
+    // in two grid cells. Repair silently on read — the persist effect then writes the
+    // clean shape back, so the key heals on the first load after this fix. Idempotent, so
+    // an already-clean layout comes back byte-identical (same reference).
+    return dedupeLayout(parsed as ColumnLayout);
   } catch (err) {
     console.warn(`[terminal] read layout from localStorage failed:`, err);
     return [];

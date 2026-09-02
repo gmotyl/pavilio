@@ -43,6 +43,54 @@ describe("useTerminalOrdering", () => {
     expect(result.current.columnLayout).toEqual([]);
   });
 
+  // Layouts persisted before the uniqueness invariant landed can already name a session
+  // twice (a StrictMode-replayed reconcile appended it again), which renders one session in
+  // two grid cells. Reading repairs those in place.
+  it("repairs a stored layout that names a session twice", () => {
+    localStorage.setItem("panel-terminal-order-vector", JSON.stringify(["a", "b"]));
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([
+        [{ sessionId: "a", weight: 2 }],
+        [{ sessionId: "b", weight: 1 }, { sessionId: "a", weight: 1 }],
+      ]),
+    );
+    const { result } = renderHook(() =>
+      useTerminalOrdering("vector", [session("a"), session("b")]),
+    );
+    expect(ids(result.current.columnLayout)).toEqual([["a"], ["b"]]);
+    // The first entry wins, keeping its weight.
+    expect(result.current.columnLayout[0][0].weight).toBe(2);
+  });
+
+  it("writes the repaired layout back to storage", () => {
+    localStorage.setItem(
+      "panel-terminal-layout-vector",
+      JSON.stringify([
+        [{ sessionId: "a", weight: 1 }],
+        [{ sessionId: "a", weight: 1 }, { sessionId: "b", weight: 1 }],
+      ]),
+    );
+    renderHook(() => useTerminalOrdering("vector", [session("a"), session("b")]));
+    expect(JSON.parse(localStorage.getItem("panel-terminal-layout-vector")!)).toEqual([
+      [{ sessionId: "a", weight: 1 }],
+      [{ sessionId: "b", weight: 1 }],
+    ]);
+  });
+
+  it("leaves a clean stored layout untouched", () => {
+    const clean = [
+      [{ sessionId: "a", weight: 1 }],
+      [{ sessionId: "b", weight: 3 }],
+    ];
+    localStorage.setItem("panel-terminal-layout-vector", JSON.stringify(clean));
+    const { result } = renderHook(() =>
+      useTerminalOrdering("vector", [session("a"), session("b")]),
+    );
+    expect(result.current.columnLayout).toEqual(clean);
+    expect(JSON.parse(localStorage.getItem("panel-terminal-layout-vector")!)).toEqual(clean);
+  });
+
   it("removes the legacy count-only columns key on mount", () => {
     localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([1, 2]));
     renderHook(() => useTerminalOrdering("vector", []));
