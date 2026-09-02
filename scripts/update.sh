@@ -37,10 +37,49 @@ fi
 
 echo ""
 echo "Syncing panel/..."
-rsync -a \
+# --delete: panel/ is a pure mirror, so a file retired upstream must disappear
+# downstream too. Without it deletions never propagate, and retired modules
+# (routes/skills.ts, routes/commands.ts, features/skills/, features/commands/,
+# usePlanDrag.ts, TerminalNavList.tsx, sessionColors.ts) linger downstream as
+# tracked dead code that nothing imports.
+#
+# Deliberately NOT applied to skills/, scripts/ or commands/ below: those hold
+# legitimate downstream-only content (private skills, local helper scripts)
+# that --delete would destroy.
+#
+# --delete is destructive, so it gets guards rather than trust:
+#   * refuse a missing or empty source. UPSTREAM_DIR is only validated for
+#     .git/, so a repo without panel/ would otherwise mirror "nothing" over the
+#     downstream tree and --delete would erase it.
+#   * --max-delete caps the blast radius. A real sync retires a handful of
+#     files; a larger prune means the source is wrong, and rsync exits non-zero
+#     (set -e aborts) instead of completing the damage.
+#   * excluded paths are protected from --delete by default — we never pass
+#     --delete-excluded — so node_modules/ and dist/ survive.
+#   * .husky/_ is husky's generated, untracked hook directory. It normally
+#     exists on both sides and so would not be pruned anyway, but an upstream
+#     clone that has not run install yet does not have it, and without this
+#     exclude the prune would take the downstream git hooks with it.
+# Structural check rather than an emptiness check: a panel/ holding only a
+# hidden placeholder (.gitkeep) counts as non-empty, so an emptiness test would
+# pass and --delete would then wipe the downstream tree — the exact failure this
+# guard exists to stop. package.json is what makes the directory the panel app.
+if [ ! -f "$UPSTREAM_DIR/panel/package.json" ]; then
+  echo "Error: $UPSTREAM_DIR/panel does not look like the panel app (no package.json)."
+  echo "Refusing to mirror it with --delete — check that $UPSTREAM_DIR is really the pavilio repo."
+  exit 1
+fi
+# rsync --delete from a directory onto itself empties it. Refuse when both sides
+# resolve to the same path (e.g. update.sh run from inside the upstream clone).
+if [ "$(readlink -f "$UPSTREAM_DIR/panel")" = "$(readlink -f "$REPO_ROOT/panel")" ]; then
+  echo "Error: source and destination panel/ resolve to the same directory — refusing to sync."
+  exit 1
+fi
+rsync -a --delete --max-delete=100 \
   --exclude='node_modules/' \
   --exclude='dist/' \
   --exclude='.DS_Store' \
+  --exclude='.husky/_' \
   "$UPSTREAM_DIR/panel/" "$REPO_ROOT/panel/"
 
 echo "Syncing skills/..."
