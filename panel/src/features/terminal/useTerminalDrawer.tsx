@@ -48,11 +48,20 @@ function readWidth(): number {
 
 export type DrawerSide = "left" | "right";
 
+/**
+ * Left is the default; only an explicitly stored "right" docks right.
+ *
+ * The storage key is deliberately NOT bumped along with this default. A value
+ * under SIDE_KEY is only ever written by an explicit drag, so a browser that
+ * already holds "right" is holding a choice its user made — and overriding an
+ * explicit choice is worse than asking one user to drag the drawer once. Do
+ * not "fix" this by migrating or clearing the key.
+ */
 function readSide(): DrawerSide {
   try {
-    return localStorage.getItem(SIDE_KEY) === "left" ? "left" : "right";
+    return localStorage.getItem(SIDE_KEY) === "right" ? "right" : "left";
   } catch {
-    return "right";
+    return "left";
   }
 }
 

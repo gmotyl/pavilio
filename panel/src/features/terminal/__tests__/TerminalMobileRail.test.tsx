@@ -46,11 +46,14 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   };
 }
 
-function renderRail(sessions: SessionMeta[] = [makeSession()]) {
+function renderRail(
+  sessions: SessionMeta[] = [makeSession()],
+  focusedId: string | null = sessions[0]?.id ?? null,
+) {
   render(
     <TerminalMobileRail
       sessions={sessions}
-      focusedId={sessions[0]?.id ?? null}
+      focusedId={focusedId}
       currentProject={sessions[0]?.project ?? "ch"}
       onFocus={vi.fn()}
       onCreate={vi.fn()}
@@ -101,5 +104,35 @@ describe("TerminalMobileRail — project colour", () => {
         rgb(TEST_PROJECT_COLORS.beta),
       ),
     );
+  });
+
+  it("rings an unselected dot in its project's colour", async () => {
+    renderRail(
+      [
+        makeSession({ id: "s1", project: "alpha" }),
+        makeSession({ id: "s2", project: "beta", name: "claude-beta" }),
+        makeSession({ id: "s3", project: "alpha", name: "claude-alpha-2" }),
+      ],
+      "s1",
+    );
+
+    const dot = (id: string) =>
+      screen.getByTestId(`terminal-mobile-rail-session-${id}`) as HTMLElement;
+
+    await waitFor(() =>
+      expect(dot("s2").style.borderTopColor).toBe(rgb(TEST_PROJECT_COLORS.beta)),
+    );
+    expect(dot("s3").style.borderTopColor).toBe(rgb(TEST_PROJECT_COLORS.alpha));
+    expect(dot("s2").style.borderTopColor).not.toBe(dot("s3").style.borderTopColor);
+
+    // Thickness is the point: at 28px a 1px ring of two nearby presets is
+    // indistinguishable, so the unselected ring is deliberately heavier.
+    expect(dot("s2").style.borderTopWidth).toBe("2px");
+    expect(dot("s3").style.borderTopWidth).toBe("2px");
+
+    // The ring says which project; the LED still says what the session is
+    // doing. They stay orthogonal.
+    expect(dot("s2").querySelector('[data-testid="activity-led"]')).toBeTruthy();
+    expect(dot("s3").querySelector('[data-testid="activity-led"]')).toBeTruthy();
   });
 });

@@ -74,9 +74,15 @@ export function TerminalMobileRail({
                 background: active
                   ? "var(--bg-elevated, var(--bg-active))"
                   : "var(--bg-base)",
+                // The unselected dot is 28px, and the rail is the one surface
+                // that lists sessions from *every* project side by side. At
+                // that size a 1px ring of Orange against Gold is
+                // indistinguishable, so the ring is deliberately 2px — a
+                // border, not a box-shadow, so the rail's overflow-x-auto
+                // scroller cannot clip it.
                 border: active
                   ? `1px solid ${accent}`
-                  : "1px solid var(--border-subtle)",
+                  : `2px solid ${accent}`,
                 color: active ? "var(--text-primary)" : "var(--text-secondary)",
               }}
             >
