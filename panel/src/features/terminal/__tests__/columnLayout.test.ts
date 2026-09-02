@@ -157,6 +157,27 @@ describe("reconcileLayout", () => {
     const second = reconcileLayout(prevOrder, first, nextOrder);
     expect(second).toEqual(first);
   });
+
+  it("undoes a replayed append without disturbing the surviving entry's weight", () => {
+    // The already-present entry carries a non-default weight and sits in a column
+    // other than the append site, so "keep the FIRST entry, with its weight" is
+    // pinned here and not only through dedupeLayout directly: a "last wins" or
+    // "collapse to the append site" repair would move C or reset it to weight 1.
+    const prevLayout: ColumnLayout = [
+      [
+        { sessionId: "A", weight: 1 },
+        { sessionId: "C", weight: 3 },
+      ],
+      [{ sessionId: "B", weight: 1 }],
+    ];
+    expect(reconcileLayout(["A", "B"], prevLayout, ["A", "B", "C"])).toEqual([
+      [
+        { sessionId: "A", weight: 1 },
+        { sessionId: "C", weight: 3 },
+      ],
+      [{ sessionId: "B", weight: 1 }],
+    ]);
+  });
 });
 
 describe("dedupeLayout", () => {
