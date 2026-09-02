@@ -490,6 +490,31 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
     expect(findProject(res.body)).toBeUndefined();
   });
 
+  it("a linked-repo OpenSpec source contributing changes also hides the empty flat source", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    // Deliberately NO plans/openspec store: the ONLY contributor is a repo.
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    seedChange(join(repoPath, "openspec"), "add-checkout");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "native" } }]),
+    );
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    expect(res.status).toBe(200);
+    // The project store contributed nothing …
+    expect(
+      res.body.sources.find((s: { id: string }) => s.id === "openspec:project"),
+    ).toBeUndefined();
+    // … the linked repo did …
+    const repoSrc = res.body.sources.find(
+      (s: { id: string }) => s.id === "openspec:repo:pavilio",
+    );
+    expect(repoSrc.changes.length).toBeGreaterThan(0);
+    // … and that alone is enough to drop the empty flat node.
+    expect(findProject(res.body)).toBeUndefined();
+  });
+
   it("keeps the empty legacy flat source when no OpenSpec source contributed changes", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
 
