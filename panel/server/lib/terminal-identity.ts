@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -51,6 +51,28 @@ export function removeName(id: string): void {
   if (!isValidId(id)) return;
   try {
     rmSync(join(namesDir(), id), { force: true });
+  } catch {
+    // best-effort — see file header.
+  }
+}
+
+/**
+ * Delete every identity file whose id is not in `liveIds` — the cleanup for
+ * sessions that vanished without going through `removeName` (a crashed
+ * server). A filename that is not a UUID is left alone rather than deleted:
+ * it was never a session file to begin with, so the live set says nothing
+ * about it.
+ */
+export function sweepNames(liveIds: string[]): void {
+  try {
+    const dir = namesDir();
+    if (!existsSync(dir)) return;
+    const live = new Set(liveIds);
+    for (const entry of readdirSync(dir)) {
+      if (!isValidId(entry)) continue;
+      if (live.has(entry)) continue;
+      rmSync(join(dir, entry), { force: true });
+    }
   } catch {
     // best-effort — see file header.
   }

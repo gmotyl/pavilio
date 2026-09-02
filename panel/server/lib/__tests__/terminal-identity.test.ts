@@ -3,10 +3,12 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "fs
 import { tmpdir } from "os";
 import { join } from "path";
 
-import { namesDir, writeName, removeName } from "../terminal-identity";
+import { namesDir, writeName, removeName, sweepNames } from "../terminal-identity";
 
 let dir = "";
 const UUID = "11111111-1111-4111-8111-111111111111";
+const UUID2 = "22222222-2222-4222-8222-222222222222";
+const UUID3 = "33333333-3333-4333-8333-333333333333";
 
 describe("terminal-identity", () => {
   beforeEach(() => {
@@ -52,5 +54,29 @@ describe("terminal-identity", () => {
     writeFileSync(blocker, "not a dir");
     process.env.PANEL_AUTH_STATE_DIR = blocker;
     expect(() => writeName(UUID, "alokai-1")).not.toThrow();
+  });
+
+  it("sweepNames deletes orphan files and spares live ids", () => {
+    writeName(UUID, "alokai-1");
+    writeName(UUID2, "alokai-2");
+    writeName(UUID3, "alokai-3");
+    sweepNames([UUID]);
+    expect(existsSync(join(namesDir(), UUID))).toBe(true);
+    expect(existsSync(join(namesDir(), UUID2))).toBe(false);
+    expect(existsSync(join(namesDir(), UUID3))).toBe(false);
+  });
+
+  it("sweepNames leaves non-uuid filenames untouched", () => {
+    writeName(UUID, "alokai-1");
+    writeFileSync(join(namesDir(), "README"), "not a session");
+    sweepNames([]);
+    expect(existsSync(join(namesDir(), "README"))).toBe(true);
+    expect(existsSync(join(namesDir(), UUID))).toBe(false);
+  });
+
+  it("sweepNames tolerates a missing terminals directory", () => {
+    expect(existsSync(namesDir())).toBe(false);
+    expect(() => sweepNames([UUID])).not.toThrow();
+    expect(existsSync(namesDir())).toBe(false);
   });
 });
