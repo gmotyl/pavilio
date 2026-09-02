@@ -154,6 +154,101 @@ describe("terminalInstances", () => {
 
     expect(disposable.dispose).toHaveBeenCalledTimes(1);
   });
+
+  // --- connection state ---------------------------------------------------
+  // getConnectionState / onConnectionChange expose the "is this browser's
+  // socket for the session alive?" fact that the disconnected badge renders.
+  // Deliberately separate from onWsChange, which only reports ws identity
+  // swaps and cannot observe a socket dying.
+
+  /** Simulate the browser delivering a close event on a fake socket. */
+  function closeSocket(ws: FakeWs): void {
+    ws.readyState = 3; // CLOSED
+    ws.onclose?.(new Event("close") as CloseEvent);
+  }
+
+  it("reports unattached for a session with no instance", async () => {
+    const mod = await import("../terminalInstances");
+    // Never acquired in this browser: normal, frequent, and not a fault.
+    expect(mod.getConnectionState("never-acquired-session")).toBe("unattached");
+  });
+
+  it("reports connected while the socket is open", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    expect(createdSockets[0].readyState).toBe(1); // OPEN
+    expect(mod.getConnectionState("test-session")).toBe("connected");
+  });
+
+  it("reports disconnected and notifies subscribers when the socket closes", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    const seen: string[] = [];
+    mod.onConnectionChange("test-session", (state) => seen.push(state));
+
+    closeSocket(createdSockets[0]);
+
+    expect(mod.getConnectionState("test-session")).toBe("disconnected");
+    expect(seen).toEqual(["disconnected"]);
+  });
+
+  it("notifies subscribers again when reopen establishes a new socket", async () => {
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+
+    const seen: string[] = [];
+    mod.onConnectionChange("test-session", (state) => seen.push(state));
+
+    closeSocket(createdSockets[0]);
+    expect(seen).toEqual(["disconnected"]);
+
+    seen.length = 0;
+    inst.reopen();
+    // The fresh socket announces itself the way a browser does.
+    createdSockets[1].onopen?.(new Event("open"));
+
+    expect(seen).toContain("connected");
+    expect(mod.getConnectionState("test-session")).toBe("connected");
+  });
+
+  it("keeps notifying remaining subscribers when one throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    const boom = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const seen: string[] = [];
+    mod.onConnectionChange("test-session", boom);
+    mod.onConnectionChange("test-session", (state) => seen.push(state));
+
+    closeSocket(createdSockets[0]);
+
+    expect(boom).toHaveBeenCalled();
+    expect(seen).toEqual(["disconnected"]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("stops notifying after unsubscribe", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    const seen: string[] = [];
+    const unsubscribe = mod.onConnectionChange("test-session", (state) =>
+      seen.push(state),
+    );
+    unsubscribe();
+
+    closeSocket(createdSockets[0]);
+
+    expect(seen).toEqual([]);
+    // ...while the state itself is still observable by a direct read.
+    expect(mod.getConnectionState("test-session")).toBe("disconnected");
+  });
 });
 
 describe("followBottomAcrossResize", () => {
