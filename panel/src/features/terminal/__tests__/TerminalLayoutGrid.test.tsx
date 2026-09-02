@@ -645,3 +645,90 @@ describe("TerminalLayoutGrid — project colour picker", () => {
     expect(onFocus).not.toHaveBeenCalled();
   });
 });
+
+describe("TerminalLayoutGrid — rename from the cell header", () => {
+  // jsdom's DragEvent has no real DataTransfer; the header's own onDragStart
+  // writes to it, so a stand-in has to be supplied (same helper as the
+  // column-layout block above).
+  function dragStart(el: Element) {
+    fireEvent.dragStart(el, { dataTransfer: { effectAllowed: "", dropEffect: "" } });
+  }
+
+  function twoSessions() {
+    return [
+      makeSession({ id: "a", name: "claude-a" }),
+      makeSession({ id: "b", name: "claude-b" }),
+    ];
+  }
+
+  it("renames a session from the cell header", () => {
+    const onRename = vi.fn();
+    renderGrid({
+      sessions: [makeSession({ id: "s-ren", name: "claude-ch" })],
+      focusedId: "s-ren",
+      onRename,
+    });
+
+    // Single click must not start an edit — the header is a drag handle.
+    fireEvent.click(screen.getByText("claude-ch"));
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+
+    fireEvent.doubleClick(screen.getByText("claude-ch"));
+
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    expect(input).toHaveValue("claude-ch");
+
+    fireEvent.change(input, { target: { value: "  builder  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onRename).toHaveBeenCalledWith("s-ren", "builder");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("keeps the previous name when the edit is cancelled with Escape", () => {
+    const onRename = vi.fn();
+    renderGrid({
+      sessions: [makeSession({ id: "s-esc", name: "claude-ch" })],
+      focusedId: "s-esc",
+      onRename,
+    });
+
+    fireEvent.doubleClick(screen.getByText("claude-ch"));
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "discarded" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.blur(input);
+
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByText("claude-ch")).toBeInTheDocument();
+  });
+
+  it("dragging the header still swaps cells", () => {
+    const onSwap = vi.fn();
+    const onRename = vi.fn();
+    renderGrid({ sessions: twoSessions(), focusedId: "a", onSwap, onRename });
+
+    dragStart(screen.getAllByTitle("Drag to swap")[0]);
+    fireEvent.drop(screen.getByTestId("terminal-view-b"));
+
+    expect(onSwap).toHaveBeenCalledWith("a", "b");
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("selecting text in the rename input does not start a cell drag", () => {
+    const onSwap = vi.fn();
+    renderGrid({ sessions: twoSessions(), focusedId: "a", onSwap, onRename: vi.fn() });
+
+    fireEvent.doubleClick(screen.getByText("claude-a"));
+    const input = screen.getByRole("textbox");
+
+    // The input lives inside a `draggable` header; without a stop, dragging
+    // to select its text starts a cell drag instead.
+    dragStart(input);
+    fireEvent.drop(screen.getByTestId("terminal-view-b"));
+
+    expect(onSwap).not.toHaveBeenCalled();
+  });
+});

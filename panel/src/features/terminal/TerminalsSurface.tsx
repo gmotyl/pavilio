@@ -184,6 +184,7 @@ export function TerminalsSurface({
               terminalHandlesRef.current.set(sessionId, handle);
             }}
             onSwap={onSwap}
+            onRename={(id, n) => onUpdateSession(id, { name: n })}
             columnLayout={columnLayout}
             onMergeColumn={onMergeColumn}
             onJoinColumn={onJoinColumn}
