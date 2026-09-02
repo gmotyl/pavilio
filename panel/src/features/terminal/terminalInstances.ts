@@ -146,6 +146,21 @@ export function getConnectionState(sessionId: string): ConnectionState {
 }
 
 /**
+ * True when the session's process has exited normally (an exit frame was
+ * received). `false` for a session with no pooled instance in this browser.
+ *
+ * Deliberately separate from {@link ConnectionState}: an exit frame does not
+ * touch connection state, so a cleanly exited shell reads "connected" until
+ * the server closes the socket and then "disconnected" — indistinguishable
+ * from a socket that died under a live process. Callers that mean "looks alive
+ * but isn't" must exclude an exited session with this, since the terminal
+ * already says `[Process exited]` on screen.
+ */
+export function hasExited(sessionId: string): boolean {
+  return instances.get(sessionId)?.exited ?? false;
+}
+
+/**
  * Subscribe to connection-state changes for a session. Fires on the ws
  * open / close / error events, on reopen()'s identity swap, and when the
  * instance is destroyed ("unattached"). Does NOT fire synchronously on
@@ -411,6 +426,11 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
   const isCurrent = () => instances.get(sessionId) === inst && inst.ws === ws;
 
   ws.onopen = () => {
+    // The SECOND of two intentional "connected" emits (the first is the
+    // optimistic one at the `inst.ws` swap below). Do NOT dedupe the pair:
+    // dropping the swap emit would strand first attach at "unattached" until
+    // the handshake lands, and dropping this one would leave a failed-then-
+    // retried handshake permanently optimistic.
     if (isCurrent()) setConnectionState(inst, "connected");
     try {
       inst.fitAddon.fit();
@@ -478,6 +498,11 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
   // terminal being connected right now does not wear a disconnected badge for
   // the duration of the handshake; a handshake that fails reports itself
   // through the error/close handlers above.
+  //
+  // The FIRST of two intentional "connected" emits — ws.onopen above fires the
+  // second. The pair must not be deduped (see that comment), and this one only
+  // reaches a snapshot-reading consumer because createInstance pools the
+  // instance before calling connectWs.
   setConnectionState(inst, "connected");
 
   // Notify subscribers (TerminalView) that the ws identity changed so
@@ -750,9 +775,20 @@ function createInstance(sessionId: string): InternalInstance {
     { capture: true },
   );
 
+  // Pool BEFORE connecting — the ordering is load-bearing, twice over:
+  //   • connectWs's `isCurrent()` guard is `instances.get(sessionId) === inst`,
+  //     and that must be true for the whole time connectWs runs, so the fresh
+  //     socket's own handlers recognise themselves as current.
+  //   • connectWs emits "connected" at the `inst.ws` swap. Emitting while the
+  //     instance is not yet pooled means getConnectionState() still answers
+  //     "unattached" at that instant, so a useSyncExternalStore consumer
+  //     re-reads an unchanged snapshot and DROPS the emit rather than merely
+  //     wasting it. `inst` is fully constructed here, so there is no reason to
+  //     wait.
+  instances.set(sessionId, inst);
+
   connectWs(sessionId, inst);
 
-  instances.set(sessionId, inst);
   return inst;
 }
 

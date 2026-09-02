@@ -194,6 +194,50 @@ describe("terminalInstances", () => {
     expect(seen).toEqual(["disconnected"]);
   });
 
+  it("reports disconnected when the socket errors", async () => {
+    // AC3 is "closes OR errors". The error path deliberately does NOT re-read
+    // readyState: a browser can deliver `error` while the socket is still OPEN
+    // and never follow it with an observable close, so the error itself is the
+    // disconnect signal. Firing it at readyState === 1 pins that down — a
+    // "just derive the state from readyState" refactor would fail here.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    const seen: string[] = [];
+    mod.onConnectionChange("test-session", (state) => seen.push(state));
+
+    const ws = createdSockets[0];
+    expect(ws.readyState).toBe(1); // OPEN — the whole point of this test
+    ws.onerror?.(new Event("error"));
+
+    expect(ws.readyState).toBe(1); // still OPEN after the error
+    expect(seen).toEqual(["disconnected"]);
+    expect(mod.getConnectionState("test-session")).toBe("disconnected");
+    warn.mockRestore();
+  });
+
+  it("reports connected at the moment of the first ws swap", async () => {
+    // On FIRST attach the optimistic "connected" emit fires at the `inst.ws`
+    // identity swap inside connectWs. The instance must already be pooled by
+    // then, otherwise getConnectionState() says "unattached" at the very
+    // instant the listener is told "connected" — and a useSyncExternalStore
+    // consumer re-reads the snapshot, sees no change, and drops the emit.
+    const mod = await import("../terminalInstances");
+
+    const seen: string[] = [];
+    const readInsideListener: string[] = [];
+    mod.onConnectionChange("test-session", (state) => {
+      seen.push(state);
+      readInsideListener.push(mod.getConnectionState("test-session"));
+    });
+
+    mod.acquireTerminal("test-session");
+
+    expect(seen).toEqual(["connected"]);
+    expect(readInsideListener).toEqual(["connected"]);
+  });
+
   it("notifies subscribers again when reopen establishes a new socket", async () => {
     const mod = await import("../terminalInstances");
     const inst = mod.acquireTerminal("test-session");
@@ -206,11 +250,74 @@ describe("terminalInstances", () => {
 
     seen.length = 0;
     inst.reopen();
-    // The fresh socket announces itself the way a browser does.
+    // The ws identity swap inside connectWs reports "connected" optimistically,
+    // before the handshake completes — so exactly one emit lands here.
+    expect(seen).toEqual(["connected"]);
+
+    // The fresh socket announces itself the way a browser does. This is the
+    // SECOND "connected" emit, and it is intentional: asserting the exact
+    // sequence (rather than `toContain`) is what makes the ws.onopen emit
+    // load-bearing, and documents that the pair must not be deduped.
     createdSockets[1].onopen?.(new Event("open"));
 
-    expect(seen).toContain("connected");
+    expect(seen).toEqual(["connected", "connected"]);
     expect(mod.getConnectionState("test-session")).toBe("connected");
+  });
+
+  it("notifies unattached when the terminal is destroyed", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    const seen: string[] = [];
+    const readInsideListener: string[] = [];
+    mod.onConnectionChange("test-session", (state) => {
+      seen.push(state);
+      readInsideListener.push(mod.getConnectionState("test-session"));
+    });
+
+    mod.destroyTerminal("test-session");
+
+    // A destroyed session is "no socket, no fault" — never a disconnect
+    // flicker on the way out.
+    expect(seen).toEqual(["unattached"]);
+    // The instance is dropped from the pool BEFORE the emit, so a listener
+    // reading the state synchronously already agrees with what it was told.
+    expect(readInsideListener).toEqual(["unattached"]);
+    expect(mod.getConnectionState("test-session")).toBe("unattached");
+
+    // Destroying an already-destroyed session is a no-op, not a re-emit.
+    mod.destroyTerminal("test-session");
+    expect(seen).toEqual(["unattached"]);
+
+    // A subscriber outlives the instance: re-acquiring the same session must
+    // reach the same, still-subscribed listener.
+    mod.acquireTerminal("test-session");
+    expect(seen).toEqual(["unattached", "connected"]);
+    expect(mod.getConnectionState("test-session")).toBe("connected");
+  });
+
+  it("reports hasExited after the process exits", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    expect(mod.hasExited("test-session")).toBe(false);
+
+    const seen: string[] = [];
+    mod.onConnectionChange("test-session", (state) => seen.push(state));
+
+    createdSockets[0].onmessage?.({
+      data: JSON.stringify({ type: "exit", code: 0 }),
+    } as MessageEvent);
+
+    expect(mod.hasExited("test-session")).toBe(true);
+    // A clean exit is NOT a connection fault: the socket is still open, so the
+    // state stays "connected" until the server actually closes it. That gap is
+    // how a normally-exited shell is told apart from a dead socket.
+    expect(seen).toEqual([]);
+    expect(mod.getConnectionState("test-session")).toBe("connected");
+
+    // No pooled instance → nothing has exited.
+    expect(mod.hasExited("never-acquired-session")).toBe(false);
   });
 
   it("keeps notifying remaining subscribers when one throws", async () => {
