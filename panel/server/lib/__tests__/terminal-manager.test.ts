@@ -17,11 +17,15 @@ import {
 // most-recently-spawned pty so a test can drive PTY output deterministically
 // without spawning a real shell.
 let lastPtyDataCallbacks: Array<(data: string) => void> = []
+// Recorder for the most recent spawn(file, args, options) call, so a test can
+// assert on the env passed to node-pty without changing the fake's shape.
+let lastSpawnCall: { file: string; args: string[]; options: Record<string, unknown> } | undefined
 function emitPtyData(data: string): void {
   for (const cb of lastPtyDataCallbacks) cb(data)
 }
 vi.mock("node-pty", () => ({
-  spawn: () => {
+  spawn: (file: string, args: string[], options: Record<string, unknown>) => {
+    lastSpawnCall = { file, args, options }
     const dataCallbacks: Array<(data: string) => void> = []
     lastPtyDataCallbacks = dataCallbacks
     return {
@@ -131,6 +135,28 @@ describe("session model", () => {
     const listed = listSessions().find((s) => s.id === meta.id)!
     expect(listed.name).toBe("renamed")
     expect(Object.hasOwn(listed, "color")).toBe(false)
+
+    destroySession(meta.id)
+  })
+})
+
+describe("spawn env", () => {
+  it("spawn env carries PAVILIO_TERMINAL_ID matching the session id", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alpha" })
+
+    expect(lastSpawnCall).toBeDefined()
+    const env = lastSpawnCall!.options.env as Record<string, string>
+    expect(env.PAVILIO_TERMINAL_ID).toBe(meta.id)
+
+    destroySession(meta.id)
+  })
+
+  it("spawn env still inherits process env and TERM", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alpha" })
+
+    const env = lastSpawnCall!.options.env as Record<string, string>
+    expect(env.TERM).toBe("xterm-256color")
+    expect(env.PATH).toBe(process.env.PATH)
 
     destroySession(meta.id)
   })

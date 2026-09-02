@@ -56,7 +56,7 @@ export function createSession(opts: {
     cols: opts.cols,
     rows: opts.rows,
     cwd: opts.cwd,
-    env: { ...process.env, TERM: "xterm-256color" },
+    env: { ...process.env, TERM: "xterm-256color", PAVILIO_TERMINAL_ID: id },
   });
 
   const session: TerminalSession = {
