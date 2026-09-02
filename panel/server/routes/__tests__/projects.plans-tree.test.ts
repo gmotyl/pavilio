@@ -470,3 +470,119 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
     expect(res2.status).toBe(403);
   });
 });
+
+// --- Legacy flat source visibility vs contributed OpenSpec changes -------------
+
+describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () => {
+  const findProject = (body: { sources: { id: string }[] }) =>
+    body.sources.find((s) => s.id === "project");
+
+  it("hides the empty legacy flat source when an OpenSpec source contributed changes", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    seedChange(join(projectsDir, "alokai", "plans", "openspec"), "add-checkout");
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    expect(res.status).toBe(200);
+    // The OpenSpec store really did contribute a change …
+    const os = res.body.sources.find((s: { id: string }) => s.id === "openspec:project");
+    expect(os.changes.length).toBeGreaterThan(0);
+    // … so the permanently empty flat node must not be serialized.
+    expect(findProject(res.body)).toBeUndefined();
+  });
+
+  it("keeps the empty legacy flat source when no OpenSpec source contributed changes", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const project = findProject(res.body);
+    expect(project).toBeTruthy();
+    expect(project!.files).toHaveLength(0);
+  });
+
+  it("keeps a non-empty legacy flat source alongside OpenSpec changes", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    seedFile(join(projectsDir, "alokai", "plans", "2026-01-01-foo.md"), "# foo");
+    seedChange(join(projectsDir, "alokai", "plans", "openspec"), "add-checkout");
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const project = findProject(res.body);
+    expect(project).toBeTruthy();
+    expect(project!.files.map((f: { filename: string }) => f.filename)).toEqual(["2026-01-01-foo.md"]);
+  });
+
+  it("still drops an empty non-project legacy source", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    mkdirSync(join(projectsDir, "alokai", "plans", "archived"), { recursive: true });
+    seedChange(join(projectsDir, "alokai", "plans", "openspec"), "add-checkout");
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    expect(res.body.sources.find((s: { id: string }) => s.id === "project:archived")).toBeUndefined();
+  });
+
+  it("a missing configured OpenSpec source does not count as a contributed change", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([
+        {
+          name: "pavilio",
+          path: join(tmpRoot, "repos", "pavilio"),
+          openspec: { mode: "store", root: "nowhere/at/all" },
+        },
+      ]),
+    );
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
+    expect(src.missing).toBe(true);
+    expect(src.changes).toHaveLength(0);
+    // A surfaced-but-missing source contributed nothing, so the flat node stays.
+    const project = findProject(res.body);
+    expect(project).toBeTruthy();
+    expect(project!.files).toHaveLength(0);
+  });
+
+  it("a rejected OpenSpec config does not count as a contributed change", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([
+        { name: "pavilio", path: join(tmpRoot, "repos", "pavilio"), openspec: { mode: "storee" } },
+      ]),
+    );
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
+    expect(src.kind).toBe("openspec-error");
+    const project = findProject(res.body);
+    expect(project).toBeTruthy();
+    expect(project!.files).toHaveLength(0);
+  });
+
+  it("serializes legacy sources before OpenSpec sources", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    seedFile(join(projectsDir, "alokai", "plans", "2026-01-01-foo.md"), "# foo");
+    seedFile(join(projectsDir, "alokai", "plans", "archived", "2026-01-01-old.md"), "# old");
+    seedChange(join(projectsDir, "alokai", "plans", "openspec"), "add-checkout");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([
+        { name: "pavilio", path: join(tmpRoot, "repos", "pavilio"), openspec: { mode: "storee" } },
+      ]),
+    );
+
+    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const sources = res.body.sources as { id: string; kind?: string }[];
+    expect(sources.map((s) => s.id)).toContain("project");
+    expect(sources.map((s) => s.id)).toContain("project:archived");
+    expect(sources.map((s) => s.id)).toContain("openspec:project");
+    const legacyIdx = sources.flatMap((s, i) => (s.kind === undefined ? [i] : []));
+    const openspecIdx = sources.flatMap((s, i) => (s.kind !== undefined ? [i] : []));
+    expect(legacyIdx.length).toBeGreaterThan(0);
+    expect(openspecIdx.length).toBeGreaterThan(0);
+    expect(Math.max(...legacyIdx)).toBeLessThan(Math.min(...openspecIdx));
+    // Legacy segment keeps its own order; the error source keeps its place first
+    // within the OpenSpec segment.
+    expect(sources[openspecIdx[0]].kind).toBe("openspec-error");
+  });
+});

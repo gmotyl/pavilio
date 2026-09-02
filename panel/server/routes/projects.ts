@@ -614,18 +614,17 @@ router.get("/:name/plans-tree", (req, res) => {
     return res.status(404).json({ error: "Project not found" });
   }
 
-  const sources: (PlanSource | OpenSpecSource | InvalidOpenSpecSource)[] = [];
-  for (const c of plansSources(projectDir, req.params.name)) {
-    const files = listPlanFilesInDir(c.absoluteRoot, c.id, projectsDir);
-    if (files.length === 0 && c.id !== "project") continue; // project node always shown
-    sources.push({ id: c.id, label: c.label, absoluteRoot: c.absoluteRoot, files });
-  }
-
-  // OpenSpec sources: the project-local store and each configured linked repo.
+  // OpenSpec sources are collected first: whether any of them actually
+  // contributed a change decides if the (often permanently empty) legacy flat
+  // node is worth a row. Wire order stays legacy-then-openspec below.
+  const openspecSources: (OpenSpecSource | InvalidOpenSpecSource)[] = [];
+  // Only a real, listed change counts — a `missing: true` source or a rejected
+  // config surfaces for visibility but contributes nothing.
+  let contributedChanges = 0;
   const openspec = openSpecSources(projectDir);
   // Rejected configs first — an invisible typo is the whole reason they surface.
   for (const bad of openspec.invalid) {
-    sources.push({
+    openspecSources.push({
       id: bad.id,
       label: bad.label,
       kind: "openspec-error",
@@ -644,13 +643,28 @@ router.get("/:name/plans-tree", (req, res) => {
     // A configured root that isn't there: surface it, don't let a typo look like
     // an empty backend.
     if (os.configured && !existsSync(os.openspecDir)) {
-      sources.push({ ...base, changes: [], missing: true });
+      openspecSources.push({ ...base, changes: [], missing: true });
       continue;
     }
     const changes = listOpenSpecChanges(os.openspecDir, os.id, projectsDir);
     if (changes.length === 0) continue;
-    sources.push({ ...base, changes });
+    contributedChanges += changes.length;
+    openspecSources.push({ ...base, changes });
   }
+
+  const legacySources: PlanSource[] = [];
+  for (const c of plansSources(projectDir, req.params.name)) {
+    const files = listPlanFilesInDir(c.absoluteRoot, c.id, projectsDir);
+    // The flat project node is kept when empty only as a fallback — once
+    // OpenSpec carries the plans it is pure noise.
+    if (files.length === 0 && (c.id !== "project" || contributedChanges > 0)) continue;
+    legacySources.push({ id: c.id, label: c.label, absoluteRoot: c.absoluteRoot, files });
+  }
+
+  const sources: (PlanSource | OpenSpecSource | InvalidOpenSpecSource)[] = [
+    ...legacySources,
+    ...openspecSources,
+  ];
 
   res.json({ project: req.params.name, sources });
 });
