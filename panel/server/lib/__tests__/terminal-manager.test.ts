@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
 import {
   createSession,
   destroySession,
@@ -12,6 +15,7 @@ import {
   flushReplay,
   _resetReplayForTests,
 } from "../terminalReplay"
+import { namesDir } from "../terminal-identity"
 
 // Fake node-pty: capture the onData callbacks registered against the
 // most-recently-spawned pty so a test can drive PTY output deterministically
@@ -20,6 +24,9 @@ let lastPtyDataCallbacks: Array<(data: string) => void> = []
 // Recorder for the most recent spawn(file, args, options) call, so a test can
 // assert on the env passed to node-pty without changing the fake's shape.
 let lastSpawnCall: { file: string; args: string[]; options: Record<string, unknown> } | undefined
+// The most-recently-spawned pty's onExit callback, so a test can simulate the
+// shell exiting on its own (not via destroySession).
+let lastPtyExitCallback: (() => void) | undefined
 function emitPtyData(data: string): void {
   for (const cb of lastPtyDataCallbacks) cb(data)
 }
@@ -34,7 +41,10 @@ vi.mock("node-pty", () => ({
         dataCallbacks.push(cb)
         return { dispose: () => {} }
       },
-      onExit: () => ({ dispose: () => {} }),
+      onExit: (cb: () => void) => {
+        lastPtyExitCallback = cb
+        return { dispose: () => {} }
+      },
       resize: () => {},
       kill: () => {},
       write: () => {},
@@ -187,5 +197,62 @@ describe("default session names", () => {
     })
     expect(meta.name).toBe("deploy-watch")
     destroySession(meta.id)
+  })
+})
+
+describe("identity file lifecycle", () => {
+  let previousStateDir: string | undefined
+  let tempDir: string
+
+  beforeEach(() => {
+    previousStateDir = process.env.PANEL_AUTH_STATE_DIR
+    tempDir = mkdtempSync(join(tmpdir(), "panel-terminal-manager-test-"))
+    process.env.PANEL_AUTH_STATE_DIR = tempDir
+  })
+
+  afterEach(() => {
+    if (previousStateDir === undefined) delete process.env.PANEL_AUTH_STATE_DIR
+    else process.env.PANEL_AUTH_STATE_DIR = previousStateDir
+    rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  function readIdentityFile(id: string): string | undefined {
+    const file = join(namesDir(), id)
+    if (!existsSync(file)) return undefined
+    return readFileSync(file, "utf8")
+  }
+
+  it("creating a session writes its identity file", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(readIdentityFile(meta.id)).toBe(`${meta.name}\n`)
+    destroySession(meta.id)
+  })
+
+  it("renaming a session rewrites its identity file", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    updateSession(meta.id, { name: "deploy-watch" })
+    expect(readIdentityFile(meta.id)).toBe("deploy-watch\n")
+    destroySession(meta.id)
+  })
+
+  it("renaming an unknown session writes no file", () => {
+    const ok = updateSession("00000000-0000-4000-8000-000000000000", { name: "ghost" })
+    expect(ok).toBe(false)
+    expect(readIdentityFile("00000000-0000-4000-8000-000000000000")).toBeUndefined()
+  })
+
+  it("destroying a session removes its identity file", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(readIdentityFile(meta.id)).toBeDefined()
+    destroySession(meta.id)
+    expect(readIdentityFile(meta.id)).toBeUndefined()
+  })
+
+  it("a session whose shell exits removes its identity file", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(readIdentityFile(meta.id)).toBeDefined()
+    // Simulate the PTY exiting on its own (not via destroySession).
+    lastPtyExitCallback?.()
+    expect(readIdentityFile(meta.id)).toBeUndefined()
   })
 })

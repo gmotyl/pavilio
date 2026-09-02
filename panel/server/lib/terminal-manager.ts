@@ -14,7 +14,7 @@ import {
   resizeReplay,
   destroyReplay,
 } from "./terminalReplay";
-import { nextSessionName } from "./terminal-identity";
+import { nextSessionName, removeName, writeName } from "./terminal-identity";
 
 export interface TerminalSession {
   id: string;
@@ -76,6 +76,7 @@ export function createSession(opts: {
   };
 
   sessions.set(id, session);
+  writeName(id, session.name);
 
   // Mirror every PTY output chunk into a headless replay buffer so a client
   // reconnecting later can be sent a serialized snapshot instead of a blank
@@ -108,6 +109,7 @@ export function createSession(opts: {
   ptyProcess.onExit(() => {
     destroyReplay(id);
     removeSession(id);
+    removeName(id);
     sessions.delete(id);
   });
 
@@ -127,6 +129,7 @@ export function destroySession(id: string): boolean {
   if (!session) return false;
   session.pty.kill();
   destroyReplay(id);
+  removeName(id);
   sessions.delete(id);
   return true;
 }
@@ -142,7 +145,10 @@ export function updateSession(
 ): boolean {
   const session = sessions.get(id);
   if (!session) return false;
-  if (updates.name !== undefined) session.name = updates.name;
+  if (updates.name !== undefined) {
+    session.name = updates.name;
+    writeName(id, session.name);
+  }
   return true;
 }
 
