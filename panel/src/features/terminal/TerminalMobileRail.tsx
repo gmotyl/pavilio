@@ -3,6 +3,7 @@ import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { mobileShortName } from "./useTerminalSessions";
 import { displayColor } from "./sessionColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { useAggregateActivity } from "../favicon/useAggregateActivity";
 
 interface Props {
@@ -57,34 +58,41 @@ export function TerminalMobileRail({
         const accent = displayColor(s, sessions);
         const label = mobileShortName(s, sessions);
         return (
-          <button
-            key={s.id}
-            type="button"
-            data-testid={`terminal-mobile-rail-session-${s.id}`}
-            onClick={() => onFocus(s.id)}
-            className={`shrink-0 rounded-full flex items-center transition-all active:scale-95 ${
-              active ? "px-2.5 py-1 gap-1.5" : "w-7 h-7 justify-center"
-            }`}
-            style={{
-              background: active
-                ? "var(--bg-elevated, var(--bg-active))"
-                : "var(--bg-base)",
-              border: active
-                ? `1px solid ${s.color || accent}`
-                : "1px solid var(--border-subtle)",
-              color: active ? "var(--text-primary)" : "var(--text-secondary)",
-            }}
-          >
-            <TerminalActivityLed sessionId={s.id} />
-            {active && (
-              <span
-                className="text-[10px] font-mono"
-                style={{ letterSpacing: "0.02em" }}
-              >
-                {label}
-              </span>
-            )}
-          </button>
+          // The pill is itself a button, so the badge cannot nest inside it.
+          // It rides on the corner instead — the same idiom as the drawer
+          // button's activity dot lower down this file.
+          <span key={s.id} className="relative shrink-0 flex items-center">
+            <button
+              type="button"
+              data-testid={`terminal-mobile-rail-session-${s.id}`}
+              onClick={() => onFocus(s.id)}
+              className={`shrink-0 rounded-full flex items-center transition-all active:scale-95 ${
+                active ? "px-2.5 py-1 gap-1.5" : "w-7 h-7 justify-center"
+              }`}
+              style={{
+                background: active
+                  ? "var(--bg-elevated, var(--bg-active))"
+                  : "var(--bg-base)",
+                border: active
+                  ? `1px solid ${s.color || accent}`
+                  : "1px solid var(--border-subtle)",
+                color: active ? "var(--text-primary)" : "var(--text-secondary)",
+              }}
+            >
+              <TerminalActivityLed sessionId={s.id} />
+              {active && (
+                <span
+                  className="text-[10px] font-mono"
+                  style={{ letterSpacing: "0.02em" }}
+                >
+                  {label}
+                </span>
+              )}
+            </button>
+            <span className="absolute -top-1 -right-1">
+              <TerminalDisconnectedBadge sessionId={s.id} size="lg" />
+            </span>
+          </span>
         );
       })}
 

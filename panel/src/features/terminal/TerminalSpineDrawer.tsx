@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { X } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 
 interface Props {
   sessions: SessionMeta[];
@@ -126,12 +127,14 @@ export function TerminalSpineDrawer({
                   {list.map((s) => {
                     const active = s.id === focusedId && isCurrent;
                     return (
-                      <li key={s.id}>
+                      // The row is itself a button, so the badge sits beside
+                      // it rather than inside it.
+                      <li key={s.id} className="flex items-center">
                         <button
                           type="button"
                           data-testid={`terminal-spine-drawer-session-${s.id}`}
                           onClick={() => onFocus(s.id, s.project)}
-                          className="flex items-center gap-2.5 w-full text-left px-2.5 py-2 rounded-md transition-colors"
+                          className="flex items-center gap-2.5 flex-1 min-w-0 text-left px-2.5 py-2 rounded-md transition-colors"
                           style={{
                             background: active
                               ? "var(--bg-elevated, var(--bg-active))"
@@ -158,6 +161,9 @@ export function TerminalSpineDrawer({
                             </span>
                           )}
                         </button>
+                        <span className="pr-1.5">
+                          <TerminalDisconnectedBadge sessionId={s.id} />
+                        </span>
                       </li>
                     );
                   })}

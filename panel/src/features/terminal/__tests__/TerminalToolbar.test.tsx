@@ -1,7 +1,36 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TerminalToolbar } from "../TerminalToolbar";
 import type { SessionMeta } from "../useTerminalSessions";
+import type { ConnectionState } from "../terminalInstances";
+import { reconnectSession } from "../terminalInstances";
+
+// Connection state is per-browser and lives in the terminal instance pool.
+// Stub the two leaf reads the disconnected badge makes so a chip can be put
+// into the disconnected state without standing up a socket.
+const conn = vi.hoisted(() => ({
+  state: "connected" as ConnectionState,
+  exited: false,
+}));
+
+vi.mock("../useTerminalConnection", () => ({
+  useTerminalConnection: () => conn.state,
+}));
+
+vi.mock("../terminalInstances", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../terminalInstances")>();
+  return {
+    ...actual,
+    hasExited: () => conn.exited,
+    reconnectSession: vi.fn(),
+  };
+});
+
+beforeEach(() => {
+  conn.state = "connected";
+  conn.exited = false;
+  vi.mocked(reconnectSession).mockClear();
+});
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {
@@ -95,5 +124,18 @@ describe("TerminalToolbar — confirm close flow", () => {
 
     expect(onDelete).not.toHaveBeenCalled();
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("TerminalToolbar — disconnected badge", () => {
+  it("does not focus the session when the badge is activated", () => {
+    conn.state = "disconnected";
+    const session = makeSession({ id: "abc-123" });
+    const { onFocus } = renderToolbar({ sessions: [session], focusedId: null });
+
+    fireEvent.click(screen.getByTestId("terminal-disconnected-abc-123"));
+
+    expect(reconnectSession).toHaveBeenCalledWith("abc-123");
+    expect(onFocus).not.toHaveBeenCalled();
   });
 });
