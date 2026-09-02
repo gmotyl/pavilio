@@ -161,3 +161,31 @@ describe("spawn env", () => {
     destroySession(meta.id)
   })
 })
+
+describe("default session names", () => {
+  it("a new session defaults to project-scoped name alokai-1", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(meta.name).toBe("alokai-1")
+    destroySession(meta.id)
+  })
+
+  it("default names are numbered per project", () => {
+    const alokai = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    const motyl = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "motyl" })
+    expect(motyl.name).toBe("motyl-1")
+    destroySession(alokai.id)
+    destroySession(motyl.id)
+  })
+
+  it("an explicit name overrides the default allocator", () => {
+    const meta = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      name: "deploy-watch",
+    })
+    expect(meta.name).toBe("deploy-watch")
+    destroySession(meta.id)
+  })
+})

@@ -14,6 +14,7 @@ import {
   resizeReplay,
   destroyReplay,
 } from "./terminalReplay";
+import { nextSessionName } from "./terminal-identity";
 
 export interface TerminalSession {
   id: string;
@@ -59,9 +60,13 @@ export function createSession(opts: {
     env: { ...process.env, TERM: "xterm-256color", PAVILIO_TERMINAL_ID: id },
   });
 
+  const existingNames = Array.from(sessions.values())
+    .filter((s) => s.project === opts.project)
+    .map((s) => s.name);
+
   const session: TerminalSession = {
     id,
-    name: opts.name || `shell-${sessions.size + 1}`,
+    name: opts.name ?? nextSessionName(opts.project, existingNames),
     project: opts.project,
     cwd: opts.cwd,
     pid: ptyProcess.pid,
