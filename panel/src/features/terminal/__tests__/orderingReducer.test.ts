@@ -34,6 +34,14 @@ describe("orderingReducer", () => {
       const once = orderingReducer(base, action);
       const twice = orderingReducer(once, action);
       expect(twice, `replaying ${action.type} changed the state`).toEqual(once);
+      // Purity is the property that actually guards against StrictMode: React
+      // double-*invokes* the reducer with the same state and action and keeps the
+      // second result. Sequential idempotence above is a stronger, separate claim
+      // that not every kind can make (see `swap`), so assert purity for all of them.
+      expect(
+        orderingReducer(base, action),
+        `${action.type} is not a pure function of (state, action)`,
+      ).toEqual(orderingReducer(base, action));
     }
 
     // `swap` is deliberately excluded above: it is an involution by contract
