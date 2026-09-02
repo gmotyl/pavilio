@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
 import { ActiveFileProvider } from "../../explorer/useActiveFile";
@@ -117,6 +117,147 @@ const OPENSPEC_TREE = {
   ],
 };
 
+// Active + archived on both families: a legacy `:archived` source and an
+// archived OpenSpec change, next to their active counterparts.
+const ARCHIVED_LEGACY_FILE = "2025-12-01-old-design.md";
+const ARCHIVED_TREE = {
+  project: "alokai",
+  sources: [
+    TREE.sources[0],
+    {
+      id: "project:archived",
+      label: "Archived",
+      absoluteRoot: "/p/projects/alokai/plans/archived",
+      files: [
+        {
+          source: "project:archived",
+          filename: ARCHIVED_LEGACY_FILE,
+          absolutePath: `/p/projects/alokai/plans/archived/${ARCHIVED_LEGACY_FILE}`,
+          modified: 1,
+          relativeToProjectsDir: `alokai/plans/archived/${ARCHIVED_LEGACY_FILE}`,
+        },
+      ],
+    },
+    {
+      id: "openspec:project",
+      label: "alokai (OpenSpec)",
+      kind: "openspec",
+      mode: "store",
+      openspecDir: "/p/openspec",
+      changes: [
+        {
+          changeId: "live-change",
+          source: "openspec:project",
+          status: "active",
+          archiveDate: null,
+          artifacts: [
+            artifact({
+              kind: "proposal",
+              modified: 9,
+              absolutePath: "/p/openspec/changes/live-change/proposal.md",
+            }),
+          ],
+        },
+        {
+          changeId: "done-change",
+          source: "openspec:project",
+          status: "archived",
+          archiveDate: "2026-01-05",
+          artifacts: [
+            artifact({
+              kind: "proposal",
+              modified: 3,
+              absolutePath: "/p/openspec/changes/archive/done-change/proposal.md",
+            }),
+            artifact({
+              kind: "design",
+              filename: "design.md",
+              modified: 4,
+              absolutePath: "/p/openspec/changes/archive/done-change/design.md",
+            }),
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+// Same shape as ARCHIVED_TREE, but the archived items are the NEWEST things in
+// the tree — the archived OpenSpec artifact (99) and the archived legacy file
+// (98) both out-rank the active artifact (10) and the active flat file (2).
+// An auto-select that took plain max-mtime over everything would land on an
+// archived path here, so this fixture is what makes the candidate set's
+// active-only filters observable.
+const NEWEST_ARCHIVED_LEGACY_FILE = "2025-11-01-ancient.md";
+const ACTIVE_ARTIFACT_PATH = "/p/openspec/changes/live-change/proposal.md";
+const ARCHIVED_NEWEST_TREE = {
+  project: "alokai",
+  sources: [
+    TREE.sources[0],
+    {
+      id: "project:archived",
+      label: "Archived",
+      absoluteRoot: "/p/projects/alokai/plans/archived",
+      files: [
+        {
+          source: "project:archived",
+          filename: NEWEST_ARCHIVED_LEGACY_FILE,
+          absolutePath: `/p/projects/alokai/plans/archived/${NEWEST_ARCHIVED_LEGACY_FILE}`,
+          modified: 98,
+          relativeToProjectsDir: `alokai/plans/archived/${NEWEST_ARCHIVED_LEGACY_FILE}`,
+        },
+      ],
+    },
+    {
+      id: "openspec:project",
+      label: "alokai (OpenSpec)",
+      kind: "openspec",
+      mode: "store",
+      openspecDir: "/p/openspec",
+      changes: [
+        {
+          changeId: "live-change",
+          source: "openspec:project",
+          status: "active",
+          archiveDate: null,
+          artifacts: [
+            artifact({
+              kind: "proposal",
+              modified: 10,
+              absolutePath: ACTIVE_ARTIFACT_PATH,
+            }),
+          ],
+        },
+        {
+          changeId: "done-change",
+          source: "openspec:project",
+          status: "archived",
+          archiveDate: "2026-01-05",
+          artifacts: [
+            artifact({
+              kind: "proposal",
+              modified: 99,
+              absolutePath: "/p/openspec/changes/archive/done-change/proposal.md",
+            }),
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+/** The `archived` checkbox inside the contract-fixed toggle label. */
+const archivedCheckbox = () =>
+  within(screen.getByTestId("plans-tab-archived-toggle")).getByRole(
+    "checkbox",
+  ) as HTMLInputElement;
+
+/** Every top-level source header currently in the sidebar, in order. */
+const sourceTestIds = () =>
+  screen
+    .queryAllByTestId(/^plans-tab-source-/)
+    .map((el) => el.getAttribute("data-testid"));
+
 beforeEach(() => {
   lastMessage = null;
   mockFetchResponses({
@@ -134,7 +275,7 @@ describe("PlansTab", () => {
     renderWithRouter(<PlansTab projectName="alokai" />);
     expect(await screen.findByTestId("plans-tab-source-project")).toBeTruthy();
     expect(screen.getByTestId("plans-tab-source-workspace")).toBeTruthy();
-    expect(screen.getByText("projects (current)")).toBeTruthy();
+    expect(screen.getByText("plans/ (flat)")).toBeTruthy();
   });
 
   it("collapses a source when its header is clicked", async () => {
@@ -204,7 +345,10 @@ describe("PlansTab", () => {
       "plans/read": { absolutePath: "/p/projects/alokai/plans/2026-01-01-foo.md", content: "# body" },
     });
     renderWithRouter(<PlansTab projectName="alokai" />);
-    const header = await screen.findByTestId("plans-tab-source-project:archived");
+    // Archived history is behind the toggle now; reveal it first.
+    await screen.findByTestId("plans-tab-archived-toggle");
+    fireEvent.click(archivedCheckbox());
+    const header = screen.getByTestId("plans-tab-source-project:archived");
     expect(screen.getByText("Archived")).toBeTruthy();
     expect(
       screen.queryByTestId(`plans-tab-file-project:archived-${ARCHIVED_FILE}`),
@@ -383,6 +527,7 @@ describe("PlansTab", () => {
         "plans-tab-artifact-openspec:project-live-change-proposal",
       ),
     ).toBeTruthy();
+    fireEvent.click(archivedCheckbox());
     // Archived change: group present but collapsed → artifact not rendered yet.
     expect(screen.getByTestId("plans-tab-source-change:done-change")).toBeTruthy();
     expect(
@@ -427,9 +572,9 @@ describe("PlansTab", () => {
       "plans/read": { content: "# artifact body" },
     });
     renderWithRouter(<PlansTab projectName="alokai" />);
-    const header = await screen.findByTestId(
-      "plans-tab-source-change:done-change",
-    );
+    await screen.findByTestId("plans-tab-archived-toggle");
+    fireEvent.click(archivedCheckbox());
+    const header = screen.getByTestId("plans-tab-source-change:done-change");
     expect(
       screen.queryByTestId(
         "plans-tab-artifact-openspec:project-done-change-proposal",
@@ -534,5 +679,188 @@ describe("PlansTab", () => {
     // No star toggle exists anymore on any plan row.
     expect(screen.queryByTestId("plans-tab-star-2026-01-01-foo.md")).toBeNull();
     expect(screen.queryByTestId("plans-tab-star-woo.md")).toBeNull();
+  });
+});
+
+describe("PlansTab archived toggle", () => {
+  const renderArchived = async (
+    options?: Parameters<typeof renderWithRouter>[1],
+  ) => {
+    mockFetchResponses({
+      "plans-tree": ARCHIVED_TREE,
+      "plans/read": { content: "# artifact body" },
+    });
+    const utils = renderWithRouter(<PlansTab projectName="alokai" />, options);
+    await screen.findByTestId("plans-tab-archived-toggle");
+    return utils;
+  };
+
+  it("renders the archived checkbox unchecked by default", async () => {
+    await renderArchived();
+    expect(archivedCheckbox().checked).toBe(false);
+    expect(
+      screen.getByTestId("plans-tab-archived-toggle").textContent,
+    ).toContain("archived");
+  });
+
+  it("hides archived change groups until the box is checked", async () => {
+    await renderArchived();
+    expect(screen.getByTestId("plans-tab-source-change:live-change")).toBeTruthy();
+    expect(screen.queryByTestId("plans-tab-source-change:done-change")).toBeNull();
+    fireEvent.click(archivedCheckbox());
+    expect(screen.getByTestId("plans-tab-source-change:done-change")).toBeTruthy();
+  });
+
+  it("reveals archived change groups, collapsed and archive-date hinted, when checked", async () => {
+    await renderArchived();
+    fireEvent.click(archivedCheckbox());
+    // Same top level as the active group — both are source headers.
+    expect(sourceTestIds()).toContain("plans-tab-source-change:live-change");
+    const header = screen.getByTestId("plans-tab-source-change:done-change");
+    expect(within(header).getByText(/archived 2026-01-05/)).toBeTruthy();
+    // Collapsed by default: its artifacts are not rendered until expanded.
+    expect(
+      screen.queryByTestId(
+        "plans-tab-artifact-openspec:project-done-change-proposal",
+      ),
+    ).toBeNull();
+    fireEvent.click(header);
+    expect(
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:project-done-change-proposal",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("the toggle governs the legacy archived source too", async () => {
+    await renderArchived();
+    expect(screen.queryByTestId("plans-tab-source-project:archived")).toBeNull();
+    fireEvent.click(archivedCheckbox());
+    expect(screen.getByTestId("plans-tab-source-project:archived")).toBeTruthy();
+  });
+
+  it("unchecking hides archived groups again", async () => {
+    await renderArchived();
+    fireEvent.click(archivedCheckbox());
+    expect(screen.getByTestId("plans-tab-source-change:done-change")).toBeTruthy();
+    fireEvent.click(archivedCheckbox());
+    expect(archivedCheckbox().checked).toBe(false);
+    expect(screen.queryByTestId("plans-tab-source-change:done-change")).toBeNull();
+    expect(screen.queryByTestId("plans-tab-source-project:archived")).toBeNull();
+    expect(screen.getByTestId("plans-tab-source-change:live-change")).toBeTruthy();
+  });
+
+  it("count badges exclude archived artifacts until the box is checked", async () => {
+    await renderArchived();
+    // 1 legacy flat file + 1 active artifact.
+    expect(screen.getByTestId("plans-tab-count").textContent).toBe("2");
+    fireEvent.click(archivedCheckbox());
+    // + 1 legacy archived file + 2 archived artifacts.
+    expect(screen.getByTestId("plans-tab-count").textContent).toBe("5");
+    expect(
+      within(screen.getByTestId("plans-tab-source-change:done-change")).getByText("2"),
+    ).toBeTruthy();
+  });
+
+  it("the toggle resets to off on remount", async () => {
+    const { unmount } = await renderArchived();
+    fireEvent.click(archivedCheckbox());
+    expect(screen.getByTestId("plans-tab-source-change:done-change")).toBeTruthy();
+    unmount();
+    await renderArchived();
+    expect(archivedCheckbox().checked).toBe(false);
+    expect(screen.queryByTestId("plans-tab-source-change:done-change")).toBeNull();
+  });
+
+  it("checking the box keeps the open plan selected and auto-selects no archived artifact", async () => {
+    await renderArchived({
+      initialEntries: [
+        `/?file=${encodeURIComponent("/p/openspec/changes/live-change/proposal.md")}`,
+      ],
+    });
+    const openRow = () =>
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:project-live-change-proposal",
+      );
+    expect(openRow().style.background).toBe("var(--bg-active)");
+    fireEvent.click(archivedCheckbox());
+    expect(openRow().style.background).toBe("var(--bg-active)");
+    // Expanding the newly visible archived group selects nothing.
+    fireEvent.click(screen.getByTestId("plans-tab-source-change:done-change"));
+    expect(
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:project-done-change-design",
+      ).style.background,
+    ).toBe("transparent");
+    expect(openRow().style.background).toBe("var(--bg-active)");
+  });
+
+  // The half the test above cannot reach: it mounts with `?file=` already set,
+  // so useAutoSelectNewest short-circuits and never picks anything. Here nothing
+  // is preselected, so auto-select actually runs — over a tree whose newest
+  // items are archived.
+  it("auto-selects the newest ACTIVE plan even when archived ones are newer", async () => {
+    sessionStorage.clear();
+    mockFetchResponses({
+      "plans-tree": ARCHIVED_NEWEST_TREE,
+      "plans/read": { content: "# artifact body" },
+    });
+    // No `?file=` — auto-select is free to run.
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    await screen.findByTestId("plans-tab-archived-toggle");
+    const activeRow = () =>
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:project-live-change-proposal",
+      );
+    // Toggle off: the active artifact is what opened, not the newer archived one.
+    await waitFor(() =>
+      expect(activeRow().style.background).toBe("var(--bg-active)"),
+    );
+    await waitFor(() =>
+      expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+        ACTIVE_ARTIFACT_PATH,
+      ),
+    );
+
+    // Toggle on: the archived history appears, but the candidate set is
+    // unchanged — the active artifact stays open and nothing archived is picked.
+    fireEvent.click(archivedCheckbox());
+    expect(activeRow().style.background).toBe("var(--bg-active)");
+    fireEvent.click(screen.getByTestId("plans-tab-source-change:done-change"));
+    fireEvent.click(screen.getByTestId("plans-tab-source-project:archived"));
+    expect(
+      screen.getByTestId(
+        "plans-tab-artifact-openspec:project-done-change-proposal",
+      ).style.background,
+    ).toBe("transparent");
+    expect(
+      screen.getByTestId(
+        `plans-tab-file-project:archived-${NEWEST_ARCHIVED_LEGACY_FILE}`,
+      ).style.background,
+    ).toBe("transparent");
+    expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+      ACTIVE_ARTIFACT_PATH,
+    );
+  });
+
+  it("checking the box changes nothing for a project with no archived plans", async () => {
+    mockFetchResponses({
+      "plans-tree": OPENSPEC_TREE,
+      "plans/read": { content: "# artifact body" },
+    });
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    await screen.findByTestId("plans-tab-source-change:add-fulfillment-api");
+    const before = sourceTestIds();
+    const beforeCount = screen.getByTestId("plans-tab-count").textContent;
+    fireEvent.click(archivedCheckbox());
+    expect(sourceTestIds()).toEqual(before);
+    expect(screen.getByTestId("plans-tab-count").textContent).toBe(beforeCount);
+  });
+
+  it("labels the legacy flat source 'plans/ (flat)'", async () => {
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    await screen.findByTestId("plans-tab-source-project");
+    expect(screen.getByText("plans/ (flat)")).toBeTruthy();
+    expect(screen.queryByText("projects (current)")).toBeNull();
   });
 });

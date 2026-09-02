@@ -9,10 +9,11 @@
  *   (b) ProjectRedirect redirects to stored path
  *   (c) per-project isolation
  */
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import ProjectRedirect from "../ProjectRedirect";
+import ProjectView from "../ProjectView";
 import { useLastPath } from "../../shell/useLastPath";
 import { readLastPath, writeLastPath } from "../../shell/lastPath";
 
@@ -101,4 +102,40 @@ describe("ProjectView URL state persistence", () => {
     expect(readLastPath("a")).toBe("/project/a/notes?file=a.md");
     expect(readLastPath("b")).toBe("/project/b/repos?repo=r&file=x.ts");
   });
+});
+
+/**
+ * ProjectView backs the notes/memo/progress/QA file lists, and it renders the
+ * shared useFileListControls bar. The archived checkbox is composed by PlansTab
+ * alone (ContextTab.test.tsx pins the same guard for the context tab), so no
+ * section tab may grow one. The real component renders here on the same
+ * `stubFetch()` the tests above use.
+ */
+describe("ProjectView file-list controls", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.stubGlobal("fetch", stubFetch());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each(["notes", "memo", "progress", "qa"])(
+    "the %s tab renders no archived checkbox",
+    async (section) => {
+      render(
+        <MemoryRouter initialEntries={[`/project/pavilio/${section}`]}>
+          <Routes>
+            <Route path="/project/:name/:section" element={<ProjectView />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      // The shared filter/sort bar is up, so a null checkbox query means the
+      // checkbox is absent — not that the controls never rendered.
+      expect(await screen.findByTestId("file-list-filter-input")).toBeTruthy();
+      expect(screen.queryByTestId("plans-tab-archived-toggle")).toBeNull();
+      expect(screen.queryByRole("checkbox")).toBeNull();
+    },
+  );
 });

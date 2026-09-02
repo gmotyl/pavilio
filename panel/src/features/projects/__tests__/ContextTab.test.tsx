@@ -116,6 +116,15 @@ describe("ContextTab", () => {
     expect(screen.queryByText("Specs")).toBeNull();
   });
 
+  // The archived toggle is composed by PlansTab alone, not by the shared
+  // useFileListControls bar every file-list tab renders.
+  it("the context tab renders no archived checkbox", async () => {
+    renderWithRouter(<ContextTab projectName="alokai" />);
+    await screen.findByTestId("context-tab-source-project");
+    expect(screen.queryByTestId("plans-tab-archived-toggle")).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
   it("groups nested living specs by repository and capability", async () => {
     const withOpenSpec = {
       ...CONTEXT,

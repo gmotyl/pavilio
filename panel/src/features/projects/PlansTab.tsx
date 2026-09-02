@@ -128,6 +128,16 @@ interface ChangeGroup {
   children: ChangeGroupChild[];
 }
 
+/**
+ * A change directory has no mtime of its own, so a group's date is the newest
+ * artifact it contains — across ALL its sources, not just the first child's.
+ */
+function groupMtime(g: ChangeGroup): number {
+  let max = 0;
+  for (const c of g.children) for (const a of c.artifacts) if (a.modified > max) max = a.modified;
+  return max;
+}
+
 function ChangeGroupRows({
   group,
   selectedPath,
@@ -185,6 +195,37 @@ function PlanDetailHeader({ path }: { path: string }) {
   );
 }
 
+/**
+ * Plans-only control: reveals archived change groups and the legacy `:archived`
+ * source. It is composed into FileListSidebar's `controls` by PlansTab rather
+ * than added to useFileListControls, which the five other file-list tabs render.
+ * Rendered as a second row beneath the filter/sort bar — that row is already
+ * full at the sidebar's width.
+ */
+function ArchivedToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label
+      data-testid="plans-tab-archived-toggle"
+      className="flex items-center gap-1.5 mb-2 text-[11px] cursor-pointer select-none"
+      style={{ color: "var(--text-muted)" }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="cursor-pointer"
+      />
+      archived
+    </label>
+  );
+}
+
 /** Does an artifact match the active filter? Searches repo, change, capability, filename. */
 function artifactMatches(
   a: PlanArtifact,
@@ -213,6 +254,9 @@ export default function PlansTab({ projectName }: Props) {
   const selectedPath = searchParams.get("file");
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  // Deliberately NOT persisted: a stored flag would strand the user back in the
+  // full history weeks after a single click. A reload or project switch resets it.
+  const [showArchived, setShowArchived] = useState(false);
 
   const setSelectedPath = useCallback(
     (path: string | null) => {
@@ -339,13 +383,18 @@ export default function PlansTab({ projectName }: Props) {
       }
     }
     const groups = [...byChange.values()];
-    // Active first, then archived; stable-sorted by change id within each band.
+    // Active first, then archived — the band split is unconditional; the sort
+    // control only breaks ties within a band.
     groups.sort((a, b) => {
       if (a.archived !== b.archived) return a.archived ? 1 : -1;
-      return a.changeId.localeCompare(b.changeId);
+      const cmp =
+        controls.sortKey === "date"
+          ? groupMtime(a) - groupMtime(b)
+          : a.changeId.localeCompare(b.changeId, undefined, { sensitivity: "base" });
+      return controls.sortDir === "desc" ? -cmp : cmp;
     });
     return groups;
-  }, [openspecSources]);
+  }, [openspecSources, controls.sortKey, controls.sortDir]);
 
   const sortOpts = {
     getName: (f: PlanFile) => f.filename,
@@ -391,29 +440,33 @@ export default function PlansTab({ projectName }: Props) {
   }
   if (!data) return null;
 
-  const legacyFileSources: FileListSource[] = legacySources.map((s) => {
-    const files = filterAndSortFiles(s.files, sortOpts);
-    const isArchived = s.id.endsWith(":archived");
-    return {
-      id: s.id,
-      // Archived's label ("Archived") already comes from the server source.
-      label: s.id === "project" ? "projects (current)" : s.label,
-      count: files.length,
-      // No hint needed: legacySources is only ever "project" or "project:archived"
-      // now that the external `.kilo`/`~/.claude/plans` sources have been dropped.
-      hint: undefined,
-      // History: collapsed by default. Archiving is done by
-      // /pavilio-archive-plan, not in the panel.
-      defaultOpen: isArchived ? false : undefined,
-      rows: (
-        <LegacyPlanRows
-          source={{ ...s, files }}
-          selectedPath={selectedPath}
-          onOpen={onOpen}
-        />
-      ),
-    };
-  });
+  // Archived history is opt-in; filtering here (not in the row renderers) keeps
+  // the count badges honest for free.
+  const legacyFileSources: FileListSource[] = legacySources
+    .filter((s) => showArchived || !s.id.endsWith(":archived"))
+    .map((s) => {
+      const files = filterAndSortFiles(s.files, sortOpts);
+      const isArchived = s.id.endsWith(":archived");
+      return {
+        id: s.id,
+        // Archived's label ("Archived") already comes from the server source.
+        label: s.id === "project" ? "plans/ (flat)" : s.label,
+        count: files.length,
+        // No hint needed: legacySources is only ever "project" or "project:archived"
+        // now that the external `.kilo`/`~/.claude/plans` sources have been dropped.
+        hint: undefined,
+        // History: collapsed by default. Archiving is done by
+        // /pavilio-archive-plan, not in the panel.
+        defaultOpen: isArchived ? false : undefined,
+        rows: (
+          <LegacyPlanRows
+            source={{ ...s, files }}
+            selectedPath={selectedPath}
+            onOpen={onOpen}
+          />
+        ),
+      };
+    });
 
   // Misconfigured sources first: an invisible typo is the whole reason they exist.
   const rejectedSources: FileListSource[] = invalidSources.map((s) => ({
@@ -434,40 +487,42 @@ export default function PlansTab({ projectName }: Props) {
       rows: <MissingSourceRows source={s} />,
     }));
 
-  const changeSources: FileListSource[] = changeGroups.flatMap((g) => {
-    // Apply the filter to each child's artifacts; drop empty children/groups.
-    const children = g.children
-      .map((c) => ({
-        ...c,
-        artifacts: c.artifacts.filter((a) =>
-          artifactMatches(a, g.changeId, c.sourceLabel, q),
-        ),
-      }))
-      .filter((c) => c.artifacts.length > 0);
-    if (children.length === 0) return [];
-    const count = children.reduce((n, c) => n + c.artifacts.length, 0);
-    return [
-      {
-        id: `change:${g.changeId}`,
-        label: g.changeId,
-        count,
-        hint: g.archived
-          ? g.archiveDate
-            ? `archived ${g.archiveDate}`
-            : "archived"
-          : undefined,
-        // Archived changes are history — collapsed by default; active stay open.
-        defaultOpen: g.archived ? false : undefined,
-        rows: (
-          <ChangeGroupRows
-            group={{ ...g, children }}
-            selectedPath={selectedPath}
-            onOpen={onOpen}
-          />
-        ),
-      },
-    ];
-  });
+  const changeSources: FileListSource[] = changeGroups
+    .filter((g) => showArchived || !g.archived)
+    .flatMap((g) => {
+      // Apply the filter to each child's artifacts; drop empty children/groups.
+      const children = g.children
+        .map((c) => ({
+          ...c,
+          artifacts: c.artifacts.filter((a) =>
+            artifactMatches(a, g.changeId, c.sourceLabel, q),
+          ),
+        }))
+        .filter((c) => c.artifacts.length > 0);
+      if (children.length === 0) return [];
+      const count = children.reduce((n, c) => n + c.artifacts.length, 0);
+      return [
+        {
+          id: `change:${g.changeId}`,
+          label: g.changeId,
+          count,
+          hint: g.archived
+            ? g.archiveDate
+              ? `archived ${g.archiveDate}`
+              : "archived"
+            : undefined,
+          // Archived changes are history — collapsed by default; active stay open.
+          defaultOpen: g.archived ? false : undefined,
+          rows: (
+            <ChangeGroupRows
+              group={{ ...g, children }}
+              selectedPath={selectedPath}
+              onOpen={onOpen}
+            />
+          ),
+        },
+      ];
+    });
 
   const sources: FileListSource[] = [
     ...rejectedSources,
@@ -482,7 +537,12 @@ export default function PlansTab({ projectName }: Props) {
       title="Plans"
       icon={<ClipboardList size={16} style={{ color: "var(--accent)" }} />}
       sources={sources}
-      controls={controls.controlsBar}
+      controls={
+        <>
+          {controls.controlsBar}
+          <ArchivedToggle checked={showArchived} onChange={setShowArchived} />
+        </>
+      }
       onRefresh={refresh}
       detail={
         <>
