@@ -24,17 +24,10 @@ export function dispatchTerminalFocus(
 export interface SessionMeta {
   id: string;
   name: string;
-  color: string | null;
   project: string;
   cwd: string;
   pid: number;
   createdAt: string;
-}
-
-export interface SessionGroup {
-  color: string;
-  name: string;
-  sessions: SessionMeta[];
 }
 
 export interface CreateSessionOpts {
@@ -242,7 +235,7 @@ export function useTerminalSessions(project: string) {
   }, []);
 
   const updateSession = useCallback(
-    async (id: string, patch: { name?: string; color?: string | null }) => {
+    async (id: string, patch: { name?: string }) => {
       try {
         const res = await fetch(`/api/terminal/sessions/${id}`, {
           method: "PATCH",
@@ -267,32 +260,8 @@ export function useTerminalSessions(project: string) {
 
   const orderedSessions = ordering.orderedSessions;
 
-  // Group sessions by color
-  const colorMap = new Map<string, SessionMeta[]>();
-  const ungrouped: SessionMeta[] = [];
-
-  for (const s of orderedSessions) {
-    if (s.color) {
-      const group = colorMap.get(s.color) ?? [];
-      group.push(s);
-      colorMap.set(s.color, group);
-    } else {
-      ungrouped.push(s);
-    }
-  }
-
-  const grouped: SessionGroup[] = Array.from(colorMap.entries()).map(
-    ([color, groupSessions]) => ({
-      color,
-      name: groupSessions[0].name.split("-")[0],
-      sessions: groupSessions,
-    }),
-  );
-
   return {
     sessions: orderedSessions,
-    grouped,
-    ungrouped,
     focusedId,
     setFocusedId,
     createSession,

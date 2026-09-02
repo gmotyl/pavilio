@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset } from "../columnLayout";
 import type { ColumnLayout } from "../columnLayout";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession } from "../terminalInstances";
+import {
+  TEST_PROJECT_COLORS,
+  installProjectColors,
+  rgb,
+} from "./projectColors.harness";
 
 // Connection state is per-browser and lives in the terminal instance pool.
 // Stub the two leaf reads the disconnected badge makes so a cell can be put
@@ -103,7 +108,6 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {
     id: "s1",
     name: "claude-ch",
-    color: null,
     project: "ch",
     cwd: "/tmp",
     pid: 1234,
@@ -561,5 +565,46 @@ describe("TerminalLayoutGrid — disconnected badge", () => {
 
     expect(reconnectSession).toHaveBeenCalledWith("abc-123");
     expect(onFocus).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalLayoutGrid — project colour", () => {
+  beforeEach(() => installProjectColors());
+
+  // The cell header is tinted with the project's accent; it is the only
+  // element in the cell that carries the colour, and it has no test id.
+  const headerColor = (index: number) =>
+    (screen.getAllByTitle("Drag to swap")[index] as HTMLElement).style.background;
+
+  it("all sessions of one project share its colour", async () => {
+    renderGrid({
+      sessions: [
+        makeSession({ id: "s1", project: "alpha" }),
+        makeSession({ id: "s2", project: "alpha", name: "claude-alpha-2" }),
+      ],
+      focusedId: "s1",
+    });
+
+    await waitFor(() =>
+      expect(headerColor(0)).toContain(rgb(TEST_PROJECT_COLORS.alpha)),
+    );
+    expect(headerColor(1)).toContain(rgb(TEST_PROJECT_COLORS.alpha));
+    expect(headerColor(0)).toBe(headerColor(1));
+  });
+
+  it("sessions of different projects differ in colour", async () => {
+    renderGrid({
+      sessions: [
+        makeSession({ id: "s1", project: "alpha" }),
+        makeSession({ id: "s2", project: "beta", name: "claude-beta" }),
+      ],
+      focusedId: "s1",
+    });
+
+    await waitFor(() =>
+      expect(headerColor(0)).toContain(rgb(TEST_PROJECT_COLORS.alpha)),
+    );
+    expect(headerColor(1)).toContain(rgb(TEST_PROJECT_COLORS.beta));
+    expect(headerColor(0)).not.toBe(headerColor(1));
   });
 });

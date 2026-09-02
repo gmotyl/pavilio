@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
+import { useProjectColors } from "./useProjectColors";
 
 interface Props {
   sessions: SessionMeta[];
@@ -28,6 +29,7 @@ export function TerminalSpineDrawer({
   onCreate,
   onClose,
 }: Props) {
+  const { colorFor } = useProjectColors();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -145,10 +147,8 @@ export function TerminalSpineDrawer({
                             color: active
                               ? "var(--text-primary)"
                               : "var(--text-secondary)",
-                            borderLeft: s.color
-                              ? `2px solid ${s.color}`
-                              : "2px solid transparent",
-                            paddingLeft: s.color ? "8px" : undefined,
+                            borderLeft: `2px solid ${colorFor(s.project)}`,
+                            paddingLeft: "8px",
                           }}
                         >
                           <TerminalActivityLed sessionId={s.id} />

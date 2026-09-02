@@ -12,7 +12,6 @@ vi.mock("../../features/terminal/useAllTerminalSessions", () => ({
         id: "s1",
         project: "metro",
         name: "t1",
-        color: null,
         cwd: "",
         pid: 0,
         createdAt: "",

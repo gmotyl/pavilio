@@ -3,7 +3,7 @@ import { Eye, X, Maximize2, Minimize2 } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import type { SessionMeta } from "./useTerminalSessions";
-import { displayColor } from "./sessionColors";
+import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
@@ -140,7 +140,6 @@ export function TerminalLayoutGrid({
     <TerminalCell
       key={session.id}
       session={session}
-      allSessions={sessions}
       focused={session.id === focusedId}
       maximized={maximized}
       isDropTarget={dropTargetId === session.id}
@@ -286,7 +285,6 @@ export function TerminalLayoutGrid({
 
 interface CellProps {
   session: SessionMeta;
-  allSessions: SessionMeta[];
   focused: boolean;
   maximized: boolean;
   isDropTarget: boolean;
@@ -304,7 +302,6 @@ interface CellProps {
 
 function TerminalCell({
   session,
-  allSessions,
   focused,
   maximized,
   isDropTarget,
@@ -319,7 +316,8 @@ function TerminalCell({
   onDragEnd,
   style,
 }: CellProps) {
-  const accentColor = displayColor(session, allSessions);
+  const { colorFor } = useProjectColors();
+  const accentColor = colorFor(session.project);
   const headerBg = `color-mix(in srgb, ${accentColor} 22%, rgb(15,16,20))`;
   const handleRef = useRef<TerminalHandle | null>(null);
   const [snapshot, setSnapshot] = useState<BufferSnapshot | null>(null);

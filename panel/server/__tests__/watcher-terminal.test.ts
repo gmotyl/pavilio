@@ -20,7 +20,6 @@ describe("attachTerminalSocket — mobile-nudge", () => {
     vi.spyOn(terminalManager, "getSession").mockReturnValue({
       id: "s1",
       name: "s1",
-      color: null,
       project: "p",
       cwd: "/",
       pid: 1,
@@ -54,7 +53,6 @@ function mockGetSession(): void {
   vi.spyOn(terminalManager, "getSession").mockReturnValue({
     id: "s1",
     name: "s1",
-    color: null,
     project: "p",
     cwd: "/",
     pid: 1,

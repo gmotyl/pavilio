@@ -23,7 +23,7 @@ export interface TerminalsSurfaceProps {
   focusedId: string | null;
   onFocus: (id: string | null) => void;
   onDeleteSession: (id: string) => void;
-  onUpdateSession: (id: string, patch: { color?: string | null; name?: string }) => void;
+  onUpdateSession: (id: string, patch: { name?: string }) => void;
 
   // All-sessions (cross-project) data
   allSessions: SessionMeta[];
@@ -132,7 +132,6 @@ export function TerminalsSurface({
             onCreateTerminal(opts || {});
           }}
           onDelete={onDeleteSession}
-          onColorChange={(id, color) => onUpdateSession(id, { color })}
           onRename={(id, n) => onUpdateSession(id, { name: n })}
           onToggleMaximize={onToggleMaximize}
           onReorder={onReorder ?? (() => {})}
@@ -143,7 +142,7 @@ export function TerminalsSurface({
         />
       </div>
 
-      {/* Mobile color-dot rail */}
+      {/* Mobile session-dot rail */}
       <div className="md:hidden">
         <TerminalMobileRail
           sessions={sessions}

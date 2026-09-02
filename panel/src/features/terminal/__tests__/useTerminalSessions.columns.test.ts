@@ -6,7 +6,6 @@ function session(id: string, project = "vector"): SessionMeta {
   return {
     id,
     name: id,
-    color: null,
     project,
     cwd: "/tmp",
     pid: 1,

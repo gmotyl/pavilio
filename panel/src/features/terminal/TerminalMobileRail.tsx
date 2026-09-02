@@ -1,7 +1,7 @@
 import { Plus, Menu, RotateCw } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { mobileShortName } from "./useTerminalSessions";
-import { displayColor } from "./sessionColors";
+import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { useAggregateActivity } from "../favicon/useAggregateActivity";
@@ -31,6 +31,7 @@ export function TerminalMobileRail({
   onReconnect,
 }: Props) {
   const activity = useAggregateActivity();
+  const { colorFor } = useProjectColors();
   return (
     <div
       className="flex items-center gap-2 px-2.5 py-2 shrink-0 overflow-x-auto scrollbar-none"
@@ -55,7 +56,7 @@ export function TerminalMobileRail({
 
       {sessions.map((s) => {
         const active = s.id === focusedId;
-        const accent = displayColor(s, sessions);
+        const accent = colorFor(s.project);
         const label = mobileShortName(s, sessions);
         return (
           // The pill is itself a button, so the badge cannot nest inside it.
@@ -74,7 +75,7 @@ export function TerminalMobileRail({
                   ? "var(--bg-elevated, var(--bg-active))"
                   : "var(--bg-base)",
                 border: active
-                  ? `1px solid ${s.color || accent}`
+                  ? `1px solid ${accent}`
                   : "1px solid var(--border-subtle)",
                 color: active ? "var(--text-primary)" : "var(--text-secondary)",
               }}
