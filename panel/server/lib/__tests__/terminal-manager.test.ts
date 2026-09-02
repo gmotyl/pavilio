@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import {
+  _resetAssignedNamesForTests,
   createSession,
   destroySession,
   listSessions,
@@ -197,6 +198,58 @@ describe("default session names", () => {
     })
     expect(meta.name).toBe("deploy-watch")
     destroySession(meta.id)
+  })
+})
+
+describe("session name allocator persists across the process", () => {
+  // Isolate each test from the assigned-name record left behind by every
+  // other test in this file — the record is deliberately never pruned in
+  // production, so tests must reset it themselves to get a clean project
+  // namespace.
+  beforeEach(() => {
+    _resetAssignedNamesForTests()
+  })
+
+  it("the highest-numbered session's number is not reused after it is destroyed", () => {
+    const first = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    const second = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(first.name).toBe("alokai-1")
+    expect(second.name).toBe("alokai-2")
+
+    destroySession(second.id)
+
+    const third = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(third.name).toBe("alokai-3")
+
+    destroySession(first.id)
+    destroySession(third.id)
+  })
+
+  it("an explicitly named session's number is not handed out again", () => {
+    const explicit = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      name: "alokai-5",
+    })
+    destroySession(explicit.id)
+
+    const next = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(next.name).toBe("alokai-6")
+
+    destroySession(next.id)
+  })
+
+  it("renaming a session does not free its number", () => {
+    const first = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    updateSession(first.id, { name: "deploy-watch" })
+
+    const second = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(second.name).toBe("alokai-2")
+
+    destroySession(first.id)
+    destroySession(second.id)
   })
 })
 
