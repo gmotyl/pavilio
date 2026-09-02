@@ -10,7 +10,10 @@ import {
   destroySession,
   updateSession,
 } from "../lib/terminal-manager.js";
-import { appendReconnectMetric } from "../lib/reconnect-log.js";
+import {
+  appendReconnectMetric,
+  normalizeTrigger,
+} from "../lib/reconnect-log.js";
 import { getConfig } from "../config.js";
 
 function expandPath(p: string): string {
@@ -68,7 +71,9 @@ router.post("/reconnect-log", (req, res) => {
       cols: num(b.cols),
       rows: num(b.rows),
       stale: bool(b.stale),
-      trigger: typeof b.trigger === "string" ? b.trigger : "manual",
+      // Not `typeof === "string"`: an unrecognised trigger is recorded as
+      // "manual" rather than stored verbatim, so the column stays an enum.
+      trigger: normalizeTrigger(b.trigger),
     });
     res.json({ ok: true });
   } catch (err) {

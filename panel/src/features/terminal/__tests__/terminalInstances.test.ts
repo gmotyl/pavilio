@@ -7,6 +7,19 @@ vi.mock("@xterm/xterm", () => {
   class FakeTerminal {
     cols = 80;
     rows = 24;
+    // Enough of xterm's buffer surface for viewportLooksBlank(), which the
+    // metric builder reads to stamp `blankAtClick`. Every line is absent, so
+    // this fake viewport reads as blank.
+    buffer = {
+      active: {
+        viewportY: 0,
+        baseY: 0,
+        getLine: (_index: number) =>
+          undefined as
+            | { translateToString: (trim?: boolean) => string }
+            | undefined,
+      },
+    };
     loadAddon = vi.fn();
     open = vi.fn();
     write = vi.fn();
@@ -64,9 +77,38 @@ class FakeWebSocket implements FakeWs {
   }
 }
 
+/** Every reconnect-log POST the module made, newest last. */
+interface LoggedMetric {
+  sessionId?: string;
+  blankAtClick?: boolean;
+  wsReadyState?: number;
+  pingMs?: number;
+  frameMs?: number;
+  cols?: number;
+  rows?: number;
+  stale?: boolean;
+  trigger?: string;
+}
+
 describe("terminalInstances", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  /** Bodies of the reconnect-log POSTs, in order. */
+  function loggedMetrics(): LoggedMetric[] {
+    return fetchMock.mock.calls
+      .filter(([url]) => url === "/api/terminal/reconnect-log")
+      .map(([, init]) => JSON.parse((init as RequestInit).body as string));
+  }
+
   beforeEach(async () => {
     createdSockets.length = 0;
+    // The reconnect log is fire-and-forget over fetch. Stub it for EVERY test
+    // in this file, not just the logging ones: jsdom has no server behind the
+    // relative URL, so a real call would reject on an unrelated test's close.
+    fetchMock = vi.fn(() =>
+      Promise.resolve({ ok: true } as unknown as Response),
+    );
+    vi.stubGlobal("fetch", fetchMock);
     vi.resetModules();
     const mod = await import("../terminalInstances");
     mod.__setWebSocketCtorForTests(
@@ -80,6 +122,7 @@ describe("terminalInstances", () => {
     const mod = await import("../terminalInstances");
     mod.destroyTerminal("test-session");
     mod.__setWebSocketCtorForTests(null);
+    vi.unstubAllGlobals();
   });
 
   it("opens exactly one websocket on acquire", async () => {
@@ -354,6 +397,161 @@ describe("terminalInstances", () => {
 
     expect(seen).toEqual([]);
     // ...while the state itself is still observable by a direct read.
+    expect(mod.getConnectionState("test-session")).toBe("disconnected");
+  });
+
+  // --- reconnect log ------------------------------------------------------
+  // The log used to record only clicks, which says what the user did and
+  // nothing about what happened when they did nothing. These cases pin the
+  // two automatic triggers, and the shape they must keep sharing with the
+  // manual line so old and new records stay directly comparable.
+
+  /** Field names of the metric, frozen: renaming one orphans the old lines. */
+  const METRIC_KEYS = [
+    "blankAtClick",
+    "cols",
+    "frameMs",
+    "pingMs",
+    "rows",
+    "sessionId",
+    "stale",
+    "trigger",
+    "wsReadyState",
+  ];
+
+  it("appends a disconnect line when the socket closes", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+    // The attach itself must not log — only the death of a live socket does.
+    expect(loggedMetrics()).toEqual([]);
+
+    closeSocket(createdSockets[0]);
+
+    const logged = loggedMetrics();
+    expect(logged).toHaveLength(1);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/terminal/reconnect-log");
+    expect((init as RequestInit).method).toBe("POST");
+    // The terminal's state AT THE MOMENT OF THE CLOSE, in the same fields the
+    // manual line has always used.
+    expect(Object.keys(logged[0]).sort()).toEqual(METRIC_KEYS);
+    expect(logged[0].trigger).toBe("disconnect");
+    expect(logged[0].sessionId).toBe("test-session");
+    expect(logged[0].wsReadyState).toBe(3); // CLOSED
+    expect(logged[0].blankAtClick).toBe(true);
+    expect(logged[0].cols).toBe(80);
+    expect(logged[0].rows).toBe(24);
+    expect(typeof logged[0].pingMs).toBe("number");
+    expect(typeof logged[0].frameMs).toBe("number");
+    expect(logged[0].stale).toBe(false);
+  });
+
+  it("logs a ws error as a single disconnect line, not one per event", async () => {
+    // A browser can deliver `error` and then `close` for one socket death.
+    // The line is emitted on the transition INTO disconnected, so the second
+    // event adds nothing — one death, one row.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    createdSockets[0].onerror?.(new Event("error"));
+    closeSocket(createdSockets[0]);
+
+    const logged = loggedMetrics();
+    expect(logged).toHaveLength(1);
+    expect(logged[0].trigger).toBe("disconnect");
+    warn.mockRestore();
+  });
+
+  it("does not log a disconnect for a cleanly exited session", async () => {
+    // `[Process exited]` is already on screen: the socket closing afterwards
+    // is the server tidying up, not a terminal that died under the user. A row
+    // for it would pollute exactly the dataset this log exists to build.
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    createdSockets[0].onmessage?.({
+      data: JSON.stringify({ type: "exit", code: 0 }),
+    } as MessageEvent);
+    closeSocket(createdSockets[0]);
+
+    expect(loggedMetrics()).toEqual([]);
+    // The connection state still moves — only the log line is withheld.
+    expect(mod.getConnectionState("test-session")).toBe("disconnected");
+  });
+
+  it("does not log a disconnect for the socket a manual reconnect tears down", async () => {
+    // reopen() detaches onclose BEFORE close(), so the close of the socket the
+    // client itself killed is unobservable. Without that, every manual
+    // reconnect would emit a spurious `disconnect` alongside its `manual`.
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    mod.reconnectSession("test-session");
+    // Whatever the fake socket does on close, the detached handler is silent.
+    createdSockets[0].onclose?.(new Event("close") as CloseEvent);
+
+    const logged = loggedMetrics();
+    expect(logged.map((m) => m.trigger)).toEqual(["manual"]);
+  });
+
+  it("keeps the manual line's shape unchanged", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+
+    mod.reconnectSession("test-session");
+
+    const logged = loggedMetrics();
+    expect(logged).toHaveLength(1);
+    expect(Object.keys(logged[0]).sort()).toEqual(METRIC_KEYS);
+    expect(logged[0].trigger).toBe("manual");
+    expect(logged[0].wsReadyState).toBe(1); // still OPEN at click time
+  });
+
+  it("appends an auto-blank line when a blank-gated reopen fires", async () => {
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+
+    // What useMobileReconnect does on its two blank-gated paths: report the
+    // reopen it is about to perform, identified by the socket it holds.
+    mod.reportAutoBlankReopen(inst.ws);
+
+    const logged = loggedMetrics();
+    expect(logged).toHaveLength(1);
+    expect(Object.keys(logged[0]).sort()).toEqual(METRIC_KEYS);
+    expect(logged[0].trigger).toBe("auto-blank");
+    expect(logged[0].sessionId).toBe("test-session");
+    expect(logged[0].blankAtClick).toBe(true);
+
+    // A socket that belongs to no pooled instance (and no socket at all) is a
+    // no-op, never a line attributed to the wrong session.
+    mod.reportAutoBlankReopen(null);
+    mod.reportAutoBlankReopen({ readyState: 1 } as unknown as WebSocket);
+    expect(loggedMetrics()).toHaveLength(1);
+  });
+
+  it("a failing log request does not block the reconnect", async () => {
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+    expect(createdSockets).toHaveLength(1);
+
+    // Both shapes of failure: a synchronous throw and a rejected promise.
+    fetchMock.mockImplementationOnce(() => {
+      throw new Error("fetch exploded");
+    });
+    mod.reconnectSession("test-session");
+    expect(createdSockets).toHaveLength(2);
+    expect(inst.ws).toBe(createdSockets[1]);
+
+    fetchMock.mockImplementationOnce(() => Promise.reject(new Error("offline")));
+    mod.reconnectSession("test-session");
+    expect(createdSockets).toHaveLength(3);
+
+    // ...and a failing log must not block the close path either.
+    fetchMock.mockImplementationOnce(() => {
+      throw new Error("fetch exploded");
+    });
+    closeSocket(createdSockets[2]);
     expect(mod.getConnectionState("test-session")).toBe("disconnected");
   });
 });

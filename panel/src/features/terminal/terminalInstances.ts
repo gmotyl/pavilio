@@ -51,6 +51,17 @@ type WsListener = (ws: WebSocket) => void;
  */
 export type ConnectionState = "connected" | "disconnected" | "unattached";
 
+/**
+ * What produced a reconnect-log record. Mirrors the server-side enum in
+ * `server/lib/reconnect-log.ts`; the endpoint coerces anything else to
+ * "manual", so an out-of-sync client cannot widen the column.
+ *
+ * - `manual` — the user clicked Reconnect (or the disconnected badge).
+ * - `disconnect` — an attached session's socket died on its own.
+ * - `auto-blank` — a blank-gated path reopened the session unasked.
+ */
+export type ReconnectTrigger = "manual" | "disconnect" | "auto-blank";
+
 type ConnectionListener = (state: ConnectionState) => void;
 
 export interface LiveTerminal {
@@ -107,6 +118,75 @@ const instances = new Map<string, InternalInstance>();
 const connectionListeners = new Map<string, Set<ConnectionListener>>();
 
 /**
+ * Snapshot the terminal's state right now, in the exact field set the log has
+ * used since #58. `blankAtClick` keeps its click-era name for the automatic
+ * triggers too: renaming it would split the file into two incomparable eras,
+ * which is the opposite of why the log exists.
+ */
+function buildReconnectMetric(
+  inst: InternalInstance,
+  trigger: ReconnectTrigger,
+) {
+  const now = Date.now();
+  // pingMs includes keep-alive pings (matches the watchdog's own signal);
+  // frameMs counts only real PTY frames, so it stays high while the TUI is
+  // frozen even though pings keep pingMs fresh.
+  const pingMs = now - inst.lastMessageAt;
+  const frameMs = now - inst.lastFrameAt;
+  return {
+    sessionId: inst.sessionId,
+    blankAtClick: viewportLooksBlank(inst.terminal),
+    wsReadyState: inst.ws?.readyState,
+    pingMs,
+    frameMs,
+    cols: inst.terminal.cols,
+    rows: inst.terminal.rows,
+    stale: pingMs > WATCHDOG_STALE_MS,
+    trigger,
+  };
+}
+
+/**
+ * Append one line to the reconnect log. Strictly fire-and-forget: never
+ * awaited, and every failure mode — a throwing metric read, a synchronous
+ * fetch throw, a rejected promise — is swallowed here so that no caller's real
+ * work (a reconnect, a socket close) can be blocked by diagnostics.
+ */
+function logReconnectMetric(
+  inst: InternalInstance,
+  trigger: ReconnectTrigger,
+): void {
+  try {
+    void fetch("/api/terminal/reconnect-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildReconnectMetric(inst, trigger)),
+    }).catch(() => {});
+  } catch {
+    // Logging must never block the caller.
+  }
+}
+
+/**
+ * Record a reopen that a blank-gated path performed on its own, identified by
+ * the socket the caller holds — `useMobileReconnect` is handed a ws, not a
+ * session id, and the pool is the only thing that can map one to the other.
+ *
+ * Call it BEFORE the reopen, so the metric describes the state that prompted
+ * the reopen rather than the fresh socket. A ws belonging to no pooled
+ * instance (or none at all) is a silent no-op.
+ */
+export function reportAutoBlankReopen(ws: WebSocket | null): void {
+  if (!ws) return;
+  for (const inst of instances.values()) {
+    if (inst.ws === ws) {
+      logReconnectMetric(inst, "auto-blank");
+      return;
+    }
+  }
+}
+
+/**
  * Report a connection-state transition to every subscriber for the session.
  * A throwing subscriber must not starve the rest — same contract (and same
  * console.warn shape) as the `wsListeners` loop in connectWs.
@@ -131,6 +211,24 @@ function setConnectionState(
   inst: InternalInstance,
   state: Exclude<ConnectionState, "unattached">,
 ): void {
+  // Log on the TRANSITION into disconnected, not on the events that cause it.
+  // A browser can deliver `error` and then `close` for a single socket death,
+  // and the transition is what dedupes them: one death, one row. It also bounds
+  // volume structurally — a socket can only die once, so no path can loop.
+  //
+  // A cleanly exited process is excluded. `[Process exited]` is already on
+  // screen and the server closes the socket right behind the exit frame
+  // (watcher.ts enqueues both in one synchronous block), so those closes would
+  // be the most common rows in the file while telling us nothing about the
+  // question the log exists to answer: did a *live* terminal die, and was there
+  // content on screen when it did?
+  if (
+    state === "disconnected" &&
+    inst.connectionState !== "disconnected" &&
+    !inst.exited
+  ) {
+    logReconnectMetric(inst, "disconnect");
+  }
   inst.connectionState = state;
   emitConnectionState(inst.sessionId, state);
 }
@@ -793,43 +891,20 @@ function createInstance(sessionId: string): InternalInstance {
 }
 
 /**
- * Manually reopen a session's ws (the toolbar Reconnect button). Captures
- * state-at-click metrics and POSTs them to the reconnect log — best-effort,
- * fire-and-forget — before tearing down and rebuilding the socket. The log is
- * how we'll later judge whether the auto-reconnect gate should have fired.
+ * Manually reopen a session's ws (the toolbar Reconnect button, and the
+ * disconnected badge). Captures state-at-click metrics and POSTs them to the
+ * reconnect log — best-effort, fire-and-forget — before tearing down and
+ * rebuilding the socket.
+ *
+ * Deliberately logs before `reopen()`, which is also what keeps this from
+ * double-counting: `reopen()` nulls the old socket's `onclose` before closing
+ * it, so the close it causes is never observed and never adds a `disconnect`
+ * row beside this `manual` one.
  */
 export function reconnectSession(sessionId: string): void {
   const inst = instances.get(sessionId);
   if (!inst) return;
-
-  const now = Date.now();
-  // pingMs includes keep-alive pings (matches the watchdog's own signal);
-  // frameMs counts only real PTY frames, so it stays high while the TUI is
-  // frozen even though pings keep pingMs fresh.
-  const pingMs = now - inst.lastMessageAt;
-  const frameMs = now - inst.lastFrameAt;
-  const metric = {
-    sessionId,
-    blankAtClick: viewportLooksBlank(inst.terminal),
-    wsReadyState: inst.ws?.readyState,
-    pingMs,
-    frameMs,
-    cols: inst.terminal.cols,
-    rows: inst.terminal.rows,
-    stale: pingMs > WATCHDOG_STALE_MS,
-    trigger: "manual",
-  };
-
-  try {
-    void fetch("/api/terminal/reconnect-log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(metric),
-    }).catch(() => {});
-  } catch {
-    // Logging must never block a reconnect.
-  }
-
+  logReconnectMetric(inst, "manual");
   inst.reopen();
 }
 

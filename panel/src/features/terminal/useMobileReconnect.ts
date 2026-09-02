@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react"
+import { reportAutoBlankReopen } from "./terminalInstances"
 
 interface Options {
   ws: WebSocket | null
@@ -51,6 +52,10 @@ export function useMobileReconnect({
       if (!isViewportBlankRef.current()) return
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         // Blank, and there is no live socket to nudge over — rebuild it.
+        // Reported before the reopen so the record describes the state that
+        // prompted it; this is one of only two paths that reconnect without
+        // the user asking, and an unreported one is invisible in the log.
+        reportAutoBlankReopen(ws)
         reopenRef.current()
         return
       }
@@ -78,7 +83,11 @@ export function useMobileReconnect({
         // over live content flickers and interrupts work; when content is
         // present we stay silent and leave recovery to the manual Reconnect
         // button (see reconnectSession in terminalInstances.ts).
-        if (isViewportBlankRef.current()) reopenRef.current()
+        if (isViewportBlankRef.current()) {
+          // The other unasked reopen — same reporting, same ordering.
+          reportAutoBlankReopen(ws)
+          reopenRef.current()
+        }
       }
     }, WATCHDOG_CHECK_MS)
     return () => clearInterval(id)
