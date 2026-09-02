@@ -14,6 +14,7 @@ import {
   resizeReplay,
   destroyReplay,
 } from "./terminalReplay";
+import { nextSessionName, removeName, writeName } from "./terminal-identity";
 
 export interface TerminalSession {
   id: string;
@@ -30,6 +31,38 @@ export interface TerminalSession {
 export type TerminalSessionMeta = Omit<TerminalSession, "pty">;
 
 const sessions = new Map<string, TerminalSession>();
+
+/**
+ * Every name ever handed to a session of a project — default-allocated or
+ * explicitly supplied — for the lifetime of this process. `createSession`
+ * feeds this record, not the live `sessions` map, to `nextSessionName`: the
+ * live map only reflects sessions that happen to still be open, so scanning
+ * it lets a destroyed session's number come back the moment nothing else is
+ * holding it — exactly the collision `nextSessionName`'s own contract rules
+ * out ("a closed session's number is never reused"). Entries are appended
+ * on create and never pruned on destroy or rename, on purpose: forgetting an
+ * assigned name is the bug this record exists to prevent.
+ *
+ * Memory note: this map is per-process and grows without bound, but every
+ * entry is a short name string, so even a very long-lived server holds only
+ * a negligible amount of data here.
+ */
+const assignedNames = new Map<string, string[]>();
+
+function recordAssignedName(project: string, name: string): void {
+  const names = assignedNames.get(project);
+  if (names) names.push(name);
+  else assignedNames.set(project, [name]);
+}
+
+/**
+ * Test-only: clears the per-project assigned-name record so a test can
+ * assert a fresh `<project>-1` allocation without leaking state from
+ * earlier tests in the same process. Never called from production code.
+ */
+export function _resetAssignedNamesForTests(): void {
+  assignedNames.clear();
+}
 
 function defaultShell(): string {
   if (platform() === "win32") return "powershell.exe";
@@ -56,12 +89,15 @@ export function createSession(opts: {
     cols: opts.cols,
     rows: opts.rows,
     cwd: opts.cwd,
-    env: { ...process.env, TERM: "xterm-256color" },
+    env: { ...process.env, TERM: "xterm-256color", PAVILIO_TERMINAL_ID: id },
   });
+
+  const priorNames = assignedNames.get(opts.project) ?? [];
+  const providedName = opts.name === undefined || opts.name === "" ? undefined : opts.name;
 
   const session: TerminalSession = {
     id,
-    name: opts.name || `shell-${sessions.size + 1}`,
+    name: providedName ?? nextSessionName(opts.project, priorNames),
     project: opts.project,
     cwd: opts.cwd,
     pid: ptyProcess.pid,
@@ -71,6 +107,8 @@ export function createSession(opts: {
   };
 
   sessions.set(id, session);
+  recordAssignedName(opts.project, session.name);
+  writeName(id, session.name);
 
   // Mirror every PTY output chunk into a headless replay buffer so a client
   // reconnecting later can be sent a serialized snapshot instead of a blank
@@ -103,6 +141,7 @@ export function createSession(opts: {
   ptyProcess.onExit(() => {
     destroyReplay(id);
     removeSession(id);
+    removeName(id);
     sessions.delete(id);
   });
 
@@ -122,6 +161,7 @@ export function destroySession(id: string): boolean {
   if (!session) return false;
   session.pty.kill();
   destroyReplay(id);
+  removeName(id);
   sessions.delete(id);
   return true;
 }
@@ -130,6 +170,10 @@ export function destroySession(id: string): boolean {
  * A session's name is the only mutable part of its model. Colour used to live
  * here too; it identifies a *project* now and lives in the committed store
  * behind `project-colors.ts`.
+ *
+ * Renaming does not touch `assignedNames`: the old default-assigned name
+ * (e.g. `alokai-3`) stays recorded even though no live session is called
+ * that any more, so the allocator still won't hand it out again.
  */
 export function updateSession(
   id: string,
@@ -137,7 +181,10 @@ export function updateSession(
 ): boolean {
   const session = sessions.get(id);
   if (!session) return false;
-  if (updates.name !== undefined) session.name = updates.name;
+  if (updates.name !== undefined) {
+    session.name = updates.name;
+    writeName(id, session.name);
+  }
   return true;
 }
 

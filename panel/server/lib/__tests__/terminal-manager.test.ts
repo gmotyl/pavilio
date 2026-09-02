@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
 import {
+  _resetAssignedNamesForTests,
   createSession,
   destroySession,
   listSessions,
@@ -12,16 +16,46 @@ import {
   flushReplay,
   _resetReplayForTests,
 } from "../terminalReplay"
+import { namesDir } from "../terminal-identity"
 
 // Fake node-pty: capture the onData callbacks registered against the
 // most-recently-spawned pty so a test can drive PTY output deterministically
 // without spawning a real shell.
 let lastPtyDataCallbacks: Array<(data: string) => void> = []
+// Recorder for the most recent spawn(file, args, options) call, so a test can
+// assert on the env passed to node-pty without changing the fake's shape.
+let lastSpawnCall: { file: string; args: string[]; options: Record<string, unknown> } | undefined
+// The most-recently-spawned pty's onExit callback, so a test can simulate the
+// shell exiting on its own (not via destroySession).
+let lastPtyExitCallback: (() => void) | undefined
 function emitPtyData(data: string): void {
   for (const cb of lastPtyDataCallbacks) cb(data)
 }
+// Every test in this file goes through createSession, and createSession
+// always writes an identity file (writeName) regardless of which describe
+// block is exercising it. Redirecting PANEL_AUTH_STATE_DIR must therefore be
+// a file-level concern, not scoped to one describe block — otherwise any
+// test outside that block resolves namesDir() to the real
+// homedir()/.panel/terminals, and a failed assertion (which skips the
+// trailing destroySession) leaks a file into the user's real home directory.
+let previousStateDir: string | undefined
+let tempDir: string
+
+beforeEach(() => {
+  previousStateDir = process.env.PANEL_AUTH_STATE_DIR
+  tempDir = mkdtempSync(join(tmpdir(), "panel-terminal-manager-test-"))
+  process.env.PANEL_AUTH_STATE_DIR = tempDir
+})
+
+afterEach(() => {
+  if (previousStateDir === undefined) delete process.env.PANEL_AUTH_STATE_DIR
+  else process.env.PANEL_AUTH_STATE_DIR = previousStateDir
+  rmSync(tempDir, { recursive: true, force: true })
+})
+
 vi.mock("node-pty", () => ({
-  spawn: () => {
+  spawn: (file: string, args: string[], options: Record<string, unknown>) => {
+    lastSpawnCall = { file, args, options }
     const dataCallbacks: Array<(data: string) => void> = []
     lastPtyDataCallbacks = dataCallbacks
     return {
@@ -30,7 +64,10 @@ vi.mock("node-pty", () => ({
         dataCallbacks.push(cb)
         return { dispose: () => {} }
       },
-      onExit: () => ({ dispose: () => {} }),
+      onExit: (cb: () => void) => {
+        lastPtyExitCallback = cb
+        return { dispose: () => {} }
+      },
       resize: () => {},
       kill: () => {},
       write: () => {},
@@ -133,5 +170,189 @@ describe("session model", () => {
     expect(Object.hasOwn(listed, "color")).toBe(false)
 
     destroySession(meta.id)
+  })
+})
+
+describe("spawn env", () => {
+  it("spawn env carries PAVILIO_TERMINAL_ID matching the session id", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alpha" })
+
+    expect(lastSpawnCall).toBeDefined()
+    const env = lastSpawnCall!.options.env as Record<string, string>
+    expect(env.PAVILIO_TERMINAL_ID).toBe(meta.id)
+
+    destroySession(meta.id)
+  })
+
+  it("spawn env still inherits process env and TERM", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alpha" })
+
+    const env = lastSpawnCall!.options.env as Record<string, string>
+    expect(env.TERM).toBe("xterm-256color")
+    expect(env.PATH).toBe(process.env.PATH)
+
+    destroySession(meta.id)
+  })
+})
+
+describe("default session names", () => {
+  it("a new session defaults to project-scoped name alokai-1", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(meta.name).toBe("alokai-1")
+    destroySession(meta.id)
+  })
+
+  it("default names are numbered per project", () => {
+    const alokai = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    const motyl = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "motyl" })
+    expect(motyl.name).toBe("motyl-1")
+    destroySession(alokai.id)
+    destroySession(motyl.id)
+  })
+
+  it("an explicit name overrides the default allocator", () => {
+    const meta = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      name: "deploy-watch",
+    })
+    expect(meta.name).toBe("deploy-watch")
+    destroySession(meta.id)
+  })
+
+  it("an empty explicit name falls through to the project allocator", () => {
+    // Reset so this test's expected alokai-1 doesn't depend on how many
+    // alokai-project names earlier tests in this describe block already
+    // assigned.
+    _resetAssignedNamesForTests()
+    const meta = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      name: "",
+    })
+    expect(meta.name).toBe("alokai-1")
+    destroySession(meta.id)
+  })
+
+  it('an explicit name of "0" is kept verbatim', () => {
+    // Reset so this test's expected alokai-1 for the follow-up default
+    // session doesn't depend on earlier tests in this describe block.
+    _resetAssignedNamesForTests()
+    const zero = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      name: "0",
+    })
+    expect(zero.name).toBe("0")
+
+    const next = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(next.name).toBe("alokai-1")
+
+    destroySession(zero.id)
+    destroySession(next.id)
+  })
+})
+
+describe("session name allocator persists across the process", () => {
+  // Isolate each test from the assigned-name record left behind by every
+  // other test in this file — the record is deliberately never pruned in
+  // production, so tests must reset it themselves to get a clean project
+  // namespace.
+  beforeEach(() => {
+    _resetAssignedNamesForTests()
+  })
+
+  it("the highest-numbered session's number is not reused after it is destroyed", () => {
+    const first = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    const second = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(first.name).toBe("alokai-1")
+    expect(second.name).toBe("alokai-2")
+
+    destroySession(second.id)
+
+    const third = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(third.name).toBe("alokai-3")
+
+    destroySession(first.id)
+    destroySession(third.id)
+  })
+
+  it("an explicitly named session's number is not handed out again", () => {
+    const explicit = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      name: "alokai-5",
+    })
+    destroySession(explicit.id)
+
+    const next = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(next.name).toBe("alokai-6")
+
+    destroySession(next.id)
+  })
+
+  it("renaming a session does not free its number", () => {
+    const first = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    updateSession(first.id, { name: "deploy-watch" })
+
+    const second = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(second.name).toBe("alokai-2")
+
+    destroySession(first.id)
+    destroySession(second.id)
+  })
+})
+
+describe("identity file lifecycle", () => {
+  // File-level beforeEach/afterEach (above) already redirects
+  // PANEL_AUTH_STATE_DIR to a fresh temp dir per test — no per-describe
+  // redirect needed here.
+
+  function readIdentityFile(id: string): string | undefined {
+    const file = join(namesDir(), id)
+    if (!existsSync(file)) return undefined
+    return readFileSync(file, "utf8")
+  }
+
+  it("creating a session writes its identity file", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(readIdentityFile(meta.id)).toBe(`${meta.name}\n`)
+    destroySession(meta.id)
+  })
+
+  it("renaming a session rewrites its identity file", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    updateSession(meta.id, { name: "deploy-watch" })
+    expect(readIdentityFile(meta.id)).toBe("deploy-watch\n")
+    destroySession(meta.id)
+  })
+
+  it("renaming an unknown session writes no file", () => {
+    const ok = updateSession("00000000-0000-4000-8000-000000000000", { name: "ghost" })
+    expect(ok).toBe(false)
+    expect(readIdentityFile("00000000-0000-4000-8000-000000000000")).toBeUndefined()
+  })
+
+  it("destroying a session removes its identity file", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(readIdentityFile(meta.id)).toBeDefined()
+    destroySession(meta.id)
+    expect(readIdentityFile(meta.id)).toBeUndefined()
+  })
+
+  it("a session whose shell exits removes its identity file", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(readIdentityFile(meta.id)).toBeDefined()
+    // Simulate the PTY exiting on its own (not via destroySession).
+    lastPtyExitCallback?.()
+    expect(readIdentityFile(meta.id)).toBeUndefined()
   })
 })
