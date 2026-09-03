@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Copy, ClipboardCopy, Check } from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
 import { openInVSCode } from "../shell/vscode";
@@ -19,16 +19,30 @@ export function ViewerActions({
   content?: string | null;
 }) {
   const [copied, setCopied] = useState<Feedback>(null);
+  // A single revert timer for the whole toolbar: only one button shows feedback
+  // at a time, so a new copy restarts the countdown rather than racing the old
+  // one. Held in a ref so it survives re-renders and can be cleared on unmount.
+  const revertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Both call sites unmount this toolbar on every file switch and tab change,
+  // so a pending timer would otherwise outlive the component.
+  useEffect(
+    () => () => {
+      if (revertTimer.current !== null) clearTimeout(revertTimer.current);
+    },
+    [],
+  );
 
   const copy = async (what: Exclude<Feedback, null>, text: string) => {
     if (!(await copyToClipboard(text))) return;
     setCopied(what);
-    // Only clear if this button is still the one showing feedback, so a later
-    // click on the other button is not wiped by an earlier button's timer.
-    setTimeout(
-      () => setCopied((current) => (current === what ? null : current)),
-      1500,
-    );
+    // Restart the countdown so this click gets the full duration, whichever
+    // button (if any) was showing feedback before.
+    if (revertTimer.current !== null) clearTimeout(revertTimer.current);
+    revertTimer.current = setTimeout(() => {
+      revertTimer.current = null;
+      setCopied(null);
+    }, 1500);
   };
 
   const canCopyContent = Boolean(content);

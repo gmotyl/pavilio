@@ -200,3 +200,103 @@ describe("ViewerActions copy contents", () => {
     ]);
   });
 });
+
+describe("ViewerActions copy feedback timers", () => {
+  it("keeps a button's feedback for the full duration when it is clicked again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      setSecureContext(true);
+      Object.assign(navigator, {
+        clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+      });
+
+      render(<ViewerActions absolutePath={PATH} content={CONTENT} />);
+      const path = () => screen.getByTestId("file-viewer-copy-path");
+
+      fireEvent.click(path());
+      await waitFor(() => expect(path()).toHaveTextContent("Copied"));
+
+      await act(async () => {
+        vi.advanceTimersByTime(1200);
+      });
+      expect(path()).toHaveTextContent("Copied");
+
+      // Re-clicking restarts the countdown; the first click's timer must not
+      // truncate the second click's feedback 300ms later.
+      fireEvent.click(path());
+      await waitFor(() => expect(path()).toHaveTextContent("Copied"));
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(path()).toHaveTextContent("Copied");
+
+      await act(async () => {
+        vi.advanceTimersByTime(1200);
+      });
+      expect(path()).toHaveTextContent("Path");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the pending revert timer on unmount", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      setSecureContext(true);
+      Object.assign(navigator, {
+        clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+      });
+
+      const { unmount } = render(
+        <ViewerActions absolutePath={PATH} content={CONTENT} />,
+      );
+      fireEvent.click(screen.getByTestId("file-viewer-copy-path"));
+      await waitFor(() =>
+        expect(screen.getByTestId("file-viewer-copy-path")).toHaveTextContent(
+          "Copied",
+        ),
+      );
+      expect(vi.getTimerCount()).toBe(1);
+
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("one button's expiring timer does not clear the other button's feedback", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      setSecureContext(true);
+      Object.assign(navigator, {
+        clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+      });
+
+      render(<ViewerActions absolutePath={PATH} content={CONTENT} />);
+      const copy = () => screen.getByTestId("file-viewer-copy-content");
+
+      fireEvent.click(screen.getByTestId("file-viewer-copy-path"));
+      await waitFor(() =>
+        expect(screen.getByTestId("file-viewer-copy-path")).toHaveTextContent(
+          "Copied",
+        ),
+      );
+
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      fireEvent.click(copy());
+      await waitFor(() => expect(copy()).toHaveTextContent("Copied"));
+
+      // t=1500 for the Path click: its timer must not wipe Copy's feedback.
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(copy()).toHaveTextContent("Copied");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
