@@ -887,6 +887,65 @@ describe("PlansTab archived toggle", () => {
     expect(copy).toBeDisabled();
   });
 
+  it("never copies the previous plan while the next one is still loading", async () => {
+    // Plan A → plan B switch with B's read still in flight. The selection
+    // effect blanks the content on every change, so the toolbar can never hand
+    // out A's source under B's name.
+    Object.defineProperty(window, "isSecureContext", {
+      value: true,
+      configurable: true,
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    // Guard the non-secure-context fallback path too.
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", {
+      value: execCommand,
+      configurable: true,
+      writable: true,
+    });
+
+    const PLAN_A = "# Plan A body";
+    const PLAN_B_PATH = "/p/.kilo/plans/woo.md";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url.includes("plans-tree")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(TREE),
+          } as Response);
+        }
+        // Plan B never resolves: it stays "loading" for the whole assertion.
+        if (url.includes(encodeURIComponent(PLAN_B_PATH))) {
+          return new Promise<Response>(() => {});
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ content: PLAN_A }),
+        } as Response);
+      }),
+    );
+
+    renderWithRouter(<PlansTab projectName="alokai" />);
+
+    // Plan A (auto-selected, newest) is on screen and copyable.
+    await waitFor(() => expect(screen.getByText("Plan A body")).toBeTruthy());
+    expect(screen.getByTestId("file-viewer-copy-content")).not.toBeDisabled();
+
+    // Open plan B while A's text would otherwise still be held in state.
+    fireEvent.click(screen.getByTestId("plans-tab-file-workspace-woo.md"));
+
+    const copy = screen.getByTestId("file-viewer-copy-content");
+    expect(copy).toBeDisabled();
+    fireEvent.click(copy);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(execCommand).not.toHaveBeenCalled();
+    expect(screen.queryByText("Plan A body")).toBeNull();
+    expect(screen.getByText("Loading…")).toBeTruthy();
+  });
+
   it("copies the open plan's source", async () => {
     Object.defineProperty(window, "isSecureContext", {
       value: true,
