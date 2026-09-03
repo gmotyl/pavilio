@@ -19,7 +19,7 @@ import {
 } from "./usePlansTree";
 import { useFileListControls, filterAndSortFiles } from "./fileListControls";
 import { useAutoSelectNewest } from "./useAutoSelectNewest";
-import PathActions from "./PathActions";
+import ViewerActions from "./ViewerActions";
 import { usePeekTriggerProps } from "./peekTrigger";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
@@ -175,7 +175,14 @@ function ChangeGroupRows({
 }
 
 /** Open-file header: the filename doubles as the hover-peek trigger (see PeekTriggerContext). */
-function PlanDetailHeader({ path }: { path: string }) {
+function PlanDetailHeader({
+  path,
+  content,
+}: {
+  path: string;
+  /** The open plan's source, or null while it is still loading. */
+  content: string | null;
+}) {
   const peek = usePeekTriggerProps();
   return (
     <div
@@ -190,7 +197,7 @@ function PlanDetailHeader({ path }: { path: string }) {
       >
         {path.split("/").pop()}
       </span>
-      <PathActions absolutePath={path} />
+      <ViewerActions absolutePath={path} content={content} />
     </div>
   );
 }
@@ -551,7 +558,9 @@ export default function PlansTab({ projectName }: Props) {
               Select a plan to view.
             </p>
           )}
-          {selectedPath && <PlanDetailHeader path={selectedPath} />}
+          {selectedPath && (
+            <PlanDetailHeader path={selectedPath} content={fileContent} />
+          )}
           {selectedPath && fileError && (
             <p className="text-sm" style={{ color: "var(--red)" }}>
               Failed to load file: {fileError}
