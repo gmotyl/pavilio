@@ -34,7 +34,14 @@ export function FileViewer({
         >
           {filePath.split("/").pop()}
         </span>
-        {absolutePath && <ViewerActions absolutePath={absolutePath} />}
+        {absolutePath && (
+          // While a switch is in flight `content` still holds the previously
+          // open file's text, so withhold it until this file has loaded.
+          <ViewerActions
+            absolutePath={absolutePath}
+            content={loading ? null : content}
+          />
+        )}
       </div>
       {loading ? (
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>

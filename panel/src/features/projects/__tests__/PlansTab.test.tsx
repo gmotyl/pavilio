@@ -863,4 +863,47 @@ describe("PlansTab archived toggle", () => {
     expect(screen.getByText("plans/ (flat)")).toBeTruthy();
     expect(screen.queryByText("projects (current)")).toBeNull();
   });
+
+  it("disables copy while a plan file is still loading", async () => {
+    // The tree resolves so a plan gets auto-selected, but its body never
+    // arrives — the toolbar is on screen with nothing to copy.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url.includes("plans-tree")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(TREE),
+          } as Response);
+        }
+        return new Promise<Response>(() => {});
+      }),
+    );
+    renderWithRouter(<PlansTab projectName="alokai" />);
+
+    const copy = await screen.findByTestId("file-viewer-copy-content");
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    expect(copy).toBeDisabled();
+  });
+
+  it("copies the open plan's source", async () => {
+    Object.defineProperty(window, "isSecureContext", {
+      value: true,
+      configurable: true,
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderWithRouter(<PlansTab projectName="alokai" />);
+    fireEvent.click(await screen.findByTestId("plans-tab-file-workspace-woo.md"));
+    await waitFor(() => expect(screen.getByText("Hello plan body")).toBeTruthy());
+
+    const copy = screen.getByTestId("file-viewer-copy-content");
+    expect(copy).not.toBeDisabled();
+    fireEvent.click(copy);
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("# Hello plan body"),
+    );
+  });
 });
