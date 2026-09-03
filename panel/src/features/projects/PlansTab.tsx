@@ -19,7 +19,7 @@ import {
 } from "./usePlansTree";
 import { useFileListControls, filterAndSortFiles } from "./fileListControls";
 import { useAutoSelectNewest } from "./useAutoSelectNewest";
-import PathActions from "./PathActions";
+import ViewerActions from "./ViewerActions";
 import { usePeekTriggerProps } from "./peekTrigger";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
@@ -190,7 +190,7 @@ function PlanDetailHeader({ path }: { path: string }) {
       >
         {path.split("/").pop()}
       </span>
-      <PathActions absolutePath={path} />
+      <ViewerActions absolutePath={path} />
     </div>
   );
 }

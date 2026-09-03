@@ -3,8 +3,8 @@ import { ExternalLink, Copy, Check } from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
 import { openInVSCode } from "../shell/vscode";
 
-/** "VS Code" + "Copy path" buttons shared by the file viewers. */
-export function PathActions({ absolutePath }: { absolutePath: string }) {
+/** Viewer toolbar actions: the buttons above an open file that operate on it. */
+export function ViewerActions({ absolutePath }: { absolutePath: string }) {
   const [copied, setCopied] = useState(false);
 
   const copyPath = async () => {
@@ -50,4 +50,4 @@ export function PathActions({ absolutePath }: { absolutePath: string }) {
   );
 }
 
-export default PathActions;
+export default ViewerActions;

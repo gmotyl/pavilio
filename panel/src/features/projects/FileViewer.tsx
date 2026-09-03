@@ -1,6 +1,6 @@
 import ImageDropZone from "../markdown/ImageDropZone";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
-import PathActions from "./PathActions";
+import ViewerActions from "./ViewerActions";
 import { usePeekTriggerProps } from "./peekTrigger";
 
 interface Props {
@@ -34,7 +34,7 @@ export function FileViewer({
         >
           {filePath.split("/").pop()}
         </span>
-        {absolutePath && <PathActions absolutePath={absolutePath} />}
+        {absolutePath && <ViewerActions absolutePath={absolutePath} />}
       </div>
       {loading ? (
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>

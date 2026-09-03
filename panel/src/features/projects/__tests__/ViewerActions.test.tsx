@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import PathActions from "../PathActions";
+import ViewerActions from "../ViewerActions";
 
 const PATH = "/home/greg/git/prv/projects/notes/foo.md";
 
@@ -15,13 +15,13 @@ afterEach(() => {
   setSecureContext(true);
 });
 
-describe("PathActions copy path", () => {
+describe("ViewerActions copy path", () => {
   it("copies via navigator.clipboard in a secure context", async () => {
     setSecureContext(true);
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
 
-    render(<PathActions absolutePath={PATH} />);
+    render(<ViewerActions absolutePath={PATH} />);
     fireEvent.click(screen.getByTestId("file-viewer-copy-path"));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(PATH));
@@ -37,7 +37,7 @@ describe("PathActions copy path", () => {
       configurable: true,
     });
 
-    render(<PathActions absolutePath={PATH} />);
+    render(<ViewerActions absolutePath={PATH} />);
     fireEvent.click(screen.getByTestId("file-viewer-copy-path"));
 
     await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
