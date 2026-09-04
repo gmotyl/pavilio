@@ -139,7 +139,12 @@ export function TerminalToolbar({
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setDefaultUser(currentProject, u.username);
+                    setDefaultUser(currentProject, u.username).catch((err) =>
+                      console.warn(
+                        `[terminal] failed to set default user for ${currentProject}`,
+                        err,
+                      ),
+                    );
                     onCreate({ runAsUser: u.username });
                     setNewOpen(false);
                   }}

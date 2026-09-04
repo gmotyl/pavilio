@@ -1,6 +1,6 @@
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
-import { platform, homedir } from "os";
+import { platform, homedir, userInfo } from "os";
 import { recordOutput, removeSession } from "./terminalActivity";
 import {
   createModeState,
@@ -106,11 +106,15 @@ export function createSession(opts: {
   // The owner is a normal discovered account too, so the toolbar dropdown
   // can perfectly well list — and the caller pick — the panel-owner's own
   // username as `runAsUser`. That's not a "run as someone else" request, so
-  // it must not route through the su/wsl.exe wrapper: same `homeDir ===
-  // homedir()` comparison as `ownerHomeDir` below, the one existing way this
-  // function already recognizes "is the owner".
+  // it must not route through the su/wsl.exe wrapper. Detected by identity
+  // (uid/username via `userInfo()`), not by comparing `homeDir` strings:
+  // `homedir()` prefers `$HOME` over the passwd-recorded home directory, so
+  // a diverged `$HOME` could make a genuine owner match look like a
+  // different account under a path comparison.
   const targetUser =
-    matchedUser && matchedUser.homeDir !== homedir() ? matchedUser : undefined;
+    matchedUser && matchedUser.username !== userInfo().username
+      ? matchedUser
+      : undefined;
 
   const identityHomeDir = targetUser?.homeDir ?? homedir();
 

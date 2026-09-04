@@ -59,7 +59,7 @@ describe("buildRunAsSpawnCommand", () => {
         "--shell-type",
         "login",
         "-e",
-        "PAVILIO_TERMINAL_ID=abc-123 exec /bin/zsh -l",
+        "PAVILIO_TERMINAL_ID=abc-123 exec '/bin/zsh' -l",
       ],
     });
   });
@@ -77,7 +77,7 @@ describe("buildRunAsSpawnCommand", () => {
         "-",
         "greg-ip",
         "-c",
-        "cd '/home/greg-ip/git/prv/pavilio' && PAVILIO_TERMINAL_ID=abc-123 exec /bin/zsh -l",
+        "cd '/home/greg-ip/git/prv/pavilio' && PAVILIO_TERMINAL_ID=abc-123 exec '/bin/zsh' -l",
       ],
     });
   });

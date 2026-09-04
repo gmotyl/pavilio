@@ -61,7 +61,7 @@ export function buildRunAsSpawnCommand(opts: {
         "--shell-type",
         "login",
         "-e",
-        `PAVILIO_TERMINAL_ID=${sessionId} exec ${user.shell} -l`,
+        `PAVILIO_TERMINAL_ID=${sessionId} exec ${shQuote(user.shell)} -l`,
       ],
     };
   }
@@ -72,7 +72,7 @@ export function buildRunAsSpawnCommand(opts: {
       "-",
       user.username,
       "-c",
-      `cd ${shQuote(cwd)} && PAVILIO_TERMINAL_ID=${sessionId} exec ${user.shell} -l`,
+      `cd ${shQuote(cwd)} && PAVILIO_TERMINAL_ID=${sessionId} exec ${shQuote(user.shell)} -l`,
     ],
   };
 }

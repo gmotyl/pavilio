@@ -293,4 +293,35 @@ describe("TerminalToolbar — run-as-user dropdown", () => {
     expect(onCreate).toHaveBeenCalledTimes(1);
     expect(onCreate).toHaveBeenCalledWith();
   });
+
+  it("a rejected setDefaultUser is caught, logged, and does not block onCreate", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unhandled = vi.fn();
+    window.addEventListener("unhandledrejection", unhandled);
+
+    const failure = new Error("network failure");
+    defaultTerminalUsersMock.setDefaultUser = vi.fn(() => Promise.reject(failure));
+    const onCreate = vi.fn();
+    renderToolbar({ currentProject: "ch", onCreate });
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-chevron"));
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-user-greg-ip"));
+
+    // The terminal must open immediately, regardless of whether the
+    // default-persist call has settled yet.
+    expect(onCreate).toHaveBeenCalledWith({ runAsUser: "greg-ip" });
+
+    // Let the rejected promise's .catch handler run.
+    await waitFor(() =>
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[terminal] failed to set default user for ch",
+        failure,
+      ),
+    );
+
+    expect(unhandled).not.toHaveBeenCalled();
+
+    window.removeEventListener("unhandledrejection", unhandled);
+    warnSpy.mockRestore();
+  });
 });

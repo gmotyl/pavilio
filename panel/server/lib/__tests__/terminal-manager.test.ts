@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
-import { tmpdir, homedir } from "node:os"
+import { tmpdir, homedir, userInfo } from "node:os"
 import {
   _resetAssignedNamesForTests,
   createSession,
@@ -481,12 +481,14 @@ describe("createSession with runAsUser", () => {
   it("createSession with runAsUser resolving to the panel-owner account spawns directly, not wrapped", () => {
     // The owner is a normal discovered account too — the toolbar dropdown
     // lists every account including whichever one runs the panel, so a
-    // match here must not route through the su/wsl.exe wrapper. Detected the
-    // same way `translateCwd`'s `ownerHomeDir` is: homeDir === homedir().
+    // match here must not route through the su/wsl.exe wrapper. Detected by
+    // identity (`userInfo().username === matchedUser.username`), not by
+    // comparing home-dir strings — see the $HOME-drift regression test below
+    // for why a path comparison is the wrong proxy for "is the owner".
     const ownerHome = homedir()
     mockOsUsers.users = [
       DEFAULT_TARGET_USER,
-      { username: "owner-account", homeDir: ownerHome, shell: "/bin/zsh" },
+      { username: userInfo().username, homeDir: ownerHome, shell: "/bin/zsh" },
     ]
 
     const meta = createSession({
@@ -494,7 +496,7 @@ describe("createSession with runAsUser", () => {
       cols: 80,
       rows: 24,
       project: "alokai",
-      runAsUser: "owner-account",
+      runAsUser: userInfo().username,
     })
 
     expect(lastSpawnCall!.file).not.toBe("su")
@@ -503,6 +505,48 @@ describe("createSession with runAsUser", () => {
     expect(lastSpawnCall!.options.cwd).toBe(process.cwd())
 
     destroySession(meta.id)
+  })
+
+  it("createSession recognizes the owner by username even when $HOME has drifted from the passwd homeDir", () => {
+    // os.homedir() prefers $HOME over the passwd-recorded home directory, so
+    // an overridden $HOME can make homedir() disagree with what /etc/passwd
+    // (and thus `matchedUser.homeDir`) says — even though `matchedUser` is
+    // genuinely the account running the panel. Owner detection must key off
+    // identity (username), not this path string, or a $HOME override alone
+    // would wrongly send an owner session through the su/wsl.exe wrapper.
+    const realHome = homedir()
+    const previousHome = process.env.HOME
+    const driftedHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-home-drift-"))
+    process.env.HOME = driftedHome
+    try {
+      expect(homedir()).not.toBe(realHome) // sanity: the drift actually took effect
+
+      mockOsUsers.users = [
+        DEFAULT_TARGET_USER,
+        // Same account that's actually running this process, but with the
+        // passwd-recorded home (not the drifted $HOME).
+        { username: userInfo().username, homeDir: realHome, shell: "/bin/zsh" },
+      ]
+
+      const meta = createSession({
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 24,
+        project: "alokai",
+        runAsUser: userInfo().username,
+      })
+
+      expect(lastSpawnCall!.file).not.toBe("su")
+      expect(lastSpawnCall!.file).not.toBe("wsl.exe")
+      expect(lastSpawnCall!.args).toEqual([])
+      expect(lastSpawnCall!.options.cwd).toBe(process.cwd())
+
+      destroySession(meta.id)
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME
+      else process.env.HOME = previousHome
+      rmSync(driftedHome, { recursive: true, force: true })
+    }
   })
 
   it("identity file for a runAsUser session is written under that user's home, not the server's own", () => {
