@@ -15,7 +15,7 @@ import {
   destroyReplay,
 } from "./terminalReplay";
 import { nextSessionName, removeName, writeName } from "./terminal-identity";
-import { listOsUsers } from "./os-users";
+import { listOsUsers, hasGitBindMount } from "./os-users";
 import { translateCwd, buildRunAsSpawnCommand } from "./terminal-run-as";
 
 export interface TerminalSession {
@@ -123,11 +123,26 @@ export function createSession(opts: {
   let spawnCwd = opts.cwd;
 
   if (targetUser) {
-    spawnCwd = translateCwd(opts.cwd, homedir(), targetUser.homeDir);
+    const translated = translateCwd(opts.cwd, homedir(), targetUser.homeDir);
+    // translateCwd assumes every account reaches the shared tree through its
+    // own `~/git` (a symlink to the bind mount, per workspace-setup's own
+    // design) — true for accounts provisioned that way, false for e.g. a
+    // pre-existing account whose `~/git` is its own unrelated directory. Only
+    // relevant when translation actually fired: an untranslated cwd (no
+    // known owner-git prefix) was never going to land under the target's
+    // `~/git` in the first place, so an absent link there says nothing about
+    // it.
+    const translationApplied = translated !== opts.cwd;
+    const fallBackToHome = translationApplied && !hasGitBindMount(targetUser.homeDir);
+    spawnCwd = fallBackToHome ? targetUser.homeDir : translated;
+
     const runAsCommand = buildRunAsSpawnCommand({
       user: targetUser,
       cwd: spawnCwd,
       sessionId: id,
+      notice: fallBackToHome
+        ? `pavilio: ${targetUser.username} has no ~/git link yet, opening $HOME instead of the project directory (expected until that account is set up with the shared tree)`
+        : undefined,
     });
     spawnFile = runAsCommand.file;
     spawnArgs = runAsCommand.args;

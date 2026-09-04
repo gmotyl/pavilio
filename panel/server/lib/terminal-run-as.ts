@@ -50,8 +50,17 @@ export function buildRunAsSpawnCommand(opts: {
   user: OsUser;
   cwd: string;
   sessionId: string;
+  /**
+   * Printed (via `echo`) before the `cd`, when the caller already decided to
+   * land somewhere other than what the user actually asked for — e.g.
+   * falling back to the target's home because the intended path doesn't
+   * exist for that account. Keeps that substitution visible in the terminal
+   * instead of a session that just silently opens somewhere unexpected.
+   */
+  notice?: string;
 }): RunAsSpawnCommand {
-  const { user, cwd, sessionId } = opts;
+  const { user, cwd, sessionId, notice } = opts;
+  const noticePrefix = notice !== undefined ? `echo ${shQuote(notice)} && ` : "";
 
   return {
     file: "su",
@@ -59,7 +68,7 @@ export function buildRunAsSpawnCommand(opts: {
       "-",
       user.username,
       "-c",
-      `cd ${shQuote(cwd)} && PAVILIO_TERMINAL_ID=${sessionId} exec ${shQuote(user.shell)} -l`,
+      `${noticePrefix}cd ${shQuote(cwd)} && PAVILIO_TERMINAL_ID=${sessionId} exec ${shQuote(user.shell)} -l`,
     ],
   };
 }

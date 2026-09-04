@@ -47,8 +47,25 @@ describe("os-users", () => {
       ]);
     });
 
-    it("parsePasswd excludes an entry with uid below 1000", () => {
+    it("parsePasswd excludes a system entry with uid below 1000", () => {
+      const content = "sync:x:4:65534:sync:/bin:/bin/sync\n";
+      expect(parsePasswd(content)).toEqual([]);
+    });
+
+    it("parsePasswd includes root (uid 0) despite being below 1000", () => {
+      // root is the one uid<1000 account worth offering: it's the
+      // panel-owner account itself on most setups, so `runAsUser: "root"`
+      // must resolve to a real discovered user for the owner-equality check
+      // in terminal-manager.ts to recognize it as "no wrapper needed"
+      // instead of silently falling back to an unknown-user direct spawn.
       const content = "root:x:0:0:root:/root:/bin/bash\n";
+      expect(parsePasswd(content)).toEqual([
+        { username: "root", homeDir: "/root", shell: "/bin/bash" },
+      ]);
+    });
+
+    it("parsePasswd still excludes root if its shell is a non-login one", () => {
+      const content = "root:x:0:0:root:/root:/usr/sbin/nologin\n";
       expect(parsePasswd(content)).toEqual([]);
     });
 

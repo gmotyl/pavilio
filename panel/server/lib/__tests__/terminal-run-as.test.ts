@@ -61,4 +61,26 @@ describe("buildRunAsSpawnCommand", () => {
       ],
     });
   });
+
+  it("buildRunAsSpawnCommand prints an optional notice before landing in cwd", () => {
+    // Used when the caller already fell back from a translated-but-missing
+    // path to the target's own home: the shell should say so visibly rather
+    // than the session just quietly landing somewhere the user didn't ask
+    // for, with no explanation.
+    const result = buildRunAsSpawnCommand({
+      user,
+      cwd: "/home/greg-ip",
+      sessionId: "abc-123",
+      notice: "greg-ip has no ~/git link yet",
+    });
+    expect(result).toEqual({
+      file: "su",
+      args: [
+        "-",
+        "greg-ip",
+        "-c",
+        "echo 'greg-ip has no ~/git link yet' && cd '/home/greg-ip' && PAVILIO_TERMINAL_ID=abc-123 exec '/bin/zsh' -l",
+      ],
+    });
+  });
 });
