@@ -144,4 +144,50 @@ describe("terminal-identity", () => {
       nextSessionName("alokai", ["alokai-1", "alokai-1-old", "alokai-x"]),
     ).toBe("alokai-2");
   });
+
+  it("namesDir resolves under an explicit homeDir when PANEL_AUTH_STATE_DIR is unset", () => {
+    delete process.env.PANEL_AUTH_STATE_DIR;
+    const otherHome = mkdtempSync(join(tmpdir(), "term-id-home-"));
+    try {
+      expect(namesDir(otherHome)).toBe(join(otherHome, ".panel", "terminals"));
+    } finally {
+      rmSync(otherHome, { recursive: true, force: true });
+    }
+  });
+
+  it("namesDir still prefers PANEL_AUTH_STATE_DIR over an explicit homeDir", () => {
+    const otherHome = mkdtempSync(join(tmpdir(), "term-id-home-"));
+    try {
+      expect(namesDir(otherHome)).toBe(join(dir, "terminals"));
+    } finally {
+      rmSync(otherHome, { recursive: true, force: true });
+    }
+  });
+
+  it("writeName writes under the given homeDir's terminals folder", () => {
+    delete process.env.PANEL_AUTH_STATE_DIR;
+    const otherHome = mkdtempSync(join(tmpdir(), "term-id-home-"));
+    try {
+      writeName(UUID, "alokai-1", otherHome);
+      expect(
+        readFileSync(join(otherHome, ".panel", "terminals", UUID), "utf8"),
+      ).toBe("alokai-1\n");
+    } finally {
+      rmSync(otherHome, { recursive: true, force: true });
+    }
+  });
+
+  it("removeName removes from the given homeDir's terminals folder", () => {
+    delete process.env.PANEL_AUTH_STATE_DIR;
+    const otherHome = mkdtempSync(join(tmpdir(), "term-id-home-"));
+    try {
+      writeName(UUID, "alokai-1", otherHome);
+      const filePath = join(otherHome, ".panel", "terminals", UUID);
+      expect(existsSync(filePath)).toBe(true);
+      removeName(UUID, otherHome);
+      expect(existsSync(filePath)).toBe(false);
+    } finally {
+      rmSync(otherHome, { recursive: true, force: true });
+    }
+  });
 });

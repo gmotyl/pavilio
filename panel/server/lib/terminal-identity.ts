@@ -26,20 +26,27 @@ function isValidId(id: string): boolean {
 /**
  * Same convention as `logDir()` in `reconnect-log.ts`: read the env var at
  * call time (never cache it at module load) so tests can redirect it.
+ *
+ * `homeDir` lets a caller resolve the identity file under a *different*
+ * account's home — the session's actual running user, when one was chosen
+ * via `runAsUser` — rather than the server process's own home. It is only
+ * ever consulted when `PANEL_AUTH_STATE_DIR` is unset; that env var, when
+ * present, always wins (it's the explicit override used by tests and by
+ * anyone who wants every identity file to land in one shared place).
  */
-export function namesDir(): string {
+export function namesDir(homeDir?: string): string {
   return join(
-    process.env.PANEL_AUTH_STATE_DIR ?? join(homedir(), ".panel"),
+    process.env.PANEL_AUTH_STATE_DIR ?? join(homeDir ?? homedir(), ".panel"),
     "terminals",
   );
 }
 
-export function writeName(id: string, name: string): void {
+export function writeName(id: string, name: string, homeDir?: string): void {
   // Ids are server-generated UUIDs, but validate anyway so a malformed id
   // can never escape namesDir() via a path-traversal-shaped string.
   if (!isValidId(id)) return;
   try {
-    const dir = namesDir();
+    const dir = namesDir(homeDir);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, id), `${name}\n`);
   } catch {
@@ -47,10 +54,10 @@ export function writeName(id: string, name: string): void {
   }
 }
 
-export function removeName(id: string): void {
+export function removeName(id: string, homeDir?: string): void {
   if (!isValidId(id)) return;
   try {
-    rmSync(join(namesDir(), id), { force: true });
+    rmSync(join(namesDir(homeDir), id), { force: true });
   } catch {
     // best-effort — see file header.
   }
