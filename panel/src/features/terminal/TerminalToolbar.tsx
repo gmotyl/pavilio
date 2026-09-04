@@ -112,7 +112,7 @@ export function TerminalToolbar({
           onMouseLeave={(e) =>
             (e.currentTarget.style.background = "transparent")
           }
-          title="Open in another project"
+          title="Choose which user to run as"
         >
           <ChevronDown size={12} />
         </button>

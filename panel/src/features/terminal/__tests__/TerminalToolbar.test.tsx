@@ -273,6 +273,11 @@ describe("TerminalToolbar — run-as-user dropdown", () => {
       "greg-ip",
     );
     expect(onCreate).toHaveBeenCalledWith({ runAsUser: "greg-ip" });
+    // The default must be persisted before the terminal is created, not after —
+    // regresses silently if the two calls are ever swapped.
+    expect(
+      defaultTerminalUsersMock.setDefaultUser.mock.invocationCallOrder[0],
+    ).toBeLessThan(onCreate.mock.invocationCallOrder[0]);
     // Dropdown closed after the click.
     expect(
       screen.queryByTestId("terminal-toolbar-new-user-greg-ip"),
