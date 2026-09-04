@@ -20,11 +20,16 @@ import { namesDir } from "../terminal-identity"
 import { buildRunAsSpawnCommand } from "../terminal-run-as"
 
 // Mutable, test-controlled stand-in for `listOsUsers()`'s real /etc/passwd
-// read — `vi.hoisted` because `vi.mock` factories are hoisted above normal
-// module-scope `let`/`const` declarations, so a factory that closes over a
-// plain outer variable would read it before it's initialized.
+// read, and for `hasGitBindMount()`'s real filesystem check — `vi.hoisted`
+// because `vi.mock` factories are hoisted above normal module-scope
+// `let`/`const` declarations, so a factory that closes over a plain outer
+// variable would read it before it's initialized. `hasGitBindMount` defaults
+// true so every test not specifically about the fallback keeps exercising
+// the normal translated-path behavior regardless of what the machine running
+// the suite actually has under `/home/greg-ip`.
 const mockOsUsers = vi.hoisted(() => ({
   users: [{ username: "greg-ip", homeDir: "/home/greg-ip", shell: "/bin/bash" }],
+  hasGitBindMount: true,
 }))
 
 vi.mock("../os-users", async (importOriginal) => {
@@ -32,6 +37,7 @@ vi.mock("../os-users", async (importOriginal) => {
   return {
     ...actual,
     listOsUsers: () => mockOsUsers.users,
+    hasGitBindMount: () => mockOsUsers.hasGitBindMount,
   }
 })
 
@@ -379,9 +385,10 @@ describe("createSession with runAsUser", () => {
   const DEFAULT_TARGET_USER = { username: RUN_AS_USER, homeDir: "/home/greg-ip", shell: "/bin/bash" }
 
   afterEach(() => {
-    // Restore the default mocked user list so a test that swaps it in for a
-    // temp-dir home doesn't leak into later tests in this file.
+    // Restore the default mocked user list/bind-mount flag so a test that
+    // swaps either in doesn't leak into later tests in this file.
     mockOsUsers.users = [DEFAULT_TARGET_USER]
+    mockOsUsers.hasGitBindMount = true
   })
 
   function withWslDistroName(value: string | undefined, run: () => void): void {
@@ -423,7 +430,6 @@ describe("createSession with runAsUser", () => {
         user: DEFAULT_TARGET_USER,
         cwd: translatedCwd,
         sessionId: meta.id,
-        wslDistro: undefined,
       })
 
       expect(lastSpawnCall!.file).toBe("su")
@@ -434,7 +440,11 @@ describe("createSession with runAsUser", () => {
     })
   })
 
-  it("createSession with a valid runAsUser under WSL_DISTRO_NAME spawns the wsl.exe form", () => {
+  it("createSession with a valid runAsUser under WSL_DISTRO_NAME still spawns the su form, never wsl.exe", () => {
+    // wsl.exe -d <distro> -u <user>, invoked from a process already attached
+    // to a real pty, hangs indefinitely and never produces a shell. These
+    // accounts are plain Linux logins either way — WSL_DISTRO_NAME being set
+    // on the panel process must not change which spawn mechanism is used.
     withWslDistroName("Ubuntu", () => {
       const cwd = `${homedir()}/git/prv/pavilio`
       const meta = createSession({
@@ -450,15 +460,70 @@ describe("createSession with runAsUser", () => {
         user: DEFAULT_TARGET_USER,
         cwd: translatedCwd,
         sessionId: meta.id,
-        wslDistro: "Ubuntu",
       })
 
-      expect(lastSpawnCall!.file).toBe("wsl.exe")
+      expect(lastSpawnCall!.file).toBe("su")
+      expect(lastSpawnCall!.file).not.toBe("wsl.exe")
       expect(lastSpawnCall!.args).toEqual(expected.args)
       expect(lastSpawnCall!.options.cwd).toBe(translatedCwd)
 
       destroySession(meta.id)
     })
+  })
+
+  it("createSession falls back to the target's home + a visible notice when it has no ~/git link", () => {
+    // translateCwd blindly rewrites the path assuming every account reaches
+    // the shared tree via its own ~/git; an account that doesn't (e.g. a
+    // pre-existing home with its own unrelated content) would otherwise get
+    // a translated cwd that doesn't exist, which fails pty.spawn's own cwd
+    // chdir with a silent ENOENT before su/the shell ever run.
+    mockOsUsers.hasGitBindMount = false
+    const cwd = `${homedir()}/git/prv/pavilio`
+    const meta = createSession({
+      cwd,
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      runAsUser: RUN_AS_USER,
+    })
+
+    const expected = buildRunAsSpawnCommand({
+      user: DEFAULT_TARGET_USER,
+      cwd: DEFAULT_TARGET_USER.homeDir,
+      sessionId: meta.id,
+      notice: "pavilio: greg-ip has no ~/git link yet, opening $HOME instead of the project directory (expected until that account is set up with the shared tree)",
+    })
+
+    expect(lastSpawnCall!.args).toEqual(expected.args)
+    expect(lastSpawnCall!.args.join(" ")).toContain("echo ")
+    expect(lastSpawnCall!.options.cwd).toBe(DEFAULT_TARGET_USER.homeDir)
+
+    destroySession(meta.id)
+  })
+
+  it("createSession does not fall back when translateCwd never fired (no known owner-git prefix)", () => {
+    // An account missing its ~/git link says nothing about a cwd that was
+    // never going to be rewritten under that link in the first place.
+    mockOsUsers.hasGitBindMount = false
+    const cwd = "/opt/somewhere/else"
+    const meta = createSession({
+      cwd,
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      runAsUser: RUN_AS_USER,
+    })
+
+    const expected = buildRunAsSpawnCommand({
+      user: DEFAULT_TARGET_USER,
+      cwd,
+      sessionId: meta.id,
+    })
+
+    expect(lastSpawnCall!.args).toEqual(expected.args)
+    expect(lastSpawnCall!.options.cwd).toBe(cwd)
+
+    destroySession(meta.id)
   })
 
   it("createSession with an unknown runAsUser falls back to direct spawn", () => {

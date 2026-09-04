@@ -22,8 +22,8 @@ export function translateCwd(
 }
 
 /**
- * Wraps `value` in single quotes for embedding in a `su -c` / `wsl.exe -e`
- * string, escaping embedded single quotes.
+ * Wraps `value` in single quotes for embedding in a `su -c` string, escaping
+ * embedded single quotes.
  */
 export function shQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -35,47 +35,32 @@ export interface RunAsSpawnCommand {
 }
 
 /**
- * `wslDistro` set => WSL branch: `wsl.exe -d <distro> -u <user> --cd <cwd>
- * --shell-type login -e <shell> -l -c "PAVILIO_TERMINAL_ID=<id> exec <shell>
- * -l"`. `wslDistro` undefined => posix branch: `su - <user> -c "cd
- * <quoted-cwd> && PAVILIO_TERMINAL_ID=<id> exec <shell> -l"`.
- *
- * The two branches look parallel but aren't: `su -c` hands its whole string
- * to the target user's shell for interpretation, so one combined string
- * works. `wsl.exe -e` execs argv directly with no shell in between — passing
- * it a single "PAVILIO_TERMINAL_ID=... exec ... -l" string makes it look for
- * a literal binary of that name and fail (execvpe ENOENT), killing the
- * session before any prompt appears. The shell binary plus `-l -c <command>`
- * must be separate argv elements so the shell itself does the interpreting.
+ * `su - <user> -c "cd <quoted-cwd> && PAVILIO_TERMINAL_ID=<id> exec <shell>
+ * -l"`. Always the `su` form — the accounts this switches between are plain
+ * Linux logins (the same ones `workspace-setup`'s account provisioning
+ * manages via `su -`, never `wsl.exe`) regardless of whether the panel
+ * process itself happens to have `WSL_DISTRO_NAME` set. An earlier version
+ * branched on that env var and shelled out to `wsl.exe -d <distro> -u <user>`
+ * instead; invoked from a process already attached to a real pty, that hangs
+ * indefinitely (confirmed: never exits, never errors, never produces a
+ * shell) — `su` doesn't have that problem and is what these accounts were
+ * built around in the first place.
  */
 export function buildRunAsSpawnCommand(opts: {
   user: OsUser;
   cwd: string;
   sessionId: string;
-  wslDistro: string | undefined;
+  /**
+   * Printed (via `echo`) before the `cd`, when the caller already decided to
+   * land somewhere other than what the user actually asked for — e.g.
+   * falling back to the target's home because the intended path doesn't
+   * exist for that account. Keeps that substitution visible in the terminal
+   * instead of a session that just silently opens somewhere unexpected.
+   */
+  notice?: string;
 }): RunAsSpawnCommand {
-  const { user, cwd, sessionId, wslDistro } = opts;
-
-  if (wslDistro !== undefined) {
-    return {
-      file: "wsl.exe",
-      args: [
-        "-d",
-        wslDistro,
-        "-u",
-        user.username,
-        "--cd",
-        cwd,
-        "--shell-type",
-        "login",
-        "-e",
-        user.shell,
-        "-l",
-        "-c",
-        `PAVILIO_TERMINAL_ID=${sessionId} exec ${shQuote(user.shell)} -l`,
-      ],
-    };
-  }
+  const { user, cwd, sessionId, notice } = opts;
+  const noticePrefix = notice !== undefined ? `echo ${shQuote(notice)} && ` : "";
 
   return {
     file: "su",
@@ -83,7 +68,7 @@ export function buildRunAsSpawnCommand(opts: {
       "-",
       user.username,
       "-c",
-      `cd ${shQuote(cwd)} && PAVILIO_TERMINAL_ID=${sessionId} exec ${shQuote(user.shell)} -l`,
+      `${noticePrefix}cd ${shQuote(cwd)} && PAVILIO_TERMINAL_ID=${sessionId} exec ${shQuote(user.shell)} -l`,
     ],
   };
 }
