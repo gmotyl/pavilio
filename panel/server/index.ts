@@ -38,6 +38,7 @@ import { pruneDeadAgents } from "./lib/agent-registry.js";
 import { registerPanelServer } from "./lib/panel-listener.js";
 import { sweepNames } from "./lib/terminal-identity.js";
 import { listSessions } from "./lib/terminal-manager.js";
+import { listOsUsers } from "./lib/os-users.js";
 
 async function findFreePort(start: number, span = 50): Promise<number> {
   for (let candidate = start; candidate < start + span; candidate++) {
@@ -125,6 +126,10 @@ async function start() {
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 
   app.use(vite.middlewares);
+
+  // Eager discovery so the first /api/terminal/os-users (or session-create)
+  // request never pays the /etc/passwd read cost; listOsUsers() never throws.
+  listOsUsers();
 
   const protocol = tlsCert && tlsKey ? "https" : "http";
   server.listen(port, "127.0.0.1", () => {

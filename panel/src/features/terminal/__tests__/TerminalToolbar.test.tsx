@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TerminalToolbar } from "../TerminalToolbar";
 import type { SessionMeta } from "../useTerminalSessions";
 import type { ConnectionState } from "../terminalInstances";
@@ -31,10 +31,35 @@ vi.mock("../terminalInstances", async (importOriginal) => {
   };
 });
 
+// Discovered OS users and the project → default-user map: the chevron
+// dropdown reads both hooks directly, so tests control their return values
+// rather than standing up the real fetch-once stores.
+const osUsersMock = vi.hoisted(() => ({
+  users: [] as { username: string }[],
+}));
+const defaultTerminalUsersMock = vi.hoisted(() => ({
+  defaultUsers: {} as Record<string, string>,
+  setDefaultUser: vi.fn(async () => {}),
+}));
+
+vi.mock("../useOsUsers", () => ({
+  useOsUsers: () => ({ users: osUsersMock.users }),
+}));
+
+vi.mock("../useDefaultTerminalUsers", () => ({
+  useDefaultTerminalUsers: () => ({
+    defaultUsers: defaultTerminalUsersMock.defaultUsers,
+    setDefaultUser: defaultTerminalUsersMock.setDefaultUser,
+  }),
+}));
+
 beforeEach(() => {
   conn.state = "connected";
   conn.exited = false;
   vi.mocked(reconnectSession).mockClear();
+  osUsersMock.users = [];
+  defaultTerminalUsersMock.defaultUsers = {};
+  defaultTerminalUsersMock.setDefaultUser = vi.fn(async () => {});
 });
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
@@ -56,7 +81,6 @@ function renderToolbar(overrides: Partial<Parameters<typeof TerminalToolbar>[0]>
     focusedId: sessions[0]?.id ?? null,
     maximized: false,
     currentProject: "ch",
-    projects: [{ name: "ch" }],
     repos: [],
     onFocus: vi.fn(),
     onCreate: vi.fn(),
@@ -184,5 +208,120 @@ describe("TerminalToolbar — project colour", () => {
     renderToolbar({ sessions, focusedId: "s1", currentProject: "alpha" });
 
     expect(screen.queryByTestId("terminal-toolbar-color-s1")).not.toBeInTheDocument();
+  });
+});
+
+describe("TerminalToolbar — run-as-user dropdown", () => {
+  beforeEach(() => {
+    osUsersMock.users = [{ username: "greg" }, { username: "greg-ip" }];
+    defaultTerminalUsersMock.defaultUsers = {};
+    defaultTerminalUsersMock.setDefaultUser = vi.fn(async () => {});
+  });
+
+  it("chevron dropdown lists discovered OS users, not projects", () => {
+    renderToolbar({ currentProject: "ch" });
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-chevron"));
+
+    expect(screen.getByText("Run new terminal as…")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("terminal-toolbar-new-user-greg"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("terminal-toolbar-new-user-greg-ip"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("terminal-toolbar-new-project-ch"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("the project's stored default user's row is marked current", () => {
+    defaultTerminalUsersMock.defaultUsers = { ch: "greg-ip" };
+    renderToolbar({ currentProject: "ch" });
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-chevron"));
+
+    expect(
+      within(screen.getByTestId("terminal-toolbar-new-user-greg-ip")).getByText(
+        /default/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("terminal-toolbar-new-user-greg")).queryByText(
+        /default/i,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("no row is marked current when the project has no stored default", () => {
+    renderToolbar({ currentProject: "ch" });
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-chevron"));
+
+    expect(screen.queryByText(/default/i)).not.toBeInTheDocument();
+  });
+
+  it("clicking a user row sets the default and creates a session with that runAsUser", () => {
+    const onCreate = vi.fn();
+    renderToolbar({ currentProject: "ch", onCreate });
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-chevron"));
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-user-greg-ip"));
+
+    expect(defaultTerminalUsersMock.setDefaultUser).toHaveBeenCalledWith(
+      "ch",
+      "greg-ip",
+    );
+    expect(onCreate).toHaveBeenCalledWith({ runAsUser: "greg-ip" });
+    // The default must be persisted before the terminal is created, not after —
+    // regresses silently if the two calls are ever swapped.
+    expect(
+      defaultTerminalUsersMock.setDefaultUser.mock.invocationCallOrder[0],
+    ).toBeLessThan(onCreate.mock.invocationCallOrder[0]);
+    // Dropdown closed after the click.
+    expect(
+      screen.queryByTestId("terminal-toolbar-new-user-greg-ip"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("the bare + button creates a session without a runAsUser", () => {
+    const onCreate = vi.fn();
+    renderToolbar({ currentProject: "ch", onCreate });
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new"));
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate).toHaveBeenCalledWith();
+  });
+
+  it("a rejected setDefaultUser is caught, logged, and does not block onCreate", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unhandled = vi.fn();
+    window.addEventListener("unhandledrejection", unhandled);
+
+    const failure = new Error("network failure");
+    defaultTerminalUsersMock.setDefaultUser = vi.fn(() => Promise.reject(failure));
+    const onCreate = vi.fn();
+    renderToolbar({ currentProject: "ch", onCreate });
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-chevron"));
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-user-greg-ip"));
+
+    // The terminal must open immediately, regardless of whether the
+    // default-persist call has settled yet.
+    expect(onCreate).toHaveBeenCalledWith({ runAsUser: "greg-ip" });
+
+    // Let the rejected promise's .catch handler run.
+    await waitFor(() =>
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[terminal] failed to set default user for ch",
+        failure,
+      ),
+    );
+
+    expect(unhandled).not.toHaveBeenCalled();
+
+    window.removeEventListener("unhandledrejection", unhandled);
+    warnSpy.mockRestore();
   });
 });

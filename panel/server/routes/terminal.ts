@@ -12,6 +12,8 @@ import {
 } from "../lib/terminal-manager.js";
 import { appendReconnectMetric } from "../lib/reconnect-log.js";
 import { getConfig } from "../config.js";
+import { listOsUsers } from "../lib/os-users.js";
+import { getDefaultUser } from "../lib/project-default-user.js";
 
 function expandPath(p: string): string {
   if (p.startsWith("~/")) return resolve(homedir(), p.slice(2));
@@ -25,18 +27,29 @@ router.get("/sessions", (_req, res) => {
   res.json(listSessions());
 });
 
+router.get("/os-users", (_req, res) => {
+  // homeDir/shell are internal spawn details, not for the client — never
+  // widen this beyond username without re-checking every caller.
+  res.json(listOsUsers().map(({ username }) => ({ username })));
+});
+
 router.post("/sessions", (req, res) => {
-  const { cwd, cols = 80, rows = 24, project = "", name } = req.body ?? {};
+  const { cwd, cols = 80, rows = 24, project = "", name, runAsUser } = req.body ?? {};
   const effectiveCwd =
     cwd && typeof cwd === "string"
       ? expandPath(cwd)
       : resolve(getConfig().projectsDir, "..");
+  // An explicit runAsUser in the body always wins; only an omitted (or
+  // non-string/empty) value falls back to the project's stored default.
+  const effectiveRunAsUser =
+    typeof runAsUser === "string" && runAsUser ? runAsUser : getDefaultUser(project);
   const session = createSession({
     cwd: effectiveCwd,
     cols,
     rows,
     project,
     name,
+    runAsUser: effectiveRunAsUser,
   });
   res.status(201).json(session);
 });

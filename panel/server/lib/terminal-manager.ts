@@ -1,6 +1,6 @@
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
-import { platform } from "os";
+import { platform, homedir, userInfo } from "os";
 import { recordOutput, removeSession } from "./terminalActivity";
 import {
   createModeState,
@@ -15,6 +15,8 @@ import {
   destroyReplay,
 } from "./terminalReplay";
 import { nextSessionName, removeName, writeName } from "./terminal-identity";
+import { listOsUsers, hostSpawnKind } from "./os-users";
+import { translateCwd, buildRunAsSpawnCommand } from "./terminal-run-as";
 
 export interface TerminalSession {
   id: string;
@@ -25,6 +27,14 @@ export interface TerminalSession {
   createdAt: string;
   pty: pty.IPty;
   modeState: ModeState;
+  /**
+   * Home directory this session's identity file lives under — the target
+   * user's home for a `runAsUser` session, the panel-owner's own home
+   * otherwise. Threaded into `writeName`/`removeName` at every call site so
+   * the identity file always lands next to the account that's actually
+   * running the PTY (see `terminal-identity.ts`'s header comment).
+   */
+  identityHomeDir: string;
   _suppressRecordUntil?: number;
 }
 
@@ -80,15 +90,55 @@ export function createSession(opts: {
   rows: number;
   project: string;
   name?: string;
+  runAsUser?: string;
 }): TerminalSessionMeta {
   const id = randomUUID();
   const shell = defaultShell();
 
-  const ptyProcess = pty.spawn(shell, [], {
+  // A `runAsUser` that doesn't match a discovered account falls back to the
+  // direct-spawn path below, identical to `runAsUser` being omitted — an
+  // account removed after being set as a default must surface as a spawn
+  // failure later, never a silent no-op here.
+  const matchedUser = opts.runAsUser
+    ? listOsUsers().find((user) => user.username === opts.runAsUser)
+    : undefined;
+
+  // The owner is a normal discovered account too, so the toolbar dropdown
+  // can perfectly well list — and the caller pick — the panel-owner's own
+  // username as `runAsUser`. That's not a "run as someone else" request, so
+  // it must not route through the su/wsl.exe wrapper. Detected by identity
+  // (uid/username via `userInfo()`), not by comparing `homeDir` strings:
+  // `homedir()` prefers `$HOME` over the passwd-recorded home directory, so
+  // a diverged `$HOME` could make a genuine owner match look like a
+  // different account under a path comparison.
+  const targetUser =
+    matchedUser && matchedUser.username !== userInfo().username
+      ? matchedUser
+      : undefined;
+
+  const identityHomeDir = targetUser?.homeDir ?? homedir();
+
+  let spawnFile = shell;
+  let spawnArgs: string[] = [];
+  let spawnCwd = opts.cwd;
+
+  if (targetUser) {
+    spawnCwd = translateCwd(opts.cwd, homedir(), targetUser.homeDir);
+    const runAsCommand = buildRunAsSpawnCommand({
+      user: targetUser,
+      cwd: spawnCwd,
+      sessionId: id,
+      wslDistro: hostSpawnKind() === "wsl" ? process.env.WSL_DISTRO_NAME : undefined,
+    });
+    spawnFile = runAsCommand.file;
+    spawnArgs = runAsCommand.args;
+  }
+
+  const ptyProcess = pty.spawn(spawnFile, spawnArgs, {
     name: "xterm-256color",
     cols: opts.cols,
     rows: opts.rows,
-    cwd: opts.cwd,
+    cwd: spawnCwd,
     env: { ...process.env, TERM: "xterm-256color", PAVILIO_TERMINAL_ID: id },
   });
 
@@ -104,11 +154,12 @@ export function createSession(opts: {
     createdAt: new Date().toISOString(),
     pty: ptyProcess,
     modeState: createModeState(),
+    identityHomeDir,
   };
 
   sessions.set(id, session);
   recordAssignedName(opts.project, session.name);
-  writeName(id, session.name);
+  writeName(id, session.name, identityHomeDir);
 
   // Mirror every PTY output chunk into a headless replay buffer so a client
   // reconnecting later can be sent a serialized snapshot instead of a blank
@@ -141,7 +192,7 @@ export function createSession(opts: {
   ptyProcess.onExit(() => {
     destroyReplay(id);
     removeSession(id);
-    removeName(id);
+    removeName(id, session.identityHomeDir);
     sessions.delete(id);
   });
 
@@ -161,7 +212,7 @@ export function destroySession(id: string): boolean {
   if (!session) return false;
   session.pty.kill();
   destroyReplay(id);
-  removeName(id);
+  removeName(id, session.identityHomeDir);
   sessions.delete(id);
   return true;
 }
@@ -183,7 +234,7 @@ export function updateSession(
   if (!session) return false;
   if (updates.name !== undefined) {
     session.name = updates.name;
-    writeName(id, session.name);
+    writeName(id, session.name, session.identityHomeDir);
   }
   return true;
 }

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
+import { tmpdir, homedir, userInfo } from "node:os"
 import {
   _resetAssignedNamesForTests,
   createSession,
@@ -17,6 +17,23 @@ import {
   _resetReplayForTests,
 } from "../terminalReplay"
 import { namesDir } from "../terminal-identity"
+import { buildRunAsSpawnCommand } from "../terminal-run-as"
+
+// Mutable, test-controlled stand-in for `listOsUsers()`'s real /etc/passwd
+// read — `vi.hoisted` because `vi.mock` factories are hoisted above normal
+// module-scope `let`/`const` declarations, so a factory that closes over a
+// plain outer variable would read it before it's initialized.
+const mockOsUsers = vi.hoisted(() => ({
+  users: [{ username: "greg-ip", homeDir: "/home/greg-ip", shell: "/bin/bash" }],
+}))
+
+vi.mock("../os-users", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../os-users")>()
+  return {
+    ...actual,
+    listOsUsers: () => mockOsUsers.users,
+  }
+})
 
 // Fake node-pty: capture the onData callbacks registered against the
 // most-recently-spawned pty so a test can drive PTY output deterministically
@@ -354,5 +371,267 @@ describe("identity file lifecycle", () => {
     // Simulate the PTY exiting on its own (not via destroySession).
     lastPtyExitCallback?.()
     expect(readIdentityFile(meta.id)).toBeUndefined()
+  })
+})
+
+describe("createSession with runAsUser", () => {
+  const RUN_AS_USER = "greg-ip"
+  const DEFAULT_TARGET_USER = { username: RUN_AS_USER, homeDir: "/home/greg-ip", shell: "/bin/bash" }
+
+  afterEach(() => {
+    // Restore the default mocked user list so a test that swaps it in for a
+    // temp-dir home doesn't leak into later tests in this file.
+    mockOsUsers.users = [DEFAULT_TARGET_USER]
+  })
+
+  function withWslDistroName(value: string | undefined, run: () => void): void {
+    const previous = process.env.WSL_DISTRO_NAME
+    if (value === undefined) delete process.env.WSL_DISTRO_NAME
+    else process.env.WSL_DISTRO_NAME = value
+    try {
+      run()
+    } finally {
+      if (previous === undefined) delete process.env.WSL_DISTRO_NAME
+      else process.env.WSL_DISTRO_NAME = previous
+    }
+  }
+
+  it("createSession without runAsUser spawns directly, unchanged from today", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+
+    expect(lastSpawnCall!.file).not.toBe("su")
+    expect(lastSpawnCall!.file).not.toBe("wsl.exe")
+    expect(lastSpawnCall!.args).toEqual([])
+    expect(lastSpawnCall!.options.cwd).toBe(process.cwd())
+
+    destroySession(meta.id)
+  })
+
+  it("createSession with a valid runAsUser on posix spawns the su form with a translated cwd", () => {
+    withWslDistroName(undefined, () => {
+      const cwd = `${homedir()}/git/prv/pavilio`
+      const meta = createSession({
+        cwd,
+        cols: 80,
+        rows: 24,
+        project: "alokai",
+        runAsUser: RUN_AS_USER,
+      })
+
+      const translatedCwd = "/home/greg-ip/git/prv/pavilio"
+      const expected = buildRunAsSpawnCommand({
+        user: DEFAULT_TARGET_USER,
+        cwd: translatedCwd,
+        sessionId: meta.id,
+        wslDistro: undefined,
+      })
+
+      expect(lastSpawnCall!.file).toBe("su")
+      expect(lastSpawnCall!.args).toEqual(expected.args)
+      expect(lastSpawnCall!.options.cwd).toBe(translatedCwd)
+
+      destroySession(meta.id)
+    })
+  })
+
+  it("createSession with a valid runAsUser under WSL_DISTRO_NAME spawns the wsl.exe form", () => {
+    withWslDistroName("Ubuntu", () => {
+      const cwd = `${homedir()}/git/prv/pavilio`
+      const meta = createSession({
+        cwd,
+        cols: 80,
+        rows: 24,
+        project: "alokai",
+        runAsUser: RUN_AS_USER,
+      })
+
+      const translatedCwd = "/home/greg-ip/git/prv/pavilio"
+      const expected = buildRunAsSpawnCommand({
+        user: DEFAULT_TARGET_USER,
+        cwd: translatedCwd,
+        sessionId: meta.id,
+        wslDistro: "Ubuntu",
+      })
+
+      expect(lastSpawnCall!.file).toBe("wsl.exe")
+      expect(lastSpawnCall!.args).toEqual(expected.args)
+      expect(lastSpawnCall!.options.cwd).toBe(translatedCwd)
+
+      destroySession(meta.id)
+    })
+  })
+
+  it("createSession with an unknown runAsUser falls back to direct spawn", () => {
+    const meta = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      runAsUser: "no-such-user",
+    })
+
+    expect(lastSpawnCall!.file).not.toBe("su")
+    expect(lastSpawnCall!.file).not.toBe("wsl.exe")
+    expect(lastSpawnCall!.args).toEqual([])
+    expect(lastSpawnCall!.options.cwd).toBe(process.cwd())
+
+    destroySession(meta.id)
+  })
+
+  it("createSession with runAsUser resolving to the panel-owner account spawns directly, not wrapped", () => {
+    // The owner is a normal discovered account too — the toolbar dropdown
+    // lists every account including whichever one runs the panel, so a
+    // match here must not route through the su/wsl.exe wrapper. Detected by
+    // identity (`userInfo().username === matchedUser.username`), not by
+    // comparing home-dir strings — see the $HOME-drift regression test below
+    // for why a path comparison is the wrong proxy for "is the owner".
+    const ownerHome = homedir()
+    mockOsUsers.users = [
+      DEFAULT_TARGET_USER,
+      { username: userInfo().username, homeDir: ownerHome, shell: "/bin/zsh" },
+    ]
+
+    const meta = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      runAsUser: userInfo().username,
+    })
+
+    expect(lastSpawnCall!.file).not.toBe("su")
+    expect(lastSpawnCall!.file).not.toBe("wsl.exe")
+    expect(lastSpawnCall!.args).toEqual([])
+    expect(lastSpawnCall!.options.cwd).toBe(process.cwd())
+
+    destroySession(meta.id)
+  })
+
+  it("createSession recognizes the owner by username even when $HOME has drifted from the passwd homeDir", () => {
+    // os.homedir() prefers $HOME over the passwd-recorded home directory, so
+    // an overridden $HOME can make homedir() disagree with what /etc/passwd
+    // (and thus `matchedUser.homeDir`) says — even though `matchedUser` is
+    // genuinely the account running the panel. Owner detection must key off
+    // identity (username), not this path string, or a $HOME override alone
+    // would wrongly send an owner session through the su/wsl.exe wrapper.
+    const realHome = homedir()
+    const previousHome = process.env.HOME
+    const driftedHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-home-drift-"))
+    process.env.HOME = driftedHome
+    try {
+      expect(homedir()).not.toBe(realHome) // sanity: the drift actually took effect
+
+      mockOsUsers.users = [
+        DEFAULT_TARGET_USER,
+        // Same account that's actually running this process, but with the
+        // passwd-recorded home (not the drifted $HOME).
+        { username: userInfo().username, homeDir: realHome, shell: "/bin/zsh" },
+      ]
+
+      const meta = createSession({
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 24,
+        project: "alokai",
+        runAsUser: userInfo().username,
+      })
+
+      expect(lastSpawnCall!.file).not.toBe("su")
+      expect(lastSpawnCall!.file).not.toBe("wsl.exe")
+      expect(lastSpawnCall!.args).toEqual([])
+      expect(lastSpawnCall!.options.cwd).toBe(process.cwd())
+
+      destroySession(meta.id)
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME
+      else process.env.HOME = previousHome
+      rmSync(driftedHome, { recursive: true, force: true })
+    }
+  })
+
+  it("identity file for a runAsUser session is written under that user's home, not the server's own", () => {
+    const previousStateDirInTest = process.env.PANEL_AUTH_STATE_DIR
+    delete process.env.PANEL_AUTH_STATE_DIR
+    const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
+    mockOsUsers.users = [{ username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash" }]
+    try {
+      const meta = createSession({
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 24,
+        project: "alokai",
+        runAsUser: RUN_AS_USER,
+      })
+
+      const identityFile = join(otherHome, ".panel", "terminals", meta.id)
+      expect(existsSync(identityFile)).toBe(true)
+      expect(readFileSync(identityFile, "utf8")).toBe(`${meta.name}\n`)
+      // Not written under the server's own (real) home either.
+      expect(existsSync(join(namesDir(), meta.id))).toBe(false)
+
+      destroySession(meta.id)
+    } finally {
+      rmSync(otherHome, { recursive: true, force: true })
+      if (previousStateDirInTest !== undefined) {
+        process.env.PANEL_AUTH_STATE_DIR = previousStateDirInTest
+      }
+    }
+  })
+
+  it("identity file for a runAsUser session is removed from that user's home on destroySession", () => {
+    const previousStateDirInTest = process.env.PANEL_AUTH_STATE_DIR
+    delete process.env.PANEL_AUTH_STATE_DIR
+    const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
+    mockOsUsers.users = [{ username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash" }]
+    try {
+      const meta = createSession({
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 24,
+        project: "alokai",
+        runAsUser: RUN_AS_USER,
+      })
+
+      const identityFile = join(otherHome, ".panel", "terminals", meta.id)
+      expect(existsSync(identityFile)).toBe(true)
+
+      destroySession(meta.id)
+      expect(existsSync(identityFile)).toBe(false)
+    } finally {
+      rmSync(otherHome, { recursive: true, force: true })
+      if (previousStateDirInTest !== undefined) {
+        process.env.PANEL_AUTH_STATE_DIR = previousStateDirInTest
+      }
+    }
+  })
+
+  it("renaming a runAsUser session rewrites the identity file under that user's home, not the server's own", () => {
+    const previousStateDirInTest = process.env.PANEL_AUTH_STATE_DIR
+    delete process.env.PANEL_AUTH_STATE_DIR
+    const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
+    mockOsUsers.users = [{ username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash" }]
+    try {
+      const meta = createSession({
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 24,
+        project: "alokai",
+        runAsUser: RUN_AS_USER,
+      })
+
+      updateSession(meta.id, { name: "deploy-watch" })
+
+      const identityFile = join(otherHome, ".panel", "terminals", meta.id)
+      expect(readFileSync(identityFile, "utf8")).toBe("deploy-watch\n")
+      // Not rewritten under the server's own (real) home either.
+      expect(existsSync(join(namesDir(), meta.id))).toBe(false)
+
+      destroySession(meta.id)
+    } finally {
+      rmSync(otherHome, { recursive: true, force: true })
+      if (previousStateDirInTest !== undefined) {
+        process.env.PANEL_AUTH_STATE_DIR = previousStateDirInTest
+      }
+    }
   })
 })

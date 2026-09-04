@@ -70,7 +70,6 @@ export default function ProjectTerminalsSurface({
   return (
     <TerminalsSurface
       currentProject={projectName}
-      projects={projects}
       repos={project?.repos}
       sessions={terminal.sessions}
       focusedId={terminal.focusedId}

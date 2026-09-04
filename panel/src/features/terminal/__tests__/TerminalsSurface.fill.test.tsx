@@ -16,7 +16,6 @@ function Harness({ fill }: { fill?: boolean }) {
   return (
     <TerminalsSurface
       currentProject="vector"
-      projects={[]}
       repos={[]}
       sessions={[]}
       focusedId={null}
