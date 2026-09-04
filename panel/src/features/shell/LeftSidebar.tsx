@@ -334,7 +334,11 @@ export default function LeftSidebar() {
                         // ignore
                       }
                       dispatchTerminalFocus(s.project, s.id);
-                      navigate(`/project/${s.project}/iterm`);
+                      // Bare project route — same as the project-name link.
+                      // ProjectRedirect resolves the destination via the
+                      // Last-open-view bookmark (or falls through to the
+                      // default section when there is none).
+                      navigate(`/project/${s.project}`);
                     }}
                     className="w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left"
                     style={{
