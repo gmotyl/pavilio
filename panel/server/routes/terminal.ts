@@ -13,6 +13,7 @@ import {
 import { appendReconnectMetric } from "../lib/reconnect-log.js";
 import { getConfig } from "../config.js";
 import { listOsUsers } from "../lib/os-users.js";
+import { getDefaultUser } from "../lib/project-default-user.js";
 
 function expandPath(p: string): string {
   if (p.startsWith("~/")) return resolve(homedir(), p.slice(2));
@@ -33,17 +34,22 @@ router.get("/os-users", (_req, res) => {
 });
 
 router.post("/sessions", (req, res) => {
-  const { cwd, cols = 80, rows = 24, project = "", name } = req.body ?? {};
+  const { cwd, cols = 80, rows = 24, project = "", name, runAsUser } = req.body ?? {};
   const effectiveCwd =
     cwd && typeof cwd === "string"
       ? expandPath(cwd)
       : resolve(getConfig().projectsDir, "..");
+  // An explicit runAsUser in the body always wins; only an omitted (or
+  // non-string/empty) value falls back to the project's stored default.
+  const effectiveRunAsUser =
+    typeof runAsUser === "string" && runAsUser ? runAsUser : getDefaultUser(project);
   const session = createSession({
     cwd: effectiveCwd,
     cols,
     rows,
     project,
     name,
+    runAsUser: effectiveRunAsUser,
   });
   res.status(201).json(session);
 });

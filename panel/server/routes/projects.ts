@@ -14,6 +14,8 @@ import { expandHome } from "../lib/paths.js";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, resolveOpenSpecRoot } from "../lib/openspec.js";
 import { resolveProjectColors, setProjectColor } from "../lib/project-colors.js";
+import { getAllDefaultUsers, setDefaultUser } from "../lib/project-default-user.js";
+import { listOsUsers } from "../lib/os-users.js";
 
 const router = Router();
 
@@ -524,6 +526,32 @@ router.get("/colors", (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
+});
+
+// Literal path, registered ahead of every `/:name/...` pattern so it can never be
+// read as a project named "default-terminal-users". Mirrors `/colors` above.
+router.get("/default-terminal-users", (_req, res) => {
+  const names = discoverProjects().map((p) => p.name);
+  const users = getAllDefaultUsers(names);
+  res.json({ users });
+});
+
+router.put("/:name/default-terminal-user", (req, res) => {
+  // Existence comes from discovery — same source `GET /` and `GET /colors` use —
+  // so a traversal-shaped name is rejected here instead of reaching the store.
+  if (!discoverProjects().some((p) => p.name === req.params.name)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  const username = typeof req.body?.username === "string" ? req.body.username : "";
+  if (!listOsUsers().some((u) => u.username === username)) {
+    return res.status(400).json({ error: "Unknown OS user" });
+  }
+  try {
+    setDefaultUser(req.params.name, username);
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+  res.json({ ok: true });
 });
 
 router.put("/:name/color", (req, res) => {
