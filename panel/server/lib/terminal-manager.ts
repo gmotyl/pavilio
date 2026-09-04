@@ -221,7 +221,7 @@ export function updateSession(
   if (!session) return false;
   if (updates.name !== undefined) {
     session.name = updates.name;
-    writeName(id, session.name);
+    writeName(id, session.name, session.identityHomeDir);
   }
   return true;
 }

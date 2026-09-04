@@ -533,4 +533,34 @@ describe("createSession with runAsUser", () => {
       }
     }
   })
+
+  it("renaming a runAsUser session rewrites the identity file under that user's home, not the server's own", () => {
+    const previousStateDirInTest = process.env.PANEL_AUTH_STATE_DIR
+    delete process.env.PANEL_AUTH_STATE_DIR
+    const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
+    mockOsUsers.users = [{ username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash" }]
+    try {
+      const meta = createSession({
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 24,
+        project: "alokai",
+        runAsUser: RUN_AS_USER,
+      })
+
+      updateSession(meta.id, { name: "deploy-watch" })
+
+      const identityFile = join(otherHome, ".panel", "terminals", meta.id)
+      expect(readFileSync(identityFile, "utf8")).toBe("deploy-watch\n")
+      // Not rewritten under the server's own (real) home either.
+      expect(existsSync(join(namesDir(), meta.id))).toBe(false)
+
+      destroySession(meta.id)
+    } finally {
+      rmSync(otherHome, { recursive: true, force: true })
+      if (previousStateDirInTest !== undefined) {
+        process.env.PANEL_AUTH_STATE_DIR = previousStateDirInTest
+      }
+    }
+  })
 })
