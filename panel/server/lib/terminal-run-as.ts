@@ -36,9 +36,17 @@ export interface RunAsSpawnCommand {
 
 /**
  * `wslDistro` set => WSL branch: `wsl.exe -d <distro> -u <user> --cd <cwd>
- * --shell-type login -e "PAVILIO_TERMINAL_ID=<id> exec <shell> -l"`.
- * `wslDistro` undefined => posix branch: `su - <user> -c "cd <quoted-cwd> &&
- * PAVILIO_TERMINAL_ID=<id> exec <shell> -l"`.
+ * --shell-type login -e <shell> -l -c "PAVILIO_TERMINAL_ID=<id> exec <shell>
+ * -l"`. `wslDistro` undefined => posix branch: `su - <user> -c "cd
+ * <quoted-cwd> && PAVILIO_TERMINAL_ID=<id> exec <shell> -l"`.
+ *
+ * The two branches look parallel but aren't: `su -c` hands its whole string
+ * to the target user's shell for interpretation, so one combined string
+ * works. `wsl.exe -e` execs argv directly with no shell in between — passing
+ * it a single "PAVILIO_TERMINAL_ID=... exec ... -l" string makes it look for
+ * a literal binary of that name and fail (execvpe ENOENT), killing the
+ * session before any prompt appears. The shell binary plus `-l -c <command>`
+ * must be separate argv elements so the shell itself does the interpreting.
  */
 export function buildRunAsSpawnCommand(opts: {
   user: OsUser;
@@ -61,6 +69,9 @@ export function buildRunAsSpawnCommand(opts: {
         "--shell-type",
         "login",
         "-e",
+        user.shell,
+        "-l",
+        "-c",
         `PAVILIO_TERMINAL_ID=${sessionId} exec ${shQuote(user.shell)} -l`,
       ],
     };
