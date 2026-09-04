@@ -15,7 +15,7 @@ import {
   destroyReplay,
 } from "./terminalReplay";
 import { nextSessionName, removeName, writeName } from "./terminal-identity";
-import { listOsUsers, hostSpawnKind } from "./os-users";
+import { listOsUsers } from "./os-users";
 import { translateCwd, buildRunAsSpawnCommand } from "./terminal-run-as";
 
 export interface TerminalSession {
@@ -128,7 +128,6 @@ export function createSession(opts: {
       user: targetUser,
       cwd: spawnCwd,
       sessionId: id,
-      wslDistro: hostSpawnKind() === "wsl" ? process.env.WSL_DISTRO_NAME : undefined,
     });
     spawnFile = runAsCommand.file;
     spawnArgs = runAsCommand.args;

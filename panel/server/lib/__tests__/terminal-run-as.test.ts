@@ -40,46 +40,16 @@ describe("buildRunAsSpawnCommand", () => {
     shell: "/bin/zsh",
   };
 
-  it("buildRunAsSpawnCommand returns the wsl.exe form when wslDistro is set", () => {
+  it("buildRunAsSpawnCommand always returns the su form", () => {
+    // No wsl.exe branch: those accounts are plain Linux logins, switched to
+    // via `su -` (matching workspace-setup's own account provisioning),
+    // regardless of whether the panel process has WSL_DISTRO_NAME set.
+    // wsl.exe -d <distro> -u <user>, invoked from a process already attached
+    // to a real pty, hangs indefinitely and never produces a shell.
     const result = buildRunAsSpawnCommand({
       user,
       cwd: "/home/greg-ip/git/prv/pavilio",
       sessionId: "abc-123",
-      wslDistro: "Ubuntu",
-    });
-    // `wsl.exe -e` execs argv directly — it does NOT hand its command to a
-    // shell for interpretation the way `su -c` does. A single combined
-    // string here would make wsl.exe look for a literal binary named
-    // "PAVILIO_TERMINAL_ID=abc-123 exec '/bin/zsh' -l" and fail with
-    // execvpe ENOENT, killing the session before any prompt appears. The
-    // shell binary + `-l -c <command>` must be separate argv elements so
-    // that shell itself interprets the command string.
-    expect(result).toEqual({
-      file: "wsl.exe",
-      args: [
-        "-d",
-        "Ubuntu",
-        "-u",
-        "greg-ip",
-        "--cd",
-        "/home/greg-ip/git/prv/pavilio",
-        "--shell-type",
-        "login",
-        "-e",
-        "/bin/zsh",
-        "-l",
-        "-c",
-        "PAVILIO_TERMINAL_ID=abc-123 exec '/bin/zsh' -l",
-      ],
-    });
-  });
-
-  it("buildRunAsSpawnCommand returns the su form when wslDistro is undefined", () => {
-    const result = buildRunAsSpawnCommand({
-      user,
-      cwd: "/home/greg-ip/git/prv/pavilio",
-      sessionId: "abc-123",
-      wslDistro: undefined,
     });
     expect(result).toEqual({
       file: "su",

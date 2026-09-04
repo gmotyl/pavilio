@@ -423,7 +423,6 @@ describe("createSession with runAsUser", () => {
         user: DEFAULT_TARGET_USER,
         cwd: translatedCwd,
         sessionId: meta.id,
-        wslDistro: undefined,
       })
 
       expect(lastSpawnCall!.file).toBe("su")
@@ -434,7 +433,11 @@ describe("createSession with runAsUser", () => {
     })
   })
 
-  it("createSession with a valid runAsUser under WSL_DISTRO_NAME spawns the wsl.exe form", () => {
+  it("createSession with a valid runAsUser under WSL_DISTRO_NAME still spawns the su form, never wsl.exe", () => {
+    // wsl.exe -d <distro> -u <user>, invoked from a process already attached
+    // to a real pty, hangs indefinitely and never produces a shell. These
+    // accounts are plain Linux logins either way — WSL_DISTRO_NAME being set
+    // on the panel process must not change which spawn mechanism is used.
     withWslDistroName("Ubuntu", () => {
       const cwd = `${homedir()}/git/prv/pavilio`
       const meta = createSession({
@@ -450,10 +453,10 @@ describe("createSession with runAsUser", () => {
         user: DEFAULT_TARGET_USER,
         cwd: translatedCwd,
         sessionId: meta.id,
-        wslDistro: "Ubuntu",
       })
 
-      expect(lastSpawnCall!.file).toBe("wsl.exe")
+      expect(lastSpawnCall!.file).toBe("su")
+      expect(lastSpawnCall!.file).not.toBe("wsl.exe")
       expect(lastSpawnCall!.args).toEqual(expected.args)
       expect(lastSpawnCall!.options.cwd).toBe(translatedCwd)
 
