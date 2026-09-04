@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useAllTerminalSessions } from "../features/terminal/useAllTerminalSessions";
 import { useTerminalMaximized } from "../features/terminal/useTerminalMaximized";
 import TerminalsSurface from "../features/terminal/TerminalsSurface";
-import { useProjects } from "../features/projects/useProjects";
 import { destroyTerminal } from "../features/terminal/terminalInstances";
 import type { TerminalHandle } from "../features/terminal/TerminalView";
 
@@ -19,7 +18,6 @@ export default function TerminalsPage() {
     splitColumn,
     applyPreset,
   } = useAllTerminalSessions();
-  const projects = useProjects();
   const [maximized, toggleMaximized] = useTerminalMaximized("__all__");
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -76,7 +74,6 @@ export default function TerminalsPage() {
     <TerminalsSurface
       standalone
       currentProject=""
-      projects={projects}
       repos={undefined}
       sessions={allSessions}
       allSessions={allSessions}

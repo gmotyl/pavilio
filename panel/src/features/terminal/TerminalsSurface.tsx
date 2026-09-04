@@ -8,14 +8,12 @@ import { TerminalSpineDrawer } from "./TerminalSpineDrawer";
 import { sendDismiss, reconnectSession } from "./terminalInstances";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
-import type { Project } from "../projects/useProjects";
 import type { RepoEntry } from "../projects/useProjects";
 import type { ColumnLayout } from "./columnLayout";
 
 export interface TerminalsSurfaceProps {
   // Current project context
   currentProject: string;
-  projects: Project[];
   repos: RepoEntry[] | undefined;
 
   // Per-project terminal sessions hook values
@@ -66,7 +64,6 @@ export interface TerminalsSurfaceProps {
 
 export function TerminalsSurface({
   currentProject,
-  projects,
   repos,
   sessions,
   focusedId,
@@ -125,7 +122,6 @@ export function TerminalsSurface({
           focusedId={focusedId}
           maximized={maximized}
           currentProject={currentProject}
-          projects={projects}
           repos={repos}
           onFocus={handleFocus}
           onCreate={(opts) => {

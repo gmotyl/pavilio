@@ -114,7 +114,6 @@ describe("TerminalDisconnectedBadge in its real host", () => {
         focusedId={SESSION_ID}
         maximized={false}
         currentProject="ch"
-        projects={[{ name: "ch" }]}
         repos={[]}
         onFocus={onFocus}
         onCreate={vi.fn()}
