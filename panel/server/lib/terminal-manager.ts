@@ -99,9 +99,18 @@ export function createSession(opts: {
   // direct-spawn path below, identical to `runAsUser` being omitted — an
   // account removed after being set as a default must surface as a spawn
   // failure later, never a silent no-op here.
-  const targetUser = opts.runAsUser
+  const matchedUser = opts.runAsUser
     ? listOsUsers().find((user) => user.username === opts.runAsUser)
     : undefined;
+
+  // The owner is a normal discovered account too, so the toolbar dropdown
+  // can perfectly well list — and the caller pick — the panel-owner's own
+  // username as `runAsUser`. That's not a "run as someone else" request, so
+  // it must not route through the su/wsl.exe wrapper: same `homeDir ===
+  // homedir()` comparison as `ownerHomeDir` below, the one existing way this
+  // function already recognizes "is the owner".
+  const targetUser =
+    matchedUser && matchedUser.homeDir !== homedir() ? matchedUser : undefined;
 
   const identityHomeDir = targetUser?.homeDir ?? homedir();
 

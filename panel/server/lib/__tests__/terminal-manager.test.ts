@@ -478,6 +478,33 @@ describe("createSession with runAsUser", () => {
     destroySession(meta.id)
   })
 
+  it("createSession with runAsUser resolving to the panel-owner account spawns directly, not wrapped", () => {
+    // The owner is a normal discovered account too — the toolbar dropdown
+    // lists every account including whichever one runs the panel, so a
+    // match here must not route through the su/wsl.exe wrapper. Detected the
+    // same way `translateCwd`'s `ownerHomeDir` is: homeDir === homedir().
+    const ownerHome = homedir()
+    mockOsUsers.users = [
+      DEFAULT_TARGET_USER,
+      { username: "owner-account", homeDir: ownerHome, shell: "/bin/zsh" },
+    ]
+
+    const meta = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      runAsUser: "owner-account",
+    })
+
+    expect(lastSpawnCall!.file).not.toBe("su")
+    expect(lastSpawnCall!.file).not.toBe("wsl.exe")
+    expect(lastSpawnCall!.args).toEqual([])
+    expect(lastSpawnCall!.options.cwd).toBe(process.cwd())
+
+    destroySession(meta.id)
+  })
+
   it("identity file for a runAsUser session is written under that user's home, not the server's own", () => {
     const previousStateDirInTest = process.env.PANEL_AUTH_STATE_DIR
     delete process.env.PANEL_AUTH_STATE_DIR
