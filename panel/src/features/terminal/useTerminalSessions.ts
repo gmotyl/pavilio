@@ -34,6 +34,7 @@ export interface CreateSessionOpts {
   project?: string;
   cwd?: string;
   name?: string;
+  runAsUser?: string;
 }
 
 export function nextProjectName(
@@ -173,6 +174,7 @@ export function useTerminalSessions(project: string) {
             cwd: opts.cwd,
             name: derivedName,
             project: targetProject,
+            runAsUser: opts.runAsUser,
           }),
         });
         if (!res.ok) {

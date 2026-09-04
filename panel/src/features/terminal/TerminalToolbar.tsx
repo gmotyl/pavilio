@@ -3,6 +3,8 @@ import { Plus, Maximize2, Minimize2, X, ChevronDown, FolderGit2, RotateCw } from
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { nextProjectName } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
+import { useOsUsers } from "./useOsUsers";
+import { useDefaultTerminalUsers } from "./useDefaultTerminalUsers";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
@@ -13,7 +15,6 @@ interface Props {
   focusedId: string | null;
   maximized: boolean;
   currentProject: string;
-  projects: { name: string }[];
   repos?: { name: string; path: string }[];
   onFocus: (id: string) => void;
   onCreate: (opts?: CreateSessionOpts) => void;
@@ -30,7 +31,6 @@ export function TerminalToolbar({
   focusedId,
   maximized,
   currentProject,
-  projects,
   repos,
   onFocus,
   onCreate,
@@ -50,6 +50,8 @@ export function TerminalToolbar({
   const draggedIdRef = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const { colorFor } = useProjectColors();
+  const { users } = useOsUsers();
+  const { defaultUsers, setDefaultUser } = useDefaultTerminalUsers();
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -126,46 +128,46 @@ export function TerminalToolbar({
               className="px-3 py-1 text-[10px] tracking-[0.2em] uppercase"
               style={{ color: "var(--text-tertiary)" }}
             >
-              New terminal in…
+              Run new terminal as…
             </div>
-            {projects.map((p) => (
-              <button
-                key={p.name}
-                data-testid={`terminal-toolbar-new-project-${p.name}`}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  console.info("[terminal] toolbar picker clicked", {
-                    project: p.name,
-                  });
-                  onCreate({ project: p.name });
-                  setNewOpen(false);
-                }}
-                className="flex items-center justify-between w-full text-left px-3 py-1.5 text-[12px] font-mono transition-colors"
-                style={{
-                  color:
-                    p.name === currentProject
+            {users.map((u) => {
+              const isDefault = defaultUsers[currentProject] === u.username;
+              return (
+                <button
+                  key={u.username}
+                  data-testid={`terminal-toolbar-new-user-${u.username}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDefaultUser(currentProject, u.username);
+                    onCreate({ runAsUser: u.username });
+                    setNewOpen(false);
+                  }}
+                  className="flex items-center justify-between w-full text-left px-3 py-1.5 text-[12px] font-mono transition-colors"
+                  style={{
+                    color: isDefault
                       ? "var(--accent, #f0c674)"
                       : "var(--text-secondary)",
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--bg-hover)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <span>{p.name}</span>
-                {p.name === currentProject && (
-                  <span
-                    className="text-[9px] tracking-widest"
-                    style={{ color: "var(--text-tertiary)" }}
-                  >
-                    HERE
-                  </span>
-                )}
-              </button>
-            ))}
+                  }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.background = "var(--bg-hover)")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.background = "transparent")
+                  }
+                >
+                  <span>{u.username}</span>
+                  {isDefault && (
+                    <span
+                      className="text-[9px] tracking-widest"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
+                      DEFAULT
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
         {/* Repo picker: only shown when the current project has repos */}
