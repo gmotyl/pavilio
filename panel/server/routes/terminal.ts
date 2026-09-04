@@ -12,6 +12,7 @@ import {
 } from "../lib/terminal-manager.js";
 import { appendReconnectMetric } from "../lib/reconnect-log.js";
 import { getConfig } from "../config.js";
+import { listOsUsers } from "../lib/os-users.js";
 
 function expandPath(p: string): string {
   if (p.startsWith("~/")) return resolve(homedir(), p.slice(2));
@@ -23,6 +24,12 @@ const router = Router();
 
 router.get("/sessions", (_req, res) => {
   res.json(listSessions());
+});
+
+router.get("/os-users", (_req, res) => {
+  // homeDir/shell are internal spawn details, not for the client — never
+  // widen this beyond username without re-checking every caller.
+  res.json(listOsUsers().map(({ username }) => ({ username })));
 });
 
 router.post("/sessions", (req, res) => {
