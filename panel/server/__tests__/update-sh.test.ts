@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -50,6 +57,34 @@ function runUpdate() {
   return { status: res.status, output: `${res.stdout}${res.stderr}` };
 }
 
+// A build that fails on purpose. The sandbox has no node_modules, so the real
+// panel build could not run here anyway, and most cases only care about what the
+// script does before it.
+const FAILING_BUILD = 'node -e "process.exit(1)"';
+// A build that succeeds and leaves a bundle behind, for the one case that needs
+// the whole run to reach the summary. Plain node, no dependencies.
+const SUCCEEDING_BUILD =
+  'node -e "const f=require(\'fs\');f.mkdirSync(\'dist\',{recursive:true});f.writeFileSync(\'dist/index.html\',\'<!doctype html>\')"';
+
+/** Rewrite the upstream fixture's panel/package.json to use a given build script. */
+function writePanelFixture(buildScript: string) {
+  writeFileSync(
+    join(upstream, "panel", "package.json"),
+    `${JSON.stringify(
+      { name: "panel-fixture", version: "0.0.0", scripts: { build: buildScript } },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
+/** Commit whatever the test just changed in the upstream fixture, so main can fast-forward. */
+function commitUpstream(message: string) {
+  git(upstream, "add", "-A");
+  git(upstream, "commit", "-q", "-m", message);
+  git(upstream, "push", "-q", "origin", "HEAD:main");
+}
+
 beforeEach(() => {
   sandbox = mkdtempSync(join(tmpdir(), "update-sh-"));
   home = join(sandbox, "home");
@@ -71,16 +106,7 @@ beforeEach(() => {
   git(upstream, "checkout", "-q", "-b", "main");
   git(upstream, "config", "user.email", "update-test@example.com");
   git(upstream, "config", "user.name", "Update Test");
-  writeFileSync(
-    join(upstream, "panel", "package.json"),
-    // A build that fails on purpose: the sandbox has no node_modules, so the real
-    // panel build could not run here anyway.
-    `${JSON.stringify(
-      { name: "panel-fixture", version: "0.0.0", scripts: { build: 'node -e "process.exit(1)"' } },
-      null,
-      2,
-    )}\n`,
-  );
+  writePanelFixture(FAILING_BUILD);
   writeFileSync(join(upstream, "panel", "src", "app.ts"), "export const app = 1;\n");
   writeFileSync(join(upstream, "skills", "demo.md"), "# demo\n");
   writeFileSync(join(upstream, "scripts", "noop.sh"), "#!/bin/bash\n");
@@ -118,7 +144,7 @@ describe("scripts/update.sh upstream branch handling", () => {
     expect(output).toMatch(/Syncing panel/);
   }, 60000);
 
-  it("refuses to switch while a rebase is in progress", () => {
+  it("refuses to switch while an interactive rebase is in progress", () => {
     git(upstream, "checkout", "-q", "-b", "feature/wip");
     mkdirSync(join(upstream, ".git", "rebase-merge"), { recursive: true });
 
@@ -126,6 +152,32 @@ describe("scripts/update.sh upstream branch handling", () => {
 
     expect(status).not.toBe(0);
     expect(output).toMatch(/rebase/i);
+    expect(output).not.toMatch(/Syncing panel/);
+    expect(currentBranch()).toBe("feature/wip");
+  }, 60000);
+
+  it("refuses to switch while an am-style rebase is in progress", () => {
+    git(upstream, "checkout", "-q", "-b", "feature/wip");
+    mkdirSync(join(upstream, ".git", "rebase-apply"), { recursive: true });
+
+    const { status, output } = runUpdate();
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/rebase/i);
+    expect(output).not.toMatch(/Syncing panel/);
+    expect(currentBranch()).toBe("feature/wip");
+  }, 60000);
+
+  it("refuses to switch while a merge is in progress", () => {
+    git(upstream, "checkout", "-q", "-b", "feature/wip");
+    writeFileSync(join(upstream, ".git", "MERGE_HEAD"), `${git(upstream, "rev-parse", "HEAD")}\n`);
+
+    const { status, output } = runUpdate();
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/merge/i);
+    expect(output).not.toMatch(/rebase/i);
+    expect(output).not.toMatch(/Syncing panel/);
     expect(currentBranch()).toBe("feature/wip");
   }, 60000);
 
@@ -143,6 +195,11 @@ describe("scripts/update.sh upstream branch handling", () => {
     expect(output).toMatch(/would be overwritten/i);
     expect(output).toMatch(/checkout main/);
     expect(currentBranch()).toBe("feature/wip");
+    // The whole point of the guard: a failed switch must stop the run before any
+    // rsync, or the feature branch's content gets mirrored into the workspace. A
+    // non-zero exit alone does not prove that — the fixture's build fails too, so
+    // the run would exit non-zero even if it had synced the wrong branch first.
+    expect(output).not.toMatch(/Syncing panel/);
   }, 60000);
 
   it("syncs despite a harmless dirty file in the upstream clone", () => {
@@ -166,5 +223,20 @@ describe("scripts/update.sh panel build", () => {
     expect(output).toMatch(/build failed/i);
     expect(output).toMatch(/pnpm -C .*panel.* build/);
     expect(output).not.toMatch(/^Done\./m);
+  }, 60000);
+
+  it("finishes with the summary and tells the user the panel is built and startable", () => {
+    writePanelFixture(SUCCEEDING_BUILD);
+    commitUpstream("panel build succeeds");
+
+    const { status, output } = runUpdate();
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/panel bundle built/i);
+    expect(output).toMatch(/^Done\./m);
+    expect(output).toMatch(/built and ready to start: pnpm start/);
+    expect(output).not.toMatch(/build failed/i);
+    // The bundle lands in the destination workspace, never copied from upstream.
+    expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(true);
   }, 60000);
 });

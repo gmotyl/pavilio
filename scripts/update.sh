@@ -57,7 +57,6 @@ if [ "$UPSTREAM_BRANCH" != "main" ]; then
     exit 1
   fi
   echo "  ✓ switched upstream clone from '$UPSTREAM_BRANCH' to main"
-  UPSTREAM_BRANCH="main"
 fi
 git -C "$UPSTREAM_DIR" fetch origin main --quiet
 # --ff-only: never create a merge commit in the upstream clone.
@@ -133,24 +132,6 @@ rsync -a \
   "$UPSTREAM_DIR/scripts/" "$REPO_ROOT/scripts/"
 
 echo ""
-echo "Building the panel bundle..."
-# The panel serves a pre-built bundle, so dist/ is only as fresh as the last build:
-# without this step a pull would land new source and keep serving the old bundle,
-# silently. Built in the destination workspace, from the source just synced into
-# it — the upstream clone's own dist/ is never copied (rsync excludes it).
-PANEL_BUILD_CMD="pnpm -C \"$REPO_ROOT/panel\" build"
-# `if !` rather than a bare call: under `set -e` a failed build would abort before
-# the explanation below, leaving the user with vite's output and nothing else.
-if ! pnpm -C "$REPO_ROOT/panel" build; then
-  echo ""
-  echo "Error: the panel build failed — sources are synced but the served bundle is stale."
-  echo "Fix the build, then re-run it on its own:"
-  echo "  $PANEL_BUILD_CMD"
-  exit 1
-fi
-echo "  ✓ panel bundle built"
-
-echo ""
 echo "Regenerating agent commands from the freshly-synced skills/ ..."
 # Re-run command setup for whichever agents are already configured, so new/renamed
 # skills become slash-commands without a manual step. Guarded (never abort the pull)
@@ -169,6 +150,30 @@ if [ -d "$REPO_ROOT/.opencode" ] || [ -d "$HOME/.config/opencode" ]; then
     echo "  ⚠️  OpenCode refresh failed — run: bash scripts/setup:opencode"
   fi
 fi
+
+echo ""
+echo "Building the panel bundle..."
+# The panel serves a pre-built bundle, so dist/ is only as fresh as the last build:
+# without this step a pull would land new source and keep serving the old bundle,
+# silently. Built in the destination workspace, from the source just synced into
+# it — the upstream clone's own dist/ is never copied (rsync excludes it).
+#
+# Deliberately the last step of the run. It is the only fatal step left after the
+# rsyncs, and everything above it has to have happened first: failing earlier would
+# leave skills/ synced while the slash-commands generated from it stayed stale — a
+# half-updated workspace. Being last also puts the failure at the end of the
+# output, where the summary would otherwise be, instead of buried mid-scroll.
+PANEL_BUILD_CMD="pnpm -C \"$REPO_ROOT/panel\" build"
+# `if !` rather than a bare call: under `set -e` a failed build would abort before
+# the explanation below, leaving the user with vite's output and nothing else.
+if ! pnpm -C "$REPO_ROOT/panel" build; then
+  echo ""
+  echo "Error: the panel build failed — sources are synced but the served bundle is stale."
+  echo "Fix the build, then re-run it on its own:"
+  echo "  $PANEL_BUILD_CMD"
+  exit 1
+fi
+echo "  ✓ panel bundle built"
 
 echo ""
 echo "Done. panel/, skills/, scripts/ (and commands/ if present) synced from upstream;"
