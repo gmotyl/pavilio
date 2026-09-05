@@ -63,8 +63,12 @@ export async function findFreePort(start: number, span = 50): Promise<number> {
  * frontend is served: `mountFrontend` is invoked after every API router and
  * before `listen()` — the slot `app.use(vite.middlewares)` used to occupy.
  *
- * That slot sits below `app.use(authMiddleware)`, so whatever is mounted there
- * is behind auth. Moving it above would expose the frontend; don't.
+ * Keep that position. It is not a security boundary — `authMiddleware` and
+ * `mobileAuthMiddleware` both 401 only `/api/` paths and `next()` everything
+ * else, so the frontend is reachable unauthenticated either way (deliberately:
+ * the Login page has to render). What the position buys is precedence: the
+ * frontend mount ends in a catch-all SPA fallback, so anything registered
+ * after it never sees a request.
  */
 export async function startPanel(
   mountFrontend: (app: Express) => void | Promise<void>,

@@ -39,7 +39,7 @@ Each feature owns its components, hooks, and tests. Cross-feature composition ha
 ## Adding an API endpoint
 
 1. Add a handler file under `panel/server/routes/`.
-2. Mount it in `panel/server/index.ts` (look for `app.use("/api/...", router)`).
+2. Mount it in `panel/server/panel-server.ts` (look for `app.use("/api/...", router)`) — that file assembles the app for both entry points; `server/index.ts` and `server/dev.ts` only pick how the frontend is served.
 3. Call it from the frontend via `fetch("/api/...")` — same origin, no CORS to worry about.
 
 ## Build and test

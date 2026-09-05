@@ -19,9 +19,20 @@ async function startDev(): Promise<void> {
     appType: "spa",
   });
 
-  await startPanel((app) => {
-    app.use(vite.middlewares);
-  });
+  try {
+    await startPanel((app) => {
+      app.use(vite.middlewares);
+    });
+  } catch (err) {
+    // The HMR socket is already bound by this point, so a failed startPanel
+    // would otherwise leave the process alive and listening with no panel
+    // behind it. Release it before the error reaches the top level.
+    await vite.close();
+    throw err;
+  }
 }
 
-startDev();
+startDev().catch((err: unknown) => {
+  console.error(err);
+  process.exit(1);
+});

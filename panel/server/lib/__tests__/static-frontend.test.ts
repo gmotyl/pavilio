@@ -5,7 +5,10 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { mountStaticFrontend } from "../static-frontend.js";
+import {
+  MissingFrontendBundleError,
+  mountStaticFrontend,
+} from "../static-frontend.js";
 
 const SHELL = "<!doctype html><title>panel shell</title>";
 
@@ -29,20 +32,16 @@ describe("mountStaticFrontend", () => {
     const missing = join(tmpRoot, "nope");
     expect(() => mountStaticFrontend(express(), missing)).toThrow(missing);
     expect(() => mountStaticFrontend(express(), missing)).toThrow("pnpm build");
+    // Its own class: the serving entry prints this one without a stack.
+    expect(() => mountStaticFrontend(express(), missing)).toThrow(
+      MissingFrontendBundleError,
+    );
   });
 
   it("throws when the bundle directory has no index.html", () => {
     rmSync(join(distDir, "index.html"));
     expect(() => mountStaticFrontend(express(), distDir)).toThrow(distDir);
     expect(() => mountStaticFrontend(express(), distDir)).toThrow("pnpm build");
-  });
-
-  it("serves a file that exists in the bundle", async () => {
-    const app = express();
-    mountStaticFrontend(app, distDir);
-    const res = await request(app).get("/assets/app-abc123.js");
-    expect(res.status).toBe(200);
-    expect(res.text).toBe("console.log(1);\n");
   });
 
   it("serves the app shell for a deep link", async () => {

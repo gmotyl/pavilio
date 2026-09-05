@@ -17,7 +17,8 @@ Local web dashboard for the pavilio workspace. Built with Vite + React + Express
 ```bash
 cd panel
 npm install
-npm run dev
+npm run build
+npm start
 # Open http://localhost:3010
 ```
 
@@ -58,7 +59,7 @@ Use `scripts/cc` instead of `claude` and `scripts/oc` instead of `opencode`. The
    PANEL_TLS_CERT=/path/to/localhost+N.pem
    PANEL_TLS_KEY=/path/to/localhost+N-key.pem
    ```
-4. Start: `pnpm dev`
+4. Build and start: `pnpm build && pnpm start`
 5. Access: `https://<your-lan-ip>:3010/login`
 
 ## Contributing
