@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server/index.ts",
+    "dev": "tsx server/dev.ts",
+    "start": "tsx server/index.ts",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
