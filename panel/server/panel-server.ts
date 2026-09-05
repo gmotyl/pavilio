@@ -72,9 +72,6 @@ export async function startPanel(
   await loadConfig();
   await loadAuthState();
   rebuildIndex();
-  // Sessions don't survive a restart, so every identity file left on disk at
-  // boot belongs to a session that's already gone — sweep them now.
-  sweepNames(listSessions().map((s) => s.id));
   const { port: configuredPort, tlsCert, tlsKey } = getConfig();
   const port = await findFreePort(configuredPort);
   if (port !== configuredPort) {
@@ -123,6 +120,15 @@ export async function startPanel(
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 
   await mountFrontend(app);
+
+  // Sessions don't survive a restart, so every identity file left on disk at
+  // boot belongs to a session that's already gone — sweep them now. Deferred
+  // until the frontend has mounted because the sweep is destructive and
+  // mountFrontend is the last startup step that can still fail (a missing
+  // bundle): a `pnpm start` that aborts there must not delete the terminal
+  // names of a panel already running in another process. Nothing between
+  // here and the top of startPanel() reads the identity files.
+  sweepNames(listSessions().map((s) => s.id));
 
   // Eager discovery so the first /api/terminal/os-users (or session-create)
   // request never pays the /etc/passwd read cost; listOsUsers() never throws.
