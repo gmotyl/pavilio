@@ -1,0 +1,4 @@
+# Windows shortcuts are binary. Without this, a clone with core.autocrlf=true
+# (the Windows default) rewrites LF bytes inside the structure and the shortcut
+# stops resolving.
+*.lnk binary

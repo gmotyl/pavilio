@@ -2,7 +2,8 @@
 # Pavilio panel launcher for Windows-WSL desktop shortcut.
 #
 # What it does on every launch:
-#   1. starts the panel (`npm start` backgrounds it via panel/ npm run dev &)
+#   1. starts the panel (`npm start` backgrounds `pnpm -C panel start`, which
+#      serves the built bundle from panel/dist — see README "Windows desktop shortcut")
 #   2. waits for the panel to come up on 127.0.0.1
 #   3. (WSL2 only) ensures the Windows-side `netsh portproxy` entries forward
 #      each managed port on the host to the current WSL IP — prompts UAC
