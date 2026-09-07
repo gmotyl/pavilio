@@ -128,7 +128,7 @@ To pull the latest improvements from upstream:
 npm run update   # or: bash scripts/update.sh
 ```
 
-This pulls `panel/`, `commands/`, and `scripts/` from the upstream clone. Your private files (`.projects.local.md`, `panel.config.local.ts`, custom scripts) are never touched.
+This pulls `panel/`, `skills/`, `scripts/`, and — when the upstream clone has it — `commands/`. Your private files (`.projects.local.md`, `panel.config.local.ts`, custom scripts) are never touched.
 
 ## Windows desktop shortcut (WSL2)
 
@@ -154,6 +154,47 @@ If you prefer to see live panel logs (and have closing the window stop the panel
 ```powershell
 $s.Arguments = '~ -d Ubuntu --cd WORKSPACE/panel -- bash -lc "npm start; echo; echo --- panel exited ---; exec bash"'
 ```
+
+### A reference copy of the shortcut
+
+A working shortcut is kept in the repo at [`scripts/Pavilio Panel.lnk`](./scripts/Pavilio%20Panel.lnk) so it survives a reinstall. It is a **backup for reference, not something to copy onto another machine** — a `.lnk` hardcodes one checkout path and distro name and carries that machine's link-tracker data. Recreate it with the PowerShell above; read this one only to see what the fields should look like:
+
+| field | value |
+| --- | --- |
+| Target | `C:\Windows\System32\wsl.exe` |
+| Arguments | `~ -d Ubuntu -- bash -lc /root/git/prv/projects/scripts/start-panel-windows.sh` |
+| Working directory | `C:\Windows\System32` |
+| Icon | `C:\Windows\System32\wsl.exe` |
+
+Note it passes the script's **absolute** path rather than using `--cd WORKSPACE` with a relative one. Either form works; the absolute path is independent of the directory the shortcut starts in (`C:\Windows\System32`, which WSL sees as `/mnt/c/Windows/System32` — there is no useful relative path from there).
+
+Three details in that argument list are load-bearing:
+
+- **`-d Ubuntu`** pins the distro. Without it `wsl.exe` uses whichever distro is currently default, which changes as soon as another is installed or `wsl --set-default` runs — and then the shortcut opens a distro with no workspace in it.
+- **`--`** ends `wsl.exe`'s own options; everything after it is the command for Linux. Drop it and `wsl.exe` tries to parse `bash -lc …` as its own flags.
+- **`bash -lc`** runs a **login** shell, so `/etc/profile` and `~/.profile` are sourced — which is where `PATH` additions for a hand-installed `node`/`pnpm` (or `PNPM_HOME`) normally live. `wsl.exe` hands bash a near-empty environment, so anything the shortcut needs has to come from that chain.
+
+  Worth knowing before you debug a `command not found` here: **`~/.bashrc` is not read at all**, with or without `-l`. Bash skips it for non-interactive shells, and Ubuntu's default copy bails on its own second line (`[ -z "$PS1" ] && return`). So a version manager wired up only in `~/.bashrc` — the usual place for fnm's `eval "$(fnm env)"` or nvm's `nvm.sh` — is **not** loaded by the shortcut. If the launch cannot find a tool, export it from `~/.profile` or call it by absolute path; adding it to `~/.bashrc` will not help.
+
+### If the browser console shows Vite HMR messages
+
+The panel has two entry points: `server/index.ts` **serves** the built bundle from `panel/dist` (what `pnpm start` runs), and `server/dev.ts` runs Vite with HMR (what `pnpm dev` runs, for a checkout where the panel itself is being developed). The launcher must end up on the serving entry — a Vite dev server left running all day reloads the page whenever anything rewrites the working tree, which wipes out terminal state.
+
+So `[vite] (client) hmr update …` in the console means the wrong entry is live. Confirm with:
+
+```bash
+ps aux | grep 'tsx server'      # want server/index.ts, not server/dev.ts
+```
+
+The usual cause is the **workspace's own root `package.json`**: `pnpm pull` syncs `panel/`, `skills/`, `commands/` and `scripts/`, but never the root `package.json`, so a workspace set up before the entry-point split can still carry `"start": "cd panel && npm run dev &"`. Point it at the serving entry:
+
+```json
+"build": "pnpm -C panel build",
+"dev":   "pnpm -C panel dev",
+"start": "pnpm -C panel start &"
+```
+
+A missing or stale `panel/dist` is a loud startup failure naming `pnpm build`, never a silent fallback to Vite. `pnpm pull` builds the bundle as part of its run, so it normally stays fresh — the exception is the first pull after upgrading to a build-aware `update.sh`, where the copy of the script already running is still the old one. Run `pnpm build` once by hand, or `pnpm pull` twice.
 
 ### LAN access from phone or other devices
 
