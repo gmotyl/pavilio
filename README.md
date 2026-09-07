@@ -128,7 +128,7 @@ To pull the latest improvements from upstream:
 npm run update   # or: bash scripts/update.sh
 ```
 
-This pulls `panel/`, `commands/`, and `scripts/` from the upstream clone. Your private files (`.projects.local.md`, `panel.config.local.ts`, custom scripts) are never touched.
+This pulls `panel/`, `skills/`, `scripts/`, and — when the upstream clone has it — `commands/`. Your private files (`.projects.local.md`, `panel.config.local.ts`, custom scripts) are never touched.
 
 ## Windows desktop shortcut (WSL2)
 
@@ -172,7 +172,9 @@ Three details in that argument list are load-bearing:
 
 - **`-d Ubuntu`** pins the distro. Without it `wsl.exe` uses whichever distro is currently default, which changes as soon as another is installed or `wsl --set-default` runs — and then the shortcut opens a distro with no workspace in it.
 - **`--`** ends `wsl.exe`'s own options; everything after it is the command for Linux. Drop it and `wsl.exe` tries to parse `bash -lc …` as its own flags.
-- **`bash -lc`** must keep the `-l`. A **login** shell is what sources the profile that puts `node`, `pnpm` and any version manager (fnm, nvm) on `PATH`. With a plain `bash -c` the launch dies immediately on `pnpm: command not found`.
+- **`bash -lc`** runs a **login** shell, so `/etc/profile` and `~/.profile` are sourced — which is where `PATH` additions for a hand-installed `node`/`pnpm` (or `PNPM_HOME`) normally live. `wsl.exe` hands bash a near-empty environment, so anything the shortcut needs has to come from that chain.
+
+  Worth knowing before you debug a `command not found` here: **`~/.bashrc` is not read at all**, with or without `-l`. Bash skips it for non-interactive shells, and Ubuntu's default copy bails on its own second line (`[ -z "$PS1" ] && return`). So a version manager wired up only in `~/.bashrc` — the usual place for fnm's `eval "$(fnm env)"` or nvm's `nvm.sh` — is **not** loaded by the shortcut. If the launch cannot find a tool, export it from `~/.profile` or call it by absolute path; adding it to `~/.bashrc` will not help.
 
 ### If the browser console shows Vite HMR messages
 
