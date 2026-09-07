@@ -19,13 +19,44 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "Pulling latest from upstream at $UPSTREAM_DIR..."
 # rsync copies the upstream working tree, so main must be the checked-out branch.
 # A plain `git pull origin main` on a feature branch merges (or fails as divergent)
-# and would sync the wrong content — refuse instead.
+# and would sync the wrong content — so put the clone on main before syncing.
 UPSTREAM_BRANCH="$(git -C "$UPSTREAM_DIR" rev-parse --abbrev-ref HEAD)"
 if [ "$UPSTREAM_BRANCH" != "main" ]; then
-  echo "Error: upstream clone is on branch '$UPSTREAM_BRANCH', not main."
-  echo "The sync copies its working tree, so switch it first:"
-  echo "  git -C \"$UPSTREAM_DIR\" checkout main"
-  exit 1
+  # Switching is done for the user rather than demanded of them — it is the same
+  # `git checkout main` they would type, every single time, before every pull.
+  UPSTREAM_GIT_DIR="$(git -C "$UPSTREAM_DIR" rev-parse --absolute-git-dir)"
+  # A half-finished rebase or merge owns HEAD and the index. Checking out main
+  # from there abandons the operation mid-flight and loses the conflict
+  # resolution already done, so stop before touching the clone at all — this is
+  # the one state where the user really does have to act first.
+  UPSTREAM_IN_PROGRESS=""
+  if [ -d "$UPSTREAM_GIT_DIR/rebase-merge" ] || [ -d "$UPSTREAM_GIT_DIR/rebase-apply" ]; then
+    UPSTREAM_IN_PROGRESS="a rebase"
+  elif [ -f "$UPSTREAM_GIT_DIR/MERGE_HEAD" ]; then
+    UPSTREAM_IN_PROGRESS="a merge"
+  fi
+  if [ -n "$UPSTREAM_IN_PROGRESS" ]; then
+    echo "Error: upstream clone has $UPSTREAM_IN_PROGRESS in progress (branch '$UPSTREAM_BRANCH')."
+    echo "Finish or abort it in $UPSTREAM_DIR, then re-run — refusing to switch to main over it."
+    exit 1
+  fi
+  echo "Upstream clone is on branch '$UPSTREAM_BRANCH' — switching it to main."
+  # Deliberately NOT gated on a clean tree: the clone permanently carries a
+  # modified package.json (corepack rewrites the packageManager pin on every
+  # run), so a "refuse unless clean" guard would refuse every pull and the
+  # automatic switch would never once fire. git checkout already knows the
+  # difference between an edit it can carry across and one it would destroy —
+  # attempt it and let its exit status decide.
+  # Captured with `if !` because `set -e` would otherwise abort the script
+  # before the guidance below could be printed.
+  if ! UPSTREAM_CHECKOUT_OUTPUT="$(git -C "$UPSTREAM_DIR" checkout main 2>&1)"; then
+    echo "Error: could not switch the upstream clone to main — it is still on '$UPSTREAM_BRANCH'."
+    echo "$UPSTREAM_CHECKOUT_OUTPUT"
+    echo "Deal with those changes, then switch it by hand:"
+    echo "  git -C \"$UPSTREAM_DIR\" checkout main"
+    exit 1
+  fi
+  echo "  ✓ switched upstream clone from '$UPSTREAM_BRANCH' to main"
 fi
 git -C "$UPSTREAM_DIR" fetch origin main --quiet
 # --ff-only: never create a merge commit in the upstream clone.
@@ -121,8 +152,34 @@ if [ -d "$REPO_ROOT/.opencode" ] || [ -d "$HOME/.config/opencode" ]; then
 fi
 
 echo ""
+echo "Building the panel bundle..."
+# The panel serves a pre-built bundle, so dist/ is only as fresh as the last build:
+# without this step a pull would land new source and keep serving the old bundle,
+# silently. Built in the destination workspace, from the source just synced into
+# it — the upstream clone's own dist/ is never copied (rsync excludes it).
+#
+# Deliberately the last step of the run. It is the only fatal step left after the
+# rsyncs, and everything above it has to have happened first: failing earlier would
+# leave skills/ synced while the slash-commands generated from it stayed stale — a
+# half-updated workspace. Being last also puts the failure at the end of the
+# output, where the summary would otherwise be, instead of buried mid-scroll.
+PANEL_BUILD_CMD="pnpm -C \"$REPO_ROOT/panel\" build"
+# `if !` rather than a bare call: under `set -e` a failed build would abort before
+# the explanation below, leaving the user with vite's output and nothing else.
+if ! pnpm -C "$REPO_ROOT/panel" build; then
+  echo ""
+  echo "Error: the panel build failed — sources are synced but the served bundle is stale."
+  echo "Fix the build, then re-run it on its own:"
+  echo "  $PANEL_BUILD_CMD"
+  exit 1
+fi
+echo "  ✓ panel bundle built"
+
+echo ""
 echo "Done. panel/, skills/, scripts/ (and commands/ if present) synced from upstream;"
 echo "agent commands regenerated for configured agents."
+echo ""
+echo "The panel bundle is built and ready to start: pnpm start"
 echo ""
 echo "Note: AGENTS.md and CLAUDE.md are manually maintained."
 echo "Check https://github.com/gmotyl/pavilio for changes and cherry-pick as needed."

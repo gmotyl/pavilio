@@ -168,11 +168,12 @@ If the cert still reads "untrusted" after a full minute, the cert is probably Ta
 
 ### `Blocked request. This host is not allowed.`
 
-The Vite dev-server's anti-DNS-rebind allowlist rejected the request. The panel's config now allows `.ts.net` by default (see `panel/server/index.ts`, Vite `server.allowedHosts`). If you still hit this:
+Vite's anti-DNS-rebind allowlist rejected the request — which means you are on the dev entry, `panel/server/dev.ts` (`pnpm dev`). Running the panel the normal way (`pnpm start`, serving the built bundle) starts `panel/server/index.ts`, where there is no Vite and no host allowlist at all, so this failure cannot happen in that mode. If you hit it, you are on `pnpm dev`.
+
+`panel/server/dev.ts` sets `server.allowedHosts: true`, turning the allowlist off entirely: any `Host` — `.ts.net`, a custom tailnet domain, a LAN IP — reaches the mobile-auth middleware, which is where non-loopback requests are actually gated. So if you still see this:
 
 1. You're on an older checkout — pull the latest.
-2. Your tailnet uses a custom domain (not `.ts.net`). Add it to `allowedHosts` in `panel/server/index.ts`.
-3. Restart `pnpm dev` after any change to `allowedHosts` — Vite reads it at startup only.
+2. Restart `pnpm dev` after any change to `allowedHosts` — Vite reads it at startup only.
 
 ## Manual teardown
 

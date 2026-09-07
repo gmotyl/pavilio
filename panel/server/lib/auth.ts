@@ -33,7 +33,10 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   if (!TOKEN) return next();
   if (PUBLIC_PATHS.has(req.path)) return next();
   if (hasValidToken(req)) return next();
-  // For API requests: 401 JSON. The SPA serves through Vite — if the SPA has not yet loaded, we still let GET HTML through so the Login page can render.
+  // API requests get a 401 JSON. Everything else — the app shell and its
+  // assets, whether they come from the built bundle or from Vite on the dev
+  // entry — is let through, because an unauthenticated visitor still has to
+  // be able to load the SPA far enough to render the Login page.
   if (req.path.startsWith("/api/")) {
     return res.status(401).json({ error: "Unauthorized" });
   }

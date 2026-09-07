@@ -94,8 +94,8 @@ cp panel/panel.config.ts panel/panel.config.local.ts
 cp AGENTS.md.example .projects.local.md
 # Edit .projects.local.md with your actual projects
 
-# Start the panel
-cd panel && npm install && npm run dev
+# Build and start the panel
+cd panel && npm install && npm run build && npm start
 # Open http://localhost:3010
 ```
 
@@ -118,8 +118,8 @@ cp ../pavilio/AGENTS.md.example .projects.local.md
 cp panel/panel.config.ts panel/panel.config.local.ts
 # Edit panel.config.local.ts with your paths
 
-# Start the panel
-cd panel && npm install && npm run dev
+# Build and start the panel
+cd panel && npm install && npm run build && npm start
 ```
 
 To pull the latest improvements from upstream:
@@ -147,12 +147,12 @@ $s.Description = 'Run npm start in WSL'
 $s.Save()
 ```
 
-Substitute `Ubuntu` with your distro name if different (`wsl --list --quiet` to check). Double-clicking the shortcut opens a console, runs `npm start` (which backgrounds the panel via `cd panel && npm run dev &`), and drops you to a bash prompt — closing the window leaves the panel running. Stop it with `npm stop` from any WSL shell.
+Substitute `Ubuntu` with your distro name if different (`wsl --list --quiet` to check). Double-clicking the shortcut opens a console, runs `npm start` (which backgrounds the panel via `pnpm -C panel start &`), and drops you to a bash prompt — closing the window leaves the panel running. Stop it with `npm stop` from any WSL shell.
 
 If you prefer to see live panel logs (and have closing the window stop the panel), swap the `Arguments` line to:
 
 ```powershell
-$s.Arguments = '~ -d Ubuntu --cd WORKSPACE/panel -- bash -lc "npm run dev; echo; echo --- panel exited ---; exec bash"'
+$s.Arguments = '~ -d Ubuntu --cd WORKSPACE/panel -- bash -lc "npm start; echo; echo --- panel exited ---; exec bash"'
 ```
 
 ### LAN access from phone or other devices
