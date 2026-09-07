@@ -141,3 +141,44 @@ describe("LeftSidebar terminal-session row navigation", () => {
     });
   });
 });
+
+describe("LeftSidebar terminal-session row highlight", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("keeps the clicked session highlighted when the bare-route redirect lands back on the same iterm view", async () => {
+    // Already reading this project's terminals; the row click bounces through
+    // the bare project route and comes straight back here.
+    sessionStorage.setItem("panel:lastPath:vector", "/project/vector/iterm");
+    setup("/project/vector/iterm");
+    expandAndClickSession();
+    await waitFor(() => {
+      expect(screen.getByTestId("location").textContent).toBe(
+        "/project/vector/iterm",
+      );
+    });
+    expect(screen.getByTestId("sidebar-session-s1").style.background).toBe(
+      "var(--bg-active)",
+    );
+  });
+
+  it("highlights the stored session when arriving on an iterm view without a focus broadcast", async () => {
+    localStorage.setItem("panel-terminal-focus-vector", "s1");
+    setup("/project/vector/iterm");
+    fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
+    expect(screen.getByTestId("sidebar-session-s1").style.background).toBe(
+      "var(--bg-active)",
+    );
+  });
+
+  it("highlights nothing while a non-terminal section of the project is open", () => {
+    localStorage.setItem("panel-terminal-focus-vector", "s1");
+    setup("/project/vector/memo");
+    fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
+    expect(screen.getByTestId("sidebar-session-s1").style.background).toBe(
+      "transparent",
+    );
+  });
+});

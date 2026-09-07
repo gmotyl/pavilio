@@ -69,9 +69,15 @@ export default function LeftSidebar() {
   const [autoSyncOpen, setAutoSyncOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const inIterm = /\/project\/[^/]+\/iterm/.test(location.pathname);
   const currentProject =
     location.pathname.match(/^\/project\/([^/]+)/)?.[1] ?? null;
+  const currentSection =
+    location.pathname.match(/^\/project\/[^/]+\/([^/]+)/)?.[1] ?? null;
+  const inIterm = currentSection === "iterm";
+  // Bare `/project/<name>` is a transient stop: ProjectRedirect resolves the
+  // Last-open-view bookmark and navigates on. Treat it as "destination not
+  // known yet" so the highlight is neither cleared nor flashed off in transit.
+  const redirectPending = currentProject !== null && currentSection === null;
 
   // Focused session id (for highlighting individual terminals)
   const [focusedId, setFocusedId] = useState<string | null>(() => {
@@ -91,19 +97,23 @@ export default function LeftSidebar() {
     window.addEventListener(TERMINAL_FOCUS_EVENT, onFocus);
     return () => window.removeEventListener(TERMINAL_FOCUS_EVENT, onFocus);
   }, []);
+  // Re-derive the highlight from the route: nothing focused outside a
+  // terminals view, and on entering one the project's stored focus — which the
+  // sidebar row click and every other focus surface write before navigating.
   useEffect(() => {
-    if (!inIterm) setFocusedId(null);
-  }, [inIterm]);
-  useEffect(() => {
-    if (!currentProject) return;
+    if (redirectPending) return;
+    if (!inIterm || !currentProject) {
+      setFocusedId(null);
+      return;
+    }
     try {
       setFocusedId(
         localStorage.getItem(`panel-terminal-focus-${currentProject}`),
       );
     } catch {
-      // ignore
+      setFocusedId(null);
     }
-  }, [currentProject]);
+  }, [inIterm, currentProject, redirectPending]);
 
   // Per-project expand state — hydrated once from localStorage when projects load
   const [expanded, setExpandedState] = useState<Record<string, boolean>>(
@@ -318,7 +328,8 @@ export default function LeftSidebar() {
             style={{ borderColor: "var(--border-subtle)" }}
           >
             {projectSessions.map((s) => {
-              const isFocused = inIterm && s.id === focusedId;
+              const isFocused =
+                (inIterm || redirectPending) && s.id === focusedId;
               return (
                 <li key={s.id}>
                   <button
