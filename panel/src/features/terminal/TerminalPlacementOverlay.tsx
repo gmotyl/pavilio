@@ -180,6 +180,8 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   } | null>(null);
   // The area being painted by the default (grow) gesture, drawn as the aim.
   const [region, setRegion] = useState<Rect | null>(null);
+  // Which gesture the modifiers currently select, so the legend can say what is live.
+  const [mode, setMode] = useState<PlacementMode>("grow");
   // The drop reads the last painted layout from a ref: a drop event that lands in the
   // same tick as a dragover must still commit what was on screen, not a stale render.
   const paintedRef = useRef<TileLayout | null>(null);
@@ -229,6 +231,8 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
       const layout = layoutRef.current;
       const self = layout.find((t) => t.sessionId === draggedId);
       if (!self) return;
+
+      setMode(mode);
 
       if (mode !== "grow") {
         const hovered = tileAt(layout, zx, zy);
@@ -338,6 +342,53 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
           </div>
         );
       })}
+
+      {dragging && (
+        <div
+          data-testid="placement-legend"
+          className="absolute left-1/2 flex items-center gap-1 rounded-md px-1.5 py-1"
+          style={{
+            bottom: "8px",
+            transform: "translateX(-50%)",
+            background: "rgba(12,13,17,0.92)",
+            border: "1px solid rgba(255,255,255,0.16)",
+            boxShadow: "0 4px 14px rgba(0,0,0,0.45)",
+          }}
+        >
+          {(
+            [
+              ["grow", "Drag", "resize"],
+              ["swap", "Ctrl", "swap"],
+              ["target", "Shift", "split"],
+            ] as [PlacementMode, string, string][]
+          ).map(([key, keyLabel, what]) => {
+            const active = mode === key;
+            return (
+              <span
+                key={key}
+                data-testid={`placement-legend-${key}`}
+                data-active={active ? "true" : "false"}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-widest"
+                style={{
+                  background: active ? "rgba(97,175,239,0.22)" : "transparent",
+                  color: active ? "#cfe6ff" : "var(--text-tertiary)",
+                }}
+              >
+                <kbd
+                  className="font-mono text-[10px] normal-case tracking-normal rounded px-1"
+                  style={{
+                    background: "rgba(255,255,255,0.10)",
+                    color: active ? "#cfe6ff" : "var(--text-secondary)",
+                  }}
+                >
+                  {keyLabel}
+                </kbd>
+                {what}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {/* The painted area, drawn so the sweep is visible while it happens. */}
       {region && (

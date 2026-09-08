@@ -157,6 +157,36 @@ describe("TerminalPlacementOverlay", () => {
     expect(regionOf("b")).toBe("6,3,6,9");
   });
 
+  it("shows a legend of the modifiers, flagging the live one", () => {
+    const { handle } = renderOverlay("a");
+
+    act(() => handle.current!.over(90, 30));
+    expect(screen.getByTestId("placement-legend")).toBeTruthy();
+    expect(screen.getByTestId("placement-legend-grow").getAttribute("data-active")).toBe(
+      "true",
+    );
+    expect(screen.getByTestId("placement-legend-swap").getAttribute("data-active")).toBe(
+      "false",
+    );
+
+    act(() => handle.current!.over(90, 30, "swap"));
+    expect(screen.getByTestId("placement-legend-swap").getAttribute("data-active")).toBe(
+      "true",
+    );
+
+    act(() => handle.current!.over(90, 1, "target"));
+    expect(
+      screen.getByTestId("placement-legend-target").getAttribute("data-active"),
+    ).toBe("true");
+  });
+
+  it("hides the legend once the gesture ends", () => {
+    const { handle } = renderOverlay("a");
+    act(() => handle.current!.over(90, 30));
+    act(() => handle.current!.end());
+    expect(screen.queryByTestId("placement-legend")).toBeNull();
+  });
+
   it("draws the zone grid while a gesture is running", () => {
     const { handle } = renderOverlay("a");
     act(() => handle.current!.over(90, 30));
