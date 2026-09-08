@@ -160,9 +160,13 @@ export function TerminalLayoutGrid({
         onDragOver={(e) => {
           e.preventDefault();
           if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-          // Plain drag paints an area anchored on the dragged window (grow/shrink);
-          // Shift falls back to the target model (swap with, or split, one neighbour).
-          overlayRef.current?.over(e.clientX, e.clientY, e.shiftKey);
+          // Plain drag paints an area anchored on the dragged window; Ctrl is the plain
+          // exchange the grid has always had; Shift adds that window's halves as targets.
+          overlayRef.current?.over(
+            e.clientX,
+            e.clientY,
+            e.ctrlKey ? "swap" : e.shiftKey ? "target" : "grow",
+          );
         }}
         onDrop={(e) => {
           e.preventDefault();

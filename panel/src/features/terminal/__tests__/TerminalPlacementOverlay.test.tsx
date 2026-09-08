@@ -109,10 +109,26 @@ describe("TerminalPlacementOverlay", () => {
     expect(screen.queryByTestId("placement-preview-a")).toBeNull();
   });
 
-  it("swaps with the window under the pointer while the modifier is held", () => {
+  it("swaps with the window under the pointer under Ctrl, wherever the pointer sits in it", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(90, 30, true));
+    // Deliberately near b's top edge: the plain exchange has no edge bands to miss.
+    act(() => handle.current!.over(90, 1, "swap"));
+
+    expect(regionOf("a")).toBe("6,0,6,6");
+    expect(regionOf("b")).toBe("0,0,6,12");
+    expect(screen.queryByTestId("placement-region")).toBeNull();
+    // Only the whole window is offered, so there is nothing to aim past.
+    expect(screen.getByTestId("placement-target-centre").getAttribute("data-region")).toBe(
+      null,
+    );
+    expect(screen.queryByTestId("placement-target-top")).toBeNull();
+  });
+
+  it("swaps with the window under the pointer while the target modifier is held", () => {
+    const { handle } = renderOverlay("a");
+
+    act(() => handle.current!.over(90, 30, "target"));
 
     expect(regionOf("a")).toBe("6,0,6,6");
     expect(regionOf("b")).toBe("0,0,6,12");
@@ -122,7 +138,7 @@ describe("TerminalPlacementOverlay", () => {
   it("draws the targets of the hovered window while the modifier is held", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(90, 30, true));
+    act(() => handle.current!.over(90, 30, "target"));
 
     for (const side of ["centre", "left", "right", "top", "bottom"]) {
       expect(screen.getByTestId(`placement-target-${side}`)).toBeTruthy();
@@ -135,7 +151,7 @@ describe("TerminalPlacementOverlay", () => {
   it("splits the hovered window when the modifier is held near its edge", () => {
     const { handle } = renderOverlay("c");
 
-    act(() => handle.current!.over(90, 1, true));
+    act(() => handle.current!.over(90, 1, "target"));
 
     expect(regionOf("c")).toBe("6,0,6,3");
     expect(regionOf("b")).toBe("6,3,6,9");

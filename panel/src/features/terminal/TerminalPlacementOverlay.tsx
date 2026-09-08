@@ -36,11 +36,19 @@ interface Props {
  * signature was `dragstart → dragend` with not one `dragover` in between, and nothing
  * ever appearing on screen.
  */
+export type PlacementMode = "grow" | "swap" | "target";
+
 export interface PlacementOverlayHandle {
   /** Arm the gesture from the cell's dragstart. Writes refs only — never renders. */
   begin: (sessionId: string) => void;
-  /** Track the pointer and paint the layout the drop would commit. */
-  over: (clientX: number, clientY: number, swap?: boolean) => void;
+  /**
+   * Track the pointer and paint the layout the drop would commit.
+   *
+   * - `grow` (no modifier) stretches an area from the dragged window to the pointer;
+   * - `swap` (Ctrl) exchanges it with the window under the pointer, as the grid always did;
+   * - `target` (Shift) offers that window's halves as well as the whole of it.
+   */
+  over: (clientX: number, clientY: number, mode?: PlacementMode) => void;
   /** Disarm and return the layout that was painted, if any. */
   release: () => TileLayout | null;
   end: () => void;
@@ -165,9 +173,11 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   const sweptRef = useRef<string[]>([]);
   const [painted, setPainted] = useState<TileLayout | null>(null);
   // What the pointer is currently aiming at, drawn so the target stops being invisible.
-  const [aiming, setAiming] = useState<{ tile: Rect; target: PlacementTarget } | null>(
-    null,
-  );
+  const [aiming, setAiming] = useState<{
+    tile: Rect;
+    target: PlacementTarget;
+    mode: PlacementMode;
+  } | null>(null);
   // The area being painted by the default (grow) gesture, drawn as the aim.
   const [region, setRegion] = useState<Rect | null>(null);
   // The drop reads the last painted layout from a ref: a drop event that lands in the
@@ -202,7 +212,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   }, [end, onCancel]);
 
   const over = useCallback(
-    (clientX: number, clientY: number, swap = false) => {
+    (clientX: number, clientY: number, mode: PlacementMode = "grow") => {
       const draggedId = draggedRef.current;
       if (!draggedId) return;
 
@@ -220,14 +230,17 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
       const self = layout.find((t) => t.sessionId === draggedId);
       if (!self) return;
 
-      if (swap) {
-        // The old target model, kept behind the modifier: exchange with the window under
-        // the pointer, or take one half of it.
+      if (mode !== "grow") {
         const hovered = tileAt(layout, zx, zy);
         if (!hovered || hovered.sessionId === draggedId) return;
-        const aim = targetAt(hovered, zx, zy);
+        // Ctrl is the plain exchange the grid has always had — the whole window under the
+        // pointer, with no edge bands to aim past. Shift additionally offers its halves.
+        const aim: PlacementTarget =
+          mode === "swap"
+            ? { side: "centre", region: { ...hovered }, hit: { ...hovered } }
+            : targetAt(hovered, zx, zy);
         setRegion(null);
-        setAiming({ tile: hovered, target: aim });
+        setAiming({ tile: hovered, target: aim, mode });
         paint(placeRegion(layout, draggedId, aim.region));
         return;
       }
@@ -349,7 +362,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
       {/* The targets on the window under the pointer, drawn so aiming is possible at
           all: the five hit areas outlined, the chosen one filled. */}
       {aiming &&
-        targetsOf(aiming.tile).map((t) => {
+        (aiming.mode === "swap" ? [aiming.target] : targetsOf(aiming.tile)).map((t) => {
           const active = t.side === aiming.target.side;
           return (
             <div
