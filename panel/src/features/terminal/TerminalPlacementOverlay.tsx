@@ -20,19 +20,28 @@ interface Props {
   layout: TileLayout;
   /** Display name per session id, for labelling the painted result. */
   nameOf?: (sessionId: string) => string;
-  onCommit: (next: TileLayout) => void;
+  /** Called when the gesture is abandoned (Escape). The commit path is `release()`. */
   onCancel: () => void;
 }
 
 /**
- * Activation is imperative on purpose. The overlay stays mounted and inert, and a
- * `dragstart` handler calls `begin()` — which flips one inline style and writes a ref,
- * with **no React state update**. A state update there re-renders the tree inside the
- * browser's own dragstart dispatch, and Chrome abandons a drag whose source subtree is
- * rebuilt underneath it: the drag never starts and nothing is ever shown.
+ * The overlay is purely visual: `pointer-events: none` for its whole life, mounted from
+ * the first render, and driven imperatively by the grid, which owns the drag events.
+ *
+ * Both halves of that are load-bearing, and both were learned the hard way. Mounting it
+ * from `dragstart` put a React render inside the browser's own dragstart dispatch;
+ * arming it by flipping `pointer-events` to `auto` changed what sat under the cursor at
+ * the same moment. Either one makes Chromium abandon the drag instantly — the observed
+ * signature was `dragstart → dragend` with not one `dragover` in between, and nothing
+ * ever appearing on screen.
  */
 export interface PlacementOverlayHandle {
+  /** Arm the gesture from the cell's dragstart. Writes refs only — never renders. */
   begin: (sessionId: string) => void;
+  /** Track the pointer and paint the layout the drop would commit. */
+  over: (clientX: number, clientY: number) => void;
+  /** Disarm and return the layout that was painted, if any. */
+  release: () => TileLayout | null;
   end: () => void;
 }
 
@@ -141,14 +150,19 @@ const pct = (zones: number) => `${(zones / GRID) * 100}%`;
  * painted on the overlay and handed to the drop verbatim.
  */
 export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props>(
-  function TerminalPlacementOverlay({ layout, nameOf, onCommit, onCancel }, handleRef) {
+  function TerminalPlacementOverlay({ layout, nameOf, onCancel }, handleRef) {
   const ref = useRef<HTMLDivElement | null>(null);
   const draggedRef = useRef<string | null>(null);
-  const [swept, setSwept] = useState<string[]>([]);
+  // A ref, not state: `begin()` runs inside the browser's dragstart dispatch and must
+  // not schedule a render there.
+  const sweptRef = useRef<string[]>([]);
   const [painted, setPainted] = useState<TileLayout | null>(null);
   // The drop reads the last painted layout from a ref: a drop event that lands in the
   // same tick as a dragover must still commit what was on screen, not a stale render.
   const paintedRef = useRef<TileLayout | null>(null);
+
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
 
   const paint = useCallback((next: TileLayout | null) => {
     paintedRef.current = next;
@@ -157,34 +171,12 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
 
   useEffect(attachGlobalDragProbe, []);
 
-  const setActive = useCallback((active: boolean) => {
-    const el = ref.current;
-    if (el) el.style.pointerEvents = active ? "auto" : "none";
-    dbg("overlay pointerEvents ->", active ? "auto" : "none", "el?", !!el);
-  }, []);
-
   const end = useCallback(() => {
     dbg("end (was dragging:", draggedRef.current, ")");
     draggedRef.current = null;
-    setActive(false);
-    setSwept([]);
+    sweptRef.current = [];
     paint(null);
-  }, [paint, setActive]);
-
-  useImperativeHandle(
-    handleRef,
-    () => ({
-      begin: (sessionId: string) => {
-        dbg("begin", sessionId);
-        draggedRef.current = sessionId;
-        setSwept([]);
-        paintedRef.current = null;
-        setActive(true);
-      },
-      end,
-    }),
-    [end, setActive],
-  );
+  }, [paint]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -197,65 +189,82 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     return () => window.removeEventListener("keydown", onKey);
   }, [end, onCancel]);
 
-  const handleDragOver = (e: React.DragEvent) => {
-    const draggedId = draggedRef.current;
-    if (!draggedId) return;
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  const over = useCallback(
+    (clientX: number, clientY: number) => {
+      const draggedId = draggedRef.current;
+      if (!draggedId) return;
 
-    const box = ref.current?.getBoundingClientRect();
-    if (!box || box.width === 0 || box.height === 0) {
-      dbg("dragover ignored — overlay box", box && { w: box.width, h: box.height });
-      return;
-    }
+      const box = ref.current?.getBoundingClientRect();
+      if (!box || box.width === 0 || box.height === 0) {
+        dbg("over ignored — overlay box", box && { w: box.width, h: box.height });
+        return;
+      }
 
-    // Fractional zone coordinates, so both the tile lookup and the band test read off
-    // the same measurement.
-    const zoneX = ((e.clientX - box.left) / box.width) * GRID;
-    const zoneY = ((e.clientY - box.top) / box.height) * GRID;
-    const zx = Math.min(GRID - 1, Math.floor(zoneX));
-    const zy = Math.min(GRID - 1, Math.floor(zoneY));
-    if (zx < 0 || zy < 0) return;
+      // Fractional zone coordinates, so the tile lookup and the band test read off the
+      // same measurement.
+      const zoneX = ((clientX - box.left) / box.width) * GRID;
+      const zoneY = ((clientY - box.top) / box.height) * GRID;
+      const zx = Math.min(GRID - 1, Math.floor(zoneX));
+      const zy = Math.min(GRID - 1, Math.floor(zoneY));
+      if (zx < 0 || zy < 0) return;
 
-    const hovered = tileAt(layout, zx, zy);
-    dbg("dragover zone", zx, zy, "hovered", hovered?.sessionId ?? null, "dragged", draggedId);
-    // Passing back over the dragged terminal changes nothing — it keeps the target the
-    // sweep has built up rather than resetting it mid-gesture.
-    if (!hovered || hovered.sessionId === draggedId) return;
+      const hovered = tileAt(layoutRef.current, zx, zy);
+      dbg("over zone", zx, zy, "hovered", hovered?.sessionId ?? null, "dragged", draggedId);
+      // Passing back over the dragged terminal changes nothing — it keeps the target the
+      // sweep has built up rather than resetting it mid-gesture.
+      if (!hovered || hovered.sessionId === draggedId) return;
 
-    const alreadySwept = swept.includes(hovered.sessionId);
-    const nextSwept =
-      swept.length === 0 || (swept.length === 1 && alreadySwept)
-        ? [hovered.sessionId]
-        : alreadySwept
-          ? swept
-          : [...swept, hovered.sessionId];
+      const swept = sweptRef.current;
+      const alreadySwept = swept.includes(hovered.sessionId);
+      const nextSwept =
+        swept.length === 0 || (swept.length === 1 && alreadySwept)
+          ? [hovered.sessionId]
+          : alreadySwept
+            ? swept
+            : [...swept, hovered.sessionId];
 
-    let region: Rect;
-    if (nextSwept.length === 1) {
-      const fx = (zoneX - hovered.x) / hovered.w;
-      const fy = (zoneY - hovered.y) / hovered.h;
-      region = regionInTile(hovered, clamp01(fx), clamp01(fy));
-    } else {
-      const sweptTiles = layout.filter((t) => nextSwept.includes(t.sessionId));
-      region = boundingBox(sweptTiles);
-    }
+      let region: Rect;
+      if (nextSwept.length === 1) {
+        const fx = (zoneX - hovered.x) / hovered.w;
+        const fy = (zoneY - hovered.y) / hovered.h;
+        region = regionInTile(hovered, clamp01(fx), clamp01(fy));
+      } else {
+        region = boundingBox(
+          layoutRef.current.filter((t) => nextSwept.includes(t.sessionId)),
+        );
+      }
 
-    if (nextSwept !== swept) setSwept(nextSwept);
-    const next = placeRegion(layout, draggedId, region);
-    dbg("region", region, "->", next ? `${next.length} tiles` : "REFUSED (null)");
-    paint(next);
-  };
+      sweptRef.current = nextSwept;
+      const next = placeRegion(layoutRef.current, draggedId, region);
+      dbg("region", region, "->", next ? `${next.length} tiles` : "REFUSED (null)");
+      paint(next);
+    },
+    [paint],
+  );
 
-  const handleDrop = (e: React.DragEvent) => {
-    dbg("drop — dragging:", draggedRef.current, "painted:", !!paintedRef.current);
-    if (!draggedRef.current) return;
-    e.preventDefault();
+  const release = useCallback((): TileLayout | null => {
     const next = paintedRef.current;
+    dbg("release — dragging:", draggedRef.current, "painted:", !!next);
+    if (!draggedRef.current) return null;
     end();
-    if (next) onCommit(next);
-    else onCancel();
-  };
+    return next;
+  }, [end]);
+
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      begin: (sessionId: string) => {
+        dbg("begin", sessionId);
+        draggedRef.current = sessionId;
+        sweptRef.current = [];
+        paintedRef.current = null;
+      },
+      over,
+      release,
+      end,
+    }),
+    [end, over, release],
+  );
 
   const preview = painted ?? [];
   const draggedId = draggedRef.current;
@@ -265,12 +274,8 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
       ref={ref}
       data-testid="terminal-placement-overlay"
       className="absolute inset-0 z-20"
-      // Inert until `begin()` flips this: an always-mounted overlay means dragstart
-      // triggers no mount, and an idle one must not swallow clicks on the cells.
+      // Never hittable: the grid below owns the drag events and forwards coordinates.
       style={{ pointerEvents: "none" }}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      onDragLeave={() => paint(null)}
     >
       {readingOrder(preview).map((tile) => {
         const dragged = tile.sessionId === draggedId;

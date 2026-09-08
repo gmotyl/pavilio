@@ -159,7 +159,22 @@ export function TerminalLayoutGrid({
     const sessionById = new Map(sessions.map((s) => [s.id, s]));
 
     body = (
-      <div className="relative h-full w-full">
+      <div
+        className="relative h-full w-full"
+        // The grid wrapper owns the drag events, not the overlay: nothing under the
+        // cursor may change at dragstart, or Chromium abandons the drag on the spot.
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+          overlayRef.current?.over(e.clientX, e.clientY);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const next = overlayRef.current?.release() ?? null;
+          console.log("[dnd] wrapper drop -> ", next ? `${next.length} tiles` : "nothing");
+          if (next) onPlace?.(next);
+        }}
+      >
         <div
           data-testid="terminal-grid"
           className="h-full w-full grid"
@@ -180,12 +195,11 @@ export function TerminalLayoutGrid({
             });
           })}
         </div>
-        {/* Always mounted, inert until a drag begins — see PlacementOverlayHandle. */}
+        {/* Always mounted, never hittable — see PlacementOverlayHandle. */}
         <TerminalPlacementOverlay
           ref={overlayRef}
           layout={resolvedTiles}
           nameOf={(id) => sessionById.get(id)?.name ?? id}
-          onCommit={(next) => onPlace?.(next)}
           onCancel={() => {}}
         />
       </div>

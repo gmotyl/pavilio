@@ -372,6 +372,8 @@ describe("TerminalLayoutGrid — placement drag", () => {
     const before = cellsByArea();
     fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
     const overlay = screen.getByTestId("terminal-placement-overlay");
+    // The wrapper owns the drag events; the overlay only measures and paints.
+    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
     vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
       left: 0,
       top: 0,
@@ -383,20 +385,21 @@ describe("TerminalLayoutGrid — placement drag", () => {
       y: 0,
       toJSON: () => ({}),
     } as DOMRect);
-    return { onPlace, overlay, before };
+    return { onPlace, overlay, wrapper, before };
   }
 
-  it("keeps the overlay mounted and only arms it for the drag", () => {
+  it("never lets the overlay take pointer events", () => {
     renderGrid({ sessions, tiles });
     const overlay = screen.getByTestId("terminal-placement-overlay");
 
-    // Mounted from the first render on purpose: mounting it *during* dragstart means a
-    // React render inside the browser's own dispatch, and Chrome then abandons the drag
-    // before it starts — the "I drag and see nothing" report.
+    // Two things killed the drag before: mounting the overlay during dragstart, and
+    // arming it by taking pointer events. Either changes the DOM under the cursor at
+    // dragstart and Chromium abandons the drag — observed as dragstart → dragend with
+    // no dragover at all. It is mounted from the first render and stays untouchable.
     expect(overlay.style.pointerEvents).toBe("none");
 
     fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
-    expect(overlay.style.pointerEvents).toBe("auto");
+    expect(overlay.style.pointerEvents).toBe("none");
 
     fireEvent.dragEnd(screen.getAllByTitle("Drag to place this terminal")[0]);
     expect(overlay.style.pointerEvents).toBe("none");
@@ -414,10 +417,10 @@ describe("TerminalLayoutGrid — placement drag", () => {
   });
 
   it("leaves every cell's grid-area untouched for the whole drag", () => {
-    const { overlay, before } = startDrag();
+    const { wrapper, before } = startDrag();
 
-    dragOverAt(overlay, 90, 30);
-    dragOverAt(overlay, 90, 90);
+    dragOverAt(wrapper, 90, 30);
+    dragOverAt(wrapper, 90, 90);
 
     // The regression that motivated the change: previewing must not re-flow the grid,
     // because a cell moving under the cursor changes which one the drop lands on.
@@ -425,10 +428,10 @@ describe("TerminalLayoutGrid — placement drag", () => {
   });
 
   it("commits the painted layout on drop", () => {
-    const { overlay, onPlace } = startDrag();
+    const { wrapper, onPlace } = startDrag();
 
-    dragOverAt(overlay, 90, 30);
-    fireEvent(overlay, new MouseEvent("drop", { bubbles: true, cancelable: true }));
+    dragOverAt(wrapper, 90, 30);
+    fireEvent(wrapper, new MouseEvent("drop", { bubbles: true, cancelable: true }));
 
     expect(onPlace).toHaveBeenCalledTimes(1);
     const committed = onPlace.mock.calls[0][0] as TileLayout;
@@ -436,24 +439,32 @@ describe("TerminalLayoutGrid — placement drag", () => {
   });
 
   it("commits nothing when the drag ends without a drop", () => {
-    const { onPlace, overlay } = startDrag();
+    const { onPlace, wrapper } = startDrag();
 
-    dragOverAt(overlay, 90, 30);
+    dragOverAt(wrapper, 90, 30);
     fireEvent.dragEnd(screen.getAllByTitle("Drag to place this terminal")[0]);
 
     expect(onPlace).not.toHaveBeenCalled();
-    expect(screen.getByTestId("terminal-placement-overlay").style.pointerEvents).toBe(
-      "none",
-    );
+    expect(screen.queryByTestId("placement-preview-a")).toBeNull();
   });
 
   it("works without throwing when onPlace is omitted", () => {
     renderGrid({ sessions, tiles, onPlace: undefined });
     fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
-    const overlay = screen.getByTestId("terminal-placement-overlay");
+    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
     expect(() =>
-      fireEvent(overlay, new MouseEvent("drop", { bubbles: true, cancelable: true })),
+      fireEvent(wrapper, new MouseEvent("drop", { bubbles: true, cancelable: true })),
     ).not.toThrow();
+  });
+
+  it("paints the target the pointer is over", () => {
+    const { wrapper } = startDrag();
+
+    dragOverAt(wrapper, 90, 30);
+
+    expect(
+      screen.getByTestId("placement-preview-a").getAttribute("data-region"),
+    ).toBe("6,0,6,6");
   });
 });
 
@@ -614,11 +625,20 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
     renderGrid({ sessions, tiles: [] });
 
+    const overlay = screen.getByTestId("terminal-placement-overlay");
+    vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, width: 120, height: 120, right: 120, bottom: 120, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
     fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
 
-    expect(screen.getByTestId("terminal-placement-overlay").style.pointerEvents).toBe(
-      "auto",
-    );
+    // Arming leaves no trace in the DOM by design — what proves it is that a
+    // subsequent dragover paints a target.
+    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
+    dragOverAt(wrapper, 90, 60);
+
+    expect(screen.queryAllByTestId(/^placement-preview-/).length).toBeGreaterThan(0);
   });
 
   it("selecting text in the rename input does not start a cell drag", () => {
@@ -631,8 +651,6 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     // to select its text starts a cell drag instead.
     dragStart(input);
 
-    expect(screen.getByTestId("terminal-placement-overlay").style.pointerEvents).toBe(
-      "none",
-    );
+    expect(screen.queryAllByTestId(/^placement-preview-/)).toHaveLength(0);
   });
 });
