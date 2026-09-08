@@ -58,11 +58,8 @@ export function useAllTerminalSessions(pollMs = 8000) {
     reorder: ordering.reorder,
     // A plain drag swaps identity in the order *and* in the layout, matching
     // the per-project surface's swapSessions.
-    swapOrder: ordering.swapSessions,
-    columnLayout: ordering.columnLayout,
-    mergeColumn: ordering.mergeColumn,
-    joinColumn: ordering.joinColumn,
-    splitColumn: ordering.splitColumn,
+    tiles: ordering.tiles,
+    placeTiles: ordering.placeTiles,
     applyPreset: ordering.applyPreset,
   };
 }

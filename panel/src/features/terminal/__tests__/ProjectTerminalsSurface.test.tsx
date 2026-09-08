@@ -24,13 +24,9 @@ vi.mock("../useTerminalSessions", async (orig) => ({
     deleteSession: () => {},
     updateSession: () => {},
     reorder: () => {},
-    swapOrder: () => {},
-    columnLayout: [[{ sessionId: "s1", weight: 1 }]],
-    mergeColumn: () => {},
-    joinColumn: () => {},
-    splitColumn: () => {},
+    tiles: [{ sessionId: "s1", x: 0, y: 0, w: 12, h: 12 }],
+    placeTiles: () => {},
     applyPreset: () => {},
-    swapSessions: () => {},
   }),
 }));
 vi.mock("../useAllTerminalSessions", () => ({
@@ -62,19 +58,16 @@ describe("ProjectTerminalsSurface", () => {
     expect(props.sessions).toHaveLength(1);
   });
 
-  it("wires useTerminalSessions's column state and callbacks into TerminalsSurface", () => {
+  it("wires useTerminalSessions's tiling and callbacks into TerminalsSurface", () => {
     render(
       <MemoryRouter>
         <ProjectTerminalsSurface projectName="vector" active />
       </MemoryRouter>,
     );
     const props = surfaceProps.mock.calls.at(-1)?.[0];
-    expect(props.columnLayout).toEqual([[{ sessionId: "s1", weight: 1 }]]);
-    expect(typeof props.onMergeColumn).toBe("function");
-    expect(typeof props.onJoinColumn).toBe("function");
-    expect(typeof props.onSplitColumn).toBe("function");
+    expect(props.tiles).toEqual([{ sessionId: "s1", x: 0, y: 0, w: 12, h: 12 }]);
+    expect(typeof props.onPlace).toBe("function");
     expect(typeof props.onApplyPreset).toBe("function");
-    expect(typeof props.onSwap).toBe("function");
   });
 
   it("enables iterm shortcuts only when active", () => {

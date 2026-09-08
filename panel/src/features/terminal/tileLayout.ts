@@ -495,15 +495,17 @@ export function placeRegion(
     const strips = sliceInto(vacated, displaced.length);
     if (!strips) return null;
 
+    // Rect spread FIRST, id last: a caller may hand in a region copied off a tile,
+    // which still carries that tile's sessionId and would otherwise overwrite this one.
     const moved = readingOrder(displaced).map((tile, i) => ({
-      sessionId: tile.sessionId,
       ...strips[i],
+      sessionId: tile.sessionId,
     }));
     const movedIds = new Set(moved.map((t) => t.sessionId));
 
     next = [
       ...layout.filter((t) => t.sessionId !== sessionId && !movedIds.has(t.sessionId)),
-      { sessionId, ...region },
+      { ...region, sessionId },
       ...moved,
     ];
   } else if (touched.length === 1) {
@@ -513,7 +515,10 @@ export function placeRegion(
 
     const kept: TileLayout = layout
       .filter((t) => t.sessionId !== sessionId && t.sessionId !== host.sessionId)
-      .concat({ sessionId: host.sessionId, ...remainder }, { sessionId, ...region });
+      .concat(
+        { ...remainder, sessionId: host.sessionId },
+        { ...region, sessionId },
+      );
 
     next = absorbRect(kept, vacated);
   } else {

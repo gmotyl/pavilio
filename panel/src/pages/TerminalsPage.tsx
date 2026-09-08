@@ -11,11 +11,8 @@ export default function TerminalsPage() {
     sessions: allSessions,
     refresh,
     reorder,
-    swapOrder,
-    columnLayout,
-    mergeColumn,
-    joinColumn,
-    splitColumn,
+    tiles,
+    placeTiles,
     applyPreset,
   } = useAllTerminalSessions();
   const [maximized, toggleMaximized] = useTerminalMaximized("__all__");
@@ -91,11 +88,8 @@ export default function TerminalsPage() {
       }}
       onNavTo={(path) => navigate(path)}
       onReorder={reorder}
-      onSwap={swapOrder}
-      columnLayout={columnLayout}
-      onMergeColumn={mergeColumn}
-      onJoinColumn={joinColumn}
-      onSplitColumn={splitColumn}
+      tiles={tiles}
+      onPlace={placeTiles}
       onApplyPreset={applyPreset}
     />
   );

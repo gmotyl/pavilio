@@ -91,10 +91,9 @@ function reconcile(layout: TileLayout, order: string[]): TileLayout {
 
 /**
  * One pure transition over `{order, layout}`. The two halves must always move
- * together, and a reducer is what makes that atomic — the shape before the column
- * model's reducer (a `setColumnLayout` call nested inside a `setSessionOrder`
- * updater) was an impure updater that StrictMode replayed, rendering one session in
- * two cells.
+ * together, and a reducer is what makes that atomic — the shape this replaced (a
+ * layout setter nested inside an order setter) was an impure updater that StrictMode
+ * replayed, rendering one session in two cells.
  */
 export function orderingReducer(state: OrderingState, action: OrderingAction): OrderingState {
   switch (action.type) {

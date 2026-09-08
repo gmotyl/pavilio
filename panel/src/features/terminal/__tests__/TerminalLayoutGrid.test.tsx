@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
-import { getLayoutPresets, expandPreset } from "../columnLayout";
-import type { ColumnLayout } from "../columnLayout";
+import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession } from "../terminalInstances";
 import {
@@ -128,7 +127,7 @@ function renderGrid(
     onExit: vi.fn(),
     onToggleMaximize: vi.fn(),
     onReady: vi.fn(),
-    onSwap: vi.fn(),
+    onPlace: vi.fn(),
     ...overrides,
   };
   const result = render(<TerminalLayoutGrid {...props} />);
@@ -264,290 +263,179 @@ describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () 
   });
 });
 
-describe("TerminalLayoutGrid — column layout", () => {
-  // jsdom's DragEvent has no real DataTransfer; the component's own
-  // onDragStart handler writes to it, so tests must supply a stand-in.
-  function dragStart(el: Element) {
-    fireEvent.dragStart(el, { dataTransfer: { effectAllowed: "", dropEffect: "" } });
-  }
+// jsdom has no DragEvent constructor, so Testing Library's drag helpers drop
+// clientX/clientY. Dispatch a MouseEvent of the same type instead.
+function dragOverAt(el: HTMLElement, clientX: number, clientY: number) {
+  fireEvent(
+    el,
+    new MouseEvent("dragover", { bubbles: true, cancelable: true, clientX, clientY }),
+  );
+}
 
-  // This jsdom build has no DragEvent constructor, so @testing-library's
-  // fireEvent.drop(el, { ctrlKey }) falls back to a plain Event whose
-  // constructor silently drops unknown init keys like ctrlKey. Dispatch a
-  // real MouseEvent (which jsdom does support) to get a readable ctrlKey.
-  function dropCtrl(el: Element, ctrlKey: boolean) {
-    fireEvent(el, new MouseEvent("drop", { bubbles: true, cancelable: true, ctrlKey }));
-  }
+const tilesFor = (ids: string[]): TileLayout =>
+  expandPreset(ids, getLayoutPresets(ids.length)[0]);
 
-  // Same workaround as dropCtrl, for "dragover" — the component reads
-  // e.ctrlKey during dragover to compute the live preview.
-  function dragOverCtrl(el: Element, ctrlKey: boolean) {
-    fireEvent(el, new MouseEvent("dragover", { bubbles: true, cancelable: true, ctrlKey }));
-  }
+const areaOf = (el: HTMLElement) => `${el.style.gridColumn}|${el.style.gridRow}`;
 
-  function threeSessionsSameColumnAB(): { sessions: SessionMeta[]; columnLayout: ColumnLayout } {
-    // a, b share column 0 (weight 1 each); c alone in column 1.
-    const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
-    ];
-    const columnLayout: ColumnLayout = [
-      [
-        { sessionId: "a", weight: 1 },
-        { sessionId: "b", weight: 1 },
-      ],
-      [{ sessionId: "c", weight: 1 }],
-    ];
-    return { sessions, columnLayout };
-  }
+function cellsByArea() {
+  return screen
+    .getAllByTitle("Drag to place this terminal")
+    .map((header) => header.parentElement as HTMLElement)
+    .map(areaOf);
+}
 
+describe("TerminalLayoutGrid — tiling", () => {
   it("renders session count matching cells across counts 1-7 using the default preset", () => {
-    for (let count = 1; count <= 7; count++) {
+    for (const count of [1, 2, 3, 4, 5, 6, 7]) {
       const sessions = Array.from({ length: count }, (_, i) =>
-        makeSession({ id: `count${count}-s${i}` }),
+        makeSession({ id: `s${i}`, name: `t${i}` }),
       );
-      const order = sessions.map((s) => s.id);
-      const expected = expandPreset(order, getLayoutPresets(count)[0].sizes);
-
-      const { unmount } = renderGrid({ sessions, focusedId: sessions[0].id });
-      expect(screen.getAllByTestId(/^terminal-view-/)).toHaveLength(count);
-      expected.forEach((column, i) => {
-        const col = screen.getByTestId(`terminal-grid-column-${i}`);
-        expect(within(col).getAllByTestId(/^terminal-view-/)).toHaveLength(column.length);
-      });
-      expect(screen.queryByTestId(`terminal-grid-column-${expected.length}`)).not.toBeInTheDocument();
+      const { unmount } = renderGrid({ sessions, tiles: [] });
+      expect(screen.getAllByTitle("Drag to place this terminal")).toHaveLength(count);
       unmount();
     }
   });
 
-  it("a weighted column renders row tracks proportional to each entry's weight", () => {
+  it("places each session with the grid-area its tile describes", () => {
     const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
-    ];
-    const columnLayout: ColumnLayout = [
-      [
-        { sessionId: "a", weight: 2 },
-        { sessionId: "b", weight: 1 },
-      ],
-      [{ sessionId: "c", weight: 1 }],
-    ];
-    renderGrid({ sessions, focusedId: "a", columnLayout });
-
-    const col0 = screen.getByTestId("terminal-grid-column-0");
-    expect(col0.style.gridTemplateRows).toBe("2fr 1fr");
-  });
-
-  it("an explicit columnLayout prop overrides the default preset expansion", () => {
-    const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
-      makeSession({ id: "d" }),
-    ];
-    const columnLayout: ColumnLayout = [
-      [{ sessionId: "a", weight: 1 }],
-      [
-        { sessionId: "b", weight: 1 },
-        { sessionId: "c", weight: 1 },
-        { sessionId: "d", weight: 1 },
-      ],
-    ];
-    renderGrid({ sessions, focusedId: "a", columnLayout });
-
-    const col0 = screen.getByTestId("terminal-grid-column-0");
-    const col1 = screen.getByTestId("terminal-grid-column-1");
-    expect(within(col0).getAllByTestId(/^terminal-view-/)).toHaveLength(1);
-    expect(within(col1).getAllByTestId(/^terminal-view-/)).toHaveLength(3);
-  });
-
-  it("mobile/maximized rendering is unaffected by columnLayout", () => {
-    const sessions = [
-      makeSession({ id: "a" }),
-      makeSession({ id: "b" }),
-      makeSession({ id: "c" }),
-    ];
-    const columnLayout: ColumnLayout = [
-      [{ sessionId: "a", weight: 1 }],
-      [
-        { sessionId: "b", weight: 1 },
-        { sessionId: "c", weight: 1 },
-      ],
+      makeSession({ id: "a", name: "a" }),
+      makeSession({ id: "b", name: "b" }),
     ];
     renderGrid({
       sessions,
-      focusedId: "a",
+      tiles: [
+        { sessionId: "a", x: 0, y: 0, w: 12, h: 4 },
+        { sessionId: "b", x: 0, y: 4, w: 12, h: 8 },
+      ],
+    });
+
+    expect(cellsByArea()).toEqual([
+      "1 / span 12|1 / span 4",
+      "1 / span 12|5 / span 8",
+    ]);
+  });
+
+  it("renders one CSS grid of 12 by 12 tracks and no gutter drop zones", () => {
+    renderGrid({
+      sessions: [makeSession({ id: "a" }), makeSession({ id: "b" })],
+      tiles: tilesFor(["a", "b"]),
+    });
+
+    const grid = screen.getByTestId("terminal-grid");
+    expect(grid.style.gridTemplateColumns).toBe("repeat(12, 1fr)");
+    expect(grid.style.gridTemplateRows).toBe("repeat(12, 1fr)");
+    expect(screen.queryByTestId("terminal-grid-gutter-0")).toBeNull();
+  });
+
+  it("falls back to the default preset when no tiles are passed", () => {
+    renderGrid({
+      sessions: [makeSession({ id: "a" }), makeSession({ id: "b" })],
+      tiles: [],
+    });
+
+    expect(cellsByArea()).toEqual([
+      "1 / span 6|1 / span 12",
+      "7 / span 6|1 / span 12",
+    ]);
+  });
+
+  it("mobile/maximized rendering is unaffected by the tiling", () => {
+    const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
+    renderGrid({
+      sessions,
       maximized: true,
-      columnLayout,
+      focusedId: "b",
+      tiles: tilesFor(["a", "b"]),
     });
 
-    expect(screen.queryByTestId("terminal-grid-column-0")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("terminal-grid-gutter-0")).not.toBeInTheDocument();
-    expect(screen.getAllByTestId(/^terminal-view-/)).toHaveLength(3);
+    // Every session stays mounted so its terminal state survives the toggle.
+    expect(screen.getAllByTitle("Drag to place this terminal")).toHaveLength(2);
+    expect(screen.queryByTestId("terminal-grid")).toBeNull();
+  });
+});
+
+describe("TerminalLayoutGrid — placement drag", () => {
+  const sessions = [
+    makeSession({ id: "a", name: "a" }),
+    makeSession({ id: "b", name: "b" }),
+    makeSession({ id: "c", name: "c" }),
+  ];
+  const tiles: TileLayout = [
+    { sessionId: "a", x: 0, y: 0, w: 6, h: 12 },
+    { sessionId: "b", x: 6, y: 0, w: 6, h: 6 },
+    { sessionId: "c", x: 6, y: 6, w: 6, h: 6 },
+  ];
+
+  function startDrag() {
+    const onPlace = vi.fn();
+    renderGrid({ sessions, tiles, onPlace });
+    const before = cellsByArea();
+    fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
+    const overlay = screen.getByTestId("terminal-placement-overlay");
+    vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 120,
+      height: 120,
+      right: 120,
+      bottom: 120,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    return { onPlace, overlay, before };
+  }
+
+  it("raises the overlay only while a drag is in flight", () => {
+    renderGrid({ sessions, tiles });
+    expect(screen.queryByTestId("terminal-placement-overlay")).toBeNull();
+
+    fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
+    expect(screen.getByTestId("terminal-placement-overlay")).toBeTruthy();
+
+    fireEvent.dragEnd(screen.getAllByTitle("Drag to place this terminal")[0]);
+    expect(screen.queryByTestId("terminal-placement-overlay")).toBeNull();
   });
 
-  it("plain drop still calls onSwap regardless of column", () => {
-    const { sessions, columnLayout } = threeSessionsSameColumnAB();
-    const onSwap = vi.fn();
-    const onMergeColumn = vi.fn();
-    const onJoinColumn = vi.fn();
-    renderGrid({ sessions, focusedId: "a", columnLayout, onSwap, onMergeColumn, onJoinColumn });
+  it("leaves every cell's grid-area untouched for the whole drag", () => {
+    const { overlay, before } = startDrag();
 
-    // a and b share a column — a plain drop still swaps, never merges/joins.
-    dragStart(screen.getAllByTitle("Drag to swap")[0]);
-    fireEvent.drop(screen.getByTestId("terminal-view-b"));
+    dragOverAt(overlay, 90, 30);
+    dragOverAt(overlay, 90, 90);
 
-    expect(onSwap).toHaveBeenCalledWith("a", "b");
-    expect(onMergeColumn).not.toHaveBeenCalled();
-    expect(onJoinColumn).not.toHaveBeenCalled();
+    // The regression that motivated the change: previewing must not re-flow the grid,
+    // because a cell moving under the cursor changes which one the drop lands on.
+    expect(cellsByArea()).toEqual(before);
   });
 
-  it("Ctrl+drop onto a same-column cell calls onMergeColumn", () => {
-    const { sessions, columnLayout } = threeSessionsSameColumnAB();
-    const onSwap = vi.fn();
-    const onMergeColumn = vi.fn();
-    const onJoinColumn = vi.fn();
-    renderGrid({ sessions, focusedId: "a", columnLayout, onSwap, onMergeColumn, onJoinColumn });
+  it("commits the painted layout on drop", () => {
+    const { overlay, onPlace } = startDrag();
 
-    dragStart(screen.getAllByTitle("Drag to swap")[0]);
-    dropCtrl(screen.getByTestId("terminal-view-b"), true);
+    dragOverAt(overlay, 90, 30);
+    fireEvent(overlay, new MouseEvent("drop", { bubbles: true, cancelable: true }));
 
-    expect(onMergeColumn).toHaveBeenCalledWith("a", "b");
-    expect(onJoinColumn).not.toHaveBeenCalled();
-    expect(onSwap).not.toHaveBeenCalled();
+    expect(onPlace).toHaveBeenCalledTimes(1);
+    const committed = onPlace.mock.calls[0][0] as TileLayout;
+    expect(committed.find((t) => t.sessionId === "a")).toMatchObject({ x: 6, y: 0 });
   });
 
-  it("Ctrl+drop onto a different-column cell calls onJoinColumn", () => {
-    const { sessions, columnLayout } = threeSessionsSameColumnAB();
-    const onSwap = vi.fn();
-    const onMergeColumn = vi.fn();
-    const onJoinColumn = vi.fn();
-    renderGrid({ sessions, focusedId: "a", columnLayout, onSwap, onMergeColumn, onJoinColumn });
+  it("commits nothing when the drag ends without a drop", () => {
+    const { onPlace, overlay } = startDrag();
 
-    // c is in a different column than a.
-    dragStart(screen.getAllByTitle("Drag to swap")[0]);
-    dropCtrl(screen.getByTestId("terminal-view-c"), true);
+    dragOverAt(overlay, 90, 30);
+    fireEvent.dragEnd(screen.getAllByTitle("Drag to place this terminal")[0]);
 
-    expect(onJoinColumn).toHaveBeenCalledWith("a", "c");
-    expect(onMergeColumn).not.toHaveBeenCalled();
-    expect(onSwap).not.toHaveBeenCalled();
+    expect(onPlace).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("terminal-placement-overlay")).toBeNull();
   });
 
-  it("Ctrl+drop onto a gutter calls onSplitColumn with its index", () => {
-    const { sessions, columnLayout } = threeSessionsSameColumnAB();
-    const onSplitColumn = vi.fn();
-    renderGrid({ sessions, focusedId: "a", columnLayout, onSplitColumn });
-
-    dragStart(screen.getAllByTitle("Drag to swap")[0]);
-    dropCtrl(screen.getByTestId("terminal-grid-gutter-1"), true);
-
-    expect(onSplitColumn).toHaveBeenCalledWith("a", 1);
-  });
-
-  it("gutter dragover sets dropEffect to move for cursor affordance", () => {
-    // Regression: the gutter's dragover handler used to skip setting
-    // dropEffect, unlike the cell path — no "drop here" cursor while
-    // hovering a gutter mid Ctrl-drag, even though the drop was accepted.
-    const { sessions, columnLayout } = threeSessionsSameColumnAB();
-    renderGrid({ sessions, focusedId: "a", columnLayout });
-
-    const dataTransfer = { effectAllowed: "", dropEffect: "" };
-    fireEvent.dragOver(screen.getByTestId("terminal-grid-gutter-1"), { dataTransfer });
-
-    expect(dataTransfer.dropEffect).toBe("move");
-  });
-
-  it("a non-Ctrl drop onto a gutter fires no callback", () => {
-    const { sessions, columnLayout } = threeSessionsSameColumnAB();
-    const onSplitColumn = vi.fn();
-    const onSwap = vi.fn();
-    renderGrid({ sessions, focusedId: "a", columnLayout, onSplitColumn, onSwap });
-
-    dragStart(screen.getAllByTitle("Drag to swap")[0]);
-    fireEvent.drop(screen.getByTestId("terminal-grid-gutter-1"));
-
-    expect(onSplitColumn).not.toHaveBeenCalled();
-    expect(onSwap).not.toHaveBeenCalled();
-  });
-
-  it("dragover with Ctrl held renders a live preview without calling any commit callback", () => {
-    const { sessions, columnLayout } = threeSessionsSameColumnAB();
-    const onMergeColumn = vi.fn();
-    const onJoinColumn = vi.fn();
-    const onSplitColumn = vi.fn();
-    renderGrid({
-      sessions,
-      focusedId: "a",
-      columnLayout,
-      onMergeColumn,
-      onJoinColumn,
-      onSplitColumn,
-    });
-
-    // Before drag: 2 columns, column 0 has both a and b.
-    expect(screen.queryByTestId("terminal-grid-column-2")).not.toBeInTheDocument();
-    expect(
-      within(screen.getByTestId("terminal-grid-column-0")).getAllByTestId(/^terminal-view-/),
-    ).toHaveLength(2);
-
-    dragStart(screen.getAllByTitle("Drag to swap")[0]);
-    dragOverCtrl(screen.getByTestId("terminal-view-b"), true);
-
-    // mergeInColumn(layout, "a", "b") collapses column 0 to a single (grown)
-    // slot and appends a new column holding the displaced "b" — rendered
-    // live, without committing anything.
-    expect(screen.getByTestId("terminal-grid-column-2")).toBeInTheDocument();
-    expect(
-      within(screen.getByTestId("terminal-grid-column-0")).getAllByTestId(/^terminal-view-/),
-    ).toHaveLength(1);
-    expect(
-      within(screen.getByTestId("terminal-grid-column-2")).getByTestId("terminal-view-b"),
-    ).toBeInTheDocument();
-
-    expect(onMergeColumn).not.toHaveBeenCalled();
-    expect(onJoinColumn).not.toHaveBeenCalled();
-    expect(onSplitColumn).not.toHaveBeenCalled();
-  });
-
-  it("ending the drag without a drop reverts the preview to the real columnLayout", () => {
-    const { sessions, columnLayout } = threeSessionsSameColumnAB();
-    renderGrid({ sessions, focusedId: "a", columnLayout });
-
-    const dragHandle = screen.getAllByTitle("Drag to swap")[0];
-    dragStart(dragHandle);
-    dragOverCtrl(screen.getByTestId("terminal-view-b"), true);
-
-    // Preview is live: 3 columns now.
-    expect(screen.getByTestId("terminal-grid-column-2")).toBeInTheDocument();
-
-    fireEvent.dragEnd(dragHandle);
-
-    // Reverted to the real (committed) columnLayout: back to 2 columns,
-    // column 0 has both a and b again.
-    expect(screen.queryByTestId("terminal-grid-column-2")).not.toBeInTheDocument();
-    expect(
-      within(screen.getByTestId("terminal-grid-column-0")).getAllByTestId(/^terminal-view-/),
-    ).toHaveLength(2);
-  });
-
-  it("Ctrl+drag works without throwing when onMergeColumn/onJoinColumn/onSplitColumn are omitted", () => {
-    const { sessions, columnLayout } = threeSessionsSameColumnAB();
-    renderGrid({ sessions, focusedId: "a", columnLayout });
-
-    expect(() => {
-      dragStart(screen.getAllByTitle("Drag to swap")[0]);
-      dragOverCtrl(screen.getByTestId("terminal-view-b"), true);
-      dropCtrl(screen.getByTestId("terminal-view-b"), true);
-
-      dragStart(screen.getAllByTitle("Drag to swap")[0]);
-      dragOverCtrl(screen.getByTestId("terminal-view-c"), true);
-      dropCtrl(screen.getByTestId("terminal-view-c"), true);
-
-      dragStart(screen.getAllByTitle("Drag to swap")[0]);
-      dropCtrl(screen.getByTestId("terminal-grid-gutter-1"), true);
-    }).not.toThrow();
+  it("works without throwing when onPlace is omitted", () => {
+    renderGrid({ sessions, tiles, onPlace: undefined });
+    fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
+    const overlay = screen.getByTestId("terminal-placement-overlay");
+    expect(() =>
+      fireEvent(overlay, new MouseEvent("drop", { bubbles: true, cancelable: true })),
+    ).not.toThrow();
   });
 });
 
@@ -557,7 +445,7 @@ describe("TerminalLayoutGrid — disconnected badge", () => {
     const session = makeSession({ id: "abc-123" });
     const { onFocus } = renderGrid({ sessions: [session], focusedId: null });
 
-    const header = screen.getAllByTitle("Drag to swap")[0];
+    const header = screen.getAllByTitle("Drag to place this terminal")[0];
     const badge = within(header).getByTestId("terminal-disconnected-abc-123");
     expect(badge).toBeInTheDocument();
 
@@ -574,7 +462,7 @@ describe("TerminalLayoutGrid — project colour", () => {
   // The cell header is tinted with the project's accent; it is the only
   // element in the cell that carries the colour, and it has no test id.
   const headerColor = (index: number) =>
-    (screen.getAllByTitle("Drag to swap")[index] as HTMLElement).style.background;
+    (screen.getAllByTitle("Drag to place this terminal")[index] as HTMLElement).style.background;
 
   it("all sessions of one project share its colour", async () => {
     renderGrid({
@@ -704,22 +592,17 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     expect(screen.getByText("claude-ch")).toBeInTheDocument();
   });
 
-  it("dragging the header still swaps cells", () => {
-    const onSwap = vi.fn();
-    const onRename = vi.fn();
-    renderGrid({ sessions: twoSessions(), focusedId: "a", onSwap, onRename });
+  it("dragging the header starts a placement drag", () => {
+    const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
+    renderGrid({ sessions, tiles: [] });
 
-    dragStart(screen.getAllByTitle("Drag to swap")[0]);
-    fireEvent.drop(screen.getByTestId("terminal-view-b"));
+    fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
 
-    expect(onSwap).toHaveBeenCalledWith("a", "b");
-    expect(onRename).not.toHaveBeenCalled();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByTestId("terminal-placement-overlay")).toBeTruthy();
   });
 
   it("selecting text in the rename input does not start a cell drag", () => {
-    const onSwap = vi.fn();
-    renderGrid({ sessions: twoSessions(), focusedId: "a", onSwap, onRename: vi.fn() });
+    renderGrid({ sessions: twoSessions(), focusedId: "a", onRename: vi.fn() });
 
     fireEvent.doubleClick(screen.getByText("claude-a"));
     const input = screen.getByRole("textbox");
@@ -727,8 +610,7 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     // The input lives inside a `draggable` header; without a stop, dragging
     // to select its text starts a cell drag instead.
     dragStart(input);
-    fireEvent.drop(screen.getByTestId("terminal-view-b"));
 
-    expect(onSwap).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("terminal-placement-overlay")).toBeNull();
   });
 });
