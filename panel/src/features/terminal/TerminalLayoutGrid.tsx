@@ -118,14 +118,8 @@ export function TerminalLayoutGrid({
       onToggleMaximize={onToggleMaximize}
       onReady={onReady}
       onRename={onRename}
-      onDragStart={() => {
-        console.log("[dnd] cell onDragStart ->", session.id);
-        overlayRef.current?.begin(session.id);
-      }}
-      onDragEnd={() => {
-        console.log("[dnd] cell onDragEnd");
-        overlayRef.current?.end();
-      }}
+      onDragStart={() => overlayRef.current?.begin(session.id)}
+      onDragEnd={() => overlayRef.current?.end()}
       style={{ height: "100%", ...style }}
     />
   );
@@ -166,12 +160,13 @@ export function TerminalLayoutGrid({
         onDragOver={(e) => {
           e.preventDefault();
           if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-          overlayRef.current?.over(e.clientX, e.clientY);
+          // Shift accumulates windows into one target; a plain drag always aims at the
+          // window under the pointer, so the route taken cannot eat the target.
+          overlayRef.current?.over(e.clientX, e.clientY, e.shiftKey);
         }}
         onDrop={(e) => {
           e.preventDefault();
           const next = overlayRef.current?.release() ?? null;
-          console.log("[dnd] wrapper drop -> ", next ? `${next.length} tiles` : "nothing");
           if (next) onPlace?.(next);
         }}
       >
@@ -308,11 +303,7 @@ function TerminalCell({
         style={{ background: headerBg, cursor: "grab" }}
         title="Drag to place this terminal"
         draggable
-        onMouseDown={(e) =>
-          console.log("[dnd] header mousedown", session.id, "button", e.button)
-        }
         onDragStart={(e) => {
-          console.log("[dnd] header dragstart", session.id, "dataTransfer?", !!e.dataTransfer);
           // jsdom's DragEvent constructor is missing, so tests dispatch drag events
           // without a dataTransfer — guard rather than assume it is present.
           if (e.dataTransfer) {

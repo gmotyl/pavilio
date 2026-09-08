@@ -76,15 +76,59 @@ describe("TerminalPlacementOverlay", () => {
     expect(regionOf("b")).toBe("6,3,6,9");
   });
 
-  it("paints the bounding box and both displacements when sweeping two tiles", () => {
+  it("aims only at the window under the pointer, whatever route it took", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(90, 30)); // over b
-    act(() => handle.current!.over(90, 90)); // and on into c
+    act(() => handle.current!.over(90, 30)); // across b …
+    act(() => handle.current!.over(90, 90)); // … and on to c
+
+    // The route must not eat the target: passing over b on the way to c used to make
+    // the region their bounding box, which is why swapping two far-apart windows was
+    // impossible.
+    expect(regionOf("a")).toBe("6,6,6,6");
+    // c takes the rectangle a vacated; b, merely passed over, is untouched.
+    expect(regionOf("c")).toBe("0,0,6,12");
+    expect(regionOf("b")).toBe("6,0,6,6");
+  });
+
+  it("merges the windows swept while the modifier is held", () => {
+    const { handle } = renderOverlay("a");
+
+    act(() => handle.current!.over(90, 30, true));
+    act(() => handle.current!.over(90, 90, true));
 
     expect(regionOf("a")).toBe("6,0,6,12");
     expect(regionOf("b")).toBe("0,0,6,6");
     expect(regionOf("c")).toBe("0,6,6,6");
+  });
+
+  it("draws the targets of the window under the pointer", () => {
+    const { handle } = renderOverlay("a");
+
+    act(() => handle.current!.over(90, 30));
+
+    // Five aim-able regions, the chosen one flagged — the affordance that was missing
+    // when the model only painted its result.
+    for (const side of ["centre", "left", "right", "top", "bottom"]) {
+      expect(screen.getByTestId(`placement-target-${side}`)).toBeTruthy();
+    }
+    expect(
+      screen.getByTestId("placement-target-centre").getAttribute("data-active"),
+    ).toBe("true");
+    expect(screen.getByTestId("placement-zone-grid")).toBeTruthy();
+  });
+
+  it("flags the edge band as the target when the pointer is near an edge", () => {
+    const { handle } = renderOverlay("c");
+
+    act(() => handle.current!.over(90, 1));
+
+    expect(
+      screen.getByTestId("placement-target-top").getAttribute("data-active"),
+    ).toBe("true");
+    expect(
+      screen.getByTestId("placement-target-centre").getAttribute("data-active"),
+    ).toBe("false");
   });
 
   it("returns the painted layout from release and disarms", () => {

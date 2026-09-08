@@ -39,47 +39,10 @@ export interface PlacementOverlayHandle {
   /** Arm the gesture from the cell's dragstart. Writes refs only — never renders. */
   begin: (sessionId: string) => void;
   /** Track the pointer and paint the layout the drop would commit. */
-  over: (clientX: number, clientY: number) => void;
+  over: (clientX: number, clientY: number, accumulate?: boolean) => void;
   /** Disarm and return the layout that was painted, if any. */
   release: () => TileLayout | null;
   end: () => void;
-}
-
-// TEMP instrumentation for the "drag never starts" report — remove before merge.
-// Logs every stage of the gesture so a failing browser can be diagnosed from a paste.
-const dbg = (...args: unknown[]) => console.log("[dnd]", ...args);
-
-let globalsAttached = false;
-function attachGlobalDragProbe() {
-  if (globalsAttached || typeof window === "undefined") return;
-  globalsAttached = true;
-  const describe = (t: EventTarget | null) => {
-    const el = t as HTMLElement | null;
-    if (!el || !el.getAttribute) return String(t);
-    return (
-      el.getAttribute("data-testid") ||
-      el.getAttribute("title") ||
-      `${el.tagName}.${String(el.className).slice(0, 24)}`
-    );
-  };
-  for (const type of ["mousedown", "dragstart", "dragend", "drop"]) {
-    document.addEventListener(
-      type,
-      (e) => dbg(`document:${type}`, describe(e.target), "defaultPrevented=", e.defaultPrevented),
-      true,
-    );
-  }
-  let overCount = 0;
-  document.addEventListener(
-    "dragover",
-    (e) => {
-      overCount += 1;
-      if (overCount <= 3 || overCount % 25 === 0)
-        dbg(`document:dragover #${overCount}`, describe(e.target));
-    },
-    true,
-  );
-  dbg("probe attached — drag a cell header and paste everything prefixed [dnd]");
 }
 
 /** Fraction of a tile, on each axis, that counts as its centre rather than a band. */
@@ -91,42 +54,93 @@ function tileAt(layout: TileLayout, zx: number, zy: number) {
   );
 }
 
+type TargetSide = "centre" | "left" | "right" | "top" | "bottom";
+
+export interface PlacementTarget {
+  side: TargetSide;
+  /** The zones the dragged session would take. */
+  region: Rect;
+  /** The zones the pointer must be in to choose it. */
+  hit: Rect;
+}
+
+// Splits a span at the boundary nearest its middle. `splitPoint` gives the SMALLER
+// part on an odd span; the dragged session takes the larger one.
+function bandParts(start: number, span: number) {
+  const cut = splitPoint(span);
+  return { near: span - cut, farStart: start + cut, farSpan: span - cut };
+}
+
 /**
- * The region a pointer inside `tile` targets: its centre asks for the whole tile (a
- * swap), each edge band for a split at the boundary nearest the middle, with the
- * dragged session taking the larger part. An axis with a single zone has no bands —
- * there is nothing to split — so its whole width counts as centre.
+ * Every target a tile offers: its centre asks for the whole tile (a swap), each edge
+ * band for a split at the boundary nearest the middle. An axis with a single zone has
+ * no bands — there is nothing to split — so its share goes to the centre.
+ *
+ * Hit areas are in zones so the overlay can *draw* them: aiming at an invisible
+ * boundary is the reason the first cut of this gesture was unusable.
  */
-function regionInTile(tile: Rect, fx: number, fy: number): Rect {
+export function targetsOf(tile: Rect): PlacementTarget[] {
   const splittableX = tile.w >= 2;
   const splittableY = tile.h >= 2;
+  // A quarter of the tile on each side, at least one zone wide so a narrow tile still
+  // offers something to aim at.
+  const bandW = splittableX ? Math.max(1, Math.round(tile.w * CENTRE_BAND)) : 0;
+  const bandH = splittableY ? Math.max(1, Math.round(tile.h * CENTRE_BAND)) : 0;
 
-  const distances: { side: "left" | "right" | "top" | "bottom"; d: number }[] = [];
-  if (splittableX && fx < CENTRE_BAND) distances.push({ side: "left", d: fx });
-  if (splittableX && fx > 1 - CENTRE_BAND) distances.push({ side: "right", d: 1 - fx });
-  if (splittableY && fy < CENTRE_BAND) distances.push({ side: "top", d: fy });
-  if (splittableY && fy > 1 - CENTRE_BAND) distances.push({ side: "bottom", d: 1 - fy });
+  const targets: PlacementTarget[] = [];
 
-  // A plain Rect, not a copy of the tile: the caller builds a new tile from it and a
-  // stray sessionId riding along would silently rename the placed session.
-  if (distances.length === 0) return { x: tile.x, y: tile.y, w: tile.w, h: tile.h };
-
-  const nearest = distances.sort((a, b) => a.d - b.d)[0].side;
-  // splitPoint gives the SMALLER part on an odd span; the dragged session takes the
-  // larger one, so the hovered side is sized by subtracting it.
-  const cutX = splitPoint(tile.w);
-  const cutY = splitPoint(tile.h);
-
-  switch (nearest) {
-    case "left":
-      return { x: tile.x, y: tile.y, w: tile.w - cutX, h: tile.h };
-    case "right":
-      return { x: tile.x + cutX, y: tile.y, w: tile.w - cutX, h: tile.h };
-    case "top":
-      return { x: tile.x, y: tile.y, w: tile.w, h: tile.h - cutY };
-    case "bottom":
-      return { x: tile.x, y: tile.y + cutY, w: tile.w, h: tile.h - cutY };
+  if (splittableX) {
+    const x = bandParts(tile.x, tile.w);
+    targets.push({
+      side: "left",
+      region: { x: tile.x, y: tile.y, w: x.near, h: tile.h },
+      hit: { x: tile.x, y: tile.y, w: bandW, h: tile.h },
+    });
+    targets.push({
+      side: "right",
+      region: { x: x.farStart, y: tile.y, w: x.farSpan, h: tile.h },
+      hit: { x: tile.x + tile.w - bandW, y: tile.y, w: bandW, h: tile.h },
+    });
   }
+  if (splittableY) {
+    const y = bandParts(tile.y, tile.h);
+    targets.push({
+      side: "top",
+      region: { x: tile.x, y: tile.y, w: tile.w, h: y.near },
+      hit: { x: tile.x, y: tile.y, w: tile.w, h: bandH },
+    });
+    targets.push({
+      side: "bottom",
+      region: { x: tile.x, y: y.farStart, w: tile.w, h: y.farSpan },
+      hit: { x: tile.x, y: tile.y + tile.h - bandH, w: tile.w, h: bandH },
+    });
+  }
+
+  targets.push({
+    side: "centre",
+    region: { x: tile.x, y: tile.y, w: tile.w, h: tile.h },
+    hit: {
+      x: tile.x + bandW,
+      y: tile.y + bandH,
+      w: Math.max(1, tile.w - bandW * 2),
+      h: Math.max(1, tile.h - bandH * 2),
+    },
+  });
+
+  return targets;
+}
+
+function inRect(rect: Rect, zx: number, zy: number): boolean {
+  return zx >= rect.x && zx < rect.x + rect.w && zy >= rect.y && zy < rect.y + rect.h;
+}
+
+/** The target whose hit area holds the pointer; the centre is the fallback. */
+export function targetAt(tile: Rect, zx: number, zy: number): PlacementTarget {
+  const targets = targetsOf(tile);
+  return (
+    targets.find((t) => t.side !== "centre" && inRect(t.hit, zx, zy)) ??
+    targets[targets.length - 1]
+  );
 }
 
 function boundingBox(tiles: Rect[]): Rect {
@@ -157,6 +171,10 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   // not schedule a render there.
   const sweptRef = useRef<string[]>([]);
   const [painted, setPainted] = useState<TileLayout | null>(null);
+  // What the pointer is currently aiming at, drawn so the target stops being invisible.
+  const [aiming, setAiming] = useState<{ tile: Rect; target: PlacementTarget } | null>(
+    null,
+  );
   // The drop reads the last painted layout from a ref: a drop event that lands in the
   // same tick as a dragover must still commit what was on screen, not a stale render.
   const paintedRef = useRef<TileLayout | null>(null);
@@ -169,12 +187,10 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     setPainted(next);
   }, []);
 
-  useEffect(attachGlobalDragProbe, []);
-
   const end = useCallback(() => {
-    dbg("end (was dragging:", draggedRef.current, ")");
     draggedRef.current = null;
     sweptRef.current = [];
+    setAiming(null);
     paint(null);
   }, [paint]);
 
@@ -190,18 +206,15 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   }, [end, onCancel]);
 
   const over = useCallback(
-    (clientX: number, clientY: number) => {
+    (clientX: number, clientY: number, accumulate = false) => {
       const draggedId = draggedRef.current;
       if (!draggedId) return;
 
       const box = ref.current?.getBoundingClientRect();
-      if (!box || box.width === 0 || box.height === 0) {
-        dbg("over ignored — overlay box", box && { w: box.width, h: box.height });
-        return;
-      }
+      if (!box || box.width === 0 || box.height === 0) return;
 
-      // Fractional zone coordinates, so the tile lookup and the band test read off the
-      // same measurement.
+      // Fractional zone coordinates, so the tile lookup and the target test read off
+      // the same measurement.
       const zoneX = ((clientX - box.left) / box.width) * GRID;
       const zoneY = ((clientY - box.top) / box.height) * GRID;
       const zx = Math.min(GRID - 1, Math.floor(zoneX));
@@ -209,25 +222,25 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
       if (zx < 0 || zy < 0) return;
 
       const hovered = tileAt(layoutRef.current, zx, zy);
-      dbg("over zone", zx, zy, "hovered", hovered?.sessionId ?? null, "dragged", draggedId);
       // Passing back over the dragged terminal changes nothing — it keeps the target the
-      // sweep has built up rather than resetting it mid-gesture.
+      // gesture has built up rather than resetting it mid-move.
       if (!hovered || hovered.sessionId === draggedId) return;
 
       const swept = sweptRef.current;
-      const alreadySwept = swept.includes(hovered.sessionId);
-      const nextSwept =
-        swept.length === 0 || (swept.length === 1 && alreadySwept)
-          ? [hovered.sessionId]
-          : alreadySwept
-            ? swept
-            : [...swept, hovered.sessionId];
+      // Tiles merge only while the modifier is held. Accumulating every tile the pointer
+      // *travelled over* made the commonest gesture — swapping two far-apart windows —
+      // impossible: the route ate the target.
+      const nextSwept = accumulate
+        ? swept.includes(hovered.sessionId)
+          ? swept
+          : [...swept, hovered.sessionId]
+        : [hovered.sessionId];
 
       let region: Rect;
+      let aim: PlacementTarget | null = null;
       if (nextSwept.length === 1) {
-        const fx = (zoneX - hovered.x) / hovered.w;
-        const fy = (zoneY - hovered.y) / hovered.h;
-        region = regionInTile(hovered, clamp01(fx), clamp01(fy));
+        aim = targetAt(hovered, zx, zy);
+        region = aim.region;
       } else {
         region = boundingBox(
           layoutRef.current.filter((t) => nextSwept.includes(t.sessionId)),
@@ -235,16 +248,14 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
       }
 
       sweptRef.current = nextSwept;
-      const next = placeRegion(layoutRef.current, draggedId, region);
-      dbg("region", region, "->", next ? `${next.length} tiles` : "REFUSED (null)");
-      paint(next);
+      setAiming(aim ? { tile: hovered, target: aim } : null);
+      paint(placeRegion(layoutRef.current, draggedId, region));
     },
     [paint],
   );
 
   const release = useCallback((): TileLayout | null => {
     const next = paintedRef.current;
-    dbg("release — dragging:", draggedRef.current, "painted:", !!next);
     if (!draggedRef.current) return null;
     end();
     return next;
@@ -254,7 +265,6 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     handleRef,
     () => ({
       begin: (sessionId: string) => {
-        dbg("begin", sessionId);
         draggedRef.current = sessionId;
         sweptRef.current = [];
         paintedRef.current = null;
@@ -268,6 +278,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
 
   const preview = painted ?? [];
   const draggedId = draggedRef.current;
+  const dragging = preview.length > 0 || aiming !== null;
 
   return (
     <div
@@ -277,6 +288,16 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
       // Never hittable: the grid below owns the drag events and forwards coordinates.
       style={{ pointerEvents: "none" }}
     >
+      {dragging && (
+        <div
+          data-testid="placement-zone-grid"
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.10) 0 1px, transparent 1px ${100 / GRID}%), repeating-linear-gradient(to bottom, rgba(255,255,255,0.10) 0 1px, transparent 1px ${100 / GRID}%)`,
+          }}
+        />
+      )}
+
       {readingOrder(preview).map((tile) => {
         const dragged = tile.sessionId === draggedId;
         return (
@@ -284,16 +305,14 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
             key={tile.sessionId}
             data-testid={`placement-preview-${tile.sessionId}`}
             data-region={`${tile.x},${tile.y},${tile.w},${tile.h}`}
-            className="absolute flex items-center justify-center rounded-md pointer-events-none"
+            className="absolute flex items-center justify-center rounded-md"
             style={{
               left: pct(tile.x),
               top: pct(tile.y),
               width: pct(tile.w),
               height: pct(tile.h),
               padding: "2px",
-              background: dragged
-                ? "rgba(97,175,239,0.28)"
-                : "rgba(20,22,28,0.55)",
+              background: dragged ? "rgba(97,175,239,0.28)" : "rgba(20,22,28,0.55)",
               outline: dragged
                 ? "2px solid rgba(97,175,239,0.9)"
                 : "1px solid rgba(255,255,255,0.25)",
@@ -310,12 +329,43 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
           </div>
         );
       })}
+
+      {/* The targets on the window under the pointer, drawn so aiming is possible at
+          all: the five hit areas outlined, the chosen one filled. */}
+      {aiming &&
+        targetsOf(aiming.tile).map((t) => {
+          const active = t.side === aiming.target.side;
+          return (
+            <div
+              key={t.side}
+              data-testid={`placement-target-${t.side}`}
+              data-active={active ? "true" : "false"}
+              className="absolute rounded-sm"
+              style={{
+                left: pct(t.hit.x),
+                top: pct(t.hit.y),
+                width: pct(t.hit.w),
+                height: pct(t.hit.h),
+                background: active ? "rgba(97,175,239,0.30)" : "transparent",
+                outline: active
+                  ? "1.5px solid rgba(97,175,239,0.95)"
+                  : "1px dashed rgba(255,255,255,0.30)",
+                outlineOffset: "-1px",
+              }}
+            >
+              {active && (
+                <span
+                  className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-widest"
+                  style={{ color: "#cfe6ff" }}
+                >
+                  {t.side === "centre" ? "swap" : "split"}
+                </span>
+              )}
+            </div>
+          );
+        })}
     </div>
   );
 });
-
-function clamp01(value: number): number {
-  return Math.min(0.999, Math.max(0, value));
-}
 
 export default TerminalPlacementOverlay;
