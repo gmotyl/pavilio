@@ -1,6 +1,10 @@
+import { createRef } from "react";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { TerminalPlacementOverlay } from "../TerminalPlacementOverlay";
+import { act, render, screen, fireEvent } from "@testing-library/react";
+import {
+  TerminalPlacementOverlay,
+  type PlacementOverlayHandle,
+} from "../TerminalPlacementOverlay";
 import { isValidLayout, type TileLayout } from "../tileLayout";
 
 // a on the left, b over c on the right — the shape from the bug report.
@@ -14,18 +18,20 @@ const layout: TileLayout = [
 // of 65,30 is zone 6.5,3 — the middle of b.
 const BOX = { left: 0, top: 0, width: 120, height: 120 };
 
-function renderOverlay(draggedId = "a") {
+function renderOverlay(draggedId = "a", begin = true) {
   const onCommit = vi.fn();
   const onCancel = vi.fn();
+  const handle = createRef<PlacementOverlayHandle>();
   render(
     <TerminalPlacementOverlay
+      ref={handle}
       layout={layout}
-      draggedId={draggedId}
       onCommit={onCommit}
       onCancel={onCancel}
     />,
   );
   const overlay = screen.getByTestId("terminal-placement-overlay");
+  if (begin) act(() => handle.current!.begin(draggedId));
   vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
     ...BOX,
     right: BOX.width,
@@ -34,7 +40,7 @@ function renderOverlay(draggedId = "a") {
     y: 0,
     toJSON: () => ({}),
   } as DOMRect);
-  return { overlay, onCommit, onCancel };
+  return { overlay, onCommit, onCancel, handle };
 }
 
 // jsdom has no DragEvent constructor, so Testing Library's dragOver helper drops
@@ -55,6 +61,26 @@ const regionOf = (sessionId: string) =>
   screen.getByTestId(`placement-preview-${sessionId}`).getAttribute("data-region");
 
 describe("TerminalPlacementOverlay", () => {
+  it("stays mounted and inert until a drag begins", () => {
+    const { overlay } = renderOverlay("a", false);
+
+    // Mounted from the start so that dragstart triggers no React render — a render
+    // inside the browser's dragstart dispatch makes Chrome abandon the drag.
+    expect(overlay).toBeTruthy();
+    expect(overlay.style.pointerEvents).toBe("none");
+
+    dragOverAt(overlay, 90, 30);
+    expect(screen.queryByTestId("placement-preview-a")).toBeNull();
+  });
+
+  it("takes pointer events only while a drag is in flight", () => {
+    const { overlay, handle } = renderOverlay("a");
+    expect(overlay.style.pointerEvents).toBe("auto");
+
+    act(() => handle.current!.end());
+    expect(overlay.style.pointerEvents).toBe("none");
+  });
+
   it("paints a swap for a centre target", () => {
     const { overlay } = renderOverlay("a");
 
@@ -131,15 +157,17 @@ describe("TerminalPlacementOverlay", () => {
       { sessionId: "a", x: 0, y: 0, w: 6, h: 12 },
       { sessionId: "b", x: 6, y: 0, w: 6, h: 12 },
     ];
+    const handle = createRef<PlacementOverlayHandle>();
     render(
       <TerminalPlacementOverlay
+        ref={handle}
         layout={pair}
-        draggedId="a"
         onCommit={onCommit}
         onCancel={vi.fn()}
       />,
     );
     const overlay = screen.getByTestId("terminal-placement-overlay");
+    act(() => handle.current!.begin("a"));
     vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
       ...BOX,
       right: 120,
@@ -167,16 +195,18 @@ describe("TerminalPlacementOverlay", () => {
   });
 
   it("labels painted tiles with the session name when one is provided", () => {
+    const handle = createRef<PlacementOverlayHandle>();
     render(
       <TerminalPlacementOverlay
+        ref={handle}
         layout={layout}
-        draggedId="a"
         nameOf={(id) => `session-${id}`}
         onCommit={vi.fn()}
         onCancel={vi.fn()}
       />,
     );
     const overlay = screen.getAllByTestId("terminal-placement-overlay")[0];
+    act(() => handle.current!.begin("a"));
     vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
       ...BOX,
       right: 120,

@@ -9,7 +9,10 @@ import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ProjectColorPicker } from "./ProjectColorPicker";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
-import { TerminalPlacementOverlay } from "./TerminalPlacementOverlay";
+import {
+  TerminalPlacementOverlay,
+  type PlacementOverlayHandle,
+} from "./TerminalPlacementOverlay";
 import { GRID, expandPreset, getLayoutPresets, type TileLayout } from "./tileLayout";
 
 interface Props {
@@ -42,7 +45,9 @@ export function TerminalLayoutGrid({
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia("(max-width: 767px)").matches,
   );
-  const [draggedId, setDraggedId] = useState<string | null>(null);
+  // Imperative, not state: a re-render inside the browser's dragstart dispatch makes
+  // Chrome abandon the drag before it starts. See PlacementOverlayHandle.
+  const overlayRef = useRef<PlacementOverlayHandle | null>(null);
   const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
   const pendingSession = sessions.find((s) => s.id === pendingCloseId);
 
@@ -113,8 +118,8 @@ export function TerminalLayoutGrid({
       onToggleMaximize={onToggleMaximize}
       onReady={onReady}
       onRename={onRename}
-      onDragStart={() => setDraggedId(session.id)}
-      onDragEnd={() => setDraggedId(null)}
+      onDragStart={() => overlayRef.current?.begin(session.id)}
+      onDragEnd={() => overlayRef.current?.end()}
       style={{ height: "100%", ...style }}
     />
   );
@@ -169,18 +174,14 @@ export function TerminalLayoutGrid({
             });
           })}
         </div>
-        {draggedId && (
-          <TerminalPlacementOverlay
-            layout={resolvedTiles}
-            draggedId={draggedId}
-            nameOf={(id) => sessionById.get(id)?.name ?? id}
-            onCommit={(next) => {
-              setDraggedId(null);
-              onPlace?.(next);
-            }}
-            onCancel={() => setDraggedId(null)}
-          />
-        )}
+        {/* Always mounted, inert until a drag begins — see PlacementOverlayHandle. */}
+        <TerminalPlacementOverlay
+          ref={overlayRef}
+          layout={resolvedTiles}
+          nameOf={(id) => sessionById.get(id)?.name ?? id}
+          onCommit={(next) => onPlace?.(next)}
+          onCancel={() => {}}
+        />
       </div>
     );
   }
@@ -290,7 +291,11 @@ function TerminalCell({
         onDragStart={(e) => {
           // jsdom's DragEvent constructor is missing, so tests dispatch drag events
           // without a dataTransfer — guard rather than assume it is present.
-          if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            // Firefox refuses to start a drag with an empty payload.
+            e.dataTransfer.setData("text/plain", session.id);
+          }
           onDragStart();
         }}
       >

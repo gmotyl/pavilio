@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import {
   GRID,
   placeRegion,
@@ -11,11 +18,22 @@ import {
 interface Props {
   /** The layout as it stands — frozen for the whole drag. */
   layout: TileLayout;
-  draggedId: string;
   /** Display name per session id, for labelling the painted result. */
   nameOf?: (sessionId: string) => string;
   onCommit: (next: TileLayout) => void;
   onCancel: () => void;
+}
+
+/**
+ * Activation is imperative on purpose. The overlay stays mounted and inert, and a
+ * `dragstart` handler calls `begin()` — which flips one inline style and writes a ref,
+ * with **no React state update**. A state update there re-renders the tree inside the
+ * browser's own dragstart dispatch, and Chrome abandons a drag whose source subtree is
+ * rebuilt underneath it: the drag never starts and nothing is ever shown.
+ */
+export interface PlacementOverlayHandle {
+  begin: (sessionId: string) => void;
+  end: () => void;
 }
 
 /** Fraction of a tile, on each axis, that counts as its centre rather than a band. */
@@ -85,14 +103,10 @@ const pct = (zones: number) => `${(zones / GRID) * 100}%`;
  * the drop committed something other than what was on screen. Here the preview is
  * painted on the overlay and handed to the drop verbatim.
  */
-export function TerminalPlacementOverlay({
-  layout,
-  draggedId,
-  nameOf,
-  onCommit,
-  onCancel,
-}: Props) {
+export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props>(
+  function TerminalPlacementOverlay({ layout, nameOf, onCommit, onCancel }, handleRef) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const draggedRef = useRef<string | null>(null);
   const [swept, setSwept] = useState<string[]>([]);
   const [painted, setPainted] = useState<TileLayout | null>(null);
   // The drop reads the last painted layout from a ref: a drop event that lands in the
@@ -104,18 +118,46 @@ export function TerminalPlacementOverlay({
     setPainted(next);
   }, []);
 
+  const setActive = useCallback((active: boolean) => {
+    const el = ref.current;
+    if (el) el.style.pointerEvents = active ? "auto" : "none";
+  }, []);
+
+  const end = useCallback(() => {
+    draggedRef.current = null;
+    setActive(false);
+    setSwept([]);
+    paint(null);
+  }, [paint, setActive]);
+
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      begin: (sessionId: string) => {
+        draggedRef.current = sessionId;
+        setSwept([]);
+        paintedRef.current = null;
+        setActive(true);
+      },
+      end,
+    }),
+    [end, setActive],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        paint(null);
+      if (e.key === "Escape" && draggedRef.current) {
+        end();
         onCancel();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel, paint]);
+  }, [end, onCancel]);
 
   const handleDragOver = (e: React.DragEvent) => {
+    const draggedId = draggedRef.current;
+    if (!draggedId) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
 
@@ -158,20 +200,25 @@ export function TerminalPlacementOverlay({
   };
 
   const handleDrop = (e: React.DragEvent) => {
+    if (!draggedRef.current) return;
     e.preventDefault();
     const next = paintedRef.current;
-    paint(null);
+    end();
     if (next) onCommit(next);
     else onCancel();
   };
 
   const preview = painted ?? [];
+  const draggedId = draggedRef.current;
 
   return (
     <div
       ref={ref}
       data-testid="terminal-placement-overlay"
       className="absolute inset-0 z-20"
+      // Inert until `begin()` flips this: an always-mounted overlay means dragstart
+      // triggers no mount, and an idle one must not swallow clicks on the cells.
+      style={{ pointerEvents: "none" }}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onDragLeave={() => paint(null)}
@@ -211,7 +258,7 @@ export function TerminalPlacementOverlay({
       })}
     </div>
   );
-}
+});
 
 function clamp01(value: number): number {
   return Math.min(0.999, Math.max(0, value));

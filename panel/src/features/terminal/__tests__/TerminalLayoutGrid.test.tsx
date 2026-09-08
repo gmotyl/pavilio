@@ -386,15 +386,31 @@ describe("TerminalLayoutGrid — placement drag", () => {
     return { onPlace, overlay, before };
   }
 
-  it("raises the overlay only while a drag is in flight", () => {
+  it("keeps the overlay mounted and only arms it for the drag", () => {
     renderGrid({ sessions, tiles });
-    expect(screen.queryByTestId("terminal-placement-overlay")).toBeNull();
+    const overlay = screen.getByTestId("terminal-placement-overlay");
+
+    // Mounted from the first render on purpose: mounting it *during* dragstart means a
+    // React render inside the browser's own dispatch, and Chrome then abandons the drag
+    // before it starts — the "I drag and see nothing" report.
+    expect(overlay.style.pointerEvents).toBe("none");
 
     fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
-    expect(screen.getByTestId("terminal-placement-overlay")).toBeTruthy();
+    expect(overlay.style.pointerEvents).toBe("auto");
 
     fireEvent.dragEnd(screen.getAllByTitle("Drag to place this terminal")[0]);
-    expect(screen.queryByTestId("terminal-placement-overlay")).toBeNull();
+    expect(overlay.style.pointerEvents).toBe("none");
+  });
+
+  it("does not re-render the cells when a drag starts", () => {
+    renderGrid({ sessions, tiles });
+    const before = screen.getAllByTitle("Drag to place this terminal")[0];
+
+    fireEvent.dragStart(before);
+
+    // The very same DOM node must survive dragstart: Chrome cancels a drag whose
+    // source subtree is rebuilt underneath it.
+    expect(screen.getAllByTitle("Drag to place this terminal")[0]).toBe(before);
   });
 
   it("leaves every cell's grid-area untouched for the whole drag", () => {
@@ -426,7 +442,9 @@ describe("TerminalLayoutGrid — placement drag", () => {
     fireEvent.dragEnd(screen.getAllByTitle("Drag to place this terminal")[0]);
 
     expect(onPlace).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("terminal-placement-overlay")).toBeNull();
+    expect(screen.getByTestId("terminal-placement-overlay").style.pointerEvents).toBe(
+      "none",
+    );
   });
 
   it("works without throwing when onPlace is omitted", () => {
@@ -598,7 +616,9 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
 
     fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
 
-    expect(screen.getByTestId("terminal-placement-overlay")).toBeTruthy();
+    expect(screen.getByTestId("terminal-placement-overlay").style.pointerEvents).toBe(
+      "auto",
+    );
   });
 
   it("selecting text in the rename input does not start a cell drag", () => {
@@ -611,6 +631,8 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     // to select its text starts a cell drag instead.
     dragStart(input);
 
-    expect(screen.queryByTestId("terminal-placement-overlay")).toBeNull();
+    expect(screen.getByTestId("terminal-placement-overlay").style.pointerEvents).toBe(
+      "none",
+    );
   });
 });
