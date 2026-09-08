@@ -157,6 +157,20 @@ describe("TerminalPlacementOverlay", () => {
     expect(regionOf("b")).toBe("6,3,6,9");
   });
 
+  it("clears the aim when the pointer has nothing to target", () => {
+    const { handle } = renderOverlay("a");
+
+    act(() => handle.current!.over(90, 30, "swap"));
+    expect(screen.queryByTestId("placement-target-centre")).not.toBeNull();
+
+    // Back over the dragged window itself: the previous window's targets must go, not
+    // linger on screen as a stale aim.
+    act(() => handle.current!.over(10, 30, "swap"));
+
+    expect(screen.queryByTestId("placement-target-centre")).toBeNull();
+    expect(screen.queryByTestId("placement-preview-a")).toBeNull();
+  });
+
   it("shows a legend of the modifiers, flagging the live one", () => {
     const { handle } = renderOverlay("a");
 

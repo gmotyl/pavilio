@@ -177,6 +177,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     tile: Rect;
     target: PlacementTarget;
     mode: PlacementMode;
+    refused: boolean;
   } | null>(null);
   // The area being painted by the default (grow) gesture, drawn as the aim.
   const [region, setRegion] = useState<Rect | null>(null);
@@ -236,16 +237,26 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
 
       if (mode !== "grow") {
         const hovered = tileAt(layout, zx, zy);
-        if (!hovered || hovered.sessionId === draggedId) return;
+        if (!hovered || hovered.sessionId === draggedId) {
+          // Clear the aim rather than leaving the previous window's targets drawn: the
+          // 4px gutters and the dragged window itself are both "nothing to aim at".
+          setAiming(null);
+          paint(null);
+          return;
+        }
         // Ctrl is the plain exchange the grid has always had — the whole window under the
         // pointer, with no edge bands to aim past. Shift additionally offers its halves.
         const aim: PlacementTarget =
           mode === "swap"
             ? { side: "centre", region: { ...hovered }, hit: { ...hovered } }
             : targetAt(hovered, zx, zy);
+        const next = placeRegion(layout, draggedId, aim.region);
         setRegion(null);
-        setAiming({ tile: hovered, target: aim, mode });
-        paint(placeRegion(layout, draggedId, aim.region));
+        // A target the tiling cannot honour is drawn refused, the same as an
+        // impossible grow region — a gesture that quietly does nothing is worse than
+        // one that says no.
+        setAiming({ tile: hovered, target: aim, mode, refused: next === null });
+        paint(next);
         return;
       }
 
@@ -415,6 +426,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
       {aiming &&
         (aiming.mode === "swap" ? [aiming.target] : targetsOf(aiming.tile)).map((t) => {
           const active = t.side === aiming.target.side;
+          const refused = active && aiming.refused;
           return (
             <div
               key={t.side}
@@ -426,19 +438,25 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
                 top: pct(t.hit.y),
                 width: pct(t.hit.w),
                 height: pct(t.hit.h),
-                background: active ? "rgba(97,175,239,0.30)" : "transparent",
-                outline: active
-                  ? "1.5px solid rgba(97,175,239,0.95)"
-                  : "1px dashed rgba(255,255,255,0.30)",
+                background: refused
+                  ? "rgba(239,97,97,0.16)"
+                  : active
+                    ? "rgba(97,175,239,0.30)"
+                    : "transparent",
+                outline: refused
+                  ? "2px dashed rgba(239,97,97,0.9)"
+                  : active
+                    ? "1.5px solid rgba(97,175,239,0.95)"
+                    : "1px dashed rgba(255,255,255,0.30)",
                 outlineOffset: "-1px",
               }}
             >
               {active && (
                 <span
                   className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-widest"
-                  style={{ color: "#cfe6ff" }}
+                  style={{ color: refused ? "#ffd0d0" : "#cfe6ff" }}
                 >
-                  {t.side === "centre" ? "swap" : "split"}
+                  {refused ? "no room" : t.side === "centre" ? "swap" : "split"}
                 </span>
               )}
             </div>
