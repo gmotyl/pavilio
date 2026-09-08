@@ -160,8 +160,8 @@ export function TerminalLayoutGrid({
         onDragOver={(e) => {
           e.preventDefault();
           if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-          // Shift accumulates windows into one target; a plain drag always aims at the
-          // window under the pointer, so the route taken cannot eat the target.
+          // Plain drag paints an area anchored on the dragged window (grow/shrink);
+          // Shift falls back to the target model (swap with, or split, one neighbour).
           overlayRef.current?.over(e.clientX, e.clientY, e.shiftKey);
         }}
         onDrop={(e) => {

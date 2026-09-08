@@ -528,3 +528,99 @@ export function placeRegion(
   if (!next || !isValidLayout(next)) return null;
   return readingOrder(next);
 }
+
+// The four rectangles left over when `region` is carved out of the grid: the full-width
+// strips above and below it, and the side strips beside it. Empty ones are dropped.
+function complementOf(region: Rect): Rect[] {
+  const right = region.x + region.w;
+  const bottom = region.y + region.h;
+  return [
+    { x: 0, y: 0, w: GRID, h: region.y },
+    { x: 0, y: region.y, w: region.x, h: region.h },
+    { x: right, y: region.y, w: GRID - right, h: region.h },
+    { x: 0, y: bottom, w: GRID, h: GRID - bottom },
+  ].filter((r) => r.w > 0 && r.h > 0);
+}
+
+const area = (r: Rect) => r.w * r.h;
+
+/**
+ * Grows (or moves) `sessionId` to exactly `region` and re-tiles everyone else into what
+ * is left. Unlike `placeRegion`, the region may swallow the dragged session's own tile
+ * and cut through any number of others — which is the whole point: "this window takes
+ * that area, the rest fit around it" is the only way to make a window BIGGER, and the
+ * target model could only ever hand a window a slice of one neighbour.
+ *
+ * The leftover is at most four rectangles, so the remaining sessions are spread across
+ * them by area (each rectangle sliced into strips along its longer axis) and any
+ * rectangle that ends up with nobody is absorbed by a neighbour. Null when the leftover
+ * cannot hold everyone — the overlay then paints nothing.
+ */
+export function growRegion(
+  layout: TileLayout,
+  sessionId: string,
+  region: Rect,
+): TileLayout | null {
+  if (!layout.some((t) => t.sessionId === sessionId)) return null;
+  if (region.w < 1 || region.h < 1) return null;
+  if (region.x < 0 || region.y < 0) return null;
+  if (region.x + region.w > GRID || region.y + region.h > GRID) return null;
+
+  const others = readingOrder(layout.filter((t) => t.sessionId !== sessionId));
+  const grown: Tile = { ...region, sessionId };
+  if (others.length === 0) {
+    return area(region) === GRID * GRID ? [grown] : null;
+  }
+
+  const rects = complementOf(region);
+  if (rects.reduce((n, r) => n + area(r), 0) < others.length) return null;
+
+  // Greedy proportional fill: each session goes to whichever leftover rectangle has the
+  // most room per session already assigned to it, so the biggest gaps take the most
+  // windows and nobody lands in a rectangle too small to hold them.
+  const load = rects.map(() => 0);
+  for (let i = 0; i < others.length; i++) {
+    let best = -1;
+    let bestRoom = -1;
+    rects.forEach((r, idx) => {
+      const capacity = Math.max(r.w, r.h);
+      if (load[idx] >= capacity) return;
+      const room = area(r) / (load[idx] + 1);
+      if (room > bestRoom) {
+        bestRoom = room;
+        best = idx;
+      }
+    });
+    if (best < 0) return null;
+    load[best]++;
+  }
+
+  let next: TileLayout = [grown];
+  const spare: Rect[] = [];
+  let taken = 0;
+
+  rects.forEach((rect, idx) => {
+    if (load[idx] === 0) {
+      spare.push(rect);
+      return;
+    }
+    const strips = sliceInto(rect, load[idx]);
+    if (!strips) {
+      spare.push(rect);
+      return;
+    }
+    for (const strip of strips) {
+      next.push({ ...strip, sessionId: others[taken++].sessionId });
+    }
+  });
+
+  if (taken < others.length) return null;
+
+  for (const rect of spare) {
+    const absorbed = absorbRect(next, rect);
+    if (!absorbed) return null;
+    next = absorbed;
+  }
+
+  return isValidLayout(next) ? readingOrder(next) : null;
+}

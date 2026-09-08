@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   GRID,
+  growRegion,
   placeRegion,
   readingOrder,
   splitPoint,
@@ -39,7 +40,7 @@ export interface PlacementOverlayHandle {
   /** Arm the gesture from the cell's dragstart. Writes refs only — never renders. */
   begin: (sessionId: string) => void;
   /** Track the pointer and paint the layout the drop would commit. */
-  over: (clientX: number, clientY: number, accumulate?: boolean) => void;
+  over: (clientX: number, clientY: number, swap?: boolean) => void;
   /** Disarm and return the layout that was painted, if any. */
   release: () => TileLayout | null;
   end: () => void;
@@ -143,14 +144,6 @@ export function targetAt(tile: Rect, zx: number, zy: number): PlacementTarget {
   );
 }
 
-function boundingBox(tiles: Rect[]): Rect {
-  const x = Math.min(...tiles.map((t) => t.x));
-  const y = Math.min(...tiles.map((t) => t.y));
-  const right = Math.max(...tiles.map((t) => t.x + t.w));
-  const bottom = Math.max(...tiles.map((t) => t.y + t.h));
-  return { x, y, w: right - x, h: bottom - y };
-}
-
 const pct = (zones: number) => `${(zones / GRID) * 100}%`;
 
 /**
@@ -175,6 +168,8 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   const [aiming, setAiming] = useState<{ tile: Rect; target: PlacementTarget } | null>(
     null,
   );
+  // The area being painted by the default (grow) gesture, drawn as the aim.
+  const [region, setRegion] = useState<Rect | null>(null);
   // The drop reads the last painted layout from a ref: a drop event that lands in the
   // same tick as a dragover must still commit what was on screen, not a stale render.
   const paintedRef = useRef<TileLayout | null>(null);
@@ -191,6 +186,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     draggedRef.current = null;
     sweptRef.current = [];
     setAiming(null);
+    setRegion(null);
     paint(null);
   }, [paint]);
 
@@ -206,7 +202,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   }, [end, onCancel]);
 
   const over = useCallback(
-    (clientX: number, clientY: number, accumulate = false) => {
+    (clientX: number, clientY: number, swap = false) => {
       const draggedId = draggedRef.current;
       if (!draggedId) return;
 
@@ -217,39 +213,39 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
       // the same measurement.
       const zoneX = ((clientX - box.left) / box.width) * GRID;
       const zoneY = ((clientY - box.top) / box.height) * GRID;
-      const zx = Math.min(GRID - 1, Math.floor(zoneX));
-      const zy = Math.min(GRID - 1, Math.floor(zoneY));
-      if (zx < 0 || zy < 0) return;
+      const zx = Math.min(GRID - 1, Math.max(0, Math.floor(zoneX)));
+      const zy = Math.min(GRID - 1, Math.max(0, Math.floor(zoneY)));
 
-      const hovered = tileAt(layoutRef.current, zx, zy);
-      // Passing back over the dragged terminal changes nothing — it keeps the target the
-      // gesture has built up rather than resetting it mid-move.
-      if (!hovered || hovered.sessionId === draggedId) return;
+      const layout = layoutRef.current;
+      const self = layout.find((t) => t.sessionId === draggedId);
+      if (!self) return;
 
-      const swept = sweptRef.current;
-      // Tiles merge only while the modifier is held. Accumulating every tile the pointer
-      // *travelled over* made the commonest gesture — swapping two far-apart windows —
-      // impossible: the route ate the target.
-      const nextSwept = accumulate
-        ? swept.includes(hovered.sessionId)
-          ? swept
-          : [...swept, hovered.sessionId]
-        : [hovered.sessionId];
-
-      let region: Rect;
-      let aim: PlacementTarget | null = null;
-      if (nextSwept.length === 1) {
-        aim = targetAt(hovered, zx, zy);
-        region = aim.region;
-      } else {
-        region = boundingBox(
-          layoutRef.current.filter((t) => nextSwept.includes(t.sessionId)),
-        );
+      if (swap) {
+        // The old target model, kept behind the modifier: exchange with the window under
+        // the pointer, or take one half of it.
+        const hovered = tileAt(layout, zx, zy);
+        if (!hovered || hovered.sessionId === draggedId) return;
+        const aim = targetAt(hovered, zx, zy);
+        setRegion(null);
+        setAiming({ tile: hovered, target: aim });
+        paint(placeRegion(layout, draggedId, aim.region));
+        return;
       }
 
-      sweptRef.current = nextSwept;
-      setAiming(aim ? { tile: hovered, target: aim } : null);
-      paint(placeRegion(layoutRef.current, draggedId, region));
+      // The default gesture: paint an area anchored on the dragged window itself and
+      // stretched to the pointer. Sweeping a 3x3's top-left window across to the right
+      // edge asks for the whole top band — the case neither target-only prototype could
+      // express, because every target it offered was a slice of somebody else.
+      const region: Rect = {
+        x: Math.min(self.x, zx),
+        y: Math.min(self.y, zy),
+        w: Math.abs(Math.max(self.x + self.w - 1, zx) - Math.min(self.x, zx)) + 1,
+        h: Math.abs(Math.max(self.y + self.h - 1, zy) - Math.min(self.y, zy)) + 1,
+      };
+
+      setAiming(null);
+      setRegion(region);
+      paint(growRegion(layout, draggedId, region));
     },
     [paint],
   );
@@ -278,7 +274,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
 
   const preview = painted ?? [];
   const draggedId = draggedRef.current;
-  const dragging = preview.length > 0 || aiming !== null;
+  const dragging = preview.length > 0 || aiming !== null || region !== null;
 
   return (
     <div
@@ -329,6 +325,26 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
           </div>
         );
       })}
+
+      {/* The painted area, drawn so the sweep is visible while it happens. */}
+      {region && (
+        <div
+          data-testid="placement-region"
+          data-region={`${region.x},${region.y},${region.w},${region.h}`}
+          className="absolute rounded-md"
+          style={{
+            left: pct(region.x),
+            top: pct(region.y),
+            width: pct(region.w),
+            height: pct(region.h),
+            outline: painted
+              ? "2px solid rgba(97,175,239,0.95)"
+              : "2px dashed rgba(239,97,97,0.9)",
+            outlineOffset: "-2px",
+            background: painted ? "transparent" : "rgba(239,97,97,0.12)",
+          }}
+        />
+      )}
 
       {/* The targets on the window under the pointer, drawn so aiming is possible at
           all: the five hit areas outlined, the chosen one filled. */}

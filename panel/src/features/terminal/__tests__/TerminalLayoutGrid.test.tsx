@@ -435,7 +435,13 @@ describe("TerminalLayoutGrid — placement drag", () => {
 
     expect(onPlace).toHaveBeenCalledTimes(1);
     const committed = onPlace.mock.calls[0][0] as TileLayout;
-    expect(committed.find((t) => t.sessionId === "a")).toMatchObject({ x: 6, y: 0 });
+    // The default gesture grows the dragged window towards the pointer.
+    expect(committed.find((t) => t.sessionId === "a")).toMatchObject({
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 12,
+    });
   });
 
   it("commits nothing when the drag ends without a drop", () => {
@@ -457,14 +463,17 @@ describe("TerminalLayoutGrid — placement drag", () => {
     ).not.toThrow();
   });
 
-  it("paints the target the pointer is over", () => {
+  it("paints the area the pointer is stretching to", () => {
     const { wrapper } = startDrag();
 
     dragOverAt(wrapper, 90, 30);
 
+    expect(screen.getByTestId("placement-region").getAttribute("data-region")).toBe(
+      "0,0,10,12",
+    );
     expect(
       screen.getByTestId("placement-preview-a").getAttribute("data-region"),
-    ).toBe("6,0,6,6");
+    ).toBe("0,0,10,12");
   });
 });
 
