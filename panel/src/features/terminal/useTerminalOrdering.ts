@@ -1,27 +1,28 @@
 import { useState, useReducer, useEffect, useCallback, useMemo } from "react";
 import {
-  dedupeLayout,
   expandPreset,
   getLayoutPresets,
-  type ColumnLayout,
-} from "./columnLayout";
+  isValidLayout,
+  readingOrder,
+  type LayoutPreset,
+  type TileLayout,
+} from "./tileLayout";
 import { orderingReducer, type OrderingState } from "./orderingReducer";
 import type { SessionMeta } from "./useTerminalSessions";
 
 export interface TerminalOrdering {
   sessionOrder: string[];
   orderedSessions: SessionMeta[];
-  columnLayout: ColumnLayout;
-  /** Merge the server's id set into the stored order and reconcile the layout in one cycle. */
+  /** The rectangle tiling for this scope; always a full tiling once sessions exist. */
+  tiles: TileLayout;
+  /** Merge the server's id set into the stored order and reconcile the tiling in one cycle. */
   syncIds: (ids: string[]) => void;
-  /** Append a just-created session id and reconcile the layout in the same cycle. */
+  /** Append a just-created session id and reconcile the tiling in the same cycle. */
   appendId: (id: string) => void;
   reorder: (fromId: string, toId: string) => void;
-  swapSessions: (idA: string, idB: string) => void;
-  mergeColumn: (sessionId: string, targetId: string) => void;
-  joinColumn: (sessionId: string, targetId: string) => void;
-  splitColumn: (sessionId: string, gutterIndex: number) => void;
-  applyPreset: (sizes: number[]) => void;
+  /** Commit a layout the drag overlay already computed and displayed. */
+  placeTiles: (layout: TileLayout) => void;
+  applyPreset: (preset: LayoutPreset) => void;
 }
 
 function readOrder(scopeKey: string): string[] {
@@ -33,84 +34,81 @@ function readOrder(scopeKey: string): string[] {
   }
 }
 
-function readLayout(scopeKey: string): ColumnLayout {
-  // The old count-only `panel-terminal-columns-<scope>` key is a different
-  // shape (number[]) and isn't migrated — just discarded.
+function readTiles(scopeKey: string): TileLayout {
+  // Two superseded shapes are discarded rather than migrated: the count-only
+  // `panel-terminal-columns-` key and the weighted column `panel-terminal-layout-`
+  // key. Mapping arbitrary column counts and weights onto 12 zones rounds, so a
+  // migration would hand back a layout that is *almost* the one the user had — and
+  // those layouts were built with the merge tool this model replaced.
   try {
     localStorage.removeItem(`panel-terminal-columns-${scopeKey}`);
+    localStorage.removeItem(`panel-terminal-layout-${scopeKey}`);
   } catch {
     // ignore
   }
+
   try {
-    const stored = localStorage.getItem(`panel-terminal-layout-${scopeKey}`);
+    const stored = localStorage.getItem(`panel-terminal-grid-${scopeKey}`);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed)) return [];
-    // Keys written before the layout uniqueness invariant landed can already name a
-    // session twice (a replayed reconcile appended it again), which renders that session
-    // in two grid cells. Repair silently on read — the persist effect then writes the
-    // clean shape back, so the key heals on the first load after this fix. Idempotent, so
-    // an already-clean layout comes back byte-identical (same reference).
-    return dedupeLayout(parsed as ColumnLayout);
+    // A layout that does not tile the grid is not rendered at all: the caller falls
+    // back to the default preset, which is always well-formed. Repairing tile-by-tile
+    // (as the column model did) cannot restore a covering, only guess at one.
+    return isValidLayout(parsed as TileLayout) ? (parsed as TileLayout) : [];
   } catch (err) {
-    console.warn(`[terminal] read layout from localStorage failed:`, err);
+    console.warn(`[terminal] read tiles from localStorage failed:`, err);
     return [];
   }
 }
 
 /** Both halves of one scope's stored ordering model, read together. */
 function readScope(scopeKey: string): OrderingState {
-  return { order: readOrder(scopeKey), layout: readLayout(scopeKey) };
+  const layout = readTiles(scopeKey);
+  // The order is the tiling's reading order whenever a tiling is stored — the two are
+  // one model, and trusting a separately-stored order here would let them disagree.
+  const order =
+    layout.length > 0
+      ? readingOrder(layout).map((tile) => tile.sessionId)
+      : readOrder(scopeKey);
+  return { order, layout };
 }
 
 /**
- * The terminal grid's ordering model — the flat `sessionOrder` and the weighted
- * `columnLayout` — for one *scope*: a project name for a per-project surface,
- * `__all__` for the cross-project terminals page. Both structures are always
- * mutated together (a layout op reconciles against the order it was resolved
- * from), so they live in one hook rather than one per consumer; that split is
- * what let the global tab ship with the order half only and every Ctrl+drag
- * commit silently no-op.
+ * The terminal grid's ordering model — the flat `sessionOrder` and the `tiles` — for
+ * one *scope*: a project name for a per-project surface, `__all__` for the
+ * cross-project terminals page. Both structures always move together (the order is
+ * the tiling's reading order), so they live in one hook rather than one per consumer.
  *
- * `sessions` is the caller's already-scoped session list (per-project surfaces
- * pass their filtered list); this hook only orders it.
+ * `sessions` is the caller's already-scoped session list; this hook only orders it.
  */
 export function useTerminalOrdering(
   scopeKey: string,
   sessions: SessionMeta[],
 ): TerminalOrdering {
   const ORDER_KEY = `panel-terminal-order-${scopeKey}`;
-  const LAYOUT_KEY = `panel-terminal-layout-${scopeKey}`;
+  const GRID_KEY = `panel-terminal-grid-${scopeKey}`;
 
-  // The flat order and the weighted layout must always move together — a layout
-  // op reconciles against the order it was resolved from — so they are one
-  // reducer state, mutated by one pure transition per user action. See
-  // orderingReducer.
-  const [{ order: sessionOrder, layout: columnLayout }, dispatch] = useReducer(
+  const [{ order: sessionOrder, layout: storedTiles }, dispatch] = useReducer(
     orderingReducer,
     scopeKey,
     readScope,
   );
 
-  // Re-read on a scope change only. The consumer component is reused across
-  // route navigations (no remount), so switching project must swap in that
-  // project's stored order/layout; on mount the useReducer initialiser has
-  // already done it.
+  // Re-read on a scope change only. The consumer component is reused across route
+  // navigations (no remount), so switching project must swap in that project's stored
+  // state; on mount the useReducer initialiser has already done it.
   //
-  // Adjusted during render (React's documented "reset state when a prop
-  // changes" pattern) rather than in an effect: an effect would only *queue*
-  // the swap, and the persist effects below run in that same commit — writing
-  // the previous scope's order and layout to the NEW scope's keys before the
-  // queued state landed. Self-correcting on the next render, but an unmount
-  // inside that one-commit window (navigate twice quickly) leaves the new
-  // scope's storage holding the old scope's data.
+  // Adjusted during render (React's documented "reset state when a prop changes"
+  // pattern) rather than in an effect: an effect would only *queue* the swap, and the
+  // persist effects below run in that same commit — writing the previous scope's data
+  // to the NEW scope's keys before the queued state landed.
   const [loadedScope, setLoadedScope] = useState(scopeKey);
   if (loadedScope !== scopeKey) {
     setLoadedScope(scopeKey);
     dispatch({ type: "reset", state: readScope(scopeKey) });
   }
 
-  // Persist order to localStorage whenever it changes
   useEffect(() => {
     try {
       localStorage.setItem(ORDER_KEY, JSON.stringify(sessionOrder));
@@ -119,22 +117,18 @@ export function useTerminalOrdering(
     }
   }, [ORDER_KEY, sessionOrder]);
 
-  // Persist columnLayout to localStorage whenever it changes — remove the key
-  // entirely when empty, mirroring useTerminalMaximized's remove-when-falsy
-  // convention (an empty array means "no custom layout stored").
   useEffect(() => {
     try {
-      if (columnLayout.length === 0) {
-        localStorage.removeItem(LAYOUT_KEY);
+      if (storedTiles.length === 0) {
+        localStorage.removeItem(GRID_KEY);
       } else {
-        localStorage.setItem(LAYOUT_KEY, JSON.stringify(columnLayout));
+        localStorage.setItem(GRID_KEY, JSON.stringify(storedTiles));
       }
     } catch (err) {
-      console.warn(`[terminal] write layout to localStorage failed:`, err);
+      console.warn(`[terminal] write tiles to localStorage failed:`, err);
     }
-  }, [LAYOUT_KEY, columnLayout]);
+  }, [GRID_KEY, storedTiles]);
 
-  // O(N) index map for sort
   const orderIndex = useMemo(
     () => new Map(sessionOrder.map((id, i) => [id, i])),
     [sessionOrder],
@@ -149,6 +143,19 @@ export function useTerminalOrdering(
     });
   }, [sessions, sessionOrder, orderIndex]);
 
+  /**
+   * What the grid renders: the stored tiling, or the default preset expanded against
+   * the live sessions when nothing is stored (a fresh scope, or a stored layout that
+   * failed validation). Resolved here rather than in the grid so the overlay and the
+   * commit path both compute against the same value.
+   */
+  const tiles = useMemo(() => {
+    if (storedTiles.length > 0) return storedTiles;
+    const ids = orderedSessions.map((s) => s.id);
+    const preset = getLayoutPresets(ids.length)[0];
+    return preset ? expandPreset(ids, preset) : [];
+  }, [storedTiles, orderedSessions]);
+
   const syncIds = useCallback((ids: string[]) => {
     dispatch({ type: "sync", ids });
   }, []);
@@ -161,83 +168,28 @@ export function useTerminalOrdering(
     dispatch({ type: "reorder", fromId, toId });
   }, []);
 
-  // An empty `columnLayout` is the "no custom layout stored" sentinel, and
-  // TerminalLayoutGrid resolves it to the default preset for both rendering
-  // and its live Ctrl+drag preview. The commit callbacks below must resolve
-  // the SAME layout the user is looking at — handed a literal [], every pure
-  // function takes its documented "id not found" no-op path, so the preview
-  // was correct while the drop silently changed nothing. Expanded against
-  // `orderedSessions` (not `sessionOrder`) to match the grid's own resolution
-  // id-for-id even before the mount-time fetch has merged the stored order.
-  const resolvedLayout = useMemo(() => {
-    if (columnLayout.length > 0) return columnLayout;
-    const order = orderedSessions.map((s) => s.id);
-    return expandPreset(order, getLayoutPresets(order.length)[0]?.sizes ?? []);
-  }, [columnLayout, orderedSessions]);
+  const placeTiles = useCallback((layout: TileLayout) => {
+    dispatch({ type: "place", layout });
+  }, []);
 
-  // Each layout op carries `resolvedLayout` as its `resolved` payload — the
-  // reducer commits against the layout the user is actually looking at, and
-  // cannot derive that itself (only the caller knows how the grid resolved the
-  // sentinel).
-  const mergeColumn = useCallback(
-    (sessionId: string, targetId: string) => {
-      dispatch({ type: "merge", sessionId, targetId, resolved: resolvedLayout });
-    },
-    [resolvedLayout],
-  );
-
-  const joinColumn = useCallback(
-    (sessionId: string, targetId: string) => {
-      dispatch({ type: "join", sessionId, targetId, resolved: resolvedLayout });
-    },
-    [resolvedLayout],
-  );
-
-  const splitColumn = useCallback(
-    (sessionId: string, gutterIndex: number) => {
-      dispatch({ type: "split", sessionId, gutterIndex, resolved: resolvedLayout });
-    },
-    [resolvedLayout],
-  );
-
-  // `preset.order` is the expansion *source*, not the state's order half: it is
-  // `orderedSessions` ids, like every other commit callback. Before the first
-  // fetch merge `sessionOrder` is still [], and after a close it can name
-  // sessions that no longer exist — either way a preset click would land as a
-  // no-op or a layout missing live sessions.
-  //
-  // `applyPreset([])` is the deliberate reset: expandPreset returns [], the
-  // persist effect drops the key, and the grid falls back to the default
-  // preset. Do not "guard" the empty case — it is the contract (see
-  // useTerminalSessions.columns.test.ts).
+  // `order` is the live session order, not the reducer's: before the first fetch sync
+  // the stored order is still empty, and after a close it can name sessions that no
+  // longer exist — either way a preset click would land as a no-op.
   const applyPreset = useCallback(
-    (sizes: number[]) => {
-      dispatch({ type: "preset", order: orderedSessions.map((s) => s.id), sizes });
+    (preset: LayoutPreset) => {
+      dispatch({ type: "preset", preset, order: orderedSessions.map((s) => s.id) });
     },
     [orderedSessions],
   );
 
-  // No `resolved` payload: the reducer's `swap` reads the raw layout on purpose,
-  // since a plain swap is the one op fully expressible through sessionOrder,
-  // which the default resolution already consumes. Dispatched once per user
-  // action — `swapIds`/`swapInLayout` are involutions, so a second *sequential*
-  // dispatch would visibly undo the first. (StrictMode double-invokes the
-  // reducer, which is safe; it does not double-dispatch.)
-  const swapSessions = useCallback((idA: string, idB: string) => {
-    dispatch({ type: "swap", idA, idB });
-  }, []);
-
   return {
     sessionOrder,
     orderedSessions,
-    columnLayout,
+    tiles,
     syncIds,
     appendId,
     reorder,
-    swapSessions,
-    mergeColumn,
-    joinColumn,
-    splitColumn,
+    placeTiles,
     applyPreset,
   };
 }

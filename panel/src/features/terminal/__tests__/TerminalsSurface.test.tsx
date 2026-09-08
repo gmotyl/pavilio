@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { useRef } from "react";
 import { TerminalsSurface } from "../TerminalsSurface";
+import type { LayoutPreset, TileLayout } from "../tileLayout";
 import type { TerminalHandle } from "../TerminalView";
 
 const gridProps = vi.fn();
@@ -24,19 +25,13 @@ vi.mock("../TerminalShortcutBar", () => ({ TerminalShortcutBar: () => <div /> })
 vi.mock("../TerminalSpineDrawer", () => ({ TerminalSpineDrawer: () => <div /> }));
 
 function Harness({
-  columnLayout,
-  onMergeColumn,
-  onJoinColumn,
-  onSplitColumn,
-  onSwap,
+  tiles,
+  onPlace,
   onApplyPreset,
 }: {
-  columnLayout?: { sessionId: string; weight: number }[][];
-  onMergeColumn?: (sessionId: string, targetId: string) => void;
-  onJoinColumn?: (sessionId: string, targetId: string) => void;
-  onSplitColumn?: (sessionId: string, gutterIndex: number) => void;
-  onSwap?: (idA: string, idB: string) => void;
-  onApplyPreset?: (sizes: number[]) => void;
+  tiles?: TileLayout;
+  onPlace?: (layout: TileLayout) => void;
+  onApplyPreset?: (preset: LayoutPreset) => void;
 }) {
   const ref = useRef<Map<string, TerminalHandle>>(new Map());
   return (
@@ -56,40 +51,26 @@ function Harness({
       terminalHandlesRef={ref}
       onCreateTerminal={() => {}}
       onNavTo={() => {}}
-      onSwap={onSwap}
-      columnLayout={columnLayout}
-      onMergeColumn={onMergeColumn}
-      onJoinColumn={onJoinColumn}
-      onSplitColumn={onSplitColumn}
+      tiles={tiles}
+      onPlace={onPlace}
       onApplyPreset={onApplyPreset}
     />
   );
 }
 
 describe("TerminalsSurface", () => {
-  it("passes columnLayout and onMergeColumn through to TerminalLayoutGrid", () => {
-    const columnLayout = [[{ sessionId: "a", weight: 1 }], [{ sessionId: "b", weight: 2 }]];
-    const onMergeColumn = vi.fn();
-    const onJoinColumn = vi.fn();
-    const onSplitColumn = vi.fn();
-    const onSwap = vi.fn();
+  it("passes the tiling and the placement callback through to TerminalLayoutGrid", () => {
+    const tiles = [
+      { sessionId: "a", x: 0, y: 0, w: 6, h: 12 },
+      { sessionId: "b", x: 6, y: 0, w: 6, h: 12 },
+    ];
+    const onPlace = vi.fn();
 
-    render(
-      <Harness
-        columnLayout={columnLayout}
-        onMergeColumn={onMergeColumn}
-        onJoinColumn={onJoinColumn}
-        onSplitColumn={onSplitColumn}
-        onSwap={onSwap}
-      />,
-    );
+    render(<Harness tiles={tiles} onPlace={onPlace} />);
 
     const props = gridProps.mock.calls.at(-1)?.[0];
-    expect(props.columnLayout).toBe(columnLayout);
-    expect(props.onMergeColumn).toBe(onMergeColumn);
-    expect(props.onJoinColumn).toBe(onJoinColumn);
-    expect(props.onSplitColumn).toBe(onSplitColumn);
-    expect(props.onSwap).toBe(onSwap);
+    expect(props.tiles).toBe(tiles);
+    expect(props.onPlace).toBe(onPlace);
   });
 
   it("wires sessions.length and onApplyPreset into the toolbar's LayoutPresetMenu", () => {

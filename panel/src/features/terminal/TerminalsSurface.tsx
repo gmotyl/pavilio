@@ -9,7 +9,7 @@ import { sendDismiss, reconnectSession } from "./terminalInstances";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
 import type { RepoEntry } from "../projects/useProjects";
-import type { ColumnLayout } from "./columnLayout";
+import type { LayoutPreset, TileLayout } from "./tileLayout";
 
 export interface TerminalsSurfaceProps {
   // Current project context
@@ -45,14 +45,12 @@ export interface TerminalsSurfaceProps {
 
   // Drag-to-reorder callbacks
   onReorder?: (fromId: string, toId: string) => void;
-  onSwap?: (idA: string, idB: string) => void;
+
 
   // Column layout state + callbacks
-  columnLayout?: ColumnLayout;
-  onMergeColumn?: (sessionId: string, targetId: string) => void;
-  onJoinColumn?: (sessionId: string, targetId: string) => void;
-  onSplitColumn?: (sessionId: string, gutterIndex: number) => void;
-  onApplyPreset?: (sizes: number[]) => void;
+  tiles?: TileLayout;
+  onPlace?: (layout: TileLayout) => void;
+  onApplyPreset?: (preset: LayoutPreset) => void;
 
   // When true: fills from below the breadcrumb bar (no negative margins, no p-6 offset)
   standalone?: boolean;
@@ -79,11 +77,8 @@ export function TerminalsSurface({
   onCreateTerminal,
   onNavTo,
   onReorder,
-  onSwap,
-  columnLayout,
-  onMergeColumn,
-  onJoinColumn,
-  onSplitColumn,
+  tiles,
+  onPlace,
   onApplyPreset,
   standalone = false,
   fill = false,
@@ -179,12 +174,10 @@ export function TerminalsSurface({
             onReady={(sessionId, handle) => {
               terminalHandlesRef.current.set(sessionId, handle);
             }}
-            onSwap={onSwap}
+
             onRename={(id, n) => onUpdateSession(id, { name: n })}
-            columnLayout={columnLayout}
-            onMergeColumn={onMergeColumn}
-            onJoinColumn={onJoinColumn}
-            onSplitColumn={onSplitColumn}
+            tiles={tiles}
+            onPlace={onPlace}
           />
         </div>
 

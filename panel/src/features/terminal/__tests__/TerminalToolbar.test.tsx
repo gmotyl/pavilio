@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TerminalToolbar } from "../TerminalToolbar";
+import { getLayoutPresets } from "../tileLayout";
 import type { SessionMeta } from "../useTerminalSessions";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession } from "../terminalInstances";
@@ -111,7 +112,7 @@ describe("TerminalToolbar — layout preset menu", () => {
     fireEvent.click(screen.getByTestId("layout-preset-option-0"));
 
     expect(onApplyPreset).toHaveBeenCalledTimes(1);
-    expect(onApplyPreset).toHaveBeenCalledWith([1, 2]);
+    expect(onApplyPreset).toHaveBeenCalledWith(getLayoutPresets(3)[0]);
   });
 });
 

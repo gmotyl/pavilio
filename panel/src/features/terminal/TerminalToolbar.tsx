@@ -9,6 +9,7 @@ import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { LayoutPresetMenu } from "./LayoutPresetMenu";
+import type { LayoutPreset } from "./tileLayout";
 
 interface Props {
   sessions: SessionMeta[];
@@ -23,7 +24,7 @@ interface Props {
   onToggleMaximize: () => void;
   onReorder: (fromId: string, toId: string) => void;
   onReconnect?: () => void;
-  onApplyPreset?: (sizes: number[]) => void;
+  onApplyPreset?: (preset: LayoutPreset) => void;
 }
 
 export function TerminalToolbar({
@@ -416,7 +417,7 @@ export function TerminalToolbar({
         </button>
         <LayoutPresetMenu
           count={sessions.length}
-          onApply={(sizes) => onApplyPreset?.(sizes)}
+          onApply={(preset) => onApplyPreset?.(preset)}
         />
       </div>
 

@@ -15,22 +15,17 @@ vi.mock("../../features/terminal/TerminalsSurface", () => ({
   },
 }));
 
-const mergeColumn = vi.fn();
-const joinColumn = vi.fn();
-const splitColumn = vi.fn();
+const placeTiles = vi.fn();
 const applyPreset = vi.fn();
-const columnLayout = [[{ sessionId: "s1", weight: 1 }]];
+const tiles = [{ sessionId: "s1", x: 0, y: 0, w: 12, h: 12 }];
 
 vi.mock("../../features/terminal/useAllTerminalSessions", () => ({
   useAllTerminalSessions: () => ({
     sessions: [{ id: "s1", project: "vector", name: "dev" }],
     refresh: async () => {},
     reorder: () => {},
-    swapOrder: () => {},
-    columnLayout,
-    mergeColumn,
-    joinColumn,
-    splitColumn,
+    tiles,
+    placeTiles,
     applyPreset,
   }),
 }));
@@ -54,28 +49,23 @@ function renderPage() {
 }
 
 describe("TerminalsPage", () => {
-  it("passes the column layout props to TerminalsSurface", () => {
+  it("passes the tiling props to TerminalsSurface", () => {
     const props = renderPage();
-    expect(props.columnLayout).toEqual(columnLayout);
-    for (const name of [
-      "onMergeColumn",
-      "onJoinColumn",
-      "onSplitColumn",
-      "onApplyPreset",
-    ]) {
+    expect(props.tiles).toEqual(tiles);
+    for (const name of ["onPlace", "onApplyPreset"]) {
       expect(typeof props[name]).toBe("function");
     }
   });
 
-  it("forwards merge/join/split/preset to the hook", () => {
+  it("forwards placement and preset choices to the hook", () => {
     const props = renderPage();
-    (props.onMergeColumn as (a: string, b: string) => void)("a", "b");
-    (props.onJoinColumn as (a: string, b: string) => void)("a", "c");
-    (props.onSplitColumn as (a: string, i: number) => void)("a", 1);
-    (props.onApplyPreset as (sizes: number[]) => void)([1, 2]);
-    expect(mergeColumn).toHaveBeenCalledWith("a", "b");
-    expect(joinColumn).toHaveBeenCalledWith("a", "c");
-    expect(splitColumn).toHaveBeenCalledWith("a", 1);
-    expect(applyPreset).toHaveBeenCalledWith([1, 2]);
+    const layout = [{ sessionId: "s1", x: 0, y: 0, w: 12, h: 12 }];
+    const preset = { label: "1 terminal", slots: [{ x: 0, y: 0, w: 12, h: 12 }] };
+
+    (props.onPlace as (l: unknown) => void)(layout);
+    (props.onApplyPreset as (p: unknown) => void)(preset);
+
+    expect(placeTiles).toHaveBeenCalledWith(layout);
+    expect(applyPreset).toHaveBeenCalledWith(preset);
   });
 });

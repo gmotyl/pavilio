@@ -1,151 +1,138 @@
-import { reorderIds, swapIds, mergeOrder } from "./sessionOrder";
+import { reorderIds, mergeOrder } from "./sessionOrder";
 import {
-  reconcileLayout,
-  mergeInColumn,
-  joinOtherColumn,
-  splitToNewColumn,
-  swapInLayout,
   expandPreset,
-  type ColumnLayout,
-} from "./columnLayout";
+  isValidLayout,
+  readingOrder,
+  reconcileTiles,
+  type LayoutPreset,
+  type TileLayout,
+} from "./tileLayout";
 
 /**
- * The terminal grid's ordering model as one value. `order` is the flat session
- * order; `layout` is the weighted column layout, with `[]` as the "no custom
- * layout stored" sentinel (resolved to the default preset for rendering, and
- * persisted by *removing* the key).
+ * The terminal grid's ordering model as one value. `layout` is the rectangle tiling;
+ * `order` is the flat session order the tab strip renders.
+ *
+ * The two halves are kept in lockstep by one invariant: **`order` is always the
+ * layout's reading order**. Rectangles are slots and the order says who sits in
+ * which, so a change to either half re-derives the other in the same transition —
+ * that is what keeps the tab strip and the grid expressing one order.
  */
 export interface OrderingState {
   order: string[];
-  layout: ColumnLayout;
+  layout: TileLayout;
 }
 
 /**
- * `resolved` carries the caller-resolved layout — the empty-layout sentinel
- * expanded to the default preset — so a layout op commits against the layout
- * the user is actually looking at. Handed a literal `[]`, every pure layout
- * function takes its "id not found" no-op path.
+ * `place` carries a layout the caller already computed — the drag overlay paints the
+ * repaired result and hands that exact value to the drop. The reducer stores it
+ * rather than re-deriving anything, because re-deriving the action from whatever sits
+ * under the cursor at drop time is precisely the defect this model replaced.
  */
 export type OrderingAction =
   | { type: "sync"; ids: string[] }
   | { type: "append"; id: string }
   | { type: "reorder"; fromId: string; toId: string }
-  | { type: "swap"; idA: string; idB: string }
-  | { type: "merge"; sessionId: string; targetId: string; resolved: ColumnLayout }
-  | { type: "join"; sessionId: string; targetId: string; resolved: ColumnLayout }
-  | { type: "split"; sessionId: string; gutterIndex: number; resolved: ColumnLayout }
-  | { type: "preset"; order: string[]; sizes: number[] }
+  | { type: "place"; layout: TileLayout }
+  | { type: "preset"; preset: LayoutPreset; order?: string[] }
   | { type: "reset"; state: OrderingState };
 
-function sameLayout(a: ColumnLayout, b: ColumnLayout): boolean {
+function sameLayout(a: TileLayout, b: TileLayout): boolean {
   if (a === b) return true;
   if (a.length !== b.length) return false;
-  return a.every((column, ci) => {
-    const other = b[ci];
-    if (column.length !== other.length) return false;
-    return column.every(
-      (entry, ei) =>
-        entry.sessionId === other[ei].sessionId && entry.weight === other[ei].weight,
+  return a.every((tile, i) => {
+    const other = b[i];
+    return (
+      tile.sessionId === other.sessionId &&
+      tile.x === other.x &&
+      tile.y === other.y &&
+      tile.w === other.w &&
+      tile.h === other.h
     );
   });
 }
 
+function sameOrder(a: string[], b: string[]): boolean {
+  return a === b || (a.length === b.length && a.every((id, i) => id === b[i]));
+}
+
 /**
- * Builds the next state, collapsing to the *same reference* when neither half
- * actually moved — the reducer equivalent of React bailing out of a setState
- * that was handed the value it already held. Keeps the 8s session poll from
- * re-running the persist effects on every unchanged tick (`mergeOrder` already
- * guards the order half by reference; the layout half needs a value compare,
- * since `reconcileLayout` rebuilds its columns).
+ * Builds the next state and collapses to the *same reference* when neither half
+ * actually moved — the reducer equivalent of React bailing out of a setState handed
+ * the value it already held. That keeps the 8s session poll from re-running the
+ * persist effects on every unchanged tick.
  */
-function commit(state: OrderingState, order: string[], layout: ColumnLayout): OrderingState {
-  const nextLayout = sameLayout(layout, state.layout) ? state.layout : layout;
-  if (order === state.order && nextLayout === state.layout) return state;
-  return { order, layout: nextLayout };
+function commit(state: OrderingState, order: string[], layout: TileLayout): OrderingState {
+  const layoutUnchanged = sameLayout(layout, state.layout);
+  const orderUnchanged = sameOrder(order, state.order);
+  if (layoutUnchanged && orderUnchanged) return state;
+  return {
+    order: orderUnchanged ? state.order : order,
+    layout: layoutUnchanged ? state.layout : layout,
+  };
+}
+
+/** Commits a tiling and the order it implies — the two always move together. */
+function commitLayout(state: OrderingState, layout: TileLayout): OrderingState {
+  return commit(state, readingOrder(layout).map((tile) => tile.sessionId), layout);
+}
+
+/** Re-seats sessions into the layout's slots following `order`. */
+function assign(layout: TileLayout, order: string[]): TileLayout {
+  return readingOrder(layout).map((slot, i) => ({
+    ...slot,
+    sessionId: order[i] ?? slot.sessionId,
+  }));
+}
+
+/** Keeps the sentinel empty; otherwise brings the stored tiling in line with `order`. */
+function reconcile(layout: TileLayout, order: string[]): TileLayout {
+  return layout.length === 0 ? layout : reconcileTiles(layout, order);
 }
 
 /**
  * One pure transition over `{order, layout}`. The two halves must always move
- * together — a layout op reconciles against the order it was resolved from —
- * and a reducer is what makes that atomic. The previous shape (a
- * `setColumnLayout` call nested inside a `setSessionOrder` updater) was an
- * impure updater: StrictMode replays it, and the layout append ran twice, so
- * one session rendered in two grid cells.
+ * together, and a reducer is what makes that atomic — the shape this replaced (a
+ * layout setter nested inside an order setter) was an impure updater that StrictMode
+ * replayed, rendering one session in two cells.
  */
 export function orderingReducer(state: OrderingState, action: OrderingAction): OrderingState {
   switch (action.type) {
+    // An empty `layout` is the "no custom shape stored" sentinel: the caller resolves it
+    // to the default preset for the live session count. The three order-only transitions
+    // below deliberately keep it empty, so opening or closing a terminal re-derives that
+    // per-count default instead of pinning the shape the count happened to have.
     case "sync": {
-      // Reconcile the layout against the PRE-merge order — the same `prev` that
-      // mergeOrder consumes — in this one transition. See reconcileLayout's contract.
       const order = mergeOrder(state.order, action.ids);
-      return commit(state, order, reconcileLayout(state.order, state.layout, order));
+      return commit(state, order, reconcile(state.layout, order));
     }
 
     case "append": {
       if (state.order.includes(action.id)) return state;
       const order = [...state.order, action.id];
-      return commit(state, order, reconcileLayout(state.order, state.layout, order));
+      return commit(state, order, reconcile(state.layout, order));
     }
 
-    case "reorder":
-      return commit(
-        state,
-        reorderIds(state.order, action.fromId, action.toId),
-        state.layout,
-      );
+    case "reorder": {
+      // A tab drag moves sessions between slots; the shape stays exactly as it was.
+      const order = reorderIds(state.order, action.fromId, action.toId);
+      return commit(state, order, assign(state.layout, order));
+    }
 
-    case "swap":
-      // Reads the RAW layout, not a resolved one, on purpose: a plain swap is the
-      // one op fully expressible through `order`, which the default resolution
-      // already consumes — so with no custom layout stored it stays a no-op here
-      // and the grid re-derives the preset against the swapped order. Resolving
-      // would spend the sentinel on a swap that needs no layout of its own, and
-      // later session-count changes would then follow `reconcileLayout` (append to
-      // the last column) instead of re-defaulting to the preset.
-      return commit(
-        state,
-        swapIds(state.order, action.idA, action.idB),
-        swapInLayout(state.layout, action.idA, action.idB),
-      );
+    case "place":
+      // Stored verbatim — the overlay already computed and displayed this layout. One
+      // that does not tile the grid is a caller bug, not a state worth persisting.
+      if (!isValidLayout(action.layout)) return state;
+      return commitLayout(state, action.layout);
 
-    // Boundary of the atomicity fix, for `merge`/`join`/`split` below: `action.resolved`
-    // is a render-time snapshot taken from the caller's closure, not something this
-    // reducer can derive (only the caller knows how the grid resolved the empty-layout
-    // sentinel). So unlike `sync`/`append`/`reorder`/`swap` — which read `state` and
-    // therefore compose — two of these three ops dispatched in the SAME commit do not
-    // compose: both carry the same pre-commit `resolved`, and the second overwrites the
-    // first. That is inherent to the `resolved` payload and an accepted limit, not a
-    // defect; do not read the reducer as having made every action atomic.
-    case "merge":
-      return commit(
-        state,
-        state.order,
-        mergeInColumn(action.resolved, action.sessionId, action.targetId),
-      );
-
-    case "join":
-      return commit(
-        state,
-        state.order,
-        joinOtherColumn(action.resolved, action.sessionId, action.targetId),
-      );
-
-    case "split":
-      return commit(
-        state,
-        state.order,
-        splitToNewColumn(action.resolved, action.sessionId, action.gutterIndex),
-      );
-
-    case "preset":
-      // `sizes: []` is the deliberate reset: expandPreset returns [], the persist
-      // path drops the key, and the grid falls back to the default preset. Do not
-      // "guard" the empty case — it is the contract.
-      return commit(state, state.order, expandPreset(action.order, action.sizes));
+    case "preset": {
+      // `order` is passed explicitly by the hook: before the first session sync the
+      // reducer's own order is still empty, and a preset click would expand to nothing.
+      const order = action.order ?? state.order;
+      return commit(state, order, expandPreset(order, action.preset));
+    }
 
     case "reset":
-      // A scope change: the caller has already read the new scope's stored order
-      // and layout, so this replaces both halves wholesale.
+      // A scope change: the caller has already read the new scope's stored state.
       return action.state;
   }
 }

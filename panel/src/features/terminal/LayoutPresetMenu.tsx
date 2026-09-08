@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, LayoutGrid } from "lucide-react";
-import { getLayoutPresets } from "./columnLayout";
+import { GRID, getLayoutPresets, type LayoutPreset } from "./tileLayout";
 
 interface Props {
   count: number; // sessions.length — determines which presets to offer
-  onApply: (sizes: number[]) => void;
+  onApply: (preset: LayoutPreset) => void;
 }
 
 // Modeled on ProjectTabsMenu's backdrop-click-to-close pattern
@@ -72,12 +72,13 @@ export function LayoutPresetMenu({ count, onApply }: Props) {
                 type="button"
                 role="menuitem"
                 data-testid={`layout-preset-option-${i}`}
+                aria-label={preset.label}
+                title={preset.label}
                 onClick={() => {
-                  onApply(preset.sizes);
+                  onApply(preset);
                   setOpen(false);
                 }}
-                className="flex items-center w-full text-left px-3 py-1.5 text-[12px] transition-colors"
-                style={{ color: "var(--text-secondary)" }}
+                className="flex items-center w-full px-2 py-1.5 transition-colors"
                 onMouseEnter={(e) =>
                   (e.currentTarget.style.background = "var(--bg-hover)")
                 }
@@ -85,13 +86,62 @@ export function LayoutPresetMenu({ count, onApply }: Props) {
                   (e.currentTarget.style.background = "transparent")
                 }
               >
-                {preset.label}
+                <PresetThumbnail preset={preset} />
               </button>
             ))}
           </div>
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * A miniature of the shape, drawn from the preset's own rectangles — the same data
+ * `onApply` commits, so the picture cannot drift from the result. The descriptive
+ * text lives on the button's `aria-label`/`title` instead of beside the thumbnail:
+ * "Alt 1" told the user nothing, and the shape tells them everything.
+ */
+function PresetThumbnail({ preset }: { preset: LayoutPreset }) {
+  return (
+    <span
+      aria-hidden
+      data-testid={`layout-preset-thumb-${preset.label}`}
+      style={{
+        position: "relative",
+        display: "block",
+        width: "32px",
+        height: "24px",
+        borderRadius: "3px",
+        border: "1px solid var(--border-subtle)",
+        background: "var(--bg-base)",
+      }}
+    >
+      {preset.slots.map((slot, i) => (
+        <span
+          key={i}
+          style={{
+            position: "absolute",
+            left: `${(slot.x / GRID) * 100}%`,
+            top: `${(slot.y / GRID) * 100}%`,
+            width: `${(slot.w / GRID) * 100}%`,
+            height: `${(slot.h / GRID) * 100}%`,
+            padding: "1px",
+          }}
+        >
+          <span
+            style={{
+              display: "block",
+              width: "100%",
+              height: "100%",
+              borderRadius: "1px",
+              background: "var(--text-tertiary)",
+              opacity: 0.55,
+            }}
+          />
+        </span>
+      ))}
+    </span>
   );
 }
 

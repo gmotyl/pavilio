@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { LayoutPresetMenu } from "../LayoutPresetMenu";
+import { getLayoutPresets } from "../tileLayout";
 
 describe("LayoutPresetMenu", () => {
   it("renders one option per getLayoutPresets(count) entry, even a single one", () => {
@@ -10,11 +11,38 @@ describe("LayoutPresetMenu", () => {
     fireEvent.click(screen.getByTestId("layout-preset-toggle"));
 
     expect(screen.getByTestId("layout-preset-menu")).toBeInTheDocument();
-    expect(screen.getByTestId("layout-preset-option-0")).toHaveTextContent("Default");
+    expect(screen.getByTestId("layout-preset-option-0")).toBeInTheDocument();
     expect(screen.queryByTestId("layout-preset-option-1")).not.toBeInTheDocument();
   });
 
-  it("clicking an option calls onApply with that preset's sizes and closes the menu", () => {
+  it("names options by shape rather than by ordinal", () => {
+    render(<LayoutPresetMenu count={3} onApply={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("layout-preset-toggle"));
+
+    expect(screen.getByLabelText("3 rows")).toBeInTheDocument();
+    expect(screen.getByLabelText("3 columns")).toBeInTheDocument();
+    expect(screen.queryByText("Alt 1")).not.toBeInTheDocument();
+  });
+
+  it("renders a thumbnail per preset built from that preset's own slots", () => {
+    render(<LayoutPresetMenu count={3} onApply={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("layout-preset-toggle"));
+
+    const rows = getLayoutPresets(3).find((p) => p.label === "3 rows")!;
+    const thumb = screen.getByTestId("layout-preset-thumb-3 rows");
+    const boxes = Array.from(thumb.children) as HTMLElement[];
+
+    expect(boxes).toHaveLength(rows.slots.length);
+    expect(boxes.map((b) => `${b.style.top}|${b.style.height}`)).toEqual(
+      rows.slots.map(
+        (slot) => `${(slot.y / 12) * 100}%|${(slot.h / 12) * 100}%`,
+      ),
+    );
+  });
+
+  it("clicking an option calls onApply with that preset and closes the menu", () => {
     const onApply = vi.fn();
     render(<LayoutPresetMenu count={4} onApply={onApply} />);
 
@@ -22,7 +50,7 @@ describe("LayoutPresetMenu", () => {
     fireEvent.click(screen.getByTestId("layout-preset-option-1"));
 
     expect(onApply).toHaveBeenCalledTimes(1);
-    expect(onApply).toHaveBeenCalledWith([1, 3]);
+    expect(onApply).toHaveBeenCalledWith(getLayoutPresets(4)[1]);
     expect(screen.queryByTestId("layout-preset-menu")).not.toBeInTheDocument();
   });
 

@@ -187,8 +187,8 @@ export function useTerminalSessions(project: string) {
         const created: SessionMeta = await res.json();
         if (created.project === project) {
           setSessions((prev) => [...prev, created]);
-          // Reconcile columnLayout the same way fetchSessions does — otherwise
-          // a custom layout falls out of sync with sessionOrder and the new
+          // Reconcile the tiling the same way fetchSessions does — otherwise a
+          // custom layout falls out of sync with the session order and the new
           // session is silently missing from the grid until the next poll.
           appendId(created.id);
           setFocusedId(created.id);
@@ -271,12 +271,9 @@ export function useTerminalSessions(project: string) {
     updateSession,
     fetchSessions,
     reorder: ordering.reorder,
-    columnLayout: ordering.columnLayout,
-    mergeColumn: ordering.mergeColumn,
-    joinColumn: ordering.joinColumn,
-    splitColumn: ordering.splitColumn,
+    tiles: ordering.tiles,
+    placeTiles: ordering.placeTiles,
     applyPreset: ordering.applyPreset,
-    swapSessions: ordering.swapSessions,
   };
 }
 
