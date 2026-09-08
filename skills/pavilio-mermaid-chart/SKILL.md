@@ -11,7 +11,7 @@ The panel renders mermaid diagrams with automatic dark-mode coloring. To get the
 
 ### Flowcharts
 
-- **Subgraph clusters** get distinct colors by order: 1st = cyan, 2nd = red, 3rd = green, 4th = blue, 5th = purple, 6th = yellow (cycles)
+- **Subgraph clusters** get distinct colors by **declaration order** — the order you wrote the `subgraph` blocks, not where mermaid ends up placing them: 1st = cyan, 2nd = red, 3rd = green, 4th = blue, 5th = purple, 6th = yellow (cycles)
 - **Nodes inside a subgraph** inherit the subgraph's color (darker fill, matching border)
 - **Nodes outside subgraphs** get a neutral teal color
 - Use subgraphs to visually group related steps — the panel colors them automatically
@@ -28,9 +28,12 @@ The panel renders mermaid diagrams with automatic dark-mode coloring. To get the
 
 ## Flowchart patterns
 
-### Use subgraphs for before/after or current/fixed
+### A node belongs to the first subgraph that mentions it
 
-Put the problematic flow in the first subgraph and the fixed flow in the second. The panel will color the first red and the second green automatically:
+This is the single biggest source of "the diagram renders but looks wrong". Mermaid
+assigns a node to a cluster by where the node is **mentioned**, not by where it was
+first declared. Write the fan-out edge inside the subgraph and the shared node is
+swallowed by it:
 
 ````markdown
 ```mermaid
@@ -39,17 +42,48 @@ flowchart TD
 
     subgraph Current broken path
       B --> C1[Problem step]
-      C1 --> D1[Failure]
     end
 
     subgraph Fixed path
       B --> C2[Corrected step]
-      C2 --> D2[Success]
+    end
+```
+````
+
+`B` is dragged inside **Current broken path** — the shared step gets that cluster's
+color, and the edge into the second subgraph crosses out of a box it never belonged
+to. Keep every subgraph body limited to its own nodes and declare the cross-links at
+root level instead:
+
+````markdown
+```mermaid
+flowchart TD
+    A[Entry point] --> B[Shared step]
+    B --> C1
+    B --> C2
+
+    subgraph Current broken path
+      C1[Problem step] --> D1[Failure]
+    end
+
+    subgraph Fixed path
+      C2[Corrected step] --> D2[Success]
     end
 
     D2 --> E[Exit point]
 ```
 ````
+
+Now `A` and `B` stay at root (neutral teal), the two clusters sit side by side, and
+`D2 --> E` still pulls the exit node out to root. A bare `B --> C1` at root level
+does **not** claim `C1` — only a mention inside a `subgraph` block does — so the
+cross-links are safe to write before or after the blocks.
+
+### Use subgraphs for before/after or current/fixed
+
+Put the problematic flow in the first subgraph and the fixed flow in the second,
+following the shape above. Declaration order drives the palette, so a two-way
+comparison comes out cyan (first) and red (second).
 
 ### Root nodes for entry/exit points
 

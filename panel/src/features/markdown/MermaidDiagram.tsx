@@ -59,6 +59,28 @@ export function fixAmbiguousLabels(src: string): string {
   return src.replace(/\[([/\\])([^\]]*[^/\\])\]/g, '["$1$2"]');
 }
 
+/**
+ * Titles of a flowchart's subgraphs, in the order they were declared.
+ *
+ * mermaid emits `.cluster` elements in layout order, not declaration order —
+ * dagre routinely hands back the second subgraph first. Reading the palette
+ * straight off the DOM therefore makes a diagram's colours depend on how the
+ * boxes happened to be placed. The source is the only stable record of the
+ * order the author wrote, so recover the order from it.
+ */
+export function subgraphTitlesInOrder(src: string): string[] {
+  const titles: string[] = [];
+  for (const line of src.split("\n")) {
+    const decl = line.match(/^\s*subgraph\s+(.+?)\s*$/)?.[1];
+    if (!decl) continue;
+    // `subgraph Id["Label"]` and `subgraph Id [Label]` render Label; a bare
+    // `subgraph Some title` renders the declaration itself.
+    const labelled = decl.match(/^\S+\s*\[\s*"?(.*?)"?\s*\]$/);
+    titles.push(labelled ? labelled[1] : decl);
+  }
+  return titles;
+}
+
 export default function MermaidDiagram({ chart }: { chart: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,8 +99,10 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
       document.getElementById("d" + idRef.current)?.remove();
     };
 
+    const src = fixAmbiguousLabels(chart);
+
     mermaid
-      .render(idRef.current, fixAmbiguousLabels(chart))
+      .render(idRef.current, src)
       .then(({ svg }) => {
         if (!cancelled && containerRef.current) {
           containerRef.current.innerHTML = svg;
@@ -95,17 +119,30 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
             { fill: "#2a2a1a", stroke: "#ca8a04", clusterBg: "#1c1c0f", clusterBorder: "#713f12" }, // yellow
           ];
           const neutralNode = { fill: "#1a3a3a", stroke: "#2dd4bf80" }; // teal for root nodes
-          const clusters = el.querySelectorAll(".cluster");
+          const clusters = Array.from(el.querySelectorAll(".cluster"));
+          // Palette follows declaration order, not the DOM order mermaid emits.
+          const declaredTitles = subgraphTitlesInOrder(src);
+          const claimed = new Set<number>();
+          const declarationIndex = (c: Element) => {
+            const label = c.querySelector(".cluster-label")?.textContent?.trim() ?? "";
+            const i = declaredTitles.findIndex((t, n) => t === label && !claimed.has(n));
+            if (i === -1) return Number.MAX_SAFE_INTEGER; // unrecognised label sorts last
+            claimed.add(i);
+            return i;
+          };
           const clusterMap = new Map<string, number>(); // cluster DOM id → palette index
-          clusters.forEach((c, i) => {
-            clusterMap.set(c.id, i);
-            const rect = c.querySelector("rect");
-            if (rect) {
-              const p = clusterPalette[i % clusterPalette.length];
-              rect.style.fill = p.clusterBg;
-              rect.style.stroke = p.clusterBorder;
-            }
-          });
+          clusters
+            .map((c) => ({ c, order: declarationIndex(c) }))
+            .sort((a, b) => a.order - b.order)
+            .forEach(({ c }, i) => {
+              clusterMap.set(c.id, i);
+              const rect = c.querySelector("rect");
+              if (rect) {
+                const p = clusterPalette[i % clusterPalette.length];
+                rect.style.fill = p.clusterBg;
+                rect.style.stroke = p.clusterBorder;
+              }
+            });
           // Color each node by which cluster it overlaps
           el.querySelectorAll(".node").forEach((n) => {
             const shape = n.querySelector("rect, polygon") as SVGElement | null;
