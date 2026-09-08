@@ -220,6 +220,90 @@ export function expandPreset(order: string[], preset: LayoutPreset): TileLayout 
     .map((slot, i) => ({ sessionId: order[i], ...slot }));
 }
 
+/** A new session prefers to split a tile with room for two usable parts. */
+const SPLIT_PREFERENCE = 4;
+
+/**
+ * Adds a session by splitting the LAST tile in reading order along its longer axis
+ * — Windows Terminal's behaviour, and the one that keeps the global Terminals view
+ * readable when sessions appear from a project tab: the main window stays main and
+ * growth happens at the end.
+ *
+ * A tile below `SPLIT_PREFERENCE` zones on that axis hands the split further back
+ * through the order, so the first window is split last. When nothing qualifies the
+ * last tile is split regardless: the preference steers the choice, it never hides a
+ * new terminal.
+ */
+export function appendSession(layout: TileLayout, sessionId: string): TileLayout {
+  if (layout.length === 0) {
+    return [{ sessionId, x: 0, y: 0, w: GRID, h: GRID }];
+  }
+
+  const ordered = readingOrder(layout);
+  const axisOf = (tile: Tile) => (tile.w >= tile.h ? "x" : "y") as "x" | "y";
+  const spanOn = (tile: Tile, axis: "x" | "y") => (axis === "x" ? tile.w : tile.h);
+
+  // Both halves must stay usable, so the split axis needs room for two parts AND
+  // the other axis must not already be a sliver — splitting a 12x1 tile down the
+  // middle yields two 6x1 cells, which is worse than splitting something further back.
+  const other = (axis: "x" | "y") => (axis === "x" ? "y" : "x");
+  let host = [...ordered].reverse().find((tile) => {
+    const axis = axisOf(tile);
+    return (
+      spanOn(tile, axis) >= SPLIT_PREFERENCE && spanOn(tile, other(axis)) >= 2
+    );
+  });
+
+  if (!host) {
+    host = [...ordered].reverse().find((tile) => spanOn(tile, axisOf(tile)) >= 2);
+  }
+  if (!host) return layout;
+
+  const [first, second] = strips(host, 2, axisOf(host));
+  return readingOrder([
+    ...layout.filter((t) => t.sessionId !== host.sessionId),
+    { sessionId: host.sessionId, ...first },
+    { sessionId, ...second },
+  ]);
+}
+
+/**
+ * Removes a session and hands its rectangle to the neighbour sharing the longest
+ * common edge (ties: top → left), so the grid stays fully tiled without reflowing
+ * everything around it.
+ */
+export function removeSession(layout: TileLayout, sessionId: string): TileLayout {
+  const gone = layout.find((t) => t.sessionId === sessionId);
+  if (!gone) return layout;
+
+  const rest = layout.filter((t) => t.sessionId !== sessionId);
+  if (rest.length === 0) return [];
+
+  const absorbed = absorbRect(rest, gone);
+  return readingOrder(absorbed && isValidLayout(absorbed) ? absorbed : rest);
+}
+
+/**
+ * Brings a stored layout in line with the live session list: ids that vanished are
+ * removed (their area absorbed), ids that appeared are appended. Idempotent, so a
+ * replayed reducer transition cannot render one session in two cells.
+ */
+export function reconcileTiles(layout: TileLayout, ids: string[]): TileLayout {
+  const live = new Set(ids);
+  let next = layout;
+
+  for (const tile of layout) {
+    if (!live.has(tile.sessionId)) next = removeSession(next, tile.sessionId);
+  }
+
+  const present = new Set(next.map((t) => t.sessionId));
+  for (const id of ids) {
+    if (!present.has(id)) next = appendSession(next, id);
+  }
+
+  return next;
+}
+
 function sameRect(a: Rect, b: Rect): boolean {
   return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 }
