@@ -59,6 +59,52 @@ export function fixAmbiguousLabels(src: string): string {
   return src.replace(/\[([/\\])([^\]]*[^/\\])\]/g, '["$1$2"]');
 }
 
+/**
+ * Titles of a flowchart's subgraphs, in the order they were declared.
+ *
+ * mermaid emits `.cluster` elements in layout order, not declaration order —
+ * dagre routinely hands back the second subgraph first. Reading the palette
+ * straight off the DOM therefore makes a diagram's colours depend on how the
+ * boxes happened to be placed. The source is the only stable record of the
+ * order the author wrote, so recover the order from it.
+ */
+export function subgraphTitlesInOrder(src: string): string[] {
+  const titles: string[] = [];
+  for (const line of src.split("\n")) {
+    const decl = line.match(/^\s*subgraph\s+(.+?)\s*$/)?.[1];
+    if (!decl) continue;
+    // `subgraph Id["Label"]` and `subgraph Id [Label]` render Label; a bare
+    // `subgraph Some title` renders the declaration itself.
+    const labelled = decl.match(/^\S+\s*\[\s*"?(.*?)"?\s*\]$/);
+    titles.push(labelled ? labelled[1] : decl);
+  }
+  return titles;
+}
+
+/**
+ * Palette slot for each rendered cluster, given the cluster labels in the order
+ * the DOM lists them. Slots are handed out in declaration order, so the first
+ * `subgraph` in the source always takes palette 0 however dagre laid the boxes
+ * out. A label the source does not account for keeps a slot, but sorts last.
+ */
+export function clusterPaletteOrder(domLabels: string[], src: string): number[] {
+  const declared = subgraphTitlesInOrder(src);
+  const claimed = new Set<number>();
+  // Duplicate titles are consumed in DOM order — nothing better to go on.
+  const ranked = domLabels.map((label, dom) => {
+    const declaration = declared.findIndex((t, n) => t === label && !claimed.has(n));
+    if (declaration !== -1) claimed.add(declaration);
+    return { dom, declaration: declaration === -1 ? Number.MAX_SAFE_INTEGER : declaration };
+  });
+  const slots = new Array<number>(domLabels.length);
+  ranked
+    .sort((a, b) => a.declaration - b.declaration || a.dom - b.dom)
+    .forEach((r, slot) => {
+      slots[r.dom] = slot;
+    });
+  return slots;
+}
+
 export default function MermaidDiagram({ chart }: { chart: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,8 +123,10 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
       document.getElementById("d" + idRef.current)?.remove();
     };
 
+    const src = fixAmbiguousLabels(chart);
+
     mermaid
-      .render(idRef.current, fixAmbiguousLabels(chart))
+      .render(idRef.current, src)
       .then(({ svg }) => {
         if (!cancelled && containerRef.current) {
           containerRef.current.innerHTML = svg;
@@ -95,13 +143,18 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
             { fill: "#2a2a1a", stroke: "#ca8a04", clusterBg: "#1c1c0f", clusterBorder: "#713f12" }, // yellow
           ];
           const neutralNode = { fill: "#1a3a3a", stroke: "#2dd4bf80" }; // teal for root nodes
-          const clusters = el.querySelectorAll(".cluster");
+          const clusters = Array.from(el.querySelectorAll(".cluster"));
+          // Palette follows declaration order, not the DOM order mermaid emits.
+          const slots = clusterPaletteOrder(
+            clusters.map((c) => c.querySelector(".cluster-label")?.textContent?.trim() ?? ""),
+            src,
+          );
           const clusterMap = new Map<string, number>(); // cluster DOM id → palette index
           clusters.forEach((c, i) => {
-            clusterMap.set(c.id, i);
+            clusterMap.set(c.id, slots[i]);
             const rect = c.querySelector("rect");
             if (rect) {
-              const p = clusterPalette[i % clusterPalette.length];
+              const p = clusterPalette[slots[i] % clusterPalette.length];
               rect.style.fill = p.clusterBg;
               rect.style.stroke = p.clusterBorder;
             }
