@@ -81,6 +81,30 @@ export function subgraphTitlesInOrder(src: string): string[] {
   return titles;
 }
 
+/**
+ * Palette slot for each rendered cluster, given the cluster labels in the order
+ * the DOM lists them. Slots are handed out in declaration order, so the first
+ * `subgraph` in the source always takes palette 0 however dagre laid the boxes
+ * out. A label the source does not account for keeps a slot, but sorts last.
+ */
+export function clusterPaletteOrder(domLabels: string[], src: string): number[] {
+  const declared = subgraphTitlesInOrder(src);
+  const claimed = new Set<number>();
+  // Duplicate titles are consumed in DOM order — nothing better to go on.
+  const ranked = domLabels.map((label, dom) => {
+    const declaration = declared.findIndex((t, n) => t === label && !claimed.has(n));
+    if (declaration !== -1) claimed.add(declaration);
+    return { dom, declaration: declaration === -1 ? Number.MAX_SAFE_INTEGER : declaration };
+  });
+  const slots = new Array<number>(domLabels.length);
+  ranked
+    .sort((a, b) => a.declaration - b.declaration || a.dom - b.dom)
+    .forEach((r, slot) => {
+      slots[r.dom] = slot;
+    });
+  return slots;
+}
+
 export default function MermaidDiagram({ chart }: { chart: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -121,28 +145,20 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
           const neutralNode = { fill: "#1a3a3a", stroke: "#2dd4bf80" }; // teal for root nodes
           const clusters = Array.from(el.querySelectorAll(".cluster"));
           // Palette follows declaration order, not the DOM order mermaid emits.
-          const declaredTitles = subgraphTitlesInOrder(src);
-          const claimed = new Set<number>();
-          const declarationIndex = (c: Element) => {
-            const label = c.querySelector(".cluster-label")?.textContent?.trim() ?? "";
-            const i = declaredTitles.findIndex((t, n) => t === label && !claimed.has(n));
-            if (i === -1) return Number.MAX_SAFE_INTEGER; // unrecognised label sorts last
-            claimed.add(i);
-            return i;
-          };
+          const slots = clusterPaletteOrder(
+            clusters.map((c) => c.querySelector(".cluster-label")?.textContent?.trim() ?? ""),
+            src,
+          );
           const clusterMap = new Map<string, number>(); // cluster DOM id → palette index
-          clusters
-            .map((c) => ({ c, order: declarationIndex(c) }))
-            .sort((a, b) => a.order - b.order)
-            .forEach(({ c }, i) => {
-              clusterMap.set(c.id, i);
-              const rect = c.querySelector("rect");
-              if (rect) {
-                const p = clusterPalette[i % clusterPalette.length];
-                rect.style.fill = p.clusterBg;
-                rect.style.stroke = p.clusterBorder;
-              }
-            });
+          clusters.forEach((c, i) => {
+            clusterMap.set(c.id, slots[i]);
+            const rect = c.querySelector("rect");
+            if (rect) {
+              const p = clusterPalette[slots[i] % clusterPalette.length];
+              rect.style.fill = p.clusterBg;
+              rect.style.stroke = p.clusterBorder;
+            }
+          });
           // Color each node by which cluster it overlaps
           el.querySelectorAll(".node").forEach((n) => {
             const shape = n.querySelector("rect, polygon") as SVGElement | null;
