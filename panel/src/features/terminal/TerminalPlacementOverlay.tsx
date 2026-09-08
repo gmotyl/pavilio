@@ -36,6 +36,43 @@ export interface PlacementOverlayHandle {
   end: () => void;
 }
 
+// TEMP instrumentation for the "drag never starts" report — remove before merge.
+// Logs every stage of the gesture so a failing browser can be diagnosed from a paste.
+const dbg = (...args: unknown[]) => console.log("[dnd]", ...args);
+
+let globalsAttached = false;
+function attachGlobalDragProbe() {
+  if (globalsAttached || typeof window === "undefined") return;
+  globalsAttached = true;
+  const describe = (t: EventTarget | null) => {
+    const el = t as HTMLElement | null;
+    if (!el || !el.getAttribute) return String(t);
+    return (
+      el.getAttribute("data-testid") ||
+      el.getAttribute("title") ||
+      `${el.tagName}.${String(el.className).slice(0, 24)}`
+    );
+  };
+  for (const type of ["mousedown", "dragstart", "dragend", "drop"]) {
+    document.addEventListener(
+      type,
+      (e) => dbg(`document:${type}`, describe(e.target), "defaultPrevented=", e.defaultPrevented),
+      true,
+    );
+  }
+  let overCount = 0;
+  document.addEventListener(
+    "dragover",
+    (e) => {
+      overCount += 1;
+      if (overCount <= 3 || overCount % 25 === 0)
+        dbg(`document:dragover #${overCount}`, describe(e.target));
+    },
+    true,
+  );
+  dbg("probe attached — drag a cell header and paste everything prefixed [dnd]");
+}
+
 /** Fraction of a tile, on each axis, that counts as its centre rather than a band. */
 const CENTRE_BAND = 0.25;
 
@@ -118,12 +155,16 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     setPainted(next);
   }, []);
 
+  useEffect(attachGlobalDragProbe, []);
+
   const setActive = useCallback((active: boolean) => {
     const el = ref.current;
     if (el) el.style.pointerEvents = active ? "auto" : "none";
+    dbg("overlay pointerEvents ->", active ? "auto" : "none", "el?", !!el);
   }, []);
 
   const end = useCallback(() => {
+    dbg("end (was dragging:", draggedRef.current, ")");
     draggedRef.current = null;
     setActive(false);
     setSwept([]);
@@ -134,6 +175,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     handleRef,
     () => ({
       begin: (sessionId: string) => {
+        dbg("begin", sessionId);
         draggedRef.current = sessionId;
         setSwept([]);
         paintedRef.current = null;
@@ -162,7 +204,10 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
 
     const box = ref.current?.getBoundingClientRect();
-    if (!box || box.width === 0 || box.height === 0) return;
+    if (!box || box.width === 0 || box.height === 0) {
+      dbg("dragover ignored — overlay box", box && { w: box.width, h: box.height });
+      return;
+    }
 
     // Fractional zone coordinates, so both the tile lookup and the band test read off
     // the same measurement.
@@ -173,6 +218,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     if (zx < 0 || zy < 0) return;
 
     const hovered = tileAt(layout, zx, zy);
+    dbg("dragover zone", zx, zy, "hovered", hovered?.sessionId ?? null, "dragged", draggedId);
     // Passing back over the dragged terminal changes nothing — it keeps the target the
     // sweep has built up rather than resetting it mid-gesture.
     if (!hovered || hovered.sessionId === draggedId) return;
@@ -196,10 +242,13 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
     }
 
     if (nextSwept !== swept) setSwept(nextSwept);
-    paint(placeRegion(layout, draggedId, region));
+    const next = placeRegion(layout, draggedId, region);
+    dbg("region", region, "->", next ? `${next.length} tiles` : "REFUSED (null)");
+    paint(next);
   };
 
   const handleDrop = (e: React.DragEvent) => {
+    dbg("drop — dragging:", draggedRef.current, "painted:", !!paintedRef.current);
     if (!draggedRef.current) return;
     e.preventDefault();
     const next = paintedRef.current;

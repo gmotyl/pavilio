@@ -118,8 +118,14 @@ export function TerminalLayoutGrid({
       onToggleMaximize={onToggleMaximize}
       onReady={onReady}
       onRename={onRename}
-      onDragStart={() => overlayRef.current?.begin(session.id)}
-      onDragEnd={() => overlayRef.current?.end()}
+      onDragStart={() => {
+        console.log("[dnd] cell onDragStart ->", session.id);
+        overlayRef.current?.begin(session.id);
+      }}
+      onDragEnd={() => {
+        console.log("[dnd] cell onDragEnd");
+        overlayRef.current?.end();
+      }}
       style={{ height: "100%", ...style }}
     />
   );
@@ -288,7 +294,11 @@ function TerminalCell({
         style={{ background: headerBg, cursor: "grab" }}
         title="Drag to place this terminal"
         draggable
+        onMouseDown={(e) =>
+          console.log("[dnd] header mousedown", session.id, "button", e.button)
+        }
         onDragStart={(e) => {
+          console.log("[dnd] header dragstart", session.id, "dataTransfer?", !!e.dataTransfer);
           // jsdom's DragEvent constructor is missing, so tests dispatch drag events
           // without a dataTransfer — guard rather than assume it is present.
           if (e.dataTransfer) {
