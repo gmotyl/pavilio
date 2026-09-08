@@ -39,6 +39,8 @@ interface Props {
 export type PlacementMode = "grow" | "swap" | "target";
 
 export interface PlacementOverlayHandle {
+  /** Whether a gesture of ours is in flight — the grid asks before claiming a drop. */
+  isDragging: () => boolean;
   /** Arm the gesture from the cell's dragstart. Writes refs only — never renders. */
   begin: (sessionId: string) => void;
   /**
@@ -288,6 +290,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   useImperativeHandle(
     handleRef,
     () => ({
+      isDragging: () => draggedRef.current !== null,
       begin: (sessionId: string) => {
         draggedRef.current = sessionId;
         sweptRef.current = [];

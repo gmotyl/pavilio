@@ -158,6 +158,10 @@ export function TerminalLayoutGrid({
         // The grid wrapper owns the drag events, not the overlay: nothing under the
         // cursor may change at dragstart, or Chromium abandons the drag on the spot.
         onDragOver={(e) => {
+          // Only claim drags of our own. Calling preventDefault unconditionally would
+          // make the grid a drop target for anything dragged in from outside the app —
+          // a file from the desktop, text from another window — and silently eat it.
+          if (!overlayRef.current?.isDragging()) return;
           e.preventDefault();
           if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
           // Plain drag paints an area anchored on the dragged window; Ctrl is the plain
@@ -169,6 +173,7 @@ export function TerminalLayoutGrid({
           );
         }}
         onDrop={(e) => {
+          if (!overlayRef.current?.isDragging()) return;
           e.preventDefault();
           const next = overlayRef.current?.release() ?? null;
           if (next) onPlace?.(next);

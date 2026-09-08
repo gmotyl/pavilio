@@ -454,6 +454,21 @@ describe("TerminalLayoutGrid — placement drag", () => {
     expect(screen.queryByTestId("placement-preview-a")).toBeNull();
   });
 
+  it("ignores drags that did not start in the grid", () => {
+    const onPlace = vi.fn();
+    renderGrid({ sessions, tiles, onPlace });
+    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
+
+    // No dragstart of ours: a file dragged in from the desktop must pass straight
+    // through rather than being claimed and silently eaten.
+    const over = new MouseEvent("dragover", { bubbles: true, cancelable: true });
+    fireEvent(wrapper, over);
+    expect(over.defaultPrevented).toBe(false);
+
+    fireEvent(wrapper, new MouseEvent("drop", { bubbles: true, cancelable: true }));
+    expect(onPlace).not.toHaveBeenCalled();
+  });
+
   it("works without throwing when onPlace is omitted", () => {
     renderGrid({ sessions, tiles, onPlace: undefined });
     fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
