@@ -595,6 +595,209 @@ describe("terminalInstances", () => {
   });
 });
 
+describe("activation reconnect and disconnected fan-out", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const opened: string[] = ["a", "b", "c", "d"];
+
+  function loggedMetrics(): LoggedMetric[] {
+    return fetchMock.mock.calls
+      .filter(([url]) => url === "/api/terminal/reconnect-log")
+      .map(([, init]) => JSON.parse((init as RequestInit).body as string));
+  }
+
+  /** Kill a session's socket the way a browser does: CLOSED, then onclose. */
+  function killSocket(ws: FakeWs): void {
+    ws.readyState = 3;
+    ws.onclose?.(new Event("close") as CloseEvent);
+  }
+
+  beforeEach(async () => {
+    createdSockets.length = 0;
+    fetchMock = vi.fn(() =>
+      Promise.resolve({ ok: true } as unknown as Response),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const mod = await import("../terminalInstances");
+    mod.__setWebSocketCtorForTests(
+      FakeWebSocket as unknown as new (url: string) => WebSocket,
+    );
+  });
+
+  afterEach(async () => {
+    const mod = await import("../terminalInstances");
+    for (const id of opened) mod.destroyTerminal(id);
+    mod.__setWebSocketCtorForTests(null);
+    vi.unstubAllGlobals();
+  });
+
+  it("reconnectSession defaults to the manual trigger", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("a");
+
+    mod.reconnectSession("a");
+
+    expect(loggedMetrics().map((m) => m.trigger)).toEqual(["manual"]);
+  });
+
+  it("reconnectSession records the trigger it is given", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("a");
+
+    mod.reconnectSession("a", "manual-all");
+
+    expect(loggedMetrics().map((m) => m.trigger)).toEqual(["manual-all"]);
+  });
+
+  it("reconnectOnActivate reopens a disconnected session and logs auto-activate", async () => {
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("a");
+    killSocket(createdSockets[0]);
+    expect(mod.getConnectionState("a")).toBe("disconnected");
+
+    mod.reconnectOnActivate("a");
+
+    expect(createdSockets).toHaveLength(2);
+    expect(inst.ws).toBe(createdSockets[1]);
+    expect(mod.getConnectionState("a")).toBe("connected");
+    // The disconnect line is the socket's own; the activation line follows it.
+    expect(loggedMetrics().map((m) => m.trigger)).toEqual([
+      "disconnect",
+      "auto-activate",
+    ]);
+  });
+
+  it("reconnectOnActivate is a no-op for a connected session", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("a");
+
+    mod.reconnectOnActivate("a");
+
+    expect(createdSockets).toHaveLength(1);
+    expect(loggedMetrics()).toEqual([]);
+  });
+
+  it("reconnectOnActivate is a no-op for an exited session", async () => {
+    // The terminal already prints [Process exited]; reopening would replay it.
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("a");
+    createdSockets[0].onmessage?.({
+      data: JSON.stringify({ type: "exit", code: 0 }),
+    } as MessageEvent);
+    killSocket(createdSockets[0]);
+
+    mod.reconnectOnActivate("a");
+
+    expect(createdSockets).toHaveLength(1);
+    expect(loggedMetrics()).toEqual([]);
+  });
+
+  it("reconnectOnActivate is a no-op for a session with no instance", async () => {
+    const mod = await import("../terminalInstances");
+
+    mod.reconnectOnActivate("never-acquired");
+
+    expect(createdSockets).toHaveLength(0);
+    expect(loggedMetrics()).toEqual([]);
+  });
+
+  it("a second activation during the handshake does not reopen twice", async () => {
+    // connectWs announces "connected" optimistically at the ws swap, so the
+    // guard debounces the second click without any state of its own.
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("a");
+    killSocket(createdSockets[0]);
+
+    mod.reconnectOnActivate("a");
+    mod.reconnectOnActivate("a");
+
+    expect(createdSockets).toHaveLength(2);
+    expect(
+      loggedMetrics().filter((m) => m.trigger === "auto-activate"),
+    ).toHaveLength(1);
+  });
+
+  it("disconnectedSessionIds lists only disconnected non-exited pooled sessions", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("a");
+    mod.acquireTerminal("b");
+    mod.acquireTerminal("c");
+    const [wsA, , wsC] = createdSockets;
+    killSocket(wsA);
+    // c is disconnected too, but it exited first — not a fault.
+    wsC.onmessage?.({
+      data: JSON.stringify({ type: "exit", code: 0 }),
+    } as MessageEvent);
+    killSocket(wsC);
+
+    expect(mod.disconnectedSessionIds()).toEqual(["a"]);
+  });
+
+  it("reconnectAllDisconnected reopens every disconnected session and returns the count", async () => {
+    const mod = await import("../terminalInstances");
+    const instA = mod.acquireTerminal("a");
+    mod.acquireTerminal("b");
+    const instC = mod.acquireTerminal("c");
+    mod.acquireTerminal("d");
+    const [wsA, wsB, wsC] = createdSockets;
+    killSocket(wsA);
+    killSocket(wsC);
+
+    expect(mod.reconnectAllDisconnected()).toBe(2);
+
+    expect(createdSockets).toHaveLength(6);
+    expect(instA.ws).not.toBe(wsA);
+    expect(instC.ws).not.toBe(wsC);
+    // The healthy ones keep the socket they had.
+    expect(mod.getConnectionState("b")).toBe("connected");
+    expect(wsB.close).not.toHaveBeenCalled();
+  });
+
+  it("reconnectAllDisconnected logs manual-all for each session it reopens", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("a");
+    mod.acquireTerminal("b");
+    killSocket(createdSockets[0]);
+    killSocket(createdSockets[1]);
+
+    mod.reconnectAllDisconnected();
+
+    const fanOut = loggedMetrics().filter((m) => m.trigger === "manual-all");
+    expect(fanOut.map((m) => m.sessionId).sort()).toEqual(["a", "b"]);
+    expect(loggedMetrics().some((m) => m.trigger === "manual")).toBe(false);
+  });
+
+  it("reconnectAllDisconnected returns 0 and reopens nothing when all sockets are open", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("a");
+    mod.acquireTerminal("b");
+
+    expect(mod.reconnectAllDisconnected()).toBe(0);
+
+    expect(createdSockets).toHaveLength(2);
+    expect(loggedMetrics()).toEqual([]);
+  });
+
+  it("one failing reopen does not stop the rest of the fan-out", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mod = await import("../terminalInstances");
+    const instA = mod.acquireTerminal("a");
+    const instB = mod.acquireTerminal("b");
+    killSocket(createdSockets[0]);
+    killSocket(createdSockets[1]);
+    // A reopen that throws outright — the fan-out must still reach "b".
+    (instA as { reopen: () => void }).reopen = () => {
+      throw new Error("reopen exploded");
+    };
+
+    expect(mod.reconnectAllDisconnected()).toBe(2);
+
+    expect(instB.ws).toBe(createdSockets[2]);
+    expect(mod.getConnectionState("b")).toBe("connected");
+    warn.mockRestore();
+  });
+});
+
 describe("followBottomAcrossResize", () => {
   // A minimal terminal-like stub whose `fit` callback can mutate baseY to
   // simulate the scrollback growth a real resize causes.

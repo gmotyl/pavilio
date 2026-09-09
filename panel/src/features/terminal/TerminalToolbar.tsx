@@ -385,7 +385,9 @@ export function TerminalToolbar({
           onMouseLeave={(e) =>
             (e.currentTarget.style.background = "transparent")
           }
-          title="Reconnect focused terminal (rebuild its connection)"
+          // Plural since the control fans out: it repairs every disconnected
+          // session, and falls back to repainting the focused one.
+          title="Reconnect every disconnected terminal (or repaint the focused one)"
         >
           <RotateCw size={12} />
           <span className="uppercase tracking-widest">Reconnect</span>

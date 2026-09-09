@@ -5,7 +5,12 @@ import { TerminalShortcutBar } from "./TerminalShortcutBar";
 import { TerminalMobileRail } from "./TerminalMobileRail";
 import { TerminalSpine } from "./TerminalSpine";
 import { TerminalSpineDrawer } from "./TerminalSpineDrawer";
-import { sendDismiss, reconnectSession } from "./terminalInstances";
+import {
+  sendDismiss,
+  reconnectSession,
+  reconnectAllDisconnected,
+  reconnectOnActivate,
+} from "./terminalInstances";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
 import type { RepoEntry } from "../projects/useProjects";
@@ -85,9 +90,28 @@ export function TerminalsSurface({
 }: TerminalsSurfaceProps) {
   // Dismiss attention state as soon as the user focuses a terminal — the
   // green "done" LED is a "check me" notification that clears on first look.
+  //
+  // Activation is also consent to repair: a session whose socket died is
+  // reconnected right here, so a frozen pane thaws on the click that selects
+  // it instead of waiting for the user to aim at its warning badge (ADR 0010).
+  // The guard lives in `reconnectOnActivate`, which shares the badge's
+  // predicate — this is every surface's focus path (grid cell, toolbar tab,
+  // rail dot, spine, drawer row, keyboard nav), so one call covers them all.
   const handleFocus = (id: string | null) => {
-    if (id) sendDismiss(id);
+    if (id) {
+      sendDismiss(id);
+      reconnectOnActivate(id);
+    }
     onFocus(id);
+  };
+
+  // Sockets die in bursts, so the Reconnect control repairs all of them. With
+  // nothing disconnected it keeps its second, deliberate use: repaint the pane
+  // being looked at, which is how it is used on a terminal that looks wrong
+  // while still connected.
+  const handleReconnect = () => {
+    if (reconnectAllDisconnected() > 0) return;
+    if (focusedId) reconnectSession(focusedId);
   };
 
   return (
@@ -126,9 +150,7 @@ export function TerminalsSurface({
           onRename={(id, n) => onUpdateSession(id, { name: n })}
           onToggleMaximize={onToggleMaximize}
           onReorder={onReorder ?? (() => {})}
-          onReconnect={() => {
-            if (focusedId) reconnectSession(focusedId);
-          }}
+          onReconnect={handleReconnect}
           onApplyPreset={onApplyPreset}
         />
       </div>
@@ -144,9 +166,7 @@ export function TerminalsSurface({
             onCreateTerminal(opts || {});
           }}
           onOpenDrawer={() => onSetDrawerOpen(!drawerOpen)}
-          onReconnect={() => {
-            if (focusedId) reconnectSession(focusedId);
-          }}
+          onReconnect={handleReconnect}
         />
       </div>
 

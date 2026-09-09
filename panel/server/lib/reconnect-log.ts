@@ -16,13 +16,30 @@ import { homedir } from "node:os";
  * What produced the record. A closed enum, not free text: the whole value of
  * this file is being able to group by it.
  *
- * - `manual` — the user clicked Reconnect (or the disconnected badge).
+ * - `manual` — one deliberate reconnect: the disconnected badge, or the
+ *   Reconnect control while nothing was disconnected (its repaint use).
+ * - `manual-all` — one session inside a Reconnect-control fan-out. Kept apart
+ *   from `manual` because a burst of eight would otherwise read as eight
+ *   deliberate clicks, destroying the measure activation-driven recovery is
+ *   judged by.
+ * - `auto-activate` — reconnected because the user focused the session.
  * - `disconnect` — an attached session's socket died on its own.
  * - `auto-blank` — a blank-gated path reopened the session without being asked.
  */
-export type ReconnectTrigger = "manual" | "disconnect" | "auto-blank";
+export type ReconnectTrigger =
+  | "manual"
+  | "manual-all"
+  | "auto-activate"
+  | "disconnect"
+  | "auto-blank";
 
-const TRIGGERS: readonly string[] = ["manual", "disconnect", "auto-blank"];
+const TRIGGERS: readonly string[] = [
+  "manual",
+  "manual-all",
+  "auto-activate",
+  "disconnect",
+  "auto-blank",
+];
 
 /**
  * Coerce a *present* client-supplied trigger to the enum. Anything
