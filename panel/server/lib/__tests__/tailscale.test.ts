@@ -25,6 +25,13 @@ function mockExecOnce(stdout: string, stderr = "", err: Error | null = null) {
 // `resolveBinary` reads `process.platform` at call time, so the platform is the
 // one knob these tests turn. The suite runs on Linux, so every test that wants
 // today's macOS candidate-path behaviour has to say so explicitly.
+// Both module-level caches have to go between tests: the resolved binary and
+// the per-port detection snapshot.
+function resetCaches() {
+  __testing.resetBinaryCache();
+  __testing.resetSnapshotCache();
+}
+
 const realPlatform = process.platform;
 function stubPlatform(platform: NodeJS.Platform) {
   Object.defineProperty(process, "platform", { value: platform, configurable: true });
@@ -36,7 +43,7 @@ afterEach(() => {
 describe("enableServe", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __testing.resetBinaryCache();
+    resetCaches();
     stubPlatform("darwin");
     existsMock.mockImplementation((p) => String(p).includes("Applications"));
   });
@@ -75,7 +82,7 @@ describe("enableServe", () => {
 describe("disableServe", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __testing.resetBinaryCache();
+    resetCaches();
     stubPlatform("darwin");
     existsMock.mockImplementation((p) => String(p).includes("Applications"));
   });
@@ -101,7 +108,7 @@ describe("disableServe", () => {
 describe("detectTailscale", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __testing.resetBinaryCache();
+    resetCaches();
     stubPlatform("darwin");
   });
 
@@ -160,7 +167,7 @@ describe("detectTailscale", () => {
 describe("detectTailscale daemon_down", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __testing.resetBinaryCache();
+    resetCaches();
     stubPlatform("darwin");
     existsMock.mockImplementation((p) => String(p).includes("Applications"));
   });
@@ -191,7 +198,7 @@ describe("detectTailscale daemon_down", () => {
 describe("resolveBinary platform scoping", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __testing.resetBinaryCache();
+    resetCaches();
   });
 
   it("skips the macOS candidate paths on a non-darwin host", async () => {
@@ -239,5 +246,87 @@ describe("resolveBinary platform scoping", () => {
       ["status", "--json"],
       expect.any(Function)
     );
+  });
+});
+
+describe("detectTailscale TTL cache", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetCaches();
+    stubPlatform("darwin");
+    existsMock.mockImplementation((p) => String(p).includes("Applications"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // One full probe: `status --json` then `serve status --json`, no serve config.
+  function mockOffProbe() {
+    mockExecOnce(
+      JSON.stringify({ BackendState: "Running", Self: { DNSName: "host.foo.ts.net." } })
+    );
+    mockExecOnce(JSON.stringify({}));
+  }
+
+  it("runs the CLI once for repeated calls inside the TTL", async () => {
+    mockOffProbe();
+    const first = await detectTailscale(3010);
+    const second = await detectTailscale(3010);
+    expect(first).toMatchObject({ state: "off", selfHost: "host.foo.ts.net" });
+    expect(second).toEqual(first);
+    expect(execMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-runs the CLI when fresh is requested", async () => {
+    mockOffProbe();
+    await detectTailscale(3010);
+    mockOffProbe();
+    expect((await detectTailscale(3010, { fresh: true })).state).toBe("off");
+    expect(execMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("re-runs the CLI after the TTL elapses", async () => {
+    vi.useFakeTimers();
+    mockOffProbe();
+    await detectTailscale(3010);
+    vi.advanceTimersByTime(2600);
+    mockOffProbe();
+    expect((await detectTailscale(3010)).state).toBe("off");
+    expect(execMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not reuse a snapshot across ports", async () => {
+    mockOffProbe();
+    await detectTailscale(3010);
+    mockOffProbe();
+    expect((await detectTailscale(3011)).state).toBe("off");
+    expect(execMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("invalidates the snapshot after enabling serve", async () => {
+    mockOffProbe();
+    expect((await detectTailscale(3010)).state).toBe("off");
+    mockExecOnce(""); // the serve command itself
+    mockExecOnce(
+      JSON.stringify({ BackendState: "Running", Self: { DNSName: "host.foo.ts.net." } })
+    );
+    mockExecOnce(
+      JSON.stringify({
+        Web: { "host.foo.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:3010" } } } },
+      })
+    );
+    const { enableServe } = await import("../tailscale");
+    // Would still report the stale `off` snapshot if enabling did not invalidate.
+    expect(await enableServe(3010)).toMatchObject({ state: "on" });
+  });
+
+  it("caches a not_installed result for the TTL", async () => {
+    stubPlatform("linux");
+    existsMock.mockReturnValue(false);
+    mockExecOnce("", "", new Error("not found")); // which tailscale
+    expect((await detectTailscale(3010)).state).toBe("not_installed");
+    expect((await detectTailscale(3010)).state).toBe("not_installed");
+    expect(execMock).toHaveBeenCalledTimes(1);
   });
 });

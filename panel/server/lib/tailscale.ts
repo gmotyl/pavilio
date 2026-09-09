@@ -23,9 +23,24 @@ const DARWIN_CANDIDATE_PATHS = [
 
 let cachedBinary: string | null | undefined;
 
+// The modal polls status every 2000 ms; a window just wider than that collapses
+// each poll cycle to at most one CLI pair while still being short enough that
+// anything the user changes out-of-band (installing the CLI, starting the
+// daemon) shows up on the next poll. Explicit rechecks pass `fresh: true`.
+const SNAPSHOT_TTL_MS = 2500;
+
+let snapshot: { port: number; at: number; state: TailscaleState } | null = null;
+
+export function invalidateTailscaleCache(): void {
+  snapshot = null;
+}
+
 export const __testing = {
   resetBinaryCache: () => {
     cachedBinary = undefined;
+  },
+  resetSnapshotCache: () => {
+    invalidateTailscaleCache();
   },
 };
 
@@ -62,7 +77,9 @@ async function resolveBinary(): Promise<string | null> {
   } catch {
     // which returns non-zero → not found
   }
-  // Do NOT cache "not found" — user may install Tailscale while the server is running.
+  // Do NOT cache "not found" here — the user may install Tailscale while the
+  // server is running. `detectTailscale` holds the resulting `not_installed`
+  // only for the snapshot TTL, so the next poll probes for the binary again.
   return null;
 }
 
@@ -70,7 +87,26 @@ function stripTrailingDot(host: string): string {
   return host.endsWith(".") ? host.slice(0, -1) : host;
 }
 
-export async function detectTailscale(port: number): Promise<TailscaleState> {
+export async function detectTailscale(
+  port: number,
+  opts?: { fresh?: boolean },
+): Promise<TailscaleState> {
+  // Keyed by port: the same host can serve a different panel port, and a
+  // snapshot taken for one says nothing about the serve config of another.
+  if (
+    !opts?.fresh &&
+    snapshot &&
+    snapshot.port === port &&
+    Date.now() - snapshot.at < SNAPSHOT_TTL_MS
+  ) {
+    return snapshot.state;
+  }
+  const state = await probeTailscale(port);
+  snapshot = { port, at: Date.now(), state };
+  return state;
+}
+
+async function probeTailscale(port: number): Promise<TailscaleState> {
   const bin = await resolveBinary();
   if (!bin) return { state: "not_installed" };
 
@@ -159,6 +195,8 @@ export async function enableServe(port: number): Promise<TailscaleState> {
     const detail = stderr.trim() || msg;
     return { state: "error", error: detail };
   }
+  // The serve config just changed, so any snapshot describes the old world.
+  invalidateTailscaleCache();
   return detectTailscale(port);
 }
 
@@ -170,5 +208,6 @@ export async function disableServe(port: number): Promise<TailscaleState> {
   } catch (e) {
     return { state: "error", error: (e as Error).message };
   }
+  invalidateTailscaleCache();
   return detectTailscale(port);
 }
