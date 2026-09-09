@@ -1,4 +1,4 @@
-import { isWsl } from "./lan";
+import { isWsl } from "./lan.js";
 
 // The host the panel process itself runs on. `wsl` is a Linux distro inside
 // WSL — a distinct platform for setup guidance, since its daemons, browser,
