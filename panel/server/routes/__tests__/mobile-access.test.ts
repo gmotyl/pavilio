@@ -315,6 +315,37 @@ describe("POST /api/mobile-access/lan/disable", () => {
   });
 });
 
+describe("cached detection on the non-status routes", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("rotate and the LAN routes use the cached detection path", async () => {
+    // Only `/status?fresh=1` may force a probe. These three answer right after
+    // an action the panel itself performed, so the TTL snapshot is current —
+    // flipping any of them to `buildResponse(port, true)` would spend a CLI
+    // pair per request and passed every other test in this file.
+    vi.mocked(tailscale.detectTailscale).mockResolvedValue({ state: "off", selfHost: "x" });
+    vi.mocked(auth.rotateToken).mockResolvedValue("FRESH");
+    vi.mocked(auth.ensureToken).mockResolvedValue("T");
+    vi.mocked(auth.getCurrentToken).mockReturnValue("T");
+    vi.mocked(lan.detectLanIp).mockReturnValue("192.168.1.42");
+    vi.mocked(listener.rebindPanel).mockResolvedValue();
+    vi.mocked(listener.getCurrentBindHost).mockReturnValue("0.0.0.0");
+
+    const app = makeApp();
+    for (const path of [
+      "/api/mobile-access/rotate",
+      "/api/mobile-access/lan/enable",
+      "/api/mobile-access/lan/disable",
+    ]) {
+      vi.mocked(tailscale.detectTailscale).mockClear();
+      const res = await request(app).post(path);
+      expect(res.status, path).toBe(200);
+      // Exactly one detection, and without the `fresh` option.
+      expect(vi.mocked(tailscale.detectTailscale).mock.calls, path).toEqual([[3010]]);
+    }
+  });
+});
+
 describe("loopback guard", () => {
   function callMiddleware(remoteAddress: string) {
     const router = mobileAccessRouter;
