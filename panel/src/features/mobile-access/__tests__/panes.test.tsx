@@ -6,6 +6,7 @@ import { AccessPane } from "../MobileAccessModal/AccessPane";
 import { ErrorPane } from "../MobileAccessModal/ErrorPane";
 import {
   SETUP_GUIDE_URL,
+  SETUP_GUIDE_WINDOWS_URL,
   SETUP_GUIDE_WSL_URL,
   type HostPlatform,
 } from "../setupGuide";
@@ -53,7 +54,9 @@ describe("NotInstalledPane", () => {
 
   it("explains the missing systemd and links the WSL setup guide on wsl", () => {
     render(<NotInstalledPane platform="wsl" onRefresh={() => {}} />);
-    expect(screen.getByText(/no systemd/i)).toBeInTheDocument();
+    // Conditional, not a claim: Fedora, openSUSE and Ubuntu with
+    // `[boot] systemd=true` all run systemd inside WSL.
+    expect(screen.getByText(/if this distro has no systemd/i)).toBeInTheDocument();
     expect(screen.getByText(/boot hook/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
       "href",
@@ -72,10 +75,19 @@ describe("NotInstalledPane", () => {
     expect(container.textContent ?? "").not.toMatch(/systemd/i);
   });
 
-  it("offers the winget command on win32", () => {
-    render(<NotInstalledPane platform="win32" onRefresh={() => {}} />);
-    expect(screen.getByText(/install tailscale on windows/i)).toBeInTheDocument();
-    expect(screen.getByText("winget install tailscale.tailscale")).toBeInTheDocument();
+  it("sends a Windows host to WSL instead of offering an install command", () => {
+    // Windows Tailscale has no `serve --https` (docs, "Windows hosts"), so an
+    // install command here walks the user into a dead end: they install, come
+    // back, and hit an error state with no path forward.
+    const { container } = render(
+      <NotInstalledPane platform="win32" onRefresh={() => {}} />,
+    );
+    expect(container.textContent ?? "").not.toMatch(/winget/i);
+    expect(screen.getByText(/inside a wsl distro/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      SETUP_GUIDE_WINDOWS_URL,
+    );
   });
 
   it("keeps the recheck button on every platform", () => {
@@ -146,6 +158,16 @@ describe("ErrorPane", () => {
     render(<ErrorPane error="x" hint="https_not_enabled" platform="darwin" />);
     const link = screen.getByRole("link", { name: /admin/i });
     expect(link).toHaveAttribute("href", expect.stringContaining("login.tailscale.com/admin"));
+  });
+
+  it("links the platform's guide section for an unhinted error", () => {
+    // The two hinted branches already use the platform-aware URL; an unhinted
+    // error on a WSL host used to drop the reader at the guide root.
+    render(<ErrorPane error="boom" platform="wsl" />);
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      SETUP_GUIDE_WSL_URL,
+    );
   });
 
   it("names the stopped daemon and links the WSL guide for daemon_down", () => {

@@ -70,7 +70,7 @@ export function ErrorPane({
         <p className="text-sm">
           <a
             className="underline"
-            href={SETUP_GUIDE_URL}
+            href={guideUrl}
             target="_blank"
             rel="noreferrer"
           >

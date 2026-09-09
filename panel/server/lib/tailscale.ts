@@ -118,6 +118,10 @@ async function probeTailscale(port: number): Promise<TailscaleState> {
     const msg = (e as Error).message ?? "";
     const stderr = e?.stderr ?? "";
     const combined = `${msg} ${stderr}`.toLowerCase();
+    // Log every status failure, the way `enableServe` logs every enable
+    // failure. The CLI's own words are the only diagnostic either path has,
+    // and an unhinted failure is precisely the one nobody can guess at later.
+    console.error("[tailscale] status failed", { msg, stderr });
     // The CLI is installed but its daemon is not answering — common on a WSL
     // distro, where nothing starts tailscaled at boot. Matched narrowly on the
     // CLI's own two connect-failure phrasings for the same reason `enableServe`
@@ -132,7 +136,6 @@ async function probeTailscale(port: number): Promise<TailscaleState> {
       // `tailscale set --operator=$USER` case, entirely plausible in a WSL
       // distro), where "start it" is the wrong advice — the detail and the log
       // are what let anyone tell the two apart afterwards.
-      console.error("[tailscale] status failed", { msg, stderr });
       const detail = stderr.trim() || msg;
       return {
         state: "error",

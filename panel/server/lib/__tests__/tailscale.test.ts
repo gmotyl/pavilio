@@ -225,6 +225,20 @@ describe("detectTailscale daemon_down", () => {
     errorLog.mockRestore();
   });
 
+  it("logs an unrelated status failure too", async () => {
+    // `enableServe` logs every failure; a status failure that is not
+    // `daemon_down` used to leave no server-side trace at all, which is the
+    // one case where the CLI's own words are the only diagnostic there is.
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockExecOnce("", "some unrelated stderr", new Error("boom"));
+    await detectTailscale(3010);
+    expect(errorLog).toHaveBeenCalledWith("[tailscale] status failed", {
+      msg: "boom",
+      stderr: "some unrelated stderr",
+    });
+    errorLog.mockRestore();
+  });
+
   it("leaves an unrelated status failure without a hint", async () => {
     mockExecOnce("", "", new Error("boom"));
     const res = await detectTailscale(3010);
