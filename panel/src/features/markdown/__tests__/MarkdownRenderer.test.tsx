@@ -43,7 +43,7 @@ describe("MarkdownRenderer mermaid fences", () => {
     const ts = ["```ts", "const a = 1;", "```", ""].join("\n");
     const { container, unmount } = renderMd({ content: ts });
     expect(container.querySelector("pre code")).toBeTruthy();
-    expect(container.querySelector("[data-testid=mermaid]")).toBeNull();
+    expect(screen.queryByTestId("mermaid")).toBeNull();
     unmount();
 
     const withBase = renderMd({ content: ts, basePath: "metro/plans/design.md" });
