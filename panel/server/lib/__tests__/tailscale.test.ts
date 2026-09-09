@@ -186,6 +186,15 @@ describe("detectTailscale daemon_down", () => {
     expect(res).toMatchObject({ state: "error", hint: "daemon_down" });
   });
 
+  it("flags a stopped daemon from the is-tailscaled-running phrasing alone", async () => {
+    // The CLI does not always print both connect-failure phrasings together,
+    // so this alternative has to be pinned on its own: no "failed to connect
+    // to local tailscaled" anywhere in the text.
+    mockExecOnce("", "cannot reach the backend; is tailscaled running?", new Error("exit 1"));
+    const res = await detectTailscale(3010);
+    expect(res).toMatchObject({ state: "error", hint: "daemon_down" });
+  });
+
   it("carries the CLI text alongside the daemon_down sentence", async () => {
     // The CLI prints the same connect-failure wording when the daemon IS up but
     // its socket is not readable by this user (the `tailscale set --operator`
@@ -349,6 +358,24 @@ describe("detectTailscale TTL cache", () => {
     const { enableServe } = await import("../tailscale");
     // Would still report the stale `off` snapshot if enabling did not invalidate.
     expect(await enableServe(3010)).toMatchObject({ state: "on" });
+  });
+
+  it("invalidates the snapshot after disabling serve", async () => {
+    // Prime an `on` snapshot first: without the invalidation, `disableServe`
+    // would hand back that stale `on` right after resetting serve.
+    mockExecOnce(
+      JSON.stringify({ BackendState: "Running", Self: { DNSName: "host.foo.ts.net." } })
+    );
+    mockExecOnce(
+      JSON.stringify({
+        Web: { "host.foo.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:3010" } } } },
+      })
+    );
+    expect((await detectTailscale(3010)).state).toBe("on");
+    mockExecOnce(""); // serve reset
+    mockOffProbe();
+    const { disableServe } = await import("../tailscale");
+    expect(await disableServe(3010)).toMatchObject({ state: "off" });
   });
 
   it("caches a not_installed result for the TTL", async () => {
