@@ -56,11 +56,19 @@ export type ConnectionState = "connected" | "disconnected" | "unattached";
  * `server/lib/reconnect-log.ts`; the endpoint coerces anything else to
  * "manual", so an out-of-sync client cannot widen the column.
  *
- * - `manual` — the user clicked Reconnect (or the disconnected badge).
+ * - `manual` — one deliberate reconnect: the disconnected badge, or the
+ *   Reconnect control while nothing was disconnected.
+ * - `manual-all` — one session inside a Reconnect-control fan-out.
+ * - `auto-activate` — reconnected because the user focused the session.
  * - `disconnect` — an attached session's socket died on its own.
  * - `auto-blank` — a blank-gated path reopened the session unasked.
  */
-export type ReconnectTrigger = "manual" | "disconnect" | "auto-blank";
+export type ReconnectTrigger =
+  | "manual"
+  | "manual-all"
+  | "auto-activate"
+  | "disconnect"
+  | "auto-blank";
 
 type ConnectionListener = (state: ConnectionState) => void;
 

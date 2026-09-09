@@ -63,6 +63,21 @@ describe("appendReconnectMetric", () => {
     expect(normalizeTrigger(7)).toBe("manual");
   });
 
+  it("passes auto-activate through unchanged", () => {
+    expect(normalizeTrigger("auto-activate")).toBe("auto-activate");
+  });
+
+  it("passes manual-all through unchanged", () => {
+    expect(normalizeTrigger("manual-all")).toBe("manual-all");
+  });
+
+  it("still coerces an unknown trigger to manual", () => {
+    // Widening the enum must not turn the column into free text: an older or
+    // hand-rolled client's stray value still lands as `manual`.
+    expect(normalizeTrigger("auto-activated")).toBe("manual");
+    expect(normalizeTrigger("all")).toBe("manual");
+  });
+
   it("keeps the recognised triggers verbatim", () => {
     appendReconnectMetric({ sessionId: "a", trigger: "disconnect" });
     appendReconnectMetric({ sessionId: "b", trigger: "auto-blank" });
