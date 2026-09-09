@@ -9,7 +9,7 @@ export type TailscaleState =
   | { state: "not_logged_in" }
   | { state: "off"; selfHost: string }
   | { state: "on"; selfHost: string; url: string }
-  | { state: "error"; error: string; hint?: "https_not_enabled" };
+  | { state: "error"; error: string; hint?: "https_not_enabled" | "daemon_down" };
 
 // macOS-only install locations: the GUI app bundle, Homebrew on Apple silicon,
 // Homebrew on Intel. The Mac app never registers a PATH entry, which is why we
@@ -78,8 +78,26 @@ export async function detectTailscale(port: number): Promise<TailscaleState> {
   try {
     const { stdout } = await run(bin, ["status", "--json"]);
     statusJson = JSON.parse(stdout);
-  } catch (e) {
-    return { state: "error", error: `tailscale status failed: ${(e as Error).message}` };
+  } catch (e: any) {
+    const msg = (e as Error).message ?? "";
+    const stderr = e?.stderr ?? "";
+    const combined = `${msg} ${stderr}`.toLowerCase();
+    // The CLI is installed but its daemon is not answering — common on a WSL
+    // distro, where nothing starts tailscaled at boot. Matched narrowly on the
+    // CLI's own two connect-failure phrasings for the same reason `enableServe`
+    // keeps its `https_not_enabled` match narrow: a broad pattern would relabel
+    // unrelated failures and send the user chasing the wrong fix.
+    if (
+      combined.includes("failed to connect to local tailscaled") ||
+      combined.includes("is tailscaled running")
+    ) {
+      return {
+        state: "error",
+        error: "tailscaled is not running on this host. Start it, then try again.",
+        hint: "daemon_down",
+      };
+    }
+    return { state: "error", error: `tailscale status failed: ${msg}` };
   }
 
   if (statusJson?.BackendState === "NeedsLogin" || statusJson?.BackendState === "Stopped") {

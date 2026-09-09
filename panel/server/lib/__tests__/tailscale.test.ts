@@ -157,6 +157,37 @@ describe("detectTailscale", () => {
   });
 });
 
+describe("detectTailscale daemon_down", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __testing.resetBinaryCache();
+    stubPlatform("darwin");
+    existsMock.mockImplementation((p) => String(p).includes("Applications"));
+  });
+
+  it("flags a stopped daemon with the daemon_down hint", async () => {
+    mockExecOnce("", "", new Error("failed to connect to local tailscaled; is tailscaled running?"));
+    const res = await detectTailscale(3010);
+    expect(res).toMatchObject({ state: "error", hint: "daemon_down" });
+  });
+
+  it("flags a stopped daemon reported only on stderr", async () => {
+    // Mixed case on purpose: the match must be case-insensitive, and the CLI
+    // puts this wording on stderr while the error itself is only "exit 1".
+    mockExecOnce("", "Failed to connect to local Tailscaled", new Error("exit 1"));
+    const res = await detectTailscale(3010);
+    expect(res).toMatchObject({ state: "error", hint: "daemon_down" });
+  });
+
+  it("leaves an unrelated status failure without a hint", async () => {
+    mockExecOnce("", "", new Error("boom"));
+    const res = await detectTailscale(3010);
+    expect(res.state).toBe("error");
+    expect(res).not.toHaveProperty("hint");
+    expect((res as { error: string }).error).toContain("tailscale status failed: boom");
+  });
+});
+
 describe("resolveBinary platform scoping", () => {
   beforeEach(() => {
     vi.clearAllMocks();
