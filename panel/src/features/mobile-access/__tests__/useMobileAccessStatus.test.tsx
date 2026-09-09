@@ -5,8 +5,11 @@ import { useMobileAccessStatus } from "../useMobileAccessStatus";
 const offEnvelope = {
   tailscale: { state: "off", selfHost: "x" },
   lan: { state: "off", lanIp: null },
-  host: { wsl: false, wslVmIp: null },
+  host: { wsl: false, wslVmIp: null, platform: "linux" },
 };
+
+const fetchCalls = () =>
+  (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls;
 
 beforeEach(() => {
   global.fetch = vi.fn(async () =>
@@ -39,6 +42,26 @@ describe("useMobileAccessStatus", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(result.current.status).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refresh requests a fresh status probe", async () => {
+    const { result } = renderHook(() => useMobileAccessStatus(false));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(
+      fetchCalls().map(([url]) => url),
+    ).toEqual(["/api/mobile-access/status?fresh=1"]);
+  });
+
+  it("interval polling does not request a fresh probe", async () => {
+    const { result } = renderHook(() => useMobileAccessStatus(true, 20));
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+    // Mount plus at least two interval ticks, so this cannot pass on the mount call alone.
+    await waitFor(() => expect(fetchCalls().length).toBeGreaterThanOrEqual(3));
+    expect(
+      fetchCalls().every(([url]) => url === "/api/mobile-access/status"),
+    ).toBe(true);
   });
 
   it("exposes enableLan / disableLan that POST to the LAN endpoints", async () => {
