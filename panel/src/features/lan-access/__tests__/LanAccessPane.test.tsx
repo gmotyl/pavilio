@@ -172,7 +172,7 @@ describe("LanAccessPane (on state)", () => {
     render(
       <LanAccessPane
         lan={on}
-        host={{ wsl: true, wslVmIp: "172.26.2.49" }}
+        host={{ wsl: true, wslVmIp: "172.26.2.49", platform: "wsl" }}
         onEnable={() => {}}
         onDisable={() => {}}
         onRegenerate={() => {}}
@@ -189,7 +189,7 @@ describe("LanAccessPane (on state)", () => {
     render(
       <LanAccessPane
         lan={on}
-        host={{ wsl: false, wslVmIp: null }}
+        host={{ wsl: false, wslVmIp: null, platform: "linux" }}
         onEnable={() => {}}
         onDisable={() => {}}
         onRegenerate={() => {}}

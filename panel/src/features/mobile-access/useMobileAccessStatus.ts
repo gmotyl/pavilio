@@ -1,11 +1,16 @@
 import { useEffect, useState, useCallback } from "react";
+import type { HostPlatform } from "./setupGuide";
 
 export type TailscaleState =
   | { state: "not_installed" }
   | { state: "not_logged_in" }
   | { state: "off"; selfHost: string }
   | { state: "on"; selfHost: string; url: string; qrUrl: string }
-  | { state: "error"; error: string; hint?: "https_not_enabled" };
+  | {
+      state: "error";
+      error: string;
+      hint?: "https_not_enabled" | "daemon_down";
+    };
 
 export type LanChannel =
   | { state: "on"; lanIp: string; url: string; qrUrl: string }
@@ -14,6 +19,7 @@ export type LanChannel =
 export interface HostInfo {
   wsl: boolean;
   wslVmIp: string | null;
+  platform: HostPlatform;
 }
 
 export interface MobileAccessStatus {
@@ -59,8 +65,13 @@ export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
     [],
   );
 
+  // The explicit recheck buttons force a probe; the poll below takes the server's cached snapshot.
   const refresh = useCallback(
-    () => call("refresh", "/api/mobile-access/status"),
+    () => call("refresh", "/api/mobile-access/status?fresh=1"),
+    [call],
+  );
+  const poll = useCallback(
+    () => call("poll", "/api/mobile-access/status"),
     [call],
   );
   const enable = useCallback(
@@ -89,13 +100,13 @@ export function useMobileAccessStatus(enabled: boolean, pollMs = 2000): Result {
     let id: ReturnType<typeof setTimeout>;
     const schedule = () => {
       id = setTimeout(() => {
-        void refresh().then(schedule);
+        void poll().then(schedule);
       }, pollMs);
     };
-    void refresh();
+    void poll();
     schedule();
     return () => clearTimeout(id);
-  }, [enabled, refresh, pollMs]);
+  }, [enabled, poll, pollMs]);
 
   return { status, refresh, enable, disable, rotate, enableLan, disableLan };
 }

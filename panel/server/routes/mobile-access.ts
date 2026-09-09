@@ -14,6 +14,7 @@ import {
   getWslHostGatewayIp,
 } from "../lib/lan.js";
 import { rebindPanel, getCurrentBindHost } from "../lib/panel-listener.js";
+import { detectHostPlatform, type HostPlatform } from "../lib/host-platform.js";
 
 const router = Router();
 
@@ -24,6 +25,7 @@ type LanChannel =
 interface HostInfo {
   wsl: boolean;
   wslVmIp: string | null;
+  platform: HostPlatform;
 }
 
 interface MobileAccessResponse {
@@ -72,18 +74,31 @@ function buildLanChannel(port: number): LanChannel {
 }
 
 function buildHostInfo(): HostInfo {
-  return { wsl: isWsl(), wslVmIp: getWslVmIp() };
+  return { wsl: isWsl(), wslVmIp: getWslVmIp(), platform: detectHostPlatform() };
 }
 
-async function buildResponse(port: number): Promise<MobileAccessResponse> {
-  const tailscale = withTailscaleQr(await detectTailscale(port));
+// `?fresh=1` bypasses the detection TTL. The modal's recheck buttons must
+// reflect a change the user just made in a terminal, not a snapshot taken
+// up to one poll window ago; the interval poll leaves it off.
+function wantsFresh(req: Request): boolean {
+  const { fresh } = req.query;
+  return fresh === "1" || fresh === "true";
+}
+
+async function buildResponse(
+  port: number,
+  fresh = false,
+): Promise<MobileAccessResponse> {
+  const tailscale = withTailscaleQr(
+    fresh ? await detectTailscale(port, { fresh: true }) : await detectTailscale(port),
+  );
   const lan = buildLanChannel(port);
   return { tailscale, lan, host: buildHostInfo() };
 }
 
-router.get("/status", async (_req, res) => {
+router.get("/status", async (req, res) => {
   const { port } = getConfig();
-  res.json(await buildResponse(port));
+  res.json(await buildResponse(port, wantsFresh(req)));
 });
 
 router.post("/enable", async (_req, res) => {
