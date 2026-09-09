@@ -1,6 +1,8 @@
 # Mobile access via Tailscale
 
-Reach the panel from your phone without exposing it to your LAN or the public internet. The panel binds only to `127.0.0.1`; `tailscale serve` on your Mac proxies HTTPS from your tailnet into loopback.
+Reach the panel from your phone without exposing it to your LAN or the public internet. The panel binds only to `127.0.0.1`; `tailscale serve` on the host proxies HTTPS from your tailnet into loopback.
+
+The host is whatever machine runs the panel — a Mac, a Linux box, or a WSL2 distro. Setup differs per host: [One-time Mac setup](#one-time-mac-setup) or [WSL setup](#wsl-setup).
 
 ## How it works
 
@@ -11,7 +13,8 @@ Reach the panel from your phone without exposing it to your LAN or the public in
  [Tailnet, private overlay network]
         │
         ▼
- Mac: tailscale serve --https=443 → http://127.0.0.1:<panel-port>
+ Host (Mac / Linux / WSL distro):
+ tailscale serve --https=443 → http://127.0.0.1:<panel-port>
         │
         ▼
  Panel (Express + Vite, loopback-only)
@@ -19,7 +22,7 @@ Reach the panel from your phone without exposing it to your LAN or the public in
 
 Two layers of authentication:
 
-1. **Network layer** — Tailnet membership. Only devices signed into your Tailscale account can reach `https://<your-mac>.<tailnet>.ts.net`.
+1. **Network layer** — Tailnet membership. Only devices signed into your Tailscale account can reach `https://<your-host>.<tailnet>.ts.net`.
 2. **Application layer** — a 256-bit pairing token carried in a signed session cookie. The token rotates every time you click **Enable**. Clicking **Disable** invalidates every paired phone in one shot.
 
 Both layers are required. Tailnet membership alone isn't enough — a stolen phone or a compromised tailnet device would otherwise inherit panel access (and the panel exposes a shell surface: terminal sessions, file read/write, git).
@@ -27,6 +30,8 @@ Both layers are required. Tailnet membership alone isn't enough — a stolen pho
 ## Prerequisites
 
 A Tailscale account in any tier. Free "Personal" works.
+
+A host that can run `tailscale serve --https`: macOS, Linux, or a WSL2 distro. Windows itself cannot (see [Windows hosts](#windows-hosts)).
 
 ### Tailscale admin configuration (one-time, critical)
 
@@ -39,6 +44,8 @@ The panel fails to enable mobile access if these aren't set, with a `Post https:
 Both toggles are on the same admin page.
 
 ## One-time Mac setup
+
+For a macOS host. If the panel runs inside a WSL distro, do [WSL setup](#wsl-setup) instead.
 
 ```bash
 brew install --cask tailscale
@@ -55,6 +62,103 @@ Confirm the CLI is reachable:
 
 Should print your devices. If it prints "Logged out", click the menubar icon and sign in.
 
+## WSL setup
+
+For a host where the panel runs inside a WSL2 distro (this is the section the panel's setup panes link to).
+
+The panel runs *inside* the distro, so the Tailscale node it drives lives inside the distro too — **not** the Tailscale you may already have installed on Windows. The panel never reaches across the WSL boundary; `which tailscale` and `http://127.0.0.1:<panel-port>` both have to mean the distro. That decision is recorded in ADR 0009 (`tailscale-node-lives-inside-the-wsl-distro`), and three of its consequences matter before you start:
+
+- **The machine appears twice on your tailnet** — the Windows node and the distro's node, side by side, with two different MagicDNS names.
+- **The phone pairs with the distro's name**, e.g. `https://spock-wsl.<tailnet>.ts.net`, not the Windows one. If you had a bookmark for the Windows node, it changes once.
+- **The distro's node is only up while the WSL VM is up.** It leaves the tailnet on `wsl --shutdown` or when the VM idles out. The Windows node does not — but neither does the panel, so this costs nothing extra.
+
+### 1. Install Tailscale inside the distro
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+```
+
+Run this in the distro's shell, not in PowerShell. Do not use `tailscale.exe` from `/mnt/c/...` — that is the Windows node, in a different network namespace.
+
+### 2. Start `tailscaled` — there is no systemd here
+
+The Debian/Ubuntu package ships exactly one supervision file, `/lib/systemd/system/tailscaled.service`, and it is inert on a distro whose PID 1 is `init(Ubuntu)` (`systemctl is-system-running` reports `offline`). The package ships **no** SysV init script, so `service tailscaled start` has nothing to run either. You start the daemon yourself:
+
+```bash
+sudo sh -c 'nohup /usr/sbin/tailscaled \
+  --tun=userspace-networking \
+  --state=/var/lib/tailscale/tailscaled.state \
+  --socket=/run/tailscale/tailscaled.sock \
+  >/var/log/tailscaled.log 2>&1 &'
+```
+
+Then confirm the CLI can reach it — before sign-in the expected answer is `Logged out.`:
+
+```bash
+tailscale status
+```
+
+Why each part:
+
+- **`nohup … &` and the redirect.** `tailscaled` runs in the foreground and logs to stdout. With no service manager, nothing backgrounds it, keeps it alive past your shell, or captures its log. `sudo sh -c '…'` matters too: the redirect has to be opened by root, not by your own shell.
+- **`--state` / `--socket`.** These are also `tailscaled`'s Linux defaults (`/var/run/tailscale/tailscaled.sock` is `/run/tailscale/tailscaled.sock` through the usual symlink, which is where the `tailscale` CLI looks), but the packaged unit passes them explicitly and lets systemd's `StateDirectory=` / `RuntimeDirectory=` create the directories. Pass them explicitly for the same reason the unit does: so the daemon and the CLI cannot disagree about where state and socket live.
+- **`--tun=userspace-networking`.** Recommended here even though `/dev/net/tun` exists in WSL2 and real TUN mode would work. Mobile access only needs *inbound* `tailscale serve` into loopback, which userspace networking serves fully — and it avoids having the daemon install netfilter rules and rewrite `/etc/resolv.conf` inside a distro whose routing and DNS are WSL's to manage (WSL regenerates `resolv.conf` on boot). The trade-off: in this mode the distro itself cannot reach other tailnet nodes over ordinary sockets. If you want that, drop the flag to get real TUN mode, and expect the daemon to touch iptables and DNS.
+- **No `--port`.** The default (`0`) auto-selects the WireGuard port. The packaged unit pins `41641` from `/etc/default/tailscaled`; behind WSL2's NAT there is nothing to gain by pinning it.
+
+### 3. Sign in
+
+```bash
+sudo tailscale up --hostname=spock-wsl
+```
+
+`sudo` is required — this is a privileged daemon operation, and the panel's own CLI calls also run as root.
+
+The command **prints an authentication URL and waits.** There is no browser in the distro, so open that URL on the Windows side: copy-paste it into your Windows browser, or click it if your terminal linkifies it. Sign in with the same Tailscale account as the rest of your tailnet, and the command returns once the node is authorized.
+
+`--hostname` is optional but worth it: it keeps the distro's node visibly distinct from the Windows node, which otherwise arrives with a confusingly similar name. Whatever it resolves to is the MagicDNS name your phone will pair with — you can read it back with `tailscale status --json` or from `login.tailscale.com/admin/machines`.
+
+### 4. Enable HTTPS certificates for the tailnet
+
+The same one-time tailnet requirement as the Mac path, and it is not optional: without it `tailscale serve --https=443` has no certificate to serve and the panel fails to enable mobile access. Enable **MagicDNS** and **HTTPS Certificates** at [https://login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns) — see [Tailscale admin configuration](#tailscale-admin-configuration-one-time-critical). If you already did this for a Mac or another host, it is a tailnet-wide setting and is already done.
+
+### 5. Keep `tailscaled` running across `wsl --shutdown`
+
+The daemon you started in step 2 dies with the VM. Nothing in the distro brings it back, so chain it onto WSL's boot hook.
+
+`/etc/wsl.conf` gives you **one** `[boot] command` slot, and something is probably in it already. Do not replace what is there — chain onto it. A distro that starts `sshd` today becomes:
+
+```ini
+[boot]
+command = /bin/sh -c "/etc/init.d/ssh start; /usr/sbin/tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock >>/var/log/tailscaled.log 2>&1 &"
+```
+
+Notes on that line:
+
+- It must stay a **single** line. `[boot] command` takes one command; `/bin/sh -c "…; …"` is how you get two.
+- Keep the existing command first, verbatim. `/etc/init.d/ssh start` is an example — copy whatever your own file has rather than this one.
+- The trailing `&` is required. The boot command runs synchronously as root during startup; an un-backgrounded `tailscaled` would sit there and hold the distro's boot open.
+- `>>` appends, so restarts accumulate in one log instead of truncating the previous boot's evidence.
+
+Then, from Windows:
+
+```powershell
+wsl --shutdown
+```
+
+Reopen the distro and check that the hook worked:
+
+```bash
+tailscale status     # should show your node, not "failed to connect to local tailscaled"
+```
+
+If it says `failed to connect to local tailscaled`, the hook did not run the daemon — read `/var/log/tailscaled.log`, and check `/etc/wsl.conf` for a stray line break or a mismatched quote.
+
+### What the panel does and does not do
+
+Keeping `tailscaled` alive is **host configuration, and the panel does not manage it.** The panel does not start the daemon, does not supervise or restart it, does not write `/etc/wsl.conf`, and does not repair a boot hook you got wrong. All it does is notice that the daemon is down, say so, and link back to this section. A panel that silently started a VPN daemon as root would be a surprise we are not willing to ship (ADR 0009).
+
+Sign-in is the same: one interactive `sudo tailscale up` per distro, done by you, once.
+
 ## Phone setup
 
 Install Tailscale:
@@ -62,14 +166,14 @@ Install Tailscale:
 - iOS: [App Store](https://apps.apple.com/app/tailscale/id1470499037)
 - Android: [Play Store](https://play.google.com/store/apps/details?id=com.tailscale.ipn)
 
-Sign in with the **same Tailscale account** as your Mac. Allow the VPN profile when iOS/Android prompts. Leave the toggle in the Tailscale app set to "on".
+Sign in with the **same Tailscale account** as the host. Allow the VPN profile when iOS/Android prompts. Leave the toggle in the Tailscale app set to "on".
 
 ## Pairing from the panel
 
 1. In the panel, click the **Mobile access** toggle in the left sidebar (bottom), or open the Dashboard and click the **Mobile access** button in the header.
 2. The modal opens. Flip the toggle switch to on.
 3. The panel runs `tailscale serve --bg --https=443 http://127.0.0.1:<panel-port>` and generates a fresh 256-bit pairing token.
-4. A QR code appears containing `https://<your-mac>.<tailnet>.ts.net/#mt=<token>`.
+4. A QR code appears containing `https://<your-host>.<tailnet>.ts.net/#mt=<token>`.
 5. Scan the QR with your phone's camera. It opens in Safari/Chrome, authenticates via the token fragment, and sets a signed `mobile_session` cookie scoped to the tailnet host. The panel loads. Paired.
 
 The full URL is shown under the QR if you prefer to copy-paste instead of scan.
@@ -141,13 +245,13 @@ Then click Enable again.
 
 The pairing token on the server has rotated since your phone last connected (you clicked Enable, Disable, or Rotate on the Mac). Open the modal on the Mac, click Enable, rescan on the phone.
 
-### Can reach the Mac URL but the panel never loads
+### Can reach the host URL but the panel never loads
 
 Check that `tailscale serve` is actually forwarding:
 
 ```bash
 tailscale serve status
-# Should show:  https://<your-mac>.<tailnet>.ts.net  →  http://127.0.0.1:<panel-port>
+# Should show:  https://<your-host>.<tailnet>.ts.net  →  http://127.0.0.1:<panel-port>
 ```
 
 If not, the panel didn't successfully register serve. Disable and re-enable from the modal.
@@ -190,7 +294,8 @@ This only removes the HTTPS proxy. Phone sessions paired to the current generati
 | Path | What |
 |---|---|
 | `~/.panel/mobile-auth.json` | Persistent state: signing secret, current pairing token, generation counter. Delete to fully reset mobile auth. |
-| `tailscale serve` config | Stored by the Tailscale daemon (`/Library/Tailscale/serve.json` on macOS). Managed via `tailscale serve` commands. |
+| `tailscale serve` config | Stored by the Tailscale daemon (`/Library/Tailscale/serve.json` on macOS; inside `/var/lib/tailscale/tailscaled.state` on Linux and WSL). Managed via `tailscale serve` commands. |
+| `/etc/wsl.conf` | WSL only, and yours to maintain: the `[boot] command` slot that starts `tailscaled` after a `wsl --shutdown`. The panel never reads or writes this. |
 | Panel code | `panel/server/lib/tailscale.ts` (CLI wrapper), `panel/server/lib/mobile-auth.ts` (token / cookie), `panel/server/routes/mobile-access.ts` (HTTP API). |
 
 ## Threat model (brief)
@@ -203,6 +308,9 @@ This only removes the HTTPS proxy. Phone sessions paired to the current generati
 
 **Rotation:** every **Enable** click generates a fresh 256-bit token and bumps a generation counter. Cookies are HMAC-signed with a per-install secret and bound to the generation; a cookie from a previous generation fails verification even if it hadn't expired.
 
-## Desktop-only note
+## Windows hosts
 
-Tailscale Serve HTTPS is a macOS / Linux feature (Windows Tailscale does not support `serve --https` as of early 2026). If you run the panel on Windows and want mobile access, use a Tailscale Funnel or reverse proxy alternative — not covered here.
+Tailscale Serve HTTPS is a macOS / Linux feature (Windows Tailscale does not support `serve --https` as of early 2026). Two options if your machine is a Windows box:
+
+- **Run the panel inside a WSL2 distro** and give that distro its own tailnet node — [WSL setup](#wsl-setup). This is the supported path.
+- Run the panel natively on Windows and reach it through a Tailscale Funnel or a reverse proxy — not covered here.
