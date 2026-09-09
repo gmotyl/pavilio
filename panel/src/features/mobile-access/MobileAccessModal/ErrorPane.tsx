@@ -1,14 +1,36 @@
+import { SETUP_GUIDE_URL, SETUP_GUIDE_WSL_URL } from "../setupGuide";
+
 export function ErrorPane({
   error,
   hint,
 }: {
   error: string;
-  hint?: "https_not_enabled";
+  hint?: "https_not_enabled" | "daemon_down";
 }) {
   return (
     <div className="p-4 space-y-3">
       <h2 className="text-lg font-semibold">Something went wrong</h2>
       <p className="text-sm opacity-80">{error}</p>
+      {hint === "daemon_down" && (
+        <>
+          <p className="text-sm">
+            tailscaled isn't running on this host. Start it, then recheck:
+          </p>
+          <pre className="p-2 rounded bg-black/40 text-sm">
+            <code>sudo tailscaled</code>
+          </pre>
+          <p className="text-sm">
+            <a
+              className="underline"
+              href={SETUP_GUIDE_WSL_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Setup guide
+            </a>
+          </p>
+        </>
+      )}
       {hint === "https_not_enabled" && (
         <p className="text-sm">
           HTTPS certificates must be enabled for your tailnet.{" "}
@@ -21,6 +43,18 @@ export function ErrorPane({
             Open tailnet admin
           </a>
           , find the HTTPS Certificates toggle, enable it, then try again.
+        </p>
+      )}
+      {!hint && (
+        <p className="text-sm">
+          <a
+            className="underline"
+            href={SETUP_GUIDE_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Setup guide
+          </a>
         </p>
       )}
     </div>

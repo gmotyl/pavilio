@@ -64,8 +64,11 @@ export function MobileAccessModal({ onClose }: { onClose: () => void }) {
               onRefresh={refresh}
             />
           )}
-          {ts?.state === "not_logged_in" && (
-            <NotLoggedInPane onRefresh={refresh} />
+          {status && ts?.state === "not_logged_in" && (
+            <NotLoggedInPane
+              platform={status.host.platform}
+              onRefresh={refresh}
+            />
           )}
           {onOff && (
             <AccessPane

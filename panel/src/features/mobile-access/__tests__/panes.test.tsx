@@ -4,7 +4,11 @@ import { NotInstalledPane } from "../MobileAccessModal/NotInstalledPane";
 import { NotLoggedInPane } from "../MobileAccessModal/NotLoggedInPane";
 import { AccessPane } from "../MobileAccessModal/AccessPane";
 import { ErrorPane } from "../MobileAccessModal/ErrorPane";
-import { SETUP_GUIDE_WSL_URL, type HostPlatform } from "../setupGuide";
+import {
+  SETUP_GUIDE_URL,
+  SETUP_GUIDE_WSL_URL,
+  type HostPlatform,
+} from "../setupGuide";
 
 vi.mock("../qr", () => ({
   renderQrSvg: async (s: string) => `<svg data-url="${s}"></svg>`,
@@ -82,10 +86,28 @@ describe("NotInstalledPane", () => {
 describe("NotLoggedInPane", () => {
   it("shows tailscale up command and refresh button", () => {
     const refresh = vi.fn();
-    render(<NotLoggedInPane onRefresh={refresh} />);
+    render(<NotLoggedInPane platform="darwin" onRefresh={refresh} />);
     expect(screen.getByText(/tailscale up/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /signed in/i }));
     expect(refresh).toHaveBeenCalled();
+  });
+
+  it("asks for sudo tailscale up and explains the auth URL on wsl", () => {
+    const refresh = vi.fn();
+    render(<NotLoggedInPane platform="wsl" onRefresh={refresh} />);
+    expect(screen.getByText("sudo tailscale up")).toBeInTheDocument();
+    expect(screen.getByText(/windows browser/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("mobile-access-not-logged-in-refresh"));
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("keeps the plain tailscale up copy on darwin", () => {
+    const { container } = render(
+      <NotLoggedInPane platform="darwin" onRefresh={() => {}} />,
+    );
+    expect(screen.getByText("tailscale up")).toBeInTheDocument();
+    expect(container.textContent ?? "").not.toMatch(/sudo/i);
+    expect(container.textContent ?? "").not.toMatch(/windows/i);
   });
 });
 
@@ -99,6 +121,32 @@ describe("ErrorPane", () => {
     render(<ErrorPane error="x" hint="https_not_enabled" />);
     const link = screen.getByRole("link", { name: /admin/i });
     expect(link).toHaveAttribute("href", expect.stringContaining("login.tailscale.com/admin"));
+  });
+
+  it("names the stopped daemon and links the WSL guide for daemon_down", () => {
+    const { container } = render(<ErrorPane error="x" hint="daemon_down" />);
+    expect(screen.getByText(/tailscaled isn't running/i)).toBeInTheDocument();
+    expect(screen.getByText("sudo tailscaled")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      SETUP_GUIDE_WSL_URL,
+    );
+    expect(container.textContent ?? "").not.toMatch(/https certificates/i);
+  });
+
+  it("keeps the tailnet admin copy for https_not_enabled", () => {
+    render(<ErrorPane error="x" hint="https_not_enabled" />);
+    expect(screen.getByText(/https certificates must be enabled/i)).toBeInTheDocument();
+    expect(screen.queryByText(/tailscaled isn't running/i)).toBeNull();
+  });
+
+  it("links the setup guide for an unhinted error", () => {
+    render(<ErrorPane error="boom" />);
+    expect(screen.getByText(/boom/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      SETUP_GUIDE_URL,
+    );
   });
 });
 
