@@ -58,8 +58,11 @@ export function MobileAccessModal({ onClose }: { onClose: () => void }) {
               Loading…
             </div>
           )}
-          {ts?.state === "not_installed" && (
-            <NotInstalledPane onRefresh={refresh} />
+          {status && ts?.state === "not_installed" && (
+            <NotInstalledPane
+              platform={status.host.platform}
+              onRefresh={refresh}
+            />
           )}
           {ts?.state === "not_logged_in" && (
             <NotLoggedInPane onRefresh={refresh} />
