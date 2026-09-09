@@ -116,7 +116,7 @@ export function TerminalMobileRail({
             border: "1px solid var(--border-subtle)",
             color: "var(--text-secondary)",
           }}
-          title="Reconnect focused terminal"
+          title="Reconnect every disconnected terminal"
         >
           <RotateCw size={13} />
         </button>
