@@ -124,13 +124,28 @@ describe("ErrorPane", () => {
   });
 
   it("names the stopped daemon and links the WSL guide for daemon_down", () => {
-    const { container } = render(<ErrorPane error="x" hint="daemon_down" />);
+    // The exact sentence the server sends with this hint.
+    const serverError =
+      "tailscaled is not running on this host. Start it, then try again.";
+    const { container } = render(
+      <ErrorPane error={serverError} hint="daemon_down" />,
+    );
     expect(screen.getByText(/tailscaled isn't running/i)).toBeInTheDocument();
-    expect(screen.getByText("sudo tailscaled")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
       "href",
       SETUP_GUIDE_WSL_URL,
     );
+    // ADR 0009: the panel links the guide and never invents a start command.
+    expect(container.querySelector("pre")).toBeNull();
+    expect(container.textContent ?? "").not.toMatch(/sudo tailscaled/i);
+    // The server's sentence is rendered once; the pane does not echo it.
+    expect(
+      (container.textContent ?? "").match(/not running on this host/gi)
+        ?.length ?? 0,
+    ).toBe(1);
+    expect(
+      (container.textContent ?? "").match(/start it, then/gi)?.length ?? 0,
+    ).toBe(1);
     expect(container.textContent ?? "").not.toMatch(/https certificates/i);
   });
 

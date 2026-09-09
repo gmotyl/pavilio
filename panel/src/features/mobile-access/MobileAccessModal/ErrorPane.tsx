@@ -9,27 +9,27 @@ export function ErrorPane({
 }) {
   return (
     <div className="p-4 space-y-3">
-      <h2 className="text-lg font-semibold">Something went wrong</h2>
+      <h2 className="text-lg font-semibold">
+        {hint === "daemon_down"
+          ? "tailscaled isn't running"
+          : "Something went wrong"}
+      </h2>
       <p className="text-sm opacity-80">{error}</p>
       {hint === "daemon_down" && (
-        <>
-          <p className="text-sm">
-            tailscaled isn't running on this host. Start it, then recheck:
-          </p>
-          <pre className="p-2 rounded bg-black/40 text-sm">
-            <code>sudo tailscaled</code>
-          </pre>
-          <p className="text-sm">
-            <a
-              className="underline"
-              href={SETUP_GUIDE_WSL_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Setup guide
-            </a>
-          </p>
-        </>
+        // ADR 0009: the panel links the documentation and never starts, supervises
+        // or repairs the daemon — so the start command lives in the guide only.
+        <p className="text-sm">
+          Follow the start step in the{" "}
+          <a
+            className="underline"
+            href={SETUP_GUIDE_WSL_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            setup guide
+          </a>{" "}
+          for this host.
+        </p>
       )}
       {hint === "https_not_enabled" && (
         <p className="text-sm">
