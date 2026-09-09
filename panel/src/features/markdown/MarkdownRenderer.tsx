@@ -44,9 +44,38 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
   const navigate = useNavigate();
 
   const components = useMemo<Components>(() => {
-    if (!basePath) return {};
+    // Fenced-code handling does not depend on where the file lives. Keep it out
+    // of the basePath guard below — a document from an OpenSpec backend outside
+    // projectsDir has no relative path, and used to lose every override with it,
+    // which left its mermaid diagrams rendered as plain code blocks.
+    const codeBlocks: Components = {
+      code: ({ className, children, ...props }) => {
+        if (/language-mermaid/.test(className || "")) {
+          const chart = extractText(children).replace(/\n$/, "");
+          return (
+            <span className="mermaid-block">
+              <Suspense fallback={<div className="animate-pulse rounded bg-zinc-800 p-8 text-center text-zinc-500">Loading diagram…</div>}>
+                <MermaidDiagram chart={chart} />
+              </Suspense>
+            </span>
+          );
+        }
+        return <code className={className} {...props}>{children}</code>;
+      },
+      pre: ({ children, ...props }) => {
+        const child = (Array.isArray(children) ? children[0] : children) as any;
+        if (child?.props?.className === "mermaid-block") {
+          return <>{children}</>;
+        }
+        return <pre {...props}>{children}</pre>;
+      },
+    };
+
+    // Relative links and images can only be resolved against a known base.
+    if (!basePath) return codeBlocks;
 
     return {
+      ...codeBlocks,
       a: ({ href, children, ...props }) => {
         if (!href) return <a {...props}>{children}</a>;
 
@@ -75,26 +104,6 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
         const resolved = resolveRelativeHref(src, basePath);
         if (!resolved) return <img src={src} alt={alt} {...props} />;
         return <img src={`/api/files/raw/${resolved}`} alt={alt} {...props} />;
-      },
-      code: ({ className, children, ...props }) => {
-        if (/language-mermaid/.test(className || "")) {
-          const chart = extractText(children).replace(/\n$/, "");
-          return (
-            <span className="mermaid-block">
-              <Suspense fallback={<div className="animate-pulse rounded bg-zinc-800 p-8 text-center text-zinc-500">Loading diagram…</div>}>
-                <MermaidDiagram chart={chart} />
-              </Suspense>
-            </span>
-          );
-        }
-        return <code className={className} {...props}>{children}</code>;
-      },
-      pre: ({ children, ...props }) => {
-        const child = (Array.isArray(children) ? children[0] : children) as any;
-        if (child?.props?.className === "mermaid-block") {
-          return <>{children}</>;
-        }
-        return <pre {...props}>{children}</pre>;
       },
     };
   }, [basePath, navigate]);
