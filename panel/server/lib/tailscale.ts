@@ -127,9 +127,16 @@ async function probeTailscale(port: number): Promise<TailscaleState> {
       combined.includes("failed to connect to local tailscaled") ||
       combined.includes("is tailscaled running")
     ) {
+      // Keep the CLI's own words. The same connect-failure wording appears when
+      // the daemon IS up but its socket is not readable by this user (the
+      // `tailscale set --operator=$USER` case, entirely plausible in a WSL
+      // distro), where "start it" is the wrong advice — the detail and the log
+      // are what let anyone tell the two apart afterwards.
+      console.error("[tailscale] status failed", { msg, stderr });
+      const detail = stderr.trim() || msg;
       return {
         state: "error",
-        error: "tailscaled is not running on this host. Start it, then try again.",
+        error: `tailscaled is not running on this host. Start it, then try again. (${detail})`,
         hint: "daemon_down",
       };
     }

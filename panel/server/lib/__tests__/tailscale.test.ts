@@ -186,6 +186,36 @@ describe("detectTailscale daemon_down", () => {
     expect(res).toMatchObject({ state: "error", hint: "daemon_down" });
   });
 
+  it("carries the CLI text alongside the daemon_down sentence", async () => {
+    // The CLI prints the same connect-failure wording when the daemon IS up but
+    // its socket is not readable by this user (the `tailscale set --operator`
+    // case). The friendly sentence is wrong there, so the CLI's own words are
+    // the only evidence that tells the two situations apart — keep them.
+    mockExecOnce(
+      "",
+      "failed to connect to local tailscaled; permission denied on /var/run/tailscale/tailscaled.sock",
+      new Error("exit 1")
+    );
+    const res = await detectTailscale(3010);
+    expect(res).toMatchObject({ state: "error", hint: "daemon_down" });
+    const { error } = res as { error: string };
+    expect(error).toMatch(
+      /^tailscaled is not running on this host\. Start it, then try again\./
+    );
+    expect(error).toContain("permission denied on /var/run/tailscale/tailscaled.sock");
+  });
+
+  it("logs the underlying daemon failure", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockExecOnce("", "failed to connect to local tailscaled", new Error("exit 1"));
+    await detectTailscale(3010);
+    expect(errorLog).toHaveBeenCalledWith("[tailscale] status failed", {
+      msg: "exit 1",
+      stderr: "failed to connect to local tailscaled",
+    });
+    errorLog.mockRestore();
+  });
+
   it("leaves an unrelated status failure without a hint", async () => {
     mockExecOnce("", "", new Error("boom"));
     const res = await detectTailscale(3010);

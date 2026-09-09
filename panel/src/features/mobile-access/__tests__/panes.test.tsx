@@ -149,7 +149,8 @@ describe("ErrorPane", () => {
   });
 
   it("names the stopped daemon and links the WSL guide for daemon_down", () => {
-    // The exact sentence the server sends with this hint.
+    // The sentence the server opens with for this hint (it also appends the
+    // CLI's own text in a trailing parenthetical, which the pane just renders).
     const serverError =
       "tailscaled is not running on this host. Start it, then try again.";
     const { container } = render(
