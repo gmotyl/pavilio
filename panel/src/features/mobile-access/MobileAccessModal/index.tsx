@@ -8,6 +8,8 @@ export function MobileAccessModal({ onClose }: { onClose: () => void }) {
   const { status, refresh, enable, disable, rotate } = useMobileAccessStatus(true);
 
   const ts = status?.tailscale ?? null;
+  // A payload without host info (older server, partial response) must still render.
+  const platform = status?.host?.platform ?? "linux";
   const onOff =
     ts?.state === "off" || ts?.state === "on" ? ts : null;
 
@@ -60,13 +62,13 @@ export function MobileAccessModal({ onClose }: { onClose: () => void }) {
           )}
           {status && ts?.state === "not_installed" && (
             <NotInstalledPane
-              platform={status.host.platform}
+              platform={platform}
               onRefresh={refresh}
             />
           )}
           {status && ts?.state === "not_logged_in" && (
             <NotLoggedInPane
-              platform={status.host.platform}
+              platform={platform}
               onRefresh={refresh}
             />
           )}

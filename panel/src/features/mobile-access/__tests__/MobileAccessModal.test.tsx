@@ -46,6 +46,18 @@ describe("MobileAccessModal", () => {
     expect(container.querySelector("pre")).toBeNull();
   });
 
+  it("degrades to the generic pane when the payload carries no host info", () => {
+    // An older server, or a partial response, sends no `host` key.
+    status.current = {
+      tailscale: { state: "not_installed" },
+      lan: { state: "off", lanIp: null },
+    } as unknown as MobileAccessStatus;
+    expect(() => render(<MobileAccessModal onClose={() => {}} />)).not.toThrow();
+    expect(
+      screen.getByText(/install tailscale on this host/i),
+    ).toBeInTheDocument();
+  });
+
   it("renders the Mac pane on a darwin host", () => {
     status.current = notInstalledOn("darwin");
     render(<MobileAccessModal onClose={() => {}} />);
