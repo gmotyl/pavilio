@@ -111,6 +111,24 @@ export function useTerminalSessions(project: string) {
     fetchSessions();
   }, [fetchSessions]);
 
+  // Adopt the session the surface actually shows when the stored focus cannot
+  // name it. The focus key is only written by an explicit act — a sidebar row
+  // click, a create, a click in the grid — so arriving any other way (the
+  // project row, a Last-open-view bookmark, a pasted URL, a browser profile
+  // that has never focused this project) leaves it absent. It also goes stale
+  // whenever the session it names is closed, or the panel restarts and hands
+  // out new ids. A terminal still renders in every one of those cases, so
+  // leaving focus unset is what left the sidebar highlighting nothing while a
+  // terminal was plainly open.
+  useEffect(() => {
+    const open = ordering.orderedSessions;
+    if (open.length === 0) return;
+    if (focusedId && open.some((s) => s.id === focusedId)) return;
+    // setFocusedId persists and broadcasts, which is how the sidebar and the
+    // mobile rail find out — they never read this hook's state directly.
+    setFocusedId(open[0].id);
+  }, [ordering.orderedSessions, focusedId, setFocusedId]);
+
   // When the project changes (no remount — same component instance reused
   // across route navigations), reset state to the new project's stored values.
   // Order and layout reset themselves inside useTerminalOrdering, keyed on the
