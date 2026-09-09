@@ -22,6 +22,9 @@ vi.mock("../../lib/panel-listener", () => ({
   rebindPanel: vi.fn(),
   getCurrentBindHost: vi.fn(),
 }));
+vi.mock("../../lib/host-platform", () => ({
+  detectHostPlatform: vi.fn(() => "linux"),
+}));
 vi.mock("../../config", () => ({
   getConfig: () => ({ port: 3010 }),
 }));
@@ -30,6 +33,7 @@ import * as tailscale from "../../lib/tailscale";
 import * as auth from "../../lib/mobile-auth";
 import * as lan from "../../lib/lan";
 import * as listener from "../../lib/panel-listener";
+import * as hostPlatform from "../../lib/host-platform";
 import mobileAccessRouter from "../mobile-access";
 
 function makeApp() {
@@ -96,6 +100,49 @@ describe("GET /api/mobile-access/status", () => {
 
     expect(res.body.lan).toEqual({ state: "off", lanIp: null });
   });
+
+  it("status reports the host platform", async () => {
+    vi.mocked(tailscale.detectTailscale).mockResolvedValue(tailscaleOn);
+    vi.mocked(auth.getCurrentToken).mockReturnValue("T0KEN");
+    vi.mocked(lan.detectLanIp).mockReturnValue(null);
+    vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
+    vi.mocked(lan.isWsl).mockReturnValueOnce(true);
+    vi.mocked(lan.getWslVmIp).mockReturnValueOnce("172.26.5.42");
+    vi.mocked(hostPlatform.detectHostPlatform).mockReturnValueOnce("wsl");
+
+    const res = await request(makeApp()).get("/api/mobile-access/status");
+
+    expect(res.status).toBe(200);
+    expect(res.body.host).toEqual({
+      wsl: true,
+      wslVmIp: "172.26.5.42",
+      platform: "wsl",
+    });
+  });
+
+  it("status?fresh=1 forces a fresh detection", async () => {
+    vi.mocked(tailscale.detectTailscale).mockResolvedValue({ state: "off", selfHost: "x" });
+    vi.mocked(auth.getCurrentToken).mockReturnValue(null);
+    vi.mocked(lan.detectLanIp).mockReturnValue(null);
+    vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
+
+    const res = await request(makeApp()).get("/api/mobile-access/status?fresh=1");
+
+    expect(res.status).toBe(200);
+    expect(tailscale.detectTailscale).toHaveBeenCalledWith(3010, { fresh: true });
+  });
+
+  it("status without fresh uses the cached detection path", async () => {
+    vi.mocked(tailscale.detectTailscale).mockResolvedValue({ state: "off", selfHost: "x" });
+    vi.mocked(auth.getCurrentToken).mockReturnValue(null);
+    vi.mocked(lan.detectLanIp).mockReturnValue(null);
+    vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
+
+    const res = await request(makeApp()).get("/api/mobile-access/status");
+
+    expect(res.status).toBe(200);
+    expect(tailscale.detectTailscale).toHaveBeenCalledWith(3010);
+  });
 });
 
 describe("POST /api/mobile-access/enable", () => {
@@ -135,6 +182,29 @@ describe("POST /api/mobile-access/disable", () => {
     expect(auth.rotateToken).not.toHaveBeenCalled();
     expect(auth.ensureToken).not.toHaveBeenCalled();
     expect(res.body.tailscale.state).toBe("off");
+  });
+});
+
+describe("host platform on the mutating routes", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("enable and disable responses carry the host platform", async () => {
+    vi.mocked(auth.ensureToken).mockResolvedValue("T");
+    vi.mocked(tailscale.enableServe).mockResolvedValue(tailscaleOn);
+    vi.mocked(tailscale.disableServe).mockResolvedValue({ state: "off", selfHost: "x" });
+    vi.mocked(auth.getCurrentToken).mockReturnValue("T");
+    vi.mocked(lan.detectLanIp).mockReturnValue(null);
+    vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
+    vi.mocked(hostPlatform.detectHostPlatform)
+      .mockReturnValueOnce("darwin")
+      .mockReturnValueOnce("darwin");
+
+    const app = makeApp();
+    const enabled = await request(app).post("/api/mobile-access/enable");
+    const disabled = await request(app).post("/api/mobile-access/disable");
+
+    expect(enabled.body.host.platform).toBe("darwin");
+    expect(disabled.body.host.platform).toBe("darwin");
   });
 });
 
