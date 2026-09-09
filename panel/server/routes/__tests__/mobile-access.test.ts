@@ -120,6 +120,23 @@ describe("GET /api/mobile-access/status", () => {
     });
   });
 
+  it("detects the host platform without pinning it", async () => {
+    vi.mocked(tailscale.detectTailscale).mockResolvedValue(tailscaleOn);
+    vi.mocked(auth.getCurrentToken).mockReturnValue(null);
+    vi.mocked(lan.detectLanIp).mockReturnValue(null);
+    vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
+
+    const res = await request(makeApp()).get("/api/mobile-access/status");
+
+    // The mock ignores its arguments, so a route that pinned the platform
+    // itself — detectHostPlatform("win32", () => false) — would still produce a
+    // correct-looking response. Pin the call shape instead, the same rigor this
+    // file already applies to detectTailscale: reading the host is the module's
+    // job, not the route's.
+    expect(res.status).toBe(200);
+    expect(hostPlatform.detectHostPlatform).toHaveBeenCalledWith();
+  });
+
   it("status?fresh=1 forces a fresh detection", async () => {
     vi.mocked(tailscale.detectTailscale).mockResolvedValue({ state: "off", selfHost: "x" });
     vi.mocked(auth.getCurrentToken).mockReturnValue(null);
