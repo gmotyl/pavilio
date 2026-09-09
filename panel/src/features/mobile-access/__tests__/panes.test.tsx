@@ -207,6 +207,28 @@ describe("ErrorPane", () => {
     expect(screen.queryByText(/tailscaled isn't running/i)).toBeNull();
   });
 
+  it("links both the tailnet admin and the setup guide for https_not_enabled", () => {
+    const { unmount } = render(
+      <ErrorPane error="x" hint="https_not_enabled" platform="wsl" />,
+    );
+    expect(
+      screen.getByRole("link", { name: /admin/i }),
+    ).toHaveAttribute("href", "https://login.tailscale.com/admin/dns");
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      SETUP_GUIDE_WSL_URL,
+    );
+    unmount();
+    render(<ErrorPane error="x" hint="https_not_enabled" platform="darwin" />);
+    expect(
+      screen.getByRole("link", { name: /admin/i }),
+    ).toHaveAttribute("href", "https://login.tailscale.com/admin/dns");
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      SETUP_GUIDE_URL,
+    );
+  });
+
   it("links the setup guide for an unhinted error", () => {
     render(<ErrorPane error="boom" platform="darwin" />);
     expect(screen.getByText(/boom/)).toBeInTheDocument();

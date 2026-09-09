@@ -54,6 +54,18 @@ export function ErrorPane({
           , find the HTTPS Certificates toggle, enable it, then try again.
         </p>
       )}
+      {hint === "https_not_enabled" && (
+        <p className="text-sm">
+          <a
+            className="underline"
+            href={guideUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Setup guide
+          </a>
+        </p>
+      )}
       {!hint && (
         <p className="text-sm">
           <a
