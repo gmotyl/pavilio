@@ -1,12 +1,21 @@
-import { SETUP_GUIDE_URL, SETUP_GUIDE_WSL_URL } from "../setupGuide";
+import {
+  SETUP_GUIDE_URL,
+  SETUP_GUIDE_WSL_URL,
+  type HostPlatform,
+} from "../setupGuide";
 
 export function ErrorPane({
   error,
   hint,
+  platform,
 }: {
   error: string;
   hint?: "https_not_enabled" | "daemon_down";
+  platform: HostPlatform;
 }) {
+  // The guide has a WSL section; every other host belongs at the guide root.
+  const guideUrl = platform === "wsl" ? SETUP_GUIDE_WSL_URL : SETUP_GUIDE_URL;
+
   return (
     <div className="p-4 space-y-3">
       <h2 className="text-lg font-semibold">
@@ -22,7 +31,7 @@ export function ErrorPane({
           Follow the start step in the{" "}
           <a
             className="underline"
-            href={SETUP_GUIDE_WSL_URL}
+            href={guideUrl}
             target="_blank"
             rel="noreferrer"
           >

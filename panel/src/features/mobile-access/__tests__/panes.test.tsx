@@ -138,12 +138,12 @@ describe("NotLoggedInPane", () => {
 
 describe("ErrorPane", () => {
   it("shows error text", () => {
-    render(<ErrorPane error="boom" />);
+    render(<ErrorPane error="boom" platform="darwin" />);
     expect(screen.getByText(/boom/)).toBeInTheDocument();
   });
 
   it("https_not_enabled hint renders admin link", () => {
-    render(<ErrorPane error="x" hint="https_not_enabled" />);
+    render(<ErrorPane error="x" hint="https_not_enabled" platform="darwin" />);
     const link = screen.getByRole("link", { name: /admin/i });
     expect(link).toHaveAttribute("href", expect.stringContaining("login.tailscale.com/admin"));
   });
@@ -154,7 +154,7 @@ describe("ErrorPane", () => {
     const serverError =
       "tailscaled is not running on this host. Start it, then try again.";
     const { container } = render(
-      <ErrorPane error={serverError} hint="daemon_down" />,
+      <ErrorPane error={serverError} hint="daemon_down" platform="wsl" />,
     );
     expect(screen.getByText(/tailscaled isn't running/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
@@ -175,14 +175,40 @@ describe("ErrorPane", () => {
     expect(container.textContent ?? "").not.toMatch(/https certificates/i);
   });
 
+  it("links the WSL guide section for daemon_down on wsl", () => {
+    const { container } = render(
+      <ErrorPane error="x" hint="daemon_down" platform="wsl" />,
+    );
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      SETUP_GUIDE_WSL_URL,
+    );
+    // ADR 0009: the pane links the guide and never prints a command.
+    expect(container.querySelector("pre")).toBeNull();
+  });
+
+  it("links the guide root for daemon_down on a non-WSL host", () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      const { container, unmount } = render(
+        <ErrorPane error="x" hint="daemon_down" platform={platform} />,
+      );
+      expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+        "href",
+        SETUP_GUIDE_URL,
+      );
+      expect(container.querySelector("pre")).toBeNull();
+      unmount();
+    }
+  });
+
   it("keeps the tailnet admin copy for https_not_enabled", () => {
-    render(<ErrorPane error="x" hint="https_not_enabled" />);
+    render(<ErrorPane error="x" hint="https_not_enabled" platform="darwin" />);
     expect(screen.getByText(/https certificates must be enabled/i)).toBeInTheDocument();
     expect(screen.queryByText(/tailscaled isn't running/i)).toBeNull();
   });
 
   it("links the setup guide for an unhinted error", () => {
-    render(<ErrorPane error="boom" />);
+    render(<ErrorPane error="boom" platform="darwin" />);
     expect(screen.getByText(/boom/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
       "href",

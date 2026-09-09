@@ -81,7 +81,7 @@ export function MobileAccessModal({ onClose }: { onClose: () => void }) {
             />
           )}
           {ts?.state === "error" && (
-            <ErrorPane error={ts.error} hint={ts.hint} />
+            <ErrorPane error={ts.error} hint={ts.hint} platform={platform} />
           )}
         </div>
       </div>
