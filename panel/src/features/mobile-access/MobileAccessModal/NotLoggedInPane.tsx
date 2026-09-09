@@ -1,4 +1,8 @@
-import type { HostPlatform } from "../setupGuide";
+import {
+  SETUP_GUIDE_URL,
+  SETUP_GUIDE_WSL_URL,
+  type HostPlatform,
+} from "../setupGuide";
 
 export function NotLoggedInPane({
   platform,
@@ -22,6 +26,16 @@ export function NotLoggedInPane({
           finish signing in.
         </p>
       )}
+      <p className="text-sm">
+        <a
+          className="underline"
+          href={isWsl ? SETUP_GUIDE_WSL_URL : SETUP_GUIDE_URL}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Setup guide
+        </a>
+      </p>
       <button
         data-testid="mobile-access-not-logged-in-refresh"
         className="px-3 py-1 rounded border text-sm"

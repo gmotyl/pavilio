@@ -14,6 +14,15 @@ vi.mock("../qr", () => ({
   renderQrSvg: async (s: string) => `<svg data-url="${s}"></svg>`,
 }));
 
+describe("setup guide links", () => {
+  // Pinned directly: comparing a rendered href against the constant would pass
+  // even if the WSL anchor were dropped from the constant itself.
+  it("points the WSL link at the guide's WSL section", () => {
+    expect(SETUP_GUIDE_URL).toMatch(/docs\/mobile-access-tailscale\.md$/);
+    expect(SETUP_GUIDE_WSL_URL).toBe(`${SETUP_GUIDE_URL}#wsl-setup`);
+  });
+});
+
 describe("NotInstalledPane", () => {
   it("shows brew install command and refresh button", () => {
     const refresh = vi.fn();
@@ -99,6 +108,22 @@ describe("NotLoggedInPane", () => {
     expect(screen.getByText(/windows browser/i)).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("mobile-access-not-logged-in-refresh"));
     expect(refresh).toHaveBeenCalled();
+  });
+
+  it("links the setup guide from the sign-in pane", () => {
+    const { unmount } = render(
+      <NotLoggedInPane platform="wsl" onRefresh={() => {}} />,
+    );
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      SETUP_GUIDE_WSL_URL,
+    );
+    unmount();
+    render(<NotLoggedInPane platform="darwin" onRefresh={() => {}} />);
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      SETUP_GUIDE_URL,
+    );
   });
 
   it("keeps the plain tailscale up copy on darwin", () => {
