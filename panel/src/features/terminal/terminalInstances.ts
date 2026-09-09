@@ -908,21 +908,91 @@ function createInstance(sessionId: string): InternalInstance {
 }
 
 /**
- * Manually reopen a session's ws (the toolbar Reconnect button, and the
- * disconnected badge). Captures state-at-click metrics and POSTs them to the
- * reconnect log — best-effort, fire-and-forget — before tearing down and
- * rebuilding the socket.
+ * Reopen a session's ws and record why. The one reopen-and-log primitive every
+ * user-driven path goes through — the disconnected badge, the Reconnect
+ * control, and activation — so "exactly one log line per reopen" holds by
+ * construction rather than by discipline.
  *
  * Deliberately logs before `reopen()`, which is also what keeps this from
  * double-counting: `reopen()` nulls the old socket's `onclose` before closing
  * it, so the close it causes is never observed and never adds a `disconnect`
- * row beside this `manual` one.
+ * row beside this one.
+ *
+ * The default trigger is `"manual"` — one deliberate reconnect — so existing
+ * callers keep their meaning without passing anything.
  */
-export function reconnectSession(sessionId: string): void {
+export function reconnectSession(
+  sessionId: string,
+  trigger: ReconnectTrigger = "manual",
+): void {
   const inst = instances.get(sessionId);
   if (!inst) return;
-  logReconnectMetric(inst, "manual");
+  logReconnectMetric(inst, trigger);
   inst.reopen();
+}
+
+/**
+ * Sessions this browser holds a *broken* terminal for: pooled, socket closed,
+ * process not exited. The same predicate {@link TerminalDisconnectedBadge}
+ * renders on, so the badge and the reconnect paths can never disagree about
+ * which sessions need repair.
+ *
+ * Scope is the pool, not the visible grid: an off-screen or other-project
+ * session is just as frozen, and already wears the badge.
+ */
+export function disconnectedSessionIds(): string[] {
+  const ids: string[] = [];
+  for (const inst of instances.values()) {
+    if (inst.connectionState === "disconnected" && !inst.exited) {
+      ids.push(inst.sessionId);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Reconnect a session because the user activated (focused) it — the gesture is
+ * the consent, exactly as a click on the disconnected badge is. See ADR 0010.
+ *
+ * A no-op unless the session is actually broken, which covers three cases
+ * without needing one each: a connected session has nothing to repair, an
+ * exited one is not a fault, and an unattached one has no socket to rebuild
+ * (mounting a terminal for it connects one via `acquireTerminal`).
+ *
+ * Also self-debouncing: `connectWs` announces "connected" optimistically at
+ * the ws swap, so a second activation while the replacement socket is still
+ * connecting reads `connected` and returns.
+ */
+export function reconnectOnActivate(sessionId: string): void {
+  if (getConnectionState(sessionId) !== "disconnected") return;
+  if (hasExited(sessionId)) return;
+  reconnectSession(sessionId, "auto-activate");
+}
+
+/**
+ * Reconnect every disconnected session at once — what the Reconnect control
+ * does. Sockets die in bursts (a server restart, a suspended host), so the
+ * repair is plural too; returns how many were reconnected so the caller can
+ * fall back to the focused session when there was nothing to fix.
+ *
+ * Each session logs `manual-all` rather than `manual`: a burst of eight would
+ * otherwise read as eight deliberate clicks and destroy the measure this
+ * behaviour is judged by.
+ *
+ * One session's failure must not strand the others — a throwing reopen is
+ * warned about and the fan-out continues, mirroring how `emitConnectionState`
+ * treats a throwing subscriber.
+ */
+export function reconnectAllDisconnected(): number {
+  const ids = disconnectedSessionIds();
+  for (const id of ids) {
+    try {
+      reconnectSession(id, "manual-all");
+    } catch (err) {
+      console.warn(`[terminal:${id}] reconnect during fan-out failed:`, err);
+    }
+  }
+  return ids.length;
 }
 
 export function sendDismiss(sessionId: string): void {
