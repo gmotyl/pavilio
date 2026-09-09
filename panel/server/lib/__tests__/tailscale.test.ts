@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { detectTailscale, __testing } from "../tailscale";
 
 vi.mock("node:child_process", () => ({
@@ -22,10 +22,22 @@ function mockExecOnce(stdout: string, stderr = "", err: Error | null = null) {
   }) as never);
 }
 
+// `resolveBinary` reads `process.platform` at call time, so the platform is the
+// one knob these tests turn. The suite runs on Linux, so every test that wants
+// today's macOS candidate-path behaviour has to say so explicitly.
+const realPlatform = process.platform;
+function stubPlatform(platform: NodeJS.Platform) {
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+}
+afterEach(() => {
+  Object.defineProperty(process, "platform", { value: realPlatform, configurable: true });
+});
+
 describe("enableServe", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     __testing.resetBinaryCache();
+    stubPlatform("darwin");
     existsMock.mockImplementation((p) => String(p).includes("Applications"));
   });
 
@@ -64,6 +76,7 @@ describe("disableServe", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     __testing.resetBinaryCache();
+    stubPlatform("darwin");
     existsMock.mockImplementation((p) => String(p).includes("Applications"));
   });
 
@@ -89,6 +102,7 @@ describe("detectTailscale", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     __testing.resetBinaryCache();
+    stubPlatform("darwin");
   });
 
   it("returns not_installed when no tailscale binary found", async () => {
@@ -140,5 +154,59 @@ describe("detectTailscale", () => {
       selfHost: "mac.tail-abcd.ts.net",
       url: "https://mac.tail-abcd.ts.net",
     });
+  });
+});
+
+describe("resolveBinary platform scoping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __testing.resetBinaryCache();
+  });
+
+  it("skips the macOS candidate paths on a non-darwin host", async () => {
+    stubPlatform("linux");
+    // Would resolve every candidate path if they were probed at all.
+    existsMock.mockReturnValue(true);
+    mockExecOnce("/usr/bin/tailscale\n"); // which tailscale
+    mockExecOnce(JSON.stringify({ BackendState: "NeedsLogin" }));
+    const res = await detectTailscale(3010);
+    expect(res.state).toBe("not_logged_in");
+    expect(existsMock).not.toHaveBeenCalled();
+    expect(execMock).toHaveBeenNthCalledWith(1, "which", ["tailscale"], expect.any(Function));
+  });
+
+  it("still probes the macOS candidate paths on darwin", async () => {
+    stubPlatform("darwin");
+    existsMock.mockImplementation((p) => String(p).includes("Applications"));
+    mockExecOnce(JSON.stringify({ BackendState: "NeedsLogin" }));
+    const res = await detectTailscale(3010);
+    expect(res.state).toBe("not_logged_in");
+    expect(existsMock).toHaveBeenCalledWith("/Applications/Tailscale.app/Contents/MacOS/Tailscale");
+    expect(execMock).toHaveBeenNthCalledWith(
+      1,
+      "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+      ["status", "--json"],
+      expect.any(Function)
+    );
+  });
+
+  it("resolves the binary from which on a Linux host", async () => {
+    stubPlatform("linux");
+    existsMock.mockReturnValue(false);
+    mockExecOnce("/usr/bin/tailscale\n"); // which tailscale
+    mockExecOnce(JSON.stringify({ BackendState: "NeedsLogin" }));
+    mockExecOnce(JSON.stringify({ BackendState: "NeedsLogin" }));
+    // Two different ports so a later per-port state cache cannot absorb the
+    // second call — the point here is that `which` runs only once.
+    expect((await detectTailscale(3010)).state).toBe("not_logged_in");
+    expect((await detectTailscale(3011)).state).toBe("not_logged_in");
+    expect(execMock).toHaveBeenCalledTimes(3);
+    expect(execMock.mock.calls.filter((c) => c[0] === "which")).toHaveLength(1);
+    expect(execMock).toHaveBeenNthCalledWith(
+      2,
+      "/usr/bin/tailscale",
+      ["status", "--json"],
+      expect.any(Function)
+    );
   });
 });

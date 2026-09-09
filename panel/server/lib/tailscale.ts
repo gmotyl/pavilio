@@ -11,7 +11,11 @@ export type TailscaleState =
   | { state: "on"; selfHost: string; url: string }
   | { state: "error"; error: string; hint?: "https_not_enabled" };
 
-const CANDIDATE_PATHS = [
+// macOS-only install locations: the GUI app bundle, Homebrew on Apple silicon,
+// Homebrew on Intel. The Mac app never registers a PATH entry, which is why we
+// probe at all — on Linux and WSL the package installs into PATH, so probing
+// these three is three guaranteed-ENOENT syscalls on every status poll.
+const DARWIN_CANDIDATE_PATHS = [
   "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
   "/opt/homebrew/bin/tailscale",
   "/usr/local/bin/tailscale",
@@ -38,10 +42,14 @@ function run(cmd: string, args: string[]): Promise<{ stdout: string; stderr: str
 
 async function resolveBinary(): Promise<string | null> {
   if (cachedBinary) return cachedBinary;
-  for (const p of CANDIDATE_PATHS) {
-    if (existsSync(p)) {
-      cachedBinary = p;
-      return p;
+  // Read the platform at call time, not at module load, so the cached binary
+  // and the probe strategy cannot disagree about which host we are on.
+  if (process.platform === "darwin") {
+    for (const p of DARWIN_CANDIDATE_PATHS) {
+      if (existsSync(p)) {
+        cachedBinary = p;
+        return p;
+      }
     }
   }
   try {
