@@ -3,6 +3,7 @@ import { execFile } from "child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import { join, resolve, sep } from "path";
 import { getConfig } from "../config.js";
+import { gitSafeEnv } from "../lib/gitEnv.js";
 import { expandHome } from "../lib/paths.js";
 
 // Keep in sync with panel/src/features/projects/useWorkspaceScripts.ts
@@ -154,7 +155,14 @@ function runScript(
     execFile(
       "bash",
       [scriptAbs, ...scriptArgs],
-      { cwd: projectsDir, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+      // Workspace scripts run git themselves (update.sh mirrors and commits), so
+      // they need the same protection from an inherited GIT_DIR. See lib/gitEnv.ts.
+      {
+        cwd: projectsDir,
+        env: gitSafeEnv(),
+        timeout: timeoutMs,
+        maxBuffer: 4 * 1024 * 1024,
+      },
       (err, stdout, stderr) => {
         const durationMs = Date.now() - start;
         const output = [stdout, stderr].filter(Boolean).join("").trim();
