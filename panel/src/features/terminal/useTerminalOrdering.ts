@@ -70,15 +70,35 @@ function readTiles(scopeKey: string): TileLayout {
   }
 }
 
+/** True when `order` is a permutation of exactly the sessions `layout` seats. */
+function namesExactly(order: string[], layout: TileLayout): boolean {
+  const seated = new Set(layout.map((tile) => tile.sessionId));
+  const named = new Set(order);
+  return (
+    named.size === order.length &&
+    named.size === seated.size &&
+    order.every((id) => seated.has(id))
+  );
+}
+
 /** Both halves of one scope's stored ordering model, read together. */
 function readScope(scopeKey: string): OrderingState {
   const layout = readTiles(scopeKey);
-  // The order is the tiling's reading order whenever a tiling is stored — the two are
-  // one model, and trusting a separately-stored order here would let them disagree.
-  const order =
-    layout.length > 0
-      ? readingOrder(layout).map((tile) => tile.sessionId)
-      : readOrder(scopeKey);
+  if (layout.length === 0) return { order: readOrder(scopeKey), layout };
+
+  // The order and the tiling are one model, so a stored order read back blind could let
+  // the two disagree — which is why this used to re-derive from the tiling and ignore
+  // the stored key outright. It cannot any more: a seam resize deliberately keeps the
+  // session order it had rather than the tiling's reading order (a horizontal seam move
+  // rewrites y, `readingOrder`'s primary key, so it can renumber terminals the gesture
+  // promised not to touch), and re-deriving here would undo that on the next mount.
+  // Set equality is what makes trusting the stored order safe: only a permutation of
+  // exactly this layout's sessions is honoured, so a stale, partial, or foreign order
+  // still loses to the reading order and the two halves can never silently drift.
+  const stored = readOrder(scopeKey);
+  const order = namesExactly(stored, layout)
+    ? stored
+    : readingOrder(layout).map((tile) => tile.sessionId);
   return { order, layout };
 }
 
