@@ -3,10 +3,15 @@
 // projects/pavilio/plans/openspec/changes/terminal-grid-rect-layout/design.md.
 //
 // A zone is a coordinate, not a DOM element: nothing renders per zone except the
-// drag overlay's hit regions. 12 is chosen because it divides by 2, 3, 4 and 6,
-// so halves, thirds, quarters and sixths are exact on both axes and the curated
-// presets need no rounding.
-export const GRID = 12;
+// drag overlay's hit regions. 48 = 2^4 * 3, so halves, thirds, quarters, sixths,
+// eighths, twelfths and sixteenths are all exact on both axes and the curated
+// presets need no rounding. It is four times the 12 the model started on, which is
+// what lets a dragged seam move in 2.08% steps rather than 8.3% ones — see
+// projects/pavilio/adr/0008-terminal-grid-seam-resize-on-a-finer-matrix.md.
+export const GRID = 48;
+
+/** Smallest span a terminal may be reduced to on either axis, in zones (8.3%). */
+export const MIN_SPAN = 4;
 
 /** Half-open rectangle on the zone matrix: covers x..x+w-1 by y..y+h-1. */
 export interface Rect {
@@ -80,7 +85,7 @@ export interface LayoutPreset {
 }
 
 // Splits `total` zones into `parts` spans, remainder going to the earliest ones —
-// so 12 into 5 is 3,3,2,2,2 and every span stays >= 1 as long as parts <= total.
+// so 48 into 5 is 10,10,10,9,9 and every span stays >= 1 as long as parts <= total.
 function evenSpans(total: number, parts: number): number[] {
   const base = Math.floor(total / parts);
   const remainder = total % parts;
@@ -221,7 +226,7 @@ export function expandPreset(order: string[], preset: LayoutPreset): TileLayout 
 }
 
 /** A new session prefers to split a tile with room for two usable parts. */
-const SPLIT_PREFERENCE = 4;
+const SPLIT_PREFERENCE = 16;
 
 /**
  * Adds a session by splitting the LAST tile in reading order along its longer axis
@@ -244,8 +249,9 @@ export function appendSession(layout: TileLayout, sessionId: string): TileLayout
   const spanOn = (tile: Tile, axis: "x" | "y") => (axis === "x" ? tile.w : tile.h);
 
   // Both halves must stay usable, so the split axis needs room for two parts AND
-  // the other axis must not already be a sliver — splitting a 12x1 tile down the
-  // middle yields two 6x1 cells, which is worse than splitting something further back.
+  // the other axis must not already be a sliver — splitting a full-width, one-zone-tall
+  // tile down the middle yields two slivers, which is worse than splitting something
+  // further back.
   const other = (axis: "x" | "y") => (axis === "x" ? "y" : "x");
   let host = [...ordered].reverse().find((tile) => {
     const axis = axisOf(tile);

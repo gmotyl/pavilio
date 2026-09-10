@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { LayoutPresetMenu } from "../LayoutPresetMenu";
-import { getLayoutPresets } from "../tileLayout";
+import { GRID, getLayoutPresets } from "../tileLayout";
 
 describe("LayoutPresetMenu", () => {
   it("renders one option per getLayoutPresets(count) entry, even a single one", () => {
@@ -37,7 +37,7 @@ describe("LayoutPresetMenu", () => {
     expect(boxes).toHaveLength(rows.slots.length);
     expect(boxes.map((b) => `${b.style.top}|${b.style.height}`)).toEqual(
       rows.slots.map(
-        (slot) => `${(slot.y / 12) * 100}%|${(slot.h / 12) * 100}%`,
+        (slot) => `${(slot.y / GRID) * 100}%|${(slot.h / GRID) * 100}%`,
       ),
     );
   });

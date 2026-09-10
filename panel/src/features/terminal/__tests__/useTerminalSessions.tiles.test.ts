@@ -60,8 +60,8 @@ describe("useTerminalSessions tiling", () => {
 
   it("initialises the tiling from panel-terminal-grid-<project>", async () => {
     const stored: TileLayout = [
-      { sessionId: "a", x: 0, y: 0, w: 12, h: 8 },
-      { sessionId: "b", x: 0, y: 8, w: 12, h: 4 },
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 32 },
+      { sessionId: "b", x: 0, y: 32, w: 48, h: 16 },
     ];
     localStorage.setItem(GRID_KEY, JSON.stringify(stored));
     mockFetchSessions([session("a"), session("b")]);
@@ -100,9 +100,9 @@ describe("useTerminalSessions tiling", () => {
     localStorage.setItem(
       GRID_KEY,
       JSON.stringify([
-        { sessionId: "A", x: 0, y: 0, w: 12, h: 4 },
-        { sessionId: "B", x: 0, y: 4, w: 12, h: 4 },
-        { sessionId: "C", x: 0, y: 8, w: 12, h: 4 },
+        { sessionId: "A", x: 0, y: 0, w: 48, h: 16 },
+        { sessionId: "B", x: 0, y: 16, w: 48, h: 16 },
+        { sessionId: "C", x: 0, y: 32, w: 48, h: 16 },
       ]),
     );
     mockFetchSessions([session("B"), session("C")]);
@@ -121,8 +121,8 @@ describe("useTerminalSessions tiling", () => {
     localStorage.setItem(
       GRID_KEY,
       JSON.stringify([
-        { sessionId: "A", x: 0, y: 0, w: 6, h: 12 },
-        { sessionId: "B", x: 6, y: 0, w: 6, h: 12 },
+        { sessionId: "A", x: 0, y: 0, w: 24, h: 48 },
+        { sessionId: "B", x: 24, y: 0, w: 24, h: 48 },
       ]),
     );
     const existing = [session("A"), session("B")];
@@ -143,8 +143,8 @@ describe("useTerminalSessions tiling", () => {
     expect(result.current.tiles.find((t) => t.sessionId === "A")).toMatchObject({
       x: 0,
       y: 0,
-      w: 6,
-      h: 12,
+      w: 24,
+      h: 48,
     });
   });
 
@@ -169,8 +169,8 @@ describe("useTerminalSessions tiling", () => {
     const { result } = await setup("vector");
 
     const placed: TileLayout = [
-      { sessionId: "B", x: 0, y: 0, w: 12, h: 6 },
-      { sessionId: "A", x: 0, y: 6, w: 12, h: 6 },
+      { sessionId: "B", x: 0, y: 0, w: 48, h: 24 },
+      { sessionId: "A", x: 0, y: 24, w: 48, h: 24 },
     ];
     act(() => result.current.placeTiles(placed));
 

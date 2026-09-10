@@ -5,18 +5,18 @@ import {
   TerminalPlacementOverlay,
   type PlacementOverlayHandle,
 } from "../TerminalPlacementOverlay";
-import { isValidLayout, type TileLayout } from "../tileLayout";
+import { GRID, isValidLayout, type TileLayout } from "../tileLayout";
 
 // a on the left, b over c on the right — the shape from the bug report.
 const layout: TileLayout = [
-  { sessionId: "a", x: 0, y: 0, w: 6, h: 12 },
-  { sessionId: "b", x: 6, y: 0, w: 6, h: 6 },
-  { sessionId: "c", x: 6, y: 6, w: 6, h: 6 },
+  { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+  { sessionId: "b", x: 24, y: 0, w: 24, h: 24 },
+  { sessionId: "c", x: 24, y: 24, w: 24, h: 24 },
 ];
 
-// 120x120 px over a 12x12 matrix: one zone is exactly 10px, so a client coordinate
-// of 65,30 is zone 6.5,3 — the middle of b.
-const BOX = { left: 0, top: 0, width: 120, height: 120 };
+// 480x480 px over a 48x48 matrix: one zone is exactly 10px, so a client coordinate
+// of 265,25 is zone 26,2 — inside b.
+const BOX = { left: 0, top: 0, width: 480, height: 480 };
 
 function renderOverlay(draggedId = "a", begin = true, custom = layout) {
   const onCancel = vi.fn();
@@ -55,7 +55,7 @@ describe("TerminalPlacementOverlay", () => {
 
   it("paints nothing until a gesture begins", () => {
     const { handle } = renderOverlay("a", false);
-    act(() => handle.current!.over(90, 30));
+    act(() => handle.current!.over(395, 155));
     expect(screen.queryByTestId("placement-region")).toBeNull();
     expect(screen.queryByTestId("placement-preview-a")).toBeNull();
   });
@@ -63,14 +63,14 @@ describe("TerminalPlacementOverlay", () => {
   it("grows the dragged window towards the pointer", () => {
     const { handle } = renderOverlay("a");
 
-    // Pointer at zone 9,3 — the area anchored on a and stretched to it spans x 0..9.
-    act(() => handle.current!.over(90, 30));
+    // Pointer at zone 39,15 — the area anchored on a and stretched to it spans x 0..39.
+    act(() => handle.current!.over(395, 155));
 
-    expect(regionAim()).toBe("0,0,10,12");
-    expect(regionOf("a")).toBe("0,0,10,12");
+    expect(regionAim()).toBe("0,0,40,48");
+    expect(regionOf("a")).toBe("0,0,40,48");
     // The others are re-tiled into what is left rather than losing their slot.
-    expect(regionOf("b")).toBe("10,0,2,6");
-    expect(regionOf("c")).toBe("10,6,2,6");
+    expect(regionOf("b")).toBe("40,0,8,24");
+    expect(regionOf("c")).toBe("40,24,8,24");
   });
 
   it("keeps the dragged window whole while the pointer stays inside it", () => {
@@ -78,33 +78,33 @@ describe("TerminalPlacementOverlay", () => {
 
     // The area is anchored on the whole tile, not on a corner: grabbing the header and
     // wobbling inside your own window must not shave it into a strip.
-    act(() => handle.current!.over(65, 5));
+    act(() => handle.current!.over(265, 25));
 
-    expect(regionAim()).toBe("6,0,6,6");
+    expect(regionAim()).toBe("24,0,24,24");
   });
 
   it("takes the whole band when the sweep crosses a row of windows", () => {
     // Greg's 3x3 case: the top-left window swept to the right edge owns the top band.
     const rows: TileLayout = [
-      { sessionId: "a", x: 0, y: 0, w: 4, h: 4 },
-      { sessionId: "b", x: 4, y: 0, w: 4, h: 4 },
-      { sessionId: "c", x: 8, y: 0, w: 4, h: 4 },
-      { sessionId: "d", x: 0, y: 4, w: 12, h: 8 },
+      { sessionId: "a", x: 0, y: 0, w: 16, h: 16 },
+      { sessionId: "b", x: 16, y: 0, w: 16, h: 16 },
+      { sessionId: "c", x: 32, y: 0, w: 16, h: 16 },
+      { sessionId: "d", x: 0, y: 16, w: 48, h: 32 },
     ];
     const { handle } = renderOverlay("a", true, rows);
 
-    act(() => handle.current!.over(115, 30)); // zone 11,3 — far right of the top band
+    act(() => handle.current!.over(475, 155)); // zone 47,15 — far right of the top band
 
-    expect(regionAim()).toBe("0,0,12,4");
-    expect(regionOf("a")).toBe("0,0,12,4");
+    expect(regionAim()).toBe("0,0,48,16");
+    expect(regionOf("a")).toBe("0,0,48,16");
   });
 
   it("refuses a region that leaves the others nowhere to go", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(119, 119)); // the whole grid
+    act(() => handle.current!.over(475, 475)); // the whole grid
 
-    expect(regionAim()).toBe("0,0,12,12");
+    expect(regionAim()).toBe("0,0,48,48");
     // Painted as refused: the aim is drawn, the result is not.
     expect(screen.queryByTestId("placement-preview-a")).toBeNull();
   });
@@ -113,10 +113,10 @@ describe("TerminalPlacementOverlay", () => {
     const { handle } = renderOverlay("a");
 
     // Deliberately near b's top edge: the plain exchange has no edge bands to miss.
-    act(() => handle.current!.over(90, 1, "swap"));
+    act(() => handle.current!.over(395, 5, "swap"));
 
-    expect(regionOf("a")).toBe("6,0,6,6");
-    expect(regionOf("b")).toBe("0,0,6,12");
+    expect(regionOf("a")).toBe("24,0,24,24");
+    expect(regionOf("b")).toBe("0,0,24,48");
     expect(screen.queryByTestId("placement-region")).toBeNull();
     // Only the whole window is offered, so there is nothing to aim past.
     expect(screen.getByTestId("placement-target-centre").getAttribute("data-region")).toBe(
@@ -128,17 +128,17 @@ describe("TerminalPlacementOverlay", () => {
   it("swaps with the window under the pointer while the target modifier is held", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(90, 30, "target"));
+    act(() => handle.current!.over(395, 155, "target"));
 
-    expect(regionOf("a")).toBe("6,0,6,6");
-    expect(regionOf("b")).toBe("0,0,6,12");
+    expect(regionOf("a")).toBe("24,0,24,24");
+    expect(regionOf("b")).toBe("0,0,24,48");
     expect(screen.queryByTestId("placement-region")).toBeNull();
   });
 
   it("draws the targets of the hovered window while the modifier is held", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(90, 30, "target"));
+    act(() => handle.current!.over(395, 155, "target"));
 
     for (const side of ["centre", "left", "right", "top", "bottom"]) {
       expect(screen.getByTestId(`placement-target-${side}`)).toBeTruthy();
@@ -151,21 +151,21 @@ describe("TerminalPlacementOverlay", () => {
   it("splits the hovered window when the modifier is held near its edge", () => {
     const { handle } = renderOverlay("c");
 
-    act(() => handle.current!.over(90, 1, "target"));
+    act(() => handle.current!.over(395, 5, "target"));
 
-    expect(regionOf("c")).toBe("6,0,6,3");
-    expect(regionOf("b")).toBe("6,3,6,9");
+    expect(regionOf("c")).toBe("24,0,24,12");
+    expect(regionOf("b")).toBe("24,12,24,36");
   });
 
   it("clears the aim when the pointer has nothing to target", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(90, 30, "swap"));
+    act(() => handle.current!.over(395, 155, "swap"));
     expect(screen.queryByTestId("placement-target-centre")).not.toBeNull();
 
     // Back over the dragged window itself: the previous window's targets must go, not
     // linger on screen as a stale aim.
-    act(() => handle.current!.over(10, 30, "swap"));
+    act(() => handle.current!.over(55, 155, "swap"));
 
     expect(screen.queryByTestId("placement-target-centre")).toBeNull();
     expect(screen.queryByTestId("placement-preview-a")).toBeNull();
@@ -174,7 +174,7 @@ describe("TerminalPlacementOverlay", () => {
   it("shows a legend of the modifiers, flagging the live one", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(90, 30));
+    act(() => handle.current!.over(395, 155));
     expect(screen.getByTestId("placement-legend")).toBeTruthy();
     expect(screen.getByTestId("placement-legend-grow").getAttribute("data-active")).toBe(
       "true",
@@ -183,12 +183,12 @@ describe("TerminalPlacementOverlay", () => {
       "false",
     );
 
-    act(() => handle.current!.over(90, 30, "swap"));
+    act(() => handle.current!.over(395, 155, "swap"));
     expect(screen.getByTestId("placement-legend-swap").getAttribute("data-active")).toBe(
       "true",
     );
 
-    act(() => handle.current!.over(90, 1, "target"));
+    act(() => handle.current!.over(395, 5, "target"));
     expect(
       screen.getByTestId("placement-legend-target").getAttribute("data-active"),
     ).toBe("true");
@@ -196,21 +196,33 @@ describe("TerminalPlacementOverlay", () => {
 
   it("hides the legend once the gesture ends", () => {
     const { handle } = renderOverlay("a");
-    act(() => handle.current!.over(90, 30));
+    act(() => handle.current!.over(395, 155));
     act(() => handle.current!.end());
     expect(screen.queryByTestId("placement-legend")).toBeNull();
   });
 
   it("draws the zone grid while a gesture is running", () => {
     const { handle } = renderOverlay("a");
-    act(() => handle.current!.over(90, 30));
+    act(() => handle.current!.over(395, 155));
     expect(screen.getByTestId("placement-zone-grid")).toBeTruthy();
+  });
+
+  it("the zone substrate draws one line every four zones", () => {
+    const { handle } = renderOverlay("a");
+    act(() => handle.current!.over(395, 155));
+
+    // A line per zone would be 48 of them on each axis — a haze, not a substrate.
+    // The stride keeps the spacing the eye already knows from the 12-zone matrix.
+    const spacing = `${(4 / GRID) * 100}%`;
+    const image = screen.getByTestId("placement-zone-grid").style.backgroundImage;
+
+    expect(image.split(spacing)).toHaveLength(3); // once per axis
   });
 
   it("returns the painted layout from release and disarms", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(90, 30));
+    act(() => handle.current!.over(395, 155));
     let committed: TileLayout | null = null;
     act(() => {
       committed = handle.current!.release();
@@ -235,7 +247,7 @@ describe("TerminalPlacementOverlay", () => {
   it("cancels on Escape leaving nothing painted", () => {
     const { handle, onCancel } = renderOverlay("a");
 
-    act(() => handle.current!.over(90, 30));
+    act(() => handle.current!.over(395, 155));
     expect(screen.queryByTestId("placement-region")).not.toBeNull();
 
     fireEvent.keyDown(window, { key: "Escape" });
@@ -257,15 +269,15 @@ describe("TerminalPlacementOverlay", () => {
     const overlay = screen.getAllByTestId("terminal-placement-overlay")[0];
     vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
       ...BOX,
-      right: 120,
-      bottom: 120,
+      right: 480,
+      bottom: 480,
       x: 0,
       y: 0,
       toJSON: () => ({}),
     } as DOMRect);
 
     act(() => handle.current!.begin("a"));
-    act(() => handle.current!.over(90, 30));
+    act(() => handle.current!.over(395, 155));
 
     expect(screen.getByText("session-a")).toBeTruthy();
   });

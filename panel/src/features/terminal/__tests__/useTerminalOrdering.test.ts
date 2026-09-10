@@ -37,8 +37,8 @@ describe("useTerminalOrdering", () => {
 
   it("initialises order and tiles from the scope's stored key", () => {
     const stored: TileLayout = [
-      { sessionId: "b", x: 0, y: 0, w: 12, h: 6 },
-      { sessionId: "a", x: 0, y: 6, w: 12, h: 6 },
+      { sessionId: "b", x: 0, y: 0, w: 48, h: 24 },
+      { sessionId: "a", x: 0, y: 24, w: 48, h: 24 },
     ];
     localStorage.setItem(GRID_KEY("vector"), JSON.stringify(stored));
 
@@ -55,7 +55,7 @@ describe("useTerminalOrdering", () => {
     localStorage.setItem(
       GRID_KEY("vector"),
       // Leaves the bottom half of the grid uncovered.
-      JSON.stringify([{ sessionId: "a", x: 0, y: 0, w: 12, h: 6 }]),
+      JSON.stringify([{ sessionId: "a", x: 0, y: 0, w: 48, h: 24 }]),
     );
 
     const { result } = renderHook(() =>
@@ -86,8 +86,8 @@ describe("useTerminalOrdering", () => {
     );
 
     const placed: TileLayout = [
-      { sessionId: "b", x: 0, y: 0, w: 12, h: 6 },
-      { sessionId: "a", x: 0, y: 6, w: 12, h: 6 },
+      { sessionId: "b", x: 0, y: 0, w: 48, h: 24 },
+      { sessionId: "a", x: 0, y: 24, w: 48, h: 24 },
     ];
     act(() => result.current.placeTiles(placed));
 
@@ -109,8 +109,8 @@ describe("useTerminalOrdering", () => {
 
   it("swaps in another scope's tiles when the scope changes", () => {
     const other: TileLayout = [
-      { sessionId: "a", x: 0, y: 0, w: 12, h: 4 },
-      { sessionId: "b", x: 0, y: 4, w: 12, h: 8 },
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 16 },
+      { sessionId: "b", x: 0, y: 16, w: 48, h: 32 },
     ];
     localStorage.setItem(GRID_KEY("metro"), JSON.stringify(other));
 
@@ -146,8 +146,8 @@ describe("useTerminalOrdering", () => {
     localStorage.setItem(
       GRID_KEY("vector"),
       JSON.stringify([
-        { sessionId: "a", x: 0, y: 0, w: 12, h: 8 },
-        { sessionId: "b", x: 0, y: 8, w: 12, h: 4 },
+        { sessionId: "a", x: 0, y: 0, w: 48, h: 32 },
+        { sessionId: "b", x: 0, y: 32, w: 48, h: 16 },
       ]),
     );
 

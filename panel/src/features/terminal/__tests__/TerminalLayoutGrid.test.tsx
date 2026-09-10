@@ -304,26 +304,26 @@ describe("TerminalLayoutGrid — tiling", () => {
     renderGrid({
       sessions,
       tiles: [
-        { sessionId: "a", x: 0, y: 0, w: 12, h: 4 },
-        { sessionId: "b", x: 0, y: 4, w: 12, h: 8 },
+        { sessionId: "a", x: 0, y: 0, w: 48, h: 16 },
+        { sessionId: "b", x: 0, y: 16, w: 48, h: 32 },
       ],
     });
 
     expect(cellsByArea()).toEqual([
-      "1 / span 12|1 / span 4",
-      "1 / span 12|5 / span 8",
+      "1 / span 48|1 / span 16",
+      "1 / span 48|17 / span 32",
     ]);
   });
 
-  it("renders one CSS grid of 12 by 12 tracks and no gutter drop zones", () => {
+  it("renders one CSS grid of 48 by 48 tracks and no gutter drop zones", () => {
     renderGrid({
       sessions: [makeSession({ id: "a" }), makeSession({ id: "b" })],
       tiles: tilesFor(["a", "b"]),
     });
 
     const grid = screen.getByTestId("terminal-grid");
-    expect(grid.style.gridTemplateColumns).toBe("repeat(12, 1fr)");
-    expect(grid.style.gridTemplateRows).toBe("repeat(12, 1fr)");
+    expect(grid.style.gridTemplateColumns).toBe("repeat(48, 1fr)");
+    expect(grid.style.gridTemplateRows).toBe("repeat(48, 1fr)");
     expect(screen.queryByTestId("terminal-grid-gutter-0")).toBeNull();
   });
 
@@ -334,8 +334,8 @@ describe("TerminalLayoutGrid — tiling", () => {
     });
 
     expect(cellsByArea()).toEqual([
-      "1 / span 6|1 / span 12",
-      "7 / span 6|1 / span 12",
+      "1 / span 24|1 / span 48",
+      "25 / span 24|1 / span 48",
     ]);
   });
 
@@ -361,9 +361,9 @@ describe("TerminalLayoutGrid — placement drag", () => {
     makeSession({ id: "c", name: "c" }),
   ];
   const tiles: TileLayout = [
-    { sessionId: "a", x: 0, y: 0, w: 6, h: 12 },
-    { sessionId: "b", x: 6, y: 0, w: 6, h: 6 },
-    { sessionId: "c", x: 6, y: 6, w: 6, h: 6 },
+    { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+    { sessionId: "b", x: 24, y: 0, w: 24, h: 24 },
+    { sessionId: "c", x: 24, y: 24, w: 24, h: 24 },
   ];
 
   function startDrag() {
@@ -377,10 +377,10 @@ describe("TerminalLayoutGrid — placement drag", () => {
     vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
       left: 0,
       top: 0,
-      width: 120,
-      height: 120,
-      right: 120,
-      bottom: 120,
+      width: 480,
+      height: 480,
+      right: 480,
+      bottom: 480,
       x: 0,
       y: 0,
       toJSON: () => ({}),
@@ -419,8 +419,8 @@ describe("TerminalLayoutGrid — placement drag", () => {
   it("leaves every cell's grid-area untouched for the whole drag", () => {
     const { wrapper, before } = startDrag();
 
-    dragOverAt(wrapper, 90, 30);
-    dragOverAt(wrapper, 90, 90);
+    dragOverAt(wrapper, 395, 155);
+    dragOverAt(wrapper, 395, 395);
 
     // The regression that motivated the change: previewing must not re-flow the grid,
     // because a cell moving under the cursor changes which one the drop lands on.
@@ -430,7 +430,7 @@ describe("TerminalLayoutGrid — placement drag", () => {
   it("commits the painted layout on drop", () => {
     const { wrapper, onPlace } = startDrag();
 
-    dragOverAt(wrapper, 90, 30);
+    dragOverAt(wrapper, 395, 155);
     fireEvent(wrapper, new MouseEvent("drop", { bubbles: true, cancelable: true }));
 
     expect(onPlace).toHaveBeenCalledTimes(1);
@@ -439,15 +439,15 @@ describe("TerminalLayoutGrid — placement drag", () => {
     expect(committed.find((t) => t.sessionId === "a")).toMatchObject({
       x: 0,
       y: 0,
-      w: 10,
-      h: 12,
+      w: 40,
+      h: 48,
     });
   });
 
   it("commits nothing when the drag ends without a drop", () => {
     const { onPlace, wrapper } = startDrag();
 
-    dragOverAt(wrapper, 90, 30);
+    dragOverAt(wrapper, 395, 155);
     fireEvent.dragEnd(screen.getAllByTitle("Drag to place this terminal")[0]);
 
     expect(onPlace).not.toHaveBeenCalled();
@@ -481,14 +481,14 @@ describe("TerminalLayoutGrid — placement drag", () => {
   it("paints the area the pointer is stretching to", () => {
     const { wrapper } = startDrag();
 
-    dragOverAt(wrapper, 90, 30);
+    dragOverAt(wrapper, 395, 155);
 
     expect(screen.getByTestId("placement-region").getAttribute("data-region")).toBe(
-      "0,0,10,12",
+      "0,0,40,48",
     );
     expect(
       screen.getByTestId("placement-preview-a").getAttribute("data-region"),
-    ).toBe("0,0,10,12");
+    ).toBe("0,0,40,48");
   });
 });
 
@@ -651,7 +651,7 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
 
     const overlay = screen.getByTestId("terminal-placement-overlay");
     vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
-      left: 0, top: 0, width: 120, height: 120, right: 120, bottom: 120, x: 0, y: 0,
+      left: 0, top: 0, width: 480, height: 480, right: 480, bottom: 480, x: 0, y: 0,
       toJSON: () => ({}),
     } as DOMRect);
 
@@ -660,7 +660,7 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     // Arming leaves no trace in the DOM by design — what proves it is that a
     // subsequent dragover paints a target.
     const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
-    dragOverAt(wrapper, 90, 60);
+    dragOverAt(wrapper, 395, 235);
 
     expect(screen.queryAllByTestId(/^placement-preview-/).length).toBeGreaterThan(0);
   });

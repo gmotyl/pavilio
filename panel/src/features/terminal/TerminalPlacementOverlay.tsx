@@ -156,6 +156,12 @@ export function targetAt(tile: Rect, zx: number, zy: number): PlacementTarget {
 
 const pct = (zones: number) => `${(zones / GRID) * 100}%`;
 
+// The zone substrate is a reading aid, not a readout of the matrix: a line per zone
+// would be 48 of them on each axis, which is a haze. Drawing every fourth zone keeps
+// the spacing the eye already learned when the matrix was 12 zones wide.
+const ZONE_LINE_STRIDE = 4;
+const zoneLineSpacing = pct(ZONE_LINE_STRIDE);
+
 /**
  * The drag surface for placing a terminal. It floats above the grid for the duration
  * of a drag and owns every drag event, so the cells underneath never move and never
@@ -320,7 +326,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
           data-testid="placement-zone-grid"
           className="absolute inset-0"
           style={{
-            backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.10) 0 1px, transparent 1px ${100 / GRID}%), repeating-linear-gradient(to bottom, rgba(255,255,255,0.10) 0 1px, transparent 1px ${100 / GRID}%)`,
+            backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.10) 0 1px, transparent 1px ${zoneLineSpacing}), repeating-linear-gradient(to bottom, rgba(255,255,255,0.10) 0 1px, transparent 1px ${zoneLineSpacing})`,
           }}
         />
       )}
