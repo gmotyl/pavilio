@@ -38,9 +38,9 @@ describe("orderingReducer", () => {
   it("stores a placed layout verbatim and re-derives the order from it", () => {
     const base = state(["A", "B", "C"]);
     const placed: TileLayout = [
-      { sessionId: "C", x: 0, y: 0, w: 12, h: 6 },
-      { sessionId: "A", x: 0, y: 6, w: 6, h: 6 },
-      { sessionId: "B", x: 6, y: 6, w: 6, h: 6 },
+      { sessionId: "C", x: 0, y: 0, w: 48, h: 24 },
+      { sessionId: "A", x: 0, y: 24, w: 24, h: 24 },
+      { sessionId: "B", x: 24, y: 24, w: 24, h: 24 },
     ];
 
     const next = orderingReducer(base, { type: "place", layout: placed });
@@ -122,9 +122,9 @@ describe("orderingReducer", () => {
   it("applying the same action twice equals applying it once", () => {
     const base = deepFreezeState(state(["A", "B", "C"]));
     const placed: TileLayout = [
-      { sessionId: "A", x: 0, y: 0, w: 12, h: 4 },
-      { sessionId: "B", x: 0, y: 4, w: 12, h: 4 },
-      { sessionId: "C", x: 0, y: 8, w: 12, h: 4 },
+      { sessionId: "A", x: 0, y: 0, w: 48, h: 16 },
+      { sessionId: "B", x: 0, y: 16, w: 48, h: 16 },
+      { sessionId: "C", x: 0, y: 32, w: 48, h: 16 },
     ];
 
     const actions: OrderingAction[] = [

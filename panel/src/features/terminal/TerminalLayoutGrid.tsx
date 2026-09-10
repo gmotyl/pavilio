@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Eye, X, Maximize2, Minimize2 } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
@@ -13,6 +19,8 @@ import {
   TerminalPlacementOverlay,
   type PlacementOverlayHandle,
 } from "./TerminalPlacementOverlay";
+import { TerminalSeamHandles } from "./TerminalSeamHandles";
+import type { LayoutCommitKind } from "./orderingReducer";
 import { GRID, expandPreset, getLayoutPresets, type TileLayout } from "./tileLayout";
 
 interface Props {
@@ -26,8 +34,12 @@ interface Props {
   onRename?: (id: string, name: string) => void;
   /** The committed tiling. Empty means "no custom shape": the default preset is used. */
   tiles?: TileLayout;
-  /** Commit a layout the placement overlay computed and displayed. */
-  onPlace?: (layout: TileLayout) => void;
+  /**
+   * Commit a layout a gesture computed and displayed. `kind` tells the scope which
+   * gesture produced it: a placement re-derives the session order from the tiling,
+   * a seam resize must not (see ADR 0008's amendment).
+   */
+  onPlace?: (layout: TileLayout, kind: LayoutCommitKind) => void;
 }
 
 export function TerminalLayoutGrid({
@@ -50,6 +62,12 @@ export function TerminalLayoutGrid({
   const overlayRef = useRef<PlacementOverlayHandle | null>(null);
   const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
   const pendingSession = sessions.find((s) => s.id === pendingCloseId);
+  // The live layout during a seam drag. Held here rather than in the handles so
+  // the cells themselves follow the boundary: every intermediate position is a
+  // valid tiling, so there is nothing to preview and no overlay is involved.
+  const [seamDraft, setSeamDraft] = useState<TileLayout | null>(null);
+  const gridWrapRef = useRef<HTMLDivElement | null>(null);
+  const [gridBox, setGridBox] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
@@ -60,16 +78,57 @@ export function TerminalLayoutGrid({
 
   const count = sessions.length;
 
+  // A seam drag converts pixels to zones, so it needs the grid's box in px. The
+  // handles never measure the DOM themselves — their own geometry is pure CSS —
+  // so the one measurement the gesture needs is taken here, and only while the
+  // tiling is the branch on screen.
+  useLayoutEffect(() => {
+    const el = gridWrapRef.current;
+    if (!el) return;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      setGridBox((box) =>
+        box.width === rect.width && box.height === rect.height
+          ? box
+          : { width: rect.width, height: rect.height },
+      );
+    };
+    measure();
+    // jsdom has no ResizeObserver, and neither do older Safaris; a window resize
+    // catches every case that actually changes the grid's box there.
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isMobile, maximized, count]);
+
+  const onSeamDraft = useCallback((layout: TileLayout | null) => {
+    setSeamDraft(layout);
+  }, []);
+
+  // One write per gesture, and flagged as a resize: the scope keeps the session
+  // order it already had rather than re-deriving it from the moved tiling.
+  const onSeamResize = useCallback(
+    (layout: TileLayout) => {
+      onPlace?.(layout, "resize");
+    },
+    [onPlace],
+  );
+
   // The committed tiling, or the default preset for the current count when the caller
   // has none stored. The real caller always passes `tiles` (as `[]` when no custom
   // shape exists), so treat empty the same as absent rather than rendering nothing.
   const resolvedTiles: TileLayout =
-    tiles && tiles.length > 0
+    seamDraft ??
+    (tiles && tiles.length > 0
       ? tiles
       : expandPreset(
           sessions.map((s) => s.id),
           getLayoutPresets(count)[0] ?? { label: "", slots: [] },
-        );
+        ));
 
   const modal = (
     <ConfirmCloseTerminalModal
@@ -148,12 +207,13 @@ export function TerminalLayoutGrid({
       </div>
     );
   } else {
-    // One CSS grid of 12x12 zone tracks; each cell is placed by its tile's grid-area.
+    // One CSS grid of 48x48 zone tracks; each cell is placed by its tile's grid-area.
     // No nested columns and no gutter elements: the tiling carries the whole shape.
     const sessionById = new Map(sessions.map((s) => [s.id, s]));
 
     body = (
       <div
+        ref={gridWrapRef}
         className="relative h-full w-full"
         // The grid wrapper owns the drag events, not the overlay: nothing under the
         // cursor may change at dragstart, or Chromium abandons the drag on the spot.
@@ -164,19 +224,21 @@ export function TerminalLayoutGrid({
           if (!overlayRef.current?.isDragging()) return;
           e.preventDefault();
           if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-          // Plain drag paints an area anchored on the dragged window; Ctrl is the plain
-          // exchange the grid has always had; Shift adds that window's halves as targets.
+          // Plain drag offers the window under the pointer — its centre and its four
+          // edge bands — because that is the gesture reached for most often; Shift
+          // paints an area anchored on the dragged window; Ctrl is the plain exchange
+          // the grid has always had, and still wins when both modifiers are down.
           overlayRef.current?.over(
             e.clientX,
             e.clientY,
-            e.ctrlKey ? "swap" : e.shiftKey ? "target" : "grow",
+            e.ctrlKey ? "swap" : e.shiftKey ? "grow" : "target",
           );
         }}
         onDrop={(e) => {
           if (!overlayRef.current?.isDragging()) return;
           e.preventDefault();
           const next = overlayRef.current?.release() ?? null;
-          if (next) onPlace?.(next);
+          if (next) onPlace?.(next, "placement");
         }}
       >
         <div
@@ -199,6 +261,17 @@ export function TerminalLayoutGrid({
             });
           })}
         </div>
+        {/* One grab strip per seam, over the gutters. Below the overlay in the
+            stack so a placement preview paints on top, which costs nothing: the
+            overlay never takes pointer events. */}
+        {count > 1 && (
+          <TerminalSeamHandles
+            layout={resolvedTiles}
+            onResize={onSeamResize}
+            onDraft={onSeamDraft}
+            box={gridBox}
+          />
+        )}
         {/* Always mounted, never hittable — see PlacementOverlayHandle. */}
         <TerminalPlacementOverlay
           ref={overlayRef}

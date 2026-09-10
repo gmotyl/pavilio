@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAllTerminalSessions } from "../useAllTerminalSessions";
 import type { SessionMeta } from "../useTerminalSessions";
-import { getLayoutPresets, readingOrder, type TileLayout } from "../tileLayout";
+import { GRID, getLayoutPresets, readingOrder, type TileLayout } from "../tileLayout";
 
 vi.mock("../../realtime/useWebSocket", () => ({
   useWebSocket: () => ({ lastMessage: null }),
@@ -73,8 +73,8 @@ describe("useAllTerminalSessions tiling", () => {
 
   it("initialises the tiling from panel-terminal-grid-__all__", async () => {
     const stored: TileLayout = [
-      { sessionId: "a", x: 0, y: 0, w: 12, h: 8 },
-      { sessionId: "b", x: 0, y: 8, w: 12, h: 4 },
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 32 },
+      { sessionId: "b", x: 0, y: 32, w: 48, h: 16 },
     ];
     localStorage.setItem(GRID_KEY, JSON.stringify(stored));
     mockFetchSessions([session("a", "vector"), session("b", "metro")]);
@@ -98,9 +98,9 @@ describe("useAllTerminalSessions tiling", () => {
     );
 
     const placed: TileLayout = [
-      { sessionId: "a", x: 0, y: 0, w: 12, h: 4 },
-      { sessionId: "b", x: 0, y: 4, w: 12, h: 4 },
-      { sessionId: "c", x: 0, y: 8, w: 12, h: 4 },
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 16 },
+      { sessionId: "b", x: 0, y: 16, w: 48, h: 16 },
+      { sessionId: "c", x: 0, y: 32, w: 48, h: 16 },
     ];
     act(() => result.current.placeTiles(placed));
 
@@ -119,7 +119,9 @@ describe("useAllTerminalSessions tiling", () => {
     act(() => result.current.applyPreset(presetFor(3, "3 rows")));
 
     expect(idsOf(result.current.tiles)).toEqual(["a", "b", "c"]);
-    expect(result.current.tiles.every((t) => t.w === 12 && t.h === 4)).toBe(true);
+    expect(result.current.tiles.every((t) => t.w === GRID && t.h === GRID / 3)).toBe(
+      true,
+    );
   });
 
   it("keeps a custom layout across a poll refresh", async () => {
@@ -131,7 +133,7 @@ describe("useAllTerminalSessions tiling", () => {
       await result.current.refresh();
     });
 
-    expect(result.current.tiles.map((t) => t.h)).toEqual([6, 6]);
+    expect(result.current.tiles.map((t) => t.h)).toEqual([GRID / 2, GRID / 2]);
     expect(idsOf(result.current.tiles)).toEqual(["a", "b"]);
   });
 
@@ -147,7 +149,7 @@ describe("useAllTerminalSessions tiling", () => {
 
     expect(idsOf(result.current.tiles)).toEqual(["a"]);
     // The survivor absorbs the freed rectangle rather than leaving a hole.
-    expect(result.current.tiles[0]).toMatchObject({ x: 0, y: 0, w: 12, h: 12 });
+    expect(result.current.tiles[0]).toMatchObject({ x: 0, y: 0, w: 48, h: 48 });
   });
 
   // The user's second symptom: "dragging panels on the terminals view is not

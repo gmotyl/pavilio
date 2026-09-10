@@ -22,47 +22,67 @@ describe("appendSession", () => {
     const next = appendSession(layout, "c");
 
     expect(isValidLayout(next)).toBe(true);
-    expect(tileOf(next, "a")).toMatchObject({ x: 0, y: 0, w: 6, h: 12 });
+    expect(tileOf(next, "a")).toMatchObject({ x: 0, y: 0, w: 24, h: 48 });
     // b is last in reading order; its longer axis is height, so it splits there.
-    expect(tileOf(next, "b")).toMatchObject({ x: 6, y: 0, w: 6, h: 6 });
-    expect(tileOf(next, "c")).toMatchObject({ x: 6, y: 6, w: 6, h: 6 });
+    expect(tileOf(next, "b")).toMatchObject({ x: 24, y: 0, w: 24, h: 24 });
+    expect(tileOf(next, "c")).toMatchObject({ x: 24, y: 24, w: 24, h: 24 });
   });
 
   it("splits along the longer axis", () => {
-    const layout: TileLayout = [{ sessionId: "a", x: 0, y: 0, w: 12, h: 12 }];
+    const layout: TileLayout = [{ sessionId: "a", x: 0, y: 0, w: 48, h: 48 }];
     const next = appendSession(layout, "b");
     // A square splits on x (width >= height), giving two columns.
-    expect(tileOf(next, "a")).toMatchObject({ w: 6, h: 12 });
-    expect(tileOf(next, "b")).toMatchObject({ x: 6, w: 6, h: 12 });
+    expect(tileOf(next, "a")).toMatchObject({ w: 24, h: 48 });
+    expect(tileOf(next, "b")).toMatchObject({ x: 24, w: 24, h: 48 });
   });
 
   it("walks back to a larger tile when the last one is too small to split", () => {
     const layout: TileLayout = [
-      { sessionId: "a", x: 0, y: 0, w: 12, h: 9 },
-      { sessionId: "b", x: 0, y: 9, w: 12, h: 2 },
-      { sessionId: "c", x: 0, y: 11, w: 12, h: 1 },
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 36 },
+      { sessionId: "b", x: 0, y: 36, w: 48, h: 8 },
+      { sessionId: "c", x: 0, y: 44, w: 48, h: 4 },
     ];
     const next = appendSession(layout, "d");
 
     expect(isValidLayout(next)).toBe(true);
-    // c (1 zone) and b (2 zones on the split axis) are below the 4-zone preference,
-    // so the split falls back to a, which has 9.
-    expect(tileOf(next, "c")).toMatchObject({ y: 11, h: 1 });
-    expect(tileOf(next, "d").h).toBeGreaterThan(1);
+    // c is 4 zones tall, so splitting it would leave two 24x4 slivers: the walk-back
+    // passes it over and lands on b (8 zones tall, two MIN_SPANs), which splits on x
+    // into two 24x8 halves. a is never reached, and c is left untouched.
+    expect(tileOf(next, "a")).toMatchObject({ x: 0, y: 0, w: 48, h: 36 });
+    expect(tileOf(next, "b")).toMatchObject({ x: 0, y: 36, w: 24, h: 8 });
+    expect(tileOf(next, "c")).toMatchObject({ x: 0, y: 44, w: 48, h: 4 });
+    expect(tileOf(next, "d")).toMatchObject({ x: 24, y: 36, w: 24, h: 8 });
+    expect(tileOf(next, "d").h).toBeGreaterThan(4);
+  });
+
+  it("passes over a tile whose split axis is under the split preference", () => {
+    // c would split into two usable 6x12 halves, but 12 zones is under
+    // SPLIT_PREFERENCE, so the walk-back takes b instead — its 36 zones clear it.
+    // A preference low enough to accept c's 12 zones would split c, not b.
+    const layout: TileLayout = [
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 36 },
+      { sessionId: "b", x: 0, y: 36, w: 36, h: 12 },
+      { sessionId: "c", x: 36, y: 36, w: 12, h: 12 },
+    ];
+    const next = appendSession(layout, "d");
+
+    expect(isValidLayout(next)).toBe(true);
+    expect(tileOf(next, "c")).toMatchObject({ x: 36, y: 36, w: 12, h: 12 });
+    expect(tileOf(next, "b")).toMatchObject({ x: 0, y: 36, w: 18, h: 12 });
+    expect(tileOf(next, "d")).toMatchObject({ x: 18, y: 36, w: 18, h: 12 });
   });
 
   it("splits the last tile anyway when nothing qualifies", () => {
     const layout: TileLayout = [
-      { sessionId: "a", x: 0, y: 0, w: 12, h: 9 },
-      { sessionId: "b", x: 0, y: 9, w: 6, h: 3 },
-      { sessionId: "c", x: 6, y: 9, w: 6, h: 3 },
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 36 },
+      { sessionId: "b", x: 0, y: 36, w: 24, h: 12 },
+      { sessionId: "c", x: 24, y: 36, w: 24, h: 12 },
     ];
-    // Every tile is below 4 zones on its longer axis except a (12 wide) — force the
-    // fallback by shrinking the grid to tiles that all fail the preference.
+    // Force the fallback with tiles that all fail the preference on their split axis.
     const tight: TileLayout = [
-      { sessionId: "a", x: 0, y: 0, w: 3, h: 3 },
-      { sessionId: "b", x: 3, y: 0, w: 9, h: 3 },
-      { sessionId: "c", x: 0, y: 3, w: 12, h: 9 },
+      { sessionId: "a", x: 0, y: 0, w: 12, h: 12 },
+      { sessionId: "b", x: 12, y: 0, w: 36, h: 12 },
+      { sessionId: "c", x: 0, y: 12, w: 48, h: 36 },
     ];
     expect(isValidLayout(appendSession(layout, "d"))).toBe(true);
     expect(isValidLayout(appendSession(tight, "d"))).toBe(true);
@@ -70,7 +90,7 @@ describe("appendSession", () => {
 
   it("starts from the default preset when the layout is empty", () => {
     expect(appendSession([], "a")).toEqual([
-      { sessionId: "a", x: 0, y: 0, w: 12, h: 12 },
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 48 },
     ]);
   });
 });
@@ -81,20 +101,20 @@ describe("removeSession", () => {
     const next = removeSession(layout, "c");
 
     expect(isValidLayout(next)).toBe(true);
-    expect(tileOf(next, "b")).toMatchObject({ x: 6, y: 0, w: 6, h: 12 });
+    expect(tileOf(next, "b")).toMatchObject({ x: 24, y: 0, w: 24, h: 48 });
   });
 
   it("breaks absorption ties in top-to-left order", () => {
     // The removed tile's four sides all share an edge of the same length.
     const layout: TileLayout = [
-      { sessionId: "top", x: 0, y: 0, w: 12, h: 4 },
-      { sessionId: "gone", x: 0, y: 4, w: 12, h: 4 },
-      { sessionId: "bottom", x: 0, y: 8, w: 12, h: 4 },
+      { sessionId: "top", x: 0, y: 0, w: 48, h: 16 },
+      { sessionId: "gone", x: 0, y: 16, w: 48, h: 16 },
+      { sessionId: "bottom", x: 0, y: 32, w: 48, h: 16 },
     ];
     const next = removeSession(layout, "gone");
 
-    expect(tileOf(next, "top")).toMatchObject({ y: 0, h: 8 });
-    expect(tileOf(next, "bottom")).toMatchObject({ y: 8, h: 4 });
+    expect(tileOf(next, "top")).toMatchObject({ y: 0, h: 32 });
+    expect(tileOf(next, "bottom")).toMatchObject({ y: 32, h: 16 });
   });
 
   it("empties the layout when the last session goes", () => {

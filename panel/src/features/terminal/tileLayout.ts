@@ -3,10 +3,15 @@
 // projects/pavilio/plans/openspec/changes/terminal-grid-rect-layout/design.md.
 //
 // A zone is a coordinate, not a DOM element: nothing renders per zone except the
-// drag overlay's hit regions. 12 is chosen because it divides by 2, 3, 4 and 6,
-// so halves, thirds, quarters and sixths are exact on both axes and the curated
-// presets need no rounding.
-export const GRID = 12;
+// drag overlay's hit regions. 48 = 2^4 * 3, so halves, thirds, quarters, sixths,
+// eighths, twelfths and sixteenths are all exact on both axes and the curated
+// presets need no rounding. It is four times the 12 the model started on, which is
+// what lets a dragged seam move in 2.08% steps rather than 8.3% ones — see
+// projects/pavilio/adr/0008-terminal-grid-seam-resize-on-a-finer-matrix.md.
+export const GRID = 48;
+
+/** Smallest span a terminal may be reduced to on either axis, in zones (8.3%). */
+export const MIN_SPAN = 4;
 
 /** Half-open rectangle on the zone matrix: covers x..x+w-1 by y..y+h-1. */
 export interface Rect {
@@ -80,7 +85,7 @@ export interface LayoutPreset {
 }
 
 // Splits `total` zones into `parts` spans, remainder going to the earliest ones —
-// so 12 into 5 is 3,3,2,2,2 and every span stays >= 1 as long as parts <= total.
+// so 48 into 5 is 10,10,10,9,9 and every span stays >= 1 as long as parts <= total.
 function evenSpans(total: number, parts: number): number[] {
   const base = Math.floor(total / parts);
   const remainder = total % parts;
@@ -113,31 +118,188 @@ function preset(label: string, slots: Rect[]): LayoutPreset {
   return { label, slots: slots.sort((a, b) => (a.y === b.y ? a.x - b.x : a.y - b.y)) };
 }
 
+/**
+ * A shape family member: the slot rects for `count` sessions, or null when that count
+ * cannot be expressed as this shape.
+ *
+ * Returns null when the shape cannot keep every strip at or above MIN_SPAN — the
+ * registry applies that check centrally, so a generator itself only bails out on
+ * counts its structure cannot express at all (a "one large plus two strips" shape
+ * needs at least two sessions beside the main one, for instance).
+ */
+export type PresetGenerator = (count: number) => Rect[] | null;
+
 // A grid of `cols` columns; the sessions are spread column-major, remainder to the
 // earliest columns — the shape the 7+ default has always had.
-function evenGrid(count: number): Rect[] {
+function evenGrid(count: number): Rect[] | null {
+  if (count < 1) return null;
   const cols = Math.min(Math.ceil(Math.sqrt(count)), GRID);
   const perColumn = evenSpans(count, cols);
   const widths = strips(whole, cols, "x");
   return widths.flatMap((column, i) => strips(column, perColumn[i], "y"));
 }
 
-// One full-height slot on the left, the rest split down two narrower columns.
-function oneLargeLeft(count: number): Rect[] {
-  const rest = count - 1;
-  const [left, ...columns] = [leftHalf, ...strips(rightHalf, 2, "x")];
-  const perColumn = evenSpans(rest, 2);
-  return [left, ...columns.flatMap((column, i) => strips(column, perColumn[i], "y"))];
+// The transpose of `evenGrid`: ceil(sqrt(n)) rows, filled row-major.
+function evenGridRows(count: number): Rect[] | null {
+  if (count < 1) return null;
+  const rows = Math.min(Math.ceil(Math.sqrt(count)), GRID);
+  const perRow = evenSpans(count, rows);
+  return strips(whole, rows, "y").flatMap((row, i) => strips(row, perRow[i], "x"));
+}
+
+// `count` equal full-height columns, and its transpose.
+function evenColumns(count: number): Rect[] | null {
+  return count < 1 ? null : strips(whole, count, "x");
+}
+
+function evenRows(count: number): Rect[] | null {
+  return count < 1 ? null : strips(whole, count, "y");
+}
+
+type Side = "left" | "right" | "top" | "bottom";
+
+const halfOn: Record<Side, Rect> = {
+  left: leftHalf,
+  right: rightHalf,
+  top: topHalf,
+  bottom: bottomHalf,
+};
+
+const opposite: Record<Side, Side> = {
+  left: "right",
+  right: "left",
+  top: "bottom",
+  bottom: "top",
+};
+
+/**
+ * One half-grid main slot against `side`, the rest spread across TWO strips in the
+ * other half — the generalisation of the old `oneLargeLeft`. Needs at least two
+ * sessions beside the main one, or one strip would stay empty and the shape would
+ * not tile.
+ */
+function oneLarge(count: number, side: Side): Rect[] | null {
+  if (count < 3) return null;
+  const horizontal = side === "left" || side === "right";
+  const stripAxis = horizontal ? "x" : "y";
+  const fillAxis = horizontal ? "y" : "x";
+  const perStrip = evenSpans(count - 1, 2);
+  return [
+    halfOn[side],
+    ...strips(halfOn[opposite[side]], 2, stripAxis).flatMap((strip, i) =>
+      strips(strip, perStrip[i], fillAxis),
+    ),
+  ];
 }
 
 /**
- * The curated shapes for 1-6 sessions and the generated pair for 7+. The FIRST entry
+ * One half-grid main slot, the rest in a SINGLE strip beside it — the classic master
+ * plus stack. `side` names where the stack goes.
+ */
+function masterStack(count: number, side: "right" | "bottom"): Rect[] | null {
+  if (count < 2) return null;
+  const main = side === "right" ? leftHalf : topHalf;
+  const stack = side === "right" ? rightHalf : bottomHalf;
+  return [main, ...strips(stack, count - 1, side === "right" ? "y" : "x")];
+}
+
+// Two equal-height rows, the larger share of sessions going to `heavy`.
+function splitRows(count: number, heavy: "top" | "bottom"): Rect[] | null {
+  if (count < 2) return null;
+  const top = heavy === "top" ? Math.ceil(count / 2) : Math.floor(count / 2);
+  return [...strips(topHalf, top, "x"), ...strips(bottomHalf, count - top, "x")];
+}
+
+// The main slot takes two thirds, the rest share the remaining third. Only exact
+// since the matrix went to 48: a third of a 12-zone axis could not be split usefully.
+const TWO_THIRDS = (GRID / 3) * 2;
+
+function twoThirdsLeft(count: number): Rect[] | null {
+  if (count < 2) return null;
+  const rest: Rect = { x: TWO_THIRDS, y: 0, w: GRID - TWO_THIRDS, h: GRID };
+  return [{ x: 0, y: 0, w: TWO_THIRDS, h: GRID }, ...strips(rest, count - 1, "y")];
+}
+
+function twoThirdsTop(count: number): Rect[] | null {
+  if (count < 2) return null;
+  const rest: Rect = { x: 0, y: TWO_THIRDS, w: GRID, h: GRID - TWO_THIRDS };
+  return [{ x: 0, y: 0, w: GRID, h: TWO_THIRDS }, ...strips(rest, count - 1, "x")];
+}
+
+/**
+ * The shape family, in menu order. The first entry is what a count with no
+ * hand-written list defaults to, so `evenGrid` leads and today's 7+ default holds.
+ */
+const PRESET_GENERATORS: {
+  label: (count: number) => string;
+  generate: PresetGenerator;
+}[] = [
+  { label: () => "Even grid", generate: evenGrid },
+  { label: () => "Even grid, rows first", generate: evenGridRows },
+  { label: (n) => `${n} columns`, generate: evenColumns },
+  { label: (n) => `${n} rows`, generate: evenRows },
+  { label: () => "1 large left, rest in two columns", generate: (n) => oneLarge(n, "left") },
+  { label: () => "1 large right, rest in two columns", generate: (n) => oneLarge(n, "right") },
+  { label: () => "1 large top, rest in two rows", generate: (n) => oneLarge(n, "top") },
+  { label: () => "1 large bottom, rest in two rows", generate: (n) => oneLarge(n, "bottom") },
+  { label: () => "1 large left, rest stacked right", generate: (n) => masterStack(n, "right") },
+  { label: () => "1 large top, rest in a row below", generate: (n) => masterStack(n, "bottom") },
+  {
+    label: (n) => `${Math.ceil(n / 2)} top, ${Math.floor(n / 2)} bottom`,
+    generate: (n) => splitRows(n, "top"),
+  },
+  {
+    label: (n) => `${Math.floor(n / 2)} top, ${Math.ceil(n / 2)} bottom`,
+    generate: (n) => splitRows(n, "bottom"),
+  },
+  { label: () => "2/3 left, rest stacked right", generate: twoThirdsLeft },
+  { label: () => "2/3 top, rest in a row below", generate: twoThirdsTop },
+];
+
+/** Dedup key: the slots in reading order, which `preset()` already sorts them into. */
+function shapeKey(slots: Rect[]): string {
+  return slots.map((s) => `${s.x},${s.y},${s.w},${s.h}`).join(" ");
+}
+
+/**
+ * The MIN_SPAN filter — what stops `evenColumns(20)` from offering twenty unusable
+ * slivers. A generator whose strips fall below it contributes nothing at that count.
+ */
+function honoursMinSpan(slots: Rect[] | null): slots is Rect[] {
+  return (
+    slots !== null &&
+    slots.length > 0 &&
+    slots.every((slot) => slot.w >= MIN_SPAN && slot.h >= MIN_SPAN)
+  );
+}
+
+// Appends the generated family after `curated`, dropping any shape already offered.
+function withGeneratedShapes(count: number, curated: LayoutPreset[]): LayoutPreset[] {
+  const out = [...curated];
+  const seen = new Set(out.map((p) => shapeKey(p.slots)));
+
+  for (const shape of PRESET_GENERATORS) {
+    const slots = shape.generate(count);
+    if (!honoursMinSpan(slots)) continue;
+
+    const entry = preset(shape.label(count), slots);
+    const key = shapeKey(entry.slots);
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    out.push(entry);
+  }
+
+  return out;
+}
+
+/**
+ * The curated shapes for 1-6 sessions, which LEAD that count's list. The FIRST entry
  * of each row is that count's default: for 1-4 and 6 it reproduces the shape the
  * column model defaulted to, so the familiar arrangement survives the model change.
+ * 7+ has no curated list, so the generated family is the whole list there.
  */
-export function getLayoutPresets(count: number): LayoutPreset[] {
-  if (count <= 0) return [];
-
+function curatedPresets(count: number): LayoutPreset[] {
   if (count === 1) return [preset("1 terminal", [whole])];
 
   if (count === 2) {
@@ -207,10 +369,16 @@ export function getLayoutPresets(count: number): LayoutPreset[] {
     ];
   }
 
-  return [
-    preset("Even grid", evenGrid(count)),
-    preset("1 large left, rest in two columns", oneLargeLeft(count)),
-  ];
+  return [];
+}
+
+/**
+ * Every shape offered at `count` sessions: the curated 1-6 list first, then the
+ * generated family appended and deduplicated by slot rects.
+ */
+export function getLayoutPresets(count: number): LayoutPreset[] {
+  if (count <= 0) return [];
+  return withGeneratedShapes(count, curatedPresets(count));
 }
 
 /** Fills a preset's slots from `order`, in reading order. */
@@ -221,7 +389,16 @@ export function expandPreset(order: string[], preset: LayoutPreset): TileLayout 
 }
 
 /** A new session prefers to split a tile with room for two usable parts. */
-const SPLIT_PREFERENCE = 4;
+const SPLIT_PREFERENCE = 16;
+
+/**
+ * The smallest the axis a tile does NOT split on may be for that split to be worth
+ * making. A tile only counts as splittable when it has room for two halves that each
+ * clear MIN_SPAN, and the cross axis is held to the same bar — otherwise splitting a
+ * full-width, near-flat tile hands back two slivers nobody can use. Expressed in
+ * MIN_SPANs rather than as a literal so it scales with the zone matrix.
+ */
+const SPLIT_MIN_CROSS_SPAN = 2 * MIN_SPAN;
 
 /**
  * Adds a session by splitting the LAST tile in reading order along its longer axis
@@ -244,13 +421,15 @@ export function appendSession(layout: TileLayout, sessionId: string): TileLayout
   const spanOn = (tile: Tile, axis: "x" | "y") => (axis === "x" ? tile.w : tile.h);
 
   // Both halves must stay usable, so the split axis needs room for two parts AND
-  // the other axis must not already be a sliver — splitting a 12x1 tile down the
-  // middle yields two 6x1 cells, which is worse than splitting something further back.
+  // the other axis must not already be a sliver — splitting a full-width, flat tile
+  // down the middle yields two slivers, which is worse than splitting something
+  // further back.
   const other = (axis: "x" | "y") => (axis === "x" ? "y" : "x");
   let host = [...ordered].reverse().find((tile) => {
     const axis = axisOf(tile);
     return (
-      spanOn(tile, axis) >= SPLIT_PREFERENCE && spanOn(tile, other(axis)) >= 2
+      spanOn(tile, axis) >= SPLIT_PREFERENCE &&
+      spanOn(tile, other(axis)) >= SPLIT_MIN_CROSS_SPAN
     );
   });
 

@@ -46,11 +46,17 @@ export interface PlacementOverlayHandle {
   /**
    * Track the pointer and paint the layout the drop would commit.
    *
-   * - `grow` (no modifier) stretches an area from the dragged window to the pointer;
-   * - `swap` (Ctrl) exchanges it with the window under the pointer, as the grid always did;
-   * - `target` (Shift) offers that window's halves as well as the whole of it.
+   * - `target` (no modifier) offers the window under the pointer: its halves as well
+   *   as the whole of it;
+   * - `grow` (Shift) stretches an area from the dragged window to the pointer;
+   * - `swap` (Ctrl) exchanges it with the window under the pointer, as the grid always did.
+   *
+   * Which modifier selects which mode is the grid's business, not the overlay's, and
+   * every caller says which one it means. The parameter is required on purpose: it
+   * used to default to `grow`, which silently became the WRONG gesture the day the
+   * plain drag stopped being a grow, and nothing pointed that out.
    */
-  over: (clientX: number, clientY: number, mode?: PlacementMode) => void;
+  over: (clientX: number, clientY: number, mode: PlacementMode) => void;
   /** Disarm and return the layout that was painted, if any. */
   release: () => TileLayout | null;
   end: () => void;
@@ -156,6 +162,12 @@ export function targetAt(tile: Rect, zx: number, zy: number): PlacementTarget {
 
 const pct = (zones: number) => `${(zones / GRID) * 100}%`;
 
+// The zone substrate is a reading aid, not a readout of the matrix: a line per zone
+// would be 48 of them on each axis, which is a haze. Drawing every fourth zone keeps
+// the spacing the eye already learned when the matrix was 12 zones wide.
+const ZONE_LINE_STRIDE = 4;
+const zoneLineSpacing = pct(ZONE_LINE_STRIDE);
+
 /**
  * The drag surface for placing a terminal. It floats above the grid for the duration
  * of a drag and owns every drag event, so the cells underneath never move and never
@@ -217,7 +229,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   }, [end, onCancel]);
 
   const over = useCallback(
-    (clientX: number, clientY: number, mode: PlacementMode = "grow") => {
+    (clientX: number, clientY: number, mode: PlacementMode) => {
       const draggedId = draggedRef.current;
       if (!draggedId) return;
 
@@ -246,8 +258,9 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
           paint(null);
           return;
         }
-        // Ctrl is the plain exchange the grid has always had — the whole window under the
-        // pointer, with no edge bands to aim past. Shift additionally offers its halves.
+        // Ctrl is the plain exchange the grid has always had — the whole window under
+        // the pointer, with no edge bands to aim past. The unmodified drag additionally
+        // offers its halves.
         const aim: PlacementTarget =
           mode === "swap"
             ? { side: "centre", region: { ...hovered }, hit: { ...hovered } }
@@ -320,7 +333,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
           data-testid="placement-zone-grid"
           className="absolute inset-0"
           style={{
-            backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.10) 0 1px, transparent 1px ${100 / GRID}%), repeating-linear-gradient(to bottom, rgba(255,255,255,0.10) 0 1px, transparent 1px ${100 / GRID}%)`,
+            backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.10) 0 1px, transparent 1px ${zoneLineSpacing}), repeating-linear-gradient(to bottom, rgba(255,255,255,0.10) 0 1px, transparent 1px ${zoneLineSpacing})`,
           }}
         />
       )}
@@ -371,9 +384,10 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
         >
           {(
             [
-              ["grow", "Drag", "resize"],
+              // The unmodified gesture reads first, then the two modifiers.
+              ["target", "Drag", "split"],
+              ["grow", "Shift", "grow"],
               ["swap", "Ctrl", "swap"],
-              ["target", "Shift", "split"],
             ] as [PlacementMode, string, string][]
           ).map(([key, keyLabel, what]) => {
             const active = mode === key;

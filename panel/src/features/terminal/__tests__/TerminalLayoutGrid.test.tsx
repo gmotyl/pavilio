@@ -5,6 +5,7 @@ import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession } from "../terminalInstances";
+import { useTerminalOrdering } from "../useTerminalOrdering";
 import {
   TEST_PROJECT_COLORS,
   installProjectColors,
@@ -265,10 +266,21 @@ describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () 
 
 // jsdom has no DragEvent constructor, so Testing Library's drag helpers drop
 // clientX/clientY. Dispatch a MouseEvent of the same type instead.
-function dragOverAt(el: HTMLElement, clientX: number, clientY: number) {
+function dragOverAt(
+  el: HTMLElement,
+  clientX: number,
+  clientY: number,
+  modifiers: { shiftKey?: boolean; ctrlKey?: boolean } = {},
+) {
   fireEvent(
     el,
-    new MouseEvent("dragover", { bubbles: true, cancelable: true, clientX, clientY }),
+    new MouseEvent("dragover", {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      ...modifiers,
+    }),
   );
 }
 
@@ -304,26 +316,26 @@ describe("TerminalLayoutGrid — tiling", () => {
     renderGrid({
       sessions,
       tiles: [
-        { sessionId: "a", x: 0, y: 0, w: 12, h: 4 },
-        { sessionId: "b", x: 0, y: 4, w: 12, h: 8 },
+        { sessionId: "a", x: 0, y: 0, w: 48, h: 16 },
+        { sessionId: "b", x: 0, y: 16, w: 48, h: 32 },
       ],
     });
 
     expect(cellsByArea()).toEqual([
-      "1 / span 12|1 / span 4",
-      "1 / span 12|5 / span 8",
+      "1 / span 48|1 / span 16",
+      "1 / span 48|17 / span 32",
     ]);
   });
 
-  it("renders one CSS grid of 12 by 12 tracks and no gutter drop zones", () => {
+  it("renders one CSS grid of 48 by 48 tracks and no gutter drop zones", () => {
     renderGrid({
       sessions: [makeSession({ id: "a" }), makeSession({ id: "b" })],
       tiles: tilesFor(["a", "b"]),
     });
 
     const grid = screen.getByTestId("terminal-grid");
-    expect(grid.style.gridTemplateColumns).toBe("repeat(12, 1fr)");
-    expect(grid.style.gridTemplateRows).toBe("repeat(12, 1fr)");
+    expect(grid.style.gridTemplateColumns).toBe("repeat(48, 1fr)");
+    expect(grid.style.gridTemplateRows).toBe("repeat(48, 1fr)");
     expect(screen.queryByTestId("terminal-grid-gutter-0")).toBeNull();
   });
 
@@ -334,8 +346,8 @@ describe("TerminalLayoutGrid — tiling", () => {
     });
 
     expect(cellsByArea()).toEqual([
-      "1 / span 6|1 / span 12",
-      "7 / span 6|1 / span 12",
+      "1 / span 24|1 / span 48",
+      "25 / span 24|1 / span 48",
     ]);
   });
 
@@ -361,9 +373,9 @@ describe("TerminalLayoutGrid — placement drag", () => {
     makeSession({ id: "c", name: "c" }),
   ];
   const tiles: TileLayout = [
-    { sessionId: "a", x: 0, y: 0, w: 6, h: 12 },
-    { sessionId: "b", x: 6, y: 0, w: 6, h: 6 },
-    { sessionId: "c", x: 6, y: 6, w: 6, h: 6 },
+    { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+    { sessionId: "b", x: 24, y: 0, w: 24, h: 24 },
+    { sessionId: "c", x: 24, y: 24, w: 24, h: 24 },
   ];
 
   function startDrag() {
@@ -377,10 +389,10 @@ describe("TerminalLayoutGrid — placement drag", () => {
     vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
       left: 0,
       top: 0,
-      width: 120,
-      height: 120,
-      right: 120,
-      bottom: 120,
+      width: 480,
+      height: 480,
+      right: 480,
+      bottom: 480,
       x: 0,
       y: 0,
       toJSON: () => ({}),
@@ -419,8 +431,8 @@ describe("TerminalLayoutGrid — placement drag", () => {
   it("leaves every cell's grid-area untouched for the whole drag", () => {
     const { wrapper, before } = startDrag();
 
-    dragOverAt(wrapper, 90, 30);
-    dragOverAt(wrapper, 90, 90);
+    dragOverAt(wrapper, 395, 155);
+    dragOverAt(wrapper, 395, 395);
 
     // The regression that motivated the change: previewing must not re-flow the grid,
     // because a cell moving under the cursor changes which one the drop lands on.
@@ -430,24 +442,24 @@ describe("TerminalLayoutGrid — placement drag", () => {
   it("commits the painted layout on drop", () => {
     const { wrapper, onPlace } = startDrag();
 
-    dragOverAt(wrapper, 90, 30);
+    dragOverAt(wrapper, 395, 155, { shiftKey: true });
     fireEvent(wrapper, new MouseEvent("drop", { bubbles: true, cancelable: true }));
 
     expect(onPlace).toHaveBeenCalledTimes(1);
     const committed = onPlace.mock.calls[0][0] as TileLayout;
-    // The default gesture grows the dragged window towards the pointer.
+    // The Shift gesture grows the dragged window towards the pointer.
     expect(committed.find((t) => t.sessionId === "a")).toMatchObject({
       x: 0,
       y: 0,
-      w: 10,
-      h: 12,
+      w: 40,
+      h: 48,
     });
   });
 
   it("commits nothing when the drag ends without a drop", () => {
     const { onPlace, wrapper } = startDrag();
 
-    dragOverAt(wrapper, 90, 30);
+    dragOverAt(wrapper, 395, 155);
     fireEvent.dragEnd(screen.getAllByTitle("Drag to place this terminal")[0]);
 
     expect(onPlace).not.toHaveBeenCalled();
@@ -481,14 +493,107 @@ describe("TerminalLayoutGrid — placement drag", () => {
   it("paints the area the pointer is stretching to", () => {
     const { wrapper } = startDrag();
 
-    dragOverAt(wrapper, 90, 30);
+    dragOverAt(wrapper, 395, 155, { shiftKey: true });
 
     expect(screen.getByTestId("placement-region").getAttribute("data-region")).toBe(
-      "0,0,10,12",
+      "0,0,40,48",
     );
     expect(
       screen.getByTestId("placement-preview-a").getAttribute("data-region"),
-    ).toBe("0,0,10,12");
+    ).toBe("0,0,40,48");
+  });
+});
+
+describe("TerminalLayoutGrid — which gesture the modifiers select", () => {
+  const sessions = [
+    makeSession({ id: "a", name: "a" }),
+    makeSession({ id: "b", name: "b" }),
+    makeSession({ id: "c", name: "c" }),
+  ];
+  // a on the left, b over c on the right. 480x480 over 48 zones: one zone is 10px.
+  const tiles: TileLayout = [
+    { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+    { sessionId: "b", x: 24, y: 0, w: 24, h: 24 },
+    { sessionId: "c", x: 24, y: 24, w: 24, h: 24 },
+  ];
+
+  // Zone 39,0 — inside b's top edge band, so the three gestures are told apart by
+  // what they paint there: target aims at b's top half, grow stretches a to the
+  // pointer, swap takes the whole of b.
+  const AT_B_TOP: [number, number] = [395, 5];
+
+  function startDrag() {
+    renderGrid({ sessions, tiles, onPlace: vi.fn() });
+    fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
+    const overlay = screen.getByTestId("terminal-placement-overlay");
+    vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 480,
+      height: 480,
+      right: 480,
+      bottom: 480,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    return screen.getByTestId("terminal-grid").parentElement as HTMLElement;
+  }
+
+  const previewOf = (id: string) =>
+    screen.getByTestId(`placement-preview-${id}`).getAttribute("data-region");
+
+  it("a plain drag drives the overlay in target mode", () => {
+    const wrapper = startDrag();
+
+    dragOverAt(wrapper, ...AT_B_TOP);
+
+    // b's centre and its four edge bands are on offer and the top one is aimed at —
+    // the gesture that used to need Shift. Swap would offer the centre alone.
+    for (const side of ["centre", "left", "right", "top", "bottom"]) {
+      expect(screen.getByTestId(`placement-target-${side}`)).toBeTruthy();
+    }
+    expect(screen.getByTestId("placement-target-top").getAttribute("data-active")).toBe(
+      "true",
+    );
+    // Something is painted, and it is not an area anchored on the dragged window.
+    expect(previewOf("a")).toBeTruthy();
+    expect(screen.queryByTestId("placement-region")).toBeNull();
+  });
+
+  it("Shift drives the overlay in grow mode", () => {
+    const wrapper = startDrag();
+
+    dragOverAt(wrapper, ...AT_B_TOP, { shiftKey: true });
+
+    expect(screen.getByTestId("placement-region").getAttribute("data-region")).toBe(
+      "0,0,40,48",
+    );
+    expect(previewOf("a")).toBe("0,0,40,48");
+    // The painted area is not a target on the hovered window.
+    expect(screen.queryByTestId("placement-target-top")).toBeNull();
+  });
+
+  it("Ctrl still drives the overlay in swap mode", () => {
+    const wrapper = startDrag();
+
+    dragOverAt(wrapper, ...AT_B_TOP, { ctrlKey: true });
+
+    expect(previewOf("a")).toBe("24,0,24,24");
+    expect(previewOf("b")).toBe("0,0,24,48");
+    // The whole window, with no edge bands to aim past and nothing painted.
+    expect(screen.queryByTestId("placement-target-top")).toBeNull();
+    expect(screen.queryByTestId("placement-region")).toBeNull();
+  });
+
+  it("Ctrl takes precedence over Shift", () => {
+    const wrapper = startDrag();
+
+    dragOverAt(wrapper, ...AT_B_TOP, { ctrlKey: true, shiftKey: true });
+
+    expect(previewOf("a")).toBe("24,0,24,24");
+    expect(previewOf("b")).toBe("0,0,24,48");
+    expect(screen.queryByTestId("placement-region")).toBeNull();
   });
 });
 
@@ -651,7 +756,7 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
 
     const overlay = screen.getByTestId("terminal-placement-overlay");
     vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
-      left: 0, top: 0, width: 120, height: 120, right: 120, bottom: 120, x: 0, y: 0,
+      left: 0, top: 0, width: 480, height: 480, right: 480, bottom: 480, x: 0, y: 0,
       toJSON: () => ({}),
     } as DOMRect);
 
@@ -660,7 +765,7 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     // Arming leaves no trace in the DOM by design — what proves it is that a
     // subsequent dragover paints a target.
     const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
-    dragOverAt(wrapper, 90, 60);
+    dragOverAt(wrapper, 395, 235);
 
     expect(screen.queryAllByTestId(/^placement-preview-/).length).toBeGreaterThan(0);
   });
@@ -676,5 +781,225 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     dragStart(input);
 
     expect(screen.queryAllByTestId(/^placement-preview-/)).toHaveLength(0);
+  });
+});
+
+// 476 + the 4px gutter = 480, so one zone is exactly 10px and pixel deltas convert
+// to zone deltas without rounding noise. The grid measures itself when the tiling
+// mounts, so the spy has to be installed before the render.
+function measureGrid(width = 476, height = 476) {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    width,
+    height,
+    right: width,
+    bottom: height,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect);
+}
+
+function seamHandles(container: HTMLElement) {
+  return Array.from(container.querySelectorAll('[data-testid^="seam-handle-"]'));
+}
+
+function grabSeam(testId: string, from: number, axis: "x" | "y" = "x") {
+  const handle = screen.getByTestId(testId);
+  handle.setPointerCapture = vi.fn();
+  fireEvent.pointerDown(handle, {
+    pointerId: 3,
+    button: 0,
+    clientX: axis === "x" ? from : 0,
+    clientY: axis === "x" ? 0 : from,
+  });
+  return handle;
+}
+
+function dragSeamTo(to: number, axis: "x" | "y" = "x") {
+  fireEvent.pointerMove(window, {
+    pointerId: 3,
+    clientX: axis === "x" ? to : 0,
+    clientY: axis === "x" ? 0 : to,
+  });
+}
+
+function releaseSeamAt(to: number, axis: "x" | "y" = "x") {
+  fireEvent.pointerUp(window, {
+    pointerId: 3,
+    clientX: axis === "x" ? to : 0,
+    clientY: axis === "x" ? 0 : to,
+  });
+}
+
+describe("TerminalLayoutGrid — seam resize", () => {
+  const threeSessions = [
+    makeSession({ id: "a", name: "a" }),
+    makeSession({ id: "b", name: "b" }),
+    makeSession({ id: "c", name: "c" }),
+  ];
+  // a down the left, b over c on the right.
+  const threeTiles: TileLayout = [
+    { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+    { sessionId: "b", x: 24, y: 0, w: 24, h: 24 },
+    { sessionId: "c", x: 24, y: 24, w: 24, h: 24 },
+  ];
+  const twoSessionsSplit = threeSessions.slice(0, 2);
+  const twoTiles: TileLayout = [
+    { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+    { sessionId: "b", x: 24, y: 0, w: 24, h: 48 },
+  ];
+
+  it("seam handles render over a multi-session grid", () => {
+    measureGrid();
+    const { container } = renderGrid({ sessions: threeSessions, tiles: threeTiles });
+
+    // The vertical boundary runs the full height; the horizontal one covers only
+    // the right-hand column, the one stretch where b faces c.
+    expect(seamHandles(container).map((el) => el.getAttribute("data-testid"))).toEqual([
+      "seam-handle-x-24-0",
+      "seam-handle-y-24-24",
+    ]);
+    // Centred on the gutter before track 24 — over the gap, not over a cell.
+    expect(screen.getByTestId("seam-handle-x-24-0").style.left).toBe(
+      "calc(-2px + 0.5 * (100% + 4px))",
+    );
+  });
+
+  it("no seam handles while a terminal is maximized", () => {
+    measureGrid();
+    const maxed = renderGrid({
+      sessions: threeSessions,
+      tiles: threeTiles,
+      maximized: true,
+    });
+
+    expect(seamHandles(maxed.container)).toHaveLength(0);
+    maxed.unmount();
+
+    // Nor with a single session live: one tile covers the whole grid, so there is
+    // no boundary between two terminals to grab.
+    const single = renderGrid({ sessions: [makeSession({ id: "a" })], tiles: [] });
+    expect(seamHandles(single.container)).toHaveLength(0);
+  });
+
+  it("a draft layout is what the cells render", () => {
+    measureGrid();
+    renderGrid({ sessions: twoSessionsSplit, tiles: twoTiles });
+
+    grabSeam("seam-handle-x-24-0", 240);
+    dragSeamTo(340);
+
+    // +100px is +10 zones: the cells follow the draft, live and unpersisted.
+    expect(cellsByArea()).toEqual([
+      "1 / span 34|1 / span 48",
+      "35 / span 14|1 / span 48",
+    ]);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    // The draft is dropped, so the committed layout is what renders again.
+    expect(cellsByArea()).toEqual([
+      "1 / span 24|1 / span 48",
+      "25 / span 24|1 / span 48",
+    ]);
+  });
+
+  it("a completed resize is handed to onPlace once", () => {
+    measureGrid();
+    const onPlace = vi.fn();
+    renderGrid({ sessions: twoSessionsSplit, tiles: twoTiles, onPlace });
+
+    grabSeam("seam-handle-x-24-0", 240);
+    dragSeamTo(300);
+    dragSeamTo(340);
+    releaseSeamAt(340);
+
+    expect(onPlace).toHaveBeenCalledTimes(1);
+    const [committed, kind] = onPlace.mock.calls[0];
+    expect(committed).toEqual([
+      { sessionId: "a", x: 0, y: 0, w: 34, h: 48 },
+      { sessionId: "b", x: 34, y: 0, w: 14, h: 48 },
+    ]);
+    // Committed as a resize, not a placement: the scope must not re-derive the
+    // session order from the new tiling.
+    expect(kind).toBe("resize");
+  });
+
+  it("a pointerdown on a handle starts no placement", () => {
+    measureGrid();
+    const onPlace = vi.fn();
+    renderGrid({ sessions: threeSessions, tiles: threeTiles, onPlace });
+
+    const handle = screen.getByTestId("seam-handle-x-24-0");
+    handle.setPointerCapture = vi.fn();
+    const notPrevented = fireEvent.pointerDown(handle, {
+      pointerId: 3,
+      button: 0,
+      clientX: 240,
+      clientY: 240,
+    });
+
+    // The default is cancelled, which is what stops the press turning into an
+    // HTML5 drag of whatever sits under the strip.
+    expect(notPrevented).toBe(false);
+    // And the overlay is not armed, so a dragover paints nothing at all.
+    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
+    dragOverAt(wrapper, 395, 155);
+    expect(screen.queryAllByTestId(/^placement-preview-/)).toHaveLength(0);
+    expect(screen.queryByTestId("placement-region")).toBeNull();
+    expect(onPlace).not.toHaveBeenCalled();
+  });
+
+  it("a horizontal seam commit keeps the existing session order", () => {
+    // ADR 0008's amendment, worked: dragging the y=12 seam down by 24 zones
+    // carries b past d in the y-major reading order. The tiling stays valid, so
+    // re-deriving the order from it would silently renumber the terminals.
+    const sessions = ["a", "b", "c", "d"].map((id) => makeSession({ id, name: id }));
+    const stored: TileLayout = [
+      { sessionId: "a", x: 0, y: 0, w: 24, h: 12 },
+      { sessionId: "b", x: 0, y: 12, w: 24, h: 36 },
+      { sessionId: "c", x: 24, y: 0, w: 24, h: 24 },
+      { sessionId: "d", x: 24, y: 24, w: 24, h: 24 },
+    ];
+    localStorage.setItem("panel-terminal-grid-seams", JSON.stringify(stored));
+
+    function Harness() {
+      const { tiles, sessionOrder, placeTiles } = useTerminalOrdering("seams", sessions);
+      return (
+        <>
+          <div data-testid="session-order">{sessionOrder.join(",")}</div>
+          <TerminalLayoutGrid
+            sessions={sessions}
+            focusedId={null}
+            maximized={false}
+            onFocus={() => {}}
+            onExit={() => {}}
+            onToggleMaximize={() => {}}
+            tiles={tiles}
+            onPlace={placeTiles}
+          />
+        </>
+      );
+    }
+
+    measureGrid();
+    render(<Harness />);
+    expect(screen.getByTestId("session-order").textContent).toBe("a,c,b,d");
+
+    grabSeam("seam-handle-y-12-0", 120, "y");
+    dragSeamTo(360, "y");
+    releaseSeamAt(360, "y");
+
+    // The boundary moved — a took b's 24 zones...
+    expect(cellsByArea()).toEqual([
+      "1 / span 24|1 / span 36",
+      "1 / span 24|37 / span 12",
+      "25 / span 24|1 / span 24",
+      "25 / span 24|25 / span 24",
+    ]);
+    // ...and the numbering did not, though readingOrder of that tiling is a,c,d,b.
+    expect(screen.getByTestId("session-order").textContent).toBe("a,c,b,d");
   });
 });
