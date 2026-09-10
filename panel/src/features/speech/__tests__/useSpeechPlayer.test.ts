@@ -403,4 +403,86 @@ describe("useSpeechPlayer", () => {
     ]);
     expect(new Set(revokedUrls)).toEqual(new Set(createdUrls));
   });
+
+  it("revokes a URL that finishes loading after the run was barged in on", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    // The two plays' synchronous prefixes run back to back, so cell-a's unit is
+    // still mid-synthesis when cell-b tears its run down. Its URL is therefore
+    // created *after* the run's URL set was drained, which is the one case that
+    // set cannot clean up: only the in-flight check inside `loadUnit` frees it.
+    // Left unfreed, every barge-in landing during a synthesis leaks one blob for
+    // the lifetime of the tab.
+    await act(async () => {
+      void result.current.play("cell-a", units("abandoned-0", "abandoned-1"));
+      void result.current.play("cell-b", units("winner-0", "winner-1"));
+      await drain();
+    });
+
+    // The abandoned unit did get as far as having a URL built for it...
+    expect(createdUrls).toContain("blob:abandoned-0");
+    // ...it just never played, and was handed back to the browser regardless.
+    expect(played).toEqual(["blob:winner-0"]);
+    expect(revokedUrls).toContain("blob:abandoned-0");
+    expect(result.current.speakingSessionId).toBe("cell-b");
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("stops speaking and revokes every URL on unmount", async () => {
+    const onError = vi.fn();
+    const { result, unmount } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
+    expect(createdUrls).toEqual(["blob:unit-0", "blob:unit-1"]);
+    expect(revokedUrls).toEqual([]);
+
+    const element = elements[elements.length - 1];
+    const pausedBefore = paused.mock.calls.length;
+
+    // Navigating away mid-utterance. The element is never in the document, so
+    // nothing tears it down for us: without the unmount teardown the browser
+    // keeps talking and every built URL outlives the hook.
+    await act(async () => {
+      unmount();
+      await drain();
+    });
+
+    expect(paused.mock.calls.length).toBeGreaterThan(pausedBefore);
+    expect(element.getAttribute("src")).toBeNull();
+    expect(new Set(revokedUrls)).toEqual(new Set(createdUrls));
+
+    // An `ended` still in flight when the hook went away must not resume the
+    // ladder: nothing further plays, and nothing further is even synthesized.
+    await act(async () => {
+      element.dispatchEvent(new Event("ended"));
+      await drain();
+    });
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(createdUrls).toEqual(["blob:unit-0", "blob:unit-1"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("drives one audio element for the whole player", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
+    await startPlay(result.current, "cell-b", units("other-0", "other-1"));
+    await act(async () => {
+      result.current.unlock();
+      await drain();
+    });
+
+    // Design §4: one element for the whole panel, so barge-in is an index reset
+    // rather than a negotiation between elements — and so the autoplay
+    // permission a gesture grants stays attached to the element the later
+    // programmatic plays use, which a per-play element would discard each time.
+    expect(elements.length).toBeGreaterThan(1);
+    expect(new Set(elements).size).toBe(1);
+    // The gesture's own `play()` lands on the element cell-b is mid-way
+    // through, src and all — there is nowhere else for it to land.
+    expect(played).toEqual(["blob:unit-0", "blob:other-0", "blob:other-0"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
 });

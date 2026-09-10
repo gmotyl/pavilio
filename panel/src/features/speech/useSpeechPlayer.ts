@@ -71,6 +71,13 @@ export interface SpeechPlayer {
   play(sessionId: string, units: SpeechUnit[], fromUnit?: number): Promise<void>;
   stop(): void;
   unlock(): void;
+  /**
+   * Whether {@link SpeechPlayer.unlock} has run — i.e. whether a user gesture
+   * has reached the element — and *not* whether playback is permitted. The
+   * browser may refuse a `play()` regardless, and the player never clears this
+   * flag when it does. So the "unheard" pip fallback must key off a
+   * `kind: "refused"` {@link SpeechPlaybackError}, never off this being `true`.
+   */
   readonly unlocked: boolean;
 }
 
