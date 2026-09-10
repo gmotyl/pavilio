@@ -191,7 +191,6 @@ export function TerminalsSurface({
             maximized={maximized}
             onFocus={handleFocus}
             onExit={onDeleteSession}
-            onToggleMaximize={onToggleMaximize}
             onReady={(sessionId, handle) => {
               terminalHandlesRef.current.set(sessionId, handle);
             }}

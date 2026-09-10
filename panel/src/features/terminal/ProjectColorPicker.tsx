@@ -66,6 +66,12 @@ interface Props {
  * `CellIconButton` siblings (`p-1` around an 11px icon) — the control this
  * replaces hung off the 6x6px activity LED and was effectively unhittable.
  *
+ * In the terminal grid it is reached from a cell's *rename editing state*
+ * (double-click the header name), not from the standing control group: a
+ * project's colour is chosen once and then left alone, so it does not earn
+ * width in every header. That host is a `draggable` row whose cell focuses on
+ * click, which is what the two guards on the wrapper below are for.
+ *
  * Uniqueness is advisory: a colour another project already holds is *marked*
  * with that project's name and stays selectable. There are more projects than
  * presets, so refusing duplicates would eventually leave a project colourless.
@@ -133,14 +139,15 @@ export function ProjectColorPicker({ project, testId }: Props) {
       ref={rootRef}
       className="relative"
       // The cell focuses on click, so the click is swallowed here the same way
-      // the eye/maximize/kill controls beside it swallow theirs. One stop on
-      // the wrapper covers the trigger and everything in the popover.
+      // the eye/kill controls in the header beside it swallow theirs. One stop
+      // on the wrapper covers the trigger and everything in the popover.
       onClick={(e) => e.stopPropagation()}
-      // The cell header is `draggable`. Without this, mouse-selecting the hex
-      // field's text starts a cell drag instead of a selection — HTML5 drag is
-      // initiated by the browser from the nearest draggable ancestor, so only
-      // cancelling `dragstart` stops it (a `mousedown` stop would not, and
-      // `draggable={false}` here only makes the browser keep walking up).
+      // The cell header is `draggable`. Without this, reaching for the trigger
+      // or mouse-selecting the hex field's text starts a cell drag instead of
+      // the gesture intended — HTML5 drag is initiated by the browser from the
+      // nearest draggable ancestor, so only cancelling `dragstart` stops it (a
+      // `mousedown` stop would not, and `draggable={false}` here only makes the
+      // browser keep walking up).
       onDragStart={(e) => {
         e.preventDefault();
         e.stopPropagation();

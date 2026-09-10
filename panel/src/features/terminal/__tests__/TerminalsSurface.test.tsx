@@ -95,6 +95,20 @@ describe("TerminalsSurface", () => {
     expect(props.onPlace).toBe(onPlace);
   });
 
+  // The surface used to hand the same `onToggleMaximize` to both children, and
+  // the cell button that used it toggled the toolbar's own surface-wide flag.
+  // The cell button is gone; the toolbar's path must be untouched.
+  it("hands the maximize callback to the toolbar only", () => {
+    render(<Harness />);
+
+    const toolbar = toolbarProps.mock.calls.at(-1)?.[0];
+    const grid = gridProps.mock.calls.at(-1)?.[0];
+    expect(typeof toolbar.onToggleMaximize).toBe("function");
+    expect(toolbar.maximized).toBe(false);
+    expect(grid.maximized).toBe(false);
+    expect("onToggleMaximize" in grid).toBe(false);
+  });
+
   it("wires sessions.length and onApplyPreset into the toolbar's LayoutPresetMenu", () => {
     const onApplyPreset = vi.fn();
     render(<Harness onApplyPreset={onApplyPreset} />);

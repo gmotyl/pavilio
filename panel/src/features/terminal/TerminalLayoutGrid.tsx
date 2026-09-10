@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Eye, X, Maximize2, Minimize2 } from "lucide-react";
+import { Eye, X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import type { SessionMeta } from "./useTerminalSessions";
@@ -48,7 +48,6 @@ interface Props {
   maximized: boolean;
   onFocus: (id: string) => void;
   onExit: (id: string) => void;
-  onToggleMaximize: () => void;
   onReady?: (sessionId: string, handle: TerminalHandle) => void;
   onRename?: (id: string, name: string) => void;
   /** The committed tiling. Empty means "no custom shape": the default preset is used. */
@@ -69,7 +68,6 @@ export function TerminalLayoutGrid({
   maximized,
   onFocus,
   onExit,
-  onToggleMaximize,
   onReady,
   onRename,
   tiles,
@@ -192,11 +190,9 @@ export function TerminalLayoutGrid({
       key={session.id}
       session={session}
       focused={session.id === focusedId}
-      maximized={maximized}
       onFocus={onFocus}
       onExit={onExit}
       onRequestExit={setPendingCloseId}
-      onToggleMaximize={onToggleMaximize}
       onReady={onReady}
       onRename={onRename}
       onDragStart={() => overlayRef.current?.begin(session.id)}
@@ -317,11 +313,9 @@ export function TerminalLayoutGrid({
 interface CellProps {
   session: SessionMeta;
   focused: boolean;
-  maximized: boolean;
   onFocus: (id: string) => void;
   onExit: (id: string) => void;
   onRequestExit: (id: string) => void;
-  onToggleMaximize: () => void;
   onReady?: (id: string, handle: TerminalHandle) => void;
   onRename?: (id: string, name: string) => void;
   onDragStart: () => void;
@@ -333,11 +327,9 @@ interface CellProps {
 function TerminalCell({
   session,
   focused,
-  maximized,
   onFocus,
   onExit,
   onRequestExit,
-  onToggleMaximize,
   onReady,
   onRename,
   onDragStart,
@@ -423,40 +415,53 @@ function TerminalCell({
       >
         <TerminalActivityLed sessionId={session.id} />
         {editingName ? (
-          <input
-            autoFocus
-            defaultValue={session.name}
-            data-testid={`terminal-cell-name-input-${session.id}`}
-            aria-label={`Rename ${session.name}`}
-            className="text-[10.5px] font-mono tracking-wide truncate flex-1 bg-transparent outline-none min-w-0"
-            style={{ color: "var(--text-primary)", letterSpacing: "0.08em" }}
-            onClick={(e) => e.stopPropagation()}
-            // The header is `draggable`, so mouse-selecting the text here
-            // would start a cell drag instead of a selection. HTML5 drag is
-            // initiated from the nearest draggable ancestor, so only
-            // cancelling `dragstart` stops it — the same guard the colour
-            // picker's hex field needs.
-            onDragStart={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                blurHandledRef.current = true;
-                commitRename(e.currentTarget.value);
-              } else if (e.key === "Escape") {
-                blurHandledRef.current = true;
-                setEditingName(false);
-              }
-            }}
-            onBlur={(e) => {
-              if (blurHandledRef.current) {
-                blurHandledRef.current = false;
-                return;
-              }
-              commitRename(e.target.value);
-            }}
-          />
+          <>
+            <input
+              autoFocus
+              defaultValue={session.name}
+              data-testid={`terminal-cell-name-input-${session.id}`}
+              aria-label={`Rename ${session.name}`}
+              className="text-[10.5px] font-mono tracking-wide truncate flex-1 bg-transparent outline-none min-w-0"
+              style={{ color: "var(--text-primary)", letterSpacing: "0.08em" }}
+              onClick={(e) => e.stopPropagation()}
+              // The header is `draggable`, so mouse-selecting the text here
+              // would start a cell drag instead of a selection. HTML5 drag is
+              // initiated from the nearest draggable ancestor, so only
+              // cancelling `dragstart` stops it — the same guard the colour
+              // picker's hex field needs.
+              onDragStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  blurHandledRef.current = true;
+                  commitRename(e.currentTarget.value);
+                } else if (e.key === "Escape") {
+                  blurHandledRef.current = true;
+                  setEditingName(false);
+                }
+              }}
+              onBlur={(e) => {
+                if (blurHandledRef.current) {
+                  blurHandledRef.current = false;
+                  return;
+                }
+                commitRename(e.target.value);
+              }}
+            />
+            {/* Colour is a property of the project, not of this cell — the
+                picker names the project so that is not a surprise. It rides
+                the rename state rather than standing in every header: a
+                project's colour is chosen once and then left alone, and the
+                width it used to hold is now the speak and autoplay controls'.
+                The picker swallows its own click and dragstart, which is what
+                keeps it from focusing the cell or starting a header drag. */}
+            <ProjectColorPicker
+              project={session.project}
+              testId={`terminal-cell-color-${session.id}`}
+            />
+          </>
         ) : (
           <span
             className="text-[10.5px] font-mono tracking-wide uppercase truncate flex-1"
@@ -472,8 +477,8 @@ function TerminalCell({
           </span>
         )}
         <div className="flex gap-0.5">
-          {/* Leads the eye · maximize · kill group. Renders nothing while the
-              socket is healthy, so the group's usual width is unchanged. */}
+          {/* Leads the eye · kill group. Renders nothing while the socket is
+              healthy, so the group's usual width is unchanged. */}
           <TerminalDisconnectedBadge sessionId={session.id} />
           {/* Speak · autoplay lead the group: they change per utterance, the
               rest are static. Both are inert until a speech host is passed. */}
@@ -497,22 +502,6 @@ function TerminalCell({
             }}
           >
             <Eye size={11} />
-          </CellIconButton>
-          {/* Colour is a property of the project, not of this cell — the
-              picker names the project so that is not a surprise. */}
-          <ProjectColorPicker
-            project={session.project}
-            testId={`terminal-cell-color-${session.id}`}
-          />
-          <CellIconButton
-            testId={`terminal-cell-maximize-${session.id}`}
-            title={maximized ? "Restore" : "Maximize"}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleMaximize();
-            }}
-          >
-            {maximized ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
           </CellIconButton>
           <CellIconButton
             testId={`terminal-cell-kill-${session.id}`}

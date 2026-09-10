@@ -326,3 +326,35 @@ describe("TerminalToolbar — run-as-user dropdown", () => {
     warnSpy.mockRestore();
   });
 });
+
+// The per-cell maximize button was removed (it toggled this very same
+// surface-wide flag), so the toolbar's control is now the only way in. Pin it.
+describe("TerminalToolbar — maximize", () => {
+  it("the toolbar maximize toggles the surface", () => {
+    const { onToggleMaximize } = renderToolbar();
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-maximize"));
+
+    expect(onToggleMaximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads Restore while maximized and stays clickable", () => {
+    const { onToggleMaximize } = renderToolbar({ maximized: true });
+    const button = screen.getByTestId("terminal-toolbar-maximize");
+
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+
+    expect(onToggleMaximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("is inert with no sessions", () => {
+    const { onToggleMaximize } = renderToolbar({ sessions: [] });
+    const button = screen.getByTestId("terminal-toolbar-maximize");
+
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+
+    expect(onToggleMaximize).not.toHaveBeenCalled();
+  });
+});

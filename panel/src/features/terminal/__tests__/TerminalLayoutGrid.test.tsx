@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
@@ -126,7 +126,6 @@ function renderGrid(
     maximized: false,
     onFocus: vi.fn(),
     onExit: vi.fn(),
-    onToggleMaximize: vi.fn(),
     onReady: vi.fn(),
     onPlace: vi.fn(),
     ...overrides,
@@ -655,40 +654,166 @@ describe("TerminalLayoutGrid — project colour", () => {
   });
 });
 
-describe("TerminalLayoutGrid — project colour picker", () => {
+describe("TerminalLayoutGrid — what the cell header no longer carries", () => {
   beforeEach(() => installProjectColors());
 
-  it("sits between the eye and maximize buttons, sized like its siblings", () => {
-    const session = makeSession({ id: "s-pick", project: "alpha" });
+  // jsdom's DragEvent has no real DataTransfer; the header's own onDragStart
+  // writes to it, so a stand-in has to be supplied.
+  function dragStart(el: Element) {
+    fireEvent.dragStart(el, { dataTransfer: { effectAllowed: "", dropEffect: "" } });
+  }
+
+  /**
+   * The shared colour store answers its one fetch after the render returns, so
+   * a test that never awaits anything leaves that update outside `act`. The
+   * cases below assert on control *presence*, not on colour, so there is
+   * nothing to `waitFor` — flush the store instead.
+   */
+  const settleColors = () => act(async () => {});
+
+  it("cell header renders no maximize control", async () => {
+    const session = makeSession({ id: "s-max", project: "alpha" });
+    const restored = renderGrid({ sessions: [session], focusedId: session.id });
+    await settleColors();
+
+    expect(screen.queryByTestId("terminal-cell-maximize-s-max")).toBeNull();
+    expect(screen.queryByTitle("Maximize")).toBeNull();
+    restored.unmount();
+
+    // The same control was the restore control while maximized — also gone.
+    renderGrid({ sessions: [session], focusedId: session.id, maximized: true });
+    await settleColors();
+    expect(screen.queryByTestId("terminal-cell-maximize-s-max")).toBeNull();
+    expect(screen.queryByTitle("Restore")).toBeNull();
+  });
+
+  it("cell header renders no standing colour control", async () => {
+    const session = makeSession({ id: "s-nc", project: "alpha" });
     renderGrid({ sessions: [session], focusedId: session.id });
+    await settleColors();
 
-    const eye = screen.getByTestId("terminal-cell-eye-s-pick");
+    expect(screen.queryByTestId("terminal-cell-color-s-nc")).toBeNull();
+    expect(screen.queryByLabelText("Set colour for alpha")).toBeNull();
+
+    // What the group holds instead, in order: speak · autoplay · eye · kill.
+    // (The disconnected badge leads it but renders nothing while healthy.)
+    const eye = screen.getByTestId("terminal-cell-eye-s-nc");
+    const group = Array.from(eye.parentElement!.children) as HTMLElement[];
+    expect(group.map((el) => el.dataset.testid)).toEqual([
+      "terminal-cell-speak-s-nc",
+      "terminal-cell-autoplay-s-nc",
+      "terminal-cell-eye-s-nc",
+      "terminal-cell-kill-s-nc",
+    ]);
+  });
+
+  it("double-clicking the name opens the rename editor with the colour control", async () => {
+    const session = makeSession({
+      id: "s-pick",
+      name: "claude-alpha",
+      project: "alpha",
+    });
+    const { onFocus } = renderGrid({ sessions: [session], focusedId: null });
+    await settleColors();
+
+    expect(screen.queryByTestId("terminal-cell-color-s-pick")).toBeNull();
+
+    fireEvent.doubleClick(screen.getByText("claude-alpha"));
+
+    expect(
+      screen.getByTestId("terminal-cell-name-input-s-pick"),
+    ).toBeInTheDocument();
     const color = screen.getByTestId("terminal-cell-color-s-pick");
-    const maximize = screen.getByTestId("terminal-cell-maximize-s-pick");
-
-    // The control needs a positioning wrapper for its popover, so compare the
-    // slot it occupies in the group rather than the button itself.
-    const group = Array.from(eye.parentElement!.children);
-    const slot = group.findIndex((el) => el.contains(color));
-    expect(slot).toBe(group.indexOf(eye) + 1);
-    expect(group.indexOf(maximize)).toBe(slot + 1);
 
     // The old picker hung off the 6x6px activity LED. This one is a real
-    // control: same padding and icon size as the buttons beside it.
+    // control: same padding and icon size as the header buttons beside it.
+    const eye = screen.getByTestId("terminal-cell-eye-s-pick");
     expect(color.className).toBe(eye.className);
     expect(color.querySelector("svg")?.getAttribute("width")).toBe(
       eye.querySelector("svg")?.getAttribute("width"),
     );
+
+    // It opens a picker that names the project it will change, and reaching it
+    // does not focus the cell.
+    fireEvent.click(color);
+    expect(screen.getByRole("dialog")).toHaveTextContent("alpha");
+    expect(onFocus).not.toHaveBeenCalled();
+
+    // Leaving the editing state takes the control with it.
+    fireEvent.keyDown(screen.getByTestId("terminal-cell-name-input-s-pick"), {
+      key: "Escape",
+    });
+    expect(screen.queryByTestId("terminal-cell-color-s-pick")).toBeNull();
   });
 
-  it("opens a picker naming the cell's project without focusing the cell", () => {
-    const session = makeSession({ id: "s-pick2", project: "beta" });
-    const { onFocus } = renderGrid({ sessions: [session], focusedId: null });
+  it("picking a colour there recolours every session of the project", async () => {
+    renderGrid({
+      sessions: [
+        makeSession({ id: "p1", project: "alpha", name: "claude-alpha-1" }),
+        makeSession({ id: "p2", project: "alpha", name: "claude-alpha-2" }),
+      ],
+      focusedId: "p1",
+    });
+    const headerColor = (index: number) =>
+      (screen.getAllByTitle("Drag to place this terminal")[index] as HTMLElement)
+        .style.background;
 
-    fireEvent.click(screen.getByTestId("terminal-cell-color-s-pick2"));
+    await waitFor(() =>
+      expect(headerColor(0)).toContain(rgb(TEST_PROJECT_COLORS.alpha)),
+    );
 
-    expect(screen.getByRole("dialog")).toHaveTextContent("beta");
-    expect(onFocus).not.toHaveBeenCalled();
+    // Reached only from the rename state, so the control is not there yet.
+    expect(screen.queryByTestId("terminal-cell-color-p1")).toBeNull();
+
+    fireEvent.doubleClick(screen.getByText("claude-alpha-1"));
+    fireEvent.click(screen.getByTestId("terminal-cell-color-p1"));
+    fireEvent.click(screen.getByTestId("project-color-preset-alpha-coral"));
+
+    // Colour is a project property, not a cell one: the cell it was opened
+    // from and its sibling both move.
+    await waitFor(() => expect(headerColor(0)).toContain(rgb("#e06c75")));
+    expect(headerColor(1)).toContain(rgb("#e06c75"));
+  });
+
+  it("renaming still commits and the header still drags", async () => {
+    const onRename = vi.fn();
+    const sessions = [
+      makeSession({ id: "r1", name: "claude-a", project: "alpha" }),
+      makeSession({ id: "r2", name: "claude-b", project: "alpha" }),
+    ];
+    renderGrid({ sessions, focusedId: "r1", onRename, tiles: [] });
+    await settleColors();
+
+    const overlay = screen.getByTestId("terminal-placement-overlay");
+    vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, width: 480, height: 480, right: 480, bottom: 480, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    // The colour control now lives inside the `draggable` header, so it needs
+    // the same dragstart guard the rename input has — otherwise reaching for
+    // it starts a cell placement.
+    expect(screen.queryByTestId("terminal-cell-color-r1")).toBeNull();
+    fireEvent.doubleClick(screen.getByText("claude-a"));
+    dragStart(screen.getByTestId("terminal-cell-color-r1"));
+    expect(screen.queryAllByTestId(/^placement-preview-/)).toHaveLength(0);
+
+    // Renaming from that same state still commits.
+    const input = screen.getByTestId(
+      "terminal-cell-name-input-r1",
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "  builder  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRename).toHaveBeenCalledWith("r1", "builder");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+
+    // And the header is still the drag handle for swapping cells. The header's
+    // own handler writes to `dataTransfer`, so it is dispatched without one —
+    // jsdom has no real DataTransfer and the handler guards for that.
+    fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
+    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
+    dragOverAt(wrapper, 395, 235);
+    expect(screen.queryAllByTestId(/^placement-preview-/).length).toBeGreaterThan(0);
   });
 });
 
@@ -976,7 +1101,6 @@ describe("TerminalLayoutGrid — seam resize", () => {
             maximized={false}
             onFocus={() => {}}
             onExit={() => {}}
-            onToggleMaximize={() => {}}
             tiles={tiles}
             onPlace={placeTiles}
           />
