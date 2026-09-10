@@ -35,6 +35,50 @@ function deepFreezeState(input: OrderingState): OrderingState {
 }
 
 describe("orderingReducer", () => {
+  it("remove drops the session and hands its rectangle to a survivor", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C"],
+      layout: [
+        { sessionId: "A", x: 0, y: 0, w: 48, h: 20 },
+        { sessionId: "B", x: 0, y: 20, w: 16, h: 28 },
+        { sessionId: "C", x: 16, y: 20, w: 32, h: 28 },
+      ],
+    });
+
+    const next = orderingReducer(base, { type: "remove", id: "B" });
+
+    expect(next.order).toEqual(["A", "C"]);
+    expect(isValidLayout(next.layout)).toBe(true);
+    expect(idsOf(next.layout)).toEqual(["A", "C"]);
+    expect(next.layout.find((t) => t.sessionId === "C")).toMatchObject({
+      x: 0,
+      y: 20,
+      w: 48,
+      h: 28,
+    });
+  });
+
+  it("remove of the last session restores the empty sentinel", () => {
+    const base = deepFreezeState({
+      order: ["A"],
+      layout: [{ sessionId: "A", x: 0, y: 0, w: 48, h: 48 }],
+    });
+
+    const next = orderingReducer(base, { type: "remove", id: "A" });
+
+    // Empty means "no custom shape stored": the next terminal gets the default
+    // preset for one session — the whole grid — not a slice of a ghost layout.
+    expect(next.order).toEqual([]);
+    expect(next.layout).toEqual([]);
+    expect(orderingReducer(next, { type: "append", id: "B" }).layout).toEqual([]);
+  });
+
+  it("remove of an id it does not hold is the same state", () => {
+    const base = deepFreezeState(state(["A", "B"]));
+
+    expect(orderingReducer(base, { type: "remove", id: "Z" })).toBe(base);
+  });
+
   it("stores a placed layout verbatim and re-derives the order from it", () => {
     const base = state(["A", "B", "C"]);
     const placed: TileLayout = [
