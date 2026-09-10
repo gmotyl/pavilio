@@ -87,7 +87,7 @@ export function useTerminalSessions(project: string) {
   // Order + column layout for this project's scope, shared with the
   // cross-project terminals page (see useTerminalOrdering).
   const ordering = useTerminalOrdering(project, sessions);
-  const { syncIds, appendId } = ordering;
+  const { syncIds, appendId, removeId } = ordering;
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -232,6 +232,11 @@ export function useTerminalSessions(project: string) {
       }
       destroyTerminal(id);
       setSessions((prev) => prev.filter((s) => s.id !== id));
+      // Symmetric with createSession's appendId: drop the tile too, so the
+      // survivors absorb the freed space. This surface has no poll to heal a
+      // stale layout, and a closed session left in the tiling turns the next
+      // terminal into a sliver of its ghost rectangle.
+      removeId(id);
       setFocusedIdState((prev) => {
         const next = prev === id ? null : prev;
         try {
@@ -251,8 +256,10 @@ export function useTerminalSessions(project: string) {
     } catch (err) {
       console.warn(`[terminal] delete session ${id} failed:`, err);
     }
+    // `project` is read only inside the focus updater, which cannot go stale in a
+    // way that matters here; `removeId` is a stable dispatch wrapper.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [removeId]);
 
   const updateSession = useCallback(
     async (id: string, patch: { name?: string }) => {

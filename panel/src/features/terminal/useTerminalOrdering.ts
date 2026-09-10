@@ -23,6 +23,8 @@ export interface TerminalOrdering {
   syncIds: (ids: string[]) => void;
   /** Append a just-created session id and reconcile the tiling in the same cycle. */
   appendId: (id: string) => void;
+  /** Drop a just-closed session id and hand its rectangle to the survivors. */
+  removeId: (id: string) => void;
   reorder: (fromId: string, toId: string) => void;
   /**
    * Commit a layout a gesture already computed and displayed. `kind` says which
@@ -192,6 +194,10 @@ export function useTerminalOrdering(
     dispatch({ type: "append", id });
   }, []);
 
+  const removeId = useCallback((id: string) => {
+    dispatch({ type: "remove", id });
+  }, []);
+
   const reorder = useCallback((fromId: string, toId: string) => {
     dispatch({ type: "reorder", fromId, toId });
   }, []);
@@ -218,6 +224,7 @@ export function useTerminalOrdering(
     orderedSessions,
     tiles,
     syncIds,
+    removeId,
     appendId,
     reorder,
     placeTiles,

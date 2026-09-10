@@ -47,6 +47,7 @@ export type LayoutCommitKind = "placement" | "resize";
 export type OrderingAction =
   | { type: "sync"; ids: string[] }
   | { type: "append"; id: string }
+  | { type: "remove"; id: string }
   | { type: "reorder"; fromId: string; toId: string }
   | { type: "place"; layout: TileLayout }
   | { type: "resize"; layout: TileLayout }
@@ -126,6 +127,16 @@ export function orderingReducer(state: OrderingState, action: OrderingAction): O
     case "append": {
       if (state.order.includes(action.id)) return state;
       const order = [...state.order, action.id];
+      return commit(state, order, reconcile(state.layout, order));
+    }
+
+    case "remove": {
+      // The close counterpart of `append`. A per-project surface has no poll, so
+      // without this the closed session keeps its slot in the order and its
+      // rectangle in the layout — an invisible hole the survivors never absorb,
+      // and one the next `append` splits instead of the whole grid.
+      if (!state.order.includes(action.id)) return state;
+      const order = state.order.filter((id) => id !== action.id);
       return commit(state, order, reconcile(state.layout, order));
     }
 

@@ -164,6 +164,66 @@ describe("useTerminalSessions tiling", () => {
     expect(result.current.tiles).toEqual(defaultFor(["A", "B"]));
   });
 
+  it("deleteSession hands the closed terminal's space back to the survivors", async () => {
+    // A close used to touch only the sessions list: the tile stayed in the layout as
+    // an invisible hole, and the per-project surface has no poll to heal it.
+    localStorage.setItem(
+      GRID_KEY,
+      JSON.stringify([
+        { sessionId: "A", x: 0, y: 0, w: 24, h: 48 },
+        { sessionId: "B", x: 24, y: 0, w: 24, h: 48 },
+      ]),
+    );
+    mockFetchSessions([session("A"), session("B")]);
+    const { result } = await setup("vector");
+
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, json: async () => ({}) });
+    await act(async () => {
+      await result.current.deleteSession("A");
+    });
+
+    expect(result.current.sessions.map((s) => s.id)).toEqual(["B"]);
+    expect(isValidLayout(result.current.tiles)).toBe(true);
+    expect(result.current.tiles).toEqual([{ sessionId: "B", x: 0, y: 0, w: 48, h: 48 }]);
+  });
+
+  it("a terminal opened after closing every other one gets the whole grid", async () => {
+    // Greg's report: resize a few, close them all, open a new one -> it appeared as a
+    // sliver because the dead tiles still held the rest of the grid.
+    localStorage.setItem(
+      GRID_KEY,
+      JSON.stringify([
+        { sessionId: "A", x: 0, y: 0, w: 30, h: 20 },
+        { sessionId: "B", x: 30, y: 0, w: 18, h: 20 },
+        { sessionId: "C", x: 0, y: 20, w: 16, h: 28 },
+        { sessionId: "D", x: 16, y: 20, w: 32, h: 28 },
+      ]),
+    );
+    mockFetchSessions([session("A"), session("B"), session("C"), session("D")]);
+    const { result } = await setup("vector");
+
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, json: async () => ({}) });
+    for (const id of ["A", "B", "C", "D"]) {
+      await act(async () => {
+        await result.current.deleteSession(id);
+      });
+    }
+
+    expect(result.current.sessions).toEqual([]);
+    // Nothing left to shape: the sentinel is empty and the key is gone.
+    expect(localStorage.getItem(GRID_KEY)).toBeNull();
+
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => session("E"),
+    });
+    await act(async () => {
+      await result.current.createSession({});
+    });
+
+    expect(result.current.tiles).toEqual([{ sessionId: "E", x: 0, y: 0, w: 48, h: 48 }]);
+  });
+
   it("commits a placement without disturbing the sessions list", async () => {
     mockFetchSessions([session("A"), session("B")]);
     const { result } = await setup("vector");
