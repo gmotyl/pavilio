@@ -85,11 +85,26 @@ const SHAPES_AT_12: Record<number, { label: string; slots: number[][] }[]> = {
   ],
 };
 
+// The curated 1-6 lists LEAD the result; generated shapes are appended after them,
+// so these are prefix assertions rather than whole-list equality.
+const leadingLabels = (count: number, take: number) =>
+  getLayoutPresets(count)
+    .slice(0, take)
+    .map((p) => p.label);
+
+// Dedup key: the preset's slots, which `preset()` already sorts into reading order.
+const signature = (slots: { x: number; y: number; w: number; h: number }[]) =>
+  slots.map((s) => `${s.x},${s.y},${s.w},${s.h}`).join(" ");
+
+// How many curated (hand-written) entries lead each count's list.
+const CURATED_COUNT: Record<number, number> = { 1: 1, 2: 2, 3: 6, 4: 4, 5: 4, 6: 4 };
+const curatedLength = (count: number) => CURATED_COUNT[count] ?? 0;
+
 describe("getLayoutPresets", () => {
   it("returns the curated shapes for counts 1 through 6", () => {
-    expect(getLayoutPresets(1).map((p) => p.label)).toEqual(["1 terminal"]);
-    expect(getLayoutPresets(2).map((p) => p.label)).toEqual(["2 columns", "2 rows"]);
-    expect(getLayoutPresets(3).map((p) => p.label)).toEqual([
+    expect(leadingLabels(1, 1)).toEqual(["1 terminal"]);
+    expect(leadingLabels(2, 2)).toEqual(["2 columns", "2 rows"]);
+    expect(leadingLabels(3, 6)).toEqual([
       "1 left, 2 stacked right",
       "3 columns",
       "3 rows",
@@ -97,19 +112,19 @@ describe("getLayoutPresets", () => {
       "1 top, 2 below",
       "2 top, 1 bottom",
     ]);
-    expect(getLayoutPresets(4).map((p) => p.label)).toEqual([
+    expect(leadingLabels(4, 4)).toEqual([
       "2 by 2",
       "4 columns",
       "1 left, 3 stacked right",
       "1 top, 3 below",
     ]);
-    expect(getLayoutPresets(5).map((p) => p.label)).toEqual([
+    expect(leadingLabels(5, 4)).toEqual([
       "1 left, 4 right",
       "1 top, 4 below",
       "2 top, 3 bottom",
       "3 top, 2 bottom",
     ]);
-    expect(getLayoutPresets(6).map((p) => p.label)).toEqual([
+    expect(leadingLabels(6, 4)).toEqual([
       "3 by 2",
       "2 by 3",
       "6 columns",
@@ -132,17 +147,6 @@ describe("getLayoutPresets", () => {
       { x: 0, y: 0, w: third, h: GRID },
       { x: third, y: 0, w: third, h: GRID },
       { x: third * 2, y: 0, w: third, h: GRID },
-    ]);
-  });
-
-  it("generates an even grid and a one-large-left shape for 7 and above", () => {
-    expect(getLayoutPresets(7).map((p) => p.label)).toEqual([
-      "Even grid",
-      "1 large left, rest in two columns",
-    ]);
-    expect(getLayoutPresets(11).map((p) => p.label)).toEqual([
-      "Even grid",
-      "1 large left, rest in two columns",
     ]);
   });
 
@@ -191,9 +195,160 @@ describe("getLayoutPresets", () => {
       }));
 
       expect(
-        getLayoutPresets(count).map((p) => ({ label: p.label, slots: p.slots })),
+        getLayoutPresets(count)
+          .slice(0, expected.length)
+          .map((p) => ({ label: p.label, slots: p.slots })),
         `${count} sessions`,
       ).toEqual(expected);
+    }
+  });
+
+  it("seven sessions are offered more than ten distinct shapes", () => {
+    const seven = getLayoutPresets(7);
+
+    expect(seven.length).toBeGreaterThan(10);
+    expect(new Set(seven.map((p) => signature(p.slots))).size).toBe(seven.length);
+
+    // Both even grids: one column-major, one row-major, and they differ at 7.
+    const evenGrid = seven[0];
+    const evenGridRows = seven.find((p) => p.label === "Even grid, rows first")!;
+    expect(evenGrid.label).toBe("Even grid");
+    expect(evenGridRows).toBeDefined();
+    expect(signature(evenGridRows.slots)).not.toBe(signature(evenGrid.slots));
+
+    // Plain strips.
+    const isColumn = (p: (typeof seven)[number]) => p.slots.every((s) => s.h === GRID);
+    const isRow = (p: (typeof seven)[number]) => p.slots.every((s) => s.w === GRID);
+    expect(seven.some(isColumn)).toBe(true);
+    expect(seven.some(isRow)).toBe(true);
+
+    // A half-grid main in each of the four orientations.
+    const hasMain = (rect: { x: number; y: number; w: number; h: number }) =>
+      seven.some((p) => p.slots.some((s) => signature([s]) === signature([rect])));
+    expect(hasMain({ x: 0, y: 0, w: GRID / 2, h: GRID })).toBe(true);
+    expect(hasMain({ x: GRID / 2, y: 0, w: GRID / 2, h: GRID })).toBe(true);
+    expect(hasMain({ x: 0, y: 0, w: GRID, h: GRID / 2 })).toBe(true);
+    expect(hasMain({ x: 0, y: GRID / 2, w: GRID, h: GRID / 2 })).toBe(true);
+
+    // A master with the rest in ONE strip: six equal rows down the right half.
+    expect(
+      seven.some(
+        (p) =>
+          p.slots.filter((s) => s.x === GRID / 2 && s.w === GRID / 2 && s.h === GRID / 6)
+            .length === 6,
+      ),
+    ).toBe(true);
+
+    // Both uneven two-row splits.
+    expect(seven.map((p) => p.label)).toContain("4 top, 3 bottom");
+    expect(seven.map((p) => p.label)).toContain("3 top, 4 bottom");
+  });
+
+  it("every generated preset tiles the grid at counts 2 through 16", () => {
+    for (let count = 2; count <= 16; count++) {
+      const generated = getLayoutPresets(count).slice(curatedLength(count));
+      expect(generated.length, `${count} sessions offer no generated shape`).toBeGreaterThan(0);
+
+      for (const preset of generated) {
+        const layout = expandPreset(ids(count), preset);
+        expect(
+          isValidLayout(layout),
+          `${count} sessions, generated preset "${preset.label}"`,
+        ).toBe(true);
+        expect(layout, `${count} sessions, generated preset "${preset.label}"`).toHaveLength(
+          count,
+        );
+      }
+    }
+  });
+
+  it("no generated preset slot falls below MIN_SPAN", () => {
+    for (let count = 1; count <= 16; count++) {
+      for (const preset of getLayoutPresets(count).slice(curatedLength(count))) {
+        for (const slot of preset.slots) {
+          expect(
+            Math.min(slot.w, slot.h),
+            `${count} sessions, generated preset "${preset.label}"`,
+          ).toBeGreaterThanOrEqual(MIN_SPAN);
+        }
+      }
+    }
+  });
+
+  it("coinciding generators collapse to one entry", () => {
+    // At 4, both even grids AND both two-row splits all produce the same 2x2.
+    const four = getLayoutPresets(4);
+    expect(four.length).toBeGreaterThan(curatedLength(4));
+
+    const twoByTwo = signature([
+      { x: 0, y: 0, w: GRID / 2, h: GRID / 2 },
+      { x: GRID / 2, y: 0, w: GRID / 2, h: GRID / 2 },
+      { x: 0, y: GRID / 2, w: GRID / 2, h: GRID / 2 },
+      { x: GRID / 2, y: GRID / 2, w: GRID / 2, h: GRID / 2 },
+    ]);
+    expect(four.filter((p) => signature(p.slots) === twoByTwo)).toHaveLength(1);
+
+    for (let count = 1; count <= 16; count++) {
+      const presets = getLayoutPresets(count);
+      const shapes = presets.map((p) => signature(p.slots));
+      expect(new Set(shapes).size, `${count} sessions repeat a shape`).toBe(shapes.length);
+
+      // Labels are the menu's React keys, so they must be unique too.
+      const labels = presets.map((p) => p.label);
+      expect(new Set(labels).size, `${count} sessions repeat a label`).toBe(labels.length);
+    }
+  });
+
+  it("counts one to six keep their existing default as the first option", () => {
+    for (let count = 1; count <= 6; count++) {
+      const [first] = getLayoutPresets(count);
+      const expected = SHAPES_AT_12[count][0];
+
+      expect(first.label, `${count} sessions`).toBe(expected.label);
+      expect(signature(first.slots), `${count} sessions`).toBe(
+        signature(
+          expected.slots.map(([x, y, w, h]) => ({
+            x: x * SCALE,
+            y: y * SCALE,
+            w: w * SCALE,
+            h: h * SCALE,
+          })),
+        ),
+      );
+    }
+  });
+
+  it("the even grid leads the list from seven sessions up", () => {
+    for (let count = 7; count <= 16; count++) {
+      const [first] = getLayoutPresets(count);
+      expect(first.label, `${count} sessions`).toBe("Even grid");
+
+      // ...and it is genuinely the column-major sqrt grid, not just so labelled.
+      const cols = Math.ceil(Math.sqrt(count));
+      expect(new Set(first.slots.map((s) => s.x)).size, `${count} sessions`).toBe(cols);
+    }
+  });
+
+  it("a generator that cannot honour MIN_SPAN contributes nothing", () => {
+    const fullHeightStrips = (count: number) =>
+      getLayoutPresets(count).filter(
+        (p) => p.slots.length === count && p.slots.every((s) => s.h === GRID),
+      );
+
+    // 12 columns of 4 zones each is exactly MIN_SPAN, so it is still offered.
+    expect(fullHeightStrips(12)).toHaveLength(1);
+    // 13 would need 3-zone slivers, so the `columns` generator drops out entirely.
+    expect(fullHeightStrips(13)).toHaveLength(0);
+
+    // And the rest of the family at 13 is still usable, not merely absent.
+    const thirteen = getLayoutPresets(13);
+    expect(thirteen.length).toBeGreaterThan(0);
+    for (const preset of thirteen) {
+      for (const slot of preset.slots) {
+        expect(Math.min(slot.w, slot.h), `preset "${preset.label}"`).toBeGreaterThanOrEqual(
+          MIN_SPAN,
+        );
+      }
     }
   });
 });
