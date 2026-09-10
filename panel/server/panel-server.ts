@@ -28,6 +28,7 @@ import scriptsRouter from "./routes/scripts.js";
 import { mountTimeRoutes } from "./routes/time.js";
 import autoSyncRouter from "./routes/auto-sync.js";
 import systemRouter from "./routes/system.js";
+import speechRouter from "./routes/speech.js";
 import archiveRouter from "./routes/archive.js";
 import { machineHostname } from "./lib/hostname.js";
 import { startScheduler } from "./lib/autoSyncScheduler.js";
@@ -120,6 +121,7 @@ export async function startPanel(
   app.use("/api/auto-sync", autoSyncRouter);
   app.use("/api/archive", archiveRouter);
   app.use("/api/system", systemRouter);
+  app.use("/api/speech", speechRouter);
   app.use("/api", scriptsRouter);
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 
