@@ -49,12 +49,30 @@ function currentBranch(): string {
   return git(upstream, "rev-parse", "--abbrev-ref", "HEAD");
 }
 
-function runUpdate() {
+function runUpdate(extraEnv: Record<string, string> = {}) {
   const res = spawnSync("bash", [join(dest, "scripts", "update.sh"), upstream], {
     encoding: "utf8",
-    env: gitEnv(),
+    env: { ...gitEnv(), ...extraEnv },
   });
   return { status: res.status, output: `${res.stdout}${res.stderr}` };
+}
+
+/**
+ * Turn the destination into a real workspace repo: the commit step is a no-op
+ * without one, and it only runs at all when the build before it succeeds.
+ */
+function initDestRepo() {
+  writePanelFixture(SUCCEEDING_BUILD);
+  commitUpstream("panel build succeeds");
+  git(dest, "init", "--quiet");
+  git(dest, "checkout", "-q", "-b", "main");
+  writeFileSync(join(dest, ".gitignore"), "node_modules/\ndist/\n");
+  git(dest, "add", "-A");
+  git(dest, "commit", "-q", "-m", "workspace initial");
+}
+
+function destStatus(): string {
+  return git(dest, "status", "--porcelain");
 }
 
 // A build that fails on purpose. The sandbox has no node_modules, so the real
@@ -238,5 +256,109 @@ describe("scripts/update.sh panel build", () => {
     expect(output).not.toMatch(/build failed/i);
     // The bundle lands in the destination workspace, never copied from upstream.
     expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(true);
+  }, 60000);
+});
+
+describe("scripts/update.sh sync commit", () => {
+  it("commits the synced files so the workspace is left clean", () => {
+    initDestRepo();
+
+    const { status, output } = runUpdate();
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/committed sync of upstream/);
+    expect(destStatus()).toBe("");
+    expect(git(dest, "log", "-1", "--pretty=%s")).toMatch(/^chore\(sync\): pavilio upstream @ /);
+  }, 60000);
+
+  it("names the upstream revision and subject it synced", () => {
+    initDestRepo();
+    const sha = git(upstream, "rev-parse", "--short", "HEAD");
+
+    runUpdate();
+
+    expect(git(dest, "log", "-1", "--pretty=%s")).toContain(sha);
+    expect(git(dest, "log", "-1", "--pretty=%b")).toContain("panel build succeeds");
+  }, 60000);
+
+  it("leaves the user's own unrelated edits uncommitted", () => {
+    initDestRepo();
+    // A live notes workspace: the user's work in progress sits in the same tree
+    // as the mirrored files, and a sync commit must never swallow it.
+    writeFileSync(join(dest, "BRIEFING.md"), "my own draft\n");
+    writeFileSync(join(dest, "notes.md"), "staged by hand\n");
+    git(dest, "add", "notes.md");
+
+    runUpdate();
+
+    const status = destStatus();
+    expect(status).toMatch(/\?\? BRIEFING\.md/);
+    expect(status).toMatch(/^A {2}notes\.md$/m);
+    // Anchored to a sync commit having actually happened, so the exclusions below
+    // cannot pass merely because nothing was committed at all.
+    expect(git(dest, "log", "-1", "--pretty=%s")).toMatch(/^chore\(sync\)/);
+    const committed = git(dest, "show", "--name-only", "--pretty=", "HEAD");
+    expect(committed).not.toMatch(/BRIEFING\.md/);
+    expect(committed).not.toMatch(/notes\.md/);
+  }, 60000);
+
+  it("commits files that upstream retired, not just changed ones", () => {
+    initDestRepo();
+    runUpdate();
+    // panel/ is mirrored with --delete, so a retired module must land in the
+    // commit as a deletion or it lingers downstream as tracked dead code.
+    rmSync(join(upstream, "panel", "src", "app.ts"));
+    commitUpstream("retire app.ts");
+
+    runUpdate();
+
+    expect(destStatus()).toBe("");
+    expect(git(dest, "show", "--name-status", "--pretty=", "HEAD")).toMatch(
+      /^D\s+panel\/src\/app\.ts$/m,
+    );
+  }, 60000);
+
+  it("says there is nothing to commit when the workspace is already in sync", () => {
+    initDestRepo();
+    runUpdate();
+    const head = git(dest, "rev-parse", "HEAD");
+
+    const { status, output } = runUpdate();
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/nothing to commit/);
+    expect(git(dest, "rev-parse", "HEAD")).toBe(head);
+  }, 60000);
+
+  it("skips committing when PAVILIO_PULL_COMMIT=0, leaving the sync in the tree", () => {
+    initDestRepo();
+
+    const { status, output } = runUpdate({ PAVILIO_PULL_COMMIT: "0" });
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/PAVILIO_PULL_COMMIT=0/);
+    expect(destStatus()).toMatch(/panel\//);
+  }, 60000);
+
+  it("refuses to commit into a workspace with a merge in progress", () => {
+    initDestRepo();
+    writeFileSync(join(dest, ".git", "MERGE_HEAD"), `${git(dest, "rev-parse", "HEAD")}\n`);
+
+    const { status, output } = runUpdate();
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/merge or rebase in progress/);
+    expect(output).toMatch(/^Done\./m);
+  }, 60000);
+
+  it("still finishes the pull when the workspace is not a git repo at all", () => {
+    writePanelFixture(SUCCEEDING_BUILD);
+    commitUpstream("panel build succeeds");
+
+    const { status, output } = runUpdate();
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/not a git repo/);
+    expect(output).toMatch(/^Done\./m);
   }, 60000);
 });
