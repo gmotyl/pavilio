@@ -46,9 +46,14 @@ export interface PlacementOverlayHandle {
   /**
    * Track the pointer and paint the layout the drop would commit.
    *
-   * - `grow` (no modifier) stretches an area from the dragged window to the pointer;
-   * - `swap` (Ctrl) exchanges it with the window under the pointer, as the grid always did;
-   * - `target` (Shift) offers that window's halves as well as the whole of it.
+   * - `target` (no modifier) offers the window under the pointer: its halves as well
+   *   as the whole of it;
+   * - `grow` (Shift) stretches an area from the dragged window to the pointer;
+   * - `swap` (Ctrl) exchanges it with the window under the pointer, as the grid always did.
+   *
+   * Which modifier selects which mode is the grid's business, not the overlay's: it
+   * always passes the mode explicitly, and the `grow` default only serves a caller
+   * that drives the overlay directly.
    */
   over: (clientX: number, clientY: number, mode?: PlacementMode) => void;
   /** Disarm and return the layout that was painted, if any. */
@@ -252,8 +257,9 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
           paint(null);
           return;
         }
-        // Ctrl is the plain exchange the grid has always had — the whole window under the
-        // pointer, with no edge bands to aim past. Shift additionally offers its halves.
+        // Ctrl is the plain exchange the grid has always had — the whole window under
+        // the pointer, with no edge bands to aim past. The unmodified drag additionally
+        // offers its halves.
         const aim: PlacementTarget =
           mode === "swap"
             ? { side: "centre", region: { ...hovered }, hit: { ...hovered } }
@@ -377,9 +383,10 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
         >
           {(
             [
-              ["grow", "Drag", "resize"],
+              // The unmodified gesture reads first, then the two modifiers.
+              ["target", "Drag", "split"],
+              ["grow", "Shift", "resize"],
               ["swap", "Ctrl", "swap"],
-              ["target", "Shift", "split"],
             ] as [PlacementMode, string, string][]
           ).map(([key, keyLabel, what]) => {
             const active = mode === key;

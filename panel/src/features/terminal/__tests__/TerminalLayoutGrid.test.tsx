@@ -265,10 +265,21 @@ describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () 
 
 // jsdom has no DragEvent constructor, so Testing Library's drag helpers drop
 // clientX/clientY. Dispatch a MouseEvent of the same type instead.
-function dragOverAt(el: HTMLElement, clientX: number, clientY: number) {
+function dragOverAt(
+  el: HTMLElement,
+  clientX: number,
+  clientY: number,
+  modifiers: { shiftKey?: boolean; ctrlKey?: boolean } = {},
+) {
   fireEvent(
     el,
-    new MouseEvent("dragover", { bubbles: true, cancelable: true, clientX, clientY }),
+    new MouseEvent("dragover", {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      ...modifiers,
+    }),
   );
 }
 
@@ -430,12 +441,12 @@ describe("TerminalLayoutGrid — placement drag", () => {
   it("commits the painted layout on drop", () => {
     const { wrapper, onPlace } = startDrag();
 
-    dragOverAt(wrapper, 395, 155);
+    dragOverAt(wrapper, 395, 155, { shiftKey: true });
     fireEvent(wrapper, new MouseEvent("drop", { bubbles: true, cancelable: true }));
 
     expect(onPlace).toHaveBeenCalledTimes(1);
     const committed = onPlace.mock.calls[0][0] as TileLayout;
-    // The default gesture grows the dragged window towards the pointer.
+    // The Shift gesture grows the dragged window towards the pointer.
     expect(committed.find((t) => t.sessionId === "a")).toMatchObject({
       x: 0,
       y: 0,
@@ -481,7 +492,7 @@ describe("TerminalLayoutGrid — placement drag", () => {
   it("paints the area the pointer is stretching to", () => {
     const { wrapper } = startDrag();
 
-    dragOverAt(wrapper, 395, 155);
+    dragOverAt(wrapper, 395, 155, { shiftKey: true });
 
     expect(screen.getByTestId("placement-region").getAttribute("data-region")).toBe(
       "0,0,40,48",
@@ -489,6 +500,99 @@ describe("TerminalLayoutGrid — placement drag", () => {
     expect(
       screen.getByTestId("placement-preview-a").getAttribute("data-region"),
     ).toBe("0,0,40,48");
+  });
+});
+
+describe("TerminalLayoutGrid — which gesture the modifiers select", () => {
+  const sessions = [
+    makeSession({ id: "a", name: "a" }),
+    makeSession({ id: "b", name: "b" }),
+    makeSession({ id: "c", name: "c" }),
+  ];
+  // a on the left, b over c on the right. 480x480 over 48 zones: one zone is 10px.
+  const tiles: TileLayout = [
+    { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+    { sessionId: "b", x: 24, y: 0, w: 24, h: 24 },
+    { sessionId: "c", x: 24, y: 24, w: 24, h: 24 },
+  ];
+
+  // Zone 39,0 — inside b's top edge band, so the three gestures are told apart by
+  // what they paint there: target aims at b's top half, grow stretches a to the
+  // pointer, swap takes the whole of b.
+  const AT_B_TOP: [number, number] = [395, 5];
+
+  function startDrag() {
+    renderGrid({ sessions, tiles, onPlace: vi.fn() });
+    fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
+    const overlay = screen.getByTestId("terminal-placement-overlay");
+    vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 480,
+      height: 480,
+      right: 480,
+      bottom: 480,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    return screen.getByTestId("terminal-grid").parentElement as HTMLElement;
+  }
+
+  const previewOf = (id: string) =>
+    screen.getByTestId(`placement-preview-${id}`).getAttribute("data-region");
+
+  it("a plain drag drives the overlay in target mode", () => {
+    const wrapper = startDrag();
+
+    dragOverAt(wrapper, ...AT_B_TOP);
+
+    // b's centre and its four edge bands are on offer and the top one is aimed at —
+    // the gesture that used to need Shift. Swap would offer the centre alone.
+    for (const side of ["centre", "left", "right", "top", "bottom"]) {
+      expect(screen.getByTestId(`placement-target-${side}`)).toBeTruthy();
+    }
+    expect(screen.getByTestId("placement-target-top").getAttribute("data-active")).toBe(
+      "true",
+    );
+    // Something is painted, and it is not an area anchored on the dragged window.
+    expect(previewOf("a")).toBeTruthy();
+    expect(screen.queryByTestId("placement-region")).toBeNull();
+  });
+
+  it("Shift drives the overlay in grow mode", () => {
+    const wrapper = startDrag();
+
+    dragOverAt(wrapper, ...AT_B_TOP, { shiftKey: true });
+
+    expect(screen.getByTestId("placement-region").getAttribute("data-region")).toBe(
+      "0,0,40,48",
+    );
+    expect(previewOf("a")).toBe("0,0,40,48");
+    // The painted area is not a target on the hovered window.
+    expect(screen.queryByTestId("placement-target-top")).toBeNull();
+  });
+
+  it("Ctrl still drives the overlay in swap mode", () => {
+    const wrapper = startDrag();
+
+    dragOverAt(wrapper, ...AT_B_TOP, { ctrlKey: true });
+
+    expect(previewOf("a")).toBe("24,0,24,24");
+    expect(previewOf("b")).toBe("0,0,24,48");
+    // The whole window, with no edge bands to aim past and nothing painted.
+    expect(screen.queryByTestId("placement-target-top")).toBeNull();
+    expect(screen.queryByTestId("placement-region")).toBeNull();
+  });
+
+  it("Ctrl takes precedence over Shift", () => {
+    const wrapper = startDrag();
+
+    dragOverAt(wrapper, ...AT_B_TOP, { ctrlKey: true, shiftKey: true });
+
+    expect(previewOf("a")).toBe("24,0,24,24");
+    expect(previewOf("b")).toBe("0,0,24,48");
+    expect(screen.queryByTestId("placement-region")).toBeNull();
   });
 });
 

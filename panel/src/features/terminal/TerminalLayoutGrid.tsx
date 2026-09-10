@@ -164,12 +164,14 @@ export function TerminalLayoutGrid({
           if (!overlayRef.current?.isDragging()) return;
           e.preventDefault();
           if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-          // Plain drag paints an area anchored on the dragged window; Ctrl is the plain
-          // exchange the grid has always had; Shift adds that window's halves as targets.
+          // Plain drag offers the window under the pointer — its centre and its four
+          // edge bands — because that is the gesture reached for most often; Shift
+          // paints an area anchored on the dragged window; Ctrl is the plain exchange
+          // the grid has always had, and still wins when both modifiers are down.
           overlayRef.current?.over(
             e.clientX,
             e.clientY,
-            e.ctrlKey ? "swap" : e.shiftKey ? "target" : "grow",
+            e.ctrlKey ? "swap" : e.shiftKey ? "grow" : "target",
           );
         }}
         onDrop={(e) => {

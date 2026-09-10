@@ -194,6 +194,26 @@ describe("TerminalPlacementOverlay", () => {
     ).toBe("true");
   });
 
+  it("the legend lists the unmodified gesture first", () => {
+    const { handle } = renderOverlay("a");
+
+    act(() => handle.current!.over(395, 155));
+    const legend = screen.getByTestId("placement-legend");
+
+    // Reading order follows how often the gesture is reached for: the unmodified
+    // target drag, then Shift to grow, then Ctrl to swap.
+    expect(
+      Array.from(legend.children).map((row) => row.getAttribute("data-testid")),
+    ).toEqual([
+      "placement-legend-target",
+      "placement-legend-grow",
+      "placement-legend-swap",
+    ]);
+    expect(
+      Array.from(legend.querySelectorAll("kbd")).map((k) => k.textContent),
+    ).toEqual(["Drag", "Shift", "Ctrl"]);
+  });
+
   it("hides the legend once the gesture ends", () => {
     const { handle } = renderOverlay("a");
     act(() => handle.current!.over(395, 155));
