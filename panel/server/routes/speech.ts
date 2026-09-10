@@ -25,17 +25,18 @@ interface Utterance {
  * Size cap for one utterance POST — a response long enough to exceed 100 KB of
  * markdown is not something anyone wants read aloud.
  *
- * This route does NOT enforce the cap itself, and must not pretend to: the
- * panel mounts a global `express.json()` (panel-server.ts) that has already
- * read the body to completion before this router is reached, and body-parser
- * skips a second parser whose request stream is already finished. A router-level
- * `express.json({ limit })` here is therefore inert — the *default* 100 kb limit
- * of the global parser is what actually rejects an oversized POST.
+ * This constant is the cap's single source: panel-server.ts feeds it to an
+ * `express.json({ limit: MAX_UTTERANCE_BYTES })` mounted on `/api/speech`
+ * *before* the global `express.json()`, because body-parser skips a request
+ * whose stream it finds already finished — so the first parser to read the body
+ * is the one whose limit applies. Changing the number here changes what the
+ * route accepts, in both directions; no other route's limit moves with it.
  *
- * So this constant is documentation of the enforced limit, not its source: it
- * must stay equal to express's default `json()` limit (100 kb). The boundary
- * test in `__tests__/speech.test.ts` mounts the production middleware order and
- * fails if the two ever diverge in either direction.
+ * The cap cannot be enforced from inside this router: by the time a
+ * router-level middleware runs, some app-level parser has already read the
+ * body, which is why the parser lives at the mount point instead of here. The
+ * boundary test in `__tests__/speech.test.ts` mirrors that mount order and
+ * probes one byte either side of the constant.
  */
 export const MAX_UTTERANCE_BYTES = 100 * 1024;
 
@@ -68,12 +69,11 @@ speechRouter.get("/latest", (_req, res) => {
   res.json({ utterances: [...latestBySession.values()] });
 });
 
-// An over-limit body is rejected by the global parser, i.e. before this router
-// runs at all, so a router-level error handler for `entity.too.large` can never
-// be reached and is deliberately absent. The status is right (413), but the body
-// is express's default HTML error page — which in a non-production NODE_ENV
-// includes a stack trace with absolute node_modules paths. Giving the panel one
-// app-level JSON error handler is the fix; it belongs in panel-server.ts, not
-// here, because it is every route's problem and not this route's.
+// An over-limit body throws inside the app-level parser mounted at
+// `/api/speech`, i.e. before this router runs at all, so a router-level error
+// handler for `entity.too.large` can never be reached and is deliberately
+// absent. The 413 and its JSON body come from the error handler sitting next to
+// that parser in panel-server.ts, which is the only place the throw passes
+// through.
 
 export default speechRouter;

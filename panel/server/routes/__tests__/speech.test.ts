@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import express, { type Express } from "express";
+import express, {
+  type Express,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,19 +30,34 @@ interface Frame {
  * what a restarted server process starts from — which is how the
  * "nothing survives a restart" requirement is asserted below.
  *
- * The middleware order mirrors production exactly: a global `express.json()`
- * (panel-server.ts:98) and then the router mounted under `/api/speech`
- * (panel-server.ts:124). It has to, because that global parser reads the body
- * to completion first and is therefore what enforces the size cap — mounting
- * the router on a bare app would exercise a limit no real request ever meets.
+ * The middleware order mirrors production (panel-server.ts): the speech-scoped
+ * `express.json({ limit: MAX_UTTERANCE_BYTES })` and its 413 handler first,
+ * then the global default-limit `express.json()`, then the router. The order
+ * matters — body-parser skips a request whose stream is already finished, so
+ * whichever parser is mounted first is the one whose limit applies. That the
+ * production file really is shaped this way is a separate assertion below;
+ * this function is only a copy of it.
  */
 async function loadApp(): Promise<{ app: Express; cap: number }> {
   vi.resetModules();
   const mod = await import("../speech");
+  const cap = mod.MAX_UTTERANCE_BYTES;
   const app = express();
+  app.use("/api/speech", express.json({ limit: cap }));
+  app.use("/api/speech", (err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if ((err as { type?: string } | null)?.type === "entity.too.large") {
+      res.status(413).json({ error: "utterance too large", limit: cap });
+      return;
+    }
+    next(err);
+  });
   app.use(express.json());
   app.use("/api/speech", mod.default);
-  return { app, cap: mod.MAX_UTTERANCE_BYTES };
+  // A control route, mounted the way the panel's other twelve routers are:
+  // after the global parser and outside the speech path. It is here so the
+  // speech-scoped parser can be shown not to have moved anyone else's limit.
+  app.post("/api/control/echo", (_req, res) => void res.status(204).end());
+  return { app, cap };
 }
 
 const frames = () => broadcast.mock.calls.map((c) => c[0] as Frame);
@@ -60,11 +80,61 @@ function bodyOfExactly(bytes: number): string {
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-const postRaw = (app: Express, body: string) =>
-  request(app)
-    .post("/api/speech/utterance")
-    .set("Content-Type", "application/json")
-    .send(body);
+const readServerSource = () => readFileSync(resolve(here, "../../panel-server.ts"), "utf8");
+
+/** One `app.use(...)` that mounts a body parser, with where it sits in the file. */
+interface ParserMount {
+  /** The path it is scoped to, or null when it is mounted app-wide. */
+  path: string | null;
+  /** The literal text of the parser's options argument (`""` when it takes none). */
+  options: string;
+  /** Offset of the `app.use` in the source, for ordering comparisons. */
+  at: number;
+}
+
+/**
+ * Every body parser panel-server.ts mounts, in source order.
+ *
+ * Whitespace-tolerant, like `bind.test.ts`, and it resolves a parser that was
+ * extracted to a variable first (`const jsonBody = express.json();
+ * app.use(jsonBody);`) the way `entry-points.contract.test.ts` resolves import
+ * aliases — a behaviour-preserving refactor should not read as a regression.
+ *
+ * Source order is only mount order because panel-server.ts mounts every parser
+ * from one straight-line function body; a parser mounted inside a conditional,
+ * a loop, or a helper would fool this.
+ */
+function parserMounts(source: string): ParserMount[] {
+  const PARSER = String.raw`(?:express|bodyParser)\s*\.\s*(?:json|urlencoded|raw|text)\s*\(([^)]*)\)`;
+  const named = new Map<string, string>();
+  for (const m of source.matchAll(
+    new RegExp(String.raw`(?:const|let|var)\s+(\w+)\s*=\s*${PARSER}`, "g"),
+  )) {
+    named.set(m[1], m[2]);
+  }
+
+  const mounts: ParserMount[] = [];
+  const use = new RegExp(
+    String.raw`app\s*\.\s*use\s*\(\s*(?:(["'][^"']*["'])\s*,\s*)?(?:${PARSER}|(\w+))`,
+    "g",
+  );
+  for (const m of source.matchAll(use)) {
+    const [, quotedPath, inlineOptions, ident] = m;
+    const options = inlineOptions ?? (ident === undefined ? undefined : named.get(ident));
+    if (options === undefined) continue; // an app.use of something that is not a parser
+    mounts.push({
+      path: quotedPath ? quotedPath.slice(1, -1) : null,
+      options,
+      at: m.index ?? -1,
+    });
+  }
+  return mounts;
+}
+
+const postRawTo = (app: Express, path: string, body: string) =>
+  request(app).post(path).set("Content-Type", "application/json").send(body);
+
+const postRaw = (app: Express, body: string) => postRawTo(app, "/api/speech/utterance", body);
 
 describe("POST /api/speech/utterance", () => {
   beforeEach(() => broadcast.mockClear());
@@ -156,11 +226,20 @@ describe("POST /api/speech/utterance", () => {
 
     // And nothing on the way in writes to disk. A `writeFileSync` added to the
     // POST handler would sail through every behavioural test above — the store
-    // would simply never be read back — so the absence of persistence is pinned
-    // statically: the route may not so much as import `fs`.
+    // would simply never be read back — so a tripwire catches the obvious
+    // accident: the route reaching for `fs`. It covers the submodule
+    // (`fs/promises`, the idiomatic modern write), the `node:` prefix, `require`,
+    // and the dynamic `await import("fs")` form.
+    //
+    // A tripwire, not a guarantee: it says nothing about `child_process`, a
+    // write smuggled through some other module that imports `fs` itself, or a
+    // process-level escape hatch. It buys the cheap 90%, and the "restores
+    // nothing after a restart" assertion above is what actually holds the
+    // requirement.
     const source = readFileSync(resolve(here, "../speech.ts"), "utf8");
-    expect(source).not.toMatch(/from\s+["'](?:node:)?fs["']/);
-    expect(source).not.toMatch(/require\(\s*["'](?:node:)?fs["']/);
+    expect(source).not.toMatch(
+      /(?:from|import|require)\s*\(?\s*["'](?:node:)?fs(?:\/[\w./-]+)?["']/,
+    );
   });
 
   it("rejects a missing sessionId, blank sessionId, missing text, or blank text without broadcasting", async () => {
@@ -193,21 +272,24 @@ describe("POST /api/speech/utterance", () => {
       .send({ sessionId: "cell-1", text: "x".repeat(101 * 1024) });
 
     // 413, not 400 — the body never finished parsing, so this is not a
-    // validation failure the hook could fix by rewording.
+    // validation failure the hook could fix by rewording. And JSON, not
+    // express's default HTML error page, which in a non-production NODE_ENV
+    // carries a stack trace with absolute node_modules paths.
     expect(res.status).toBe(413);
+    expect(res.body).toMatchObject({ error: expect.any(String) });
     expect(broadcast).not.toHaveBeenCalled();
     const latest = await request(app).get("/api/speech/latest");
     expect(latest.body.utterances).toEqual([]);
   });
 
-  it("enforces the limit MAX_UTTERANCE_BYTES claims, to the byte", async () => {
+  it("enforces the limit MAX_UTTERANCE_BYTES sets, to the byte", async () => {
     const { app, cap } = await loadApp();
 
-    // The constant does not configure the parser — express's default 100 kb
-    // does — so it can silently drift from the limit it documents. Probing both
-    // sides of it pins the two together: raise the constant and the at-the-cap
-    // body starts getting 413, lower it and the one-byte-over body starts
-    // getting 204.
+    // The constant configures the parser, so this probes that it really governs
+    // rather than describing something else: raise the constant and the
+    // one-byte-over body starts getting 204, lower it and the at-the-cap body
+    // starts getting 413. Sizing both bodies from the constant is the point
+    // here — the fixed-literal check lives in the test above.
     const atCap = await postRaw(app, bodyOfExactly(cap));
     expect(atCap.status).toBe(204);
     expect(broadcast).toHaveBeenCalledTimes(1);
@@ -215,15 +297,55 @@ describe("POST /api/speech/utterance", () => {
     const overCap = await postRaw(app, bodyOfExactly(cap + 1));
     expect(overCap.status).toBe(413);
     expect(broadcast).toHaveBeenCalledTimes(1);
+  });
 
-    // The probes above only mean anything if `loadApp` is still a faithful copy
-    // of production, so production is pinned too: the global parser must take
-    // express's default limit (no `limit` option at all) and must still run
-    // before the speech router is mounted.
-    const serverSource = readFileSync(resolve(here, "../../panel-server.ts"), "utf8");
-    const globalParserAt = serverSource.indexOf("app.use(express.json());");
-    const speechRouterAt = serverSource.indexOf('app.use("/api/speech", speechRouter);');
-    expect(globalParserAt).toBeGreaterThan(-1);
-    expect(speechRouterAt).toBeGreaterThan(globalParserAt);
+  it("leaves every other route on express's default limit", async () => {
+    const { app } = await loadApp();
+
+    // Fixed literals, not the constant: the whole point is that moving
+    // MAX_UTTERANCE_BYTES must not drag this boundary with it. 100 kb is
+    // express's own `json()` default, which the global parser still takes.
+    const atDefault = await postRawTo(app, "/api/control/echo", bodyOfExactly(100 * 1024));
+    expect(atDefault.status).toBe(204);
+
+    const overDefault = await postRawTo(app, "/api/control/echo", bodyOfExactly(100 * 1024 + 1));
+    expect(overDefault.status).toBe(413);
+  });
+
+  it("mounts the cap in production where it can actually bite", () => {
+    // Everything above runs against `loadApp`, which is a hand-written copy of
+    // the production middleware order — so the copy is worth nothing unless
+    // panel-server.ts is still shaped the same way. This is that check.
+    const serverSource = readServerSource();
+    const mounts = parserMounts(serverSource);
+    expect(mounts.length).toBeGreaterThan(1);
+
+    // Exclusivity, not mere presence: the FIRST parser mounted is the one that
+    // reads the body, so it is the one whose limit applies. A parser sneaked in
+    // ahead of this line — global or path-scoped, wider or narrower — would
+    // quietly take the cap over, so "there is a parser somewhere before the
+    // router" is not a strong enough claim to make.
+    const [first, ...rest] = mounts;
+    expect(first.path).toBe("/api/speech");
+    expect(first.options).toMatch(/limit\s*:\s*MAX_UTTERANCE_BYTES/);
+
+    // The rest of the panel: exactly one app-wide parser, taking no `limit` of
+    // its own, so every other route keeps express's default.
+    const appWide = rest.filter((m) => m.path === null);
+    expect(appWide).toHaveLength(1);
+    expect(appWide[0].options.trim()).toBe("");
+    expect(rest.filter((m) => m.path === "/api/speech")).toEqual([]);
+
+    // The 413 body is JSON because an error handler sits between the speech
+    // parser and everything downstream; without it express answers with its
+    // default HTML page.
+    const tooLargeAt = serverSource.search(/entity\.too\.large/);
+    expect(tooLargeAt).toBeGreaterThan(first.at);
+
+    // And the router itself still mounts after its parser.
+    const routerAt = serverSource.search(
+      /app\s*\.\s*use\s*\(\s*["']\/api\/speech["']\s*,\s*speechRouter\s*\)/,
+    );
+    expect(routerAt).toBeGreaterThan(first.at);
   });
 });

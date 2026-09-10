@@ -1,4 +1,9 @@
-import express, { type Express } from "express";
+import express, {
+  type Express,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
 import { resolve } from "path";
 import { createServer as createHttpServer, type Server as HttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
@@ -28,7 +33,7 @@ import scriptsRouter from "./routes/scripts.js";
 import { mountTimeRoutes } from "./routes/time.js";
 import autoSyncRouter from "./routes/auto-sync.js";
 import systemRouter from "./routes/system.js";
-import speechRouter from "./routes/speech.js";
+import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
 import archiveRouter from "./routes/archive.js";
 import { machineHostname } from "./lib/hostname.js";
 import { startScheduler } from "./lib/autoSyncScheduler.js";
@@ -94,6 +99,27 @@ export async function startPanel(
   } else {
     server = createHttpServer(app);
   }
+
+  // The speech route owns its own body cap, so its parser has to run before the
+  // global one: body-parser skips a request whose stream it finds already
+  // finished, so whichever parser reads the body first is the one whose `limit`
+  // governs. Scoped to the speech path, so every other route is still parsed by
+  // the global `express.json()` below at its default limit. This changes no
+  // security boundary — `express.json()` already ran here, ahead of
+  // `authMiddleware`, before this line existed.
+  app.use("/api/speech", express.json({ limit: MAX_UTTERANCE_BYTES }));
+  // Reachable only from the parser directly above: an error thrown by a later
+  // layer (the speech router itself) resumes past this one and never sees it.
+  // That is exactly the scope wanted — it turns the over-limit throw into JSON
+  // instead of express's default HTML error page, without becoming the panel's
+  // de facto global error handler.
+  app.use("/api/speech", (err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if ((err as { type?: string } | null)?.type === "entity.too.large") {
+      res.status(413).json({ error: "utterance too large", limit: MAX_UTTERANCE_BYTES });
+      return;
+    }
+    next(err);
+  });
 
   app.use(express.json());
   app.use(mobileAuthMiddleware);
