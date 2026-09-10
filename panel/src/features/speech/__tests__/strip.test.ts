@@ -45,6 +45,40 @@ describe("stripToSpeakableText", () => {
     expect(spoken).toBe("Here is the cell state.\n\nOnly one cell is ever armed.");
   });
 
+  // The two tests above surround their block with blank lines, so the boundary
+  // the removal leaves behind is indistinguishable from the blank lines that
+  // were already there. These two remove that cover: with the block welded
+  // directly onto the prose, the inserted boundary is the ONLY thing keeping the
+  // paragraphs apart, which is what the unit builder's "unit 0 is the first
+  // heading" reading depends on.
+  it("leaves a paragraph boundary where a fence had no blank lines around it", () => {
+    const markdown = ["## Heading", "```ts", "const x = 1;", "```", "Body text."].join("\n");
+
+    const spoken = stripToSpeakableText(markdown);
+
+    expect(spoken).toBe("## Heading\n\nBody text.");
+    // Without the inserted boundary this is one welded paragraph, not two.
+    expect(spoken.split(/\n{2,}/)).toEqual(["## Heading", "Body text."]);
+  });
+
+  it("leaves a paragraph boundary where a table had no blank lines around it", () => {
+    const markdown = [
+      "Here is the cell state.",
+      "| cell | state |",
+      "| --- | ----- |",
+      "| one  | armed |",
+      "Only one cell is ever armed.",
+    ].join("\n");
+
+    const spoken = stripToSpeakableText(markdown);
+
+    expect(spoken).toBe("Here is the cell state.\n\nOnly one cell is ever armed.");
+    expect(spoken.split(/\n{2,}/)).toEqual([
+      "Here is the cell state.",
+      "Only one cell is ever armed.",
+    ]);
+  });
+
   it("keeps short inline code", () => {
     expect(stripToSpeakableText("Call `prepare` before speaking.")).toBe(
       "Call prepare before speaking.",
