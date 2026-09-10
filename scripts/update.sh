@@ -186,8 +186,87 @@ fi
 echo "  ✓ panel bundle built"
 
 echo ""
+echo "Committing the synced files..."
+# Every path this script writes is tracked downstream, so a run that stops at the
+# build leaves the workspace dirty after every single pull — dozens of
+# machine-generated modifications the user has to read past in `git status` and
+# hand-commit with a message they have to invent each time.
+#
+# Scoped pathspecs, never `git add -A`: the destination is a live notes workspace
+# whose working tree normally carries the user's own unrelated edits (briefings,
+# time logs, half-written notes). `git add -A -- <paths>` stages upstream
+# deletions too (panel/ is mirrored with --delete, so retired files must be
+# committed as deletions), while `git commit -- <paths>` commits only those paths
+# and leaves anything staged elsewhere staged and uncommitted.
+#
+# Deliberately last and deliberately non-fatal: the sync and the bundle are the
+# run's actual product and have both already succeeded by the time we get here. A
+# workspace that cannot be committed — not a repo, mid-merge, a hook that refuses
+# — is worth a warning, not discarding a good pull. Set PAVILIO_PULL_COMMIT=0 to
+# skip this step and inspect the sync by hand instead.
+COMMIT_PATHS=(panel skills scripts commands .claude/commands .opencode/commands opencode.json)
+
+if [ "${PAVILIO_PULL_COMMIT:-1}" = "0" ]; then
+  echo "  ⏭️  skipped (PAVILIO_PULL_COMMIT=0) — synced files left uncommitted."
+elif ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  # A workspace does not have to be version-controlled to be a valid destination.
+  echo "  ⏭️  workspace is not a git repo — nothing to commit."
+else
+  DEST_GIT_DIR="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)"
+  # Committing into a half-finished merge or rebase would fold the sync into
+  # whatever the user is resolving. Their operation owns HEAD until they finish it.
+  if [ -d "$DEST_GIT_DIR/rebase-merge" ] || [ -d "$DEST_GIT_DIR/rebase-apply" ] ||
+    [ -f "$DEST_GIT_DIR/MERGE_HEAD" ]; then
+    echo "  ⚠️  workspace has a merge or rebase in progress — synced files left uncommitted."
+    echo "      Finish it, then commit them yourself."
+  else
+    # commands/ is optional upstream, and the agent command dirs only exist once
+    # the matching agent has been set up. Staging a path that is not there aborts
+    # the add, taking the real paths with it.
+    PRESENT_PATHS=()
+    for COMMIT_PATH in "${COMMIT_PATHS[@]}"; do
+      if [ -e "$REPO_ROOT/$COMMIT_PATH" ]; then
+        PRESENT_PATHS+=("$COMMIT_PATH")
+      fi
+    done
+    # An empty pathspec list is the one input that turns this block into its own
+    # opposite: `git add -A --` with nothing after it means "everything", so it
+    # would stage exactly the unrelated work the scoping exists to protect, and do
+    # it silently. Unreachable as the script stands — scripts/ holds the running
+    # script, so it is always present — but guarded rather than argued about,
+    # because nothing would report the day a refactor makes it reachable.
+    if [ ${#PRESENT_PATHS[@]} -eq 0 ]; then
+      echo "  ⏭️  none of the synced paths exist here — nothing to commit."
+    else
+      git -C "$REPO_ROOT" add -A -- "${PRESENT_PATHS[@]}"
+      if git -C "$REPO_ROOT" diff --cached --quiet -- "${PRESENT_PATHS[@]}"; then
+        echo "  ✓ already up to date — nothing to commit"
+      else
+        # Name the upstream commit actually synced, so the downstream history says
+        # which pavilio revision the workspace is mirroring rather than just "sync".
+        UPSTREAM_SHA="$(git -C "$UPSTREAM_DIR" rev-parse --short HEAD)"
+        UPSTREAM_SUBJECT="$(git -C "$UPSTREAM_DIR" log -1 --pretty=%s)"
+        # --shortstat already begins with a space, so no separator is added here.
+        SYNC_SUMMARY="$(git -C "$REPO_ROOT" diff --cached --shortstat -- "${PRESENT_PATHS[@]}")"
+        if git -C "$REPO_ROOT" commit --quiet \
+          -m "chore(sync): pavilio upstream @ $UPSTREAM_SHA" \
+          -m "$UPSTREAM_SUBJECT" \
+          -m "Synced by scripts/update.sh." \
+          -- "${PRESENT_PATHS[@]}"; then
+          echo "  ✓ committed sync of upstream $UPSTREAM_SHA —${SYNC_SUMMARY}"
+        else
+          # Most likely a pre-commit hook. The staged files are still there for the
+          # user to deal with, so say so rather than leaving them guessing.
+          echo "  ⚠️  commit failed — the synced files are staged, commit them yourself."
+        fi
+      fi
+    fi
+  fi
+fi
+
+echo ""
 echo "Done. panel/, skills/, scripts/ (and commands/ if present) synced from upstream;"
-echo "agent commands regenerated for configured agents."
+echo "agent commands regenerated for configured agents, and the sync committed."
 echo ""
 echo "The panel bundle is built and ready to start: pnpm start"
 echo ""
