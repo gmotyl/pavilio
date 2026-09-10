@@ -43,7 +43,7 @@ function serveLatest(utterances: Utterance[]) {
 
 /** Renders the hook and lets the mount fetch settle, so no assertion races hydration. */
 async function renderChannel() {
-  const rendered = renderHook(() => useUtteranceChannel(speaking));
+  const rendered = renderHook(() => useUtteranceChannel({ speakingSessionId: speaking }));
   await act(async () => {
     await Promise.resolve();
   });
@@ -128,10 +128,11 @@ describe("useUtteranceChannel", () => {
   it("reports empty for a session that never received one", async () => {
     serveLatest([utterance("cell-a", "a1")]);
 
-    const { result, rerender } = renderHook(() => useUtteranceChannel());
-    await act(async () => {
-      await Promise.resolve();
-    });
+    // `speakingSessionId: null` — nothing is speaking — is the caller's way of
+    // saying so, and it is the only way to say it: the field is required, so a
+    // call site cannot omit it and quietly lose the `speaking` state.
+    speaking = null;
+    const { result, rerender } = await renderChannel();
     lastMessage = frame(utterance("cell-b", "b1"));
     await act(async () => {
       rerender();
@@ -267,6 +268,17 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
     expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    // Same id, different `at` and text: the guard must key on the id. `at` is
+    // `Date.now()`, so an `at`-keyed guard would both miss this replay and
+    // wrongly conflate two genuinely different utterances that land in the
+    // same millisecond.
+    lastMessage = frame({ ...spoken, at: spoken.at + 5_000, text: "replayed body" });
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+    expect(result.current.utteranceFor("cell-a")).toEqual(spoken);
   });
 
   it("does not let a slow hydration response overwrite a live frame", async () => {
@@ -279,7 +291,7 @@ describe("useUtteranceChannel", () => {
         }),
     ) as unknown as typeof fetch;
 
-    const { result, rerender } = renderHook(() => useUtteranceChannel(speaking));
+    const { result, rerender } = renderHook(() => useUtteranceChannel({ speakingSessionId: speaking }));
 
     const live = utterance("cell-a", "a2", 2_000);
     lastMessage = frame(live);

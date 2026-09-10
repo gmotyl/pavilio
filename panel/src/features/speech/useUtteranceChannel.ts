@@ -32,6 +32,16 @@ interface SessionSpeech {
   heard: boolean;
 }
 
+export interface UtteranceChannelOptions {
+  /**
+   * The player's `speakingSessionId`, as of this render. Required, not
+   * defaulted: forgetting it has no sensible fallback — it would silently
+   * delete the `speaking` state from the grid — so the omission must be a type
+   * error that forces the call site to decide.
+   */
+  speakingSessionId: string | null;
+}
+
 export interface Channel {
   stateFor(sessionId: string): CellSpeechState;
   utteranceFor(sessionId: string): Utterance | null;
@@ -54,7 +64,12 @@ function toUtterance(raw: unknown): Utterance | null {
   return { id, sessionId, text, at };
 }
 
-export function useUtteranceChannel(speakingSessionId: string | null = null): Channel {
+/**
+ * The caller must pass the player's `speakingSessionId` on every render — the
+ * channel never observes playback itself, so a stale or missing value is the
+ * only way the grid can be wrong about what is speaking.
+ */
+export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptions): Channel {
   const { lastMessage } = useWebSocket();
   const [sessions, setSessions] = useState<Map<string, SessionSpeech>>(() => new Map());
   // Read once at mount, so a remount restores the armed cell (DECISION 12).
