@@ -318,6 +318,29 @@ describe("scripts/update.sh sync commit", () => {
     );
   }, 60000);
 
+  it("skips a synced path the workspace gitignores instead of aborting the pull", () => {
+    initDestRepo();
+    // A generated directory the workspace deliberately does not track — exactly
+    // how .claude/commands/ is set up downstream, ignored wholesale with one
+    // force-added file inside. `git add` treats a pathspec matching only ignored
+    // files as an error, which under `set -e` used to kill the run after a
+    // successful sync and build.
+    mkdirSync(join(dest, ".claude", "commands"), { recursive: true });
+    writeFileSync(join(dest, ".claude", "commands", "generated.md"), "# generated\n");
+    writeFileSync(join(dest, ".gitignore"), "node_modules/\ndist/\n.claude/commands/\n");
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "ignore the generated commands");
+
+    const { status, output } = runUpdate();
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/committed sync of upstream/);
+    expect(output).not.toMatch(/ignored by one of your \.gitignore/);
+    // The ignored path is left alone; everything else still lands.
+    expect(destStatus()).toBe("");
+    expect(git(dest, "show", "--name-only", "--pretty=", "HEAD")).toMatch(/panel\//);
+  }, 60000);
+
   it("says there is nothing to commit when the workspace is already in sync", () => {
     initDestRepo();
     runUpdate();
