@@ -15,6 +15,7 @@ import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
 import type { RepoEntry } from "../projects/useProjects";
 import type { LayoutPreset, TileLayout } from "./tileLayout";
+import type { LayoutCommitKind } from "./orderingReducer";
 
 export interface TerminalsSurfaceProps {
   // Current project context
@@ -54,7 +55,7 @@ export interface TerminalsSurfaceProps {
 
   // Column layout state + callbacks
   tiles?: TileLayout;
-  onPlace?: (layout: TileLayout) => void;
+  onPlace?: (layout: TileLayout, kind: LayoutCommitKind) => void;
   onApplyPreset?: (preset: LayoutPreset) => void;
 
   // When true: fills from below the breadcrumb bar (no negative margins, no p-6 offset)

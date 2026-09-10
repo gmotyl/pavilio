@@ -5,6 +5,7 @@ import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession } from "../terminalInstances";
+import { useTerminalOrdering } from "../useTerminalOrdering";
 import {
   TEST_PROJECT_COLORS,
   installProjectColors,
@@ -780,5 +781,225 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     dragStart(input);
 
     expect(screen.queryAllByTestId(/^placement-preview-/)).toHaveLength(0);
+  });
+});
+
+// 476 + the 4px gutter = 480, so one zone is exactly 10px and pixel deltas convert
+// to zone deltas without rounding noise. The grid measures itself when the tiling
+// mounts, so the spy has to be installed before the render.
+function measureGrid(width = 476, height = 476) {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    width,
+    height,
+    right: width,
+    bottom: height,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect);
+}
+
+function seamHandles(container: HTMLElement) {
+  return Array.from(container.querySelectorAll('[data-testid^="seam-handle-"]'));
+}
+
+function grabSeam(testId: string, from: number, axis: "x" | "y" = "x") {
+  const handle = screen.getByTestId(testId);
+  handle.setPointerCapture = vi.fn();
+  fireEvent.pointerDown(handle, {
+    pointerId: 3,
+    button: 0,
+    clientX: axis === "x" ? from : 0,
+    clientY: axis === "x" ? 0 : from,
+  });
+  return handle;
+}
+
+function dragSeamTo(to: number, axis: "x" | "y" = "x") {
+  fireEvent.pointerMove(window, {
+    pointerId: 3,
+    clientX: axis === "x" ? to : 0,
+    clientY: axis === "x" ? 0 : to,
+  });
+}
+
+function releaseSeamAt(to: number, axis: "x" | "y" = "x") {
+  fireEvent.pointerUp(window, {
+    pointerId: 3,
+    clientX: axis === "x" ? to : 0,
+    clientY: axis === "x" ? 0 : to,
+  });
+}
+
+describe("TerminalLayoutGrid — seam resize", () => {
+  const threeSessions = [
+    makeSession({ id: "a", name: "a" }),
+    makeSession({ id: "b", name: "b" }),
+    makeSession({ id: "c", name: "c" }),
+  ];
+  // a down the left, b over c on the right.
+  const threeTiles: TileLayout = [
+    { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+    { sessionId: "b", x: 24, y: 0, w: 24, h: 24 },
+    { sessionId: "c", x: 24, y: 24, w: 24, h: 24 },
+  ];
+  const twoSessionsSplit = threeSessions.slice(0, 2);
+  const twoTiles: TileLayout = [
+    { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+    { sessionId: "b", x: 24, y: 0, w: 24, h: 48 },
+  ];
+
+  it("seam handles render over a multi-session grid", () => {
+    measureGrid();
+    const { container } = renderGrid({ sessions: threeSessions, tiles: threeTiles });
+
+    // The vertical boundary runs the full height; the horizontal one covers only
+    // the right-hand column, the one stretch where b faces c.
+    expect(seamHandles(container).map((el) => el.getAttribute("data-testid"))).toEqual([
+      "seam-handle-x-24-0",
+      "seam-handle-y-24-24",
+    ]);
+    // Centred on the gutter before track 24 — over the gap, not over a cell.
+    expect(screen.getByTestId("seam-handle-x-24-0").style.left).toBe(
+      "calc(-2px + 0.5 * (100% + 4px))",
+    );
+  });
+
+  it("no seam handles while a terminal is maximized", () => {
+    measureGrid();
+    const maxed = renderGrid({
+      sessions: threeSessions,
+      tiles: threeTiles,
+      maximized: true,
+    });
+
+    expect(seamHandles(maxed.container)).toHaveLength(0);
+    maxed.unmount();
+
+    // Nor with a single session live: one tile covers the whole grid, so there is
+    // no boundary between two terminals to grab.
+    const single = renderGrid({ sessions: [makeSession({ id: "a" })], tiles: [] });
+    expect(seamHandles(single.container)).toHaveLength(0);
+  });
+
+  it("a draft layout is what the cells render", () => {
+    measureGrid();
+    renderGrid({ sessions: twoSessionsSplit, tiles: twoTiles });
+
+    grabSeam("seam-handle-x-24-0", 240);
+    dragSeamTo(340);
+
+    // +100px is +10 zones: the cells follow the draft, live and unpersisted.
+    expect(cellsByArea()).toEqual([
+      "1 / span 34|1 / span 48",
+      "35 / span 14|1 / span 48",
+    ]);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    // The draft is dropped, so the committed layout is what renders again.
+    expect(cellsByArea()).toEqual([
+      "1 / span 24|1 / span 48",
+      "25 / span 24|1 / span 48",
+    ]);
+  });
+
+  it("a completed resize is handed to onPlace once", () => {
+    measureGrid();
+    const onPlace = vi.fn();
+    renderGrid({ sessions: twoSessionsSplit, tiles: twoTiles, onPlace });
+
+    grabSeam("seam-handle-x-24-0", 240);
+    dragSeamTo(300);
+    dragSeamTo(340);
+    releaseSeamAt(340);
+
+    expect(onPlace).toHaveBeenCalledTimes(1);
+    const [committed, kind] = onPlace.mock.calls[0];
+    expect(committed).toEqual([
+      { sessionId: "a", x: 0, y: 0, w: 34, h: 48 },
+      { sessionId: "b", x: 34, y: 0, w: 14, h: 48 },
+    ]);
+    // Committed as a resize, not a placement: the scope must not re-derive the
+    // session order from the new tiling.
+    expect(kind).toBe("resize");
+  });
+
+  it("a pointerdown on a handle starts no placement", () => {
+    measureGrid();
+    const onPlace = vi.fn();
+    renderGrid({ sessions: threeSessions, tiles: threeTiles, onPlace });
+
+    const handle = screen.getByTestId("seam-handle-x-24-0");
+    handle.setPointerCapture = vi.fn();
+    const notPrevented = fireEvent.pointerDown(handle, {
+      pointerId: 3,
+      button: 0,
+      clientX: 240,
+      clientY: 240,
+    });
+
+    // The default is cancelled, which is what stops the press turning into an
+    // HTML5 drag of whatever sits under the strip.
+    expect(notPrevented).toBe(false);
+    // And the overlay is not armed, so a dragover paints nothing at all.
+    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
+    dragOverAt(wrapper, 395, 155);
+    expect(screen.queryAllByTestId(/^placement-preview-/)).toHaveLength(0);
+    expect(screen.queryByTestId("placement-region")).toBeNull();
+    expect(onPlace).not.toHaveBeenCalled();
+  });
+
+  it("a horizontal seam commit keeps the existing session order", () => {
+    // ADR 0008's amendment, worked: dragging the y=12 seam down by 24 zones
+    // carries b past d in the y-major reading order. The tiling stays valid, so
+    // re-deriving the order from it would silently renumber the terminals.
+    const sessions = ["a", "b", "c", "d"].map((id) => makeSession({ id, name: id }));
+    const stored: TileLayout = [
+      { sessionId: "a", x: 0, y: 0, w: 24, h: 12 },
+      { sessionId: "b", x: 0, y: 12, w: 24, h: 36 },
+      { sessionId: "c", x: 24, y: 0, w: 24, h: 24 },
+      { sessionId: "d", x: 24, y: 24, w: 24, h: 24 },
+    ];
+    localStorage.setItem("panel-terminal-grid-seams", JSON.stringify(stored));
+
+    function Harness() {
+      const { tiles, sessionOrder, placeTiles } = useTerminalOrdering("seams", sessions);
+      return (
+        <>
+          <div data-testid="session-order">{sessionOrder.join(",")}</div>
+          <TerminalLayoutGrid
+            sessions={sessions}
+            focusedId={null}
+            maximized={false}
+            onFocus={() => {}}
+            onExit={() => {}}
+            onToggleMaximize={() => {}}
+            tiles={tiles}
+            onPlace={placeTiles}
+          />
+        </>
+      );
+    }
+
+    measureGrid();
+    render(<Harness />);
+    expect(screen.getByTestId("session-order").textContent).toBe("a,c,b,d");
+
+    grabSeam("seam-handle-y-12-0", 120, "y");
+    dragSeamTo(360, "y");
+    releaseSeamAt(360, "y");
+
+    // The boundary moved — a took b's 24 zones...
+    expect(cellsByArea()).toEqual([
+      "1 / span 24|1 / span 36",
+      "1 / span 24|37 / span 12",
+      "25 / span 24|1 / span 24",
+      "25 / span 24|25 / span 24",
+    ]);
+    // ...and the numbering did not, though readingOrder of that tiling is a,c,d,b.
+    expect(screen.getByTestId("session-order").textContent).toBe("a,c,b,d");
   });
 });

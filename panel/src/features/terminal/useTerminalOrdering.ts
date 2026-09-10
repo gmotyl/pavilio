@@ -7,7 +7,11 @@ import {
   type LayoutPreset,
   type TileLayout,
 } from "./tileLayout";
-import { orderingReducer, type OrderingState } from "./orderingReducer";
+import {
+  orderingReducer,
+  type LayoutCommitKind,
+  type OrderingState,
+} from "./orderingReducer";
 import type { SessionMeta } from "./useTerminalSessions";
 
 export interface TerminalOrdering {
@@ -20,8 +24,12 @@ export interface TerminalOrdering {
   /** Append a just-created session id and reconcile the tiling in the same cycle. */
   appendId: (id: string) => void;
   reorder: (fromId: string, toId: string) => void;
-  /** Commit a layout the drag overlay already computed and displayed. */
-  placeTiles: (layout: TileLayout) => void;
+  /**
+   * Commit a layout a gesture already computed and displayed. `kind` says which
+   * gesture: a placement re-derives the session order from the new tiling, a seam
+   * resize carries the existing order over untouched.
+   */
+  placeTiles: (layout: TileLayout, kind?: LayoutCommitKind) => void;
   applyPreset: (preset: LayoutPreset) => void;
 }
 
@@ -168,9 +176,12 @@ export function useTerminalOrdering(
     dispatch({ type: "reorder", fromId, toId });
   }, []);
 
-  const placeTiles = useCallback((layout: TileLayout) => {
-    dispatch({ type: "place", layout });
-  }, []);
+  const placeTiles = useCallback(
+    (layout: TileLayout, kind: LayoutCommitKind = "placement") => {
+      dispatch({ type: kind === "resize" ? "resize" : "place", layout });
+    },
+    [],
+  );
 
   // `order` is the live session order, not the reducer's: before the first fetch sync
   // the stored order is still empty, and after a close it can name sessions that no

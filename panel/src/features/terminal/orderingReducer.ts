@@ -16,6 +16,12 @@ import {
  * layout's reading order**. Rectangles are slots and the order says who sits in
  * which, so a change to either half re-derives the other in the same transition —
  * that is what keeps the tab strip and the grid expressing one order.
+ *
+ * A seam resize is the one transition that does not re-derive: moving a boundary
+ * must not renumber the user's terminals, so `resize` keeps `order` exactly as it
+ * was. A horizontal seam move can therefore leave the two out of step — the price
+ * of the promise, and the reason the exception is a distinct action rather than a
+ * flag. See ADR 0008's 2026-09-10 amendment.
  */
 export interface OrderingState {
   order: string[];
@@ -23,16 +29,27 @@ export interface OrderingState {
 }
 
 /**
+ * How a committed tiling came about — the two gestures that hand the model a whole
+ * layout differ only in what they mean for the session order, so the caller says
+ * which it is rather than the reducer guessing from the geometry.
+ */
+export type LayoutCommitKind = "placement" | "resize";
+
+/**
  * `place` carries a layout the caller already computed — the drag overlay paints the
  * repaired result and hands that exact value to the drop. The reducer stores it
  * rather than re-deriving anything, because re-deriving the action from whatever sits
  * under the cursor at drop time is precisely the defect this model replaced.
+ *
+ * `resize` carries a layout too, and differs from `place` in exactly one way: it is
+ * not a reordering event.
  */
 export type OrderingAction =
   | { type: "sync"; ids: string[] }
   | { type: "append"; id: string }
   | { type: "reorder"; fromId: string; toId: string }
   | { type: "place"; layout: TileLayout }
+  | { type: "resize"; layout: TileLayout }
   | { type: "preset"; preset: LayoutPreset; order?: string[] }
   | { type: "reset"; state: OrderingState };
 
@@ -123,6 +140,16 @@ export function orderingReducer(state: OrderingState, action: OrderingAction): O
       // that does not tile the grid is a caller bug, not a state worth persisting.
       if (!isValidLayout(action.layout)) return state;
       return commitLayout(state, action.layout);
+
+    case "resize":
+      // A seam move is a resize, not a reordering event, so the order carries over
+      // untouched instead of being re-derived from the new tiling. `readingOrder`
+      // sorts y-major, and a horizontal seam move rewrites y — it can carry a tile
+      // across another's row and come back renumbered, while still producing a
+      // tiling `isValidLayout` accepts. Re-deriving here would renumber the user's
+      // terminals for a gesture that promises not to. See ADR 0008's amendment.
+      if (!isValidLayout(action.layout)) return state;
+      return commit(state, state.order, action.layout);
 
     case "preset": {
       // `order` is passed explicitly by the hook: before the first session sync the
