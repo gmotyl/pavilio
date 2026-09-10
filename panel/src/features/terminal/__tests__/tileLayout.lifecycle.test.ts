@@ -45,10 +45,31 @@ describe("appendSession", () => {
     const next = appendSession(layout, "d");
 
     expect(isValidLayout(next)).toBe(true);
-    // c (1 zone) and b (2 zones on the split axis) are below the 4-zone preference,
-    // so the split falls back to a, which has 9.
-    expect(tileOf(next, "c")).toMatchObject({ y: 44, h: 4 });
-    expect(tileOf(next, "d").h).toBeGreaterThan(1);
+    // c is 4 zones tall, so splitting it would leave two 24x4 slivers: the walk-back
+    // passes it over and lands on b (8 zones tall, two MIN_SPANs), which splits on x
+    // into two 24x8 halves. a is never reached, and c is left untouched.
+    expect(tileOf(next, "a")).toMatchObject({ x: 0, y: 0, w: 48, h: 36 });
+    expect(tileOf(next, "b")).toMatchObject({ x: 0, y: 36, w: 24, h: 8 });
+    expect(tileOf(next, "c")).toMatchObject({ x: 0, y: 44, w: 48, h: 4 });
+    expect(tileOf(next, "d")).toMatchObject({ x: 24, y: 36, w: 24, h: 8 });
+    expect(tileOf(next, "d").h).toBeGreaterThan(4);
+  });
+
+  it("passes over a tile whose split axis is under the split preference", () => {
+    // c would split into two usable 6x12 halves, but 12 zones is under
+    // SPLIT_PREFERENCE, so the walk-back takes b instead — its 36 zones clear it.
+    // A preference low enough to accept c's 12 zones would split c, not b.
+    const layout: TileLayout = [
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 36 },
+      { sessionId: "b", x: 0, y: 36, w: 36, h: 12 },
+      { sessionId: "c", x: 36, y: 36, w: 12, h: 12 },
+    ];
+    const next = appendSession(layout, "d");
+
+    expect(isValidLayout(next)).toBe(true);
+    expect(tileOf(next, "c")).toMatchObject({ x: 36, y: 36, w: 12, h: 12 });
+    expect(tileOf(next, "b")).toMatchObject({ x: 0, y: 36, w: 18, h: 12 });
+    expect(tileOf(next, "d")).toMatchObject({ x: 18, y: 36, w: 18, h: 12 });
   });
 
   it("splits the last tile anyway when nothing qualifies", () => {

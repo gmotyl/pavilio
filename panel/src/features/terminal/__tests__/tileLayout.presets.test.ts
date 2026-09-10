@@ -10,8 +10,9 @@ import {
 
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `s${i + 1}`);
 
-// How much finer the matrix is than the 12 zones the curated shapes were authored on.
-const SCALE = GRID / 12;
+// The 12 -> 48 widening is a x4 rescale, so this is deliberately a literal: derive it
+// from GRID and the assertions below stay true at any matrix size, pinning nothing.
+const SCALE = 4;
 
 // Every slot the curated presets produced when the matrix was 12x12, as [x, y, w, h]
 // in reading order. Multiplied by SCALE these must still be exactly what

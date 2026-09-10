@@ -229,6 +229,15 @@ export function expandPreset(order: string[], preset: LayoutPreset): TileLayout 
 const SPLIT_PREFERENCE = 16;
 
 /**
+ * The smallest the axis a tile does NOT split on may be for that split to be worth
+ * making. A tile only counts as splittable when it has room for two halves that each
+ * clear MIN_SPAN, and the cross axis is held to the same bar — otherwise splitting a
+ * full-width, near-flat tile hands back two slivers nobody can use. Expressed in
+ * MIN_SPANs rather than as a literal so it scales with the zone matrix.
+ */
+const SPLIT_MIN_CROSS_SPAN = 2 * MIN_SPAN;
+
+/**
  * Adds a session by splitting the LAST tile in reading order along its longer axis
  * — Windows Terminal's behaviour, and the one that keeps the global Terminals view
  * readable when sessions appear from a project tab: the main window stays main and
@@ -249,14 +258,15 @@ export function appendSession(layout: TileLayout, sessionId: string): TileLayout
   const spanOn = (tile: Tile, axis: "x" | "y") => (axis === "x" ? tile.w : tile.h);
 
   // Both halves must stay usable, so the split axis needs room for two parts AND
-  // the other axis must not already be a sliver — splitting a full-width, one-zone-tall
-  // tile down the middle yields two slivers, which is worse than splitting something
+  // the other axis must not already be a sliver — splitting a full-width, flat tile
+  // down the middle yields two slivers, which is worse than splitting something
   // further back.
   const other = (axis: "x" | "y") => (axis === "x" ? "y" : "x");
   let host = [...ordered].reverse().find((tile) => {
     const axis = axisOf(tile);
     return (
-      spanOn(tile, axis) >= SPLIT_PREFERENCE && spanOn(tile, other(axis)) >= 2
+      spanOn(tile, axis) >= SPLIT_PREFERENCE &&
+      spanOn(tile, other(axis)) >= SPLIT_MIN_CROSS_SPAN
     );
   });
 
