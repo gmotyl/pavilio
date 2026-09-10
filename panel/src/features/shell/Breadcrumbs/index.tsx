@@ -22,7 +22,7 @@ function parsePath(pathname: string): Crumb[] {
   }
 
   if (segments[0] === "settings") {
-    return [{ label: "Agent Settings" }];
+    return [{ label: "Settings" }];
   }
 
   if (segments[0] === "project" && segments.length >= 2) {

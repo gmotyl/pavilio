@@ -474,7 +474,7 @@ export default function LeftSidebar() {
           }}
         >
           <Settings size={14} />
-          Agent Settings
+          Settings
         </button>
         <div
           className="flex items-center gap-2 w-full text-[12px] px-2 py-1.5 rounded-md"

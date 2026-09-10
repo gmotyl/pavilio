@@ -45,9 +45,9 @@ function parsePath(pathname: string): Crumb[] {
     return [{ label: "Git" }];
   }
 
-  // /settings → Home / Agent Settings
+  // /settings → Home / Settings
   if (segments[0] === "settings") {
-    return [{ label: "Agent Settings" }];
+    return [{ label: "Settings" }];
   }
 
   // /project/:name or /project/:name/:section
