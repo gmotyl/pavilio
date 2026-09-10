@@ -4,6 +4,7 @@ import { readFileSync } from "fs";
 import { join, resolve } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
+import { gitSafeEnv } from "../lib/gitEnv.js";
 
 const router = Router();
 
@@ -26,6 +27,9 @@ function getRepoRoot(customRepo?: string): string {
 function git(cmd: string, repoPath?: string): string {
   return execSync(`git ${cmd}`, {
     cwd: getRepoRoot(repoPath),
+    // Without this an inherited GIT_DIR would win over cwd and these reads would
+    // describe someone else's repository. See lib/gitEnv.ts.
+    env: gitSafeEnv(),
     encoding: "utf-8",
   });
 }

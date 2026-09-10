@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { broadcast } from "../watcher.js";
+import { gitSafeEnv } from "./gitEnv.js";
 import { buildConflictPrompt } from "./buildConflictPrompt.js";
 
 export type SyncState =
@@ -65,7 +66,14 @@ interface Run { ok: boolean; status: number | null; stdout: string; stderr: stri
 // also reaps grandchildren (ssh) — a hung ssh once kept the runner alive for 19h.
 function git(cwd: string, args: string[], timeoutMs = DEFAULT_GIT_TIMEOUT_MS): Promise<Run> {
   return new Promise((done) => {
-    const child = spawn("git", args, { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    // env: GIT_DIR and friends outrank cwd, so an inherited one would point every
+    // sync at whichever repository launched us. See gitEnv.ts.
+    const child = spawn("git", args, {
+      cwd,
+      env: gitSafeEnv(),
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     child.stdout.setEncoding("utf-8");
     child.stderr.setEncoding("utf-8");
     let stdout = "", stderr = "", timedOut = false;

@@ -1,6 +1,16 @@
 #!/bin/bash
 set -e
 
+# Git resolves its repository from the environment before it consults -C or the
+# working directory, and it exports these to every hook it runs. In a linked
+# worktree GIT_DIR is absolute, so a pull triggered from inside a hook would aim
+# every git call below at the hook's repository rather than the clone and the
+# workspace we were actually pointed at — mirroring, committing and merging in
+# the wrong place. Unset them here, before the first git call, so the explicit
+# paths in this script are what decide.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
+
 # Resolve upstream local clone directory
 # Default: sibling directory named pavilio
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
