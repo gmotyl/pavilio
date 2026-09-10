@@ -37,11 +37,52 @@ const sharedSeam: TileLayout = [
 
 const single: TileLayout = [{ sessionId: "a", x: 0, y: 0, w: GRID, h: GRID }];
 
+// Rows whose tiles do not line up: the seam at HALF is faced by two tiles on each
+// side, and no two of those four have the same width. Serves two purposes — a
+// vertical move here could cross reading order if crossing were possible at all,
+// and the clamp has an unequal pair to pick the tightest span from.
+//
+//         0   12   24        48
+//     0   +---+---+----------+
+//         | a | b |     c    |
+//    24   +---+---+-----+----+
+//         |   d   |  e  | f  |
+//    48   +-------+-----+----+
+const staggered: TileLayout = [
+  { sessionId: "a", x: 0, y: 0, w: THIRD, h: HALF },
+  { sessionId: "b", x: THIRD, y: 0, w: THIRD, h: HALF },
+  { sessionId: "c", x: HALF, y: 0, w: HALF, h: HALF },
+  { sessionId: "d", x: 0, y: HALF, w: HALF, h: HALF },
+  { sessionId: "e", x: HALF, y: HALF, w: THIRD, h: HALF },
+  { sessionId: "f", x: GRID - THIRD, y: HALF, w: THIRD, h: HALF },
+];
+
+// The horizontal counterexample: `b` is the only tile below the seam at THIRD, so
+// growing `a` pushes `b` past `d`'s row without touching `c` or `d`.
+//
+//         0        24        48
+//     0   +---------+---------+
+//         |    a    |         |
+//    12   +---------+    c    |
+//         |         |         |
+//    24   |    b    +---------+
+//         |         |    d    |
+//    48   +---------+---------+
+const crossing: TileLayout = [
+  { sessionId: "a", x: 0, y: 0, w: HALF, h: THIRD },
+  { sessionId: "b", x: 0, y: THIRD, w: HALF, h: GRID - THIRD },
+  { sessionId: "c", x: HALF, y: 0, w: HALF, h: HALF },
+  { sessionId: "d", x: HALF, y: HALF, w: HALF, h: HALF },
+];
+
 const verticalSeams = (layout: TileLayout) =>
   seamsOf(layout).filter((seam) => seam.axis === "x");
 
 const find = (layout: TileLayout, sessionId: string) =>
   layout.find((tile) => tile.sessionId === sessionId)!;
+
+const ids = (layout: TileLayout) =>
+  readingOrder(layout).map((tile) => tile.sessionId);
 
 describe("seamsOf", () => {
   it("two boundaries on one line are enumerated as two separate seams", () => {
@@ -93,8 +134,18 @@ describe("seamsOf", () => {
     expect(atThird[0].to).toBe(GRID);
   });
 
-  it("a single-tile layout has no seams", () => {
+  it("a single-tile layout has no seams, but splitting it yields one", () => {
+    // The empty result has to be the layout's doing, not the function's: a stub
+    // returning [] would satisfy the first assertion and fail the second.
     expect(seamsOf(single)).toEqual([]);
+
+    const split: TileLayout = [
+      { sessionId: "a", x: 0, y: 0, w: HALF, h: GRID },
+      { sessionId: "b", x: HALF, y: 0, w: HALF, h: GRID },
+    ];
+    expect(seamsOf(split)).toEqual([
+      { axis: "x", at: HALF, from: 0, to: GRID, before: ["a"], after: ["b"] },
+    ]);
   });
 });
 
@@ -106,8 +157,10 @@ describe("resizeSeam", () => {
     const next = resizeSeam(twoBoundaries, topSeam(), 4)!;
 
     expect(next).not.toBeNull();
-    expect(find(next, "b")).toEqual(find(twoBoundaries, "b"));
-    expect(find(next, "c")).toEqual(find(twoBoundaries, "c"));
+    // Byte-identical, not merely equal: an untouched tile is the same object, so a
+    // caller diffing by reference sees no change at all.
+    expect(find(next, "b")).toBe(find(twoBoundaries, "b"));
+    expect(find(next, "c")).toBe(find(twoBoundaries, "c"));
     expect(find(next, "a")).toEqual({
       sessionId: "a",
       x: 0,
@@ -161,6 +214,33 @@ describe("resizeSeam", () => {
     expect(isValidLayout(grown)).toBe(true);
   });
 
+  it("the clamp sizes to the tightest tile on the shrinking side", () => {
+    // Both sides of `staggered`'s middle seam carry two tiles of different widths.
+    // MIN_SPAN has to hold for EVERY participating tile, so the room to move is the
+    // smallest tile's slack — and `isValidLayout` would not notice if it were not,
+    // since it never checks MIN_SPAN.
+    const seam = seamsOf(staggered).find(
+      (candidate) => candidate.axis === "x" && candidate.at === HALF,
+    )!;
+    expect(seam).toMatchObject({ before: ["b", "d"], after: ["c", "e"] });
+
+    // Shrinking `after`: `e` is THIRD wide and `c` is HALF, so THIRD - MIN_SPAN is
+    // all the room there is, and `c` is left with slack to spare.
+    const grown = resizeSeam(staggered, seam, GRID)!;
+    expect(find(grown, "e").w).toBe(MIN_SPAN);
+    expect(find(grown, "c").w).toBe(HALF - (THIRD - MIN_SPAN));
+    expect(find(grown, "c").w).toBeGreaterThan(MIN_SPAN);
+    expect(find(grown, "b").w).toBe(THIRD + (THIRD - MIN_SPAN));
+    expect(isValidLayout(grown)).toBe(true);
+
+    // Shrinking `before`: same story with `b` as the tightest tile.
+    const shrunk = resizeSeam(staggered, seam, -GRID)!;
+    expect(find(shrunk, "b").w).toBe(MIN_SPAN);
+    expect(find(shrunk, "d").w).toBe(HALF - (THIRD - MIN_SPAN));
+    expect(find(shrunk, "d").w).toBeGreaterThan(MIN_SPAN);
+    expect(isValidLayout(shrunk)).toBe(true);
+  });
+
   it("a seam with no room to move returns null", () => {
     const tight: TileLayout = [
       { sessionId: "a", x: 0, y: 0, w: MIN_SPAN, h: GRID },
@@ -174,23 +254,56 @@ describe("resizeSeam", () => {
     expect(resizeSeam(tight, seam, 0)).toBeNull();
   });
 
-  it("moving a seam never changes reading order", () => {
-    const ids = (layout: TileLayout) =>
-      readingOrder(layout).map((tile) => tile.sessionId);
-
-    const seams = seamsOf(twoBoundaries);
-    expect(seams).toHaveLength(3);
-
+  it("a vertical seam move never changes reading order", () => {
+    // Provable, not incidental: every `after` tile shares x === at, so a vertical
+    // move rewrites x only, leaves every y alone, and cannot push a tile out of its
+    // row. `staggered` gives the property something to break on — the seam at HALF
+    // is shared by two rows, and each row has a neighbour the moved tile would have
+    // to cross if crossing were possible.
+    const seams = verticalSeams(staggered);
     let moves = 0;
     for (const seam of seams) {
-      for (const delta of [-6, -1, 1, 6]) {
-        const next = resizeSeam(twoBoundaries, seam, delta);
+      for (const delta of [-8, -1, 1, 8, GRID, -GRID]) {
+        const next = resizeSeam(staggered, seam, delta);
         if (!next) continue;
         moves++;
-        expect(ids(next)).toEqual(ids(twoBoundaries));
+        expect(ids(next)).toEqual(ids(staggered));
       }
     }
-    expect(moves).toBe(seams.length * 4);
+    expect(moves).toBe(seams.length * 6);
+  });
+
+  it("a horizontal seam move can change reading order, so callers must not re-derive it", () => {
+    // Reading order is y-major, and a horizontal move rewrites y — the primary sort
+    // key. Here growing `a` carries `b` below `d`, and the result is a perfectly
+    // valid tiling, so `isValidLayout` does not and cannot catch it. Preserving the
+    // session order across a seam drag is therefore the commit path's job: it must
+    // carry the order it already had rather than call `readingOrder` on the result.
+    const seam = seamsOf(crossing).find(
+      (candidate) => candidate.axis === "y" && candidate.at === THIRD,
+    )!;
+    expect(seam).toMatchObject({ before: ["a"], after: ["b"] });
+
+    const next = resizeSeam(crossing, seam, HALF)!;
+
+    expect(find(next, "a")).toEqual({
+      sessionId: "a",
+      x: 0,
+      y: 0,
+      w: HALF,
+      h: GRID - THIRD,
+    });
+    expect(find(next, "b")).toEqual({
+      sessionId: "b",
+      x: 0,
+      y: GRID - THIRD,
+      w: HALF,
+      h: THIRD,
+    });
+    expect(isValidLayout(next)).toBe(true);
+
+    expect(ids(crossing)).toEqual(["a", "c", "b", "d"]);
+    expect(ids(next)).toEqual(["a", "c", "d", "b"]);
   });
 
   it("horizontal seams move on the other axis", () => {

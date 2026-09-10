@@ -109,6 +109,16 @@ export function seamsOf(layout: TileLayout): Seam[] {
  * by the same amount, so no tile outside `before` and `after` is touched at all —
  * that is what makes this a resize rather than a placement. `isValidLayout` on the
  * result is a defensive net, not the mechanism.
+ *
+ * What this does NOT promise is reading order. `readingOrder` sorts y-major, and a
+ * horizontal seam move rewrites y — the primary key — so the `after` tiles can be
+ * carried past tiles in other rows and come back renumbered. The result is still a
+ * valid tiling, so `isValidLayout` neither catches it nor could. A vertical move is
+ * safe (every `after` tile shares x === at, and y is untouched), but the general
+ * guarantee belongs to the CALLER: a seam drag is a resize, not a reordering event,
+ * so the commit path must carry the session order it already had rather than
+ * re-derive it with `readingOrder` on the result. See the tests for the worked
+ * counterexample.
  */
 export function resizeSeam(
   layout: TileLayout,
