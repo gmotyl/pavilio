@@ -312,6 +312,61 @@ input[type="checkbox"] {
   height: 8px;
 }
 
+/* Cell-header speak control and autoplay toggle. Both borrow the activity
+   LED's vocabulary above rather than inventing a second one: the same green
+   (#9ece6a), the same `terminal-led-pulse-attention` keyframes, and the same
+   `data-pulse` switch that stops the animation. */
+.terminal-speak,
+.terminal-autoplay {
+  color: var(--text-muted);
+  transition:
+    color 200ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease;
+}
+
+/* Empty is the inert state: muted and dimmed, never green. */
+.terminal-speak[data-speech="empty"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Unheard, heard and speaking are all the LED's green — only the pulse and
+   the fill differ, so `heard` reads as "the same thing, already heard". */
+.terminal-speak[data-speech="unheard"],
+.terminal-speak[data-speech="heard"],
+.terminal-speak[data-speech="speaking"] {
+  color: #9ece6a;
+}
+
+.terminal-speak[data-pulse="1"] {
+  animation: terminal-led-pulse-attention 0.8s ease-in-out infinite;
+}
+
+.terminal-speak[data-pulse="0"] {
+  animation: none;
+}
+
+/* Speaking is the solid state — a click stops it. */
+.terminal-speak[data-speech="speaking"] {
+  background: rgba(158, 206, 106, 0.16);
+}
+
+/* Armed for autoplay: the same green plus a fill, so on/off is legible with
+   no hover and no click. */
+.terminal-autoplay[data-armed="1"] {
+  color: #9ece6a;
+  background: rgba(158, 206, 106, 0.16);
+}
+
+/* Hover feedback like the sibling header buttons, but only where no fill is
+   already standing — an armed toggle and a speaking cell keep their green. */
+.terminal-speak[data-speech="unheard"]:hover,
+.terminal-speak[data-speech="heard"]:hover,
+.terminal-autoplay[data-armed="0"]:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 /* Mobile: let xterm own vertical swipe for scrollback; keep the browser
    from stealing the gesture for page scroll, pull-to-refresh, or the
    iOS/Android back swipe. */

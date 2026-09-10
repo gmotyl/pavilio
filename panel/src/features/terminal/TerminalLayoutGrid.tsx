@@ -13,6 +13,8 @@ import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ProjectColorPicker } from "./ProjectColorPicker";
+import { CellSpeakButton } from "./CellSpeakButton";
+import { CellAutoplayToggle } from "./CellAutoplayToggle";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
 import {
@@ -20,8 +22,25 @@ import {
   type PlacementOverlayHandle,
 } from "./TerminalPlacementOverlay";
 import { TerminalSeamHandles } from "./TerminalSeamHandles";
+import type { CellSpeechState } from "../speech/useUtteranceChannel";
 import type { LayoutCommitKind } from "./orderingReducer";
 import { GRID, expandPreset, getLayoutPresets, type TileLayout } from "./tileLayout";
+
+/**
+ * The cell header's speech wiring, hoisted so one channel and one player serve
+ * the whole surface. Optional: with no speech host the controls still render,
+ * every cell reads `empty`, and nothing is armed. Task 11 supplies this from
+ * `useUtteranceChannel` + `useSpeechPlayer`.
+ */
+export interface GridSpeech {
+  stateFor: (sessionId: string) => CellSpeechState;
+  /** The single armed session in this browser, or `null`. */
+  armedSessionId: string | null;
+  onSpeak: (sessionId: string) => void;
+  /** Stop playback. The host must also mark the session heard. */
+  onStop: (sessionId: string) => void;
+  onArm: (sessionId: string | null) => void;
+}
 
 interface Props {
   sessions: SessionMeta[];
@@ -40,6 +59,8 @@ interface Props {
    * a seam resize must not (see ADR 0008's amendment).
    */
   onPlace?: (layout: TileLayout, kind: LayoutCommitKind) => void;
+  /** See {@link GridSpeech}. Absent means "no speech host": every cell is `empty`. */
+  speech?: GridSpeech;
 }
 
 export function TerminalLayoutGrid({
@@ -53,6 +74,7 @@ export function TerminalLayoutGrid({
   onRename,
   tiles,
   onPlace,
+  speech,
 }: Props) {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia("(max-width: 767px)").matches,
@@ -179,6 +201,7 @@ export function TerminalLayoutGrid({
       onRename={onRename}
       onDragStart={() => overlayRef.current?.begin(session.id)}
       onDragEnd={() => overlayRef.current?.end()}
+      speech={speech}
       style={{ height: "100%", ...style }}
     />
   );
@@ -303,6 +326,7 @@ interface CellProps {
   onRename?: (id: string, name: string) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
+  speech?: GridSpeech;
   style?: React.CSSProperties;
 }
 
@@ -318,6 +342,7 @@ function TerminalCell({
   onRename,
   onDragStart,
   onDragEnd,
+  speech,
   style,
 }: CellProps) {
   const { colorFor } = useProjectColors();
@@ -450,6 +475,19 @@ function TerminalCell({
           {/* Leads the eye · maximize · kill group. Renders nothing while the
               socket is healthy, so the group's usual width is unchanged. */}
           <TerminalDisconnectedBadge sessionId={session.id} />
+          {/* Speak · autoplay lead the group: they change per utterance, the
+              rest are static. Both are inert until a speech host is passed. */}
+          <CellSpeakButton
+            sessionId={session.id}
+            state={speech?.stateFor(session.id) ?? "empty"}
+            onSpeak={(id) => speech?.onSpeak(id)}
+            onStop={(id) => speech?.onStop(id)}
+          />
+          <CellAutoplayToggle
+            sessionId={session.id}
+            armedSessionId={speech?.armedSessionId ?? null}
+            onArm={(id) => speech?.onArm(id)}
+          />
           <CellIconButton
             testId={`terminal-cell-eye-${session.id}`}
             title={`View viewport text (read aloud / print) — ${navigator.platform.includes("Mac") ? "⌘" : "Ctrl+"}U`}
