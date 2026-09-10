@@ -83,8 +83,8 @@ function Harness({
 describe("TerminalsSurface", () => {
   it("passes the tiling and the placement callback through to TerminalLayoutGrid", () => {
     const tiles = [
-      { sessionId: "a", x: 0, y: 0, w: 6, h: 12 },
-      { sessionId: "b", x: 6, y: 0, w: 6, h: 12 },
+      { sessionId: "a", x: 0, y: 0, w: 24, h: 48 },
+      { sessionId: "b", x: 24, y: 0, w: 24, h: 48 },
     ];
     const onPlace = vi.fn();
 

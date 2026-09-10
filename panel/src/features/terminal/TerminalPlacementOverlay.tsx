@@ -385,7 +385,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
             [
               // The unmodified gesture reads first, then the two modifiers.
               ["target", "Drag", "split"],
-              ["grow", "Shift", "resize"],
+              ["grow", "Shift", "grow"],
               ["swap", "Ctrl", "swap"],
             ] as [PlacementMode, string, string][]
           ).map(([key, keyLabel, what]) => {

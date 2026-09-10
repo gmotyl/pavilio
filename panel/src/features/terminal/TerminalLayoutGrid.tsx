@@ -207,7 +207,7 @@ export function TerminalLayoutGrid({
       </div>
     );
   } else {
-    // One CSS grid of 12x12 zone tracks; each cell is placed by its tile's grid-area.
+    // One CSS grid of 48x48 zone tracks; each cell is placed by its tile's grid-area.
     // No nested columns and no gutter elements: the tiling carries the whole shape.
     const sessionById = new Map(sessions.map((s) => [s.id, s]));
 

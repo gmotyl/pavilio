@@ -45,7 +45,7 @@ function readOrder(scopeKey: string): string[] {
 function readTiles(scopeKey: string): TileLayout {
   // Two superseded shapes are discarded rather than migrated: the count-only
   // `panel-terminal-columns-` key and the weighted column `panel-terminal-layout-`
-  // key. Mapping arbitrary column counts and weights onto 12 zones rounds, so a
+  // key. Mapping arbitrary column counts and weights onto 48 zones rounds, so a
   // migration would hand back a layout that is *almost* the one the user had — and
   // those layouts were built with the merge tool this model replaced.
   try {
