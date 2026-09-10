@@ -225,7 +225,15 @@ else
     # the add, taking the real paths with it.
     PRESENT_PATHS=()
     for COMMIT_PATH in "${COMMIT_PATHS[@]}"; do
-      if [ -e "$REPO_ROOT/$COMMIT_PATH" ]; then
+      [ -e "$REPO_ROOT/$COMMIT_PATH" ] || continue
+      # Existing is not the same as stageable. A workspace may gitignore one of
+      # these generated directories — .claude/commands/ is ignored downstream,
+      # with a single force-added file inside it — and `git add` treats a
+      # pathspec matching only ignored files as a hard error, which under `set -e`
+      # would abort the whole pull *after* a good sync and a good build. Rather
+      # than reimplement ignore resolution over rules we do not own, ask git with
+      # a dry run and keep only what it would actually accept.
+      if git -C "$REPO_ROOT" add -A --dry-run -- "$COMMIT_PATH" >/dev/null 2>&1; then
         PRESENT_PATHS+=("$COMMIT_PATH")
       fi
     done
@@ -238,8 +246,11 @@ else
     if [ ${#PRESENT_PATHS[@]} -eq 0 ]; then
       echo "  ⏭️  none of the synced paths exist here — nothing to commit."
     else
-      git -C "$REPO_ROOT" add -A -- "${PRESENT_PATHS[@]}"
-      if git -C "$REPO_ROOT" diff --cached --quiet -- "${PRESENT_PATHS[@]}"; then
+      if ! git -C "$REPO_ROOT" add -A -- "${PRESENT_PATHS[@]}"; then
+        # Nothing above should get here, but staging must not be the one step
+        # that can still throw away a finished pull.
+        echo "  ⚠️  could not stage the synced paths — commit them yourself."
+      elif git -C "$REPO_ROOT" diff --cached --quiet -- "${PRESENT_PATHS[@]}"; then
         echo "  ✓ already up to date — nothing to commit"
       else
         # Name the upstream commit actually synced, so the downstream history says
