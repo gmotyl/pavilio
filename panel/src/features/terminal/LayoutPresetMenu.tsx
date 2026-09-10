@@ -61,9 +61,16 @@ export function LayoutPresetMenu({ count, onApply }: Props) {
             data-testid="layout-preset-menu"
             role="menu"
             className="absolute right-0 top-full z-40 mt-1 min-w-[140px] rounded-md py-1 shadow-lg"
+            // The generated preset family runs to a dozen-plus shapes, which would
+            // push the panel off the bottom of the viewport. A viewport-relative
+            // max-height caps it and scrolls the overflow inside. It is a cap and
+            // not a height, so a one-option list still sizes itself to its content
+            // with no empty scroll area below it.
             style={{
               background: "var(--bg-surface)",
               border: "1px solid var(--border-subtle)",
+              maxHeight: "60vh",
+              overflowY: "auto",
             }}
           >
             {presets.map((preset, i) => (

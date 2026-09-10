@@ -80,6 +80,52 @@ describe("LayoutPresetMenu", () => {
     expect(screen.queryByTestId("layout-preset-menu")).not.toBeInTheDocument();
   });
 
+  it("a long preset list scrolls inside a bounded panel", () => {
+    // 7 sessions is where the generated family gets long — well past what fits
+    // under a toolbar without a cap.
+    const long = getLayoutPresets(7);
+    expect(long.length).toBeGreaterThan(10);
+
+    render(<LayoutPresetMenu count={7} onApply={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("layout-preset-toggle"));
+
+    const panel = screen.getByTestId("layout-preset-menu");
+    // Bounded relative to the viewport, so it cannot run off the bottom of it.
+    expect(panel.style.maxHeight).toMatch(/vh$/);
+    // ...and the overflow scrolls inside the panel rather than being clipped away.
+    expect(panel.style.overflowY).toBe("auto");
+  });
+
+  it("a short preset list is not padded to the cap", () => {
+    render(<LayoutPresetMenu count={1} onApply={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("layout-preset-toggle"));
+
+    const panel = screen.getByTestId("layout-preset-menu");
+    // The bound is a cap, not a size: nothing fixes or floors the panel's height,
+    // so one option leaves no empty scroll area below it.
+    expect(panel.style.maxHeight).toMatch(/vh$/);
+    expect(panel.style.height).toBe("");
+    expect(panel.style.minHeight).toBe("");
+  });
+
+  it("every preset stays reachable and keeps its accessible name", () => {
+    const presets = getLayoutPresets(7);
+    render(<LayoutPresetMenu count={7} onApply={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("layout-preset-toggle"));
+
+    presets.forEach((preset, i) => {
+      const option = screen.getByTestId(`layout-preset-option-${i}`);
+      expect(option).toHaveAttribute("aria-label", preset.label);
+      // The thumbnail is still drawn from that preset's own rects.
+      const thumb = screen.getByTestId(`layout-preset-thumb-${preset.label}`);
+      expect(Array.from(thumb.children)).toHaveLength(preset.slots.length);
+    });
+
+    expect(
+      screen.queryByTestId(`layout-preset-option-${presets.length}`),
+    ).not.toBeInTheDocument();
+  });
+
   it("pressing Escape closes the menu", () => {
     const onApply = vi.fn();
     render(<LayoutPresetMenu count={3} onApply={onApply} />);
