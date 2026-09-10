@@ -19,6 +19,7 @@
     "setup:jira": "./scripts/setup:jira",
     "setup:azure-devops": "./scripts/setup:azure-devops",
     "install-skills": "./skills/install-skills.sh",
+    "install:speech": "node panel/scripts/install-speech-hook.mjs",
     "update": "bash scripts/update.sh",
     "pull": "bash scripts/update.sh",
     "test": "pnpm -C panel test",
