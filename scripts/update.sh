@@ -229,25 +229,36 @@ else
         PRESENT_PATHS+=("$COMMIT_PATH")
       fi
     done
-    git -C "$REPO_ROOT" add -A -- "${PRESENT_PATHS[@]}"
-    if git -C "$REPO_ROOT" diff --cached --quiet -- "${PRESENT_PATHS[@]}"; then
-      echo "  ✓ already up to date — nothing to commit"
+    # An empty pathspec list is the one input that turns this block into its own
+    # opposite: `git add -A --` with nothing after it means "everything", so it
+    # would stage exactly the unrelated work the scoping exists to protect, and do
+    # it silently. Unreachable as the script stands — scripts/ holds the running
+    # script, so it is always present — but guarded rather than argued about,
+    # because nothing would report the day a refactor makes it reachable.
+    if [ ${#PRESENT_PATHS[@]} -eq 0 ]; then
+      echo "  ⏭️  none of the synced paths exist here — nothing to commit."
     else
-      # Name the upstream commit actually synced, so the downstream history says
-      # which pavilio revision the workspace is mirroring rather than just "sync".
-      UPSTREAM_SHA="$(git -C "$UPSTREAM_DIR" rev-parse --short HEAD)"
-      UPSTREAM_SUBJECT="$(git -C "$UPSTREAM_DIR" log -1 --pretty=%s)"
-      SYNC_SUMMARY="$(git -C "$REPO_ROOT" diff --cached --shortstat -- "${PRESENT_PATHS[@]}")"
-      if git -C "$REPO_ROOT" commit --quiet \
-        -m "chore(sync): pavilio upstream @ $UPSTREAM_SHA" \
-        -m "$UPSTREAM_SUBJECT" \
-        -m "Synced by scripts/update.sh." \
-        -- "${PRESENT_PATHS[@]}"; then
-        echo "  ✓ committed sync of upstream $UPSTREAM_SHA —${SYNC_SUMMARY}"
+      git -C "$REPO_ROOT" add -A -- "${PRESENT_PATHS[@]}"
+      if git -C "$REPO_ROOT" diff --cached --quiet -- "${PRESENT_PATHS[@]}"; then
+        echo "  ✓ already up to date — nothing to commit"
       else
-        # Most likely a pre-commit hook. The staged files are still there for the
-        # user to deal with, so say so rather than leaving them guessing.
-        echo "  ⚠️  commit failed — the synced files are staged, commit them yourself."
+        # Name the upstream commit actually synced, so the downstream history says
+        # which pavilio revision the workspace is mirroring rather than just "sync".
+        UPSTREAM_SHA="$(git -C "$UPSTREAM_DIR" rev-parse --short HEAD)"
+        UPSTREAM_SUBJECT="$(git -C "$UPSTREAM_DIR" log -1 --pretty=%s)"
+        # --shortstat already begins with a space, so no separator is added here.
+        SYNC_SUMMARY="$(git -C "$REPO_ROOT" diff --cached --shortstat -- "${PRESENT_PATHS[@]}")"
+        if git -C "$REPO_ROOT" commit --quiet \
+          -m "chore(sync): pavilio upstream @ $UPSTREAM_SHA" \
+          -m "$UPSTREAM_SUBJECT" \
+          -m "Synced by scripts/update.sh." \
+          -- "${PRESENT_PATHS[@]}"; then
+          echo "  ✓ committed sync of upstream $UPSTREAM_SHA —${SYNC_SUMMARY}"
+        else
+          # Most likely a pre-commit hook. The staged files are still there for the
+          # user to deal with, so say so rather than leaving them guessing.
+          echo "  ⚠️  commit failed — the synced files are staged, commit them yourself."
+        fi
       fi
     fi
   fi

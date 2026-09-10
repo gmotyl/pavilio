@@ -343,12 +343,17 @@ describe("scripts/update.sh sync commit", () => {
   it("refuses to commit into a workspace with a merge in progress", () => {
     initDestRepo();
     writeFileSync(join(dest, ".git", "MERGE_HEAD"), `${git(dest, "rev-parse", "HEAD")}\n`);
+    const head = git(dest, "rev-parse", "HEAD");
 
     const { status, output } = runUpdate();
 
     expect(status).toBe(0);
     expect(output).toMatch(/merge or rebase in progress/);
     expect(output).toMatch(/^Done\./m);
+    // The warning has to be true, not just printed: the user's merge still owns
+    // HEAD, and the synced files are left in the tree for them to commit.
+    expect(git(dest, "rev-parse", "HEAD")).toBe(head);
+    expect(destStatus()).toMatch(/panel\//);
   }, 60000);
 
   it("still finishes the pull when the workspace is not a git repo at all", () => {
