@@ -80,6 +80,20 @@ curl -fsSL https://tailscale.com/install.sh | sh
 
 Run this in the distro's shell, not in PowerShell. Do not use `tailscale.exe` from `/mnt/c/...` — that is the Windows node, in a different network namespace.
 
+**Check that it actually installed** — the script can add the repo and then quietly stop:
+
+```bash
+tailscale version
+```
+
+The script runs `apt-get update` before installing, and `apt-get update` exits non-zero if *any* configured repository fails — a stale PPA with no Release file for your Ubuntu release is enough. The tailscale repo itself is fine and its package lists are already fetched at that point, so finish the job by hand:
+
+```bash
+sudo apt-get install -y tailscale
+```
+
+Then clean the broken entries out of `/etc/apt/sources.list.d/` at your leisure, or the next apt-repo installer fails the same way.
+
 ### 2. Start `tailscaled` — there is no systemd here
 
 The Debian/Ubuntu package ships exactly one supervision file, `/lib/systemd/system/tailscaled.service`, and it is inert on a distro whose PID 1 is `init(Ubuntu)` (`systemctl is-system-running` reports `offline`). The package ships **no** SysV init script, so `service tailscaled start` has nothing to run either. You start the daemon yourself:
@@ -121,7 +135,38 @@ The command **prints an authentication URL and waits.** There is no browser in t
 
 The same one-time tailnet requirement as the Mac path, and it is not optional: without it `tailscale serve --https=443` has no certificate to serve and the panel fails to enable mobile access. Enable **MagicDNS** and **HTTPS Certificates** at [https://login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns) — see [Tailscale admin configuration](#tailscale-admin-configuration-one-time-critical). If you already did this for a Mac or another host, it is a tailnet-wide setting and is already done.
 
-### 5. Keep `tailscaled` running across `wsl --shutdown`
+### 5. Check the distro's `eth0` MTU
+
+Do this before you conclude anything is wrong with certificates or DNS — a too-small `eth0` breaks `tailscale serve` in a way that looks like everything *except* an MTU problem.
+
+```bash
+ip -o link show eth0 | awk '{print $5}'
+```
+
+If that prints anything below ~1400, raise it:
+
+```bash
+sudo ip link set dev eth0 mtu 1500
+```
+
+Why it matters: Tailscale negotiates a path MTU with each peer (commonly `1360`, visible as `mtu=` in `grep 'now using' /var/log/tailscaled.log`). If `eth0` cannot carry that, every WireGuard packet above its limit is dropped **silently** — no error, no ICMP that anything acts on. Small packets sail through, so the node looks perfectly healthy:
+
+- `tailscale status` shows the node online, `tailscale ping` to a nearby peer answers in single-digit ms
+- MagicDNS resolves, the hostname pings fine
+- but **`tailscale serve` HTTPS never loads from any client**, because the multi-KB ServerHello and Let's Encrypt chain exceed the limit. The daemon logs `http: TLS handshake error from <peer>: EOF` while the browser reports a plain timeout.
+
+Confirm it with a do-not-fragment ping from another machine on the tailnet — find the size where it flips:
+
+```powershell
+ping -f -l 1000 <tailnet-ip>    # succeeds
+ping -f -l 1200 <tailnet-ip>    # "Packet needs to be fragmented" or silence
+```
+
+Seen in the wild on a distro whose `eth0` came up at `1280` while the Windows `vEthernet (WSL)` side was `1500`. That is not a WSL default and the cause was never identified, so treat it as something to *check*, not something that cannot happen to you. Lowering the MTU on a *client* works around it for that one client — useless for a phone, whose MTU you cannot set — so fix `eth0`, which fixes every client at once.
+
+The setting does not survive a VM restart. Pin it in the boot hook below, ahead of everything else.
+
+### 6. Keep `tailscaled` running across `wsl --shutdown`
 
 The daemon you started in step 2 dies with the VM. Nothing in the distro brings it back, so chain it onto WSL's boot hook.
 
@@ -129,12 +174,13 @@ The daemon you started in step 2 dies with the VM. Nothing in the distro brings 
 
 ```ini
 [boot]
-command = /bin/sh -c "/etc/init.d/ssh start; /usr/sbin/tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock >>/var/log/tailscaled.log 2>&1 &"
+command = /bin/sh -c "ip link set dev eth0 mtu 1500; /etc/init.d/ssh start; /usr/sbin/tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock >>/var/log/tailscaled.log 2>&1 &"
 ```
 
 Notes on that line:
 
 - It must stay a **single** line. `[boot] command` takes one command; `/bin/sh -c "…; …"` is how you get two.
+- The MTU line comes first and is only needed if [step 5](#5-check-the-distros-eth0-mtu) found a small `eth0`; drop it otherwise.
 - Keep the existing command first, verbatim. `/etc/init.d/ssh start` is an example — copy whatever your own file has rather than this one.
 - The trailing `&` is required. The boot command runs synchronously as root during startup; an un-backgrounded `tailscaled` would sit there and hold the distro's boot open.
 - `>>` appends, so restarts accumulate in one log instead of truncating the previous boot's evidence.
@@ -255,6 +301,34 @@ tailscale serve status
 ```
 
 If not, the panel didn't successfully register serve. Disable and re-enable from the modal.
+
+If `serve` *is* configured and the daemon logs `http: TLS handshake error from <peer>: EOF` while the client just times out, the proxy is fine and the packets are being dropped for size — see [the `eth0` MTU](#5-check-the-distros-eth0-mtu).
+
+### `DNS_PROBE_FINISHED_NXDOMAIN` on a Windows client
+
+The Windows machine is on the tailnet but has **"Use Tailscale DNS settings" off**, so it resolves through your router, which knows nothing about `*.ts.net`. Check and fix:
+
+```powershell
+tailscale debug prefs        # look for "CorpDNS": false
+tailscale set --accept-dns=true
+ipconfig /flushdns
+```
+
+This routes Windows DNS through Tailscale's `100.100.100.100`, which forwards non-tailnet domains to your existing servers. Hosts-file entries are unaffected — Windows consults them before any resolver — so local development names pinned there keep working.
+
+### Do not diagnose tailnet DNS with `nslookup`
+
+`nslookup` talks to a DNS server directly and **ignores Windows' NRPT rules**, which are exactly the mechanism Tailscale uses to route `*.ts.net` to its own resolver. So it reports `Non-existent domain` for a name the rest of the system resolves perfectly, and sends you chasing a DNS fault that is not there.
+
+Use something that goes through the Windows resolver:
+
+```powershell
+ping <host>.<tailnet>.ts.net           # resolves via the DNS Client service
+Resolve-DnsName <host>.<tailnet>.ts.net
+Get-DnsClientNrptPolicy | Select-Object -ExpandProperty Namespace   # should list .ts.net
+```
+
+If `ping` resolves the name but the page still will not load, the DNS layer is fine — look at [the `eth0` MTU](#5-check-the-distros-eth0-mtu).
 
 ### HTTPS cert takes ~30s on first enable
 
