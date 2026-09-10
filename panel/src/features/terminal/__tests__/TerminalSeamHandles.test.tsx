@@ -215,6 +215,58 @@ describe("TerminalSeamHandles", () => {
     expect(onResize).not.toHaveBeenCalled();
   });
 
+  it("the handle layer lets pointer traffic through to the grid beneath", () => {
+    const { container } = setup(SPLIT);
+
+    // The layer is `absolute inset-0`, so it covers every cell in the grid. It must
+    // therefore take no pointer events of its own: without `pointer-events-none`
+    // here the whole grid stops being clickable, and the strips are the only thing
+    // that should be hittable. jsdom runs no Tailwind and does no hit testing, so
+    // the contract is pinned on the class list rather than on a synthetic click.
+    const layer = container.firstElementChild as HTMLElement;
+    const classes = layer.className.split(" ");
+    expect(classes).toContain("absolute");
+    expect(classes).toContain("inset-0");
+    expect(classes).toContain("pointer-events-none");
+
+    // ...and the strips re-enable it, or there would be no gesture at all.
+    for (const handle of handles(container)) {
+      expect(handle.className.split(" ")).toContain("pointer-events-auto");
+    }
+  });
+
+  it("a jiggle inside one zone persists nothing", () => {
+    const { onDraft, onResize } = grabSplitSeam();
+
+    // 3px on a 10px zone rounds to a zero-zone move, so the boundary never went
+    // anywhere. The draft falls back to the snapshot to hold the boundary still,
+    // and releasing must not write that snapshot back: doing so materialises a
+    // custom layout for the scope and stops the per-count default re-applying.
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: 243, clientY: 240 });
+
+    const draft = lastDraft(onDraft) as TileLayout;
+    expect(tile(draft, "a")).toMatchObject({ x: 0, w: 24 });
+
+    fireEvent.pointerUp(window, { pointerId: 3, clientX: 243, clientY: 240 });
+
+    expect(onResize).not.toHaveBeenCalled();
+  });
+
+  it("unmounting mid-drag clears the draft", () => {
+    const { onDraft, onResize, unmount } = grabSplitSeam();
+
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: 340, clientY: 240 });
+    expect(lastDraft(onDraft)).not.toBeNull();
+
+    // The handles go away for reasons other than release — the session count drops
+    // to 1, a terminal is maximized — and the draft lives in the grid above them.
+    // Leaving it behind renders a tiling nobody committed.
+    unmount();
+
+    expect(lastDraft(onDraft)).toBeNull();
+    expect(onResize).not.toHaveBeenCalled();
+  });
+
   it("a single-tile layout renders no handles", () => {
     const { container } = setup(SINGLE);
 

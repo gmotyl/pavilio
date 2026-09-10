@@ -66,6 +66,21 @@ export function TerminalSeamHandles({
   const draftRef = useRef<TileLayout | null>(null);
   const [dragging, setDragging] = useState(false);
 
+  // Read through a ref so the cleanup below fires on unmount and on nothing else.
+  const onDraftRef = useRef(onDraft);
+  onDraftRef.current = onDraft;
+
+  // The draft is rendered by the grid above us, so it must not outlive us. Release,
+  // Escape and pointercancel all abandon explicitly, but the handles can also just
+  // go away mid-drag — the session count drops to 1, or a terminal is maximized —
+  // and without this the grid would keep painting a tiling nobody committed.
+  useEffect(
+    () => () => {
+      if (draftRef.current) onDraftRef.current(null);
+    },
+    [],
+  );
+
   // Abandon: the draft is dropped and the grid falls back to the committed layout.
   const abandon = useCallback(() => {
     dragRef.current = null;
@@ -96,9 +111,15 @@ export function TerminalSeamHandles({
     };
 
     const up = () => {
+      const drag = dragRef.current;
       const draft = draftRef.current;
-      // One gesture, one write: a press that never moved persists nothing.
-      if (draft) onResize(draft);
+      // One gesture, one write, and only when the boundary actually moved: a press
+      // that never moved persists nothing, and neither does a jiggle inside one
+      // zone. There the delta rounds to 0, `resizeSeam` declines, and the draft is
+      // the snapshot itself — committing that would mint a custom layout for the
+      // scope out of a click, and a scope with one stops taking the per-count
+      // default.
+      if (draft && draft !== drag?.snapshot) onResize(draft);
       abandon();
     };
 

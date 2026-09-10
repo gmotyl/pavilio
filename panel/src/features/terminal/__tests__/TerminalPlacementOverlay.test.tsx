@@ -55,7 +55,7 @@ describe("TerminalPlacementOverlay", () => {
 
   it("paints nothing until a gesture begins", () => {
     const { handle } = renderOverlay("a", false);
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
     expect(screen.queryByTestId("placement-region")).toBeNull();
     expect(screen.queryByTestId("placement-preview-a")).toBeNull();
   });
@@ -64,7 +64,7 @@ describe("TerminalPlacementOverlay", () => {
     const { handle } = renderOverlay("a");
 
     // Pointer at zone 39,15 — the area anchored on a and stretched to it spans x 0..39.
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
 
     expect(regionAim()).toBe("0,0,40,48");
     expect(regionOf("a")).toBe("0,0,40,48");
@@ -78,7 +78,7 @@ describe("TerminalPlacementOverlay", () => {
 
     // The area is anchored on the whole tile, not on a corner: grabbing the header and
     // wobbling inside your own window must not shave it into a strip.
-    act(() => handle.current!.over(265, 25));
+    act(() => handle.current!.over(265, 25, "grow"));
 
     expect(regionAim()).toBe("24,0,24,24");
   });
@@ -93,7 +93,7 @@ describe("TerminalPlacementOverlay", () => {
     ];
     const { handle } = renderOverlay("a", true, rows);
 
-    act(() => handle.current!.over(475, 155)); // zone 47,15 — far right of the top band
+    act(() => handle.current!.over(475, 155, "grow")); // zone 47,15 — far right of the top band
 
     expect(regionAim()).toBe("0,0,48,16");
     expect(regionOf("a")).toBe("0,0,48,16");
@@ -102,7 +102,7 @@ describe("TerminalPlacementOverlay", () => {
   it("refuses a region that leaves the others nowhere to go", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(475, 475)); // the whole grid
+    act(() => handle.current!.over(475, 475, "grow")); // the whole grid
 
     expect(regionAim()).toBe("0,0,48,48");
     // Painted as refused: the aim is drawn, the result is not.
@@ -174,7 +174,7 @@ describe("TerminalPlacementOverlay", () => {
   it("shows a legend of the modifiers, flagging the live one", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
     expect(screen.getByTestId("placement-legend")).toBeTruthy();
     expect(screen.getByTestId("placement-legend-grow").getAttribute("data-active")).toBe(
       "true",
@@ -197,7 +197,7 @@ describe("TerminalPlacementOverlay", () => {
   it("the legend lists the unmodified gesture first", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
     const legend = screen.getByTestId("placement-legend");
 
     // Reading order follows how often the gesture is reached for: the unmodified
@@ -216,20 +216,20 @@ describe("TerminalPlacementOverlay", () => {
 
   it("hides the legend once the gesture ends", () => {
     const { handle } = renderOverlay("a");
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
     act(() => handle.current!.end());
     expect(screen.queryByTestId("placement-legend")).toBeNull();
   });
 
   it("draws the zone grid while a gesture is running", () => {
     const { handle } = renderOverlay("a");
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
     expect(screen.getByTestId("placement-zone-grid")).toBeTruthy();
   });
 
   it("the zone substrate draws one line every four zones", () => {
     const { handle } = renderOverlay("a");
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
 
     // A line per zone would be 48 of them on each axis — a haze, not a substrate.
     // The stride keeps the spacing the eye already knows from the 12-zone matrix.
@@ -242,7 +242,7 @@ describe("TerminalPlacementOverlay", () => {
   it("returns the painted layout from release and disarms", () => {
     const { handle } = renderOverlay("a");
 
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
     let committed: TileLayout | null = null;
     act(() => {
       committed = handle.current!.release();
@@ -267,7 +267,7 @@ describe("TerminalPlacementOverlay", () => {
   it("cancels on Escape leaving nothing painted", () => {
     const { handle, onCancel } = renderOverlay("a");
 
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
     expect(screen.queryByTestId("placement-region")).not.toBeNull();
 
     fireEvent.keyDown(window, { key: "Escape" });
@@ -297,7 +297,7 @@ describe("TerminalPlacementOverlay", () => {
     } as DOMRect);
 
     act(() => handle.current!.begin("a"));
-    act(() => handle.current!.over(395, 155));
+    act(() => handle.current!.over(395, 155, "grow"));
 
     expect(screen.getByText("session-a")).toBeTruthy();
   });

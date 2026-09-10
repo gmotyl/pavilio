@@ -51,11 +51,12 @@ export interface PlacementOverlayHandle {
    * - `grow` (Shift) stretches an area from the dragged window to the pointer;
    * - `swap` (Ctrl) exchanges it with the window under the pointer, as the grid always did.
    *
-   * Which modifier selects which mode is the grid's business, not the overlay's: it
-   * always passes the mode explicitly, and the `grow` default only serves a caller
-   * that drives the overlay directly.
+   * Which modifier selects which mode is the grid's business, not the overlay's, and
+   * every caller says which one it means. The parameter is required on purpose: it
+   * used to default to `grow`, which silently became the WRONG gesture the day the
+   * plain drag stopped being a grow, and nothing pointed that out.
    */
-  over: (clientX: number, clientY: number, mode?: PlacementMode) => void;
+  over: (clientX: number, clientY: number, mode: PlacementMode) => void;
   /** Disarm and return the layout that was painted, if any. */
   release: () => TileLayout | null;
   end: () => void;
@@ -228,7 +229,7 @@ export const TerminalPlacementOverlay = forwardRef<PlacementOverlayHandle, Props
   }, [end, onCancel]);
 
   const over = useCallback(
-    (clientX: number, clientY: number, mode: PlacementMode = "grow") => {
+    (clientX: number, clientY: number, mode: PlacementMode) => {
       const draggedId = draggedRef.current;
       if (!draggedId) return;
 
