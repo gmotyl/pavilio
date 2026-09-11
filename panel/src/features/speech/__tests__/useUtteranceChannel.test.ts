@@ -398,4 +398,29 @@ describe("useUtteranceChannel", () => {
     expect(result.current.stateFor("cell-a")).toBe("heard");
     expect(result.current.stateFor("cell-b")).toBe("unheard");
   });
+
+  it("lists every speakable utterance, from both arrival paths", async () => {
+    // This is what the host warms from, so both paths have to land in it — a
+    // list carrying only live frames would leave a hydrated tab's control lit
+    // and cold. A session whose arrival had nothing to say is not in it: there
+    // is no unit 0 to warm.
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result, rerender } = await renderChannel();
+
+    await waitFor(() => expect(result.current.speakableUtterances).toHaveLength(1));
+
+    lastMessage = frame(utterance("cell-b", "b1"));
+    await act(async () => {
+      rerender();
+    });
+    lastMessage = frame(codeOnly("cell-c", "c1"));
+    await act(async () => {
+      rerender();
+    });
+
+    expect(result.current.speakableUtterances).toEqual([
+      utterance("cell-a", "a1"),
+      utterance("cell-b", "b1"),
+    ]);
+  });
 });

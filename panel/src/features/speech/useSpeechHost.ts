@@ -14,6 +14,11 @@
  * channel on every render, and calls `markHeard` itself. That is the whole
  * reason this file exists.
  *
+ * It is also where **warming** lives, for the same reason: warming needs the
+ * channel's arrivals and the player's voice and cache, and neither of those two
+ * may reach across to the other. The channel stays pure text work; this module
+ * reads `speakableUtterances` and fills the synthesis cache.
+ *
  * ## Why a run object rather than `await play(); markHeard()`
  *
  * `useSpeechPlayer.play()` resolves the same way for four different endings —
@@ -38,9 +43,11 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { toast } from "../../lib/toast";
 import { closingMarkerUnit, prepare } from "./prepare";
+import { prefetchSpeech } from "./synth";
 import type { GridSpeech, PreparedSpeech, Utterance } from "./types";
 import { useSpeechPlayer, type SpeechPlaybackError } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
+import { getStoredVoice } from "./voices";
 
 /**
  * How a playback ended. `"pending"` until something ends it early.
@@ -79,6 +86,8 @@ export function useSpeechHost(): GridSpeech {
   const preparedRef = useRef<Map<string, PreparedSpeech>>(new Map());
   /** The last utterance the armed cell autoplayed, so none is played twice. */
   const autoplayedRef = useRef<string | null>(null);
+  /** Utterance ids whose first unit has been warmed, so none is warmed twice. */
+  const warmedRef = useRef<Set<string>>(new Set());
 
   const onError = useCallback((error: SpeechPlaybackError): void => {
     // A refusal is NOT a natural end: the cell falls back to `unheard`. This
@@ -113,7 +122,15 @@ export function useSpeechHost(): GridSpeech {
   // speaking has to be handed to it on every render. Forgetting this deletes
   // the `speaking` state from the grid.
   const channel = useUtteranceChannel({ speakingSessionId: player.speakingSessionId });
-  const { armedSessionId, languageFor, markHeard, setArmed, stateFor, utteranceFor } = channel;
+  const {
+    armedSessionId,
+    languageFor,
+    markHeard,
+    setArmed,
+    speakableUtterances,
+    stateFor,
+    utteranceFor,
+  } = channel;
 
   const preparedFor = useCallback(
     (utterance: Utterance, language: "pl" | "en"): PreparedSpeech => {
@@ -126,6 +143,38 @@ export function useSpeechHost(): GridSpeech {
     },
     [],
   );
+
+  useEffect(() => {
+    // A lit control has to be ready to speak. Without this the first click pays
+    // for the dynamic `import("edge-tts-universal/browser")`, a DRM token and a
+    // fresh WebSocket handshake — seconds of nothing, which reads as a dead
+    // button. So unit 0 is synthesized the moment an utterance arrives.
+    //
+    // EVERY session is warmed, not only the armed one (Greg: "arm all, I will
+    // use TTS most of the time"). The cost is one small synthesis per arriving
+    // response, bounded by the number of terminals, and unit 0 is deliberately
+    // the response's heading or first sentence.
+    //
+    // Warming is silent and invisible: `prefetchSpeech` fills the synthesis
+    // cache and touches neither the player nor the channel, so a warmed cell
+    // that is not armed still makes no sound, and no control state moves. The
+    // only thing it changes is that the click that follows finds its audio.
+    for (const utterance of speakableUtterances) {
+      if (warmedRef.current.has(utterance.id)) continue;
+      // Marked before the synthesis, not after: a second render must not start
+      // a second warm of the same utterance while the first is in flight.
+      warmedRef.current.add(utterance.id);
+
+      const first = preparedFor(utterance, languageFor(utterance.sessionId)).units[0];
+      if (!first) continue;
+      // The voice the click will use, from the same source `useSpeechPlayer`
+      // reads. The cache keys on voice + text, so warming with any other voice
+      // would be a synthesis nobody ever plays.
+      prefetchSpeech(first.text, { voice: getStoredVoice() });
+    }
+    // `prefetchSpeech` swallows its own failures, so a warm that fails changes
+    // nothing here: the cell keeps its state and the click resynthesizes.
+  }, [languageFor, preparedFor, speakableUtterances]);
 
   const speakFrom = useCallback(
     (sessionId: string, fromUnit: number): void => {

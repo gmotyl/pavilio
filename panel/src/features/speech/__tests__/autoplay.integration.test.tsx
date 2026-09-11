@@ -19,12 +19,21 @@ import { MemoryRouter } from "react-router-dom";
  * Deferred synthesis, copied in spirit from `useSpeechPlayer.test.ts`: the real
  * vendored edge-tts client must never be opened, and every assertion about
  * "what spoke" is really an assertion about which unit texts were synthesized.
+ *
+ * It keeps the real module's **cache** as well, keyed on voice + text exactly
+ * as `synth.ts` keys it, and records a request only on a miss. Warming is worth
+ * nothing unless the click that follows hits that cache, and a stub that
+ * re-synthesized on every call — or a no-op `prefetchSpeech` — would report a
+ * warmed panel as green while every click still paid for a fresh synthesis.
  */
 const synth = vi.hoisted(() => {
   const buffers = new Map<string, ArrayBuffer>();
   const bufferText = new Map<ArrayBuffer, string>();
   const blobText = new Map<Blob, string>();
+  const cache = new Map<string, Promise<ArrayBuffer>>();
   let requests: string[] = [];
+  /** The voice each request carried, in the same order. */
+  let requestVoices: (string | undefined)[] = [];
   /** A synthesizer that is simply down, for the three-consecutive-failures rule. */
   let failing = false;
   /** A synthesizer that goes down partway: the first `n` requests succeed. */
@@ -39,14 +48,31 @@ const synth = vi.hoisted(() => {
     return buffer;
   }
 
-  return {
-    synthesizeSpeech: async (text: string): Promise<ArrayBuffer> => {
-      requests.push(text);
+  function synthesizeSpeech(text: string, options: { voice?: string } = {}): Promise<ArrayBuffer> {
+    const key = `${options.voice ?? ""}::${text}`;
+    const cached = cache.get(key);
+    if (cached) return cached;
+
+    requests.push(text);
+    requestVoices.push(options.voice);
+    const promise = (async (): Promise<ArrayBuffer> => {
       if (failing || requests.length > healthyRequests) {
         throw new Error("the synthesizer is down");
       }
       return bufferFor(text);
-    },
+    })();
+
+    cache.set(key, promise);
+    // Never cache a failure, as the real module does not: a retry must be able
+    // to reach the synthesizer again.
+    void promise.catch(() => {
+      if (cache.get(key) === promise) cache.delete(key);
+    });
+    return promise;
+  }
+
+  return {
+    synthesizeSpeech,
     setFailing: (value: boolean): void => {
       failing = value;
     },
@@ -54,7 +80,10 @@ const synth = vi.hoisted(() => {
     setHealthyRequests: (count: number): void => {
       healthyRequests = count;
     },
-    prefetchSpeech: (): void => {},
+    /** Exactly what the real one is: a fire-and-forget `synthesizeSpeech`. */
+    prefetchSpeech: (text: string, options: { voice?: string } = {}): void => {
+      void synthesizeSpeech(text, options).catch(() => {});
+    },
     toSpeechBlob: (buffer: ArrayBuffer): Blob => {
       const blob = new Blob([buffer], { type: "audio/mpeg" });
       blobText.set(blob, bufferText.get(buffer) ?? "unknown");
@@ -64,8 +93,13 @@ const synth = vi.hoisted(() => {
     get requests() {
       return requests;
     },
+    get requestVoices() {
+      return requestVoices;
+    },
     reset: () => {
       requests = [];
+      requestVoices = [];
+      cache.clear();
       failing = false;
       healthyRequests = Number.POSITIVE_INFINITY;
     },
@@ -256,7 +290,7 @@ import TerminalsPage from "../../../pages/TerminalsPage";
 import { SpeechHostProvider } from "../SpeechHostProvider";
 import { dismissToast, getToastSnapshot } from "../../../lib/toast";
 import { prepare } from "../prepare";
-import { setStoredArmedSession } from "../voices";
+import { SPEECH_VOICE_STORAGE_KEY, setStoredArmedSession } from "../voices";
 
 /** Every `<audio>` element the panel drove — criterion 7 is that there is one. */
 const elements: HTMLMediaElement[] = [];
@@ -444,6 +478,9 @@ beforeAll(() => {
 
 beforeEach(() => {
   synth.reset();
+  // The picked voice is a per-browser preference in localStorage, so one test's
+  // choice would otherwise still be in force in the next.
+  localStorage.removeItem(SPEECH_VOICE_STORAGE_KEY);
   hosts.reset();
   // The toast store is a module singleton, so a toast raised by one test would
   // otherwise still be standing in the next one.
@@ -495,14 +532,17 @@ describe("autoplay — the armed cell", () => {
     expect(speakState("cell-a")).toBe("speaking");
   });
 
-  it("an unarmed cell only pulses", async () => {
+  it("an unarmed cell is warmed but silent", async () => {
     await renderProjectSurface();
     await arm("cell-a");
 
     await emitUtterance("cell-b", "b1", "Nobody armed this cell.");
 
+    // Warming is not a quiet autoplay: the first unit is synthesized so the
+    // click is instant, and NOTHING is handed to the audio element. A warm that
+    // could make a sound would be far worse than a slow click.
+    expect(synth.requests).toEqual(["Nobody armed this cell."]);
     expect(played).toEqual([]);
-    expect(synth.requests).toEqual([]);
     expect(speakState("cell-b")).toBe("unheard");
     // The pulse is the whole notification: same attribute the activity LED uses.
     expect(
@@ -541,7 +581,13 @@ describe("autoplay — the armed cell", () => {
     await emitUtterance("cell-b", "b1", "Answer from B.");
     await emitUtterance("cell-c", "c1", "Answer from C.");
 
-    expect(synth.requests).toEqual(["Answer from B."]);
+    // Every cell is warmed — the decision is that a lit control anywhere is
+    // ready, not only the armed one — but only the armed cell's audio is
+    // handed to the element.
+    expect(new Set(synth.requests)).toEqual(
+      new Set(["Answer from A.", "Answer from B.", "Answer from C."]),
+    );
+    expect(played).toEqual(["blob:Answer from B."]);
     expect(speakState("cell-a")).toBe("unheard");
     expect(speakState("cell-b")).toBe("speaking");
     expect(speakState("cell-c")).toBe("unheard");
@@ -626,17 +672,22 @@ describe("autoplay — refusal and the budget", () => {
     // failure. Without a handler for `kind: "synthesis"` the stop reaches
     // neither the user nor the console — a present handler suppresses the
     // player's own `console.error` fallback.
+    const markdown = longResponse();
+    const prepared = prepare(markdown);
     synth.setFailing(true);
 
     await renderProjectSurface();
     await arm("cell-a");
-    await emitUtterance("cell-a", "a1", longResponse());
+    await emitUtterance("cell-a", "a1", markdown);
 
     await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
     expect(getToastSnapshot()?.text).toMatch(/speech/i);
-    // Consecutive is the point: the run stops at the third failure rather than
-    // hammering the synthesizer unit after unit.
-    expect(synth.requests).toHaveLength(3);
+    // Consecutive is the point: the run gives up inside the first few units —
+    // the three it tried to play, plus the one the ladder had warmed ahead of
+    // them — rather than hammering the synthesizer through all twelve.
+    expect(new Set(synth.requests)).toEqual(
+      new Set(prepared.units.slice(0, 4).map((unit) => unit.text)),
+    );
     expect(played).toEqual([]);
   });
 
@@ -717,11 +768,16 @@ describe("autoplay — refusal and the budget", () => {
     // Every budgeted unit, and then the marker. The marker is an addition to
     // the spoken sequence, never one of the budgeted units — it displaces none
     // of them, which is what the slice below pins.
+    //
+    // Compared as a set: the warm and the prefetch ladder both run ahead of
+    // the unit that is playing, so the request ORDER interleaves — what is
+    // pinned here is that each budgeted unit was synthesized exactly once and
+    // nothing past the cut was.
     expect(synth.requests).toHaveLength(prepared.spokenUnits + 1);
-    expect(synth.requests.slice(0, prepared.spokenUnits)).toEqual(
-      prepared.units.slice(0, prepared.spokenUnits).map((unit) => unit.text),
+    expect(new Set(synth.requests.slice(0, prepared.spokenUnits))).toEqual(
+      new Set(prepared.units.slice(0, prepared.spokenUnits).map((unit) => unit.text)),
     );
-    expect(synth.requests[prepared.spokenUnits]).toBe(
+    expect(synth.requests[synth.requests.length - 1]).toBe(
       `End of the excerpt. Remaining paragraphs: ${prepared.remainderParagraphs}.`,
     );
 
@@ -910,7 +966,116 @@ describe("one speech host for the panel, not one per surface", () => {
     // No gesture has reached the `<audio>` element, so this must be absorbed:
     // a page that starts talking by itself is what the lock gate prevents.
     expect(played).toEqual([]);
-    expect(synth.requests).toEqual([]);
     expect(speakState("cell-a")).toBe("unheard");
+    // Warmed all the same — hydration is an arrival, so the control the tab
+    // comes up with is as ready as one that lit while the tab was watching.
+    expect(synth.requests).toEqual(["Said while the tab was away."]);
+  });
+});
+
+/**
+ * "A lit control is ready to speak": the glow used to mean only that an
+ * utterance had arrived, and the first click then paid for the dynamic
+ * `edge-tts-universal/browser` import, a DRM token and a WebSocket handshake —
+ * seconds of silence that read as a dead button. Unit 0 is warmed on arrival
+ * instead, and these pin both halves: that the click is instant, and that
+ * warming never becomes a quiet autoplay.
+ */
+describe("warming the first unit on arrival", () => {
+  it("warms unit 0 only, and the click plays it without re-synthesizing", async () => {
+    const markdown = shortResponse(4);
+    const prepared = prepare(markdown);
+    expect(prepared.units).toHaveLength(4);
+
+    await renderProjectSurface();
+    // cell-b is not armed: warming is not autoplay's back door.
+    await emitUtterance("cell-b", "b1", markdown);
+
+    // Unit 0 and no further: units 2..n stay unsynthesized until playback
+    // reaches them, so the eager cost is one small unit per response.
+    expect(synth.requests).toEqual([prepared.units[0].text]);
+    expect(played).toEqual([]);
+
+    await click("terminal-cell-speak-cell-b");
+
+    // The click played unit 0 out of the cache: not one additional request for
+    // it, which is the whole promise the lit control makes. A warm that used a
+    // different voice, or a click that prepared different text, would show up
+    // here as a second request for the same words.
+    expect(played).toEqual([`blob:${prepared.units[0].text}`]);
+    expect(synth.requests.filter((text) => text === prepared.units[0].text)).toHaveLength(1);
+  });
+
+  it("warms with the voice the click will use", async () => {
+    // The cache keys on voice + text. Warming with the module's own default —
+    // or with anything but the stored voice — is a synthesis nobody plays and
+    // a click that still waits, with every state looking exactly right.
+    localStorage.setItem(SPEECH_VOICE_STORAGE_KEY, "en-US-EmmaMultilingualNeural");
+
+    await renderProjectSurface();
+    await emitUtterance("cell-b", "b1", "The picked voice warms it.");
+
+    expect(synth.requests).toEqual(["The picked voice warms it."]);
+    expect(synth.requestVoices).toEqual(["en-US-EmmaMultilingualNeural"]);
+
+    await click("terminal-cell-speak-cell-b");
+
+    expect(played).toEqual(["blob:The picked voice warms it."]);
+    expect(synth.requests).toEqual(["The picked voice warms it."]);
+  });
+
+  it("a warmed cell that is not armed stays silent", async () => {
+    await renderProjectSurface();
+    // cell-a is the armed one; the utterances arrive for the other two.
+    await arm("cell-a");
+
+    await emitUtterance("cell-b", "b1", "Warmed and waiting.");
+    await emitUtterance("cell-c", "c1", "Warmed and waiting too.");
+
+    // Both warmed, neither spoken: the audio element was never handed a source
+    // and no cell moved to `speaking`.
+    expect(new Set(synth.requests)).toEqual(
+      new Set(["Warmed and waiting.", "Warmed and waiting too."]),
+    );
+    expect(played).toEqual([]);
+    expect(elements).toEqual([]);
+    expect(speakState("cell-b")).toBe("unheard");
+    expect(speakState("cell-c")).toBe("unheard");
+  });
+
+  it("a failed warm changes nothing", async () => {
+    synth.setFailing(true);
+
+    await renderProjectSurface();
+    await emitUtterance("cell-b", "b1", "The synthesizer is down while this arrives.");
+
+    // The warm rejected inside `prefetchSpeech`, which swallows it: no toast,
+    // no state change, and the cell is still the click's to retry.
+    expect(synth.requests).toEqual(["The synthesizer is down while this arrives."]);
+    expect(getToastSnapshot()).toBeNull();
+    expect(played).toEqual([]);
+    expect(speakState("cell-b")).toBe("unheard");
+  });
+
+  it("warms each arriving utterance once", async () => {
+    await renderProjectSurface();
+
+    await emitUtterance("cell-b", "b1", "First answer.");
+    // A re-delivered frame — a reconnect replay — is not news, so it must not
+    // buy a second synthesis.
+    await emitUtterance("cell-b", "b1", "First answer.");
+    await emitUtterance("cell-b", "b2", "Second answer, same cell.");
+
+    expect(synth.requests).toEqual(["First answer.", "Second answer, same cell."]);
+    expect(played).toEqual([]);
+  });
+
+  it("a response with nothing to say is not warmed", async () => {
+    await renderProjectSurface();
+
+    await emitUtterance("cell-b", "b1", "```ts\nconst x = 1;\n```\n");
+
+    expect(synth.requests).toEqual([]);
+    expect(speakState("cell-b")).toBe("empty");
   });
 });

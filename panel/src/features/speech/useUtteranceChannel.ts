@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { prepare } from "./prepare";
 import {
@@ -103,6 +103,15 @@ export interface Channel {
    * one response: it is the tally every utterance so far has voted into.
    */
   languageFor(sessionId: string): "pl" | "en";
+  /**
+   * Every session's current speakable utterance, armed or not. It is how the
+   * host learns that something ARRIVED — `utteranceFor` answers only about a
+   * session the caller already knows to ask about, and warming has to react to
+   * the arrival itself. The identity changes only when the set does, so an
+   * effect keyed on it runs once per arrival rather than once per render, and
+   * both arrival paths — a live frame and `/latest` hydration — land in it.
+   */
+  speakableUtterances: Utterance[];
   armedSessionId: string | null;
   /** Exclusive: arming a session disarms whichever was armed. `null` disarms. */
   setArmed(sessionId: string | null): void;
@@ -231,6 +240,14 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
     [sessions],
   );
 
+  const speakableUtterances = useMemo(
+    () =>
+      [...sessions.values()]
+        .map((record) => record.utterance)
+        .filter((utterance): utterance is Utterance => utterance !== null),
+    [sessions],
+  );
+
   const markHeard = useCallback((sessionId: string) => {
     setSessions((current) => {
       const existing = current.get(sessionId);
@@ -248,5 +265,13 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
     setArmedSessionId(setStoredArmedSession(sessionId));
   }, []);
 
-  return { stateFor, utteranceFor, languageFor, armedSessionId, setArmed, markHeard };
+  return {
+    stateFor,
+    utteranceFor,
+    languageFor,
+    speakableUtterances,
+    armedSessionId,
+    setArmed,
+    markHeard,
+  };
 }
