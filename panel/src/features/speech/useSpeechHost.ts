@@ -220,11 +220,6 @@ export function useSpeechHost(): SpeechHost {
     // control that might still be synthesizing is exactly the ambiguity the
     // red state exists to remove.
     for (const utterance of speakableUtterances) {
-      if (warmedRef.current.has(utterance.id)) continue;
-      // Marked before the synthesis, not after: a second render must not start
-      // a second warm of the same utterance while the first is in flight.
-      warmedRef.current.add(utterance.id);
-
       // A newer answer for a cell the user left PAUSED abandons the held run,
       // exactly as a barge-in abandons it in `speakFrom`. Without this the run
       // stays `pending` — `onPause` stamps nothing, on purpose — so the player
@@ -232,11 +227,23 @@ export function useSpeechHost(): SpeechHost {
       // other state in the channel, and the control routes the next click to
       // `onResume`. The arriving answer is warmed and unreachable: the user has
       // to listen the stale one out to its end before the new one can be
-      // played at all. Stamped `superseded` *before* `stop()` resolves the
-      // pending `play`, so the abandoned run lands on `ready` rather than
-      // `heard`, and the session's resume point goes with it so the click that
-      // follows starts at unit 0 of the new utterance rather than jumping into
-      // the middle of the old text.
+      // played at all.
+      //
+      // Deliberately ABOVE the `warmedRef` short-circuit, and so re-evaluated
+      // on every run of this effect rather than once per utterance. The two
+      // halves of the situation arrive in either order — the answer can land
+      // while the cell is still speaking and the pause follow it, in which case
+      // the utterance is long since warmed by the time the condition first
+      // becomes true, and a check behind the `continue` would never look again.
+      // Re-evaluating is safe because the block is idempotent: `finish` nulls
+      // `runRef` when the stopped `play` settles, so a second pass has no held
+      // run to find. `player.pausedSessionId` is in the dependency list for
+      // exactly this — the pause is what re-runs the effect.
+      //
+      // The `utteranceId` guard is load-bearing HERE, not defence: the ordinary
+      // pause is a run paused on the utterance that is still the session's
+      // current one, and this effect re-runs the moment that pause is taken.
+      // Without the guard every pause would supersede itself.
       //
       // Paused ONLY. A run that is still speaking is one the user is listening
       // to right now, and cutting that off mid-sentence because the agent
@@ -247,10 +254,24 @@ export function useSpeechHost(): SpeechHost {
         held.utteranceId !== utterance.id &&
         player.pausedSessionId === utterance.sessionId
       ) {
+        // Stamped before `stop()` to read the same way `speakFrom`'s barge-in
+        // does — but the order is not what makes it work: `stop()` resolves the
+        // pending `play` on a microtask, so the synchronous stamp lands first
+        // either way. What it buys is the outcome: `superseded`, so the
+        // abandoned run lands on `ready` rather than `heard`.
         held.outcome = "superseded";
         player.stop();
+        // Belt and braces. `onSpeak` already discards a resume point whose
+        // `utteranceId` is not the session's current one, so the next click
+        // would start at unit 0 regardless; dropping it here keeps the map from
+        // carrying a point for a run nothing can ever continue.
         resumeRef.current.delete(utterance.sessionId);
       }
+
+      if (warmedRef.current.has(utterance.id)) continue;
+      // Marked before the synthesis, not after: a second render must not start
+      // a second warm of the same utterance while the first is in flight.
+      warmedRef.current.add(utterance.id);
 
       const first = preparedFor(utterance, languageFor(utterance.sessionId)).units[0];
       if (!first) continue;
@@ -281,10 +302,12 @@ export function useSpeechHost(): SpeechHost {
         });
     }
     // `player.pausedSessionId` and `player.stop` rather than `player`: the
-    // player's identity changes on every playback state change, and the whole
-    // effect is a no-op for an utterance already in `warmedRef`, so depending
-    // on the two members it actually reads keeps the re-runs cheap and their
-    // reason legible.
+    // player's identity changes on every playback state change, and all a
+    // re-run costs for an already-warmed utterance is the supersession test
+    // above, so depending on the two members it actually reads keeps the
+    // re-runs cheap and their reason legible. `pausedSessionId` in particular
+    // is not bookkeeping — it is the edge the supersession fires on when the
+    // answer arrived first and the pause came after.
   }, [
     languageFor,
     player.pausedSessionId,

@@ -524,6 +524,41 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
     expect(played).toEqual([`blob:${newer[0]}`]);
   });
 
+  /**
+   * The other ordering, and the one a supersession evaluated only on an
+   * utterance's FIRST sighting cannot serve: the newer answer lands while the
+   * cell is still SPEAKING — so it is warmed, recorded, and the arrival effect
+   * has already had its one look at it — and only THEN does the user pause. So
+   * the condition has to be re-evaluated when the pause itself re-runs the
+   * effect; behind the "already warmed" short-circuit the stale run is still
+   * sitting there holding the cell when the click arrives, which is exactly the
+   * hostage-taking the scenario forbids, reached the other way round.
+   */
+  it("a newer utterance that arrived while speaking still frees the cell once it is paused", async () => {
+    const stale = unitsOf(response(3));
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    // Part-way in, so a resumed stale run is audibly the wrong thing rather
+    // than coincidentally the newer utterance's first unit.
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
+
+    // The answer arrives BEFORE the pause, while the cell is still speaking —
+    // the arm this fix deliberately leaves alone.
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${newer[0]}`]);
+  });
+
   it("supersession does not disarm the armed cell", async () => {
     const newer = unitsOf(response(3, "Newer"));
     const { result } = renderHook(() => useSpeechHost());
@@ -576,5 +611,26 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
     expect(result.current.stateFor("cell-a")).toBe("ready");
     // Nothing has been clicked, so nothing may have made a sound.
     expect(played).toEqual([]);
+  });
+
+  /**
+   * Supersession is per SESSION, and the arrival effect walks every speakable
+   * utterance in the panel — so an answer for a different terminal iterates
+   * past the held run too. The session guard is the only thing keeping it off
+   * a pause the user is holding in another cell, and a panel with two busy
+   * terminals is the ordinary case rather than the exotic one.
+   */
+  it("a newer utterance for another cell leaves a paused cell paused", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    await emitUtterance("cell-b", "u-2", response(3, "Newer"));
+
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+    expect(result.current.stateFor("cell-b")).toBe("ready");
   });
 });
