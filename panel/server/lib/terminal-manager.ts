@@ -140,6 +140,11 @@ export function createSession(opts: {
       user: targetUser,
       cwd: spawnCwd,
       sessionId: id,
+      // `su -` resets the environment, so the `{ ...process.env }` below
+      // reaches every other terminal but not this one. `startPanel` puts the
+      // resolved panel URL here; the token is deliberately NOT carried this
+      // way (a `su -c` command line is world-readable in `ps aux`).
+      panelUrl: process.env.PAVILIO_PANEL_URL,
       notice: fallBackToHome
         ? `pavilio: ${targetUser.username} has no ~/git link yet, opening $HOME instead of the project directory (expected until that account is set up with the shared tree)`
         : undefined,

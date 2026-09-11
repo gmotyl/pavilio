@@ -83,4 +83,67 @@ describe("buildRunAsSpawnCommand", () => {
       ],
     });
   });
+
+  it("buildRunAsSpawnCommand injects the panel URL inline so su - cannot drop it", () => {
+    // `su -` resets the environment, so the `{ ...process.env }` handed to
+    // node-pty never reaches this session: without an inline assignment the
+    // speech hook falls back to its hard-coded default port, which is exactly
+    // the port a stale panel was holding when the real one moved up.
+    const result = buildRunAsSpawnCommand({
+      user,
+      cwd: "/home/greg-ip/git/prv/pavilio",
+      sessionId: "abc-123",
+      panelUrl: "http://127.0.0.1:3012",
+    });
+    expect(result.args[3]).toBe(
+      "cd '/home/greg-ip/git/prv/pavilio' && PAVILIO_TERMINAL_ID=abc-123 " +
+        "PAVILIO_PANEL_URL='http://127.0.0.1:3012' exec '/bin/zsh' -l",
+    );
+  });
+
+  it("buildRunAsSpawnCommand quotes the panel URL rather than splicing it raw", () => {
+    // The value arrives from this process's environment, so it is quoted the
+    // same way every other interpolation here is. Unquoted, a `;` would end
+    // the assignment and run whatever follows as the target user.
+    const result = buildRunAsSpawnCommand({
+      user,
+      cwd: "/home/greg-ip",
+      sessionId: "abc-123",
+      panelUrl: "http://127.0.0.1:3012'; touch /tmp/pwned; '",
+    });
+    const command = result.args[3];
+    expect(command).toContain(
+      `PAVILIO_PANEL_URL='http://127.0.0.1:3012'\\''; touch /tmp/pwned; '\\'''`,
+    );
+    expect(command).not.toContain("; touch /tmp/pwned; exec");
+  });
+
+  it("buildRunAsSpawnCommand omits the panel URL entirely when there is none", () => {
+    // No variable set (a panel that never resolved a port, or a unit test):
+    // leave the command exactly as it was so the hook keeps its own default
+    // rather than inheriting an empty, unusable URL.
+    const result = buildRunAsSpawnCommand({
+      user,
+      cwd: "/home/greg-ip",
+      sessionId: "abc-123",
+    });
+    expect(result.args[3]).not.toContain("PAVILIO_PANEL_URL");
+    expect(result.args[3]).toBe(
+      "cd '/home/greg-ip' && PAVILIO_TERMINAL_ID=abc-123 exec '/bin/zsh' -l",
+    );
+  });
+
+  it("buildRunAsSpawnCommand never puts PANEL_TOKEN into the su -c command", () => {
+    // A `su -c` command line is visible in `ps aux` to every account on the
+    // machine. The URL is not a secret and belongs there; the token is and
+    // does not — carrying it must use a mechanism that keeps it off the
+    // process list.
+    const result = buildRunAsSpawnCommand({
+      user,
+      cwd: "/home/greg-ip",
+      sessionId: "abc-123",
+      panelUrl: "http://127.0.0.1:3012",
+    });
+    expect(result.args.join(" ")).not.toContain("PANEL_TOKEN");
+  });
 });

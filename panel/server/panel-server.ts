@@ -87,6 +87,21 @@ export async function startPanel(
   if (port !== configuredPort) {
     console.log(`Port ${configuredPort} in use, using ${port} instead.`);
   }
+  const protocol = tlsCert && tlsKey ? "https" : "http";
+
+  // Publish the port the panel actually resolved to, so anything spawned by
+  // this process can reach it. `findFreePort` scans a 50-port span, so the
+  // configured port is a wish, not an address: a stale panel or an unrelated
+  // server holding it silently moves us elsewhere, and until this line the
+  // real port existed only in a console.log and an in-memory registration.
+  // The speech `Stop` hook reads exactly this variable (its own hard-coded
+  // default stays as the fallback), and `terminal-manager.ts` spawns PTYs
+  // with `{ ...process.env }`, so setting it here is all the plumbing a
+  // normal terminal needs. Deliberately before the first `app.use`: terminal
+  // sessions are only ever created by the `POST /api/terminal/sessions`
+  // handler, whose router is mounted below and which cannot be reached until
+  // `server.listen()` further down — so no PTY can exist without it.
+  process.env.PAVILIO_PANEL_URL = `${protocol}://127.0.0.1:${port}`;
 
   const app = express();
 
@@ -166,7 +181,6 @@ export async function startPanel(
   // request never pays the /etc/passwd read cost; listOsUsers() never throws.
   listOsUsers();
 
-  const protocol = tlsCert && tlsKey ? "https" : "http";
   server.listen(port, "127.0.0.1", () => {
     console.log(`Panel bound to ${protocol}://127.0.0.1:${port} (loopback only)`);
   });
