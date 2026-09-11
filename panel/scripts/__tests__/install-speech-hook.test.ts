@@ -21,6 +21,26 @@ const HOOK_MARKER = "panel/hooks/speak-response.mjs";
 // travel with the checkout instead of hard-coding one machine's path.
 const HOOK_PATH = resolve(TEST_DIR, "..", "..", "hooks", "speak-response.mjs");
 
+// codex registers its emitter as a marker-delimited block in config.toml rather
+// than as a parsed edit, so the expectation here is the literal block text —
+// including the TOML-escaped quotes around the absolute path.
+const CODEX_HOOK_PATH = resolve(
+  TEST_DIR,
+  "..",
+  "..",
+  "hooks",
+  "speak-response-codex.mjs",
+);
+const CODEX_BLOCK = `# pavilio-speech begin
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = "node \\"${CODEX_HOOK_PATH}\\""
+timeout = 30
+# pavilio-speech end
+`;
+
 interface HookCommand {
   type?: string;
   command?: string;
@@ -36,6 +56,7 @@ interface Settings {
 
 let home: string;
 let settingsPath: string;
+let codexConfigPath: string;
 
 function run(...args: string[]) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {
@@ -80,8 +101,39 @@ function reportLines(stdout: string): Record<string, string> {
   return lines;
 }
 
+/** Every `<agent>: …` report line for one agent — there must only ever be one. */
+function agentLines(stdout: string, agent: string): string[] {
+  return stdout.split("\n").filter((line) => line.startsWith(`${agent}: `));
+}
+
 function makeRoots(...roots: string[][]) {
   for (const parts of roots) mkdirSync(join(home, ...parts), { recursive: true });
+}
+
+function readCodexConfig(): string {
+  return readFileSync(codexConfigPath, "utf8");
+}
+
+function countCodexBlocks(raw: string): number {
+  return raw.split("\n").filter((line) => line === "# pavilio-speech begin")
+    .length;
+}
+
+/**
+ * Everything *outside* the managed block — the bytes the installer promises to
+ * copy through untouched. Cuts the marker lines and the one blank line the
+ * installer inserts ahead of an appended block, which is the exact inverse of
+ * how the block is written.
+ */
+function withoutCodexBlock(raw: string): string {
+  const lines = raw.split("\n");
+  const begin = lines.indexOf("# pavilio-speech begin");
+  const end = lines.indexOf("# pavilio-speech end");
+  expect(begin).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(begin);
+  const head = lines.slice(0, begin);
+  if (head[head.length - 1] === "") head.pop();
+  return head.concat(lines.slice(end + 1)).join("\n");
 }
 
 const existingSettings = {
@@ -147,10 +199,41 @@ const SINGLE_AGENT_SETTINGS = `{
 }
 `;
 
+/**
+ * Shaped like a real `~/.codex/config.toml`: bare scalars, dotted-key tables,
+ * quoted-key tables, the `[hooks.state]` trust ledger, and peon-ping's own
+ * marker-delimited block with its own `[[hooks.Stop]]` in it. Blank lines and
+ * comments are part of the fixture — they are what a TOML round-trip would eat.
+ */
+const CODEX_SEED_CONFIG = `model = "gpt-5.6-luna"
+approvals_reviewer = "auto_review"
+
+[projects."/root/git/prv/projects"]
+trust_level = "trusted"
+
+[mcp_servers.todoist]
+command = "npx"
+
+[hooks.state]
+
+[hooks.state."/root/.codex/config.toml:stop:0:0"]
+trusted_hash = "sha256:efd1150768d3d7da868368096da7ffd6ccd6d4158710bda86058b5edf3a4a0db"
+
+# peon-ping Codex hooks begin
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = "bash /root/.claude/hooks/peon-ping/adapters/codex.sh"
+timeout = 30
+# peon-ping Codex hooks end
+`;
+
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "pavilio-install-speech-"));
   mkdirSync(join(home, ".claude"), { recursive: true });
   settingsPath = join(home, ".claude", "settings.json");
+  codexConfigPath = join(home, ".codex", "config.toml");
 });
 
 afterEach(() => {
@@ -314,5 +397,125 @@ describe("install-speech-hook", () => {
     const lines = reportLines(result.stdout);
     expect(lines.codex).toBeDefined();
     expect(lines.opencode).toBeDefined();
+  });
+
+  // --- the codex target -----------------------------------------------------
+
+  it("appends the managed block to an existing config", () => {
+    makeRoots([".codex"]);
+    writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
+
+    const result = run();
+
+    expect(result.status).toBe(0);
+    const raw = readCodexConfig();
+    expect(raw).toContain(CODEX_BLOCK);
+    // Appended, so everything that was there stays where it was …
+    expect(raw.endsWith(CODEX_BLOCK)).toBe(true);
+    // … byte for byte.
+    expect(withoutCodexBlock(raw)).toBe(CODEX_SEED_CONFIG);
+  });
+
+  it("replaces the block instead of appending a second one", () => {
+    makeRoots([".codex"]);
+    writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
+    expect(run().status).toBe(0);
+    const afterFirst = readCodexConfig();
+
+    expect(run().status).toBe(0);
+    expect(run().status).toBe(0);
+
+    expect(countCodexBlocks(readCodexConfig())).toBe(1);
+    // Byte-identical: a re-run refreshes the block in place, it does not stack.
+    expect(readCodexConfig()).toBe(afterFirst);
+  });
+
+  it("preserves other hooks and unrelated tables", () => {
+    makeRoots([".codex"]);
+    writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
+    expect(run().status).toBe(0);
+
+    // The user then adds a table of their own *after* our block. A later
+    // install must rewrite the block where it sits, not swallow what follows.
+    const trailing = `
+[mcp_servers.added_later]
+command = "npx"
+`;
+    writeFileSync(codexConfigPath, readCodexConfig() + trailing);
+
+    expect(run().status).toBe(0);
+
+    const raw = readCodexConfig();
+    expect(countCodexBlocks(raw)).toBe(1);
+    expect(raw).toContain(CODEX_BLOCK);
+    // Everything outside the markers — before and after — is untouched.
+    expect(withoutCodexBlock(raw)).toBe(CODEX_SEED_CONFIG + trailing);
+    expect(raw).toContain("# peon-ping Codex hooks begin");
+    expect(raw).toContain(
+      'command = "bash /root/.claude/hooks/peon-ping/adapters/codex.sh"',
+    );
+    expect(raw).toContain('[projects."/root/git/prv/projects"]');
+    expect(raw).toContain("[mcp_servers.added_later]");
+  });
+
+  it("removes the block and its markers on uninstall", () => {
+    makeRoots([".codex"]);
+    writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
+    expect(run().status).toBe(0);
+    // Guard against a vacuous pass: there has to be a block to remove.
+    expect(readCodexConfig()).toContain(CODEX_BLOCK);
+
+    const result = run("--uninstall");
+
+    expect(result.status).toBe(0);
+    const raw = readCodexConfig();
+    expect(raw).not.toContain("pavilio-speech");
+    expect(raw).not.toContain("speak-response-codex.mjs");
+    // Back to exactly the file we started from, blank separator included.
+    expect(raw).toBe(CODEX_SEED_CONFIG);
+  });
+
+  it("creates the config file when absent", () => {
+    makeRoots([".codex"]);
+    expect(existsSync(codexConfigPath)).toBe(false);
+
+    const result = run();
+
+    expect(result.status).toBe(0);
+    expect(existsSync(codexConfigPath)).toBe(true);
+    // Nothing but the block — no invented scaffolding around it.
+    expect(readCodexConfig()).toBe(CODEX_BLOCK);
+  });
+
+  it("prints the one-time trust note", () => {
+    makeRoots([".codex"]);
+
+    const result = run();
+
+    expect(result.status).toBe(0);
+    expect(reportLines(result.stdout).codex).toBeDefined();
+    // The note is a continuation of codex's single report line, not a second
+    // `codex:` line — the per-agent report stays one line per agent.
+    expect(agentLines(result.stdout, "codex")).toHaveLength(1);
+    expect(result.stdout).toMatch(/^ +.*trust/im);
+  });
+
+  it("never writes a trusted_hash", () => {
+    makeRoots([".codex"]);
+    writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
+    const hashesBefore = (CODEX_SEED_CONFIG.match(/trusted_hash/g) ?? []).length;
+    const statesBefore = (CODEX_SEED_CONFIG.match(/\[hooks\.state/g) ?? [])
+      .length;
+
+    expect(run().status).toBe(0);
+
+    const raw = readCodexConfig();
+    // Guard against a vacuous pass: the hook did get registered …
+    expect(raw).toContain(CODEX_BLOCK);
+    // … codex's trust gate exists to make the user read a new hook's command.
+    // Forging its ledger entry would defeat it, so the installer adds none.
+    expect((raw.match(/trusted_hash/g) ?? []).length).toBe(hashesBefore);
+    expect((raw.match(/\[hooks\.state/g) ?? []).length).toBe(statesBefore);
+    expect(CODEX_BLOCK).not.toMatch(/trusted_hash|hooks\.state/);
   });
 });

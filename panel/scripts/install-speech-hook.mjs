@@ -166,23 +166,152 @@ const claudeTarget = {
   },
 };
 
-/* ────────────────────────── codex / opencode ───────────────────────────────
- * Seams only. The codex target (a marker-delimited block in
- * ~/.codex/config.toml) and the opencode target (a symlink into
- * ~/.config/opencode/plugins/) land in the following two steps; the shell
- * around them — detection, reporting, failure isolation — is what is being
- * built here. A seam reports rather than throws: an unimplemented target is not
- * a failure, and must not colour the exit status.
+/* ────────────────────────────── codex ──────────────────────────────────────
+ * Manages a marker-delimited block in ~/.codex/config.toml: append it if
+ * absent, replace it wholesale if present, delete it on uninstall. Everything
+ * outside the markers is copied through byte-for-byte.
+ *
+ * Why not parse the TOML: this repo has no TOML parser, and adding one to
+ * parse-and-reserialise a user's config is a bad trade — it would lose comments
+ * and blank lines across the *whole* file to rewrite six lines of it. A marker
+ * block touches only what it owns. peon-ping already coexists in this same file
+ * exactly this way, so the approach is proven in place.
+ *
+ * What is deliberately NOT written: anything under `[hooks.state]`. codex
+ * records a `trusted_hash` there per hook and asks the user to trust a newly
+ * registered command once. That gate exists so a human reads the command before
+ * it runs; synthesising the hash would defeat it, and the hashing algorithm is
+ * undocumented and unpinned besides. The installer registers the hook and says
+ * the trust prompt is coming.
  * ────────────────────────────────────────────────────────────────────────── */
 
-const PENDING = "not implemented yet — nothing was written";
+const CODEX_BEGIN = "# pavilio-speech begin";
+const CODEX_END = "# pavilio-speech end";
+
+const codexRoot = join(home, ".codex");
+const codexConfigPath = join(codexRoot, "config.toml");
+
+const codexHookPath = resolve(scriptDir, "..", "hooks", "speak-response-codex.mjs");
+// TOML basic string: the inner quotes around the path are escaped, so a path
+// containing spaces still reaches the shell as one argument.
+const codexHookCommand = `node "${codexHookPath}"`;
+
+const codexBlockLines = [
+  CODEX_BEGIN,
+  "[[hooks.Stop]]",
+  "",
+  "[[hooks.Stop.hooks]]",
+  'type = "command"',
+  `command = "node \\"${codexHookPath}\\""`,
+  "timeout = 30",
+  CODEX_END,
+];
+
+/**
+ * Line indices of our block, or null when it is not there. `trimEnd()` tolerates
+ * a stray carriage return; an opening marker with no closing one is a damaged
+ * file we refuse to guess at rather than silently swallow the rest.
+ */
+function findCodexBlock(lines) {
+  const isMarker = (line, marker) => line.trimEnd() === marker;
+  const begin = lines.findIndex((line) => isMarker(line, CODEX_BEGIN));
+  if (begin === -1) return null;
+  const end = lines.findIndex((line, i) => i > begin && isMarker(line, CODEX_END));
+  if (end === -1) {
+    fail(
+      `${codexConfigPath} has a "${CODEX_BEGIN}" marker with no matching "${CODEX_END}". Nothing was written — fix the file and run again.`,
+    );
+  }
+  return { begin, end };
+}
+
+function readCodexConfig() {
+  if (!existsSync(codexConfigPath)) return "";
+  return readFileSync(codexConfigPath, "utf8");
+}
+
+/** Temp file + rename, so an interrupted run cannot truncate a real config. */
+function writeCodexConfig(text) {
+  mkdirSync(dirname(codexConfigPath), { recursive: true });
+  const tmpPath = `${codexConfigPath}.install-speech-hook.tmp`;
+  try {
+    writeFileSync(tmpPath, text, "utf8");
+    renameSync(tmpPath, codexConfigPath);
+  } catch (err) {
+    if (existsSync(tmpPath)) {
+      try {
+        unlinkSync(tmpPath);
+      } catch {
+        // Nothing useful to do; the real error is reported below.
+      }
+    }
+    fail(`could not write ${codexConfigPath} (${err.message}).`);
+  }
+}
 
 const codexTarget = {
   name: "codex",
-  root: join(home, ".codex"),
-  install: () => PENDING,
-  uninstall: () => PENDING,
+  root: codexRoot,
+  install() {
+    const raw = readCodexConfig();
+    // An absent or blank file becomes the block and nothing else — no invented
+    // scaffolding around it.
+    if (raw.trim() === "") {
+      writeCodexConfig(`${codexBlockLines.join("\n")}\n`);
+    } else {
+      const lines = raw.split("\n");
+      const found = findCodexBlock(lines);
+      if (found) {
+        // In place: whatever precedes and follows the block keeps its position.
+        const next = [
+          ...lines.slice(0, found.begin),
+          ...codexBlockLines,
+          ...lines.slice(found.end + 1),
+        ];
+        writeCodexConfig(next.join("\n"));
+      } else {
+        // Appended after one blank separator line — TOML tables must not run
+        // into the previous table's keys, and the blank is what uninstall
+        // takes back out again.
+        const body = raw.endsWith("\n") ? raw : `${raw}\n`;
+        writeCodexConfig(`${body}\n${codexBlockLines.join("\n")}\n`);
+      }
+    }
+    return [
+      `Registered the speech ${HOOK_EVENT} hook in ${codexConfigPath}`,
+      `  ${codexHookCommand}`,
+      "  codex will ask you to trust this hook once, the first time it fires.",
+    ].join("\n");
+  },
+  uninstall() {
+    // No config means no registration to strip — and writing one here would
+    // create a file the user never had.
+    if (!existsSync(codexConfigPath)) {
+      return `Nothing to remove — ${codexConfigPath} does not exist.`;
+    }
+    const raw = readCodexConfig();
+    const lines = raw.split("\n");
+    const found = findCodexBlock(lines);
+    if (!found) {
+      return `Nothing to remove — no pavilio-speech block in ${codexConfigPath}`;
+    }
+    const head = lines.slice(0, found.begin);
+    // Take back the one blank separator install put in, and no more: further
+    // blank lines above it are the user's.
+    if (head.length > 0 && head[head.length - 1] === "") head.pop();
+    writeCodexConfig(head.concat(lines.slice(found.end + 1)).join("\n"));
+    return `Removed the speech ${HOOK_EVENT} hook from ${codexConfigPath}`;
+  },
 };
+
+/* ───────────────────────────── opencode ────────────────────────────────────
+ * Seam only. The opencode target (a symlink into
+ * ~/.config/opencode/plugins/) lands in the following step. A seam reports
+ * rather than throws: an unimplemented target is not a failure, and must not
+ * colour the exit status.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+const PENDING = "not implemented yet — nothing was written";
 
 const opencodeTarget = {
   name: "opencode",
