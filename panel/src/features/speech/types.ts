@@ -69,10 +69,26 @@ export interface GridSpeech {
   stateFor: (sessionId: string) => CellSpeechState;
   /** The single armed session in this browser, or `null`. */
   armedSessionId: string | null;
+  /** Speak the cell's utterance from the start — or replay a heard one. */
   onSpeak: (sessionId: string) => void;
   /**
-   * Stop playback. It does NOT mark the session heard: a run the user cut
+   * Hold the live run at its current position. The run is not torn down and the
+   * cell is NOT marked heard: it never reached its last unit.
+   */
+  onPause: (sessionId: string) => void;
+  /**
+   * Let a held run go on from where it was suspended, rather than restarting
+   * the unit — which is what `onSpeak` would do.
+   */
+  onResume: (sessionId: string) => void;
+  /**
+   * Tear the run down. It does NOT mark the session heard: a run the user cut
    * short never reached its last unit, so the cell falls back to `ready`.
+   *
+   * No control raises this any more — the amendment replaced the stop control
+   * with the pause above, and the only other way to end a run is to play a
+   * different cell. It stays on the contract because it is the panel's one
+   * programmatic "stop talking", and the host keeps it wired.
    */
   onStop: (sessionId: string) => void;
   onArm: (sessionId: string | null) => void;

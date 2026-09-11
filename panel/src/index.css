@@ -331,14 +331,39 @@ input[type="checkbox"] {
   cursor: default;
 }
 
-/* Ready, heard and speaking are all the LED's green — only the pulse and
-   the fill differ, so `heard` reads as "the same thing, already heard".
-   `preparing`, `stalled` and `paused` have no rule yet: Task 18 owns the
-   control's colours and adds the red and the dimmed yellow. */
+/* COLOUR SAYS WHERE THE AUDIO IS, and nothing else — the icon channel is the
+   component's (`data-icon`), and the two are deliberately not derivable from
+   each other. Four colours, keyed off `data-speech` alone:
+     muted        → nothing to play                     (the base rule above)
+     green        → something here has not been heard   (ready/speaking/paused)
+     red          → blocked on synthesis, more is coming (preparing/stalled)
+     dimmed yellow→ played through to the end           (heard)
+   Nothing is invented here: the green and the pulse are the activity LED's,
+   the red and the yellow are the panel's own `--red` / `--yellow` tokens. */
+
+/* Green is "unheard": a cell waiting to be played, one playing, and one the
+   user is holding are all the same promise — there is still something in it. */
 .terminal-speak[data-speech="ready"],
-.terminal-speak[data-speech="heard"],
-.terminal-speak[data-speech="speaking"] {
+.terminal-speak[data-speech="speaking"],
+.terminal-speak[data-speech="paused"] {
   color: #9ece6a;
+}
+
+/* Red is "the audio is not here yet", on both sides of the click: a cell whose
+   first unit is still warming, and a live run blocked on its next one. One
+   colour for both, because the user's question — "is it here?" — is the same. */
+.terminal-speak[data-speech="preparing"],
+.terminal-speak[data-speech="stalled"] {
+  color: var(--red);
+}
+
+/* Heard: the panel's yellow, dimmed. Dimmed because a finished cell must not
+   compete for attention with the green ones that still have something to say —
+   and yellow rather than green because "already listened to" is a different
+   answer to "where is the audio", not a quieter version of the same one. */
+.terminal-speak[data-speech="heard"] {
+  color: var(--yellow);
+  opacity: 0.55;
 }
 
 .terminal-speak[data-pulse="1"] {
@@ -349,9 +374,16 @@ input[type="checkbox"] {
   animation: none;
 }
 
-/* Speaking is the solid state — a click stops it. */
-.terminal-speak[data-speech="speaking"] {
+/* A run in hand gets a fill, so it reads as a thing being held rather than a
+   thing being offered. The fill follows the colour channel: green under a
+   playing or held run, the panel's `--red-dim` under a stalled one. */
+.terminal-speak[data-speech="speaking"],
+.terminal-speak[data-speech="paused"] {
   background: rgba(158, 206, 106, 0.16);
+}
+
+.terminal-speak[data-speech="stalled"] {
+  background: var(--red-dim);
 }
 
 /* Armed for autoplay: the same green plus a fill, so on/off is legible with

@@ -15,6 +15,8 @@ export const INERT_SPEECH: GridSpeech = {
   stateFor: () => "empty",
   armedSessionId: null,
   onSpeak: () => {},
+  onPause: () => {},
+  onResume: () => {},
   onStop: () => {},
   onArm: () => {},
 };

@@ -369,6 +369,33 @@ export function useSpeechHost(): SpeechHost {
     [player],
   );
 
+  const onPause = useCallback(
+    (sessionId: string): void => {
+      // Nothing is stamped on the run: a pause does not END it. The run stays
+      // `pending`, so the cell can still reach `heard` by playing out, and the
+      // player keeps naming it as the speaking one — which is why `paused`
+      // outranks `speaking` in the channel.
+      //
+      // Guarded on the session the player is actually running: the control
+      // only offers a pause on that one cell, and a stray call from anywhere
+      // else must not silence a run the user did not touch.
+      if (player.speakingSessionId !== sessionId) return;
+      player.pause();
+    },
+    [player],
+  );
+
+  const onResume = useCallback(
+    (sessionId: string): void => {
+      if (player.pausedSessionId !== sessionId) return;
+      // Deliberately NOT `player.unlock()`: the element is holding the paused
+      // unit, so unlocking would play it here rather than through `resume()` —
+      // and the gesture was already spent on the click that started the run.
+      player.resume();
+    },
+    [player],
+  );
+
   const onArm = useCallback(
     (sessionId: string | null): void => {
       // Arming is a click too, and it is the gesture the autoplay that follows
@@ -408,8 +435,26 @@ export function useSpeechHost(): SpeechHost {
   }, [armedSessionId, armedUtterance, player.unlocked, speakFrom]);
 
   return useMemo(
-    () => ({ stateFor, armedSessionId, onSpeak, onStop, onArm, preparingSessionIds }),
-    [armedSessionId, onArm, onSpeak, onStop, preparingSessionIds, stateFor],
+    () => ({
+      stateFor,
+      armedSessionId,
+      onSpeak,
+      onPause,
+      onResume,
+      onStop,
+      onArm,
+      preparingSessionIds,
+    }),
+    [
+      armedSessionId,
+      onArm,
+      onPause,
+      onResume,
+      onSpeak,
+      onStop,
+      preparingSessionIds,
+      stateFor,
+    ],
   );
 }
 

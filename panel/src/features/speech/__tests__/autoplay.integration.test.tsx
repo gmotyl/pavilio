@@ -38,6 +38,14 @@ const synth = vi.hoisted(() => {
   let failing = false;
   /** A synthesizer that goes down partway: the first `n` requests succeed. */
   let healthyRequests = Number.POSITIVE_INFINITY;
+  /**
+   * A synthesizer that has taken the request but not answered yet. Without it
+   * every synthesis settles inside the same microtask drain as the frame that
+   * asked for it, so `preparing` — the red before the audio is in hand — would
+   * never be observable, and a control that never showed it would pass.
+   */
+  let held: Promise<void> | null = null;
+  let releaseHeld: (() => void) | null = null;
 
   function bufferFor(text: string): ArrayBuffer {
     const existing = buffers.get(text);
@@ -56,6 +64,7 @@ const synth = vi.hoisted(() => {
     requests.push(text);
     requestVoices.push(options.voice);
     const promise = (async (): Promise<ArrayBuffer> => {
+      if (held) await held;
       if (failing || requests.length > healthyRequests) {
         throw new Error("the synthesizer is down");
       }
@@ -80,6 +89,19 @@ const synth = vi.hoisted(() => {
     setHealthyRequests: (count: number): void => {
       healthyRequests = count;
     },
+    /** Takes every further request without answering it. */
+    hold: (): void => {
+      held = new Promise<void>((resolve) => {
+        releaseHeld = resolve;
+      });
+    },
+    /** Answers everything taken while held. */
+    release: (): void => {
+      const resolve = releaseHeld;
+      held = null;
+      releaseHeld = null;
+      resolve?.();
+    },
     /** Exactly what the real one is: a fire-and-forget `synthesizeSpeech`. */
     prefetchSpeech: (text: string, options: { voice?: string } = {}): void => {
       void synthesizeSpeech(text, options).catch(() => {});
@@ -102,6 +124,9 @@ const synth = vi.hoisted(() => {
       cache.clear();
       failing = false;
       healthyRequests = Number.POSITIVE_INFINITY;
+      releaseHeld?.();
+      held = null;
+      releaseHeld = null;
     },
   };
 });
@@ -296,6 +321,12 @@ import { SPEECH_VOICE_STORAGE_KEY, setStoredArmedSession } from "../voices";
 const elements: HTMLMediaElement[] = [];
 /** The `src` of every started playback, in order. */
 const played: string[] = [];
+/**
+ * Every object URL the player materialized — one per unit it actually loaded.
+ * A resume must not appear here: it re-issues `play()` on the source the
+ * element is still holding, where a restart would build the unit again.
+ */
+const objectUrls: string[] = [];
 /** Swapped per test: a browser that accepts the start, or one that refuses it. */
 let playResult: () => Promise<void>;
 
@@ -341,6 +372,10 @@ async function click(testId: string): Promise<void> {
 
 const speakState = (sessionId: string): string | null =>
   screen.getByTestId(`terminal-cell-speak-${sessionId}`).getAttribute("data-speech");
+
+/** The control's other channel: what a click would do, not where the audio is. */
+const speakIcon = (sessionId: string): string | null =>
+  screen.getByTestId(`terminal-cell-speak-${sessionId}`).getAttribute("data-icon");
 
 const armed = (sessionId: string): string | null =>
   screen.getByTestId(`terminal-cell-autoplay-${sessionId}`).getAttribute("data-armed");
@@ -488,6 +523,7 @@ beforeEach(() => {
   prepareCalls.length = 0;
   elements.length = 0;
   played.length = 0;
+  objectUrls.length = 0;
   ws.setters.clear();
   playResult = () => Promise.resolve();
 
@@ -498,7 +534,11 @@ beforeEach(() => {
   Object.defineProperty(URL, "createObjectURL", {
     configurable: true,
     writable: true,
-    value: (blob: Blob) => `blob:${synth.textForBlob(blob)}`,
+    value: (blob: Blob) => {
+      const url = `blob:${synth.textForBlob(blob)}`;
+      objectUrls.push(url);
+      return url;
+    },
   });
   Object.defineProperty(URL, "revokeObjectURL", {
     configurable: true,
@@ -626,19 +666,18 @@ describe("autoplay — taking over and stopping", () => {
     expect(speakState("cell-a")).not.toBe("heard");
   });
 
-  it("clicking stop on the speaking cell leaves it ready, not heard", async () => {
+  it("clicking the speaking cell holds it rather than ending it", async () => {
     await renderProjectSurface();
     await arm("cell-a");
     await emitUtterance("cell-a", "a1", "A is speaking now.");
     expect(speakState("cell-a")).toBe("speaking");
 
-    // The same control, clicked while speaking, cuts the run short — and it
-    // lands exactly where the barge-in above lands. It used to be the one
-    // ending that meant `heard`; the amendment removed that exception,
-    // because a run the user cut short never reached its last unit.
+    // The amendment: there is no explicit stop control any more. The same
+    // control, clicked while speaking, PAUSES — the run is not torn down, and
+    // it is certainly not heard: it never reached its last unit.
     await click("terminal-cell-speak-cell-a");
 
-    await waitFor(() => expect(speakState("cell-a")).toBe("ready"));
+    expect(speakState("cell-a")).toBe("paused");
     expect(speakState("cell-a")).not.toBe("heard");
   });
 
@@ -1082,5 +1121,122 @@ describe("warming the first unit on arrival", () => {
 
     expect(synth.requests).toEqual([]);
     expect(speakState("cell-b")).toBe("empty");
+  });
+});
+
+/**
+ * The control's two channels, end to end through the real host: `data-speech`
+ * is the colour channel and `data-icon` the icon channel, and these drive them
+ * from the frame that arrives to the unit that ends.
+ *
+ * jsdom applies no stylesheet, so nothing here proves a colour. What it proves
+ * is the STATE the colour is keyed off; that `preparing`/`stalled` are red and
+ * `heard` the dimmed yellow is asserted on the rule itself in
+ * `features/terminal/__tests__/CellSpeakButton.test.tsx`.
+ */
+describe("the control's colour and icon, end to end", () => {
+  it("an arriving utterance goes preparing → ready without a click", async () => {
+    await renderProjectSurface();
+    // The synthesizer takes the warm and does not answer: the audio is not in
+    // hand yet, which is exactly what the red is for.
+    synth.hold();
+
+    await emitUtterance("cell-b", "b1", "The audio is not here yet.");
+
+    expect(speakState("cell-b")).toBe("preparing");
+    // The icon channel does not move with it: the click will still be a start.
+    expect(speakIcon("cell-b")).toBe("speaker");
+    expect(played).toEqual([]);
+
+    await act(async () => {
+      synth.release();
+      await drain();
+    });
+
+    // Green without anybody clicking anything, and still silent.
+    expect(speakState("cell-b")).toBe("ready");
+    expect(speakIcon("cell-b")).toBe("speaker");
+    expect(played).toEqual([]);
+  });
+
+  it("click → pause → resume speaks the same unit once", async () => {
+    const markdown = shortResponse(3);
+    const unit0 = prepare(markdown).units[0].text;
+
+    await renderProjectSurface();
+    await emitUtterance("cell-b", "b1", markdown);
+    expect(speakState("cell-b")).toBe("ready");
+
+    await click("terminal-cell-speak-cell-b");
+    expect(speakState("cell-b")).toBe("speaking");
+    expect(speakIcon("cell-b")).toBe("pause");
+    expect(played).toEqual([`blob:${unit0}`]);
+
+    // The pause holds the run rather than ending it: the cell is the user's to
+    // resume, so it is neither `ready` nor `heard`.
+    await click("terminal-cell-speak-cell-b");
+    expect(speakState("cell-b")).toBe("paused");
+    expect(speakIcon("cell-b")).toBe("play");
+
+    await click("terminal-cell-speak-cell-b");
+    expect(speakState("cell-b")).toBe("speaking");
+    expect(speakIcon("cell-b")).toBe("pause");
+
+    // The same unit, once. One synthesis and — the sharper half — one object
+    // URL: a resume that restarted the unit (the control raising `onSpeak`, or
+    // the host calling `play(…, 0)` instead of the player's `resume()`) would
+    // materialize it a second time, cache hit or not.
+    expect(synth.requests.filter((text) => text === unit0)).toHaveLength(1);
+    expect(objectUrls.filter((url) => url === `blob:${unit0}`)).toHaveLength(1);
+    expect(new Set(elements).size).toBe(1);
+
+    // And the ladder goes on from where it was held, all the way to the end.
+    await endRun();
+    await waitFor(() => expect(speakState("cell-b")).toBe("heard"));
+  });
+
+  it("the last unit ending is what turns the cell yellow", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await emitUtterance("cell-a", "a1", shortResponse(3));
+    expect(speakState("cell-a")).toBe("speaking");
+
+    // Two of the three units end: the cell has been spoken at, but something
+    // in it has still not been listened to, so it stays green.
+    await endCurrentUnit();
+    expect(speakState("cell-a")).toBe("speaking");
+    await endCurrentUnit();
+    expect(speakState("cell-a")).toBe("speaking");
+
+    await endCurrentUnit();
+
+    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
+    // The icon channel goes back to "a click replays this", and the pulse —
+    // the notification — is off: the cell is not asking for anything.
+    expect(speakIcon("cell-a")).toBe("speaker");
+    expect(
+      screen.getByTestId("terminal-cell-speak-cell-a").getAttribute("data-pulse"),
+    ).toBe("0");
+  });
+
+  it("a barge-in leaves the first cell green", async () => {
+    // The plain speaking → barge-in case is covered above ("a barged-in cell
+    // reverts to ready, not heard"). This is the amendment's harder one: the
+    // panel has ONE audio element, so a PAUSED position cannot survive another
+    // cell taking it over — the cell must fall back to green, not sit there
+    // wearing a play icon over a run that no longer exists.
+    await renderProjectSurface();
+    await emitUtterance("cell-a", "a1", shortResponse(3));
+    await emitUtterance("cell-b", "b1", "B is waiting its turn.");
+
+    await click("terminal-cell-speak-cell-a");
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("paused");
+
+    await click("terminal-cell-speak-cell-b");
+
+    await waitFor(() => expect(speakState("cell-b")).toBe("speaking"));
+    expect(speakState("cell-a")).toBe("ready");
+    expect(speakIcon("cell-a")).toBe("speaker");
   });
 });

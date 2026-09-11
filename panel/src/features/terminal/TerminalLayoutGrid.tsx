@@ -484,7 +484,8 @@ function TerminalCell({
             sessionId={session.id}
             state={speech?.stateFor(session.id) ?? "empty"}
             onSpeak={(id) => speech?.onSpeak(id)}
-            onStop={(id) => speech?.onStop(id)}
+            onPause={(id) => speech?.onPause(id)}
+            onResume={(id) => speech?.onResume(id)}
           />
           <CellAutoplayToggle
             sessionId={session.id}
