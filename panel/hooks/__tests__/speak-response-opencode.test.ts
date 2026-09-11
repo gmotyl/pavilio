@@ -12,6 +12,11 @@ const MAIN_SESSION = "ses_main";
 const CHILD_SESSION = "ses_child";
 
 const ANSWER = "Notes and registry updated, and the batch is committed as 4f2a91c.";
+/**
+ * The answer of a turn the listener has already heard. Shouted on purpose: if it
+ * ever reaches the panel the assertion that catches it should read unambiguously.
+ */
+const STALE_ANSWER = "THE OLD ANSWER FROM THE PREVIOUS TURN";
 
 /**
  * The opencode plugin is not a subprocess: it is imported into this test
@@ -90,6 +95,13 @@ interface FakeClientOptions {
   messages?: Record<string, unknown[]>;
   /** When set, every client call rejects with it. */
   throws?: Error;
+  /**
+   * When set, `client.session.get` answers with this verbatim instead of a
+   * session record — the generated SDK's `{data: undefined, error}` envelope,
+   * which a client built with the default `ThrowOnError = false` *resolves*
+   * with on an HTTP error rather than throwing.
+   */
+  sessionGetResult?: unknown;
 }
 
 interface FakeClient {
@@ -97,13 +109,19 @@ interface FakeClient {
   client: unknown;
 }
 
-function fakeClient({ sessions = {}, messages = {}, throws }: FakeClientOptions): FakeClient {
+function fakeClient({
+  sessions = {},
+  messages = {},
+  throws,
+  sessionGetResult,
+}: FakeClientOptions): FakeClient {
   const calls: string[] = [];
   const client = {
     session: {
       get: async ({ path }: { path: { id: string } }) => {
         calls.push(`get:${path.id}`);
         if (throws) throw throws;
+        if (sessionGetResult !== undefined) return sessionGetResult;
         return { data: sessions[path.id] ?? { id: path.id } };
       },
       messages: async ({ path }: { path: { id: string } }) => {
@@ -265,6 +283,42 @@ describe("speak-response-opencode", () => {
     await deliver(client, { type: "message.part.updated", properties: { part: textPart(ANSWER) } });
 
     expect(calls).toEqual([]);
+    expect(captured).toEqual([]);
+  });
+
+  it("posts nothing when the turn did not end with an assistant message", async () => {
+    await listenAsPanel();
+    const { client } = fakeClient({
+      sessions: { [MAIN_SESSION]: { id: MAIN_SESSION } },
+      messages: {
+        // What an aborted turn — or an `/undo`, which trims the trailing
+        // messages — leaves behind: the previous turn's answer, then a user
+        // message this turn never answered. Scanning backwards for an assistant
+        // message finds the old answer and speaks it as if it were new.
+        [MAIN_SESSION]: [
+          assistantMessage([textPart(STALE_ANSWER)], "msg_older"),
+          userMessage("actually, never mind"),
+        ],
+      },
+    });
+
+    await deliver(client, idleEvent(MAIN_SESSION));
+
+    expect(captured).toEqual([]);
+  });
+
+  it("treats a session it cannot resolve as a child", async () => {
+    await listenAsPanel();
+    const { client } = fakeClient({
+      // The default client resolves an HTTP failure instead of throwing, so the
+      // parentID that says "subagent" is simply absent. Absent must not read as
+      // "main", or every unresolved child speaks into the parent's cell.
+      sessionGetResult: { data: undefined, error: { data: { message: "session not found" } } },
+      messages: { [CHILD_SESSION]: [assistantMessage([textPart("SUBAGENT ANSWER")])] },
+    });
+
+    await deliver(client, idleEvent(CHILD_SESSION));
+
     expect(captured).toEqual([]);
   });
 });

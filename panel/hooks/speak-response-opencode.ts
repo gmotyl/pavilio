@@ -23,7 +23,10 @@
  *
  * - there is no file and no async-write race — `session.idle` means the turn is
  *   over, and `client.session.messages` answers from the server's own state, so
- *   there is nothing to wait for and no staleness check to get wrong;
+ *   there is nothing to wait for. What still has to be got right is *which*
+ *   record in that state ends the turn: see `lastAnswer`, which anchors on the
+ *   final message rather than searching back for one, because a search finds a
+ *   previous turn's answer and speaks it as though it were this turn's;
  * - there is no process to exit. A throw here surfaces into the agent's own
  *   turn. So containment is not a convention in this file, it is the contract:
  *   the whole handler sits inside one `try`, and every path out of it resolves.
@@ -121,47 +124,70 @@ function payloadOf(result: unknown): unknown {
 }
 
 /**
- * Whether this session is a subagent's. Fail-closed on purpose: the caller
- * treats a session it cannot resolve as one not to post, because speaking a
- * subagent's answer into its parent's cell is worse than missing one answer.
+ * Whether this session is a subagent's — and, deliberately, whether it is one
+ * this code failed to read. Only a session record that came back and carries no
+ * `parentID` counts as a main session; everything else answers `true` and so is
+ * never posted, because speaking a subagent's answer into its parent's cell is
+ * worse than missing one answer.
+ *
+ * The unreadable case is not hypothetical. The generated client's default is
+ * `ThrowOnError = false`, under which an HTTP failure *resolves* as
+ * `{ data: undefined, error }` rather than throwing; `payloadOf` then yields
+ * `undefined`, and a `parentID` read off that is absent for exactly the same
+ * reason a main session's is. Inferring "main" from a missing field would make
+ * every session this plugin cannot resolve speak into the parent's cell — the
+ * one outcome the filter exists to prevent — so the missing *record* is decided
+ * here, before the missing *field* is allowed to mean anything.
  */
 async function isChildSession(client: OpencodeClientLike, sessionID: string): Promise<boolean> {
-  const info = payloadOf(await client.session.get({ path: { id: sessionID } })) as
-    | { parentID?: unknown }
-    | undefined;
-  return typeof info?.parentID === "string" && info.parentID !== "";
+  const info = payloadOf(await client.session.get({ path: { id: sessionID } }));
+  if (info === null || typeof info !== "object") return true;
+  const parentID = (info as { parentID?: unknown }).parentID;
+  // Absent is the only shape a main session has here. A string id is a child,
+  // and so is anything else present that this code does not recognise.
+  return parentID !== undefined && parentID !== null && parentID !== "";
 }
 
 /**
- * The prose of the session's last assistant message, or `""` when it has none.
+ * The prose of the message that ends the turn, or `""` when there is none.
  *
  * Only `type: "text"` parts count. A message also carries reasoning, tool calls
  * and their results, step markers and patches — none of which is something to
  * say out loud, and all of which routinely sit *after* the prose, so position
  * within the message cannot select the answer.
  *
- * Strictly the **last** assistant message, with no fallback to an earlier one:
- * a turn that ended without prose has nothing to say, and the answer above it
- * belongs to a turn the listener has already heard. A stale answer sounds
- * exactly like a fresh one.
+ * The turn is anchored on the **final** element of the list, which must be the
+ * assistant's; it is never searched for by walking backwards. Walking back is
+ * how a finished turn's answer and a *previous* turn's answer become
+ * indistinguishable: when the list does not end in an assistant message — a
+ * turn aborted before it answered, or an `/undo`, which trims the trailing
+ * messages — the scan simply keeps going until it finds prose the listener
+ * already heard, and says it again as if it were new. There is no reading of
+ * that list that makes an older message this turn's answer, so the only safe
+ * answer is none.
+ *
+ * The same holds for a last assistant message whose parts carry no text: that
+ * turn had nothing to say, and the message above it belongs to a turn that is
+ * already over. (In opencode's model a `Message` is a user's or an assistant's
+ * — tool calls are *parts*, not messages — so a turn that ends in tool work
+ * ends in an assistant message with no text part, and is this same case.)
  */
 function lastAnswer(messages: unknown): string {
   if (!Array.isArray(messages)) return "";
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i] as { info?: { role?: unknown }; parts?: unknown } | undefined;
-    if (message?.info?.role !== "assistant") continue;
-    if (!Array.isArray(message.parts)) return "";
-    return message.parts
-      .filter(
-        (part): part is { text: string } =>
-          (part as { type?: unknown })?.type === "text" &&
-          typeof (part as { text?: unknown })?.text === "string",
-      )
-      .map((part) => part.text)
-      .join("\n\n")
-      .trim();
-  }
-  return "";
+  const message = messages[messages.length - 1] as
+    | { info?: { role?: unknown }; parts?: unknown }
+    | undefined;
+  if (message?.info?.role !== "assistant") return "";
+  if (!Array.isArray(message.parts)) return "";
+  return message.parts
+    .filter(
+      (part): part is { text: string } =>
+        (part as { type?: unknown })?.type === "text" &&
+        typeof (part as { text?: unknown })?.text === "string",
+    )
+    .map((part) => part.text)
+    .join("\n\n")
+    .trim();
 }
 
 async function post(sessionId: string, text: string): Promise<void> {
