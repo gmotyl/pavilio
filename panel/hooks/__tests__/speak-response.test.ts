@@ -5,7 +5,13 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import express, { type NextFunction, type Request, type Response } from "express";
+
+// Importing the route module for its cap constant pulls in the WS fan-out it
+// broadcasts through; the stand-in below never needs it.
+vi.mock("../../server/watcher", () => ({ broadcast: vi.fn() }));
+const { MAX_UTTERANCE_BYTES } = await import("../../server/routes/speech");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, "..", "speak-response.mjs");
@@ -32,6 +38,10 @@ let server: Server | undefined;
 let panelUrl = "";
 let captured: CapturedRequest[] = [];
 let scratch: string;
+/** Statuses the capped stand-in answered with, in order. */
+let answered: number[] = [];
+/** Raw request-body bytes as the parser counted them; null if it never got there. */
+let rawBodyBytes: number | null = null;
 
 /**
  * Stand-in panel. `respond` decides the answer; `hang` accepts the body and
@@ -70,6 +80,54 @@ async function unusedPanelUrl(): Promise<string> {
   const { port } = probe.address() as AddressInfo;
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return `http://127.0.0.1:${port}`;
+}
+
+/**
+ * Stand-in panel that enforces the same limit the real route does. This mirrors
+ * the production mount in `server/panel-server.ts`: the speech-scoped
+ * `express.json({ limit: MAX_UTTERANCE_BYTES })` first, the 413 handler sitting
+ * next to it second, the utterance handler last — so an over-limit body throws
+ * inside the parser and comes back 413, exactly as it would in the panel.
+ */
+async function listenAsCappedPanel(): Promise<void> {
+  const app = express();
+  app.use((_req, res, next) => {
+    res.on("finish", () => answered.push(res.statusCode));
+    next();
+  });
+  app.use(
+    "/api/speech",
+    express.json({
+      limit: MAX_UTTERANCE_BYTES,
+      // Only reached once the whole body has been read inside the limit, which
+      // is what makes it a trustworthy measure of what the hook actually sent.
+      verify: (_req, _res, buf: Buffer) => {
+        rawBodyBytes = buf.byteLength;
+      },
+    }),
+  );
+  app.use("/api/speech", (err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if ((err as { type?: string } | null)?.type === "entity.too.large") {
+      res.status(413).json({ error: "utterance too large", limit: MAX_UTTERANCE_BYTES });
+      return;
+    }
+    next(err);
+  });
+  app.post("/api/speech/utterance", (req: Request, res: Response) => {
+    captured.push({
+      method: req.method,
+      url: req.url,
+      authorization: req.headers.authorization,
+      body: JSON.stringify(req.body),
+    });
+    res.status(204).end();
+  });
+
+  server = createServer(app);
+  await new Promise<void>((resolve) => {
+    server!.listen(0, "127.0.0.1", () => resolve());
+  });
+  panelUrl = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
 }
 
 interface HookRun {
@@ -132,6 +190,8 @@ function stopPayload(transcriptPath: string) {
 
 beforeEach(() => {
   captured = [];
+  answered = [];
+  rawBodyBytes = null;
   panelUrl = "";
   scratch = mkdtempSync(join(tmpdir(), "pavilio-speak-response-"));
 });
@@ -296,5 +356,54 @@ describe("speak-response", () => {
     // A diagnostic that leaks the credential it is complaining about is worse
     // than no diagnostic at all.
     expect(result.stderr).not.toContain(TEST_TOKEN);
+  });
+
+  it("stays inside the route's cap when the response is far over it", async () => {
+    // The cap is on the request *body*, so the trim has to survive the envelope
+    // and JSON escaping. This text is built out of the characters that inflate
+    // under escaping — quotes, backslashes, newlines — so trimming the text to
+    // the cap (the earlier behaviour) leaves a body well over it.
+    const unit = 'He said "no" — path C:\\tmp\\x\n';
+    const hugeText = unit.repeat(12_000);
+    const transcript = join(scratch, "huge.jsonl");
+    writeFileSync(
+      transcript,
+      `${JSON.stringify({
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: hugeText }] },
+      })}\n`,
+    );
+
+    // Guard the fixture: a text-only trim really would be rejected here, so a
+    // 204 below cannot be passing for a trivial reason.
+    const textTrimmedToCap = Buffer.from(hugeText, "utf8")
+      .subarray(0, MAX_UTTERANCE_BYTES)
+      .toString("utf8");
+    const bodyOfTextTrim = JSON.stringify({
+      sessionId: TERMINAL_ID,
+      text: textTrimmedToCap,
+    });
+    expect(Buffer.byteLength(bodyOfTextTrim)).toBeGreaterThan(MAX_UTTERANCE_BYTES);
+
+    await listenAsCappedPanel();
+
+    const result = await run(stopPayload(transcript));
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    // 204, not 413: the whole utterance survived instead of being dropped.
+    expect(answered).toEqual([204]);
+    expect(captured).toHaveLength(1);
+    expect(rawBodyBytes).not.toBeNull();
+    expect(rawBodyBytes!).toBeLessThanOrEqual(MAX_UTTERANCE_BYTES);
+
+    // What arrived is the front of the response, cut, not something else.
+    const { sessionId, text } = JSON.parse(captured[0].body) as {
+      sessionId: string;
+      text: string;
+    };
+    expect(sessionId).toBe(TERMINAL_ID);
+    expect(text.length).toBeGreaterThan(1_000);
+    expect(hugeText.startsWith(text)).toBe(true);
   });
 });

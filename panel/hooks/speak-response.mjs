@@ -61,10 +61,21 @@ const PANEL_URL = process.env.PAVILIO_PANEL_URL ?? "http://127.0.0.1:3010";
 const REQUEST_TIMEOUT_MS = 1000;
 
 /**
- * Mirror of `MAX_UTTERANCE_BYTES` in `server/routes/speech.ts`. Used only to
- * pre-trim, and only *after* the message has been selected — see `trimToCap`.
+ * Mirror of `MAX_UTTERANCE_BYTES` in `server/routes/speech.ts`. The route
+ * applies it to the raw **request body** (`express.json({ limit: … })` mounted
+ * at `/api/speech`), not to the text inside it. Used only to pre-trim, and only
+ * *after* the message has been selected — see `trimToCap`.
  */
 const MAX_UTTERANCE_BYTES = 100 * 1024;
+
+/**
+ * Headroom kept below that cap. `trimToCap` measures the real serialized body
+ * rather than assuming a fixed overhead for the envelope and for JSON escaping,
+ * so this margin is not paying for either: it only absorbs the boundary the
+ * search cannot land on exactly and any future envelope field. 1 KiB out of
+ * 100 KiB costs about ten words of a response that is already being cut.
+ */
+const BODY_MARGIN_BYTES = 1024;
 
 function readStdin() {
   try {
@@ -117,18 +128,43 @@ function lastAssistantText(transcript) {
   return null;
 }
 
+/** Bytes this pair will actually put on the wire — exactly what `post` sends. */
+function bodyBytes(sessionId, text) {
+  return Buffer.byteLength(JSON.stringify({ sessionId, text }), "utf8");
+}
+
+/** Prefix of `length` UTF-16 units, minus a trailing half of a surrogate pair. */
+function cutAt(text, length) {
+  const prefix = text.slice(0, length);
+  const lastUnit = prefix.charCodeAt(prefix.length - 1);
+  return lastUnit >= 0xd800 && lastUnit <= 0xdbff ? prefix.slice(0, -1) : prefix;
+}
+
 /**
- * Keep the body inside the route's cap, which would otherwise answer 413 and
- * drop the whole utterance. Done *after* selecting the message, so nothing is
- * discarded before the choice is made. A response this long does get cut
- * mid-sentence — accepted deliberately: the alternative is hearing nothing at
- * all, and the browser's preparation stage truncates far earlier anyway.
+ * Keep the **serialized body** inside the route's cap, which would otherwise
+ * answer 413 and drop the whole utterance. What the route limits is the body,
+ * envelope and JSON escaping included, so the length of the text alone is not a
+ * usable measure: 100 KB of markdown full of quotes, backslashes and newlines
+ * serializes to well over 100 KB of body. Done *after* selecting the message,
+ * so nothing is discarded before the choice is made. A response this long does
+ * get cut mid-sentence — accepted deliberately: the alternative is hearing
+ * nothing at all, and the browser's preparation stage truncates far earlier
+ * anyway.
  */
-function trimToCap(text) {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.byteLength <= MAX_UTTERANCE_BYTES) return text;
-  // A cut can land inside a multi-byte character; drop the resulting partial.
-  return bytes.subarray(0, MAX_UTTERANCE_BYTES).toString("utf8").replace(/\uFFFD+$/u, "");
+function trimToCap(sessionId, text) {
+  const budget = MAX_UTTERANCE_BYTES - BODY_MARGIN_BYTES;
+  if (bodyBytes(sessionId, text) <= budget) return text;
+  // Longest prefix whose body still fits, by binary search over characters: a
+  // character's byte cost is not uniform once escaping is in play, so only
+  // measuring the serialized body tells whether a given cut fits.
+  let fits = 0;
+  let tooLong = text.length;
+  while (fits < tooLong) {
+    const mid = Math.ceil((fits + tooLong) / 2);
+    if (bodyBytes(sessionId, cutAt(text, mid)) <= budget) fits = mid;
+    else tooLong = mid - 1;
+  }
+  return cutAt(text, fits);
 }
 
 async function post(sessionId, text) {
@@ -181,7 +217,7 @@ async function main() {
   const text = lastAssistantText(transcript);
   if (text === null) return;
 
-  await post(sessionId, trimToCap(text));
+  await post(sessionId, trimToCap(sessionId, text));
 }
 
 try {
