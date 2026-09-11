@@ -13,9 +13,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * default; these recordings are what pin that the player always passes one.
  */
 const synth = vi.hoisted(() => {
-  type Mode = "resolve" | "reject" | "hang";
+  type Mode = "resolve" | "reject" | "hang" | "defer";
 
   const modes = new Map<string, Mode>();
+  /** Resolvers for the units held in "defer" mode, keyed by unit text. */
+  const releases = new Map<string, () => void>();
   const buffers = new Map<string, ArrayBuffer>();
   const bufferText = new Map<ArrayBuffer, string>();
   const blobText = new Map<Blob, string>();
@@ -42,6 +44,11 @@ const synth = vi.hoisted(() => {
 
       const mode = modes.get(text) ?? "resolve";
       if (mode === "hang") return new Promise<ArrayBuffer>(() => {});
+      if (mode === "defer") {
+        return new Promise<ArrayBuffer>((resolve) => {
+          releases.set(text, () => resolve(bufferFor(text)));
+        });
+      }
       if (mode === "reject") throw new Error(`synthesis failed: ${text}`);
       return bufferFor(text);
     },
@@ -70,8 +77,23 @@ const synth = vi.hoisted(() => {
     },
     failOn: (text: string) => modes.set(text, "reject"),
     hangOn: (text: string) => modes.set(text, "hang"),
+    /**
+     * Holds this unit's synthesis open until {@link release}. "hang" proves a
+     * unit was never awaited; this one proves what the player reports *while*
+     * it waits, and then that the wait ends.
+     */
+    deferOn: (text: string) => modes.set(text, "defer"),
+    release: (text: string) => {
+      const resolve = releases.get(text);
+      if (!resolve) throw new Error(`no deferred synthesis is waiting for ${text}`);
+      releases.delete(text);
+      // A released unit synthesizes normally if it is ever asked for again.
+      modes.delete(text);
+      resolve();
+    },
     reset: () => {
       modes.clear();
+      releases.clear();
       requests = [];
       prefetches = [];
       blobbed = [];
@@ -104,6 +126,26 @@ const revokedUrls: string[] = [];
 const paused = vi.fn();
 /** Swapped per test: a browser that accepts the start, or one that refuses it. */
 let playResult: () => Promise<void>;
+
+// jsdom stores `currentTime` as a plain value and never rewinds it, so an
+// element whose `src` was reassigned is indistinguishable from one that was
+// held across a pause — and "resume does not restart the unit" would then be
+// unfalsifiable. A real browser loads the new source and rewinds to zero; the
+// stand-in is taught to do the same. Patched once, at module scope: the
+// per-test `vi.restoreAllMocks()` only unwinds spies, and re-wrapping this in
+// `beforeEach` would stack one wrapper per test.
+const nativeSrc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src")!;
+Object.defineProperty(HTMLMediaElement.prototype, "src", {
+  configurable: true,
+  enumerable: nativeSrc.enumerable,
+  get(this: HTMLMediaElement): string {
+    return nativeSrc.get!.call(this) as string;
+  },
+  set(this: HTMLMediaElement, value: string) {
+    this.currentTime = 0;
+    nativeSrc.set!.call(this, value);
+  },
+});
 
 /**
  * The player's steps are all microtasks — synthesis resolves, the object URL is
@@ -141,6 +183,21 @@ async function endCurrentUnit(): Promise<void> {
     element.dispatchEvent(new Event("ended"));
     await drain();
   });
+}
+
+/** Runs a synchronous player call and lets the run settle around it. */
+async function settle(action: () => void): Promise<void> {
+  await act(async () => {
+    action();
+    await drain();
+  });
+}
+
+/** The element the player is currently driving. */
+function currentElement(): HTMLMediaElement {
+  const element = elements[elements.length - 1];
+  if (!element) throw new Error("nothing is playing");
+  return element;
 }
 
 beforeEach(() => {
@@ -558,6 +615,245 @@ describe("useSpeechPlayer", () => {
     // The gesture's own `play()` lands on the element cell-b is mid-way
     // through, src and all — there is nowhere else for it to land.
     expect(played).toEqual(["blob:unit-0", "blob:other-0", "blob:other-0"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("pause holds the element without tearing the run down", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
+    const element = currentElement();
+    const pausesBefore = paused.mock.calls.length;
+
+    await settle(() => result.current.pause());
+
+    expect(paused.mock.calls.length).toBeGreaterThan(pausesBefore);
+    expect(result.current.pausedSessionId).toBe("cell-a");
+    // A pause is not a stop: the run keeps its session, its element and its
+    // ladder, because the user is going to come back to it.
+    expect(result.current.speakingSessionId).toBe("cell-a");
+    expect(element.getAttribute("src")).toBe("blob:unit-0");
+    expect(createdUrls).toEqual(["blob:unit-0", "blob:unit-1"]);
+    expect(revokedUrls).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("resume continues from the retained position, not the start of the unit", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
+    const element = currentElement();
+    // Two seconds into unit 0 — the position the listener expects back.
+    element.currentTime = 12.5;
+
+    await settle(() => result.current.pause());
+    const createdAtPause = [...createdUrls];
+    const requestedAtPause = synth.requests.map((request) => request.text);
+
+    await settle(() => result.current.resume());
+
+    expect(result.current.pausedSessionId).toBeNull();
+    expect(result.current.speakingSessionId).toBe("cell-a");
+    // The element was told to play again on the source it was already holding.
+    expect(played).toEqual(["blob:unit-0", "blob:unit-0"]);
+    // Nothing reassigned `src`, which is what would have rewound it to zero.
+    // Going through `play(sessionId, units, fromUnit)` would have done exactly
+    // that — and re-synthesized and rebuilt the URL on the way.
+    expect(element.currentTime).toBe(12.5);
+    expect(createdUrls).toEqual(createdAtPause);
+    expect(synth.requests.map((request) => request.text)).toEqual(requestedAtPause);
+    expect(revokedUrls).toEqual([]);
+
+    // And the ladder is still the same ladder: the next unit follows normally.
+    await endCurrentUnit();
+    expect(played).toEqual(["blob:unit-0", "blob:unit-0", "blob:unit-1"]);
+    expect(revokedUrls).toEqual(["blob:unit-0"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("a unit that ends while paused does not advance the ladder", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
+    await settle(() => result.current.pause());
+
+    // The element reaches the end of the unit under the pause. Advancing now
+    // would start the next unit speaking while the user holds the run.
+    await endCurrentUnit();
+
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(result.current.pausedSessionId).toBe("cell-a");
+    expect(revokedUrls).toEqual([]);
+
+    await settle(() => result.current.resume());
+
+    expect(played).toEqual(["blob:unit-0", "blob:unit-1"]);
+    expect(result.current.pausedSessionId).toBeNull();
+    expect(revokedUrls).toEqual(["blob:unit-0"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("reports waiting while the first unit synthesizes", async () => {
+    synth.deferOn("unit-0");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
+
+    // The run exists and is blocked on edge-tts: this is the red the control
+    // shows before a single sound is made.
+    expect(result.current.speakingSessionId).toBe("cell-a");
+    expect(result.current.waitingForSynthesis).toBe(true);
+    expect(played).toEqual([]);
+
+    await settle(() => synth.release("unit-0"));
+
+    // Handed to the element, so the wait is over.
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(result.current.waitingForSynthesis).toBe(false);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("reports waiting again on a mid-response underrun", async () => {
+    synth.deferOn("unit-1");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
+
+    // Unit 0 is speaking and unit 1 is still in flight: nothing is *blocked*
+    // yet, because the listener is hearing something.
+    expect(result.current.waitingForSynthesis).toBe(false);
+
+    await endCurrentUnit();
+
+    // Now the ladder has run dry mid-response — the same flag, the same red.
+    expect(result.current.waitingForSynthesis).toBe(true);
+    expect(result.current.speakingSessionId).toBe("cell-a");
+    expect(played).toEqual(["blob:unit-0"]);
+
+    await settle(() => synth.release("unit-1"));
+
+    expect(played).toEqual(["blob:unit-0", "blob:unit-1"]);
+    expect(result.current.waitingForSynthesis).toBe(false);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("stop from paused tears down like stop from playing", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
+    const element = currentElement();
+    await settle(() => result.current.pause());
+
+    await settle(() => result.current.stop());
+
+    expect(result.current.pausedSessionId).toBeNull();
+    expect(result.current.speakingSessionId).toBeNull();
+    expect(result.current.waitingForSynthesis).toBe(false);
+    expect(element.getAttribute("src")).toBeNull();
+    expect(new Set(revokedUrls)).toEqual(new Set(createdUrls));
+
+    // The held unit must not wake the ladder after the teardown either.
+    await settle(() => element.dispatchEvent(new Event("ended")));
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("a new play discards another session's paused position", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
+    await settle(() => result.current.pause());
+    expect(result.current.pausedSessionId).toBe("cell-a");
+
+    await startPlay(result.current, "cell-b", units("other-0", "other-1"));
+
+    // One element, so cell-a's suspended position cannot be kept: the run is
+    // abandoned exactly as a playing one would be.
+    expect(result.current.pausedSessionId).toBeNull();
+    expect(result.current.speakingSessionId).toBe("cell-b");
+    expect(played).toEqual(["blob:unit-0", "blob:other-0"]);
+    expect(new Set(revokedUrls)).toEqual(new Set(["blob:unit-0", "blob:unit-1"]));
+
+    // And nothing can resurrect it: `resume` has nothing paused to resume.
+    await settle(() => result.current.resume());
+    expect(played).toEqual(["blob:unit-0", "blob:other-0"]);
+    expect(result.current.speakingSessionId).toBe("cell-b");
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("clears waiting before reporting a systemic failure", async () => {
+    synth.failOn("unit-0");
+    synth.failOn("unit-1");
+    synth.failOn("unit-2");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(
+      result.current,
+      "cell-a",
+      units("unit-0", "unit-1", "unit-2", "unit-3"),
+    );
+
+    // The run is dead. Red means "more is still coming", so a run that has
+    // given up must never be left presenting as one that is still waiting.
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect((onError.mock.calls[0][0] as SpeechPlaybackError).kind).toBe("synthesis");
+    expect(result.current.waitingForSynthesis).toBe(false);
+    expect(result.current.speakingSessionId).toBeNull();
+    expect(result.current.pausedSessionId).toBeNull();
+  });
+
+  it("clears waiting when a blocked run is stopped", async () => {
+    // The failure path above clears the flag on its way past the await, so it
+    // cannot see this one: a run stopped *while* it is still blocked never
+    // reaches that line. Red is never terminal, so the teardown has to clear it
+    // itself or the cell stays red with nothing behind it.
+    synth.deferOn("unit-0");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
+    expect(result.current.waitingForSynthesis).toBe(true);
+
+    await settle(() => result.current.stop());
+
+    expect(result.current.waitingForSynthesis).toBe(false);
+    expect(result.current.speakingSessionId).toBeNull();
+
+    // The abandoned synthesis landing afterwards changes nothing.
+    await settle(() => synth.release("unit-0"));
+    expect(result.current.waitingForSynthesis).toBe(false);
+    expect(played).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("keeps a unit that arrives during a pause silent until resume", async () => {
+    synth.deferOn("unit-1");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
+    await endCurrentUnit();
+    expect(result.current.waitingForSynthesis).toBe(true);
+
+    // Pausing a run that is blocked on synthesis is allowed — the control keeps
+    // its pause icon while it is red — so the unit lands while the run is held.
+    await settle(() => result.current.pause());
+    await settle(() => synth.release("unit-1"));
+
+    expect(result.current.pausedSessionId).toBe("cell-a");
+    expect(played).toEqual(["blob:unit-0"]);
+
+    await settle(() => result.current.resume());
+
+    expect(played).toEqual(["blob:unit-0", "blob:unit-1"]);
     expect(onError).not.toHaveBeenCalled();
   });
 });

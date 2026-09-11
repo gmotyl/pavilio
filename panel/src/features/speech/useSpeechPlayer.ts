@@ -8,6 +8,11 @@
  * current unit's `ended` fires, so the swap is a local assignment with no
  * network round-trip — motyl's rule, carried over.
  *
+ * A pause holds the *element*, not the run: nothing is torn down, no URL is
+ * revoked, and the ladder simply stops advancing until `resume`, which
+ * re-issues `play()` on the source the element is still holding — so it
+ * continues rather than restarting the unit.
+ *
  * Nothing here is language-aware and nothing here prepares text: it plays the
  * units it is handed, in order, with the voice the user picked.
  */
@@ -94,7 +99,32 @@ export interface SpeechPlayerOptions {
 
 export interface SpeechPlayer {
   speakingSessionId: string | null;
+  /**
+   * The session whose run the user is holding paused, or `null`. A paused run
+   * is still the speaking run — {@link SpeechPlayer.speakingSessionId} keeps
+   * naming it — because a pause suspends the element rather than ending the
+   * ladder. The control reads this one first: paused outranks speaking, so a
+   * held run can never present as playing.
+   */
+  pausedSessionId: string | null;
+  /**
+   * Whether the run is blocked waiting for a unit to synthesize. One flag for
+   * both occasions, because there is only one place playback ever waits: the
+   * first unit of a run, and an underrun part-way through a response. It is
+   * the "blocked on synthesis" red, so it is never left set on a run that has
+   * given up — a red control always means more is still coming.
+   */
+  waitingForSynthesis: boolean;
   play(sessionId: string, units: SpeechUnit[], fromUnit?: number): Promise<void>;
+  /**
+   * Holds the current run: the element pauses where it is and the ladder stops
+   * advancing, but nothing is torn down and no URL is revoked. Legal while the
+   * run is blocked on synthesis too — the unit that then arrives is loaded and
+   * left silent until {@link SpeechPlayer.resume}.
+   */
+  pause(): void;
+  /** Lets a paused run go on from exactly where it was suspended. */
+  resume(): void;
   stop(): void;
   unlock(): void;
   /**
@@ -115,10 +145,24 @@ export interface SpeechPlayer {
 interface PlaybackRun {
   readonly sessionId: string;
   active: boolean;
+  /**
+   * Whether the user is holding this run. Distinct from `active`: a paused run
+   * is still very much alive — it keeps its URLs, its element and its place in
+   * the ladder — it simply makes no sound and does not advance.
+   */
+  paused: boolean;
   /** Object URLs built for this run and not yet revoked. */
   readonly urls: Set<string>;
   /** Set while a unit is playing; unblocks that wait on barge-in. */
   abandonUnit: (() => void) | null;
+  /**
+   * What `resume` must do to the unit the element is currently holding. Two
+   * shapes, one hook: re-issue `play()` on the element — which continues from
+   * the retained `currentTime`, because `src` was never touched — or, when the
+   * unit reached its end under the pause, release the ladder to advance. Null
+   * between units, where a resume has nothing to do but let the loop run on.
+   */
+  resumeUnit: (() => void) | null;
 }
 
 /** A unit's load never rejects, so the ladder can run ahead without a catch. */
@@ -222,10 +266,20 @@ function playUnit(element: HTMLAudioElement, url: string, run: PlaybackRun): Pro
       element.removeEventListener("ended", onEnded);
       element.removeEventListener("error", onFailed);
       run.abandonUnit = null;
+      run.resumeUnit = null;
       finish();
     };
 
-    const onEnded = (): void => settle(resolve);
+    const onEnded = (): void => {
+      if (run.paused) {
+        // The unit ran out under a pause. Resolving now would start the next
+        // one speaking while the user is holding the run, so the ladder waits
+        // for the resume instead.
+        run.resumeUnit = () => settle(resolve);
+        return;
+      }
+      settle(resolve);
+    };
     const onFailed = (): void =>
       settle(() => reject(new Error(`the audio element could not play ${url}`)));
 
@@ -237,21 +291,37 @@ function playUnit(element: HTMLAudioElement, url: string, run: PlaybackRun): Pro
 
     element.src = url;
 
-    let started: unknown;
-    try {
-      started = element.play();
-    } catch (cause) {
-      settle(() => reject(new PlaybackRefusedError(cause)));
-      return;
-    }
-    if (isPromiseLike(started)) {
-      started.catch((cause: unknown) => settle(() => reject(new PlaybackRefusedError(cause))));
-    }
+    const start = (): void => {
+      let started: unknown;
+      try {
+        started = element.play();
+      } catch (cause) {
+        settle(() => reject(new PlaybackRefusedError(cause)));
+        return;
+      }
+      if (isPromiseLike(started)) {
+        started.catch((cause: unknown) => settle(() => reject(new PlaybackRefusedError(cause))));
+      }
+    };
+
+    // Re-issuing `play()` is also what a resume from mid-unit needs, and it
+    // continues rather than restarts: `src` is assigned once, above, so the
+    // element keeps the position it was paused at. Registering it here is what
+    // lets `resume` stay ignorant of which of the two cases it is in — and
+    // keeps a refused resume on the same reporting path as a refused start.
+    run.resumeUnit = start;
+
+    // The pause may have landed while this unit was still synthesizing. It is
+    // loaded into the element, but nothing may make a sound until the resume.
+    if (run.paused) return;
+    start();
   });
 }
 
 export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer {
   const [speakingSessionId, setSpeakingSessionId] = useState<string | null>(null);
+  const [pausedSessionId, setPausedSessionId] = useState<string | null>(null);
+  const [waitingForSynthesis, setWaitingForSynthesis] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const elementRef = useRef<HTMLAudioElement | null>(null);
   const runRef = useRef<PlaybackRun | null>(null);
@@ -280,6 +350,32 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
     }
     if (elementRef.current) resetElement(elementRef.current);
     setSpeakingSessionId(null);
+    setPausedSessionId(null);
+    // A run that is over is not waiting for anything. Red means more is still
+    // coming, so a torn-down run must never be left wearing it.
+    setWaitingForSynthesis(false);
+  }, []);
+
+  const pause = useCallback((): void => {
+    const run = runRef.current;
+    if (!run || !run.active || run.paused) return;
+
+    run.paused = true;
+    elementRef.current?.pause();
+    setPausedSessionId(run.sessionId);
+  }, []);
+
+  const resume = useCallback((): void => {
+    const run = runRef.current;
+    if (!run || !run.active || !run.paused) return;
+
+    run.paused = false;
+    setPausedSessionId(null);
+    // Whatever the element is holding, this is how it goes on: a `play()` that
+    // continues from the retained position, or the release of a unit that ended
+    // under the pause. Deliberately NOT `play(sessionId, units, fromUnit)` —
+    // that tears the run down and starts the unit again from its first word.
+    run.resumeUnit?.();
   }, []);
 
   const report = useCallback(
@@ -311,8 +407,10 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       const run: PlaybackRun = {
         sessionId,
         active: true,
+        paused: false,
         urls: new Set<string>(),
         abandonUnit: null,
+        resumeUnit: null,
       };
       runRef.current = run;
       setSpeakingSessionId(sessionId);
@@ -338,8 +436,14 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       let lastFailure: unknown = null;
 
       while (pending !== null) {
+        // The only place playback ever waits on synthesis, which is why one
+        // flag covers both the first unit of the run and a mid-response
+        // underrun. A newer run owns the flag the moment this one goes stale,
+        // so an abandoned run must not clear it on its way out.
+        setWaitingForSynthesis(true);
         const loaded = await pending;
         if (isStale()) return;
+        setWaitingForSynthesis(false);
 
         if ("error" in loaded) {
           consecutiveFailures += 1;
@@ -457,7 +561,27 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
   );
 
   return useMemo(
-    () => ({ speakingSessionId, play, stop, unlock, unlocked }),
-    [speakingSessionId, play, stop, unlock, unlocked],
+    () => ({
+      speakingSessionId,
+      pausedSessionId,
+      waitingForSynthesis,
+      play,
+      pause,
+      resume,
+      stop,
+      unlock,
+      unlocked,
+    }),
+    [
+      speakingSessionId,
+      pausedSessionId,
+      waitingForSynthesis,
+      play,
+      pause,
+      resume,
+      stop,
+      unlock,
+      unlocked,
+    ],
   );
 }
