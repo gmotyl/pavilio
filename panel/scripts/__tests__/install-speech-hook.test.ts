@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -87,6 +87,91 @@ function run(...args: string[]) {
     env: { ...process.env, HOME: home, USERPROFILE: home },
     encoding: "utf8",
   });
+}
+
+/*
+ * Windows-shaped hook paths — where the TOML hazard lives. `resolve()` there
+ * returns `C:\Users\…`, and `\U` is not one of TOML's defined escapes (`\\`,
+ * `\"`, `\n`, `\t`, `\uXXXX`, …), so a path spliced raw into a basic string
+ * does not merely fail to register the hook: it leaves the user's whole
+ * config.toml unparseable, everything they already had in it included. POSIX
+ * `resolve()` never emits a backslash, so a test pinned to this machine's own
+ * path passes with the bug as readily as without it.
+ *
+ * The second path carries quotes as well, which is what pins the *order* of
+ * the two replacements: escaping quotes first would double the backslash that
+ * quote-escaping had just introduced, closing the string early.
+ */
+const WINDOWS_HOOK_PATH =
+  "C:\\Users\\foo\\panel\\hooks\\speak-response-codex.mjs";
+const WINDOWS_HOOK_PATH_WITH_QUOTES =
+  'C:\\Users\\foo "bar"\\panel\\hooks\\speak-response-codex.mjs';
+
+/**
+ * Runs the installer with `path.resolve()` handing it a Windows-shaped path for
+ * the codex emitter — the one thing this box cannot produce by itself. Staging
+ * the script under a directory whose *name* holds a backslash is no route
+ * either: node's ESM loader refuses outright to load a module whose path
+ * contains one. So the lever is a `--import` preload that patches `resolve` on
+ * the `path` CJS export object *before* node builds the ESM facade the
+ * installer imports from. Nothing in the code under test is touched — the
+ * installer's own splicing is what writes the file.
+ */
+function runWithCodexHookPath(hookPath: string) {
+  const stub = join(home, "windows-path-stub.mjs");
+  writeFileSync(
+    stub,
+    `import { createRequire } from "node:module";
+const path = createRequire(import.meta.url)("path");
+const realResolve = path.resolve;
+path.resolve = (...parts) => {
+  const resolved = realResolve(...parts);
+  return resolved.endsWith("speak-response-codex.mjs")
+    ? ${JSON.stringify(hookPath)}
+    : resolved;
+};
+`,
+  );
+  return spawnSync(
+    process.execPath,
+    ["--import", pathToFileURL(stub).href, SCRIPT],
+    {
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+      encoding: "utf8",
+    },
+  );
+}
+
+/**
+ * The first interpreter here whose stdlib carries `tomllib` (3.11+), or
+ * undefined. This repo has no TOML parser and pulling one in to check six
+ * written lines would be the very trade the installer itself refuses; python's
+ * is already on the box. `python3` is not assumed new enough — on this machine
+ * it is 3.8 with 3.12 sitting beside it.
+ */
+const TOML_PYTHON = ["python3", "python3.13", "python3.12", "python3.11"].find(
+  (bin) =>
+    spawnSync(bin, ["-c", "import tomllib"], { encoding: "utf8" }).status === 0,
+);
+
+interface CodexToml {
+  hooks?: { Stop?: { hooks?: { command?: string }[] }[] };
+}
+
+/** Parses a written config.toml — proof it is TOML at all, not merely bytes. */
+function parseToml(path: string): CodexToml {
+  const parsed = spawnSync(
+    TOML_PYTHON as string,
+    [
+      "-c",
+      "import json,sys,tomllib;json.dump(tomllib.load(open(sys.argv[1],'rb')),sys.stdout)",
+      path,
+    ],
+    { encoding: "utf8" },
+  );
+  expect(parsed.stderr).toBe("");
+  expect(parsed.status).toBe(0);
+  return JSON.parse(parsed.stdout) as CodexToml;
 }
 
 function readSettings(): Settings {
@@ -643,6 +728,53 @@ command = "npx"
     expect(run("--uninstall").status).toBe(0);
     expect(readCodexConfig()).toBe(CODEX_SEED_CONFIG);
   });
+
+  it("escapes backslashes and quotes out of the path it splices into TOML", () => {
+    makeRoots([".codex"]);
+
+    const result = runWithCodexHookPath(WINDOWS_HOOK_PATH_WITH_QUOTES);
+
+    expect(result.status).toBe(0);
+    // Spelled out rather than recomputed with the installer's own replace():
+    // the expectation here *is* the exact bytes, and a mirrored expression
+    // would agree with the bug as readily as with the fix.
+    expect(readCodexConfig()).toContain(
+      String.raw`command = "node \"C:\\Users\\foo \"bar\"\\panel\\hooks\\speak-response-codex.mjs\""`,
+    );
+    // The escaping belongs to the TOML literal and stops there: the report the
+    // user reads back shows the path as it actually is on disk.
+    expect(result.stdout).toContain(`node "${WINDOWS_HOOK_PATH_WITH_QUOTES}"`);
+  });
+
+  it.skipIf(!TOML_PYTHON)(
+    "leaves config.toml parseable after a Windows-shaped install",
+    () => {
+      makeRoots([".codex"]);
+
+      for (const hookPath of [
+        WINDOWS_HOOK_PATH,
+        WINDOWS_HOOK_PATH_WITH_QUOTES,
+      ]) {
+        writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
+
+        expect(runWithCodexHookPath(hookPath).status).toBe(0);
+
+        // Unescaped, this file does not merely fail to register a hook: it
+        // stops being TOML, taking the user's model, projects and MCP servers
+        // down with it, and codex says nothing about why.
+        const commands = (parseToml(codexConfigPath).hooks?.Stop ?? [])
+          .flatMap((entry) => entry.hooks ?? [])
+          .map((hook) => hook.command ?? "");
+        // Round-trips to the path itself, so the escaping is correct and not
+        // merely parseable — a doubled backslash left behind shows up here.
+        expect(commands).toContain(`node "${hookPath}"`);
+        // And peon-ping's own block came back through the same parse.
+        expect(commands).toContain(
+          "bash /root/.claude/hooks/peon-ping/adapters/codex.sh",
+        );
+      }
+    },
+  );
 
   // --- the opencode target --------------------------------------------------
 

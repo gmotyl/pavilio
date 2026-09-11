@@ -234,9 +234,23 @@ const codexRoot = join(home, ".codex");
 const codexConfigPath = join(codexRoot, "config.toml");
 
 const codexHookPath = resolve(scriptDir, "..", "hooks", "speak-response-codex.mjs");
-// TOML basic string: the inner quotes around the path are escaped, so a path
-// containing spaces still reaches the shell as one argument.
+// What the user is shown. Deliberately the raw path: the report is there to be
+// read against what is on disk, and escaping belongs to the file format, not to
+// the human. Only the TOML literal below gets the escaped form.
 const codexHookCommand = `node "${codexHookPath}"`;
+
+// The path as it may appear *inside* a TOML basic string. That string type
+// defines a closed set of escapes — \\ \" \b \f \n \r \t \uXXXX \UXXXXXXXX —
+// and treats every other backslash sequence as a parse error. On Windows
+// resolve() returns `C:\Users\…`, so splicing the path in raw would not merely
+// fail to register the hook: `\U` makes the *whole* config.toml unparseable,
+// taking down every unrelated key the user had in it, and codex reports nothing
+// that points at this file. Backslashes first, then quotes — the other order
+// would double the backslash that quote-escaping had just introduced, ending
+// the string early. Usually a no-op on POSIX, but not only a Windows concern:
+// both characters are legal in a POSIX filename, so a checkout under one of
+// them corrupts the config exactly the same way.
+const codexHookPathToml = codexHookPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
 const codexBlockLines = [
   CODEX_BEGIN,
@@ -244,7 +258,9 @@ const codexBlockLines = [
   "",
   "[[hooks.Stop.hooks]]",
   'type = "command"',
-  `command = "node \\"${codexHookPath}\\""`,
+  // The inner quotes around the path are escaped for TOML, so a path
+  // containing spaces still reaches the shell as one argument.
+  `command = "node \\"${codexHookPathToml}\\""`,
   "timeout = 30",
   CODEX_END,
 ];
