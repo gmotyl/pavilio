@@ -658,9 +658,14 @@ describe("TerminalLayoutGrid — what the cell header no longer carries", () => 
   beforeEach(() => installProjectColors());
 
   // jsdom's DragEvent has no real DataTransfer; the header's own onDragStart
-  // writes to it, so a stand-in has to be supplied.
+  // writes to it, so a stand-in has to be supplied. `setData` belongs in that
+  // stand-in on purpose: without it the header's handler throws before it can
+  // arm a drag, and a missing guard on the control being dragged would then
+  // look like a pass (no previews) instead of the failure it is.
   function dragStart(el: Element) {
-    fireEvent.dragStart(el, { dataTransfer: { effectAllowed: "", dropEffect: "" } });
+    fireEvent.dragStart(el, {
+      dataTransfer: { effectAllowed: "", dropEffect: "", setData: () => {} },
+    });
   }
 
   /**
@@ -790,12 +795,17 @@ describe("TerminalLayoutGrid — what the cell header no longer carries", () => 
       toJSON: () => ({}),
     } as DOMRect);
 
+    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
+
     // The colour control now lives inside the `draggable` header, so it needs
     // the same dragstart guard the rename input has — otherwise reaching for
     // it starts a cell placement.
     expect(screen.queryByTestId("terminal-cell-color-r1")).toBeNull();
     fireEvent.doubleClick(screen.getByText("claude-a"));
     dragStart(screen.getByTestId("terminal-cell-color-r1"));
+    // Arming leaves no DOM trace; only a following dragover paints a target.
+    // Without this dragover the absence of previews would prove nothing.
+    dragOverAt(wrapper, 395, 235);
     expect(screen.queryAllByTestId(/^placement-preview-/)).toHaveLength(0);
 
     // Renaming from that same state still commits.
@@ -811,7 +821,6 @@ describe("TerminalLayoutGrid — what the cell header no longer carries", () => 
     // own handler writes to `dataTransfer`, so it is dispatched without one —
     // jsdom has no real DataTransfer and the handler guards for that.
     fireEvent.dragStart(screen.getAllByTitle("Drag to place this terminal")[0]);
-    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
     dragOverAt(wrapper, 395, 235);
     expect(screen.queryAllByTestId(/^placement-preview-/).length).toBeGreaterThan(0);
   });
