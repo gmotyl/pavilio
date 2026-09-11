@@ -229,15 +229,20 @@ export function voteLanguage(text: string): "pl" | "en" {
  *
  * The two counters are deliberately asymmetric, because the two rules they
  * serve are:
- * - `plVotes` is the session's **lifetime** Polish evidence. It only grows.
+ * - `plVotes` is the Polish evidence **since the session last flipped back to
+ *   English**. It only grows while the session has not flipped back; the
+ *   flip-back clears it, so re-entering Polish costs two fresh votes, exactly
+ *   as it did on first entry — one utterance is never enough, anywhere.
  * - `enVotes` is the **current run** of consecutive English votes — the counter
  *   the "three consecutive" flip-back rule needs — and any Polish vote resets
  *   it. A lifetime English tally here would let a long English preamble lock a
  *   session out of Polish forever, which a genuinely bilingual agent session
- *   must not do.
+ *   must not do: sessions open in English, so `en×5, pl, pl` would need six
+ *   Polish votes to clear a lifetime tally and the 2-vote threshold would be
+ *   dead on arrival.
  */
 export interface LanguageState {
-  /** Lifetime count of `pl` votes. */
+  /** Count of `pl` votes since the last flip back to English; reset by one. */
   plVotes: number;
   /** Length of the current run of `en` votes; reset by any `pl` vote. */
   enVotes: number;
@@ -263,17 +268,28 @@ export const INITIAL_LANGUAGE_STATE: LanguageState = Object.freeze({
  * Folds one utterance's vote into the session's tally. Pure — the state lives
  * with the rest of the per-session speech state, not here.
  *
- * The flip-back is checked first: three English utterances in a row mean the
- * session has switched language, and that beats however much Polish evidence
- * came before it. The `plVotes > enVotes` guard is what stops a session that has
- * just flipped back from bouncing straight to Polish again on the strength of
- * old evidence.
+ * The flip-back is checked FIRST, and it clears `plVotes`: three English
+ * utterances in a row mean the session has switched language, and that beats
+ * however much Polish evidence came before it — which is also why the old
+ * evidence is thrown away rather than kept. Re-entering Polish then costs two
+ * fresh votes, so a single Polish utterance can no more re-enter Polish than it
+ * could enter it in the first place. (Checking the switch first instead would
+ * let `pl,pl,pl,pl,en,en,en` stay Polish on the strength of the four old
+ * votes.)
+ *
+ * The `plVotes > enVotes` comparison is a restatement of that clearing, not a
+ * second rule: every `pl` vote zeroes `enVotes`, so the comparison holds on
+ * every vote that could switch the session on. It is kept as an explicit floor
+ * — Polish evidence must outweigh the current English run — but brute force
+ * over every vote sequence of length ≤ 10 shows it changes no outcome today.
+ * It is not, and must not be described as, the thing that stops a just-flipped
+ * session from bouncing back to Polish: clearing `plVotes` is.
  */
 export function nextLanguageState(state: LanguageState, vote: "pl" | "en"): LanguageState {
   const plVotes = vote === "pl" ? state.plVotes + 1 : state.plVotes;
   const enVotes = vote === "en" ? state.enVotes + 1 : 0;
 
-  if (enVotes >= EN_FLIP_BACK_VOTES) return { plVotes, enVotes, lang: "en" };
+  if (enVotes >= EN_FLIP_BACK_VOTES) return { plVotes: 0, enVotes, lang: "en" };
   if (plVotes >= PL_SWITCH_VOTES && plVotes > enVotes) return { plVotes, enVotes, lang: "pl" };
 
   return { plVotes, enVotes, lang: state.lang };

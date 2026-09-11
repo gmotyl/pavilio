@@ -84,4 +84,27 @@ describe("nextLanguageState", () => {
     expect(session("pl", "pl", "en", "en", "en", "en").lang).toBe("en");
     expect(session("pl", "pl", "en", "en", "en", "en", "pl", "pl").lang).toBe("pl");
   });
+
+  it("the flip back clears the Polish evidence, so re-entry costs two fresh votes", () => {
+    expect(session("pl", "pl", "en", "en", "en").lang).toBe("en");
+    // One Polish utterance can no more re-enter Polish than it could enter it.
+    expect(session("pl", "pl", "en", "en", "en", "pl").lang).toBe("en");
+    expect(session("pl", "pl", "en", "en", "en", "pl", "pl").lang).toBe("pl");
+    // Old evidence does not survive a longer English run either.
+    expect(session("pl", "pl", "en", "en", "en", "en", "en", "en", "pl").lang).toBe("en");
+    expect(session("pl", "pl", "en", "en", "en", "en", "en", "en", "pl", "pl").lang).toBe("pl");
+    // The evidence is cleared, not merely outweighed.
+    expect(session("pl", "pl", "en", "en", "en").plVotes).toBe(0);
+  });
+
+  it("checks the flip back before the pl switch", () => {
+    // Four Polish votes, then three consecutive English ones: the run wins,
+    // however much Polish evidence preceded it. Checking the pl switch first
+    // would answer "pl" here.
+    expect(session("pl", "pl", "pl", "pl", "en", "en", "en").lang).toBe("en");
+    expect(session("pl", "pl", "pl", "pl", "en", "en", "en").plVotes).toBe(0);
+    // ...and the session is back to needing two fresh Polish votes.
+    expect(session("pl", "pl", "pl", "pl", "en", "en", "en", "pl").lang).toBe("en");
+    expect(session("pl", "pl", "pl", "pl", "en", "en", "en", "pl", "pl").lang).toBe("pl");
+  });
 });

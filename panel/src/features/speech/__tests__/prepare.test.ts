@@ -45,20 +45,26 @@ describe("prepare", () => {
   });
 
   it("a leading TLDR paragraph becomes its own second unit", () => {
+    // The TLDR is deliberately MORE than one sentence: a single-sentence TLDR
+    // is indistinguishable from the generic first-sentence fast start, so a
+    // fixture built on one would pass with the TLDR branch deleted. The whole
+    // paragraph must ride in unit 1 — not just its opening sentence.
     const { units } = prepare(
       [
         "## What changed",
         "",
-        "**TLDR:** Responses are spoken aloud now.",
+        "**TLDR:** Responses are spoken. A second sentence rides along in the same TLDR paragraph.",
         "",
-        "The panel prepares the markdown into units and plays them in order.",
+        "Body paragraph follows here.",
         "",
       ].join("\n"),
     );
 
     expect(units[0].text).toBe("What changed");
-    expect(units[1].text).toBe("TLDR: Responses are spoken aloud now.");
-    expect(units[2].text).toBe("The panel prepares the markdown into units and plays them in order.");
+    expect(units[1].text).toBe(
+      "TLDR: Responses are spoken. A second sentence rides along in the same TLDR paragraph.",
+    );
+    expect(units[2].text).toBe("Body paragraph follows here.");
   });
 
   it("a TLDR paragraph that is not first is not hoisted", () => {
@@ -77,6 +83,28 @@ describe("prepare", () => {
     expect(units[1].text).toBe("First body paragraph here.");
     // Spoken in document order as ordinary body, not hoisted to index 1.
     expect(units[2].text).toBe("TLDR: this one arrived late.");
+  });
+
+  it("a heading that is not first is not hoisted", () => {
+    const { units } = prepare(
+      [
+        "First body paragraph here. It runs on a little.",
+        "",
+        "## A later heading",
+        "",
+        "Body after the heading.",
+        "",
+      ].join("\n"),
+    );
+
+    // Unit 0 is the body's opening sentence, not the heading further down.
+    expect(units[0].text).toBe("First body paragraph here.");
+
+    const spoken = units.map((unit) => unit.text).join(" ");
+    expect(spoken).toContain("A later heading");
+    // Spoken in document order as a section marker inside the body.
+    expect(spoken.indexOf("A later heading")).toBeGreaterThan(spoken.indexOf("It runs on a little."));
+    expect(spoken.indexOf("A later heading")).toBeLessThan(spoken.indexOf("Body after the heading."));
   });
 
   it("packs short paragraphs to the floor and cuts long ones at the ceiling", () => {
@@ -117,6 +145,16 @@ describe("prepare", () => {
     const full = prepare(packingResponse);
     expect(full.spokenUnits).toBe(full.units.length);
     expect(full.remainderParagraphs).toBe(0);
+  });
+
+  it("speaks one unit even when the budget cannot afford it", () => {
+    const { units, spokenUnits, remainderParagraphs } = prepare(packingResponse, { budgetChars: 1 });
+
+    // A budget smaller than unit 0 still says something rather than falling
+    // silent — and it says exactly one unit, not one plus whatever follows.
+    expect(units[0].chars).toBeGreaterThan(1);
+    expect(spokenUnits).toBe(1);
+    expect(remainderParagraphs).toBe(units.length - 1);
   });
 
   it("spends the budget on prose in a diff-heavy response", () => {
