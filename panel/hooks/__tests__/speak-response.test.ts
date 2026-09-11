@@ -35,6 +35,16 @@ const EARLIER_TEXT = "Starting with the route suite, then the preparation suite.
 const PREVIOUS_TEXT = "This is one sentence.";
 const CURRENT_TEXT = "Testing works.";
 
+/**
+ * The second shape this suite pins, and the one that actually shipped broken:
+ * a single turn that speaks *twice*. `ANNOUNCEMENT` is what the turn says on
+ * its way to doing the work; `ANSWER` is what it says when the work is done.
+ * Both sit after the same user turn, so "an assistant text after the last user
+ * turn" cannot tell them apart — `stop_reason` can.
+ */
+const ANNOUNCEMENT = "Using pavilio-grill to sharpen this into a design.";
+const ANSWER = "Verified before asking: node-side edge-tts works from the worktree.";
+
 /** A real user turn: the human's own message, recorded as a plain string. */
 function userTurn(text: string) {
   return { type: "user", message: { role: "user", content: text } };
@@ -44,6 +54,27 @@ function assistantText(text: string) {
   return {
     type: "assistant",
     message: { role: "assistant", content: [{ type: "text", text }] },
+  };
+}
+
+/**
+ * An assistant message that records *why* the model stopped, which is what a
+ * real Claude Code transcript carries on every assistant entry: `"tool_use"`
+ * when the turn is going on to call a tool, `"end_turn"` when this is the
+ * turn's answer.
+ *
+ * The distinction is the whole point of this suite's newest cases: a turn that
+ * announces what it is about to do, works, and then answers writes two
+ * assistant text messages, and only the second one is worth hearing.
+ */
+function assistantTextStopping(text: string, stopReason: "tool_use" | "end_turn") {
+  return {
+    type: "assistant",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      stop_reason: stopReason,
+    },
   };
 }
 
@@ -570,5 +601,99 @@ describe("speak-response", () => {
     });
     // ...and it got there without paying the wait the stale one pays.
     expect(staleElapsed - completeElapsed).toBeGreaterThan(200);
+  });
+
+  it("speaks the turn's answer, not an announcement it made on the way", async () => {
+    // The bug this suite exists to stop coming back: one turn, two assistant
+    // text messages, both after the same user turn. Picking "an assistant text
+    // after the last user turn" picks the first — the announcement — and the
+    // listener hears the agent describe work instead of report it.
+    await listenAsPanel();
+    const transcript = writeTranscript("two-texts.jsonl", [
+      userTurn("lets try server side synthesis"),
+      assistantTextStopping(ANNOUNCEMENT, "tool_use"),
+      toolUse("call-1"),
+      toolResult("call-1"),
+      assistantTextStopping(ANSWER, "end_turn"),
+    ]);
+
+    const result = await run(stopPayload(transcript));
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: ANSWER,
+    });
+  });
+
+  it("says nothing while the turn has announced but not answered", async () => {
+    // Exactly the state the transcript is in when `Stop` fires and the answer
+    // has not been flushed yet. The announcement is present and complete; it is
+    // still not the turn's response, so silence is the only honest answer.
+    await listenAsPanel();
+    const transcript = writeTranscript("announced-only.jsonl", [
+      userTurn("lets try server side synthesis"),
+      assistantTextStopping(ANNOUNCEMENT, "tool_use"),
+      toolUse("call-1"),
+      toolResult("call-1"),
+    ]);
+
+    const result = await run(stopPayload(transcript));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(captured).toHaveLength(0);
+  });
+
+  it("speaks the answer that lands while it is waiting on an announced turn", async () => {
+    await listenAsPanel();
+    const transcript = writeTranscript("announced-then-answered.jsonl", [
+      userTurn("lets try server side synthesis"),
+      assistantTextStopping(ANNOUNCEMENT, "tool_use"),
+      toolUse("call-1"),
+      toolResult("call-1"),
+    ]);
+
+    const append = setTimeout(() => {
+      appendFileSync(
+        transcript,
+        `${JSON.stringify(assistantTextStopping(ANSWER, "end_turn"))}\n`,
+      );
+    }, 100);
+
+    const result = await run(stopPayload(transcript));
+    clearTimeout(append);
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: ANSWER,
+    });
+  });
+
+  it("falls back to the last assistant text when nothing records a stop_reason", async () => {
+    // A transcript whose assistant entries carry no `stop_reason` at all — an
+    // older Claude Code, or another writer of the same format. Demanding
+    // `end_turn` there would make the feature permanently, silently mute, which
+    // is the one outcome this hook is written to avoid. The pre-existing rule
+    // still governs those.
+    await listenAsPanel();
+    const transcript = writeTranscript("no-stop-reason.jsonl", [
+      userTurn("run the suite"),
+      assistantText(CURRENT_TEXT),
+      toolUse("call-1"),
+      toolResult("call-1"),
+    ]);
+
+    const result = await run(stopPayload(transcript));
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: CURRENT_TEXT,
+    });
   });
 });
