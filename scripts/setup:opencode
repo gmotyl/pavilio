@@ -8,8 +8,13 @@ echo ""
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-OC_CMD_DIR="$REPO_ROOT/.opencode/commands"
-OC_JSON="$REPO_ROOT/opencode.json"
+# Where the generated artifacts land. Defaults to the repo root; `PAVILIO_OPENCODE_OUT`
+# redirects them (and skips the global sync) so the generator can be driven into a
+# throwaway directory — that is how the wrapper contract test exercises it without
+# touching the developer's real config.
+OUT_ROOT="${PAVILIO_OPENCODE_OUT:-$REPO_ROOT}"
+OC_CMD_DIR="$OUT_ROOT/.opencode/commands"
+OC_JSON="$OUT_ROOT/opencode.json"
 
 # 1. Generate one opencode command wrapper per skill (dynamic, no hardcoded list) —
 #    mirrors setup:claude-code. Wrappers use the absolute skill path so the command
@@ -31,12 +36,12 @@ fi
 #    is created minimally only if absent.
 echo ""
 echo "🧩 Registering commands in opencode.json ..."
-python3 - "$REPO_ROOT" <<'PY'
+python3 - "$REPO_ROOT" "$OUT_ROOT" <<'PY'
 import json, os, glob, re, sys
 
-root = sys.argv[1]
-cmd_dir = os.path.join(root, ".opencode", "commands")
-cfg_path = os.path.join(root, "opencode.json")
+root, out_root = sys.argv[1], sys.argv[2]
+cmd_dir = os.path.join(out_root, ".opencode", "commands")
+cfg_path = os.path.join(out_root, "opencode.json")
 
 cfg = {}
 if os.path.exists(cfg_path):
@@ -86,7 +91,7 @@ PY
 # 3. Sync wrappers to the global opencode config, if present, so commands also
 #    resolve when opencode is launched outside this repo.
 GLOBAL="$HOME/.config/opencode"
-if [ -d "$GLOBAL" ]; then
+if [ -z "${PAVILIO_OPENCODE_OUT:-}" ] && [ -d "$GLOBAL" ]; then
     mkdir -p "$GLOBAL/commands"
     cp "$OC_CMD_DIR"/*.md "$GLOBAL/commands/" 2>/dev/null || true
     echo "  ✓ Synced wrappers → $GLOBAL/commands/"
