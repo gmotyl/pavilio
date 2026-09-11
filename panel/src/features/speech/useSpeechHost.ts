@@ -26,12 +26,14 @@
  * - user clicked stop → `Heard`
  * - another cell took over → `Unheard` (*not* heard — this is the trap)
  * - the browser refused → `Unheard`
+ * - nothing could be synthesized → `Unheard`, plus a toast
  *
  * So the outcome is not read off the promise at all. Each `play` gets a {@link
  * Run} whose `outcome` starts `"pending"`, and whoever *ends* it early stamps
  * it: the incoming play stamps `"superseded"`, the stop handler stamps
- * `"stopped"`, the player's `onError` stamps `"refused"`. A run still `pending`
- * when the promise settles is the only natural end there is.
+ * `"stopped"`, the player's `onError` stamps `"refused"` — or `"failed"`, when
+ * the run it reports played no unit at all. A run still `pending` when the
+ * promise settles is the only natural end there is.
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { toast } from "../../lib/toast";
@@ -40,8 +42,17 @@ import type { GridSpeech, PreparedSpeech, Utterance } from "./types";
 import { useSpeechPlayer, type SpeechPlaybackError } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
 
-/** How a playback ended. `"pending"` until something ends it early. */
-type RunOutcome = "pending" | "superseded" | "stopped" | "refused";
+/**
+ * How a playback ended. `"pending"` until something ends it early.
+ *
+ * `"failed"` is the run that made no sound at all: every unit it reached failed
+ * to synthesize. It resolves its promise exactly like a finished answer, and
+ * `through === total` for a short utterance, so without the stamp it would be
+ * indistinguishable from having been listened to — silence, and a cell marked
+ * heard. It is not `"refused"`: that one is the browser declining, and it is
+ * deliberately toast-free.
+ */
+type RunOutcome = "pending" | "superseded" | "stopped" | "refused" | "failed";
 
 interface Run {
   readonly sessionId: string;
@@ -78,6 +89,15 @@ export function useSpeechHost(): GridSpeech {
       const run = runRef.current;
       if (run?.sessionId === error.sessionId) run.outcome = "refused";
       return;
+    }
+
+    // A run that played nothing was not heard, whatever its unit count says.
+    // The cell stays `unheard` so the pip keeps inviting the retry — which is
+    // how the user finds out that a second click usually works. A run that
+    // spoke and *then* failed keeps its old ending: it was partly listened to.
+    if (error.playedUnits === 0) {
+      const run = runRef.current;
+      if (run?.sessionId === error.sessionId) run.outcome = "failed";
     }
 
     // A systemic synthesis failure has no pip to fall back to — the player has
@@ -158,9 +178,15 @@ export function useSpeechHost(): GridSpeech {
       function finish(ended: Run): void {
         if (runRef.current === ended) runRef.current = null;
 
-        // Superseded or refused: the cell keeps whatever it had, which is
-        // `unheard`. Only a deliberate stop and a real end make it `heard`.
-        if (ended.outcome === "superseded" || ended.outcome === "refused") return;
+        // Superseded, refused or failed: the cell keeps whatever it had, which
+        // is `unheard`. Only a deliberate stop and a real end make it `heard`.
+        if (
+          ended.outcome === "superseded" ||
+          ended.outcome === "refused" ||
+          ended.outcome === "failed"
+        ) {
+          return;
+        }
 
         if (ended.outcome === "pending" && ended.through < ended.total) {
           // The budget cut is not the end of the response. The chart calls

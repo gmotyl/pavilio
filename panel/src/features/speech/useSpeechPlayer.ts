@@ -29,13 +29,21 @@ export const PREFETCH_AHEAD = 2;
  * flaky socket that drops one unit in five should not silence the answer, but a
  * synthesizer that is simply down should not be hammered unit after unit.
  * Motyl's rule.
+ *
+ * It is a ceiling, not the only guard: an utterance of one or two units runs
+ * out of units before it can reach three failures, so `play` also reports a run
+ * that ends having played nothing at all.
  */
 export const MAX_CONSECUTIVE_UNIT_FAILURES = 3;
 
 export type SpeechFailureKind =
   /** The browser refused `play()` — nothing has been unlocked by a gesture. */
   | "refused"
-  /** {@link MAX_CONSECUTIVE_UNIT_FAILURES} units in a row failed to synthesize. */
+  /**
+   * Synthesis let the run down: {@link MAX_CONSECUTIVE_UNIT_FAILURES} units in
+   * a row failed, or the run ended having played no unit at all. The error's
+   * `playedUnits` tells the two apart.
+   */
   | "synthesis";
 
 /**
@@ -50,13 +58,29 @@ export class SpeechPlaybackError extends Error {
   readonly sessionId: string;
   /** Declared here rather than passed to `super`: the tsconfig lib is ES2020. */
   readonly cause: unknown;
+  /**
+   * How many units of this run actually reached the listener before it failed.
+   * Zero means the user heard **nothing at all** — a different ending from a
+   * run that spoke half an answer and then gave up, and the one the host keys
+   * its `unheard` fallback off: a run that played nothing must not mark the
+   * cell heard, so the pip stays and a click is still a retry. It is carried
+   * on the error because the host cannot see inside the run.
+   */
+  readonly playedUnits: number;
 
-  constructor(kind: SpeechFailureKind, sessionId: string, message: string, cause?: unknown) {
+  constructor(
+    kind: SpeechFailureKind,
+    sessionId: string,
+    message: string,
+    cause?: unknown,
+    playedUnits = 0,
+  ) {
     super(message);
     this.name = "SpeechPlaybackError";
     this.kind = kind;
     this.sessionId = sessionId;
     this.cause = cause;
+    this.playedUnits = playedUnits;
   }
 }
 
@@ -259,8 +283,14 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
   }, []);
 
   const report = useCallback(
-    (run: PlaybackRun, kind: SpeechFailureKind, message: string, cause: unknown): void => {
-      const error = new SpeechPlaybackError(kind, run.sessionId, message, cause);
+    (
+      run: PlaybackRun,
+      kind: SpeechFailureKind,
+      message: string,
+      cause: unknown,
+      playedUnits: number,
+    ): void => {
+      const error = new SpeechPlaybackError(kind, run.sessionId, message, cause, playedUnits);
       const handler = onErrorRef.current;
       if (handler) handler(error);
       // A missing handler still must not swallow it.
@@ -302,6 +332,10 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       // waiting on, so it gets the connection to itself.
       let pending: Promise<LoadedUnit> | null = loadUnit(run, units, start, voice);
       let consecutiveFailures = 0;
+      /** Units the listener actually heard. Zero at the end is a failed run. */
+      let playedUnits = 0;
+      /** Why the last unit was lost, for the report a silent run ends with. */
+      let lastFailure: unknown = null;
 
       while (pending !== null) {
         const loaded = await pending;
@@ -309,12 +343,14 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
 
         if ("error" in loaded) {
           consecutiveFailures += 1;
+          lastFailure = loaded.error;
           if (consecutiveFailures >= MAX_CONSECUTIVE_UNIT_FAILURES) {
             report(
               run,
               "synthesis",
               `speech stopped after ${consecutiveFailures} units failed to synthesize`,
               loaded.error,
+              playedUnits,
             );
             stop();
             return;
@@ -330,16 +366,24 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
         try {
           await playUnit(element, loaded.url, run);
           consecutiveFailures = 0;
+          playedUnits += 1;
         } catch (cause) {
           if (cause instanceof PlaybackRefusedError) {
             releaseUrl(run, loaded.url);
-            report(run, "refused", "the browser refused to start speaking", cause.cause);
+            report(
+              run,
+              "refused",
+              "the browser refused to start speaking",
+              cause.cause,
+              playedUnits,
+            );
             stop();
             return;
           }
           // The element failed on this unit alone: treat it like a failed
           // synthesis and let the next unit have its turn.
           consecutiveFailures += 1;
+          lastFailure = cause;
           if (consecutiveFailures >= MAX_CONSECUTIVE_UNIT_FAILURES) {
             releaseUrl(run, loaded.url);
             report(
@@ -347,6 +391,7 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
               "synthesis",
               `speech stopped after ${consecutiveFailures} units failed to play`,
               cause,
+              playedUnits,
             );
             stop();
             return;
@@ -358,6 +403,24 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       }
 
       if (isStale()) return;
+
+      // The run reached the end of its units without ever making a sound.
+      // {@link MAX_CONSECUTIVE_UNIT_FAILURES} cannot catch this on its own:
+      // an utterance of one or two units runs out of units before it runs out
+      // of the failures the ladder needs, so the loop simply ends and the run
+      // would otherwise look exactly like a finished answer — silence, no
+      // toast, and a cell flipped to `heard`. Short answers are the common
+      // case, so this weaker condition is what makes a dead click legible.
+      if (playedUnits === 0) {
+        report(
+          run,
+          "synthesis",
+          `speech produced nothing: all ${units.length - start} units failed`,
+          lastFailure,
+          0,
+        );
+      }
+
       stop();
     },
     [ensureElement, report, stop],

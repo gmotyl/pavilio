@@ -320,6 +320,81 @@ describe("useSpeechPlayer", () => {
     expect(result.current.speakingSessionId).toBeNull();
   });
 
+  it("reports a one-unit utterance whose only unit fails", async () => {
+    // The short-answer hole: one unit means one failure, and
+    // MAX_CONSECUTIVE_UNIT_FAILURES is three — so the ladder ends, the run
+    // resolves, and without the played-nothing check this is silence with no
+    // report at all, which the cell then reads as a finished answer.
+    synth.failOn("only-unit");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("only-unit"));
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    const error = onError.mock.calls[0][0] as SpeechPlaybackError;
+    expect(error.kind).toBe("synthesis");
+    expect(error.sessionId).toBe("cell-a");
+    // Zero is what tells the host the user heard nothing.
+    expect(error.playedUnits).toBe(0);
+    expect(played).toEqual([]);
+    expect(result.current.speakingSessionId).toBeNull();
+  });
+
+  it("reports a two-unit utterance whose units both fail", async () => {
+    // Two failures is still one short of the ladder's three.
+    synth.failOn("unit-0");
+    synth.failOn("unit-1");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    const error = onError.mock.calls[0][0] as SpeechPlaybackError;
+    expect(error.kind).toBe("synthesis");
+    expect(error.playedUnits).toBe(0);
+    // Both were attempted before the run gave up — one failure is a skip.
+    expect(synth.requests.map((request) => request.text)).toEqual(["unit-0", "unit-1"]);
+    expect(played).toEqual([]);
+  });
+
+  it("does not report a run whose units all played", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
+    await endCurrentUnit();
+    await endCurrentUnit();
+
+    // The played-nothing check must not fire on the ordinary ending, which
+    // leaves the ladder exactly the same way: `pending === null`.
+    expect(played).toEqual(["blob:unit-0", "blob:unit-1"]);
+    expect(onError).not.toHaveBeenCalled();
+    expect(result.current.speakingSessionId).toBeNull();
+  });
+
+  it("counts the units a failing run managed to play", async () => {
+    // Unit 0 speaks, then the synthesizer goes down for the rest: the ladder's
+    // three-consecutive rule stops it, and the count is what keeps the host's
+    // `unheard` fallback off a run the user did partly hear.
+    synth.failOn("unit-1");
+    synth.failOn("unit-2");
+    synth.failOn("unit-3");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2", "unit-3"));
+    expect(played).toEqual(["blob:unit-0"]);
+
+    await endCurrentUnit();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    const error = onError.mock.calls[0][0] as SpeechPlaybackError;
+    expect(error.kind).toBe("synthesis");
+    expect(error.playedUnits).toBe(1);
+  });
+
   it("resumes at fromUnit", async () => {
     localStorage.setItem(SPEECH_VOICE_STORAGE_KEY, "en-US-EmmaMultilingualNeural");
     const onError = vi.fn();

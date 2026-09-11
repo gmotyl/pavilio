@@ -27,6 +27,8 @@ const synth = vi.hoisted(() => {
   let requests: string[] = [];
   /** A synthesizer that is simply down, for the three-consecutive-failures rule. */
   let failing = false;
+  /** A synthesizer that goes down partway: the first `n` requests succeed. */
+  let healthyRequests = Number.POSITIVE_INFINITY;
 
   function bufferFor(text: string): ArrayBuffer {
     const existing = buffers.get(text);
@@ -40,11 +42,17 @@ const synth = vi.hoisted(() => {
   return {
     synthesizeSpeech: async (text: string): Promise<ArrayBuffer> => {
       requests.push(text);
-      if (failing) throw new Error("the synthesizer is down");
+      if (failing || requests.length > healthyRequests) {
+        throw new Error("the synthesizer is down");
+      }
       return bufferFor(text);
     },
     setFailing: (value: boolean): void => {
       failing = value;
+    },
+    /** Lets the run speak `count` units and fails everything after them. */
+    setHealthyRequests: (count: number): void => {
+      healthyRequests = count;
     },
     prefetchSpeech: (): void => {},
     toSpeechBlob: (buffer: ArrayBuffer): Blob => {
@@ -59,6 +67,7 @@ const synth = vi.hoisted(() => {
     reset: () => {
       requests = [];
       failing = false;
+      healthyRequests = Number.POSITIVE_INFINITY;
     },
   };
 });
@@ -382,6 +391,18 @@ async function arm(sessionId: string): Promise<void> {
   await click(`terminal-cell-autoplay-${sessionId}`);
 }
 
+/**
+ * A response of `count` units, comfortably inside the budget: every paragraph
+ * is one sentence over the 200-char packing floor and under the 450-char
+ * ceiling, so it is neither merged with its neighbour nor cut in half.
+ */
+function shortResponse(count: number): string {
+  return Array.from({ length: count }, (_, i) => {
+    const head = `Paragraph ${String(i).padStart(2, "0")} `;
+    return head + "x".repeat(238 - head.length) + ".";
+  }).join("\n\n");
+}
+
 /** A response long enough that the speech budget cuts it in two. */
 function longResponse(): string {
   // 240 characters a paragraph: over the 200-char packing floor so each one is
@@ -617,6 +638,65 @@ describe("autoplay — refusal and the budget", () => {
     // hammering the synthesizer unit after unit.
     expect(synth.requests).toHaveLength(3);
     expect(played).toEqual([]);
+  });
+
+  it("a one-unit answer that synthesizes to nothing is reported, not marked heard", async () => {
+    // Greg's dead button: one unit means one failure, three short of the
+    // ladder's stop rule, so the run ends the way a finished answer ends. No
+    // sound, no toast, and a cell flipped to `heard` — the pip that should be
+    // inviting the retry that works is gone.
+    const markdown = "One sentence, and the synthesizer is down.";
+    expect(prepare(markdown).units).toHaveLength(1);
+    synth.setFailing(true);
+
+    await renderProjectSurface();
+    await arm("cell-a");
+    await emitUtterance("cell-a", "a1", markdown);
+
+    await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
+    expect(getToastSnapshot()?.text).toMatch(/speech/i);
+    expect(played).toEqual([]);
+    // Unheard, so the pip still invites the click that usually works.
+    expect(speakState("cell-a")).toBe("unheard");
+  });
+
+  it("a two-unit answer that synthesizes to nothing is reported too", async () => {
+    // Two failures is still one short of the ladder's three.
+    const markdown = shortResponse(2);
+    expect(prepare(markdown).units).toHaveLength(2);
+    synth.setFailing(true);
+
+    await renderProjectSurface();
+    await arm("cell-a");
+    await emitUtterance("cell-a", "a1", markdown);
+
+    await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
+    expect(played).toEqual([]);
+    expect(speakState("cell-a")).toBe("unheard");
+    expect(synth.requests).toHaveLength(2);
+  });
+
+  it("a run that spoke before it failed is still heard", async () => {
+    // The weaker condition must not swallow the ordinary one: this run was
+    // partly listened to, so the ladder's three-consecutive stop leaves it
+    // exactly where it left it before — heard, with the failure toasted.
+    const markdown = shortResponse(4);
+    const prepared = prepare(markdown);
+    // Fixture guard: four units, no budget cut, so a natural end is `heard`.
+    expect(prepared.units).toHaveLength(4);
+    expect(prepared.spokenUnits).toBe(prepared.units.length);
+    // Unit 0 synthesizes; the synthesizer is down for units 1, 2 and 3.
+    synth.setHealthyRequests(1);
+
+    await renderProjectSurface();
+    await arm("cell-a");
+    await emitUtterance("cell-a", "a1", markdown);
+
+    expect(played).toEqual([`blob:${prepared.units[0].text}`]);
+    await endRun();
+
+    await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
+    expect(speakState("cell-a")).toBe("heard");
   });
 
   it("continuing after the budget resumes at the first unspoken unit", async () => {
