@@ -222,6 +222,26 @@ describe("speak-response", () => {
     });
   });
 
+  it("normalises a trailing slash on PAVILIO_PANEL_URL", async () => {
+    // Now that the panel publishes this variable and people set it by hand,
+    // `http://127.0.0.1:3012/` is an easy thing to type. Unnormalised it
+    // builds `//api/speech/utterance`, which the panel answers 404 to — and
+    // this hook swallows a 404 by design, so the only symptom is silence.
+    await listenAsPanel();
+
+    const result = await run(stopPayload(FIXTURE), {
+      PAVILIO_PANEL_URL: `${panelUrl}///`,
+    });
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(captured[0].url).toBe("/api/speech/utterance");
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: LAST_TEXT,
+    });
+  });
+
   it("omits the Authorization header without PANEL_TOKEN", async () => {
     await listenAsPanel();
 

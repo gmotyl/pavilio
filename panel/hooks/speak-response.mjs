@@ -29,6 +29,16 @@
  * `server/lib/terminal-manager.ts`. Without it there is no cell to attribute
  * the response to, so the hook does nothing at all.
  *
+ * ## Which panel
+ *
+ * `PAVILIO_PANEL_URL` carries the port the panel actually bound to, which is
+ * not necessarily its configured one — `startPanel` takes the first free port
+ * in a 50-wide span, so a stale panel or an unrelated server holding 3010
+ * moves the real one up. `startPanel` sets that variable on itself (inherited
+ * by every normal PTY) and `terminal-run-as.ts` re-injects it into the
+ * `su -c` string, since `su -` would otherwise drop it. The default below is
+ * only the fallback for a hook running outside a panel-spawned terminal.
+ *
  * ## Auth
  *
  * Sends `Authorization: Bearer ${PANEL_TOKEN}` when `PANEL_TOKEN` is present,
@@ -39,10 +49,12 @@
  * `terminal-manager.ts` spawns the PTY with `{ ...process.env, … }`, so the
  * panel's own `PANEL_TOKEN` is already inherited by normal terminals.
  *
- * **Known limitation — "run as another user" terminals have no speech.**
- * `server/lib/terminal-run-as.ts` spawns `su - <user> -c "…"`, and `su -`
- * resets the environment, so `PANEL_TOKEN` does not reach the hook there. It is
- * deliberately NOT worked around by putting the token into that command string:
+ * **Known limitation — "run as another user" terminals have no speech on a
+ * token-protected panel.** `server/lib/terminal-run-as.ts` spawns
+ * `su - <user> -c "…"`, and `su -` resets the environment, so `PANEL_TOKEN`
+ * does not reach the hook there. (`PAVILIO_PANEL_URL` does: it is re-injected
+ * inline into that command string, which is safe precisely because a URL is
+ * not a secret.) The token is deliberately NOT worked around the same way:
  * a `su -c` command line is visible in `ps aux` to every user on the machine,
  * which would leak the token system-wide. On a token-protected panel, run-as
  * terminals therefore hit the 401 path (one stderr line, exit 0); on an
@@ -50,8 +62,21 @@
  */
 import { readFileSync, writeSync } from "node:fs";
 
-/** Override for tests and for a panel that moved off its configured port. */
-const PANEL_URL = process.env.PAVILIO_PANEL_URL ?? "http://127.0.0.1:3010";
+/**
+ * Override for tests and for a panel that moved off its configured port.
+ * `startPanel` publishes the port it actually resolved to into this variable,
+ * and a `su -`d terminal gets it re-injected by `terminal-run-as.ts`.
+ *
+ * Trailing slashes are stripped. This is a variable people also set by hand,
+ * and `http://127.0.0.1:3012/` would otherwise build
+ * `http://127.0.0.1:3012//api/speech/utterance` — a doubled slash the panel
+ * answers 404 to, which this hook then swallows by design, so the symptom is
+ * silence with nothing anywhere to explain it.
+ */
+const PANEL_URL = (process.env.PAVILIO_PANEL_URL ?? "http://127.0.0.1:3010").replace(
+  /\/+$/,
+  "",
+);
 
 /**
  * How long the POST gets before it is abandoned. Short on purpose: the agent's
