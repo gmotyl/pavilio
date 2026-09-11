@@ -9,6 +9,9 @@ import express, { type Express } from "express";
  */
 const ASSETS_DIR = "assets";
 
+/** The app shell `vite build` emits at the root of the bundle. */
+const SHELL_FILE = "index.html";
+
 /**
  * "You forgot to build", not a fault. Its own class so the entry point can
  * print the instruction on its own and keep the stack trace for everything
@@ -27,7 +30,7 @@ export class MissingFrontendBundleError extends Error {
  * Throws `MissingFrontendBundleError` when `distDir` holds no built bundle.
  */
 export function mountStaticFrontend(app: Express, distDir: string): void {
-  const shell = join(distDir, "index.html");
+  const shell = join(distDir, SHELL_FILE);
   // A dir without index.html is a half-built or emptied bundle, not a bundle:
   // serving it would answer every deep link with a 404 instead of the app.
   if (!existsSync(distDir) || !existsSync(shell)) {
@@ -57,6 +60,13 @@ export function mountStaticFrontend(app: Express, distDir: string): void {
       next();
       return;
     }
-    res.sendFile(shell);
+    // `root` + a relative name, never the absolute path. `send` defaults to
+    // `dotfiles: "ignore"` and, given an absolute path with no root, applies
+    // that check to EVERY segment — so a bundle living anywhere under a
+    // dot-directory (`~/.pavilio/panel/dist`, a dot-prefixed TMPDIR) answered
+    // every deep link with 404 while its assets still served, because
+    // `express.static` passes a root and only dot-checks below it. Scoping the
+    // check to "index.html" keeps the protection where it belongs.
+    res.sendFile(SHELL_FILE, { root: distDir });
   });
 }

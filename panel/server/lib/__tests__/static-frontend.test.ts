@@ -102,4 +102,28 @@ describe("mountStaticFrontend", () => {
     expect(res.status).toBe(200);
     expect(res.text).toBe(SHELL);
   });
+
+  // `send` defaults to `dotfiles: "ignore"`, and an absolute path handed to
+  // `res.sendFile` with no `root` is dot-checked segment by segment — so a
+  // bundle under any dot-directory used to 404 every deep link while its assets
+  // kept serving. That is a real deployment shape (`~/.pavilio/panel/dist`), and
+  // it is what made this suite look intermittent: it failed only where TMPDIR
+  // itself sat under a dot-directory.
+  it("serves the app shell when the bundle lives under a dot-directory", async () => {
+    const hiddenDist = join(tmpRoot, ".hidden", "dist");
+    mkdirSync(join(hiddenDist, "assets"), { recursive: true });
+    writeFileSync(join(hiddenDist, "index.html"), SHELL);
+    writeFileSync(join(hiddenDist, "assets", "app-abc123.js"), "console.log(1);\n");
+
+    const app = express();
+    mountStaticFrontend(app, hiddenDist);
+
+    const deep = await request(app).get("/project/pavilio/iterm");
+    expect(deep.status).toBe(200);
+    expect(deep.text).toBe(SHELL);
+
+    // The dotfile guard must still cover everything it did before.
+    const missingAsset = await request(app).get("/assets/app-OLDHASH.js");
+    expect(missingAsset.status).toBe(404);
+  });
 });
