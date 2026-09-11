@@ -1,12 +1,16 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
+  realpathSync,
   rmSync,
   existsSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,6 +47,19 @@ timeout = 30
 # pavilio-speech end
 `;
 
+// opencode is registered as a symlink rather than as an edit to a config file:
+// `~/.config/opencode/plugins/pavilio-speech.ts` points back at the repo file, so
+// a `pnpm pull` cannot leave a stale copy behind. The link target is also the
+// identity key — any link resolving to a path ending in this suffix is ours.
+const OPENCODE_PLUGIN_MARKER = "panel/hooks/speak-response-opencode.ts";
+const OPENCODE_PLUGIN_PATH = resolve(
+  TEST_DIR,
+  "..",
+  "..",
+  "hooks",
+  "speak-response-opencode.ts",
+);
+
 interface HookCommand {
   type?: string;
   command?: string;
@@ -59,6 +76,9 @@ interface Settings {
 let home: string;
 let settingsPath: string;
 let codexConfigPath: string;
+let opencodeRoot: string;
+let opencodePluginsDir: string;
+let opencodeLinkPath: string;
 
 function run(...args: string[]) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {
@@ -110,6 +130,19 @@ function agentLines(stdout: string, agent: string): string[] {
 
 function makeRoots(...roots: string[][]) {
   for (const parts of roots) mkdirSync(join(home, ...parts), { recursive: true });
+}
+
+/**
+ * lstat, not existsSync: a *dangling* symlink is still very much present at the
+ * path, and the installer has to see it there in order to replace it.
+ */
+function linkExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readCodexConfig(): string {
@@ -236,6 +269,9 @@ beforeEach(() => {
   mkdirSync(join(home, ".claude"), { recursive: true });
   settingsPath = join(home, ".claude", "settings.json");
   codexConfigPath = join(home, ".codex", "config.toml");
+  opencodeRoot = join(home, ".config", "opencode");
+  opencodePluginsDir = join(opencodeRoot, "plugins");
+  opencodeLinkPath = join(opencodePluginsDir, "pavilio-speech.ts");
 });
 
 afterEach(() => {
@@ -606,5 +642,171 @@ command = "npx"
     // And a single uninstall takes the lot back out, not one copy per run.
     expect(run("--uninstall").status).toBe(0);
     expect(readCodexConfig()).toBe(CODEX_SEED_CONFIG);
+  });
+
+  // --- the opencode target --------------------------------------------------
+
+  it("symlinks the plugin into the opencode plugins directory", () => {
+    makeRoots([".config", "opencode"]);
+
+    const result = run();
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(opencodeLinkPath).isSymbolicLink()).toBe(true);
+    // Pointed at the repo file itself, not at a copy of it: a copy would go
+    // stale on the next `pnpm pull` without ever saying so.
+    expect(readlinkSync(opencodeLinkPath)).toBe(OPENCODE_PLUGIN_PATH);
+    expect(realpathSync(opencodeLinkPath)).toBe(
+      realpathSync(OPENCODE_PLUGIN_PATH),
+    );
+    expect(reportLines(result.stdout).opencode).not.toMatch(/skipped/i);
+  });
+
+  it("creates the plugins directory when absent", () => {
+    makeRoots([".config", "opencode"]);
+    // Guard against a vacuous pass: the directory must really be missing.
+    expect(existsSync(opencodePluginsDir)).toBe(false);
+
+    const result = run();
+
+    expect(result.status).toBe(0);
+    expect(statSync(opencodePluginsDir).isDirectory()).toBe(true);
+    expect(lstatSync(opencodeLinkPath).isSymbolicLink()).toBe(true);
+  });
+
+  it("creates the plugins directory with the opencode root's own permissions", () => {
+    makeRoots([".config", "opencode"]);
+    // A directory carries no content of its own, so there is nothing to be
+    // conservative *about*; what it should match is the tree it is being added
+    // to. A user who tightened ~/.config/opencode gets a tightened plugins/ …
+    chmodSync(opencodeRoot, 0o700);
+    expect(existsSync(opencodePluginsDir)).toBe(false);
+
+    expect(run().status).toBe(0);
+
+    // Guard against a vacuous pass: it did create the link in there.
+    expect(lstatSync(opencodeLinkPath).isSymbolicLink()).toBe(true);
+    expect(statSync(opencodePluginsDir).mode & 0o777).toBe(0o700);
+
+    // … and a default one gets the default, so the mode is inherited rather
+    // than hard-coded.
+    rmSync(opencodePluginsDir, { recursive: true, force: true });
+    chmodSync(opencodeRoot, 0o755);
+
+    expect(run().status).toBe(0);
+
+    expect(statSync(opencodePluginsDir).mode & 0o777).toBe(0o755);
+  });
+
+  it("is a no-op when the link already points here", () => {
+    makeRoots([".config", "opencode"]);
+    expect(run().status).toBe(0);
+    const before = lstatSync(opencodeLinkPath);
+
+    const result = run();
+
+    expect(result.status).toBe(0);
+    expect(reportLines(result.stdout).opencode).toMatch(/already/i);
+    // Same inode: it was left where it was, not relinked through a rename.
+    expect(lstatSync(opencodeLinkPath).ino).toBe(before.ino);
+    expect(readlinkSync(opencodeLinkPath)).toBe(OPENCODE_PLUGIN_PATH);
+  });
+
+  it("replaces a dangling link that is ours", () => {
+    makeRoots([".config", "opencode"]);
+    mkdirSync(opencodePluginsDir, { recursive: true });
+    // Another pavilio checkout that has since been deleted — the exact state a
+    // `git worktree remove` leaves behind. The suffix is what makes it ours.
+    const stale = join(
+      home,
+      "another-pavilio",
+      "panel",
+      "hooks",
+      "speak-response-opencode.ts",
+    );
+    expect(stale.endsWith(OPENCODE_PLUGIN_MARKER)).toBe(true);
+    symlinkSync(stale, opencodeLinkPath);
+    // Guard against a vacuous pass: the link is there, and it dangles.
+    expect(linkExists(opencodeLinkPath)).toBe(true);
+    expect(existsSync(opencodeLinkPath)).toBe(false);
+
+    const result = run();
+
+    expect(result.status).toBe(0);
+    expect(readlinkSync(opencodeLinkPath)).toBe(OPENCODE_PLUGIN_PATH);
+    expect(existsSync(opencodeLinkPath)).toBe(true);
+  });
+
+  it("refuses to clobber a real file and reports it", () => {
+    makeRoots([".config", "opencode"], [".codex"]);
+    mkdirSync(opencodePluginsDir, { recursive: true });
+    const foreign = "// someone else's plugin\n";
+    writeFileSync(opencodeLinkPath, foreign);
+
+    const result = run();
+
+    // Reported, not thrown: the exit status still lets the other agents install.
+    expect(result.status).toBe(0);
+    expect(lstatSync(opencodeLinkPath).isSymbolicLink()).toBe(false);
+    expect(readFileSync(opencodeLinkPath, "utf8")).toBe(foreign);
+    expect(reportLines(result.stdout).opencode).toMatch(/left .* alone/i);
+    // Guard against a vacuous pass: the other agents really did get their turn.
+    expect(speechCommands(readSettings())).toHaveLength(1);
+    expect(readCodexConfig()).toContain(CODEX_BLOCK);
+
+    // A symlink owned by something else is equally off-limits — it is the link
+    // *target* that decides ownership, not the fact that it is a link.
+    rmSync(opencodeLinkPath);
+    const otherPlugin = join(home, "somewhere-else.ts");
+    writeFileSync(otherPlugin, foreign);
+    symlinkSync(otherPlugin, opencodeLinkPath);
+
+    const second = run();
+
+    expect(second.status).toBe(0);
+    expect(readlinkSync(opencodeLinkPath)).toBe(otherPlugin);
+    expect(reportLines(second.stdout).opencode).toMatch(/left .* alone/i);
+  });
+
+  it("removes only a link it owns on uninstall", () => {
+    makeRoots([".config", "opencode"]);
+    expect(run().status).toBe(0);
+    // Guard against a vacuous pass: there has to be a link to remove.
+    expect(lstatSync(opencodeLinkPath).isSymbolicLink()).toBe(true);
+
+    expect(run("--uninstall").status).toBe(0);
+
+    expect(linkExists(opencodeLinkPath)).toBe(false);
+    // The directory itself is opencode's, not ours to delete.
+    expect(existsSync(opencodePluginsDir)).toBe(true);
+
+    // A foreign file at the same path is left exactly where it is.
+    const foreign = "// someone else's plugin\n";
+    writeFileSync(opencodeLinkPath, foreign);
+
+    const result = run("--uninstall");
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(opencodeLinkPath, "utf8")).toBe(foreign);
+    expect(reportLines(result.stdout).opencode).toMatch(/left .* alone/i);
+  });
+
+  it("leaves an unrelated plugin file alone", () => {
+    makeRoots([".config", "opencode"]);
+    mkdirSync(opencodePluginsDir, { recursive: true });
+    const neighbour = join(opencodePluginsDir, "peon-ping.ts");
+    const body = "export const PeonPing = async () => ({});\n";
+    writeFileSync(neighbour, body);
+
+    expect(run().status).toBe(0);
+
+    // Guard against a vacuous pass: the installer did act on this directory.
+    expect(lstatSync(opencodeLinkPath).isSymbolicLink()).toBe(true);
+    expect(readFileSync(neighbour, "utf8")).toBe(body);
+
+    expect(run("--uninstall").status).toBe(0);
+
+    expect(linkExists(opencodeLinkPath)).toBe(false);
+    expect(readFileSync(neighbour, "utf8")).toBe(body);
   });
 });

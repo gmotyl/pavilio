@@ -23,10 +23,13 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   renameSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -371,19 +374,173 @@ const codexTarget = {
 };
 
 /* ───────────────────────────── opencode ────────────────────────────────────
- * Seam only. The opencode target (a symlink into
- * ~/.config/opencode/plugins/) lands in the following step. A seam reports
- * rather than throws: an unimplemented target is not a failure, and must not
- * colour the exit status.
+ * A symlink at ~/.config/opencode/plugins/pavilio-speech.ts pointing back at
+ * the plugin in this checkout. opencode loads every file in that directory, so
+ * the registration *is* the file's presence — there is no config to merge into.
+ *
+ * Why a link and not a copy: a copy is a fork. Every `pnpm pull` would leave
+ * the user running last month's plugin with nothing anywhere saying so, and the
+ * only cure would be remembering to re-run the installer. A link cannot go
+ * stale, and when it does break it breaks loudly.
+ *
+ * Owned-link semantics. A link is *ours* when it resolves — or dangles — to a
+ * path ending in the plugin's repo-relative suffix, exactly the way the claude
+ * target recognises its own hook command by substring. That deliberately spans
+ * more than this checkout: a link into a pavilio worktree that has since been
+ * removed, or into a second clone, is still ours to repoint, and repointing it
+ * is the only way a re-run from a new checkout can converge. Anything else —
+ * a real file, a directory, a link into someone else's plugin — is left where
+ * it is and reported. Refusing is a *report*, not a throw: someone else owning
+ * this path is not a broken install, and it must not colour the exit status
+ * that the claude and codex targets share.
  * ────────────────────────────────────────────────────────────────────────── */
 
-const PENDING = "not implemented yet — nothing was written";
+// Identity key: any link resolving here is ours, whatever the absolute prefix.
+const OPENCODE_PLUGIN_MARKER = "panel/hooks/speak-response-opencode.ts";
+
+const opencodeRoot = join(home, ".config", "opencode");
+const opencodePluginsDir = join(opencodeRoot, "plugins");
+const opencodeLinkPath = join(opencodePluginsDir, "pavilio-speech.ts");
+const opencodePluginPath = resolve(scriptDir, "..", "hooks", "speak-response-opencode.ts");
+
+/**
+ * What currently sits at the link path: `absent`, `ours` (with the absolute
+ * path it points at), or `foreign` (with a phrase naming what it is, for the
+ * report).
+ *
+ * lstat, not existsSync: a dangling link is still very much present at the
+ * path, and existsSync — which follows the link — would call it absent and send
+ * the caller into a symlink() that fails EEXIST.
+ */
+function inspectOpencodeLink() {
+  let stats;
+  try {
+    stats = lstatSync(opencodeLinkPath);
+  } catch {
+    return { kind: "absent" };
+  }
+  if (!stats.isSymbolicLink()) {
+    return { kind: "foreign", what: stats.isDirectory() ? "a directory" : "a real file" };
+  }
+  let raw;
+  try {
+    raw = readlinkSync(opencodeLinkPath);
+  } catch (err) {
+    fail(`could not read the link at ${opencodeLinkPath} (${err.message}).`);
+  }
+  // resolve() both absolutises a relative link (against the directory holding
+  // it, which is what the kernel does) and normalises away any `..` segments,
+  // so the suffix test sees a real path rather than a walk to one. It works on
+  // the link *text*, so a dangling link is classified exactly like a live one.
+  const target = resolve(opencodePluginsDir, raw);
+  if (!target.endsWith(OPENCODE_PLUGIN_MARKER)) {
+    return { kind: "foreign", what: `a symlink to ${target}` };
+  }
+  return { kind: "ours", target };
+}
+
+/**
+ * The one directory this installer may have to invent. Its mode is inherited
+ * from opencode's own config root rather than pinned to the 0600 that new
+ * *files* get: a directory holds no content to disclose, and everything that
+ * will ever land in it is either the user's own plugin code or a link to a
+ * world-readable file in a git checkout. What matters instead is that it match
+ * the tree it is being added to — a user who tightened ~/.config/opencode does
+ * not want a wide-open directory appearing inside it, and one who did not would
+ * be puzzled by a 0700 directory among 0755 siblings.
+ */
+function ensureOpencodePluginsDir() {
+  if (existsSync(opencodePluginsDir)) return;
+  let mode = 0o700;
+  try {
+    mode = statSync(opencodeRoot).mode & 0o777;
+  } catch {
+    // No root to inherit from — cannot normally happen, since its existence is
+    // what selected this target — so the conservative default stands.
+  }
+  try {
+    // mkdir's mode is filtered by the umask; the chmod pins the exact bits.
+    mkdirSync(opencodePluginsDir, { recursive: true, mode });
+    chmodSync(opencodePluginsDir, mode);
+  } catch (err) {
+    fail(`could not create ${opencodePluginsDir} (${err.message}).`);
+  }
+}
+
+/**
+ * Symlink + rename, the same shape as writeFileAtomically and for the same
+ * reason: symlink() itself refuses to overwrite, so the obvious unlink-then-
+ * symlink would leave the plugin missing outright if the process died between
+ * the two. rename() replaces whatever is there in one step instead.
+ */
+function linkOpencodePlugin() {
+  const tmpPath = `${opencodeLinkPath}.install-speech-hook.tmp`;
+  try {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // No leftover from an interrupted run; nothing to clear.
+    }
+    symlinkSync(opencodePluginPath, tmpPath);
+    renameSync(tmpPath, opencodeLinkPath);
+  } catch (err) {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // Nothing useful to do; the real error is reported below.
+    }
+    fail(`could not link ${opencodeLinkPath} (${err.message}).`);
+  }
+}
+
+function opencodeNotOurs(found, verb) {
+  return `Left ${opencodeLinkPath} alone — it is ${found.what}, which this installer does not own and will not ${verb}.`;
+}
 
 const opencodeTarget = {
   name: "opencode",
-  root: join(home, ".config", "opencode"),
-  install: () => PENDING,
-  uninstall: () => PENDING,
+  root: opencodeRoot,
+  install() {
+    const found = inspectOpencodeLink();
+    if (found.kind === "foreign") {
+      return [
+        opencodeNotOurs(found, "replace"),
+        "  Move it aside and run again to link the speech plugin.",
+      ].join("\n");
+    }
+    if (found.kind === "ours" && found.target === opencodePluginPath) {
+      // Already exactly right. Relinking would be harmless but noisy, and the
+      // report is more useful when it distinguishes the two.
+      return `Already linked — ${opencodeLinkPath}\n  → ${opencodePluginPath}`;
+    }
+    ensureOpencodePluginsDir();
+    linkOpencodePlugin();
+    if (found.kind === "ours") {
+      return [
+        `Relinked the speech plugin at ${opencodeLinkPath}`,
+        `  → ${opencodePluginPath}`,
+        `  (was ${found.target})`,
+      ].join("\n");
+    }
+    return `Linked the speech plugin into ${opencodeLinkPath}\n  → ${opencodePluginPath}`;
+  },
+  uninstall() {
+    const found = inspectOpencodeLink();
+    if (found.kind === "absent") {
+      return `Nothing to remove — ${opencodeLinkPath} does not exist.`;
+    }
+    if (found.kind === "foreign") {
+      return opencodeNotOurs(found, "remove");
+    }
+    try {
+      unlinkSync(opencodeLinkPath);
+    } catch (err) {
+      fail(`could not remove ${opencodeLinkPath} (${err.message}).`);
+    }
+    // plugins/ itself stays: it is opencode's directory, not ours to delete,
+    // and the user's own plugins may well be sitting in it.
+    return `Removed the speech plugin link ${opencodeLinkPath}`;
+  },
 };
 
 /* ──────────────────────────────── the walk ─────────────────────────────── */
