@@ -111,10 +111,18 @@ function panelUrl(): string {
 const REQUEST_TIMEOUT_MS = 1000;
 
 /**
- * The payload of a generated SDK call. The client returns
- * `{ data, error, request, response }`, but a thin or hand-rolled client — and
- * a future SDK major — may hand back the value itself; accepting both keeps a
- * client change from silently muting speech.
+ * The payload of a generated SDK call. On success the client resolves
+ * `{ data, request, response }` (`@opencode-ai/sdk/dist/gen/client/client.gen.js`
+ * lines 101-105); on failure it resolves `{ error, request, response }` — with
+ * **no `data` key** (lines 128-132). Both are plain objects, so unwrapping
+ * cannot itself tell them apart: the failure envelope simply falls through the
+ * `"data" in result` test and comes back whole.
+ *
+ * The fall-through is deliberate rather than merely tolerated, because a thin
+ * or hand-rolled client — and a future SDK major — may hand back the value
+ * itself, and accepting that keeps a client change from silently muting speech.
+ * The cost is that "did this call succeed?" is not answerable here, and is left
+ * to each caller to decide from the payload's own shape.
  */
 function payloadOf(result: unknown): unknown {
   if (result !== null && typeof result === "object" && "data" in result) {
@@ -130,18 +138,24 @@ function payloadOf(result: unknown): unknown {
  * never posted, because speaking a subagent's answer into its parent's cell is
  * worse than missing one answer.
  *
- * The unreadable case is not hypothetical. The generated client's default is
- * `ThrowOnError = false`, under which an HTTP failure *resolves* as
- * `{ data: undefined, error }` rather than throwing; `payloadOf` then yields
- * `undefined`, and a `parentID` read off that is absent for exactly the same
- * reason a main session's is. Inferring "main" from a missing field would make
- * every session this plugin cannot resolve speak into the parent's cell — the
- * one outcome the filter exists to prevent — so the missing *record* is decided
- * here, before the missing *field* is allowed to mean anything.
+ * The unreadable case is not hypothetical, and it does not look unreadable.
+ * The generated client's default is `ThrowOnError = false`, under which an HTTP
+ * failure *resolves* as `{ error, request, response }` rather than throwing.
+ * That envelope carries no `data` key, so `payloadOf` hands back the envelope
+ * itself — a perfectly ordinary non-null object, on which `parentID` is absent
+ * for exactly the same reason a main session's is. Every test framed as "is
+ * this *not* an error?" therefore passes here, which is why the record is
+ * recognised by a *positive* signal instead: a session record has a string
+ * `id`, and no failure envelope this client can produce does. Anything without
+ * one never resolved, and an unresolved session is treated as a child, because
+ * speaking into the parent's cell is the outcome this filter exists to prevent.
  */
 async function isChildSession(client: OpencodeClientLike, sessionID: string): Promise<boolean> {
   const info = payloadOf(await client.session.get({ path: { id: sessionID } }));
   if (info === null || typeof info !== "object") return true;
+  // The record must identify itself before the absence of `parentID` is allowed
+  // to mean anything; see above.
+  if (typeof (info as { id?: unknown }).id !== "string") return true;
   const parentID = (info as { parentID?: unknown }).parentID;
   // Absent is the only shape a main session has here. A string id is a child,
   // and so is anything else present that this code does not recognise.

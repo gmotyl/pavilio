@@ -88,6 +88,34 @@ const assistantMessage = (parts: unknown[], id = "msg_assistant") => ({
   parts,
 });
 
+/**
+ * The two envelopes the generated client actually resolves with, copied
+ * key-for-key out of `@opencode-ai/sdk/dist/gen/client/client.gen.js`. Both
+ * spread the same `const result = { request, response }` (line 62); the only
+ * difference is what is spread around it — `data` on success (line 101-105),
+ * `error` on the non-throwing failure path (line 128-132).
+ *
+ * `createOpencodeClient` (`dist/client.js:48`) passes no `responseStyle`, so
+ * the `"data"` short-circuit in each of those returns is never taken and the
+ * `"fields"` branch is what the plugin sees. `throwOnError` likewise defaults
+ * to false, so a 404 *resolves* here rather than throwing.
+ *
+ * The load-bearing detail, and the one a previous fixture invented its way
+ * around: the error envelope has **no `data` key at all** — not `data:
+ * undefined`, absent. A guard that only rejects non-objects is handed a
+ * perfectly ordinary object by this shape and lets it through.
+ */
+const sdkOk = (data: unknown) => ({
+  data,
+  request: new Request("http://127.0.0.1/session"),
+  response: new Response(null, { status: 200 }),
+});
+const sdkError = (status: number, message: string) => ({
+  error: { data: { message } },
+  request: new Request("http://127.0.0.1/session"),
+  response: new Response(null, { status }),
+});
+
 interface FakeClientOptions {
   /** Session records `client.session.get` answers with, keyed by id. */
   sessions?: Record<string, { id: string; parentID?: string }>;
@@ -97,9 +125,9 @@ interface FakeClientOptions {
   throws?: Error;
   /**
    * When set, `client.session.get` answers with this verbatim instead of a
-   * session record — the generated SDK's `{data: undefined, error}` envelope,
-   * which a client built with the default `ThrowOnError = false` *resolves*
-   * with on an HTTP error rather than throwing.
+   * session record — i.e. with `sdkError(...)`, which is what a client built
+   * with the default `ThrowOnError = false` *resolves* with on an HTTP error
+   * rather than throwing.
    */
   sessionGetResult?: unknown;
 }
@@ -122,12 +150,12 @@ function fakeClient({
         calls.push(`get:${path.id}`);
         if (throws) throw throws;
         if (sessionGetResult !== undefined) return sessionGetResult;
-        return { data: sessions[path.id] ?? { id: path.id } };
+        return sdkOk(sessions[path.id] ?? { id: path.id });
       },
       messages: async ({ path }: { path: { id: string } }) => {
         calls.push(`messages:${path.id}`);
         if (throws) throw throws;
-        return { data: messages[path.id] ?? [] };
+        return sdkOk(messages[path.id] ?? []);
       },
     },
   };
@@ -312,13 +340,49 @@ describe("speak-response-opencode", () => {
     const { client } = fakeClient({
       // The default client resolves an HTTP failure instead of throwing, so the
       // parentID that says "subagent" is simply absent. Absent must not read as
-      // "main", or every unresolved child speaks into the parent's cell.
-      sessionGetResult: { data: undefined, error: { data: { message: "session not found" } } },
+      // "main", or every unresolved child speaks into the parent's cell. Note
+      // that this envelope is an object and has no `data` — so unwrapping it
+      // yields the envelope itself, and a non-object check never fires.
+      sessionGetResult: sdkError(404, "session not found"),
       messages: { [CHILD_SESSION]: [assistantMessage([textPart("SUBAGENT ANSWER")])] },
     });
 
     await deliver(client, idleEvent(CHILD_SESSION));
 
     expect(captured).toEqual([]);
+  });
+
+  it("resolves a main session out of the SDK's success envelope", async () => {
+    await listenAsPanel();
+    const calls: string[] = [];
+    // Written out literally rather than through `sdkOk`, because this is the
+    // assertion that the *shape* is what the plugin was built against: `data`
+    // beside `request`/`response`, the record itself one level down. The guard
+    // that keeps an error envelope out is a positive test for `id`, so an SDK
+    // that moved or renamed either key would fail this test — loudly — instead
+    // of quietly reclassifying every main session as a child and going mute.
+    const client = {
+      session: {
+        get: async ({ path }: { path: { id: string } }) => {
+          calls.push(`get:${path.id}`);
+          return {
+            data: { id: MAIN_SESSION, title: "a main session", version: "0.0.0" },
+            request: new Request("http://127.0.0.1/session"),
+            response: new Response(null, { status: 200 }),
+          };
+        },
+        messages: async () => ({
+          data: [assistantMessage([textPart(ANSWER)])],
+          request: new Request("http://127.0.0.1/session"),
+          response: new Response(null, { status: 200 }),
+        }),
+      },
+    };
+
+    await deliver(client, idleEvent(MAIN_SESSION));
+
+    expect(calls).toEqual([`get:${MAIN_SESSION}`]);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body).text).toBe(ANSWER);
   });
 });
