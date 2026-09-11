@@ -25,6 +25,8 @@ const synth = vi.hoisted(() => {
   const bufferText = new Map<ArrayBuffer, string>();
   const blobText = new Map<Blob, string>();
   let requests: string[] = [];
+  /** A synthesizer that is simply down, for the three-consecutive-failures rule. */
+  let failing = false;
 
   function bufferFor(text: string): ArrayBuffer {
     const existing = buffers.get(text);
@@ -38,7 +40,11 @@ const synth = vi.hoisted(() => {
   return {
     synthesizeSpeech: async (text: string): Promise<ArrayBuffer> => {
       requests.push(text);
+      if (failing) throw new Error("the synthesizer is down");
       return bufferFor(text);
+    },
+    setFailing: (value: boolean): void => {
+      failing = value;
     },
     prefetchSpeech: (): void => {},
     toSpeechBlob: (buffer: ArrayBuffer): Blob => {
@@ -52,6 +58,7 @@ const synth = vi.hoisted(() => {
     },
     reset: () => {
       requests = [];
+      failing = false;
     },
   };
 });
@@ -238,6 +245,7 @@ import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import ProjectTerminalsSurface from "../../terminal/ProjectTerminalsSurface";
 import TerminalsPage from "../../../pages/TerminalsPage";
 import { SpeechHostProvider } from "../SpeechHostProvider";
+import { dismissToast, getToastSnapshot } from "../../../lib/toast";
 import { prepare } from "../prepare";
 import { setStoredArmedSession } from "../voices";
 
@@ -408,6 +416,9 @@ beforeAll(() => {
 beforeEach(() => {
   synth.reset();
   hosts.reset();
+  // The toast store is a module singleton, so a toast raised by one test would
+  // otherwise still be standing in the next one.
+  dismissToast();
   prepareCalls.length = 0;
   elements.length = 0;
   played.length = 0;
@@ -553,6 +564,28 @@ describe("autoplay — refusal and the budget", () => {
 
     await waitFor(() => expect(speakState("cell-a")).toBe("unheard"));
     expect(speakState("cell-a")).not.toBe("heard");
+    // A refusal is reported by the pip, not by a toast: the two kinds of
+    // failure have two different surfaces and must not borrow each other's.
+    expect(getToastSnapshot()).toBeNull();
+  });
+
+  it("three consecutive synthesis failures are surfaced with a toast", async () => {
+    // `spec.md`: three consecutive unit failures stop playback AND surface the
+    // failure. Without a handler for `kind: "synthesis"` the stop reaches
+    // neither the user nor the console — a present handler suppresses the
+    // player's own `console.error` fallback.
+    synth.setFailing(true);
+
+    await renderProjectSurface();
+    await arm("cell-a");
+    await emitUtterance("cell-a", "a1", longResponse());
+
+    await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
+    expect(getToastSnapshot()?.text).toMatch(/speech/i);
+    // Consecutive is the point: the run stops at the third failure rather than
+    // hammering the synthesizer unit after unit.
+    expect(synth.requests).toHaveLength(3);
+    expect(played).toEqual([]);
   });
 
   it("continuing after the budget resumes at the first unspoken unit", async () => {

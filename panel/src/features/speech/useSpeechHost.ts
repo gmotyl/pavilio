@@ -34,6 +34,7 @@
  * when the promise settles is the only natural end there is.
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { toast } from "../../lib/toast";
 import { prepare } from "./prepare";
 import type { PreparedSpeech, Utterance } from "./types";
 import { useSpeechPlayer, type SpeechPlaybackError } from "./useSpeechPlayer";
@@ -74,10 +75,18 @@ export function useSpeechHost(): GridSpeech {
     // keys off the error's `kind`, never off `player.unlocked` — that flag says
     // a gesture reached the element, not that playback is permitted, and the
     // player never clears it when the browser says no.
-    const run = runRef.current;
-    if (error.kind === "refused" && run?.sessionId === error.sessionId) {
-      run.outcome = "refused";
+    if (error.kind === "refused") {
+      const run = runRef.current;
+      if (run?.sessionId === error.sessionId) run.outcome = "refused";
+      return;
     }
+
+    // A systemic synthesis failure has no pip to fall back to — the player has
+    // already stopped — so a toast is the only thing that tells the user the
+    // silence is a failure rather than the end of the answer. Every kind must
+    // land somewhere: a handler that returns early also suppresses the player's
+    // own `console.error` fallback, which only runs when there is no handler.
+    toast.error("Speech stopped — the voice could not be synthesized.");
   }, []);
 
   const player = useSpeechPlayer({ onError });

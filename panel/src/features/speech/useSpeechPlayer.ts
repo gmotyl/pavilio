@@ -39,9 +39,11 @@ export type SpeechFailureKind =
   | "synthesis";
 
 /**
- * A playback failure worth telling the user about. Both kinds are surfaced,
- * never swallowed: a refusal is what the "unheard" pip falls back to, and a
- * synthesis stop is what a toast reports.
+ * A playback failure worth telling the user about. Both kinds are surfaced by
+ * `useSpeechHost`'s `onError`, never swallowed: a refusal is what the "unheard"
+ * pip falls back to, and a synthesis stop is what its toast reports. A handler
+ * that silently ignores a kind swallows it twice over — the `console.error`
+ * below is a fallback for a *missing* handler, not for a handler that returns.
  */
 export class SpeechPlaybackError extends Error {
   readonly kind: SpeechFailureKind;
