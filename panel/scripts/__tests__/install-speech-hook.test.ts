@@ -1,10 +1,12 @@
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   existsSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -517,5 +519,92 @@ command = "npx"
     expect((raw.match(/trusted_hash/g) ?? []).length).toBe(hashesBefore);
     expect((raw.match(/\[hooks\.state/g) ?? []).length).toBe(statesBefore);
     expect(CODEX_BLOCK).not.toMatch(/trusted_hash|hooks\.state/);
+  });
+  // --- what the file already held ------------------------------------------
+
+  it("preserves the codex config file permissions", () => {
+    makeRoots([".codex"]);
+    writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
+    // A real ~/.codex/config.toml is 0600: it carries MCP server definitions
+    // with plaintext tokens in them. A write that lands on a fresh inode would
+    // hand those to every account on the machine.
+    chmodSync(codexConfigPath, 0o600);
+
+    expect(run().status).toBe(0);
+
+    // Guard against a vacuous pass: it did rewrite the file.
+    expect(readCodexConfig()).toContain(CODEX_BLOCK);
+    expect(statSync(codexConfigPath).mode & 0o777).toBe(0o600);
+
+    // Uninstall rewrites the same file and must not loosen it either.
+    expect(run("--uninstall").status).toBe(0);
+    expect(statSync(codexConfigPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("preserves the claude settings file permissions", () => {
+    writeFileSync(settingsPath, JSON.stringify(existingSettings, null, 2));
+    // 0600 is not the default for this file, but a user who tightened it has
+    // to stay tightened — the writer is the same temp-file-plus-rename dance.
+    chmodSync(settingsPath, 0o600);
+
+    expect(run().status).toBe(0);
+
+    expect(speechCommands(readSettings())).toHaveLength(1);
+    expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
+
+    expect(run("--uninstall").status).toBe(0);
+    expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("creates absent config files readable only by their owner", () => {
+    makeRoots([".codex"]);
+    expect(existsSync(settingsPath)).toBe(false);
+    expect(existsSync(codexConfigPath)).toBe(false);
+
+    expect(run().status).toBe(0);
+
+    // Nothing to inherit, so the installer picks the conservative mode: these
+    // files grow credentials over time and only their owner ever reads them.
+    expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
+    expect(statSync(codexConfigPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("refuses to write when a stray begin marker sits above the block", () => {
+    makeRoots([".codex"]);
+    // Two begin markers, one end. Taking the first begin and the first end
+    // would delete everything between them — the user's keys included.
+    const strayed = `${CODEX_SEED_CONFIG}# pavilio-speech begin
+keep_me = "user content"
+
+${CODEX_BLOCK}[mcp_servers.tail]
+command = "npx"
+`;
+    writeFileSync(codexConfigPath, strayed);
+
+    const result = run();
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(codexConfigPath);
+    // Byte-identical afterwards: damaged markers are reported, never guessed at.
+    expect(readCodexConfig()).toBe(strayed);
+  });
+
+  it("collapses a pre-existing pair of duplicate blocks", () => {
+    makeRoots([".codex"]);
+    writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
+    expect(run().status).toBe(0);
+    // An older installer stacked a second copy of the block. Two registrations
+    // means the answer is spoken twice, so install has to converge on one.
+    writeFileSync(codexConfigPath, `${readCodexConfig()}\n${CODEX_BLOCK}`);
+    expect(countCodexBlocks(readCodexConfig())).toBe(2);
+
+    expect(run().status).toBe(0);
+
+    const raw = readCodexConfig();
+    expect(countCodexBlocks(raw)).toBe(1);
+    expect(withoutCodexBlock(raw)).toBe(CODEX_SEED_CONFIG);
+    // And a single uninstall takes the lot back out, not one copy per run.
+    expect(run("--uninstall").status).toBe(0);
+    expect(readCodexConfig()).toBe(CODEX_SEED_CONFIG);
   });
 });

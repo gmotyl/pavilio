@@ -20,7 +20,16 @@
  *
  * Run from the repo root as `pnpm install:speech` (add `--uninstall` to remove).
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +48,51 @@ class InstallError extends Error {}
 
 function fail(message) {
   throw new InstallError(message);
+}
+
+// What a config file this installer had to invent gets. These files accumulate
+// credentials — codex keeps MCP server definitions with plaintext tokens in
+// them — and nothing but the owner's own agent ever reads one, so the group and
+// world bits buy nothing and cost a disclosure. An existing file's mode always
+// wins over this; it is only the no-information case.
+const NEW_CONFIG_MODE = 0o600;
+
+/**
+ * Temp file + rename, so an interrupted run cannot truncate a real config.
+ *
+ * The rename lands a *new* inode, which is why the mode has to be carried over
+ * explicitly: without this the user's 0600 config comes back 0644 and every
+ * account on the machine can read their API tokens. The mode is stamped on the
+ * temp file before the rename rather than on the target after it, so the
+ * permissive window never exists at the real path.
+ */
+function writeFileAtomically(targetPath, text) {
+  mkdirSync(dirname(targetPath), { recursive: true });
+  // statSync, not existsSync-then-stat: one syscall, and a file that vanishes
+  // between the two would otherwise throw where it should fall back.
+  let mode = NEW_CONFIG_MODE;
+  try {
+    mode = statSync(targetPath).mode & 0o777;
+  } catch {
+    // No existing file to inherit from; the conservative default stands.
+  }
+  const tmpPath = `${targetPath}.install-speech-hook.tmp`;
+  try {
+    // `mode` on the write covers creation (umask still applies to it), chmod
+    // then pins the exact bits — including on a stale temp file we reused.
+    writeFileSync(tmpPath, text, { encoding: "utf8", mode });
+    chmodSync(tmpPath, mode);
+    renameSync(tmpPath, targetPath);
+  } catch (err) {
+    if (existsSync(tmpPath)) {
+      try {
+        unlinkSync(tmpPath);
+      } catch {
+        // Nothing useful to do; the real error is reported below.
+      }
+    }
+    fail(`could not write ${targetPath} (${err.message}).`);
+  }
 }
 
 /* ────────────────────────────── claude ────────────────────────────────────
@@ -129,23 +183,8 @@ function withOurHook(settings) {
   return { ...base, hooks };
 }
 
-/** Temp file + rename, so an interrupted run cannot truncate a real settings file. */
 function writeSettings(settings) {
-  mkdirSync(dirname(settingsPath), { recursive: true });
-  const tmpPath = `${settingsPath}.install-speech-hook.tmp`;
-  try {
-    writeFileSync(tmpPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-    renameSync(tmpPath, settingsPath);
-  } catch (err) {
-    if (existsSync(tmpPath)) {
-      try {
-        unlinkSync(tmpPath);
-      } catch {
-        // Nothing useful to do; the real error is reported below.
-      }
-    }
-    fail(`could not write ${settingsPath} (${err.message}).`);
-  }
+  writeFileAtomically(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 const claudeTarget = {
@@ -208,21 +247,67 @@ const codexBlockLines = [
 ];
 
 /**
- * Line indices of our block, or null when it is not there. `trimEnd()` tolerates
- * a stray carriage return; an opening marker with no closing one is a damaged
- * file we refuse to guess at rather than silently swallow the rest.
+ * Line ranges of every block of ours, in file order — empty when there are
+ * none. `trimEnd()` tolerates a stray carriage return.
+ *
+ * Both ways a marker pair can be damaged are refused outright rather than
+ * guessed at, because every guess available here deletes user content:
+ *
+ *  - an opening marker with no closing one would swallow the rest of the file;
+ *  - a second opening marker *inside* a pair means the pairing is ambiguous —
+ *    taking the outer one eats every key between the two markers, and taking
+ *    the inner one leaves an orphan marker behind that breaks the next run.
+ *
+ * Refusing keeps one invariant across both: the installer never removes a line
+ * it cannot prove it wrote. An unwritable case is reported and exits non-zero,
+ * which is what the shipped code already did for the first of the two.
  */
-function findCodexBlock(lines) {
+function findCodexBlocks(lines) {
   const isMarker = (line, marker) => line.trimEnd() === marker;
-  const begin = lines.findIndex((line) => isMarker(line, CODEX_BEGIN));
-  if (begin === -1) return null;
-  const end = lines.findIndex((line, i) => i > begin && isMarker(line, CODEX_END));
-  if (end === -1) {
+  const blocks = [];
+  let begin = -1;
+  lines.forEach((line, i) => {
+    if (isMarker(line, CODEX_BEGIN)) {
+      if (begin !== -1) {
+        fail(
+          `${codexConfigPath} has a second "${CODEX_BEGIN}" marker (line ${i + 1}) inside the block opened at line ${begin + 1}. Nothing was written — fix the file and run again.`,
+        );
+      }
+      begin = i;
+    } else if (begin !== -1 && isMarker(line, CODEX_END)) {
+      blocks.push({ begin, end: i });
+      begin = -1;
+    }
+  });
+  if (begin !== -1) {
     fail(
       `${codexConfigPath} has a "${CODEX_BEGIN}" marker with no matching "${CODEX_END}". Nothing was written — fix the file and run again.`,
     );
   }
-  return { begin, end };
+  return blocks;
+}
+
+/**
+ * Cuts every block out of `lines`, optionally putting `replacement` where the
+ * first one stood. Taking back the one blank separator line above a removed
+ * block is the exact inverse of how install appends one; the caller's own
+ * blank lines above that are left alone.
+ */
+function spliceCodexBlocks(lines, blocks, replacement) {
+  const out = [];
+  let cursor = 0;
+  blocks.forEach((block, i) => {
+    const head = lines.slice(cursor, block.begin);
+    if (i === 0 && replacement) {
+      out.push(...head, ...replacement);
+    } else {
+      if (head.length > 0 && head[head.length - 1] === "") head.pop();
+      out.push(...head);
+    }
+    cursor = block.end + 1;
+  });
+  out.push(...lines.slice(cursor));
+  return out;
 }
 
 function readCodexConfig() {
@@ -230,23 +315,8 @@ function readCodexConfig() {
   return readFileSync(codexConfigPath, "utf8");
 }
 
-/** Temp file + rename, so an interrupted run cannot truncate a real config. */
 function writeCodexConfig(text) {
-  mkdirSync(dirname(codexConfigPath), { recursive: true });
-  const tmpPath = `${codexConfigPath}.install-speech-hook.tmp`;
-  try {
-    writeFileSync(tmpPath, text, "utf8");
-    renameSync(tmpPath, codexConfigPath);
-  } catch (err) {
-    if (existsSync(tmpPath)) {
-      try {
-        unlinkSync(tmpPath);
-      } catch {
-        // Nothing useful to do; the real error is reported below.
-      }
-    }
-    fail(`could not write ${codexConfigPath} (${err.message}).`);
-  }
+  writeFileAtomically(codexConfigPath, text);
 }
 
 const codexTarget = {
@@ -260,15 +330,13 @@ const codexTarget = {
       writeCodexConfig(`${codexBlockLines.join("\n")}\n`);
     } else {
       const lines = raw.split("\n");
-      const found = findCodexBlock(lines);
-      if (found) {
+      const blocks = findCodexBlocks(lines);
+      if (blocks.length > 0) {
         // In place: whatever precedes and follows the block keeps its position.
-        const next = [
-          ...lines.slice(0, found.begin),
-          ...codexBlockLines,
-          ...lines.slice(found.end + 1),
-        ];
-        writeCodexConfig(next.join("\n"));
+        // Any further copies — an older installer stacked them, and two
+        // registrations would speak every answer twice — are dropped here, so
+        // install converges on one block however many it found.
+        writeCodexConfig(spliceCodexBlocks(lines, blocks, codexBlockLines).join("\n"));
       } else {
         // Appended after one blank separator line — TOML tables must not run
         // into the previous table's keys, and the blank is what uninstall
@@ -291,15 +359,13 @@ const codexTarget = {
     }
     const raw = readCodexConfig();
     const lines = raw.split("\n");
-    const found = findCodexBlock(lines);
-    if (!found) {
+    const blocks = findCodexBlocks(lines);
+    if (blocks.length === 0) {
       return `Nothing to remove — no pavilio-speech block in ${codexConfigPath}`;
     }
-    const head = lines.slice(0, found.begin);
-    // Take back the one blank separator install put in, and no more: further
-    // blank lines above it are the user's.
-    if (head.length > 0 && head[head.length - 1] === "") head.pop();
-    writeCodexConfig(head.concat(lines.slice(found.end + 1)).join("\n"));
+    // Every block is ours, so one uninstall takes them all: peeling off one
+    // copy per run would leave a stacked file still speaking.
+    writeCodexConfig(spliceCodexBlocks(lines, blocks, null).join("\n"));
     return `Removed the speech ${HOOK_EVENT} hook from ${codexConfigPath}`;
   },
 };
