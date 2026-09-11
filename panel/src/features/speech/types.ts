@@ -25,3 +25,22 @@ export interface SpeechUnit {
   text: string;
   chars: number;
 }
+
+/**
+ * One response, turned into something speakable. `units` is the whole response;
+ * only the first `spokenUnits` of them fit the speech budget, and
+ * `remainderParagraphs` is how many units were left unspoken — the number the
+ * panel reports as "there is more to read".
+ *
+ * `language` is the language the pronunciation map was gated on. It is the
+ * session's language, handed *to* preparation rather than detected from this one
+ * response (see `prepare.ts`), so it is reported back to make the gate visible.
+ */
+export interface PreparedSpeech {
+  /** May be empty — an utterance with nothing to say. */
+  units: SpeechUnit[];
+  language: "pl" | "en";
+  /** Units inside the budget; the rest are the remainder. */
+  spokenUnits: number;
+  remainderParagraphs: number;
+}

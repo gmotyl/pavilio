@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { detectLanguage } from "../pronunciation";
+import { INITIAL_LANGUAGE_STATE, nextLanguageState, voteLanguage } from "../pronunciation";
 import {
   DEFAULT_SPEECH_VOICE,
   SPEECH_VOICES,
@@ -52,20 +52,26 @@ describe("getStoredVoice", () => {
   });
 });
 
-describe("detectLanguage", () => {
-  it("detectLanguage returns a language, not a voice id", () => {
+describe("language detection", () => {
+  it("returns a language, not a voice id", () => {
     const polish = "To jest odpowiedź agenta, ale nie wiem czy to zadziała dla tego przypadku.";
     const english = "The panel keeps the latest utterance for each session and speaks it aloud.";
 
-    expect(detectLanguage(polish)).toBe("pl");
-    expect(detectLanguage(english)).toBe("en");
+    expect(voteLanguage(polish)).toBe("pl");
+    expect(voteLanguage(english)).toBe("en");
+
+    // The session's language is the accumulated verdict, and it is still a
+    // language: `pl` / `en`, never something the picker could offer.
+    const spoken = [polish, polish].map(voteLanguage).reduce(nextLanguageState, INITIAL_LANGUAGE_STATE);
+    expect(spoken.lang).toBe("pl");
 
     // Detection gates the pronunciation map and nothing else: it must never
     // name a voice, and it must never displace the user's pick.
     const ids = voiceIds();
-    expect(ids).not.toContain(detectLanguage(polish));
-    expect(ids).not.toContain(detectLanguage(english));
-    expect(detectLanguage(polish)).not.toBe("pl-PL-MarekNeural");
+    expect(ids).not.toContain(voteLanguage(polish));
+    expect(ids).not.toContain(voteLanguage(english));
+    expect(ids).not.toContain(spoken.lang);
+    expect(voteLanguage(polish)).not.toBe("pl-PL-MarekNeural");
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
   });
 });

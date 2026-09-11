@@ -1,12 +1,14 @@
 /**
  * English → Polish phonetic pronunciation maps, vendored verbatim from motyl's
  * `lib/tts/pronunciation.ts`, together with the matcher that applies them
- * (motyl keeps it in `lib/tts/speech.ts`) and the language detection that gates
+ * (motyl keeps it in `lib/tts/speech.ts`) and the language tally that gates
  * them (motyl's `lib/tts/voice-map.ts`).
  *
  * The maps are a hand-tuned workaround for edge-tts mispronouncing English tech
  * terms *inside Polish prose*. They are applied on the Polish branch only —
- * see {@link detectLanguage} — because an English answer needs none of it.
+ * see {@link voteLanguage} and {@link nextLanguageState} — because an English
+ * answer needs none of it: roughly 38 of the keys below are ordinary English
+ * words, so applying the map to English prose is not a no-op, it is damage.
  *
  * HOW TO EDIT: add `englishStem: "polishPhonetic"` entries below. Matching is
  * case-insensitive and stem-based: the key is matched at a word start and any
@@ -199,44 +201,80 @@ export function applyPronunciation(text: string): string {
   return out;
 }
 
-/** Common Polish function words — the signal content-based detection keys on. */
-const POLISH_WORDS: ReadonlySet<string> = new Set([
-  "jest",
-  "ale",
-  "dla",
-  "tego",
-  "tak",
-  "jak",
-  "to",
-  "co",
-  "na",
-  "do",
-  "za",
-  "od",
-  "po",
-  "we",
-  "ze",
-]);
-
-/** Share of whitespace-separated words that must be Polish function words. */
-const POLISH_WORD_RATIO = 0.1;
+/**
+ * The letters that only Polish has. They are the ONLY evidence a vote keys on,
+ * because they are unambiguous: no English text contains them, so the
+ * false-positive class that the old function-word ratio produced — six of ten
+ * ordinary English sentences read as Polish — cannot arise.
+ */
+const POLISH_DIACRITICS_RE = /[ąćęłńóśźż]/i;
 
 /**
- * Detects the language of a response — a **language**, never a voice id.
+ * One utterance's vote for the session's language.
  *
- * Motyl's `detectLanguageFromContent` returns `pl-PL-MarekNeural` /
- * `en-GB-RyanNeural`, so detection silently overrides whichever voice the user
- * picked. Here the two concerns are split: this gates the pronunciation map and
- * nothing else, and the picked voice always wins (see `voices.ts`). Every
- * offered voice is multilingual, so no voice ever has to be switched.
- *
- * The heuristic is motyl's: if more than 10% of the whitespace-separated words
- * are common Polish function words, the text is Polish. Anything else — English
- * prose, an identifier dump, an empty string — is English.
+ * Known and accepted: short diacritic-free Polish ("do 2026 roku") votes `en`,
+ * so the pronunciation map is simply not applied. That is the safe failure
+ * direction — ~38 map keys are ordinary English words (`build`, `update`,
+ * `summary`), so misapplying the map mangles the output, while withholding it
+ * only leaves a Polish sentence saying "deploy" in English.
  */
-export function detectLanguage(text: string): "pl" | "en" {
-  const words = text.toLowerCase().split(/\s+/);
-  const polishWordCount = words.filter((word) => POLISH_WORDS.has(word)).length;
+export function voteLanguage(text: string): "pl" | "en" {
+  return POLISH_DIACRITICS_RE.test(text) ? "pl" : "en";
+}
 
-  return polishWordCount > words.length * POLISH_WORD_RATIO ? "pl" : "en";
+/**
+ * A session's running language tally. Language is a property of the SESSION,
+ * not of one response: certainty accumulates across utterances, so no single
+ * line can flip the pronunciation map on.
+ *
+ * The two counters are deliberately asymmetric, because the two rules they
+ * serve are:
+ * - `plVotes` is the session's **lifetime** Polish evidence. It only grows.
+ * - `enVotes` is the **current run** of consecutive English votes — the counter
+ *   the "three consecutive" flip-back rule needs — and any Polish vote resets
+ *   it. A lifetime English tally here would let a long English preamble lock a
+ *   session out of Polish forever, which a genuinely bilingual agent session
+ *   must not do.
+ */
+export interface LanguageState {
+  /** Lifetime count of `pl` votes. */
+  plVotes: number;
+  /** Length of the current run of `en` votes; reset by any `pl` vote. */
+  enVotes: number;
+  lang: "pl" | "en";
+}
+
+/** Polish votes needed before the map may be switched on. */
+const PL_SWITCH_VOTES = 2;
+/** Consecutive English votes that switch it back off. */
+const EN_FLIP_BACK_VOTES = 3;
+
+/**
+ * A session starts English. Misapplying the map is the harm, so the default is
+ * the branch that changes nothing.
+ */
+export const INITIAL_LANGUAGE_STATE: LanguageState = Object.freeze({
+  plVotes: 0,
+  enVotes: 0,
+  lang: "en",
+});
+
+/**
+ * Folds one utterance's vote into the session's tally. Pure — the state lives
+ * with the rest of the per-session speech state, not here.
+ *
+ * The flip-back is checked first: three English utterances in a row mean the
+ * session has switched language, and that beats however much Polish evidence
+ * came before it. The `plVotes > enVotes` guard is what stops a session that has
+ * just flipped back from bouncing straight to Polish again on the strength of
+ * old evidence.
+ */
+export function nextLanguageState(state: LanguageState, vote: "pl" | "en"): LanguageState {
+  const plVotes = vote === "pl" ? state.plVotes + 1 : state.plVotes;
+  const enVotes = vote === "en" ? state.enVotes + 1 : 0;
+
+  if (enVotes >= EN_FLIP_BACK_VOTES) return { plVotes, enVotes, lang: "en" };
+  if (plVotes >= PL_SWITCH_VOTES && plVotes > enVotes) return { plVotes, enVotes, lang: "pl" };
+
+  return { plVotes, enVotes, lang: state.lang };
 }
