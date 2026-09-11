@@ -81,19 +81,37 @@ if command -v powershell.exe >/dev/null 2>&1; then
   #
   # Only ever raised to the host adapter's own MTU, never to a hard-coded
   # number: a link that legitimately needs a smaller one keeps it.
-  HOST_MTU="$(powershell.exe -NoProfile -Command "(Get-NetIPInterface -AddressFamily IPv4 | Where-Object { \$_.InterfaceAlias -match 'WSL' } | Select-Object -First 1).NlMtu" 2>/dev/null | tr -d '\r\n')"
   WSL_MTU="$(ip -o link show eth0 2>/dev/null | sed -n 's/.* mtu \([0-9]*\).*/\1/p')"
-  # Anything non-numeric (absent adapter, unexpected PowerShell output) stands
-  # down rather than reaching `[ -gt ]` with a string.
-  case "$HOST_MTU" in '' | *[!0-9]*) HOST_MTU="" ;; esac
+  # Anything non-numeric stands down rather than reaching `[ -lt ]` with a string.
   case "$WSL_MTU" in '' | *[!0-9]*) WSL_MTU="" ;; esac
-  if [ -n "$HOST_MTU" ] && [ -n "$WSL_MTU" ] && [ "$HOST_MTU" -gt "$WSL_MTU" ]; then
-    if ip link set dev eth0 mtu "$HOST_MTU" 2>/dev/null; then
-      echo "Raised WSL eth0 MTU ${WSL_MTU} → ${HOST_MTU} (matching the Windows WSL adapter)."
-    else
-      echo "WSL eth0 MTU is ${WSL_MTU} but the Windows WSL adapter is ${HOST_MTU}, and raising"
-      echo "  it failed (needs root in the distro). Tailscale HTTPS will stall on large"
-      echo "  responses until it is raised: ip link set dev eth0 mtu ${HOST_MTU}"
+
+  # Windows is asked only when eth0 looks small. Every launch would otherwise
+  # pay a PowerShell cold start (~1-2s) to be told nothing is wrong, and an
+  # eth0 already at the standard 1500 is not the fault this exists to repair.
+  # A host running jumbo frames therefore leaves eth0 at 1500: undersized is a
+  # throughput question, oversized is the black hole described above.
+  if [ -n "$WSL_MTU" ] && [ "$WSL_MTU" -lt 1500 ]; then
+    # `vEthernet (WSL)` by exact alias, because a host can carry more than one
+    # WSL-ish adapter — `vEthernet (WSL-HyperV Firewall)`, or a leftover from a
+    # previous distro — and a substring match with `-First 1` could read the
+    # MTU off the wrong one. Where the exact alias is absent, the smallest of
+    # the `vEthernet (WSL*)` family is taken: among ambiguous candidates the
+    # conservative figure is the one that cannot create a black hole.
+    #
+    # Timed out because the Win32 interop path can stall (a hung PowerShell
+    # host, a slow adapter enumeration), and this sits in front of the rest of
+    # the launcher.
+    HOST_MTU="$(timeout 10 powershell.exe -NoProfile -Command "\$a = Get-NetIPInterface -AddressFamily IPv4 | Where-Object { \$_.InterfaceAlias -eq 'vEthernet (WSL)' } | Select-Object -First 1; if (-not \$a) { \$a = Get-NetIPInterface -AddressFamily IPv4 | Where-Object { \$_.InterfaceAlias -like 'vEthernet (WSL*' } | Sort-Object NlMtu | Select-Object -First 1 }; \$a.NlMtu" 2>/dev/null | tr -d '\r\n')"
+    case "$HOST_MTU" in '' | *[!0-9]*) HOST_MTU="" ;; esac
+
+    if [ -n "$HOST_MTU" ] && [ "$HOST_MTU" -gt "$WSL_MTU" ]; then
+      if ip link set dev eth0 mtu "$HOST_MTU" 2>/dev/null; then
+        echo "Raised WSL eth0 MTU ${WSL_MTU} → ${HOST_MTU} (matching the Windows WSL adapter)."
+      else
+        echo "WSL eth0 MTU is ${WSL_MTU} but the Windows WSL adapter is ${HOST_MTU}, and raising"
+        echo "  it failed (needs root in the distro). Tailscale HTTPS will stall on large"
+        echo "  responses until it is raised: ip link set dev eth0 mtu ${HOST_MTU}"
+      fi
     fi
   fi
   # ---------- end MTU self-heal --------------------------------------------

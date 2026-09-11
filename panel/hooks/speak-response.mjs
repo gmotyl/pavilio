@@ -290,12 +290,21 @@ function lastIndexWhere(entries, matches) {
  */
 function currentResponse(transcript) {
   const entries = parseEntries(transcript);
-  // A transcript that records `stop_reason` is read strictly — only the message
-  // that ended the turn counts. One that does not is read the old way, by
-  // position alone, which is all such a transcript can support.
-  const isResponse = recordsStopReason(entries) ? isTurnAnswer : isAssistantText;
-  const textIndex = lastIndexWhere(entries, isResponse);
   const userIndex = lastIndexWhere(entries, isUserTurn);
+  // A turn that records `stop_reason` is read strictly — only the message that
+  // ended it counts. One that does not is read the old way, by position alone,
+  // which is all such a turn can support.
+  //
+  // The question is asked of THIS turn's entries, not of the whole file. A
+  // transcript can be mixed — a session that spans an agent upgrade has turns
+  // on both sides of it — and judging the file as a whole would put a turn
+  // that never writes `stop_reason` into the strict branch, where the
+  // `end_turn` it is waited on for can never arrive: silence on every turn,
+  // for the life of that session.
+  const isResponse = recordsStopReason(entries.slice(userIndex + 1))
+    ? isTurnAnswer
+    : isAssistantText;
+  const textIndex = lastIndexWhere(entries, isResponse);
   if (textIndex < userIndex) return { stale: true, text: null };
   return {
     stale: false,

@@ -673,6 +673,33 @@ describe("speak-response", () => {
     });
   });
 
+  it("reads a mixed transcript by the current turn, not by the whole file", async () => {
+    // A session that spans an agent upgrade carries turns on both sides of it.
+    // Judging the file as a whole would see the older turn's `stop_reason` and
+    // put THIS turn — which records none — into the strict branch, where the
+    // `end_turn` it waits for can never arrive: silence for the rest of the
+    // session.
+    await listenAsPanel();
+    const transcript = writeTranscript("mixed.jsonl", [
+      userTurn("an older turn, from before the upgrade"),
+      assistantTextStopping(ANNOUNCEMENT, "tool_use"),
+      assistantTextStopping(ANSWER, "end_turn"),
+      userTurn("run the suite"),
+      assistantText(CURRENT_TEXT),
+      toolUse("call-1"),
+      toolResult("call-1"),
+    ]);
+
+    const result = await run(stopPayload(transcript));
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: CURRENT_TEXT,
+    });
+  });
+
   it("falls back to the last assistant text when nothing records a stop_reason", async () => {
     // A transcript whose assistant entries carry no `stop_reason` at all — an
     // older Claude Code, or another writer of the same format. Demanding
