@@ -17,10 +17,18 @@
  * then speaks the last question's answer while the current one is on screen,
  * every turn, for the life of the session.
  *
- * So completeness is checked before anything is sent: a finished turn has an
- * assistant text message **after** the last real user turn. Until it does, this
- * waits (see `TRANSCRIPT_WAIT_MS`) and, if it never appears, sends nothing at
- * all. See `currentResponse`.
+ * So completeness is checked before anything is sent: a finished turn has the
+ * message that **ended** it — `stop_reason: "end_turn"` — after the last real
+ * user turn. Until it does, this waits (see `TRANSCRIPT_WAIT_MS`) and, if it
+ * never appears, sends nothing at all. See `currentResponse`.
+ *
+ * Merely "an assistant text after the last user turn" is not enough, and that
+ * weaker test is what shipped first. A turn routinely speaks more than once —
+ * it announces what it is about to do, calls tools, then answers — so the
+ * announcement also sits after that user turn and satisfies the weaker test on
+ * its own. The panel then spoke "Using X to do Y" while the answer it was
+ * announcing sat on screen unread, on most turns, because most turns have that
+ * shape.
  *
  * Registered by `scripts/install-speech-hook.mjs`, which points a `Stop` entry
  * at this exact path.
@@ -215,6 +223,44 @@ function isAssistantText(entry) {
   return roleOf(entry) === "assistant" && textOf(contentOf(entry)) !== "";
 }
 
+/** Why the model stopped, when the transcript records it. */
+function stopReasonOf(entry) {
+  return (entry.message ?? entry)?.stop_reason;
+}
+
+/**
+ * Whether this transcript records `stop_reason` on its assistant entries at
+ * all. Claude Code writes it on every one; an older build, or a different
+ * writer of the same format, may not.
+ *
+ * It is asked of the whole file rather than of a single entry because the
+ * absence of the field on one entry is not evidence: only a transcript that
+ * records it *somewhere* can be read strictly. Demanding `end_turn` from a
+ * transcript that never says it would make the feature permanently, silently
+ * mute — the one failure mode this hook is written to avoid.
+ */
+function recordsStopReason(entries) {
+  return entries.some(
+    (entry) => roleOf(entry) === "assistant" && typeof stopReasonOf(entry) === "string",
+  );
+}
+
+/**
+ * The assistant message that **ends** the turn, as opposed to one it made on
+ * the way through it.
+ *
+ * A turn routinely speaks more than once: it says what it is about to do, calls
+ * tools, and then answers. Every one of those messages is an assistant text
+ * sitting after the same user turn, so position alone cannot separate them —
+ * and picking the first is picking the announcement, which is what the panel
+ * used to speak while the real answer sat unread on screen. `stop_reason` is
+ * the discriminator the transcript already carries: `"tool_use"` on the way
+ * through, `"end_turn"` at the end.
+ */
+function isTurnAnswer(entry) {
+  return isAssistantText(entry) && stopReasonOf(entry) === "end_turn";
+}
+
 /** Index of the last entry matching `matches`, or -1. */
 function lastIndexWhere(entries, matches) {
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -227,9 +273,10 @@ function lastIndexWhere(entries, matches) {
  * What the transcript says about the turn that just ended.
  *
  * `stale` is the completeness check, and it needs no memory of previous turns:
- * a finished turn has an assistant text message **after** the last real user
- * turn, so an assistant text sitting *before* it is the previous turn's answer
- * and the current one has not been written yet.
+ * a finished turn has its **ending** message after the last real user turn, so
+ * one sitting *before* that user turn is the previous turn's answer and the
+ * current one has not been written yet. A turn that has only announced itself
+ * counts as unfinished too — see `isTurnAnswer`.
  *
  * `text` is that assistant message, scanned from the end so the newest wins and
  * so a trailing run of `tool_use` / `tool_result` entries is stepped over — the
@@ -243,8 +290,21 @@ function lastIndexWhere(entries, matches) {
  */
 function currentResponse(transcript) {
   const entries = parseEntries(transcript);
-  const textIndex = lastIndexWhere(entries, isAssistantText);
   const userIndex = lastIndexWhere(entries, isUserTurn);
+  // A turn that records `stop_reason` is read strictly — only the message that
+  // ended it counts. One that does not is read the old way, by position alone,
+  // which is all such a turn can support.
+  //
+  // The question is asked of THIS turn's entries, not of the whole file. A
+  // transcript can be mixed — a session that spans an agent upgrade has turns
+  // on both sides of it — and judging the file as a whole would put a turn
+  // that never writes `stop_reason` into the strict branch, where the
+  // `end_turn` it is waited on for can never arrive: silence on every turn,
+  // for the life of that session.
+  const isResponse = recordsStopReason(entries.slice(userIndex + 1))
+    ? isTurnAnswer
+    : isAssistantText;
+  const textIndex = lastIndexWhere(entries, isResponse);
   if (textIndex < userIndex) return { stale: true, text: null };
   return {
     stale: false,

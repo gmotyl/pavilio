@@ -323,6 +323,12 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
   const [pausedSessionId, setPausedSessionId] = useState<string | null>(null);
   const [waitingForSynthesis, setWaitingForSynthesis] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
+  /**
+   * Mirrors {@link unlocked} for `unlock` itself, which has to know whether the
+   * gesture has already been spent *synchronously* — two clicks in one tick
+   * would both see the stale state value and both reach the element.
+   */
+  const unlockedRef = useRef(false);
   const elementRef = useRef<HTMLAudioElement | null>(null);
   const runRef = useRef<PlaybackRun | null>(null);
   const onErrorRef = useRef<SpeechPlayerOptions["onError"]>(undefined);
@@ -531,6 +537,22 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
   );
 
   const unlock = useCallback((): void => {
+    // Unlocking is a once-per-element act, and doing it twice is not merely
+    // redundant — it is destructive. The trick below works by calling `play()`
+    // on an element with **no source**, so the call fails and only the gesture
+    // is consumed. An element that is already unlocked may be holding a paused
+    // unit, and there the same `play()` SUCCEEDS: it audibly restarts the run
+    // the user paused, and its deferred `pause()` then lands on whichever
+    // source the element holds by that point — the next session's first unit,
+    // if a click started one. That pause is silent: no `ended`, no `error`, so
+    // the new run hangs forever and the cell never speaks.
+    //
+    // The sequence is ordinary — pause a cell, switch project, click another
+    // cell — and the guard is what keeps the gesture spender from stopping the
+    // playback it exists to authorise.
+    if (unlockedRef.current) return;
+    unlockedRef.current = true;
+
     const element = ensureElement();
     // Autoplay permission attaches to the element, not to the page: a `play()`
     // the user's own gesture authorises keeps this element playable for the

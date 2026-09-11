@@ -856,4 +856,46 @@ describe("useSpeechPlayer", () => {
     expect(played).toEqual(["blob:unit-0", "blob:unit-1"]);
     expect(onError).not.toHaveBeenCalled();
   });
+
+  it("unlocking for a click does not pause the play that click starts", async () => {
+    // The sequence a user actually performs: pause one cell, navigate to
+    // another project, click that project's cell. `useSpeechHost.onSpeak`
+    // spends the gesture with `unlock()` and then plays — and `unlock()` was
+    // written for a virgin element, which has no source and whose `play()`
+    // therefore fails harmlessly.
+    //
+    // A paused run breaks that assumption: the element is still holding the
+    // paused audio, so `unlock()`'s `play()` SUCCEEDS and schedules a deferred
+    // `element.pause()`. By the time that lands the element belongs to the new
+    // session — and pausing it there is silent, with no `ended` and no error,
+    // so the run simply hangs.
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    // Both clicks go through the host's order: spend the gesture, then play.
+    await settle(() => result.current.unlock());
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
+    await settle(() => result.current.pause());
+    expect(result.current.pausedSessionId).toBe("cell-a");
+
+    await settle(() => result.current.unlock());
+    await startPlay(result.current, "cell-b", units("other-0", "other-1"));
+    // Give the deferred pause every chance to land before asserting it did not.
+    await settle(async () => {
+      await drain();
+    });
+
+    // The new session's audio must never be paused by the gesture that started
+    // it. Tearing down cell-a's run may pause cell-a's source; cell-b's is the
+    // one that has to survive.
+    expect(paused.mock.calls.map((call) => call[0])).not.toContain("blob:other-0");
+    // `""` is the first unlock's probe on the still-source-less element — the
+    // gesture being spent, which is the whole point of it. The second unlock
+    // adds nothing here: that is the fix. Without it this reads
+    // `["", "blob:unit-0", "blob:unit-0", "blob:other-0"]`, the middle entry
+    // being cell-a's paused unit audibly restarting.
+    expect(played).toEqual(["", "blob:unit-0", "blob:other-0"]);
+    expect(result.current.speakingSessionId).toBe("cell-b");
+    expect(onError).not.toHaveBeenCalled();
+  });
 });
