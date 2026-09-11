@@ -35,7 +35,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { toast } from "../../lib/toast";
-import { prepare } from "./prepare";
+import { closingMarkerUnit, prepare } from "./prepare";
 import type { PreparedSpeech, Utterance } from "./types";
 import { useSpeechPlayer, type SpeechPlaybackError } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
@@ -129,6 +129,19 @@ export function useSpeechHost(): GridSpeech {
       // array it is handed to the end, so the cut has to be made here.
       const through = start === 0 ? prepared.spokenUnits : prepared.units.length;
 
+      const spoken = prepared.units.slice(0, through);
+      if (through < prepared.units.length) {
+        // The budget cut is the only place a remainder exists — a continue
+        // plays to the end — so `through < units.length` means `through ===
+        // spokenUnits`, and `remainderParagraphs` is exactly the count to name.
+        //
+        // The marker is APPENDED to what the player is handed rather than added
+        // to `prepared.units`: it costs nothing against the budget, and `run`
+        // below still counts in prepared units only, so the resume point stays
+        // the first unspoken unit rather than the marker.
+        spoken.push(closingMarkerUnit(prepared.remainderParagraphs, prepared.language));
+      }
+
       // Barge-in: whatever was speaking is *superseded*, not finished, so it
       // must revert to `unheard`. Stamped before `play`, which stops it.
       const previous = runRef.current;
@@ -166,7 +179,7 @@ export function useSpeechHost(): GridSpeech {
       }
 
       void player
-        .play(sessionId, prepared.units.slice(0, through), start)
+        .play(sessionId, spoken, start)
         .then(() => finish(run))
         .catch(() => finish(run));
     },

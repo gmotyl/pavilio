@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { SPEECH_BUDGET_CHARS, UNIT_MAX_CHARS, UNIT_MIN_CHARS, prepare } from "../prepare";
+import {
+  SPEECH_BUDGET_CHARS,
+  UNIT_MAX_CHARS,
+  UNIT_MIN_CHARS,
+  closingMarkerUnit,
+  prepare,
+} from "../prepare";
 
 /** Five short paragraphs, each well under the packing floor. */
 const short = (n: number): string => `Short paragraph ${n} about the panel and its speech units.`;
@@ -201,6 +207,36 @@ describe("prepare", () => {
     expect(prepare("We build and update the dashboard.", { language: "pl" }).units[0].text).toBe(
       "We bild and apdejt the daszbord.",
     );
+  });
+
+  it("names the remaining paragraph count in the session's language", () => {
+    expect(closingMarkerUnit(7, "en").text).toBe("End of the excerpt. Remaining paragraphs: 7.");
+    expect(closingMarkerUnit(7, "pl").text).toBe("Koniec fragmentu. Pozostałe akapity: 7.");
+
+    // The count sits after a label, so no count needs a different sentence —
+    // Polish would otherwise need `1 akapit` / `2 akapity` / `5 akapitów` and a
+    // verb that agrees with each of them.
+    for (const remaining of [1, 2, 5, 12, 22]) {
+      expect(closingMarkerUnit(remaining, "pl").text).toBe(
+        `Koniec fragmentu. Pozostałe akapity: ${remaining}.`,
+      );
+    }
+
+    const marker = closingMarkerUnit(3, "en");
+    expect(marker.chars).toBe(marker.text.length);
+  });
+
+  it("does not count the closing marker against the budget", () => {
+    // The marker is not one of the prepared units, so it can neither displace a
+    // budgeted unit nor change how many of them fit.
+    const markdown = Array.from({ length: 12 }, (_, i) => `Paragraph ${i}. ${"x".repeat(230)}.`)
+      .join("\n\n");
+    const prepared = prepare(markdown);
+
+    expect(prepared.spokenUnits).toBeLessThan(prepared.units.length);
+    expect(prepared.remainderParagraphs).toBe(prepared.units.length - prepared.spokenUnits);
+    const marker = closingMarkerUnit(prepared.remainderParagraphs, prepared.language);
+    expect(prepared.units).not.toContainEqual(marker);
   });
 
   it("returns no units for a response that is only code", () => {

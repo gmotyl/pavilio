@@ -393,6 +393,14 @@ function longResponse(): string {
   }).join("\n\n");
 }
 
+/** The same shape, in Polish: the diacritics are what vote the session `pl`. */
+function longPolishResponse(): string {
+  return Array.from({ length: 12 }, (_, i) => {
+    const head = `Akapit ${String(i).padStart(2, "0")} zażółć gęślą jaźń `;
+    return head + "ę".repeat(238 - head.length) + ".";
+  }).join("\n\n");
+}
+
 beforeAll(() => {
   // jsdom implements neither of these; the grid reads matchMedia on its first
   // render to decide whether it is the mobile branch.
@@ -626,13 +634,64 @@ describe("autoplay — refusal and the budget", () => {
     // The budget cut is not the end of the response: the cell is left with
     // something unheard, which is the chart's `Paused`.
     await waitFor(() => expect(speakState("cell-a")).toBe("unheard"));
-    expect(synth.requests).toHaveLength(prepared.spokenUnits);
+    // Every budgeted unit, and then the marker. The marker is an addition to
+    // the spoken sequence, never one of the budgeted units — it displaces none
+    // of them, which is what the slice below pins.
+    expect(synth.requests).toHaveLength(prepared.spokenUnits + 1);
+    expect(synth.requests.slice(0, prepared.spokenUnits)).toEqual(
+      prepared.units.slice(0, prepared.spokenUnits).map((unit) => unit.text),
+    );
+    expect(synth.requests[prepared.spokenUnits]).toBe(
+      `End of the excerpt. Remaining paragraphs: ${prepared.remainderParagraphs}.`,
+    );
 
     synth.reset();
     await click("terminal-cell-speak-cell-a");
 
+    // And the marker has not consumed the resume point: the continue starts at
+    // the first unspoken *prepared* unit, not after the marker.
     await waitFor(() => expect(synth.requests.length).toBeGreaterThan(0));
     expect(synth.requests[0]).toBe(prepared.units[prepared.spokenUnits].text);
+  });
+
+  it("no closing marker is spoken when nothing was truncated", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+
+    const markdown = "A short answer. It fits the budget with room to spare.";
+    // Fixture guard: nothing to report as remaining.
+    expect(prepare(markdown).remainderParagraphs).toBe(0);
+
+    await emitUtterance("cell-a", "a1", markdown);
+    await endRun();
+
+    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
+    expect(synth.requests.join(" ")).not.toMatch(/remaining paragraphs/i);
+  });
+
+  it("the closing marker is spoken in the session's language", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+
+    // Two Polish votes are what flip the session; no single response can.
+    await emitUtterance("cell-a", "a1", "Zażółć gęślą jaźń. To jest odpowiedź.");
+    await endRun();
+    await emitUtterance("cell-a", "a2", "Drugie zdanie po polsku. Wciąż mówię tak samo.");
+    await endRun();
+
+    const markdown = longPolishResponse();
+    const prepared = prepare(markdown, { language: "pl" });
+    expect(prepared.remainderParagraphs).toBeGreaterThan(0);
+
+    synth.reset();
+    await emitUtterance("cell-a", "a3", markdown);
+    await endRun();
+
+    // The marker speaks the session's language, not the panel's default — an
+    // English sentence at the end of a Polish answer is the failure here.
+    expect(synth.requests[synth.requests.length - 1]).toBe(
+      `Koniec fragmentu. Pozostałe akapity: ${prepared.remainderParagraphs}.`,
+    );
   });
 });
 

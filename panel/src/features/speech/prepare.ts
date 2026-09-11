@@ -219,6 +219,38 @@ function countWithinBudget(units: readonly SpeechUnit[], budgetChars: number): n
   return spoken;
 }
 
+/**
+ * The closing marker's wording, per language.
+ *
+ * The count sits after a label instead of inside a noun phrase on purpose.
+ * Polish would otherwise need three noun forms (`1 akapit`, `2-4 akapity`,
+ * `5+ akapitów`) **and** a verb that agrees with them (`pozostał` / `pozostały`
+ * / `pozostało`), and a marker that gets that wrong is worse than one that does
+ * not inflect at all. The label form is correct for every count in both
+ * languages. The Polish wording is plain Polish with no English tech terms in
+ * it, so it needs no pass through the pronunciation map.
+ */
+const CLOSING_MARKER: Readonly<Record<"pl" | "en", (remaining: number) => string>> = {
+  en: (remaining) => `End of the excerpt. Remaining paragraphs: ${remaining}.`,
+  pl: (remaining) => `Koniec fragmentu. Pozostałe akapity: ${remaining}.`,
+};
+
+/**
+ * The unit spoken after the budgeted ones when the budget cut a response short:
+ * it names how much is left, so the silence that follows is heard as a cut
+ * rather than as the end of the answer.
+ *
+ * It is deliberately **not** one of {@link PreparedSpeech.units}. It is an
+ * addition to the spoken sequence, so it is never counted against the budget
+ * and never shifts the resume point — which is an index into the prepared
+ * units, and those are exactly what {@link prepare} returns.
+ */
+export function closingMarkerUnit(remainderParagraphs: number, language: "pl" | "en"): SpeechUnit {
+  const text = CLOSING_MARKER[language](remainderParagraphs);
+
+  return { text, chars: text.length };
+}
+
 export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech {
   const language = opts?.language ?? "en";
   const budgetChars = opts?.budgetChars ?? SPEECH_BUDGET_CHARS;
