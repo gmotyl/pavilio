@@ -9,6 +9,7 @@ import { createTerminalSession } from "./createTerminalSession";
 import { useTerminalMaximized } from "./useTerminalMaximized";
 import { useAllTerminalSessions } from "./useAllTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
+import { useSpeechHost } from "../speech/useSpeechHost";
 
 interface Props {
   projectName: string;
@@ -34,6 +35,9 @@ export default function ProjectTerminalsSurface({
     useTerminalMaximized(projectName);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
+  // One channel and one player for the whole surface — never one per cell, or
+  // "only one thing speaks" would stop being structural.
+  const speech = useSpeechHost();
 
   const createTerminal = useCallback(
     async (opts: CreateSessionOpts = {}) => {
@@ -90,6 +94,7 @@ export default function ProjectTerminalsSurface({
       tiles={terminal.tiles}
       onPlace={terminal.placeTiles}
       onApplyPreset={terminal.applyPreset}
+      speech={speech}
       fill={fill}
     />
   );

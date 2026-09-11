@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { TerminalsSurface } from "../TerminalsSurface";
 import type { LayoutPreset, TileLayout } from "../tileLayout";
 import type { TerminalHandle } from "../TerminalView";
+import { INERT_SPEECH } from "./speech.harness";
 
 const gridProps = vi.fn();
 const toolbarProps = vi.fn();
@@ -76,6 +77,7 @@ function Harness({
       tiles={tiles}
       onPlace={onPlace}
       onApplyPreset={onApplyPreset}
+      speech={INERT_SPEECH}
     />
   );
 }

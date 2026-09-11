@@ -5,6 +5,7 @@ import { useTerminalMaximized } from "../features/terminal/useTerminalMaximized"
 import TerminalsSurface from "../features/terminal/TerminalsSurface";
 import { destroyTerminal } from "../features/terminal/terminalInstances";
 import type { TerminalHandle } from "../features/terminal/TerminalView";
+import { useSpeechHost } from "../features/speech/useSpeechHost";
 
 export default function TerminalsPage() {
   const {
@@ -20,6 +21,9 @@ export default function TerminalsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
   const navigate = useNavigate();
+  // The standalone view is a surface of its own, so it hosts its own single
+  // channel and player — the same rule ProjectTerminalsSurface follows.
+  const speech = useSpeechHost();
 
   // Global-view delete: works for any session regardless of owning project.
   const handleDelete = useCallback(
@@ -91,6 +95,7 @@ export default function TerminalsPage() {
       tiles={tiles}
       onPlace={placeTiles}
       onApplyPreset={applyPreset}
+      speech={speech}
     />
   );
 }

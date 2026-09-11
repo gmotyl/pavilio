@@ -16,6 +16,7 @@ import type { TerminalHandle } from "./TerminalView";
 import type { RepoEntry } from "../projects/useProjects";
 import type { LayoutPreset, TileLayout } from "./tileLayout";
 import type { LayoutCommitKind } from "./orderingReducer";
+import type { GridSpeech } from "./TerminalLayoutGrid";
 
 export interface TerminalsSurfaceProps {
   // Current project context
@@ -58,6 +59,12 @@ export interface TerminalsSurfaceProps {
   onPlace?: (layout: TileLayout, kind: LayoutCommitKind) => void;
   onApplyPreset?: (preset: LayoutPreset) => void;
 
+  /**
+   * The surface's speech host — one channel and one player for every cell it
+   * renders. Required, so neither host can forget it; see {@link GridSpeech}.
+   */
+  speech: GridSpeech;
+
   // When true: fills from below the breadcrumb bar (no negative margins, no p-6 offset)
   standalone?: boolean;
 
@@ -86,6 +93,7 @@ export function TerminalsSurface({
   tiles,
   onPlace,
   onApplyPreset,
+  speech,
   standalone = false,
   fill = false,
 }: TerminalsSurfaceProps) {
@@ -198,6 +206,7 @@ export function TerminalsSurface({
             onRename={(id, n) => onUpdateSession(id, { name: n })}
             tiles={tiles}
             onPlace={onPlace}
+            speech={speech}
           />
         </div>
 

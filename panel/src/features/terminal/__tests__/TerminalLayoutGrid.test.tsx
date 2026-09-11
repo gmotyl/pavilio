@@ -11,6 +11,7 @@ import {
   installProjectColors,
   rgb,
 } from "./projectColors.harness";
+import { INERT_SPEECH } from "./speech.harness";
 
 // Connection state is per-browser and lives in the terminal instance pool.
 // Stub the two leaf reads the disconnected badge makes so a cell can be put
@@ -128,6 +129,8 @@ function renderGrid(
     onExit: vi.fn(),
     onReady: vi.fn(),
     onPlace: vi.fn(),
+    // Speech is required, and these suites are not about it.
+    speech: INERT_SPEECH,
     ...overrides,
   };
   const result = render(<TerminalLayoutGrid {...props} />);
@@ -1130,6 +1133,7 @@ describe("TerminalLayoutGrid — seam resize", () => {
             onExit={() => {}}
             tiles={tiles}
             onPlace={placeTiles}
+            speech={INERT_SPEECH}
           />
         </>
       );

@@ -28,9 +28,16 @@ import { GRID, expandPreset, getLayoutPresets, type TileLayout } from "./tileLay
 
 /**
  * The cell header's speech wiring, hoisted so one channel and one player serve
- * the whole surface. Optional: with no speech host the controls still render,
- * every cell reads `empty`, and nothing is armed. Task 11 supplies this from
- * `useUtteranceChannel` + `useSpeechPlayer`.
+ * the whole surface. Supplied by `useSpeechHost`, which is where
+ * `useUtteranceChannel` and `useSpeechPlayer` meet.
+ *
+ * **Required**, and deliberately so: when it was optional a surface that forgot
+ * it left every cell `empty`, every callback a no-op, and the whole suite
+ * green. The type is only half the guard — vitest transpiles without
+ * typechecking — so `autoplay.integration.test.tsx` mounts the real surfaces
+ * and reads the header attributes. The runtime `?.` below is the other half:
+ * a cell that somehow arrives without a host degrades to `empty` rather than
+ * throwing in the middle of a terminal grid.
  */
 export interface GridSpeech {
   stateFor: (sessionId: string) => CellSpeechState;
@@ -58,8 +65,8 @@ interface Props {
    * a seam resize must not (see ADR 0008's amendment).
    */
   onPlace?: (layout: TileLayout, kind: LayoutCommitKind) => void;
-  /** See {@link GridSpeech}. Absent means "no speech host": every cell is `empty`. */
-  speech?: GridSpeech;
+  /** See {@link GridSpeech}. Required: a surface that forgets it is silent. */
+  speech: GridSpeech;
 }
 
 export function TerminalLayoutGrid({
@@ -320,7 +327,7 @@ interface CellProps {
   onRename?: (id: string, name: string) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
-  speech?: GridSpeech;
+  speech: GridSpeech;
   style?: React.CSSProperties;
 }
 

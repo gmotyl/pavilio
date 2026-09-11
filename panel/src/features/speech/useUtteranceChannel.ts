@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
+import {
+  INITIAL_LANGUAGE_STATE,
+  nextLanguageState,
+  voteLanguage,
+  type LanguageState,
+} from "./pronunciation";
 import type { Utterance } from "./types";
 import { getStoredArmedSession, setStoredArmedSession } from "./voices";
 
@@ -30,6 +36,18 @@ interface SessionSpeech {
   utterance: Utterance;
   /** Spoken in this browser. Flipped back by a newer utterance. */
   heard: boolean;
+  /**
+   * The session's running language tally. Language is a property of the
+   * SESSION, not of one response, so the vote is folded in here — where the
+   * rest of the per-session knowledge already lives — the moment an utterance
+   * arrives, and `languageFor` is what preparation reads.
+   */
+  language: LanguageState;
+}
+
+/** Folds one arriving utterance's vote into a session's tally. */
+function advanceLanguage(previous: LanguageState | undefined, text: string): LanguageState {
+  return nextLanguageState(previous ?? INITIAL_LANGUAGE_STATE, voteLanguage(text));
 }
 
 export interface UtteranceChannelOptions {
@@ -45,6 +63,11 @@ export interface UtteranceChannelOptions {
 export interface Channel {
   stateFor(sessionId: string): CellSpeechState;
   utteranceFor(sessionId: string): Utterance | null;
+  /**
+   * The session's accumulated language, for `prepare`. Never a detection of
+   * one response: it is the tally every utterance so far has voted into.
+   */
+  languageFor(sessionId: string): "pl" | "en";
   armedSessionId: string | null;
   /** Exclusive: arming a session disarms whichever was armed. `null` disarms. */
   setArmed(sessionId: string | null): void;
@@ -97,7 +120,11 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
             if (!utterance || next.has(utterance.sessionId)) continue;
             // A tab that mounts after the broadcast has not heard it, and the
             // server keeps only the latest — so a seeded cell is unheard.
-            next.set(utterance.sessionId, { utterance, heard: false });
+            next.set(utterance.sessionId, {
+              utterance,
+              heard: false,
+              language: advanceLanguage(undefined, utterance.text),
+            });
           }
           return next;
         });
@@ -128,7 +155,11 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
       const next = new Map(current);
       // A frame can be the first news of a session — a terminal's response may
       // arrive before anything else told the channel the cell exists.
-      next.set(utterance.sessionId, { utterance, heard: false });
+      next.set(utterance.sessionId, {
+        utterance,
+        heard: false,
+        language: advanceLanguage(existing?.language, utterance.text),
+      });
       return next;
     });
   }, [lastMessage]);
@@ -145,6 +176,12 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
 
   const utteranceFor = useCallback(
     (sessionId: string): Utterance | null => sessions.get(sessionId)?.utterance ?? null,
+    [sessions],
+  );
+
+  const languageFor = useCallback(
+    (sessionId: string): "pl" | "en" =>
+      sessions.get(sessionId)?.language.lang ?? INITIAL_LANGUAGE_STATE.lang,
     [sessions],
   );
 
@@ -165,5 +202,5 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
     setArmedSessionId(setStoredArmedSession(sessionId));
   }, []);
 
-  return { stateFor, utteranceFor, armedSessionId, setArmed, markHeard };
+  return { stateFor, utteranceFor, languageFor, armedSessionId, setArmed, markHeard };
 }
