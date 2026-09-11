@@ -26,21 +26,26 @@
  * `useSpeechPlayer.play()` resolves the same way for four different endings —
  * the last unit finished, another cell barged in, the user hit stop, or the
  * browser refused the start — because barge-in resolves through
- * `if (isStale()) return;`, which is indistinguishable from a natural end. The
- * four endings need three different outcomes (`design.md` §4's chart):
+ * `if (isStale()) return;`, which is indistinguishable from a natural end. And
+ * `heard` now means one thing only: the **final unit played to its end**. So
+ * exactly one of those endings is `Heard` and every other one is `Ready`:
  *
  * - last unit ended → `Heard`
- * - user clicked stop → `Heard`
- * - another cell took over → `Unheard` (*not* heard — this is the trap)
- * - the browser refused → `Unheard`
- * - nothing could be synthesized → `Unheard`, plus a toast
+ * - user stopped or paused → `Ready` (the amendment's correction: a run the
+ *   user cut short was not listened to)
+ * - another cell took over → `Ready` (*not* heard — this is the trap)
+ * - the browser refused → `Ready`
+ * - the budget cut it short → `Ready`, plus a resume point
+ * - the synthesizer gave up → `Ready`, plus a toast
  *
  * So the outcome is not read off the promise at all. Each `play` gets a {@link
  * Run} whose `outcome` starts `"pending"`, and whoever *ends* it early stamps
  * it: the incoming play stamps `"superseded"`, the stop handler stamps
- * `"stopped"`, the player's `onError` stamps `"refused"` — or `"failed"`, when
- * the run it reports played no unit at all. A run still `pending` when the
- * promise settles is the only natural end there is.
+ * `"stopped"`, the player's `onError` stamps `"refused"` or `"failed"`. A run
+ * still `pending` when the promise settles — and that played every unit it was
+ * handed — is the only natural end there is. The stamps are kept distinct
+ * although they now share a destination: they are what a future reader needs to
+ * see that the four endings were told apart deliberately.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../../lib/toast";
@@ -52,14 +57,14 @@ import { useUtteranceChannel } from "./useUtteranceChannel";
 import { getStoredVoice } from "./voices";
 
 /**
- * How a playback ended. `"pending"` until something ends it early.
+ * How a playback ended. `"pending"` until something ends it early, and only a
+ * run that is still `"pending"` when its promise settles is a natural end.
  *
- * `"failed"` is the run that made no sound at all: every unit it reached failed
- * to synthesize. It resolves its promise exactly like a finished answer, and
- * `through === total` for a short utterance, so without the stamp it would be
- * indistinguishable from having been listened to — silence, and a cell marked
- * heard. It is not `"refused"`: that one is the browser declining, and it is
- * deliberately toast-free.
+ * `"failed"` is the run the synthesizer killed. It resolves its promise exactly
+ * like a finished answer, and `through === total` for a short utterance, so
+ * without the stamp it would be indistinguishable from having been listened to
+ * — silence, and a cell marked heard. It is not `"refused"`: that one is the
+ * browser declining, and it is deliberately toast-free.
  */
 type RunOutcome = "pending" | "superseded" | "stopped" | "refused" | "failed";
 
@@ -136,24 +141,24 @@ export function useSpeechHost(): SpeechHost {
   }, []);
 
   const onError = useCallback((error: SpeechPlaybackError): void => {
-    // A refusal is NOT a natural end: the cell falls back to `unheard`. This
+    const run = runRef.current;
+
+    // A refusal is NOT a natural end: the cell falls back to `ready`. This
     // keys off the error's `kind`, never off `player.unlocked` — that flag says
     // a gesture reached the element, not that playback is permitted, and the
     // player never clears it when the browser says no.
     if (error.kind === "refused") {
-      const run = runRef.current;
       if (run?.sessionId === error.sessionId) run.outcome = "refused";
       return;
     }
 
-    // A run that played nothing was not heard, whatever its unit count says.
-    // The cell stays `unheard` so the pip keeps inviting the retry — which is
-    // how the user finds out that a second click usually works. A run that
-    // spoke and *then* failed keeps its old ending: it was partly listened to.
-    if (error.playedUnits === 0) {
-      const run = runRef.current;
-      if (run?.sessionId === error.sessionId) run.outcome = "failed";
-    }
+    // A run the synthesizer killed did not reach its last unit, so it was not
+    // heard — whatever it managed to say first, and whatever its unit count
+    // ends up looking like. The cell stays `ready` so the pip keeps inviting
+    // the retry, which is how the user finds out a second click usually works.
+    // `playedUnits` used to gate this; the amendment removed the gate, because
+    // a half-spoken answer is exactly as unfinished as a silent one.
+    if (run?.sessionId === error.sessionId) run.outcome = "failed";
 
     // A systemic synthesis failure has no pip to fall back to — the player has
     // already stopped — so a toast is the only thing that tells the user the
@@ -164,10 +169,17 @@ export function useSpeechHost(): SpeechHost {
   }, []);
 
   const player = useSpeechPlayer({ onError });
-  // The channel never observes playback, so the player's view of what is
-  // speaking has to be handed to it on every render. Forgetting this deletes
-  // the `speaking` state from the grid.
-  const channel = useUtteranceChannel({ speakingSessionId: player.speakingSessionId });
+  // The channel never observes playback or synthesis, so everything it needs to
+  // know about either has to be handed to it on every render. Forgetting one of
+  // these deletes that state from the grid.
+  const channel = useUtteranceChannel({
+    speakingSessionId: player.speakingSessionId,
+    pausedSessionId: player.pausedSessionId,
+    waitingForSynthesis: player.waitingForSynthesis,
+    // The warm this module owns, handed back so one function — `stateFor` —
+    // answers the whole of the control's question.
+    preparingSessionIds,
+  });
   const {
     armedSessionId,
     languageFor,
@@ -294,20 +306,19 @@ export function useSpeechHost(): SpeechHost {
       function finish(ended: Run): void {
         if (runRef.current === ended) runRef.current = null;
 
-        // Superseded, refused or failed: the cell keeps whatever it had, which
-        // is `unheard`. Only a deliberate stop and a real end make it `heard`.
-        if (
-          ended.outcome === "superseded" ||
-          ended.outcome === "refused" ||
-          ended.outcome === "failed"
-        ) {
-          return;
-        }
+        // `heard` means the final unit played to its end, and nothing else.
+        // Superseded, stopped, refused, failed — every ending that is not the
+        // natural one leaves the cell `ready`, because something in it has
+        // still not been listened to. A run still `pending` when the promise
+        // settles is the only natural end there is.
+        if (ended.outcome !== "pending") return;
 
-        if (ended.outcome === "pending" && ended.through < ended.total) {
-          // The budget cut is not the end of the response. The chart calls
-          // this `Paused`; it looks exactly like `Unheard` in the header on
-          // purpose, and only the resume point tells them apart.
+        if (ended.through < ended.total) {
+          // The budget cut is not the end of the response, so the cell stays
+          // `ready` — indistinguishable in the header from a cell nobody has
+          // clicked yet, on purpose, and only the resume point tells them
+          // apart. It is NOT the control's `paused`, which is a run the user
+          // is holding and the player is still naming as its speaking one.
           resumeRef.current.set(ended.sessionId, {
             utteranceId: ended.utteranceId,
             fromUnit: ended.through,
@@ -347,8 +358,10 @@ export function useSpeechHost(): SpeechHost {
 
   const onStop = useCallback(
     (sessionId: string): void => {
-      // A deliberate stop is the opposite of a barge-in: the chart sends it to
-      // `Heard`. Stamped before `stop()`, which resolves the pending `play`.
+      // A deliberate stop lands where a barge-in lands: `Ready`. It was the
+      // one exception, and the amendment removed it — a run the user cut short
+      // never reached its last unit, so it was not listened to. Stamped before
+      // `stop()`, which resolves the pending `play`.
       const run = runRef.current;
       if (run?.sessionId === sessionId) run.outcome = "stopped";
       player.stop();

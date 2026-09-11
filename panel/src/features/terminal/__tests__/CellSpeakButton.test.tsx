@@ -37,12 +37,12 @@ describe("CellSpeakButton", () => {
     expect(onStop).not.toHaveBeenCalled();
   });
 
-  it("pulses in the unheard state and speaks on click", () => {
-    const { onSpeak, onStop, button } = renderButton("unheard");
+  it("pulses in the ready state and speaks on click", () => {
+    const { onSpeak, onStop, button } = renderButton("ready");
 
     // `data-pulse` is the activity LED's own switch (index.css `.terminal-led`),
     // not a second animation — see the speak-control rules in index.css.
-    expect(button).toHaveAttribute("data-speech", "unheard");
+    expect(button).toHaveAttribute("data-speech", "ready");
     expect(button).toHaveAttribute("data-pulse", "1");
     expect(button).not.toBeDisabled();
 
@@ -90,7 +90,7 @@ describe("CellSpeakButton", () => {
         <div draggable onDragStart={onDragStart}>
           <CellSpeakButton
             sessionId={SESSION}
-            state="unheard"
+            state="ready"
             onSpeak={() => {}}
             onStop={() => {}}
           />

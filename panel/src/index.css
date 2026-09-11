@@ -331,9 +331,11 @@ input[type="checkbox"] {
   cursor: default;
 }
 
-/* Unheard, heard and speaking are all the LED's green — only the pulse and
-   the fill differ, so `heard` reads as "the same thing, already heard". */
-.terminal-speak[data-speech="unheard"],
+/* Ready, heard and speaking are all the LED's green — only the pulse and
+   the fill differ, so `heard` reads as "the same thing, already heard".
+   `preparing`, `stalled` and `paused` have no rule yet: Task 18 owns the
+   control's colours and adds the red and the dimmed yellow. */
+.terminal-speak[data-speech="ready"],
 .terminal-speak[data-speech="heard"],
 .terminal-speak[data-speech="speaking"] {
   color: #9ece6a;
@@ -361,7 +363,7 @@ input[type="checkbox"] {
 
 /* Hover feedback like the sibling header buttons, but only where no fill is
    already standing — an armed toggle and a speaking cell keep their green. */
-.terminal-speak[data-speech="unheard"]:hover,
+.terminal-speak[data-speech="ready"]:hover,
 .terminal-speak[data-speech="heard"]:hover,
 .terminal-autoplay[data-armed="0"]:hover {
   background: rgba(255, 255, 255, 0.06);

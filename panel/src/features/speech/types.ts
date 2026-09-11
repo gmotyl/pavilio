@@ -15,12 +15,43 @@
  */
 
 /**
- * What a cell's speech control shows. Only `empty` is inert: `heard` is a flag,
- * never a deletion, so the utterance stays retrievable and a click replays it.
- * A session with nothing speakable in it can never be reported as `speaking`,
- * whatever the player says.
+ * What a cell's speech control shows. Seven states, feeding **two independent
+ * channels** on the control: colour says where the audio is, icon says what a
+ * click does. Keeping them independent is the requirement, which is why
+ * `speaking` and `stalled` are two states rather than one plus a flag — they
+ * differ in colour and share an icon — and why `preparing` and `stalled` share
+ * a colour while differing in everything else.
+ *
+ * - `empty`     — nothing has arrived. Muted and inert; a click does nothing.
+ * - `preparing` — the utterance is here, its first unit is still synthesizing.
+ *                 Red, and **inert**: there is nothing yet for a click to start.
+ * - `ready`     — the first unit is in the synthesis cache. Green and pulsing,
+ *                 and green carries the promise: a click starts with no wait.
+ * - `speaking`  — a live run, making sound.
+ * - `stalled`   — a live run blocked on synthesis, whether on its first unit or
+ *                 on a mid-response underrun. Red, because more is still
+ *                 coming, while the icon stays the pause icon: the run is
+ *                 still the user's to hold.
+ * - `paused`    — a run the user is holding. Outranks `speaking`, because the
+ *                 player keeps naming a paused run as the speaking one: a
+ *                 pause suspends the element rather than ending the ladder.
+ * - `heard`     — the **final unit played to its end**, and nothing else. A
+ *                 barge-in, a budget stop, a pause, a deliberate stop and a
+ *                 systemic synthesis failure all leave the cell `ready`,
+ *                 because something in it has still not been listened to.
+ *
+ * `heard` is a flag, never a deletion, so the utterance stays retrievable and a
+ * click replays it. A session with nothing speakable in it is `empty` whatever
+ * the player or the host says about it.
  */
-export type CellSpeechState = "empty" | "unheard" | "heard" | "speaking";
+export type CellSpeechState =
+  | "empty"
+  | "preparing"
+  | "ready"
+  | "speaking"
+  | "stalled"
+  | "paused"
+  | "heard";
 
 /**
  * The cell header's speech wiring, hoisted so one channel and one player serve
@@ -39,7 +70,10 @@ export interface GridSpeech {
   /** The single armed session in this browser, or `null`. */
   armedSessionId: string | null;
   onSpeak: (sessionId: string) => void;
-  /** Stop playback. The host must also mark the session heard. */
+  /**
+   * Stop playback. It does NOT mark the session heard: a run the user cut
+   * short never reached its last unit, so the cell falls back to `ready`.
+   */
   onStop: (sessionId: string) => void;
   onArm: (sessionId: string | null) => void;
 }

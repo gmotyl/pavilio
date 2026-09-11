@@ -144,6 +144,8 @@ import { DEFAULT_SPEECH_VOICE } from "../voices";
 
 /** The `src` of every started playback, in order. Warming must never add one. */
 const played: string[] = [];
+/** The element each playback was started on, so a unit's `ended` can be fired. */
+const elements: HTMLMediaElement[] = [];
 
 /** Drains the microtask ladder the host and player run on. */
 async function drain(): Promise<void> {
@@ -164,6 +166,26 @@ async function settle(action: () => void): Promise<void> {
     action();
     await drain();
   });
+}
+
+/** Ends the unit that is currently playing, as the browser's `ended` would. */
+async function endCurrentUnit(): Promise<void> {
+  const element = elements[elements.length - 1];
+  if (!element) throw new Error("nothing is playing");
+  await act(async () => {
+    element.dispatchEvent(new Event("ended"));
+    await drain();
+  });
+}
+
+/** Ends every unit of the run that is playing, up to a bound. */
+async function endRun(max = 40): Promise<void> {
+  for (let i = 0; i < max; i += 1) {
+    if (!played.length) return;
+    const before = played.length;
+    await endCurrentUnit();
+    if (played.length === before) return;
+  }
 }
 
 const requestedTexts = (): string[] => synth.requests.map((request) => request.text);
@@ -189,6 +211,7 @@ const unitsOf = (text: string): string[] =>
 beforeEach(() => {
   synth.reset();
   played.length = 0;
+  elements.length = 0;
   ws.setters.clear();
 
   global.fetch = vi.fn(
@@ -211,7 +234,10 @@ beforeEach(() => {
   ) {
     const src = this.getAttribute("src");
     // `unlock()` plays a source-less element on purpose; that is not audio.
-    if (src) played.push(src);
+    if (src) {
+      played.push(src);
+      elements.push(this);
+    }
     return Promise.resolve();
   });
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -342,5 +368,81 @@ describe("useSpeechHost warming", () => {
 
     expect(played).toEqual([`blob:${units[0]}`]);
     expect(timesRequested(units[0])).toBe(1);
+  });
+});
+
+/**
+ * `heard` means one thing and one thing only: the FINAL unit of the utterance
+ * played to its end. Every other ending — a barge-in, the budget cut, a
+ * deliberate stop — leaves the cell green, because something in it has still
+ * not been listened to. `play()` resolves identically for all of them, so these
+ * are the tests that catch an `await play(); markHeard()`.
+ */
+describe("useSpeechHost — heard is the end of the last unit", () => {
+  it("heard is reached only when the last unit ends", async () => {
+    const markdown = response(2);
+    const units = unitsOf(markdown);
+    // Fixture guard: two units, both inside the budget, so a run that plays
+    // them both is a natural end with no remainder.
+    expect(prepare(markdown, { language: "en" }).spokenUnits).toBe(2);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", markdown);
+    await settle(() => result.current.onSpeak("cell-a"));
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    // The first unit ending is not the end of the utterance.
+    await endCurrentUnit();
+    expect(result.current.stateFor("cell-a")).not.toBe("heard");
+    expect(played).toEqual([`blob:${units[0]}`, `blob:${units[1]}`]);
+
+    await endCurrentUnit();
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+  });
+
+  it("a barge-in leaves the interrupted cell ready, not heard", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(2));
+    await emitUtterance("cell-b", "u-2", response(2, "Other"));
+
+    await settle(() => result.current.onSpeak("cell-a"));
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    await settle(() => result.current.onSpeak("cell-b"));
+
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    expect(result.current.stateFor("cell-b")).toBe("speaking");
+  });
+
+  it("a budget stop leaves the cell ready", async () => {
+    const markdown = response(8);
+    const prepared = prepare(markdown, { language: "en" });
+    // Fixture guard: without a remainder there is no budget stop to observe.
+    expect(prepared.spokenUnits).toBeGreaterThan(0);
+    expect(prepared.spokenUnits).toBeLessThan(prepared.units.length);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", markdown);
+    await settle(() => result.current.onSpeak("cell-a"));
+    await endRun();
+
+    // The budget cut is not the end of the response, so the cell keeps
+    // inviting the click that continues it.
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+
+  it("a user stop leaves the cell ready, not heard", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await settle(() => result.current.onSpeak("cell-a"));
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    // The amendment's correction: a run the user cut short was NOT listened
+    // to, so it lands exactly where a barge-in lands rather than in `heard`.
+    await settle(() => result.current.onStop("cell-a"));
+
+    expect(result.current.stateFor("cell-a")).toBe("ready");
   });
 });

@@ -13,11 +13,16 @@ vi.mock("../../realtime/useWebSocket", () => ({
 }));
 
 /**
- * Playback lives in `useSpeechPlayer`, not here, so `speaking` is an input:
- * whatever the caller says is speaking. Task 11 passes the player's
- * `speakingSessionId`; these tests pass this variable.
+ * Playback lives in `useSpeechPlayer` and synthesis in the host's warming
+ * effect, not here, so all four are *inputs*: whatever the caller says.
+ * `useSpeechHost` passes the player's `speakingSessionId`, `pausedSessionId`
+ * and `waitingForSynthesis` plus its own `preparingSessionIds`; these tests
+ * pass these variables.
  */
 let speaking: string | null = null;
+let paused: string | null = null;
+let waiting = false;
+let preparing: ReadonlySet<string> = new Set<string>();
 
 const { useUtteranceChannel } = await import("../useUtteranceChannel");
 const { SPEECH_ARMED_STORAGE_KEY } = await import("../voices");
@@ -56,9 +61,17 @@ function serveLatest(utterances: Utterance[]) {
   return fetchMock;
 }
 
+/** The four playback/synthesis inputs, as of whatever the variables now say. */
+const options = () => ({
+  speakingSessionId: speaking,
+  pausedSessionId: paused,
+  waitingForSynthesis: waiting,
+  preparingSessionIds: preparing,
+});
+
 /** Renders the hook and lets the mount fetch settle, so no assertion races hydration. */
 async function renderChannel() {
-  const rendered = renderHook(() => useUtteranceChannel({ speakingSessionId: speaking }));
+  const rendered = renderHook(() => useUtteranceChannel(options()));
   await act(async () => {
     await Promise.resolve();
   });
@@ -68,6 +81,9 @@ async function renderChannel() {
 beforeEach(() => {
   lastMessage = null;
   speaking = null;
+  paused = null;
+  waiting = false;
+  preparing = new Set<string>();
   serveLatest([]);
 });
 
@@ -79,13 +95,13 @@ describe("useUtteranceChannel", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/speech/latest");
     // A tab that mounts after the broadcast has not heard the utterance, and
-    // the server keeps only the latest — so a seeded cell is unheard, not heard.
-    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("unheard"));
-    expect(result.current.stateFor("cell-b")).toBe("unheard");
+    // the server keeps only the latest — so a seeded cell is ready, not heard.
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    expect(result.current.stateFor("cell-b")).toBe("ready");
     expect(result.current.utteranceFor("cell-b")).toEqual(utterance("cell-b", "b1"));
   });
 
-  it("marks a session unheard when a frame arrives", async () => {
+  it("marks a session ready when a frame arrives", async () => {
     const { result, rerender } = await renderChannel();
 
     // Nothing has ever told the hook this session exists — the frame itself
@@ -97,7 +113,7 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
 
-    expect(result.current.stateFor("cell-x")).toBe("unheard");
+    expect(result.current.stateFor("cell-x")).toBe("ready");
     expect(result.current.utteranceFor("cell-x")).toEqual(utterance("cell-x", "x1"));
   });
 
@@ -119,7 +135,7 @@ describe("useUtteranceChannel", () => {
     expect(result.current.utteranceFor("cell-a")).toEqual(spoken);
   });
 
-  it("returns a heard session to unheard when a newer utterance arrives", async () => {
+  it("returns a heard session to ready when a newer utterance arrives", async () => {
     const { result, rerender } = await renderChannel();
 
     lastMessage = frame(utterance("cell-a", "a1", 1_000));
@@ -136,7 +152,7 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
 
-    expect(result.current.stateFor("cell-a")).toBe("unheard");
+    expect(result.current.stateFor("cell-a")).toBe("ready");
     expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
   });
 
@@ -161,7 +177,7 @@ describe("useUtteranceChannel", () => {
 
     const { result } = await renderChannel();
 
-    await waitFor(() => expect(result.current.stateFor("cell-b")).toBe("unheard"));
+    await waitFor(() => expect(result.current.stateFor("cell-b")).toBe("ready"));
     expect(result.current.stateFor("cell-a")).toBe("empty");
     expect(result.current.utteranceFor("cell-a")).toBeNull();
   });
@@ -225,8 +241,8 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
 
-    expect(result.current.stateFor("cell-a")).toBe("unheard");
-    expect(result.current.stateFor("cell-b")).toBe("unheard");
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    expect(result.current.stateFor("cell-b")).toBe("ready");
     expect(result.current.stateFor("cell-never")).toBe("empty");
     expect(result.current.utteranceFor("cell-never")).toBeNull();
   });
@@ -287,7 +303,7 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
     expect(result.current.stateFor("cell-never")).toBe("empty");
-    expect(result.current.stateFor("cell-a")).toBe("unheard");
+    expect(result.current.stateFor("cell-a")).toBe("ready");
   });
 
   it("stays usable when /api/speech/latest cannot be reached", async () => {
@@ -303,7 +319,7 @@ describe("useUtteranceChannel", () => {
     await act(async () => {
       rerender();
     });
-    expect(result.current.stateFor("cell-a")).toBe("unheard");
+    expect(result.current.stateFor("cell-a")).toBe("ready");
   });
 
   it("keeps arming usable when localStorage throws", async () => {
@@ -378,7 +394,7 @@ describe("useUtteranceChannel", () => {
         }),
     ) as unknown as typeof fetch;
 
-    const { result, rerender } = renderHook(() => useUtteranceChannel({ speakingSessionId: speaking }));
+    const { result, rerender } = renderHook(() => useUtteranceChannel(options()));
 
     const live = utterance("cell-a", "a2", 2_000);
     lastMessage = frame(live);
@@ -396,7 +412,7 @@ describe("useUtteranceChannel", () => {
 
     expect(result.current.utteranceFor("cell-a")).toEqual(live);
     expect(result.current.stateFor("cell-a")).toBe("heard");
-    expect(result.current.stateFor("cell-b")).toBe("unheard");
+    expect(result.current.stateFor("cell-b")).toBe("ready");
   });
 
   it("lists every speakable utterance, from both arrival paths", async () => {
@@ -422,5 +438,170 @@ describe("useUtteranceChannel", () => {
       utterance("cell-a", "a1"),
       utterance("cell-b", "b1"),
     ]);
+  });
+
+  it("preparing and ready are distinguished for a waiting utterance", async () => {
+    preparing = new Set(["cell-a"]);
+    const { result, rerender } = await renderChannel();
+
+    lastMessage = frame(utterance("cell-a", "a1"));
+    await act(async () => {
+      rerender();
+    });
+    // Red: the utterance is here but its first unit is still being synthesized,
+    // so a click has nothing to start from.
+    expect(result.current.stateFor("cell-a")).toBe("preparing");
+
+    preparing = new Set<string>();
+    await act(async () => {
+      rerender();
+    });
+    // Green carries the promise: the audio is in hand.
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+
+  it("speaking and stalled are distinguished by the waiting input", async () => {
+    const { result, rerender } = await renderChannel();
+
+    lastMessage = frame(utterance("cell-a", "a1"));
+    speaking = "cell-a";
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    // One state for both waits — the first unit of a live run and a
+    // mid-response underrun are the same question: is the audio here yet?
+    waiting = true;
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("stalled");
+
+    waiting = false;
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+  });
+
+  it("paused outranks speaking", async () => {
+    const { result, rerender } = await renderChannel();
+
+    lastMessage = frame(utterance("cell-a", "a1"));
+    // A paused run is still the *speaking* run — the player keeps naming it,
+    // because a pause suspends the element rather than ending the ladder. So
+    // the channel has to read `paused` first or a held run reads as playing.
+    speaking = "cell-a";
+    paused = "cell-a";
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    // And it outranks `stalled` too: pausing a run that is blocked on
+    // synthesis is legal, and what the user did is the more useful answer.
+    waiting = true;
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+  });
+
+  it("a live run outranks a stale preparing id", async () => {
+    const { result, rerender } = await renderChannel();
+
+    lastMessage = frame(utterance("cell-a", "a1"));
+    // `preparing` is the control's INERT red — a click raises nothing. So it
+    // must never mask a run the user has to be able to pause, however late a
+    // warm reports itself.
+    preparing = new Set(["cell-a"]);
+    speaking = "cell-a";
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    paused = "cell-a";
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+  });
+
+  it("a paused cell is never heard", async () => {
+    const { result, rerender } = await renderChannel();
+
+    lastMessage = frame(utterance("cell-a", "a1"));
+    speaking = "cell-a";
+    paused = "cell-a";
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    // Letting go of a paused run without ever reaching the last unit is an
+    // interruption like any other: the cell falls back to green, not yellow.
+    speaking = null;
+    paused = null;
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+
+  it("an empty cell ignores a stray preparing or speaking id", async () => {
+    const { result, rerender } = await renderChannel();
+
+    // Nothing has arrived for this cell, so nothing the host or the player
+    // says about it can invent a state for it.
+    preparing = new Set(["cell-never"]);
+    speaking = "cell-never";
+    paused = "cell-never";
+    waiting = true;
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-never")).toBe("empty");
+
+    // A record that exists only to carry a language tally is just as inert.
+    lastMessage = frame(codeOnly("cell-never", "c1"));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-never")).toBe("empty");
+  });
+
+  it("the host's warming inputs keep their identity across a markHeard", async () => {
+    const { result, rerender } = await renderChannel();
+
+    lastMessage = frame(utterance("cell-a", "a1"));
+    await act(async () => {
+      rerender();
+    });
+
+    // The host's warming effect is keyed on both of these. If either changes
+    // identity on every `sessions` update the effect churns on every heard
+    // cell — and stabilising only one of them changes nothing, because the
+    // effect re-runs when *either* moves.
+    const utterances = result.current.speakableUtterances;
+    const language = result.current.languageFor;
+
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    expect(result.current.speakableUtterances).toBe(utterances);
+    expect(result.current.languageFor).toBe(language);
+
+    // A genuinely new arrival still moves the list — stability must not mean
+    // staleness, or nothing would ever be warmed again.
+    lastMessage = frame(utterance("cell-b", "b1"));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.speakableUtterances).not.toBe(utterances);
+    expect(result.current.speakableUtterances).toHaveLength(2);
   });
 });

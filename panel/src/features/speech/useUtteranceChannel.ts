@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { prepare } from "./prepare";
 import {
@@ -15,19 +15,27 @@ import { getStoredArmedSession, setStoredArmedSession } from "./voices";
  * server's latest-per-session store, listens for `speech-utterance` frames, and
  * remembers which cell has something unheard and which one is armed.
  *
- * It does NOT own playback. `useSpeechPlayer` does, and the coupling is kept
- * one-way — nothing here imports the player. `speaking` is therefore an *input*:
- * the caller (Task 11) passes the player's `speakingSessionId`, and
- * {@link useUtteranceChannel} overlays it onto the state it computes. A session
- * with no utterance can never be reported as speaking, whatever is passed.
+ * It does NOT own playback, and it does not own synthesis either. The coupling
+ * is kept one-way — nothing here imports the player or the synthesizer — so
+ * `speaking`, `stalled`, `paused` and `preparing` are all *inputs*: the caller
+ * (`useSpeechHost`) passes them on every render and
+ * {@link useUtteranceChannel} overlays them onto the state it computes. A
+ * session with no utterance can never be reported as anything but `empty`,
+ * whatever is passed.
+ *
+ * What the channel itself decides is exactly one bit: `heard`. It means the
+ * **final unit played to its end**, nothing less — {@link Channel.markHeard} is
+ * called only from the host's natural end, never from a stop, a pause, a
+ * barge-in, a budget cut or a dead synthesizer, all of which leave the cell
+ * `ready` because something in it has still not been listened to.
  *
  * `heard` is a flag, never a deletion: the utterance stays retrievable through
  * {@link Channel.utteranceFor} so a click replays it out of the synthesis LRU
  * cache instead of paying for synthesis again. A session is `empty` until it has
- * something speakable in it, and only `empty` is inert.
+ * something speakable in it, and only `empty` and `preparing` are inert.
  *
  * Arrival is also where a response with **nothing to say** is filtered out. That
- * has to happen here rather than at the click: marking the cell `unheard` first
+ * has to happen here rather than at the click: marking the cell `ready` first
  * and discovering the emptiness only inside `speakFrom` leaves every cell
  * pulsing for a pure-code answer, and an unarmed cell — the common case — stands
  * there with a pip until the user clicks it and nothing happens. So
@@ -85,14 +93,36 @@ function languageOnly(existing: SessionSpeech | undefined, language: LanguageSta
   return existing ? { ...existing, language } : { utterance: null, heard: false, language };
 }
 
+/**
+ * Everything the channel is told rather than observes. The coupling stays
+ * one-way — this module imports neither the player nor the synthesizer — so
+ * `speaking`, `stalled`, `paused` and `preparing` all arrive as inputs from
+ * `useSpeechHost`, the one place the channel, the player and the warming
+ * effect meet.
+ *
+ * Every field is required, never defaulted: forgetting one has no sensible
+ * fallback — it would silently delete a state from the grid, which is the bug
+ * the required `speakingSessionId` was introduced to prevent — so the omission
+ * has to be a type error that forces the call site to decide.
+ */
 export interface UtteranceChannelOptions {
-  /**
-   * The player's `speakingSessionId`, as of this render. Required, not
-   * defaulted: forgetting it has no sensible fallback — it would silently
-   * delete the `speaking` state from the grid — so the omission must be a type
-   * error that forces the call site to decide.
-   */
+  /** The player's `speakingSessionId`, as of this render. */
   speakingSessionId: string | null;
+  /** The player's `pausedSessionId`: the run the user is holding, or `null`. */
+  pausedSessionId: string | null;
+  /**
+   * The player's `waitingForSynthesis`: whether the live run is blocked on a
+   * unit. It is what turns `speaking` into `stalled`, and it belongs to the one
+   * running playback, so it is a single flag rather than a set.
+   */
+  waitingForSynthesis: boolean;
+  /**
+   * The host's `preparingSessionIds`: cells whose first unit is still being
+   * warmed, before anyone has clicked anything. A different wait from
+   * `waitingForSynthesis` — they sit on opposite sides of the click — painted
+   * the same red only because the user's question has the same answer.
+   */
+  preparingSessionIds: ReadonlySet<string>;
 }
 
 export interface Channel {
@@ -132,13 +162,28 @@ function toUtterance(raw: unknown): Utterance | null {
 }
 
 /**
- * The caller must pass the player's `speakingSessionId` on every render — the
- * channel never observes playback itself, so a stale or missing value is the
- * only way the grid can be wrong about what is speaking.
+ * The caller must pass all four inputs on every render — the channel never
+ * observes playback or synthesis itself, so a stale or missing value is the
+ * only way the grid can be wrong about where a cell's audio is.
  */
-export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptions): Channel {
+export function useUtteranceChannel({
+  speakingSessionId,
+  pausedSessionId,
+  waitingForSynthesis,
+  preparingSessionIds,
+}: UtteranceChannelOptions): Channel {
   const { lastMessage } = useWebSocket();
   const [sessions, setSessions] = useState<Map<string, SessionSpeech>>(() => new Map());
+  /**
+   * The rendered `sessions`, mirrored so the *callbacks* below can read the
+   * current tally without taking it as a dependency. The host's warming effect
+   * is keyed on `languageFor` and `speakableUtterances` together, so both have
+   * to hold their identity across a `markHeard` or the effect churns on every
+   * cell that finishes speaking — and stabilising only one of them changes
+   * nothing, because the effect re-runs when either moves.
+   */
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   // Read once at mount, so a remount restores the armed cell (DECISION 12).
   const [armedSessionId, setArmedSessionId] = useState<string | null>(getStoredArmedSession);
 
@@ -221,12 +266,27 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
     (sessionId: string): CellSpeechState => {
       const record = sessions.get(sessionId);
       // A record with no speakable utterance is as inert as no record at all:
-      // it exists only to carry the session's language tally.
+      // it exists only to carry the session's language tally. Checked first, so
+      // a stray preparing, paused or speaking id cannot invent a state for a
+      // cell that has nothing to play.
       if (!record?.utterance) return "empty";
-      if (sessionId === speakingSessionId) return "speaking";
-      return record.heard ? "heard" : "unheard";
+
+      // Playback outranks warming, and it has to. `preparing` is the control's
+      // INERT red — a click raises nothing — so letting a late-landing warm
+      // mask a live run would take the pause away from a run that is speaking.
+      if (sessionId === pausedSessionId) return "paused";
+      if (sessionId === speakingSessionId) {
+        return waitingForSynthesis ? "stalled" : "speaking";
+      }
+
+      if (preparingSessionIds.has(sessionId)) return "preparing";
+      // `heard` is set by `markHeard` alone, and the host calls it only when
+      // the final unit has played to its end. Everything else — a barge-in, a
+      // budget stop, a stop, a refusal, a dead synthesizer — leaves the flag
+      // where it was, which is `ready`.
+      return record.heard ? "heard" : "ready";
     },
-    [sessions, speakingSessionId],
+    [pausedSessionId, preparingSessionIds, sessions, speakingSessionId, waitingForSynthesis],
   );
 
   const utteranceFor = useCallback(
@@ -234,19 +294,39 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
     [sessions],
   );
 
+  // Reads the mirror, so its identity never changes. It is only ever called
+  // from the host's effects and callbacks — never rendered — so there is
+  // nothing for a changing identity to refresh, and holding it still is what
+  // keeps the warming effect from re-running on every `sessions` update.
   const languageFor = useCallback(
     (sessionId: string): "pl" | "en" =>
-      sessions.get(sessionId)?.language.lang ?? INITIAL_LANGUAGE_STATE.lang,
-    [sessions],
+      sessionsRef.current.get(sessionId)?.language.lang ?? INITIAL_LANGUAGE_STATE.lang,
+    [],
   );
 
-  const speakableUtterances = useMemo(
-    () =>
-      [...sessions.values()]
-        .map((record) => record.utterance)
-        .filter((utterance): utterance is Utterance => utterance !== null),
-    [sessions],
-  );
+  /** The last list handed out, so an unchanged set keeps its identity. */
+  const speakableRef = useRef<Utterance[]>([]);
+  const speakableUtterances = useMemo(() => {
+    const next = [...sessions.values()]
+      .map((record) => record.utterance)
+      .filter((utterance): utterance is Utterance => utterance !== null);
+
+    // `sessions` is a fresh Map on every change, including a `markHeard` that
+    // touches no utterance at all, so the array it derives is fresh too. Utterance
+    // objects are stored once and never rewritten, so element identity is the
+    // honest test of whether the SET changed — and returning the previous array
+    // when it did not is what stops the host warming effect churning.
+    const previous = speakableRef.current;
+    if (
+      previous.length === next.length &&
+      previous.every((utterance, index) => utterance === next[index])
+    ) {
+      return previous;
+    }
+
+    speakableRef.current = next;
+    return next;
+  }, [sessions]);
 
   const markHeard = useCallback((sessionId: string) => {
     setSessions((current) => {

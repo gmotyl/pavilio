@@ -543,7 +543,7 @@ describe("autoplay — the armed cell", () => {
     // could make a sound would be far worse than a slow click.
     expect(synth.requests).toEqual(["Nobody armed this cell."]);
     expect(played).toEqual([]);
-    expect(speakState("cell-b")).toBe("unheard");
+    expect(speakState("cell-b")).toBe("ready");
     // The pulse is the whole notification: same attribute the activity LED uses.
     expect(
       screen.getByTestId("terminal-cell-speak-cell-b").getAttribute("data-pulse"),
@@ -588,9 +588,9 @@ describe("autoplay — the armed cell", () => {
       new Set(["Answer from A.", "Answer from B.", "Answer from C."]),
     );
     expect(played).toEqual(["blob:Answer from B."]);
-    expect(speakState("cell-a")).toBe("unheard");
+    expect(speakState("cell-a")).toBe("ready");
     expect(speakState("cell-b")).toBe("speaking");
-    expect(speakState("cell-c")).toBe("unheard");
+    expect(speakState("cell-c")).toBe("ready");
     // Criterion 7: one element for the whole panel, so "who is speaking" can
     // never be a negotiation between two of them.
     expect(new Set(elements).size).toBe(1);
@@ -612,7 +612,7 @@ describe("autoplay — taking over and stopping", () => {
     expect(new Set(elements).size).toBe(1);
   });
 
-  it("a barged-in cell reverts to unheard, not heard", async () => {
+  it("a barged-in cell reverts to ready, not heard", async () => {
     await renderProjectSurface();
     await arm("cell-a");
     await emitUtterance("cell-a", "a1", "A is speaking now.");
@@ -622,21 +622,24 @@ describe("autoplay — taking over and stopping", () => {
 
     // `play()` resolves identically for a barge-in and for a natural end, so
     // this is the assertion that catches `await play(id); markHeard(id)`.
-    await waitFor(() => expect(speakState("cell-a")).toBe("unheard"));
+    await waitFor(() => expect(speakState("cell-a")).toBe("ready"));
     expect(speakState("cell-a")).not.toBe("heard");
   });
 
-  it("clicking stop on the speaking cell marks it heard", async () => {
+  it("clicking stop on the speaking cell leaves it ready, not heard", async () => {
     await renderProjectSurface();
     await arm("cell-a");
     await emitUtterance("cell-a", "a1", "A is speaking now.");
     expect(speakState("cell-a")).toBe("speaking");
 
-    // The same control, clicked while speaking, is the stop — and the opposite
-    // outcome to the barge-in above, from the same promise resolution.
+    // The same control, clicked while speaking, cuts the run short — and it
+    // lands exactly where the barge-in above lands. It used to be the one
+    // ending that meant `heard`; the amendment removed that exception,
+    // because a run the user cut short never reached its last unit.
     await click("terminal-cell-speak-cell-a");
 
-    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
+    await waitFor(() => expect(speakState("cell-a")).toBe("ready"));
+    expect(speakState("cell-a")).not.toBe("heard");
   });
 
   it("a natural end marks the cell heard", async () => {
@@ -651,7 +654,7 @@ describe("autoplay — taking over and stopping", () => {
 });
 
 describe("autoplay — refusal and the budget", () => {
-  it("a refused autoplay falls back to unheard", async () => {
+  it("a refused autoplay falls back to ready", async () => {
     // The browser refuses the start even though a gesture reached the element:
     // `unlocked` says a gesture happened, never that playback is permitted.
     playResult = () => Promise.reject(new DOMException("blocked", "NotAllowedError"));
@@ -660,7 +663,7 @@ describe("autoplay — refusal and the budget", () => {
     await arm("cell-a");
     await emitUtterance("cell-a", "a1", "This one will be refused.");
 
-    await waitFor(() => expect(speakState("cell-a")).toBe("unheard"));
+    await waitFor(() => expect(speakState("cell-a")).toBe("ready"));
     expect(speakState("cell-a")).not.toBe("heard");
     // A refusal is reported by the pip, not by a toast: the two kinds of
     // failure have two different surfaces and must not borrow each other's.
@@ -707,8 +710,8 @@ describe("autoplay — refusal and the budget", () => {
     await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
     expect(getToastSnapshot()?.text).toMatch(/speech/i);
     expect(played).toEqual([]);
-    // Unheard, so the pip still invites the click that usually works.
-    expect(speakState("cell-a")).toBe("unheard");
+    // Ready, so the pip still invites the click that usually works.
+    expect(speakState("cell-a")).toBe("ready");
   });
 
   it("a two-unit answer that synthesizes to nothing is reported too", async () => {
@@ -723,17 +726,19 @@ describe("autoplay — refusal and the budget", () => {
 
     await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
     expect(played).toEqual([]);
-    expect(speakState("cell-a")).toBe("unheard");
+    expect(speakState("cell-a")).toBe("ready");
     expect(synth.requests).toHaveLength(2);
   });
 
-  it("a run that spoke before it failed is still heard", async () => {
-    // The weaker condition must not swallow the ordinary one: this run was
-    // partly listened to, so the ladder's three-consecutive stop leaves it
-    // exactly where it left it before — heard, with the failure toasted.
+  it("a run that spoke before it failed is not heard either", async () => {
+    // Half an answer is exactly as unfinished as none of it: the run never
+    // reached its last unit, so it lands `ready` with the failure toasted.
+    // This used to assert `heard` — the amendment's "systemic failure leaves
+    // the cell ready" is what changed it, and it also closes follow-up #19.
     const markdown = shortResponse(4);
     const prepared = prepare(markdown);
-    // Fixture guard: four units, no budget cut, so a natural end is `heard`.
+    // Fixture guard: four units, no budget cut, so the only thing standing
+    // between this run and `heard` is the failure itself.
     expect(prepared.units).toHaveLength(4);
     expect(prepared.spokenUnits).toBe(prepared.units.length);
     // Unit 0 synthesizes; the synthesizer is down for units 1, 2 and 3.
@@ -747,7 +752,7 @@ describe("autoplay — refusal and the budget", () => {
     await endRun();
 
     await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
-    expect(speakState("cell-a")).toBe("heard");
+    expect(speakState("cell-a")).toBe("ready");
   });
 
   it("continuing after the budget resumes at the first unspoken unit", async () => {
@@ -764,7 +769,7 @@ describe("autoplay — refusal and the budget", () => {
     await endRun();
     // The budget cut is not the end of the response: the cell is left with
     // something unheard, which is the chart's `Paused`.
-    await waitFor(() => expect(speakState("cell-a")).toBe("unheard"));
+    await waitFor(() => expect(speakState("cell-a")).toBe("ready"));
     // Every budgeted unit, and then the marker. The marker is an addition to
     // the spoken sequence, never one of the budgeted units — it displaces none
     // of them, which is what the slice below pins.
@@ -839,7 +844,7 @@ describe("autoplay — the surfaces and the session language", () => {
     // toggle never changes — that is exactly what this pins.
     expect(speakState("cell-a")).toBe("empty");
     await emitUtterance("cell-a", "a1", "Wired to the channel.");
-    expect(speakState("cell-a")).toBe("unheard");
+    expect(speakState("cell-a")).toBe("ready");
 
     expect(armed("cell-a")).toBe("0");
     await arm("cell-a");
@@ -860,7 +865,7 @@ describe("autoplay — the surfaces and the session language", () => {
 
     expect(speakState("cell-a")).toBe("empty");
     await emitUtterance("cell-a", "a1", "Wired to the channel.");
-    expect(speakState("cell-a")).toBe("unheard");
+    expect(speakState("cell-a")).toBe("ready");
 
     await arm("cell-a");
     expect(armed("cell-a")).toBe("1");
@@ -966,7 +971,7 @@ describe("one speech host for the panel, not one per surface", () => {
     // No gesture has reached the `<audio>` element, so this must be absorbed:
     // a page that starts talking by itself is what the lock gate prevents.
     expect(played).toEqual([]);
-    expect(speakState("cell-a")).toBe("unheard");
+    expect(speakState("cell-a")).toBe("ready");
     // Warmed all the same — hydration is an arrival, so the control the tab
     // comes up with is as ready as one that lit while the tab was watching.
     expect(synth.requests).toEqual(["Said while the tab was away."]);
@@ -1039,8 +1044,8 @@ describe("warming the first unit on arrival", () => {
     );
     expect(played).toEqual([]);
     expect(elements).toEqual([]);
-    expect(speakState("cell-b")).toBe("unheard");
-    expect(speakState("cell-c")).toBe("unheard");
+    expect(speakState("cell-b")).toBe("ready");
+    expect(speakState("cell-c")).toBe("ready");
   });
 
   it("a failed warm changes nothing", async () => {
@@ -1054,7 +1059,7 @@ describe("warming the first unit on arrival", () => {
     expect(synth.requests).toEqual(["The synthesizer is down while this arrives."]);
     expect(getToastSnapshot()).toBeNull();
     expect(played).toEqual([]);
-    expect(speakState("cell-b")).toBe("unheard");
+    expect(speakState("cell-b")).toBe("ready");
   });
 
   it("warms each arriving utterance once", async () => {

@@ -6,7 +6,7 @@ export interface CellSpeakButtonProps {
   /** The cell's speech state, as `useUtteranceChannel().stateFor` reports it. */
   state: CellSpeechState;
   /**
-   * Speak the cell's utterance. Raised for `unheard` and for `heard` alike — a
+   * Speak the cell's utterance. Raised for `ready` and for `heard` alike — a
    * replay is the same intent, and costs nothing because the audio is still in
    * the synthesis LRU cache.
    */
@@ -25,7 +25,7 @@ export interface CellSpeakButtonProps {
  * and raises intents, and imports neither `useUtteranceChannel` nor
  * `useSpeechPlayer`, so the grid stays renderable without a speech host.
  *
- * Its four states borrow the activity LED's vocabulary rather than a palette of
+ * Its states borrow the activity LED's vocabulary rather than a palette of
  * their own: the same green, and the same `data-pulse` attribute that turns the
  * pulse off (see `.terminal-led` / `.terminal-speak` in index.css). `empty` is
  * the only inert one.
@@ -56,7 +56,7 @@ export function CellSpeakButton({
       data-speech={state}
       // Read by index.css exactly as the activity LED reads it: "1" runs the
       // attention pulse, "0" leaves the same green standing still.
-      data-pulse={state === "unheard" ? "1" : "0"}
+      data-pulse={state === "ready" ? "1" : "0"}
       className="terminal-speak p-1 rounded"
       // The header row is `draggable` and the cell root focuses on click, so
       // every gesture that could reach either has to stop here.

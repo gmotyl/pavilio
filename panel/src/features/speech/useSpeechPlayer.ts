@@ -53,9 +53,9 @@ export type SpeechFailureKind =
 
 /**
  * A playback failure worth telling the user about. Both kinds are surfaced by
- * `useSpeechHost`'s `onError`, never swallowed: a refusal is what the "unheard"
- * pip falls back to, and a synthesis stop is what its toast reports. A handler
- * that silently ignores a kind swallows it twice over — the `console.error`
+ * `useSpeechHost`'s `onError`, never swallowed: a refusal is what the green
+ * `ready` pip falls back to, and a synthesis stop is what its toast reports. A
+ * handler that silently ignores a kind swallows it twice over — the `console.error`
  * below is a fallback for a *missing* handler, not for a handler that returns.
  */
 export class SpeechPlaybackError extends Error {
@@ -66,10 +66,10 @@ export class SpeechPlaybackError extends Error {
   /**
    * How many units of this run actually reached the listener before it failed.
    * Zero means the user heard **nothing at all** — a different ending from a
-   * run that spoke half an answer and then gave up, and the one the host keys
-   * its `unheard` fallback off: a run that played nothing must not mark the
-   * cell heard, so the pip stays and a click is still a retry. It is carried
-   * on the error because the host cannot see inside the run.
+   * run that spoke half an answer and then gave up. The host no longer branches
+   * on it — since `heard` means the final unit played to its end, both endings
+   * leave the cell `ready` alike — but it is the only thing that tells the two
+   * failures apart from outside the run, which is why it is still carried.
    */
   readonly playedUnits: number;
 
@@ -131,7 +131,7 @@ export interface SpeechPlayer {
    * Whether {@link SpeechPlayer.unlock} has run — i.e. whether a user gesture
    * has reached the element — and *not* whether playback is permitted. The
    * browser may refuse a `play()` regardless, and the player never clears this
-   * flag when it does. So the "unheard" pip fallback must key off a
+   * flag when it does. So the green `ready` fallback must key off a
    * `kind: "refused"` {@link SpeechPlaybackError}, never off this being `true`.
    */
   readonly unlocked: boolean;
