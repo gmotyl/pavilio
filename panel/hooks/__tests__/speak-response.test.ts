@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -26,6 +26,52 @@ const TEST_TOKEN = "test-token";
 const LAST_TEXT =
   "Both suites pass — 14 tests, no failures.\n\nThe emitter now posts the last response to the panel, and the route keeps one utterance per session.";
 const EARLIER_TEXT = "Starting with the route suite, then the preparation suite.";
+
+/**
+ * The shape of the race this suite pins. `PREVIOUS_TEXT` is the answer already
+ * in the transcript when the `Stop` hook fires; `CURRENT_TEXT` is the one the
+ * user is looking at and has not been appended yet.
+ */
+const PREVIOUS_TEXT = "This is one sentence.";
+const CURRENT_TEXT = "Testing works.";
+
+/** A real user turn: the human's own message, recorded as a plain string. */
+function userTurn(text: string) {
+  return { type: "user", message: { role: "user", content: text } };
+}
+
+function assistantText(text: string) {
+  return {
+    type: "assistant",
+    message: { role: "assistant", content: [{ type: "text", text }] },
+  };
+}
+
+function toolUse(id: string) {
+  return {
+    type: "assistant",
+    message: { role: "assistant", content: [{ type: "tool_use", id, name: "Bash", input: {} }] },
+  };
+}
+
+/**
+ * A tool result — role `"user"`, `tool_result` blocks, and the `toolUseResult`
+ * a real transcript carries alongside them. NOT a user turn, however much the
+ * role says otherwise.
+ */
+function toolResult(id: string) {
+  return {
+    type: "user",
+    toolUseResult: { stdout: "", stderr: "", interrupted: false },
+    message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+  };
+}
+
+function writeTranscript(name: string, entries: unknown[]): string {
+  const file = join(scratch, name);
+  writeFileSync(file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  return file;
+}
 
 interface CapturedRequest {
   method: string | undefined;
@@ -425,5 +471,104 @@ describe("speak-response", () => {
     expect(sessionId).toBe(TERMINAL_ID);
     expect(text.length).toBeGreaterThan(1_000);
     expect(hugeText.startsWith(text)).toBe(true);
+  });
+
+  it("says nothing while the current turn's response is missing", async () => {
+    // The exact shape the hook fires on: the previous turn's answer, then this
+    // turn's user message, and nothing after it yet. Speaking here would speak
+    // the previous answer — which is indistinguishable, to the listener, from
+    // the right one.
+    await listenAsPanel();
+    const transcript = writeTranscript("stale.jsonl", [
+      userTurn("say one sentence"),
+      assistantText(PREVIOUS_TEXT),
+      userTurn("test"),
+    ]);
+
+    const result = await run(stopPayload(transcript));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+    expect(captured).toHaveLength(0);
+  });
+
+  it("speaks the response that lands while it is waiting", async () => {
+    await listenAsPanel();
+    const transcript = writeTranscript("appended.jsonl", [
+      userTurn("say one sentence"),
+      assistantText(PREVIOUS_TEXT),
+      userTurn("test"),
+    ]);
+
+    // Claude Code appending the turn it has just finished, a moment after the
+    // hook was started — the write the hook is waiting for.
+    const append = setTimeout(() => {
+      appendFileSync(transcript, `${JSON.stringify(assistantText(CURRENT_TEXT))}\n`);
+    }, 100);
+
+    const result = await run(stopPayload(transcript));
+    clearTimeout(append);
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: CURRENT_TEXT,
+    });
+  });
+
+  it("does not mistake a tool result for a new user turn", async () => {
+    // A turn that ends after tool use puts a role `"user"` entry *after* the
+    // prose. Reading that as a new user turn would make every such turn look
+    // unfinished: a full wait, then silence, on the most common shape there is.
+    await listenAsPanel();
+    const transcript = writeTranscript("tool-tail.jsonl", [
+      userTurn("run the suite"),
+      assistantText(CURRENT_TEXT),
+      toolUse("call-1"),
+      toolResult("call-1"),
+    ]);
+
+    const result = await run(stopPayload(transcript));
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: CURRENT_TEXT,
+    });
+  });
+
+  it("waits only when the transcript is behind", async () => {
+    // Relative, not absolute: spawning Node dominates the wall clock and varies
+    // with the machine, so the fixture — a finished turn whose tail is tool
+    // calls and results — is timed against a stale transcript in the same
+    // environment. Only the stale run may spend the wait budget.
+    await listenAsPanel();
+
+    const completeStartedAt = Date.now();
+    const complete = await run(stopPayload(FIXTURE));
+    const completeElapsed = Date.now() - completeStartedAt;
+
+    const transcript = writeTranscript("stale-timed.jsonl", [
+      userTurn("say one sentence"),
+      assistantText(PREVIOUS_TEXT),
+      userTurn("test"),
+    ]);
+    const staleStartedAt = Date.now();
+    const stale = await run(stopPayload(transcript));
+    const staleElapsed = Date.now() - staleStartedAt;
+
+    expect(complete.status).toBe(0);
+    expect(stale.status).toBe(0);
+    // The finished turn is still spoken, trailing tool traffic and all...
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: LAST_TEXT,
+    });
+    // ...and it got there without paying the wait the stale one pays.
+    expect(staleElapsed - completeElapsed).toBeGreaterThan(200);
   });
 });

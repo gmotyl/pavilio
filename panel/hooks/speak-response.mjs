@@ -3,10 +3,24 @@
  * Claude Code `Stop` hook: emit the agent's finished response to the panel.
  *
  * Reads the hook payload as JSON on stdin, opens the transcript it names, takes
- * the **last assistant text message** out of it, and POSTs
+ * the **current turn's assistant text message** out of it, and POSTs
  * `{ sessionId, text }` to `POST /api/speech/utterance`. The panel keeps it as
  * the latest utterance for that session and broadcasts it to open tabs; the
  * browser does the preparation and the synthesis. Nothing is synthesized here.
+ *
+ * ## Which turn — the transcript is not finished when this fires
+ *
+ * The `Stop` hook runs at the end of the turn, but Claude Code appends the
+ * turn's assistant message to `transcript_path` asynchronously, so the file can
+ * still end at the *user* message that started this turn. Taking the newest
+ * assistant text out of that file yields the PREVIOUS turn's answer — the panel
+ * then speaks the last question's answer while the current one is on screen,
+ * every turn, for the life of the session.
+ *
+ * So completeness is checked before anything is sent: a finished turn has an
+ * assistant text message **after** the last real user turn. Until it does, this
+ * waits (see `TRANSCRIPT_WAIT_MS`) and, if it never appears, sends nothing at
+ * all. See `currentResponse`.
  *
  * Registered by `scripts/install-speech-hook.mjs`, which points a `Stop` entry
  * at this exact path.
@@ -102,6 +116,21 @@ const MAX_UTTERANCE_BYTES = 100 * 1024;
  */
 const BODY_MARGIN_BYTES = 1024;
 
+/**
+ * How long to wait for the current turn's assistant message to be appended to
+ * the transcript, and how often to re-read the file while waiting.
+ *
+ * Bounded and small on purpose: the agent's turn is blocked on this process, so
+ * this is spent before `REQUEST_TIMEOUT_MS` (1000 ms) even starts. In practice
+ * the message lands within a few polls — the writer is the same process tree,
+ * on local disk — so the cap is what an unusually slow flush costs, not what a
+ * normal turn costs. On expiry the hook says **nothing**: silence is the right
+ * answer, because a stale answer sounds exactly like a current one and the
+ * listener has no way to tell it is hearing the wrong turn.
+ */
+const TRANSCRIPT_WAIT_MS = 400;
+const TRANSCRIPT_POLL_MS = 20;
+
 function readStdin() {
   try {
     // fd 0 in one go: the payload is a single small JSON object, and the hook
@@ -124,33 +153,130 @@ function textOf(content) {
 }
 
 /**
- * Last assistant message in the transcript that actually carries text.
- *
- * Scans from the end so the newest wins, and skips every entry whose content is
- * only `tool_use` / `tool_result` blocks — an agent turn almost always ends with
- * a run of those, and the thing worth hearing is the prose before them. A line
- * that will not parse is skipped rather than fatal: a half-written last line
- * must not hide the good message above it.
+ * Every entry the transcript can be read as, in file order. A line that will
+ * not parse is skipped rather than fatal: a half-written last line — which is
+ * exactly what a transcript being appended to right now ends with — must not
+ * hide the good message above it.
  */
-function lastAssistantText(transcript) {
-  const lines = transcript.split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (line === "") continue;
+function parseEntries(transcript) {
+  const entries = [];
+  for (const line of transcript.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
     let entry;
     try {
-      entry = JSON.parse(line);
+      entry = JSON.parse(trimmed);
     } catch {
       continue;
     }
-    if (entry === null || typeof entry !== "object") continue;
-    const message = entry.message ?? entry;
-    const role = message?.role ?? entry.type;
-    if (role !== "assistant") continue;
-    const text = textOf(message?.content);
-    if (text !== "") return text;
+    if (entry !== null && typeof entry === "object") entries.push(entry);
   }
-  return null;
+  return entries;
+}
+
+/** Who an entry speaks as. Carried on `message.role`, or as the entry's `type`. */
+function roleOf(entry) {
+  return (entry.message ?? entry)?.role ?? entry.type;
+}
+
+/** One entry's content, wherever it hangs. */
+function contentOf(entry) {
+  return (entry.message ?? entry)?.content;
+}
+
+/**
+ * A **real user turn** — something the human actually sent — as opposed to a
+ * tool result, which Claude Code records with role `"user"` as well.
+ *
+ * The two are told apart by the shape of `content`, which is what the
+ * transcripts actually differ in:
+ *
+ * - a human turn is either a plain string (`"test"`) or an array carrying a
+ *   `text` (or `image`) block;
+ * - a tool result is an array of `tool_result` blocks and nothing else, and the
+ *   entry additionally carries a top-level `toolUseResult` — corroboration, not
+ *   the test, since the block shape is the thing that is always there.
+ *
+ * Getting this wrong is the expensive mistake: an agent turn almost always ends
+ * with a `tool_use` / `tool_result` pair *after* the prose worth hearing, so
+ * counting a tool result as a user turn would make every such turn look
+ * permanently unfinished — a full wait, then silence, every time.
+ */
+function isUserTurn(entry) {
+  if (roleOf(entry) !== "user") return false;
+  const content = contentOf(entry);
+  if (typeof content === "string") return content.trim() !== "";
+  if (!Array.isArray(content)) return false;
+  return content.some((block) => block?.type && block.type !== "tool_result");
+}
+
+/** An assistant message that actually carries prose, not only tool calls. */
+function isAssistantText(entry) {
+  return roleOf(entry) === "assistant" && textOf(contentOf(entry)) !== "";
+}
+
+/** Index of the last entry matching `matches`, or -1. */
+function lastIndexWhere(entries, matches) {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (matches(entries[i])) return i;
+  }
+  return -1;
+}
+
+/**
+ * What the transcript says about the turn that just ended.
+ *
+ * `stale` is the completeness check, and it needs no memory of previous turns:
+ * a finished turn has an assistant text message **after** the last real user
+ * turn, so an assistant text sitting *before* it is the previous turn's answer
+ * and the current one has not been written yet.
+ *
+ * `text` is that assistant message, scanned from the end so the newest wins and
+ * so a trailing run of `tool_use` / `tool_result` entries is stepped over — the
+ * thing worth hearing is the prose before them. It is `null` when the
+ * transcript has no assistant prose at all, which is as silent as a stale one
+ * but is not worth waiting on.
+ *
+ * Sidechains are not filtered: a main transcript only ever carries
+ * `isSidechain: false` (subagent turns live in a separate `subagents/` tree),
+ * and an absent field must not be read as one either way.
+ */
+function currentResponse(transcript) {
+  const entries = parseEntries(transcript);
+  const textIndex = lastIndexWhere(entries, isAssistantText);
+  const userIndex = lastIndexWhere(entries, isUserTurn);
+  if (textIndex < userIndex) return { stale: true, text: null };
+  return {
+    stale: false,
+    text: textIndex === -1 ? null : textOf(contentOf(entries[textIndex])),
+  };
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The current turn's response, waiting out a transcript the writer has not
+ * caught up with. `null` for every ending that must stay silent: an unreadable
+ * transcript, one with no assistant prose in it, and one still stale when
+ * `TRANSCRIPT_WAIT_MS` runs out.
+ */
+async function currentResponseText(transcriptPath) {
+  const deadline = Date.now() + TRANSCRIPT_WAIT_MS;
+  for (;;) {
+    let transcript;
+    try {
+      transcript = readFileSync(transcriptPath, "utf8");
+    } catch {
+      return null;
+    }
+
+    const { stale, text } = currentResponse(transcript);
+    if (!stale) return text;
+    // Re-read rather than watch: the file is local and tiny next to the cost of
+    // being wrong, and a watcher would have to be torn down on every path out.
+    if (Date.now() >= deadline) return null;
+    await sleep(TRANSCRIPT_POLL_MS);
+  }
 }
 
 /** Bytes this pair will actually put on the wire — exactly what `post` sends. */
@@ -232,14 +358,7 @@ async function main() {
   const transcriptPath = payload?.transcript_path;
   if (typeof transcriptPath !== "string" || transcriptPath === "") return;
 
-  let transcript;
-  try {
-    transcript = readFileSync(transcriptPath, "utf8");
-  } catch {
-    return;
-  }
-
-  const text = lastAssistantText(transcript);
+  const text = await currentResponseText(transcriptPath);
   if (text === null) return;
 
   await post(sessionId, trimToCap(sessionId, text));
