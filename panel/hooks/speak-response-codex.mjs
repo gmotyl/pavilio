@@ -20,6 +20,10 @@
  * emitter stays a single file that Node can run with no resolution beyond the
  * standard library.
  *
+ * Those thirty lines have since stopped being identical: this one posts over
+ * `node:http` rather than `fetch`, because codex alone re-resolves `node`
+ * through a login shell and so picks the interpreter for us. See `post`.
+ *
  * ## Which turn — `task_complete`, not the newest message
  *
  * A rollout records the turn's prose twice over: as `response_item` `message`
@@ -84,6 +88,8 @@
  * `[[hooks.Stop]]` entry in `~/.codex/config.toml` at this exact path.
  */
 import { readFileSync, readdirSync, statSync, writeSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -325,30 +331,104 @@ function trimToCap(sessionId, text) {
   return cutAt(text, fits);
 }
 
-async function post(sessionId, text) {
-  const headers = { "content-type": "application/json" };
-  // Present only when the panel is token-protected; the value is never logged.
-  if (process.env.PANEL_TOKEN) {
-    headers.authorization = `Bearer ${process.env.PANEL_TOKEN}`;
-  }
+/**
+ * The one best-effort POST — over `node:http`, deliberately, while both sibling
+ * emitters use `fetch`.
+ *
+ * codex does not spawn its hooks with the PTY's environment: it re-resolves the
+ * command through a **login shell**, so `node` here is whatever that shell's
+ * PATH finds first, which is not the interpreter the panel or codex itself is
+ * running under. On the machine this was diagnosed on, the codex PTY held fnm's
+ * v20 while `sh -lc 'which node'` answered `/usr/local/bin/node` v16.13.2 — a
+ * runtime with neither `fetch` nor `AbortSignal.timeout`. The old `post()` used
+ * both, the ReferenceError went straight into this file's catch-all, and the
+ * hook exited 0 having said nothing and logged nothing: the feature was silently
+ * dead for every codex turn, with no diagnostic anywhere to explain it.
+ *
+ * So the interpreter version is not ours to assume, and this emitter is pinned
+ * to what `node:http` has offered since forever. The divergence from
+ * `speak-response.mjs` is deliberate: Claude Code spawns its hooks with the
+ * session's own environment (modern node, `fetch` present) and the opencode
+ * emitter runs in-process, so only this one is handed an interpreter it did not
+ * choose. Do not "harmonise" it back to `fetch` — the unit tests spawn this file
+ * under an interpreter with no global `fetch` precisely to stop that.
+ *
+ * `https` is a real possibility, not defensive dressing: `panel-server.ts`
+ * publishes `PAVILIO_PANEL_URL` as `https://…` whenever `tlsCert`/`tlsKey` are
+ * configured. Certificate verification is left at its default, which is what
+ * `fetch` did too — a panel behind a cert this machine does not trust stays
+ * silent rather than being blindly trusted.
+ *
+ * Resolves rather than rejects on every outcome: the caller has nothing to
+ * decide, and a rejection here would only take the same trip through the
+ * catch-all.
+ */
+function post(sessionId, text) {
+  return new Promise((resolve) => {
+    const body = Buffer.from(JSON.stringify({ sessionId, text }), "utf8");
+    const headers = {
+      "content-type": "application/json",
+      // Explicit, because `node:http` would otherwise send this chunked; the
+      // byte count is the same one `trimToCap` measured against the route's cap.
+      "content-length": String(body.length),
+    };
+    // Present only when the panel is token-protected; the value is never logged.
+    if (process.env.PANEL_TOKEN) {
+      headers.authorization = `Bearer ${process.env.PANEL_TOKEN}`;
+    }
 
-  const response = await fetch(`${PANEL_URL}/api/speech/utterance`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ sessionId, text }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    // Exactly once, from whichever of the four endings arrives first.
+    let settled = false;
+    let timer = null;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      resolve();
+    };
+
+    let req;
+    try {
+      const url = new URL(`${PANEL_URL}/api/speech/utterance`);
+      const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+      req = send(url, { method: "POST", headers }, (response) => {
+        if (response.statusCode === 401) {
+          // The single diagnostic this hook is allowed. Names the variable,
+          // never its value, and stays one line so it cannot bury the agent's
+          // own output.
+          writeSync(
+            2,
+            "speak-response-codex: the panel answered 401, so the response was not spoken. " +
+              "PANEL_TOKEN is missing or wrong in this terminal's environment " +
+              "(terminals started as another user do not inherit it).\n",
+          );
+        }
+        // Drained rather than read: the answer's body is of no interest, and an
+        // unread response keeps its socket — and the event loop — alive.
+        response.resume();
+        response.on("end", settle);
+        response.on("error", settle);
+      });
+    } catch {
+      // An unparseable PAVILIO_PANEL_URL, i.e. misconfiguration: as silent as a
+      // refused connection, and just as much not this hook's business.
+      settle();
+      return;
+    }
+
+    // A whole-request deadline rather than `req.setTimeout`, which arms an
+    // *inactivity* timer on the socket and so cannot bound a panel that answers
+    // slowly but steadily. This is what `AbortSignal.timeout` gave us, on a
+    // runtime that does not have it. `destroy()` surfaces as the `error` below.
+    timer = setTimeout(() => req.destroy(), REQUEST_TIMEOUT_MS);
+
+    // Refused, reset, DNS, our own timeout: every one of them is a non-event.
+    req.on("error", settle);
+    // Backstop for a socket that dies without ever emitting `error` — the
+    // promise must not be the thing that hangs the agent's turn.
+    req.on("close", settle);
+    req.end(body);
   });
-
-  if (response.status === 401) {
-    // The single diagnostic this hook is allowed. Names the variable, never its
-    // value, and stays one line so it cannot bury the agent's own output.
-    writeSync(
-      2,
-      "speak-response-codex: the panel answered 401, so the response was not spoken. " +
-        "PANEL_TOKEN is missing or wrong in this terminal's environment " +
-        "(terminals started as another user do not inherit it).\n",
-    );
-  }
 }
 
 /** The rollout the payload names, or the one its session id leads to. */
@@ -386,6 +466,15 @@ try {
 } catch {
   // Every failure is a non-event: the agent's turn is not this hook's business.
 }
-// Explicit: Node's fetch keeps its connection pool warm, which would otherwise
-// hold the event loop open after the POST is already done.
+// Kept, but no longer for the reason it was added. The fetch-era justification
+// is gone: measured on both interpreters this hook can get (v16.13.2 and
+// v22.22.1), removing this line still exits in ~65ms, because `http.Agent`
+// unrefs a pooled socket once it is idle — so even the `keepAlive: true`
+// default of Node 19+ does not hold the loop open the way fetch's pool did.
+//
+// What it still buys is the guarantee itself, on a line that costs nothing: the
+// agent's turn is blocked on this process, and "exits, immediately, 0" is the
+// only promise this hook makes. That must not become contingent on an agent
+// pooling policy, a stray timer or a `process.exitCode` set on some path added
+// later — least of all here, where the interpreter is not ours to choose.
 process.exit(0);

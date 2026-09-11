@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
@@ -16,6 +16,20 @@ const TERMINAL_ID = "cell-7";
 const TEST_TOKEN = "test-token";
 
 const SESSION_ID = "01a08c22-1e40-7d11-9c0a-6f7b2e5a4d31";
+
+/**
+ * The interpreter a login shell finds on this machine — the one codex hands
+ * its hooks. Kept as a literal path rather than resolved through `sh -lc`,
+ * because what matters is that it is an interpreter *older than ours*, not
+ * which PATH happens to lead to it today.
+ */
+const LEGACY_NODE = "/usr/local/bin/node";
+const LEGACY_NODE_VERSION = (() => {
+  const probe = spawnSync(LEGACY_NODE, ["--version"], { encoding: "utf8" });
+  return probe.status === 0 ? probe.stdout.trim() : null;
+})();
+const LEGACY_NODE_MAJOR =
+  LEGACY_NODE_VERSION === null ? null : Number(LEGACY_NODE_VERSION.replace(/^v/, "").split(".")[0]);
 
 /**
  * The fixture's two assistant messages, both after the same user turn.
@@ -133,7 +147,27 @@ interface HookRun {
  * would block this process's event loop, so the stand-in panel above could
  * never accept the connection and every request would time out.
  */
-function run(payload: unknown, env: Record<string, string | undefined> = {}): Promise<HookRun> {
+/**
+ * Which interpreter runs the hook, and with which flags.
+ *
+ * Not a knob for its own sake: codex re-resolves `node` through a **login
+ * shell** before spawning its hooks, so the interpreter the hook gets is
+ * whatever that shell's PATH finds — on this machine `/usr/local/bin/node`
+ * v16.13.2, not the fnm v20/v22 the panel and this suite run under. The two
+ * guard tests at the bottom of this file exist to run the hook the way codex
+ * actually runs it, so a dependency on a modern global (`fetch`,
+ * `AbortSignal.timeout`) cannot creep back in unnoticed.
+ */
+interface Interpreter {
+  execPath?: string;
+  execArgv?: string[];
+}
+
+function run(
+  payload: unknown,
+  env: Record<string, string | undefined> = {},
+  { execPath = process.execPath, execArgv = [] }: Interpreter = {},
+): Promise<HookRun> {
   const childEnv: Record<string, string | undefined> = {
     ...process.env,
     PAVILIO_TERMINAL_ID: TERMINAL_ID,
@@ -148,7 +182,7 @@ function run(payload: unknown, env: Record<string, string | undefined> = {}): Pr
     if (childEnv[key] === undefined) delete childEnv[key];
   }
 
-  const child = spawn(process.execPath, [HOOK], {
+  const child = spawn(execPath, [...execArgv, HOOK], {
     env: childEnv as NodeJS.ProcessEnv,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -416,4 +450,72 @@ describe("speak-response-codex", () => {
     // than no diagnostic at all.
     expect(result.stderr).not.toContain(TEST_TOKEN);
   });
+  /**
+   * Is `--no-experimental-fetch` still a real switch on the Node running this
+   * suite? The flag has been around since fetch was introduced, but it guards
+   * an experiment, and an experiment that graduates can lose its off-switch.
+   * Probed rather than assumed, because a flag that is silently ignored turns
+   * the guard below into a test that passes no matter what the hook does.
+   */
+  async function fetchCanBeDisabled(): Promise<boolean> {
+    const probe = spawnSync(
+      process.execPath,
+      ["--no-experimental-fetch", "-e", "process.exit(typeof fetch === 'undefined' ? 0 : 3)"],
+      { stdio: "ignore" },
+    );
+    return probe.status === 0;
+  }
+
+  it("posts on an interpreter that has no global fetch", async () => {
+    // The regression this file exists to prevent: the emitter posted through
+    // `fetch`, codex handed it a Node with no `fetch`, the catch-all swallowed
+    // the ReferenceError and the hook exited 0 with nothing said and nothing
+    // logged. Any future reach for `fetch` reproduces it here instead of in
+    // the user's terminal.
+    //
+    // Asserted, not skipped: if a future Node stops honouring the flag this
+    // test fails loudly and a human moves the guard to the old-interpreter
+    // test below, rather than the guard quietly becoming a no-op.
+    expect(await fetchCanBeDisabled()).toBe(true);
+    await listenAsPanel();
+
+    const result = await run(stopPayload(FIXTURE), {}, { execArgv: ["--no-experimental-fetch"] });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+    expect(captured).toHaveLength(1);
+    expect(captured[0].method).toBe("POST");
+    expect(captured[0].url).toBe("/api/speech/utterance");
+    expect(JSON.parse(captured[0].body)).toEqual({ sessionId: TERMINAL_ID, text: ANSWER });
+  });
+
+  it.skipIf(LEGACY_NODE_MAJOR === null || LEGACY_NODE_MAJOR > 16)(
+    `posts under the pre-fetch interpreter a login shell resolves (${LEGACY_NODE}${
+      LEGACY_NODE_VERSION === null ? "" : ` ${LEGACY_NODE_VERSION}`
+    })`,
+    async () => {
+      // The real thing, not a flag approximating it: this interpreter is what
+      // `sh -lc 'which node'` answers for the accounts codex runs under here,
+      // and it has neither `fetch` nor `AbortSignal.timeout` — the flag above
+      // only takes the first of those away. Skipped where it is not installed,
+      // since a machine without it cannot reproduce the failure mode anyway.
+      await listenAsPanel();
+
+      const result = await run(
+        stopPayload(FIXTURE),
+        { PANEL_TOKEN: TEST_TOKEN },
+        { execPath: LEGACY_NODE },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("");
+      expect(captured).toHaveLength(1);
+      expect(captured[0].method).toBe("POST");
+      expect(captured[0].url).toBe("/api/speech/utterance");
+      expect(captured[0].authorization).toBe(`Bearer ${TEST_TOKEN}`);
+      expect(JSON.parse(captured[0].body)).toEqual({ sessionId: TERMINAL_ID, text: ANSWER });
+    },
+  );
 });
