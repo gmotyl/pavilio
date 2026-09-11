@@ -225,6 +225,33 @@ export function useSpeechHost(): SpeechHost {
       // a second warm of the same utterance while the first is in flight.
       warmedRef.current.add(utterance.id);
 
+      // A newer answer for a cell the user left PAUSED abandons the held run,
+      // exactly as a barge-in abandons it in `speakFrom`. Without this the run
+      // stays `pending` — `onPause` stamps nothing, on purpose — so the player
+      // goes on naming the cell as its paused one, `paused` outranks every
+      // other state in the channel, and the control routes the next click to
+      // `onResume`. The arriving answer is warmed and unreachable: the user has
+      // to listen the stale one out to its end before the new one can be
+      // played at all. Stamped `superseded` *before* `stop()` resolves the
+      // pending `play`, so the abandoned run lands on `ready` rather than
+      // `heard`, and the session's resume point goes with it so the click that
+      // follows starts at unit 0 of the new utterance rather than jumping into
+      // the middle of the old text.
+      //
+      // Paused ONLY. A run that is still speaking is one the user is listening
+      // to right now, and cutting that off mid-sentence because the agent
+      // answered again is not the same favour.
+      const held = runRef.current;
+      if (
+        held?.sessionId === utterance.sessionId &&
+        held.utteranceId !== utterance.id &&
+        player.pausedSessionId === utterance.sessionId
+      ) {
+        held.outcome = "superseded";
+        player.stop();
+        resumeRef.current.delete(utterance.sessionId);
+      }
+
       const first = preparedFor(utterance, languageFor(utterance.sessionId)).units[0];
       if (!first) continue;
 
@@ -253,7 +280,19 @@ export function useSpeechHost(): SpeechHost {
           setPreparing(utterance.sessionId, false);
         });
     }
-  }, [languageFor, preparedFor, setPreparing, speakableUtterances]);
+    // `player.pausedSessionId` and `player.stop` rather than `player`: the
+    // player's identity changes on every playback state change, and the whole
+    // effect is a no-op for an utterance already in `warmedRef`, so depending
+    // on the two members it actually reads keeps the re-runs cheap and their
+    // reason legible.
+  }, [
+    languageFor,
+    player.pausedSessionId,
+    player.stop,
+    preparedFor,
+    setPreparing,
+    speakableUtterances,
+  ]);
 
   const speakFrom = useCallback(
     (sessionId: string, fromUnit: number): void => {
