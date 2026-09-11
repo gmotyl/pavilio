@@ -139,7 +139,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
 });
 
 import { prepare } from "../prepare";
-import { useSpeechHost } from "../useSpeechHost";
+import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
 import { DEFAULT_SPEECH_VOICE } from "../voices";
 
 /** The `src` of every started playback, in order. Warming must never add one. */
@@ -186,6 +186,27 @@ async function endRun(max = 40): Promise<void> {
     await endCurrentUnit();
     if (played.length === before) return;
   }
+}
+
+/**
+ * One click on the cell's control, routed exactly as `CellSpeakButton` routes
+ * it: `speaking` and `stalled` raise the pause, `paused` raises the resume,
+ * `empty` and `preparing` raise nothing, and everything else speaks.
+ *
+ * The routing is the load-bearing half of the paused-cell bug — a cell that
+ * still reports `paused` sends the click to `onResume`, which continues the
+ * stale run — so a test about what a click does must never reach for `onSpeak`
+ * directly. Doing that answers a question the user cannot ask.
+ */
+async function clickControl(host: SpeechHost, sessionId: string): Promise<void> {
+  const state = host.stateFor(sessionId);
+  if (state === "empty" || state === "preparing") return;
+
+  await settle(() => {
+    if (state === "speaking" || state === "stalled") host.onPause(sessionId);
+    else if (state === "paused") host.onResume(sessionId);
+    else host.onSpeak(sessionId);
+  });
 }
 
 const requestedTexts = (): string[] => synth.requests.map((request) => request.text);
@@ -444,5 +465,172 @@ describe("useSpeechHost — heard is the end of the last unit", () => {
     await settle(() => result.current.onStop("cell-a"));
 
     expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+});
+
+/**
+ * A pause holds a run open on purpose — the run stays `pending`, the player
+ * keeps naming the cell as its paused one, and `paused` outranks everything
+ * else the channel could say. That is right until the agent answers again: the
+ * arriving utterance is warmed but unreachable, because the control still shows
+ * the play icon and routes the click to `onResume`, which continues the stale
+ * answer. The user has to listen to the old answer to its end before the new
+ * one is reachable at all.
+ *
+ * So an arriving utterance abandons a paused run exactly as a barge-in does —
+ * the rule the neighbouring "a pause does not survive a barge-in" already
+ * establishes, applied to the other way a run can be outranked.
+ */
+describe("useSpeechHost — a newer utterance abandons a paused run", () => {
+  it("a newer utterance takes a paused cell out of the paused state", async () => {
+    const newer = unitsOf(response(3, "Newer"))[0];
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    // Held so the fall-through is observable as the two states it is: red
+    // while the new answer's first unit synthesizes, then green.
+    synth.hold(newer);
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+    expect(result.current.stateFor("cell-a")).toBe("preparing");
+
+    await settle(() => synth.release(newer));
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+
+  it("playing a superseded paused cell starts the new utterance at unit 0", async () => {
+    const stale = unitsOf(response(3));
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    // Pause part-way through, so a resumed stale run would be audibly the
+    // wrong thing rather than coincidentally the same first unit.
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${newer[0]}`]);
+  });
+
+  /**
+   * The other ordering, and the one a supersession evaluated only on an
+   * utterance's FIRST sighting cannot serve: the newer answer lands while the
+   * cell is still SPEAKING — so it is warmed, recorded, and the arrival effect
+   * has already had its one look at it — and only THEN does the user pause. So
+   * the condition has to be re-evaluated when the pause itself re-runs the
+   * effect; behind the "already warmed" short-circuit the stale run is still
+   * sitting there holding the cell when the click arrives, which is exactly the
+   * hostage-taking the scenario forbids, reached the other way round.
+   */
+  it("a newer utterance that arrived while speaking still frees the cell once it is paused", async () => {
+    const stale = unitsOf(response(3));
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    // Part-way in, so a resumed stale run is audibly the wrong thing rather
+    // than coincidentally the newer utterance's first unit.
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
+
+    // The answer arrives BEFORE the pause, while the cell is still speaking —
+    // the arm this fix deliberately leaves alone.
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${newer[0]}`]);
+  });
+
+  it("supersession does not disarm the armed cell", async () => {
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await settle(() => result.current.onArm("cell-a"));
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    // Arming is a standing preference, not a property of the run that was
+    // abandoned. The armed cell still autoplays the answer that arrived.
+    expect(result.current.armedSessionId).toBe("cell-a");
+    expect(played[played.length - 1]).toBe(`blob:${newer[0]}`);
+  });
+
+  /**
+   * The other two arms of the control's channel, pinned so the fix stays the
+   * narrow one it is. A run the user is LISTENING to is not a run the user has
+   * abandoned, so a second answer arriving mid-sentence changes nothing about
+   * it — the contract's "exactly as before".
+   */
+  it("a newer utterance for a speaking cell leaves the run alone", async () => {
+    const stale = unitsOf(response(3));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+    expect(played).toEqual([`blob:${stale[0]}`]);
+  });
+
+  it("a newer utterance for an idle cell is unchanged", async () => {
+    const newer = unitsOf(response(3, "Newer"))[0];
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    synth.hold(newer);
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+    expect(result.current.stateFor("cell-a")).toBe("preparing");
+
+    await settle(() => synth.release(newer));
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    // Nothing has been clicked, so nothing may have made a sound.
+    expect(played).toEqual([]);
+  });
+
+  /**
+   * Supersession is per SESSION, and the arrival effect walks every speakable
+   * utterance in the panel — so an answer for a different terminal iterates
+   * past the held run too. The session guard is the only thing keeping it off
+   * a pause the user is holding in another cell, and a panel with two busy
+   * terminals is the ordinary case rather than the exotic one.
+   */
+  it("a newer utterance for another cell leaves a paused cell paused", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    await emitUtterance("cell-b", "u-2", response(3, "Newer"));
+
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+    expect(result.current.stateFor("cell-b")).toBe("ready");
   });
 });
