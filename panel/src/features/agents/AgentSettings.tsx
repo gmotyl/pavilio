@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { ExternalLink, Copy, Check, FileText, ChevronDown, ChevronRight, Save, Pencil, X, Play, AlertTriangle } from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
 import { openInVSCode as openPathInVSCode } from "../shell/vscode";
+import { VoiceSelect } from "../speech/VoiceSelect";
 
 interface SettingsFile {
   name: string;
@@ -449,10 +450,16 @@ export default function AgentSettings() {
 
   return (
     <div className="p-6 max-w-4xl">
-      <h1 className="text-2xl font-bold mb-2" style={{ color: "var(--text-primary)" }}>Agent Settings</h1>
+      <h1 className="text-2xl font-bold mb-2" style={{ color: "var(--text-primary)" }}>Settings</h1>
       <p className="text-sm mb-8" style={{ color: "var(--text-muted)" }}>
-        Configuration files for your AI coding agents. Click to expand and view, or open in VS Code to edit.
+        Panel preferences, plus the configuration files for your AI coding agents. Click a file to expand and view, or open it in VS Code to edit.
       </p>
+
+      {/* Speech */}
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Speech</h2>
+        <VoiceSelect />
+      </section>
 
       {/* Workspace actions */}
       <section className="mb-8">

@@ -1,4 +1,9 @@
-import express, { type Express } from "express";
+import express, {
+  type Express,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
 import { resolve } from "path";
 import { createServer as createHttpServer, type Server as HttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
@@ -28,6 +33,7 @@ import scriptsRouter from "./routes/scripts.js";
 import { mountTimeRoutes } from "./routes/time.js";
 import autoSyncRouter from "./routes/auto-sync.js";
 import systemRouter from "./routes/system.js";
+import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
 import archiveRouter from "./routes/archive.js";
 import { machineHostname } from "./lib/hostname.js";
 import { startScheduler } from "./lib/autoSyncScheduler.js";
@@ -81,6 +87,21 @@ export async function startPanel(
   if (port !== configuredPort) {
     console.log(`Port ${configuredPort} in use, using ${port} instead.`);
   }
+  const protocol = tlsCert && tlsKey ? "https" : "http";
+
+  // Publish the port the panel actually resolved to, so anything spawned by
+  // this process can reach it. `findFreePort` scans a 50-port span, so the
+  // configured port is a wish, not an address: a stale panel or an unrelated
+  // server holding it silently moves us elsewhere, and until this line the
+  // real port existed only in a console.log and an in-memory registration.
+  // The speech `Stop` hook reads exactly this variable (its own hard-coded
+  // default stays as the fallback), and `terminal-manager.ts` spawns PTYs
+  // with `{ ...process.env }`, so setting it here is all the plumbing a
+  // normal terminal needs. Deliberately before the first `app.use`: terminal
+  // sessions are only ever created by the `POST /api/terminal/sessions`
+  // handler, whose router is mounted below and which cannot be reached until
+  // `server.listen()` further down — so no PTY can exist without it.
+  process.env.PAVILIO_PANEL_URL = `${protocol}://127.0.0.1:${port}`;
 
   const app = express();
 
@@ -93,6 +114,27 @@ export async function startPanel(
   } else {
     server = createHttpServer(app);
   }
+
+  // The speech route owns its own body cap, so its parser has to run before the
+  // global one: body-parser skips a request whose stream it finds already
+  // finished, so whichever parser reads the body first is the one whose `limit`
+  // governs. Scoped to the speech path, so every other route is still parsed by
+  // the global `express.json()` below at its default limit. This changes no
+  // security boundary — `express.json()` already ran here, ahead of
+  // `authMiddleware`, before this line existed.
+  app.use("/api/speech", express.json({ limit: MAX_UTTERANCE_BYTES }));
+  // Reachable only from the parser directly above: an error thrown by a later
+  // layer (the speech router itself) resumes past this one and never sees it.
+  // That is exactly the scope wanted — it turns the over-limit throw into JSON
+  // instead of express's default HTML error page, without becoming the panel's
+  // de facto global error handler.
+  app.use("/api/speech", (err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if ((err as { type?: string } | null)?.type === "entity.too.large") {
+      res.status(413).json({ error: "utterance too large", limit: MAX_UTTERANCE_BYTES });
+      return;
+    }
+    next(err);
+  });
 
   app.use(express.json());
   app.use(mobileAuthMiddleware);
@@ -120,6 +162,7 @@ export async function startPanel(
   app.use("/api/auto-sync", autoSyncRouter);
   app.use("/api/archive", archiveRouter);
   app.use("/api/system", systemRouter);
+  app.use("/api/speech", speechRouter);
   app.use("/api", scriptsRouter);
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 
@@ -138,7 +181,6 @@ export async function startPanel(
   // request never pays the /etc/passwd read cost; listOsUsers() never throws.
   listOsUsers();
 
-  const protocol = tlsCert && tlsKey ? "https" : "http";
   server.listen(port, "127.0.0.1", () => {
     console.log(`Panel bound to ${protocol}://127.0.0.1:${port} (loopback only)`);
   });

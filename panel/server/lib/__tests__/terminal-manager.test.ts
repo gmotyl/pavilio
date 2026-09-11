@@ -63,16 +63,27 @@ function emitPtyData(data: string): void {
 // trailing destroySession) leaks a file into the user's real home directory.
 let previousStateDir: string | undefined
 let tempDir: string
+// Same file-level reasoning for PAVILIO_PANEL_URL, for a different reason:
+// createSession now forwards it into the run-as command string, and a panel
+// sets it on itself — so a suite run from inside a pavilio terminal inherits
+// it and every run-as assertion below would see an extra assignment it did
+// not build into its expectation. Cleared per test; the one test that is
+// actually about the variable sets it itself.
+let previousPanelUrl: string | undefined
 
 beforeEach(() => {
   previousStateDir = process.env.PANEL_AUTH_STATE_DIR
   tempDir = mkdtempSync(join(tmpdir(), "panel-terminal-manager-test-"))
   process.env.PANEL_AUTH_STATE_DIR = tempDir
+  previousPanelUrl = process.env.PAVILIO_PANEL_URL
+  delete process.env.PAVILIO_PANEL_URL
 })
 
 afterEach(() => {
   if (previousStateDir === undefined) delete process.env.PANEL_AUTH_STATE_DIR
   else process.env.PANEL_AUTH_STATE_DIR = previousStateDir
+  if (previousPanelUrl === undefined) delete process.env.PAVILIO_PANEL_URL
+  else process.env.PAVILIO_PANEL_URL = previousPanelUrl
   rmSync(tempDir, { recursive: true, force: true })
 })
 
@@ -213,6 +224,21 @@ describe("spawn env", () => {
     const env = lastSpawnCall!.options.env as Record<string, string>
     expect(env.TERM).toBe("xterm-256color")
     expect(env.PATH).toBe(process.env.PATH)
+
+    destroySession(meta.id)
+  })
+
+  it("spawn env carries PAVILIO_PANEL_URL as startPanel resolved it", () => {
+    // startPanel writes the port it actually bound to into its own
+    // environment, and this spread is the whole of the plumbing that gets it
+    // to a normal terminal — and from there to the speech Stop hook, which
+    // would otherwise post to a hard-coded 3010 that a stale panel may hold.
+    // The file-level afterEach restores whatever the ambient value was.
+    process.env.PAVILIO_PANEL_URL = "http://127.0.0.1:3012"
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alpha" })
+
+    const env = lastSpawnCall!.options.env as Record<string, string>
+    expect(env.PAVILIO_PANEL_URL).toBe("http://127.0.0.1:3012")
 
     destroySession(meta.id)
   })
@@ -524,6 +550,37 @@ describe("createSession with runAsUser", () => {
     expect(lastSpawnCall!.options.cwd).toBe(cwd)
 
     destroySession(meta.id)
+  })
+
+  it("createSession forwards the resolved panel URL into the su -c command, never the token", () => {
+    // The spawn env below is spread from process.env, but `su -` throws that
+    // away — a run-as terminal only sees what is written inline into the
+    // command string. This is the path the speech hook was silently dying on.
+    process.env.PAVILIO_PANEL_URL = "http://127.0.0.1:3012"
+    const previousToken = process.env.PANEL_TOKEN
+    process.env.PANEL_TOKEN = "not-a-real-token"
+    try {
+      const meta = createSession({
+        cwd: `${homedir()}/git/prv/pavilio`,
+        cols: 80,
+        rows: 24,
+        project: "alokai",
+        runAsUser: RUN_AS_USER,
+      })
+
+      expect(lastSpawnCall!.file).toBe("su")
+      const command = lastSpawnCall!.args[3] as string
+      expect(command).toContain("PAVILIO_PANEL_URL='http://127.0.0.1:3012'")
+      // A `su -c` command line is world-readable in `ps aux`, so the URL may
+      // ride there and the token may not.
+      expect(command).not.toContain("PANEL_TOKEN")
+      expect(command).not.toContain("not-a-real-token")
+
+      destroySession(meta.id)
+    } finally {
+      if (previousToken === undefined) delete process.env.PANEL_TOKEN
+      else process.env.PANEL_TOKEN = previousToken
+    }
   })
 
   it("createSession with an unknown runAsUser falls back to direct spawn", () => {

@@ -9,6 +9,7 @@ import { createTerminalSession } from "./createTerminalSession";
 import { useTerminalMaximized } from "./useTerminalMaximized";
 import { useAllTerminalSessions } from "./useAllTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
+import { usePanelSpeech } from "../speech/SpeechHostProvider";
 
 interface Props {
   projectName: string;
@@ -34,6 +35,11 @@ export default function ProjectTerminalsSurface({
     useTerminalMaximized(projectName);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
+  // The panel's single host, read from context — never hosted here. This
+  // surface is mounted twice at once (ProjectView and the terminal drawer), so
+  // hosting it would be two players and two armed cells. Still passed down to
+  // the grid explicitly: the prop is what proves this surface is wired.
+  const speech = usePanelSpeech();
 
   const createTerminal = useCallback(
     async (opts: CreateSessionOpts = {}) => {
@@ -90,6 +96,7 @@ export default function ProjectTerminalsSurface({
       tiles={terminal.tiles}
       onPlace={terminal.placeTiles}
       onApplyPreset={terminal.applyPreset}
+      speech={speech}
       fill={fill}
     />
   );

@@ -3,6 +3,7 @@ import { render } from "@testing-library/react";
 import { useRef } from "react";
 import { TerminalsSurface } from "../TerminalsSurface";
 import type { TerminalHandle } from "../TerminalView";
+import { INERT_SPEECH } from "./speech.harness";
 
 vi.mock("../TerminalToolbar", () => ({ TerminalToolbar: () => <div /> }));
 vi.mock("../TerminalMobileRail", () => ({ TerminalMobileRail: () => <div /> }));
@@ -30,6 +31,7 @@ function Harness({ fill }: { fill?: boolean }) {
       terminalHandlesRef={ref}
       onCreateTerminal={() => {}}
       onNavTo={() => {}}
+      speech={INERT_SPEECH}
       fill={fill}
     />
   );
