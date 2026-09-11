@@ -17,7 +17,9 @@
  * It is also where **warming** lives, for the same reason: warming needs the
  * channel's arrivals and the player's voice and cache, and neither of those two
  * may reach across to the other. The channel stays pure text work; this module
- * reads `speakableUtterances` and fills the synthesis cache.
+ * reads `speakableUtterances`, fills the synthesis cache, and reports which
+ * cells are still waiting on it — {@link SpeechHost.preparingSessionIds}, the
+ * red the control shows before anyone has clicked anything.
  *
  * ## Why a run object rather than `await play(); markHeard()`
  *
@@ -40,10 +42,10 @@
  * the run it reports played no unit at all. A run still `pending` when the
  * promise settles is the only natural end there is.
  */
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../../lib/toast";
 import { closingMarkerUnit, prepare } from "./prepare";
-import { prefetchSpeech } from "./synth";
+import { synthesizeSpeech } from "./synth";
 import type { GridSpeech, PreparedSpeech, Utterance } from "./types";
 import { useSpeechPlayer, type SpeechPlaybackError } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
@@ -60,6 +62,31 @@ import { getStoredVoice } from "./voices";
  * deliberately toast-free.
  */
 type RunOutcome = "pending" | "superseded" | "stopped" | "refused" | "failed";
+
+/**
+ * What the host adds to {@link GridSpeech}: which cells are still *getting*
+ * their audio. The grid-facing contract in `./types` stays as it is — it is
+ * consumed by hand-built stubs all over the terminal suites — so the extra
+ * channel lives here, on the host's own return type.
+ */
+export interface SpeechHost extends GridSpeech {
+  /**
+   * Sessions whose current utterance's first unit is still being synthesized.
+   * A cell in here is **preparing** — the red "blocked on synthesis" — and one
+   * that is not, but has an utterance, is **ready**: its audio is in hand, so a
+   * click starts speaking with no wait.
+   *
+   * This is NOT the player's `waitingForSynthesis`. That one reports a *running*
+   * playback blocked on its next unit; this one reports a cell that has not
+   * been clicked at all. The two are different waits, on different sides of the
+   * click, and the control paints them the same red only because the user's
+   * question — "is the audio here yet?" — has the same answer.
+   */
+  preparingSessionIds: ReadonlySet<string>;
+}
+
+/** Shared so a panel with nothing warming does not allocate a Set per render. */
+const NOTHING_PREPARING: ReadonlySet<string> = new Set<string>();
 
 interface Run {
   readonly sessionId: string;
@@ -78,7 +105,7 @@ interface ResumePoint {
   readonly fromUnit: number;
 }
 
-export function useSpeechHost(): GridSpeech {
+export function useSpeechHost(): SpeechHost {
   const runRef = useRef<Run | null>(null);
   const resumeRef = useRef<Map<string, ResumePoint>>(new Map());
   // Keyed by utterance id: preparation is pure and the same utterance always
@@ -88,6 +115,25 @@ export function useSpeechHost(): GridSpeech {
   const autoplayedRef = useRef<string | null>(null);
   /** Utterance ids whose first unit has been warmed, so none is warmed twice. */
   const warmedRef = useRef<Set<string>>(new Set());
+  /**
+   * The utterance each session is CURRENTLY warming, so a warm that a newer
+   * utterance superseded cannot report the cell ready when it lands — the click
+   * would play the newer unit, which is still in flight.
+   */
+  const warmingRef = useRef<Map<string, string>>(new Map());
+  const [preparingSessionIds, setPreparingSessionIds] =
+    useState<ReadonlySet<string>>(NOTHING_PREPARING);
+
+  const setPreparing = useCallback((sessionId: string, preparing: boolean): void => {
+    setPreparingSessionIds((current) => {
+      if (current.has(sessionId) === preparing) return current;
+
+      const next = new Set(current);
+      if (preparing) next.add(sessionId);
+      else next.delete(sessionId);
+      return next;
+    });
+  }, []);
 
   const onError = useCallback((error: SpeechPlaybackError): void => {
     // A refusal is NOT a natural end: the cell falls back to `unheard`. This
@@ -155,10 +201,12 @@ export function useSpeechHost(): GridSpeech {
     // response, bounded by the number of terminals, and unit 0 is deliberately
     // the response's heading or first sentence.
     //
-    // Warming is silent and invisible: `prefetchSpeech` fills the synthesis
-    // cache and touches neither the player nor the channel, so a warmed cell
-    // that is not armed still makes no sound, and no control state moves. The
-    // only thing it changes is that the click that follows finds its audio.
+    // Warming is silent but deliberately VISIBLE. Silent: it fills the
+    // synthesis cache and never touches the player, so a warmed cell that is
+    // not armed makes no sound however it is coloured. Visible: the cell is
+    // reported preparing until the audio is actually in hand, because a green
+    // control that might still be synthesizing is exactly the ambiguity the
+    // red state exists to remove.
     for (const utterance of speakableUtterances) {
       if (warmedRef.current.has(utterance.id)) continue;
       // Marked before the synthesis, not after: a second render must not start
@@ -167,14 +215,33 @@ export function useSpeechHost(): GridSpeech {
 
       const first = preparedFor(utterance, languageFor(utterance.sessionId)).units[0];
       if (!first) continue;
-      // The voice the click will use, from the same source `useSpeechPlayer`
-      // reads. The cache keys on voice + text, so warming with any other voice
-      // would be a synthesis nobody ever plays.
-      prefetchSpeech(first.text, { voice: getStoredVoice() });
+
+      warmingRef.current.set(utterance.sessionId, utterance.id);
+      setPreparing(utterance.sessionId, true);
+
+      // `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the
+      // whole point here — it is what says when the cell stops being red — and
+      // a fire-and-forget warm cannot be reported on. The failure is swallowed
+      // exactly as `prefetchSpeech` swallows it.
+      //
+      // The voice is the one the click will use, from the same source
+      // `useSpeechPlayer` reads. The cache keys on voice + text, so warming
+      // with any other voice would be a synthesis nobody ever plays.
+      void synthesizeSpeech(first.text, { voice: getStoredVoice() })
+        .catch(() => {
+          // A warm that failed must never strand a cell red: the cell is
+          // reported ready anyway, and the click pays for the synthesis
+          // itself — which is also how the user gets a retry.
+        })
+        .then(() => {
+          // A newer utterance took the cell over while this was in flight. It
+          // owns the cell's colour now, so this landing says nothing.
+          if (warmingRef.current.get(utterance.sessionId) !== utterance.id) return;
+          warmingRef.current.delete(utterance.sessionId);
+          setPreparing(utterance.sessionId, false);
+        });
     }
-    // `prefetchSpeech` swallows its own failures, so a warm that fails changes
-    // nothing here: the cell keeps its state and the click resynthesizes.
-  }, [languageFor, preparedFor, speakableUtterances]);
+  }, [languageFor, preparedFor, setPreparing, speakableUtterances]);
 
   const speakFrom = useCallback(
     (sessionId: string, fromUnit: number): void => {
@@ -328,8 +395,8 @@ export function useSpeechHost(): GridSpeech {
   }, [armedSessionId, armedUtterance, player.unlocked, speakFrom]);
 
   return useMemo(
-    () => ({ stateFor, armedSessionId, onSpeak, onStop, onArm }),
-    [armedSessionId, onArm, onSpeak, onStop, stateFor],
+    () => ({ stateFor, armedSessionId, onSpeak, onStop, onArm, preparingSessionIds }),
+    [armedSessionId, onArm, onSpeak, onStop, preparingSessionIds, stateFor],
   );
 }
 
