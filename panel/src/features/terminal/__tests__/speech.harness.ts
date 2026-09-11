@@ -1,4 +1,4 @@
-import type { GridSpeech } from "../TerminalLayoutGrid";
+import type { GridSpeech } from "../../speech/types";
 
 /**
  * A speech host that does nothing, for the suites whose subject is not speech.

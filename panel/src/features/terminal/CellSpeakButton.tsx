@@ -1,5 +1,5 @@
 import { Volume2, VolumeX } from "lucide-react";
-import type { CellSpeechState } from "../speech/useUtteranceChannel";
+import type { CellSpeechState } from "../speech/types";
 
 export interface CellSpeakButtonProps {
   sessionId: string;

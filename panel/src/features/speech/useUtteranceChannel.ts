@@ -7,7 +7,7 @@ import {
   voteLanguage,
   type LanguageState,
 } from "./pronunciation";
-import type { Utterance } from "./types";
+import type { CellSpeechState, Utterance } from "./types";
 import { getStoredArmedSession, setStoredArmedSession } from "./voices";
 
 /**
@@ -34,8 +34,10 @@ import { getStoredArmedSession, setStoredArmedSession } from "./voices";
  * {@link prepare} runs on arrival. It is pure text work (no synthesis, no
  * network), and importing it keeps the coupling one-way: the channel still
  * imports nothing from the player.
+ *
+ * The state a cell shows is {@link CellSpeechState}, declared in `./types` with
+ * the rest of the grid-facing contract.
  */
-export type CellSpeechState = "empty" | "unheard" | "heard" | "speaking";
 
 /**
  * What the channel remembers per session. One named record rather than parallel

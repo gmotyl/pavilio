@@ -16,7 +16,7 @@ import type { TerminalHandle } from "./TerminalView";
 import type { RepoEntry } from "../projects/useProjects";
 import type { LayoutPreset, TileLayout } from "./tileLayout";
 import type { LayoutCommitKind } from "./orderingReducer";
-import type { GridSpeech } from "./TerminalLayoutGrid";
+import type { GridSpeech } from "../speech/types";
 
 export interface TerminalsSurfaceProps {
   // Current project context

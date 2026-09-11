@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import type { CellSpeechState } from "../../speech/useUtteranceChannel";
+import type { CellSpeechState } from "../../speech/types";
 import { CellSpeakButton } from "../CellSpeakButton";
 
 // The control is presentational on purpose: it takes the cell's speech state

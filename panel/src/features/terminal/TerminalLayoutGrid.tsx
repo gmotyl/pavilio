@@ -22,32 +22,23 @@ import {
   type PlacementOverlayHandle,
 } from "./TerminalPlacementOverlay";
 import { TerminalSeamHandles } from "./TerminalSeamHandles";
-import type { CellSpeechState } from "../speech/useUtteranceChannel";
+import type { GridSpeech } from "../speech/types";
 import type { LayoutCommitKind } from "./orderingReducer";
 import { GRID, expandPreset, getLayoutPresets, type TileLayout } from "./tileLayout";
 
 /**
- * The cell header's speech wiring, hoisted so one channel and one player serve
- * the whole surface. Supplied by `useSpeechHost`, which is where
- * `useUtteranceChannel` and `useSpeechPlayer` meet.
+ * The cell header's speech wiring is {@link GridSpeech}, owned by
+ * `features/speech/types.ts` — the feature that implements it — so the two
+ * features do not import each other.
  *
- * **Required**, and deliberately so: when it was optional a surface that forgot
- * it left every cell `empty`, every callback a no-op, and the whole suite
- * green. The type is only half the guard — vitest transpiles without
- * typechecking — so `autoplay.integration.test.tsx` mounts the real surfaces
- * and reads the header attributes. The runtime `?.` below is the other half:
- * a cell that somehow arrives without a host degrades to `empty` rather than
- * throwing in the middle of a terminal grid.
+ * It is a **required** prop here and deliberately so: when it was optional a
+ * surface that forgot it left every cell `empty`, every callback a no-op, and
+ * the whole suite green. The type is only half the guard — vitest transpiles
+ * without typechecking — so `features/speech/__tests__/autoplay.integration.test.tsx`
+ * mounts the real surfaces and reads the header attributes. The runtime `?.`
+ * below is the other half: a cell that somehow arrives without a host degrades
+ * to `empty` rather than throwing in the middle of a terminal grid.
  */
-export interface GridSpeech {
-  stateFor: (sessionId: string) => CellSpeechState;
-  /** The single armed session in this browser, or `null`. */
-  armedSessionId: string | null;
-  onSpeak: (sessionId: string) => void;
-  /** Stop playback. The host must also mark the session heard. */
-  onStop: (sessionId: string) => void;
-  onArm: (sessionId: string | null) => void;
-}
 
 interface Props {
   sessions: SessionMeta[];

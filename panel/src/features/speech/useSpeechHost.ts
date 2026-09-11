@@ -36,10 +36,9 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { toast } from "../../lib/toast";
 import { closingMarkerUnit, prepare } from "./prepare";
-import type { PreparedSpeech, Utterance } from "./types";
+import type { GridSpeech, PreparedSpeech, Utterance } from "./types";
 import { useSpeechPlayer, type SpeechPlaybackError } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
-import type { GridSpeech } from "../terminal/TerminalLayoutGrid";
 
 /** How a playback ended. `"pending"` until something ends it early. */
 type RunOutcome = "pending" | "superseded" | "stopped" | "refused";

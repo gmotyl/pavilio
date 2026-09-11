@@ -19,7 +19,7 @@
  */
 import { createContext, useContext, type ReactNode } from "react";
 import { useSpeechHost } from "./useSpeechHost";
-import type { GridSpeech } from "../terminal/TerminalLayoutGrid";
+import type { GridSpeech } from "./types";
 
 const SpeechHostContext = createContext<GridSpeech | null>(null);
 
