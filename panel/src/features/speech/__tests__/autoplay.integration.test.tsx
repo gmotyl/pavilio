@@ -481,6 +481,29 @@ describe("autoplay — the armed cell", () => {
     ).toBe("1");
   });
 
+  it("a response with nothing to say is not announced anywhere", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+
+    // Only code: it strips to nothing, so there is nothing to say — on the
+    // armed cell and on an unarmed one alike.
+    const codeOnly = "```ts\nconst x = 1;\n```\n";
+    await emitUtterance("cell-a", "a1", codeOnly);
+    await emitUtterance("cell-b", "b1", codeOnly);
+
+    // No audio, no pip, no pulse: `empty` is the only inert state, and this is
+    // what the click-time check could never give — by then the pip has stood
+    // there for however long the user took to notice it.
+    expect(played).toEqual([]);
+    expect(synth.requests).toEqual([]);
+    for (const id of ["cell-a", "cell-b"]) {
+      expect(speakState(id)).toBe("empty");
+      expect(screen.getByTestId(`terminal-cell-speak-${id}`).getAttribute("data-pulse")).not.toBe(
+        "1",
+      );
+    }
+  });
+
   it("only the armed cell speaks when several utterances arrive", async () => {
     await renderProjectSurface();
     await arm("cell-b");

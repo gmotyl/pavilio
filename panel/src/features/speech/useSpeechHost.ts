@@ -115,8 +115,10 @@ export function useSpeechHost(): GridSpeech {
 
       const prepared = preparedFor(utterance, languageFor(sessionId));
       if (prepared.units.length === 0) {
-        // A response that strips to nothing has nothing to say; leaving the
-        // cell pulsing for it would be a notification that can never be met.
+        // Defence in depth. `useUtteranceChannel` never announces a response
+        // that prepares to nothing, so nothing speakable-looking should reach
+        // this — but a cell that somehow does has nothing to say, and leaving it
+        // pulsing would be a notification that can never be met.
         markHeard(sessionId);
         return;
       }

@@ -29,6 +29,21 @@ const utterance = (sessionId: string, id: string, at = 1_000): Utterance => ({
   at,
 });
 
+/**
+ * A response that is only code. It strips to nothing and prepares to zero
+ * units, so it has nothing to say — and the Polish comment inside the fence is
+ * still evidence of the session's language, which `voteLanguage` reads off the
+ * raw text.
+ */
+const CODE_ONLY_PL = "```ts\n// zażółć gęślą jaźń\nconst x = 1;\n```\n";
+
+const codeOnly = (sessionId: string, id: string, at = 1_000): Utterance => ({
+  id,
+  sessionId,
+  text: CODE_ONLY_PL,
+  at,
+});
+
 /** The WS broadcast shape: `speech-utterance` plus the utterance's own fields. */
 const frame = (u: Utterance) => ({ type: "speech-utterance", ...u });
 
@@ -123,6 +138,78 @@ describe("useUtteranceChannel", () => {
 
     expect(result.current.stateFor("cell-a")).toBe("unheard");
     expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
+  });
+
+  it("does not announce a response that has nothing to say", async () => {
+    const { result, rerender } = await renderChannel();
+
+    lastMessage = frame(codeOnly("cell-a", "a1"));
+    await act(async () => {
+      rerender();
+    });
+
+    // No pulse, no pip, no audio: the cell is as inert as one that never
+    // received anything, and nothing can be handed to the player either.
+    expect(result.current.stateFor("cell-a")).toBe("empty");
+    expect(result.current.utteranceFor("cell-a")).toBeNull();
+  });
+
+  it("does not announce a stored response that has nothing to say", async () => {
+    // Hydration is an arrival too — `/latest` keeps the last response per
+    // session whether or not it was speakable.
+    serveLatest([codeOnly("cell-a", "a1"), utterance("cell-b", "b1")]);
+
+    const { result } = await renderChannel();
+
+    await waitFor(() => expect(result.current.stateFor("cell-b")).toBe("unheard"));
+    expect(result.current.stateFor("cell-a")).toBe("empty");
+    expect(result.current.utteranceFor("cell-a")).toBeNull();
+  });
+
+  it("a response with nothing to say still casts its language vote", async () => {
+    const { result, rerender } = await renderChannel();
+
+    // The frame was processed — it just was not announced. Language is a
+    // property of the SESSION, not of one response, so a pure-code answer
+    // written in Polish is still evidence about the session.
+    lastMessage = frame(codeOnly("cell-a", "a1"));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.languageFor("cell-a")).toBe("en");
+    expect(result.current.stateFor("cell-a")).toBe("empty");
+
+    lastMessage = frame(codeOnly("cell-a", "a2"));
+    await act(async () => {
+      rerender();
+    });
+    // Two votes are the threshold, exactly as for a spoken response.
+    expect(result.current.languageFor("cell-a")).toBe("pl");
+    expect(result.current.stateFor("cell-a")).toBe("empty");
+  });
+
+  it("a response with nothing to say changes no control state", async () => {
+    const { result, rerender } = await renderChannel();
+
+    const spoken = utterance("cell-a", "a1");
+    lastMessage = frame(spoken);
+    await act(async () => {
+      rerender();
+    });
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    lastMessage = frame(codeOnly("cell-a", "a2", 2_000));
+    await act(async () => {
+      rerender();
+    });
+
+    // A newer utterance un-hears a cell; one with nothing to say is not news,
+    // so the cell keeps both its state and the response it already had.
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+    expect(result.current.utteranceFor("cell-a")).toEqual(spoken);
   });
 
   it("reports empty for a session that never received one", async () => {

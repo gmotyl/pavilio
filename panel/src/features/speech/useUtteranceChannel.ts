@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
+import { prepare } from "./prepare";
 import {
   INITIAL_LANGUAGE_STATE,
   nextLanguageState,
@@ -22,8 +23,17 @@ import { getStoredArmedSession, setStoredArmedSession } from "./voices";
  *
  * `heard` is a flag, never a deletion: the utterance stays retrievable through
  * {@link Channel.utteranceFor} so a click replays it out of the synthesis LRU
- * cache instead of paying for synthesis again. Only a session that has never
- * received an utterance is `empty`, and only `empty` is inert.
+ * cache instead of paying for synthesis again. A session is `empty` until it has
+ * something speakable in it, and only `empty` is inert.
+ *
+ * Arrival is also where a response with **nothing to say** is filtered out. That
+ * has to happen here rather than at the click: marking the cell `unheard` first
+ * and discovering the emptiness only inside `speakFrom` leaves every cell
+ * pulsing for a pure-code answer, and an unarmed cell — the common case — stands
+ * there with a pip until the user clicks it and nothing happens. So
+ * {@link prepare} runs on arrival. It is pure text work (no synthesis, no
+ * network), and importing it keeps the coupling one-way: the channel still
+ * imports nothing from the player.
  */
 export type CellSpeechState = "empty" | "unheard" | "heard" | "speaking";
 
@@ -32,8 +42,13 @@ export type CellSpeechState = "empty" | "unheard" | "heard" | "speaking";
  * maps keyed by session id, so per-session knowledge has a single home.
  */
 interface SessionSpeech {
-  /** Always the latest utterance for the session — retained after it is heard. */
-  utterance: Utterance;
+  /**
+   * The latest **speakable** utterance for the session — retained after it is
+   * heard. `null` when the only thing the session has ever received had nothing
+   * to say: the vote below still had to be recorded, and a record exists for
+   * that alone.
+   */
+  utterance: Utterance | null;
   /** Spoken in this browser. Flipped back by a newer utterance. */
   heard: boolean;
   /**
@@ -48,6 +63,24 @@ interface SessionSpeech {
 /** Folds one arriving utterance's vote into a session's tally. */
 function advanceLanguage(previous: LanguageState | undefined, text: string): LanguageState {
   return nextLanguageState(previous ?? INITIAL_LANGUAGE_STATE, voteLanguage(text));
+}
+
+/**
+ * Whether an arriving response has anything to say at all. A response that is
+ * only code strips to nothing and prepares to zero units, and announcing that
+ * would be a notification that can never be met.
+ */
+function hasSomethingToSay(text: string, language: "pl" | "en"): boolean {
+  return prepare(text, { language }).units.length > 0;
+}
+
+/**
+ * The record an unspeakable arrival leaves: the session's tally advances and
+ * nothing else changes — the cell keeps whichever utterance and `heard` flag it
+ * already had, so there is no pulse, no pip and no audio.
+ */
+function languageOnly(existing: SessionSpeech | undefined, language: LanguageState): SessionSpeech {
+  return existing ? { ...existing, language } : { utterance: null, heard: false, language };
 }
 
 export interface UtteranceChannelOptions {
@@ -118,13 +151,16 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
             // anything `/latest` can say, so hydration never displaces one —
             // that would resurrect an utterance and un-hear a heard cell.
             if (!utterance || next.has(utterance.sessionId)) continue;
+            const language = advanceLanguage(undefined, utterance.text);
+            // Hydration is an arrival too, so it gets the same gate: a stored
+            // pure-code answer must not seed a pip either.
+            if (!hasSomethingToSay(utterance.text, language.lang)) {
+              next.set(utterance.sessionId, languageOnly(undefined, language));
+              continue;
+            }
             // A tab that mounts after the broadcast has not heard it, and the
             // server keeps only the latest — so a seeded cell is unheard.
-            next.set(utterance.sessionId, {
-              utterance,
-              heard: false,
-              language: advanceLanguage(undefined, utterance.text),
-            });
+            next.set(utterance.sessionId, { utterance, heard: false, language });
           }
           return next;
         });
@@ -150,16 +186,22 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
       const existing = current.get(utterance.sessionId);
       // Re-delivery of the same utterance (a reconnect replay, a double effect
       // run) must not make a heard cell pulse again. Only a new id is news.
-      if (existing?.utterance.id === utterance.id) return current;
+      if (existing?.utterance?.id === utterance.id) return current;
 
       const next = new Map(current);
+      // The vote is folded in whatever the response turns out to be: language is
+      // a property of the SESSION, not of one response, so a pure-code answer
+      // written in Polish still tells the session which language it is in.
+      const language = advanceLanguage(existing?.language, utterance.text);
+
+      if (!hasSomethingToSay(utterance.text, language.lang)) {
+        next.set(utterance.sessionId, languageOnly(existing, language));
+        return next;
+      }
+
       // A frame can be the first news of a session — a terminal's response may
       // arrive before anything else told the channel the cell exists.
-      next.set(utterance.sessionId, {
-        utterance,
-        heard: false,
-        language: advanceLanguage(existing?.language, utterance.text),
-      });
+      next.set(utterance.sessionId, { utterance, heard: false, language });
       return next;
     });
   }, [lastMessage]);
@@ -167,7 +209,9 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
   const stateFor = useCallback(
     (sessionId: string): CellSpeechState => {
       const record = sessions.get(sessionId);
-      if (!record) return "empty";
+      // A record with no speakable utterance is as inert as no record at all:
+      // it exists only to carry the session's language tally.
+      if (!record?.utterance) return "empty";
       if (sessionId === speakingSessionId) return "speaking";
       return record.heard ? "heard" : "unheard";
     },
@@ -188,7 +232,7 @@ export function useUtteranceChannel({ speakingSessionId }: UtteranceChannelOptio
   const markHeard = useCallback((sessionId: string) => {
     setSessions((current) => {
       const existing = current.get(sessionId);
-      if (!existing || existing.heard) return current;
+      if (!existing?.utterance || existing.heard) return current;
 
       const next = new Map(current);
       next.set(sessionId, { ...existing, heard: true });
