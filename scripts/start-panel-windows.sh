@@ -64,6 +64,40 @@ done
 # Only runs when powershell.exe is on PATH (i.e. inside a WSL2 distro on
 # Windows). On native Linux/macOS this whole block is skipped.
 if command -v powershell.exe >/dev/null 2>&1; then
+  # ---------- WSL2 MTU self-heal -------------------------------------------
+  # WSL can bring eth0 up with a smaller MTU than the Windows-side
+  # `vEthernet (WSL)` adapter it sits behind, and re-apply that smaller value
+  # whenever it reconfigures the NIC — which happens long after boot, so an
+  # `/etc/wsl.conf` `[boot] command` does not hold. This has bitten this host
+  # twice (eth0 at 1280 against a host adapter at 1500).
+  #
+  # The failure is a PMTU black hole, and it is very easy to misdiagnose:
+  # Tailscale negotiates a peer path sized for the host figure, so every
+  # WireGuard packet above the Linux figure is dropped silently at eth0. Small
+  # requests succeed, large responses vanish, `tailscale serve` HTTPS dies in
+  # the handshake (`TLS handshake error … EOF`) — and `tailscale status`,
+  # `tailscale serve status` and `tailscale ping` all stay healthy throughout,
+  # because pings are small. So it is checked on every launch.
+  #
+  # Only ever raised to the host adapter's own MTU, never to a hard-coded
+  # number: a link that legitimately needs a smaller one keeps it.
+  HOST_MTU="$(powershell.exe -NoProfile -Command "(Get-NetIPInterface -AddressFamily IPv4 | Where-Object { \$_.InterfaceAlias -match 'WSL' } | Select-Object -First 1).NlMtu" 2>/dev/null | tr -d '\r\n')"
+  WSL_MTU="$(ip -o link show eth0 2>/dev/null | sed -n 's/.* mtu \([0-9]*\).*/\1/p')"
+  # Anything non-numeric (absent adapter, unexpected PowerShell output) stands
+  # down rather than reaching `[ -gt ]` with a string.
+  case "$HOST_MTU" in '' | *[!0-9]*) HOST_MTU="" ;; esac
+  case "$WSL_MTU" in '' | *[!0-9]*) WSL_MTU="" ;; esac
+  if [ -n "$HOST_MTU" ] && [ -n "$WSL_MTU" ] && [ "$HOST_MTU" -gt "$WSL_MTU" ]; then
+    if ip link set dev eth0 mtu "$HOST_MTU" 2>/dev/null; then
+      echo "Raised WSL eth0 MTU ${WSL_MTU} → ${HOST_MTU} (matching the Windows WSL adapter)."
+    else
+      echo "WSL eth0 MTU is ${WSL_MTU} but the Windows WSL adapter is ${HOST_MTU}, and raising"
+      echo "  it failed (needs root in the distro). Tailscale HTTPS will stall on large"
+      echo "  responses until it is raised: ip link set dev eth0 mtu ${HOST_MTU}"
+    fi
+  fi
+  # ---------- end MTU self-heal --------------------------------------------
+
   WSL_IP="$(ip -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)"
   if [ -z "$WSL_IP" ]; then
     echo "Could not determine WSL eth0 IP — skipping portproxy check."
