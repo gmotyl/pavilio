@@ -829,9 +829,14 @@ describe("TerminalLayoutGrid — what the cell header no longer carries", () => 
 describe("TerminalLayoutGrid — rename from the cell header", () => {
   // jsdom's DragEvent has no real DataTransfer; the header's own onDragStart
   // writes to it, so a stand-in has to be supplied (same helper as the
-  // column-layout block above).
+  // column-layout block above). `setData` belongs in that stand-in on purpose:
+  // without it the header's handler throws before it can arm a drag, and a
+  // missing guard on the element being dragged would then look like a pass (no
+  // previews) instead of the failure it is.
   function dragStart(el: Element) {
-    fireEvent.dragStart(el, { dataTransfer: { effectAllowed: "", dropEffect: "" } });
+    fireEvent.dragStart(el, {
+      dataTransfer: { effectAllowed: "", dropEffect: "", setData: () => {} },
+    });
   }
 
   function twoSessions() {
@@ -907,12 +912,25 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
   it("selecting text in the rename input does not start a cell drag", () => {
     renderGrid({ sessions: twoSessions(), focusedId: "a", onRename: vi.fn() });
 
+    // The overlay converts client pixels to zones off its own box, so it has
+    // to have one — jsdom gives every element a zero-sized rect.
+    const overlay = screen.getByTestId("terminal-placement-overlay");
+    vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, width: 480, height: 480, right: 480, bottom: 480, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
     fireEvent.doubleClick(screen.getByText("claude-a"));
     const input = screen.getByRole("textbox");
 
     // The input lives inside a `draggable` header; without a stop, dragging
     // to select its text starts a cell drag instead.
     dragStart(input);
+
+    // Arming leaves no DOM trace; only a following dragover paints a target.
+    // Without this dragover the absence of previews would prove nothing.
+    const wrapper = screen.getByTestId("terminal-grid").parentElement as HTMLElement;
+    dragOverAt(wrapper, 395, 235);
 
     expect(screen.queryAllByTestId(/^placement-preview-/)).toHaveLength(0);
   });
