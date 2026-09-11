@@ -1,10 +1,13 @@
 /**
  * The one place the channel and the player meet.
  *
- * Hosted **once per surface**, never per cell: the player owns a single
- * `<audio>` element, so a second host would be a second element and "only one
- * thing speaks" would stop being structural. The channel is hoisted with it so
- * every cell in the surface reads the same armed session and the same state.
+ * Hosted **once per panel**, never per surface and never per cell: the player
+ * owns a single `<audio>` element, so a second host would be a second element
+ * and "only one thing speaks" would stop being structural. Two surfaces can be
+ * on screen at once (ProjectView's and the terminal drawer's), so this hook has
+ * exactly one call site — `SpeechHostProvider` — and surfaces read its value
+ * from context. The channel is hoisted with it so every cell in the panel reads
+ * the same armed session and the same state.
  *
  * The coupling stays one-way. `useUtteranceChannel` still imports nothing from
  * the player; this module passes the player's `speakingSessionId` *into* the

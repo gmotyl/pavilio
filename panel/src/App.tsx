@@ -22,6 +22,7 @@ import { useVisualViewport } from "./features/shell/useVisualViewport";
 import { useHostModeRoot } from "./features/host-mode/useHostModeRoot";
 import ToastHost from "./components/ToastHost";
 import { TimeTrackingProvider } from "./features/time/TimeTrackingProvider";
+import { SpeechHostProvider } from "./features/speech/SpeechHostProvider";
 
 function AppShell() {
   const { authRequired, authenticated, loading, recheck } = useAuthStatus();
@@ -42,6 +43,10 @@ function AppShell() {
             <QuickFinder />
             <QuickTerminalModal />
             <FaviconUpdater />
+            {/* One speech host for the whole panel: above the routes AND above
+                the drawer Layout mounts, so the two terminals surfaces that can
+                be on screen at once share one player and one channel. */}
+            <SpeechHostProvider>
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
@@ -64,6 +69,7 @@ function AppShell() {
                 <Route path="/archive" element={<ArchivePage />} />
               </Routes>
             </Layout>
+            </SpeechHostProvider>
             <ToastHost />
             </TerminalDrawerProvider>
           </FloatingActionProvider>

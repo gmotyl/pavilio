@@ -97,6 +97,57 @@ const ws = vi.hoisted(() => {
   };
 });
 
+/**
+ * Counts *mounted instances* of the two hooks the host owns — not renders. The
+ * panel is allowed exactly one of each; before the host was hoisted out of the
+ * surfaces there was one per surface, and two surfaces are mounted at once.
+ */
+const hosts = vi.hoisted(() => {
+  const players = new Set<number>();
+  const channels = new Set<number>();
+  let seq = 0;
+  return {
+    players,
+    channels,
+    next: () => {
+      seq += 1;
+      return seq;
+    },
+    reset: () => {
+      players.clear();
+      channels.clear();
+    },
+  };
+});
+
+vi.mock("../useSpeechPlayer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../useSpeechPlayer")>();
+  const React = await import("react");
+  return {
+    ...actual,
+    useSpeechPlayer: (opts: Parameters<typeof actual.useSpeechPlayer>[0]) => {
+      const id = React.useRef<number | null>(null);
+      if (id.current === null) id.current = hosts.next();
+      hosts.players.add(id.current);
+      return actual.useSpeechPlayer(opts);
+    },
+  };
+});
+
+vi.mock("../useUtteranceChannel", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../useUtteranceChannel")>();
+  const React = await import("react");
+  return {
+    ...actual,
+    useUtteranceChannel: (opts: Parameters<typeof actual.useUtteranceChannel>[0]) => {
+      const id = React.useRef<number | null>(null);
+      if (id.current === null) id.current = hosts.next();
+      hosts.channels.add(id.current);
+      return actual.useUtteranceChannel(opts);
+    },
+  };
+});
+
 vi.mock("../../realtime/useWebSocket", async () => {
   const React = await import("react");
   return {
@@ -186,7 +237,9 @@ vi.mock("../../projects/useITermShortcuts", () => ({
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import ProjectTerminalsSurface from "../../terminal/ProjectTerminalsSurface";
 import TerminalsPage from "../../../pages/TerminalsPage";
+import { SpeechHostProvider } from "../SpeechHostProvider";
 import { prepare } from "../prepare";
+import { setStoredArmedSession } from "../voices";
 
 /** Every `<audio>` element the panel drove — criterion 7 is that there is one. */
 const elements: HTMLMediaElement[] = [];
@@ -244,13 +297,73 @@ const armed = (sessionId: string): string | null =>
 async function renderProjectSurface(): Promise<void> {
   render(
     <MemoryRouter>
-      <ProjectTerminalsSurface projectName="vector" active />
+      <SpeechHostProvider>
+        <ProjectTerminalsSurface projectName="vector" active />
+      </SpeechHostProvider>
     </MemoryRouter>,
   );
   await act(async () => {
     await drain();
   });
 }
+
+/**
+ * Both surfaces at once, under the one provider — the arrangement the real
+ * panel is in the whole time the terminal drawer is open over the iTerm view
+ * (`ProjectView.tsx` and `TerminalDrawer.tsx` each mount one).
+ */
+async function renderBothViews(): Promise<void> {
+  render(
+    <MemoryRouter>
+      <SpeechHostProvider>
+        {/* ProjectView's iTerm surface. */}
+        <ProjectTerminalsSurface projectName="vector" active />
+        {/* TerminalDrawer's, mounted over it on Cmd+B. */}
+        <ProjectTerminalsSurface projectName="vector" active={false} fill />
+      </SpeechHostProvider>
+    </MemoryRouter>,
+  );
+  await act(async () => {
+    await drain();
+  });
+}
+
+/** One cell's control in each view: the main surface first, the drawer second. */
+const controls = (kind: "speak" | "autoplay", sessionId: string): HTMLElement[] =>
+  screen.getAllByTestId(`terminal-cell-${kind}-${sessionId}`);
+
+/** What each view says about a cell's arming, in view order. */
+const armedInViews = (sessionId: string): (string | null)[] =>
+  controls("autoplay", sessionId).map((el) => el.getAttribute("data-armed"));
+
+async function clickIn(
+  view: number,
+  kind: "speak" | "autoplay",
+  sessionId: string,
+): Promise<void> {
+  await act(async () => {
+    fireEvent.click(controls(kind, sessionId)[view]);
+    await drain();
+  });
+}
+
+/**
+ * Spends a user gesture inside one view. An `<audio>` element is unlocked by a
+ * click that reaches *it*, so a second host would need its own — this is how a
+ * user who touches both views gets there. The toggle is clicked twice so the
+ * armed cell ends exactly where it started, which keeps the script identical
+ * whether the panel has one host or (the bug) one per surface.
+ */
+async function clickAround(view: number, sessionId: string): Promise<void> {
+  await clickIn(view, "autoplay", sessionId);
+  await clickIn(view, "autoplay", sessionId);
+}
+
+/** How many times the panel hydrated `/api/speech/latest` — one per channel. */
+const latestFetches = (): number =>
+  (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+    (call) => call[0] === "/api/speech/latest",
+  ).length;
 
 /**
  * Arms a cell. The click is also the gesture the `<audio>` element needs, so
@@ -294,6 +407,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   synth.reset();
+  hosts.reset();
   prepareCalls.length = 0;
   elements.length = 0;
   played.length = 0;
@@ -484,7 +598,9 @@ describe("autoplay — the surfaces and the session language", () => {
   it("the standalone terminals page wires its cells to the channel", async () => {
     render(
       <MemoryRouter>
-        <TerminalsPage />
+        <SpeechHostProvider>
+          <TerminalsPage />
+        </SpeechHostProvider>
       </MemoryRouter>,
     );
     await act(async () => {
@@ -513,5 +629,93 @@ describe("autoplay — the surfaces and the session language", () => {
 
     await emitUtterance("cell-a", "a3", "Trzecie zdanie, dalej po polsku.");
     expect(lastLanguage()).toBe("pl");
+  });
+});
+
+/**
+ * The panel mounts `ProjectTerminalsSurface` twice at once — ProjectView's and
+ * the terminal drawer's — so hosting the channel and the player *per surface*
+ * gave the panel two of each: the same utterance echoed twice, two cells could
+ * talk over each other, and the armed cell was per-surface rather than per
+ * browser. These pin the single host.
+ */
+describe("one speech host for the panel, not one per surface", () => {
+  it("two mounted surfaces are one voice, not two", async () => {
+    // A returning browser: the armed cell is restored from storage by whatever
+    // mounts, so both views come up armed on the same cell (DECISION 12).
+    setStoredArmedSession("cell-a");
+
+    await renderBothViews();
+    // Fixture guard: this really is the two-surface arrangement, not one.
+    expect(controls("autoplay", "cell-a")).toHaveLength(2);
+    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
+
+    // The user works in both views, as they do whenever the drawer is open.
+    await clickAround(0, "cell-a");
+    await clickAround(1, "cell-a");
+
+    // One sentence, so one unit: anything beyond a single synthesis request
+    // here is a second host paying for the same words.
+    await emitUtterance("cell-a", "a1", "Only one voice for the panel.");
+
+    // Criterion 7 at the panel level: one playback, one `<audio>` element, one
+    // synthesis — never one of each per mounted surface.
+    expect(played).toEqual(["blob:Only one voice for the panel."]);
+    expect(new Set(elements).size).toBe(1);
+    expect(synth.requests).toEqual(["Only one voice for the panel."]);
+    // And the structural reason, counted directly.
+    expect(hosts.players.size).toBe(1);
+    expect(hosts.channels.size).toBe(1);
+    // One channel is also one hydration of the latest-per-session store.
+    expect(latestFetches()).toBe(1);
+  });
+
+  it("arming stays exclusive across both views", async () => {
+    await renderBothViews();
+    expect(armedInViews("cell-a")).toEqual(["0", "0"]);
+
+    await clickIn(0, "autoplay", "cell-a");
+
+    // The drawer is not a second browser: it shows the same armed cell.
+    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
+
+    // Arming from the *other* view disarms the first cell everywhere — one
+    // armed cell per browser, whichever view it was armed from.
+    await clickIn(1, "autoplay", "cell-b");
+
+    expect(armedInViews("cell-a")).toEqual(["0", "0"]);
+    expect(armedInViews("cell-b")).toEqual(["1", "1"]);
+  });
+
+  it("a freshly hydrated tab does not start talking on its own", async () => {
+    // The browser remembers an armed cell and the server still holds that
+    // cell's last response, so the tab comes up armed with something unheard
+    // in it — and nothing has been clicked yet.
+    setStoredArmedSession("cell-a");
+    global.fetch = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          json: async () => ({
+            utterances: [
+              {
+                id: "a1",
+                sessionId: "cell-a",
+                text: "Said while the tab was away.",
+                at: 1,
+              },
+            ],
+          }),
+        }) as Response,
+    ) as unknown as typeof fetch;
+
+    await renderProjectSurface();
+
+    expect(armed("cell-a")).toBe("1");
+    // No gesture has reached the `<audio>` element, so this must be absorbed:
+    // a page that starts talking by itself is what the lock gate prevents.
+    expect(played).toEqual([]);
+    expect(synth.requests).toEqual([]);
+    expect(speakState("cell-a")).toBe("unheard");
   });
 });

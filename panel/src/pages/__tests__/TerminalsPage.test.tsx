@@ -37,12 +37,16 @@ vi.mock("../../features/projects/useProjects", () => ({
 }));
 
 import TerminalsPage from "../TerminalsPage";
+// The page reads the panel's one speech host from context.
+import { SpeechHostProvider } from "../../features/speech/SpeechHostProvider";
 
 function renderPage() {
   surfaceProps.mockClear();
   render(
     <MemoryRouter>
-      <TerminalsPage />
+      <SpeechHostProvider>
+        <TerminalsPage />
+      </SpeechHostProvider>
     </MemoryRouter>,
   );
   return surfaceProps.mock.calls[0][0] as Record<string, unknown>;
