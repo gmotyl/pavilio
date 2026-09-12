@@ -96,9 +96,11 @@ describe("stripToSpeakableText", () => {
       `Call ${atThreshold} first.`,
     );
 
-    // One character past the threshold is no longer followable by ear.
+    // One character past the threshold is no longer followable by ear, so it
+    // is named rather than spoken — it used to be dropped, which left the
+    // sentence describing a call to nothing at all.
     const pastThreshold = "a".repeat(MAX_SPOKEN_CODE_CHARS + 1);
-    expect(stripToSpeakableText(`Call \`${pastThreshold}\` first.`)).toBe("Call first.");
+    expect(stripToSpeakableText(`Call \`${pastThreshold}\` first.`)).toBe("Call ⟦expr⟧ first.");
   });
 
   it("elides a long file path with a line range", () => {
@@ -448,5 +450,104 @@ describe("stripToSpeakableText", () => {
       "The fetch is one line.\n\n⟦code⟧\n\n⟦table⟧\n\nNothing else changed.",
     );
     expect(spoken).not.toContain("⟦link⟧");
+  });
+
+  it("speaks the last segment of a path that ends in a separator", () => {
+    // The live bug: the last segment of a path ending in `/` is the empty
+    // string, so the token was spoken as nothing at all — the sentence lost
+    // its subject and the listener heard "the plan lives in now".
+    expect(
+      stripToSpeakableText("The plan lives in `openspec/changes/speech-flow-and-diction/` now."),
+    ).toBe("The plan lives in speech flow and diction now.");
+
+    // Same path unwrapped: the trailing separator belongs to the token, so it
+    // does not survive as a stray slash beside the segment either.
+    expect(
+      stripToSpeakableText("The plan lives in openspec/changes/speech-flow-and-diction/ now."),
+    ).toBe("The plan lives in speech flow and diction now.");
+
+    // Several trailing separators are still one path, not several empty ones.
+    expect(stripToSpeakableText("Look under `panel/src/features/speech//` for it.")).toBe(
+      "Look under speech for it.",
+    );
+  });
+
+  it("speaks separators inside a path segment as spaces", () => {
+    // Inside a segment a separator is word spacing, not punctuation: the voice
+    // reads "use-speech-player" as one unpronounceable run otherwise.
+    expect(stripToSpeakableText("Open panel/src/features/speech/use-speech-player.ts now.")).toBe(
+      "Open use speech player.ts now.",
+    );
+
+    // Underscores read the same way, and a run of them is one space.
+    expect(stripToSpeakableText("Open panel/docs/heading__line_re.md now.")).toBe(
+      "Open heading line re.md now.",
+    );
+  });
+
+  it("still drops a line reference from a path", () => {
+    expect(
+      stripToSpeakableText(
+        "See panel/src/features/terminal/TerminalLayoutGrid.tsx:453-478 for the grid.",
+      ),
+    ).toBe("See TerminalLayoutGrid.tsx for the grid.");
+
+    // Order is load-bearing: the reference is dropped before the segment is
+    // spaced out, or the hyphen in `12-30` would be spoken as "twelve thirty".
+    expect(stripToSpeakableText("See panel/src/use-speech-player.ts:12-30 for the swap.")).toBe(
+      "See use speech player.ts for the swap.",
+    );
+  });
+
+  it("names an over-long expression instead of dropping it", () => {
+    // An expression too long to follow by ear is still something the answer
+    // said; dropping it silently rewrote the sentence into a lie.
+    expect(stripToSpeakableText('Call `units.map((u) => u.text).join(" ")` before speaking.')).toBe(
+      "Call ⟦expr⟧ before speaking.",
+    );
+
+    // A path is not an expression: it has its own rule and keeps its segment,
+    // however long the span is.
+    expect(
+      stripToSpeakableText("See `panel/src/features/speech/use-speech-player.ts` for the swap."),
+    ).toBe("See use speech player.ts for the swap.");
+
+    // And an answer that is *only* an expression still has nothing to say, for
+    // the same reason an answer that is only code has nothing to say.
+    expect(stripToSpeakableText('`units.map((u) => u.text).join(" ")`')).toBe("");
+  });
+
+  it("still unwraps short inline code", () => {
+    expect(stripToSpeakableText("Call `prepare` before speaking.")).toBe(
+      "Call prepare before speaking.",
+    );
+
+    // Exactly at the cap is still speakable — the expression sentinel starts
+    // one character later.
+    const atThreshold = "a".repeat(MAX_SPOKEN_CODE_CHARS);
+    expect(stripToSpeakableText(`Call \`${atThreshold}\` first.`)).toBe(
+      `Call ${atThreshold} first.`,
+    );
+
+    // A short path is followable by ear, so it is neither elided nor spaced.
+    expect(stripToSpeakableText("See `src/strip.ts` for the filter.")).toBe(
+      "See src/strip.ts for the filter.",
+    );
+  });
+
+  it("leaves an ordinary hyphenated word alone", () => {
+    // The guard on the rule above. Spacing separators across prose would split
+    // a Polish hyphenated word into two, so the rule is scoped to the inside of
+    // a recognised path token and nothing else — here both are in one sentence.
+    expect(
+      stripToSpeakableText(
+        "Zdjęcie czarno-białe leży w openspec/changes/speech-flow-and-diction/ do jutra.",
+      ),
+    ).toBe("Zdjęcie czarno-białe leży w speech flow and diction do jutra.");
+
+    // With no path in sight the sentence is untouched, hyphens and all.
+    expect(stripToSpeakableText("Ten e-mail jest czarno-biały i dobrze znany.")).toBe(
+      "Ten e-mail jest czarno-biały i dobrze znany.",
+    );
   });
 });

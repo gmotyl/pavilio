@@ -16,9 +16,10 @@
  * What is removed is *named*. A silent removal is indistinguishable from an
  * answer that never mentioned the thing, so every removal leaves a neutral
  * sentinel behind — `⟦code⟧`, `⟦table⟧`, `⟦html⟧` for whole blocks, `⟦image⟧`
- * and `⟦link⟧` for the addresses inside a line. They are deliberately not
- * words: this stage does not know the session's language, so it names the
- * *kind* and leaves the wording to `prepare.ts`, which does. The corner
+ * and `⟦link⟧` for the addresses inside a line, `⟦expr⟧` for a code span too
+ * long for a listener to follow. They are deliberately not words: this stage
+ * does not know the session's language, so it names the *kind* and leaves the
+ * wording to `prepare.ts`, which does. The corner
  * brackets are the point — no answer contains them, so the substitution
  * downstream cannot collide with the response's own prose.
  *
@@ -46,12 +47,28 @@ const INLINE_CODE_RE = /`+([^`\n]+)`+/g;
  * A path-ish token: either slash-separated segments, or a bare filename with a
  * line range (`useTerminalOrdering.ts:66-75`). A trailing `:12-34` / `:12:5`
  * line reference is part of the token so it can be dropped with it.
+ *
+ * The final segment is optional (`*`, not `+`) and the separator repeats
+ * (`\/+`), so a directory written the way people write directories —
+ * `openspec/changes/speech-flow-and-diction/` — is *one* token, trailing
+ * separators included. Leaving them outside the match is what stranded a bare
+ * slash beside the elided segment, and what stopped `isWholePath` recognising
+ * such a path inside a code span at all — where the span was then dropped for
+ * length and the whole token spoken as nothing.
  */
 const PATH_RE =
-  /(?:[\w.@~+-]+\/)+[\w.@+-]+(?::\d+(?:[-:]\d+)?)?|[\w.@+-]+\.[A-Za-z]\w{0,4}:\d+(?:[-:]\d+)?/g;
+  /(?:[\w.@~+-]+\/+)+[\w.@+-]*(?::\d+(?:[-:]\d+)?)?|[\w.@+-]+\.[A-Za-z]\w{0,4}:\d+(?:[-:]\d+)?/g;
 
 /** A path token's own trailing line reference. */
 const LINE_REFERENCE_RE = /:\d+(?:[-:]\d+)?$/;
+
+/**
+ * The separators *inside* a path segment. Applied nowhere else, and that scope
+ * is the whole safety argument rather than an implementation detail: in prose a
+ * hyphen joins one word (`czarno-biały`) and spacing it out would split it in
+ * two, while inside a segment it is the only word boundary there is.
+ */
+const SEGMENT_SEPARATOR_RE = /[-_]+/g;
 
 /**
  * A link's visible text: anything without brackets, plus **one** level of
@@ -113,7 +130,7 @@ const SENTINEL_ONLY_RE = /^(?:\s*⟦[a-z]+⟧)*\s*$/;
  * listener needs to know that *something of this kind* was skipped, and hearing
  * "code block" three times in a row tells them nothing the first one did not.
  */
-type RemovedKind = "code" | "table" | "html" | "image" | "link";
+type RemovedKind = "code" | "table" | "html" | "image" | "link" | "expr";
 
 /**
  * The half of the vocabulary `removeBlocks` may emit. Splitting it out is not
@@ -135,6 +152,7 @@ export const SENTINEL: Record<RemovedKind, string> = {
   html: "⟦html⟧",
   image: "⟦image⟧",
   link: "⟦link⟧",
+  expr: "⟦expr⟧",
 };
 
 function isTableLine(line: string): boolean {
@@ -272,14 +290,27 @@ function removeBlocks(lines: readonly string[]): string[] {
 }
 
 /**
- * Elides a path to its basename and drops the line reference. The basename is
- * the only part a listener can act on — "TerminalLayoutGrid.tsx" locates the
- * file, while the directories and "colon four five three dash four seven
- * eight" are pure noise at listening speed.
+ * Elides a path to its last meaningful segment and drops the line reference.
+ * That segment is the only part a listener can act on — "TerminalLayoutGrid.tsx"
+ * locates the file, while the directories and "colon four five three dash four
+ * seven eight" are pure noise at listening speed.
+ *
+ * *Last non-empty*, not "everything after the last slash": a directory path is
+ * routinely written with a trailing separator, and its text after the last
+ * slash is the empty string — so `openspec/changes/speech-flow-and-diction/`
+ * used to be spoken as nothing at all, mid-sentence, with no sign anything had
+ * gone missing.
+ *
+ * The segment's own `-`/`_` become spaces here and only here, because here is
+ * the one place we know we are inside a path rather than inside prose.
  */
 function elidePath(token: string): string {
-  const withoutRange = token.replace(LINE_REFERENCE_RE, "");
-  return withoutRange.slice(withoutRange.lastIndexOf("/") + 1);
+  const segments = token
+    .replace(LINE_REFERENCE_RE, "")
+    .split("/")
+    .filter((segment) => segment !== "");
+  const last = segments.pop() ?? "";
+  return last.replace(SEGMENT_SEPARATOR_RE, " ").trim();
 }
 
 function isWholePath(value: string): boolean {
@@ -301,9 +332,9 @@ function elideLongPaths(text: string): string {
  *
  * Runs **before** `reduceInlineCode` on purpose. An address is an address
  * whether or not someone wrapped it in backticks, and inline code is judged by
- * length: a 40-character URL in a span would otherwise be dropped for being
- * unspeakable (and, once Task 3 lands, named an *expression*), which tells the
- * listener the wrong thing about what they missed. Reducing first turns the
+ * length: a 40-character URL in a span would otherwise be named an
+ * *expression*, which tells the listener the wrong thing about what they
+ * missed. Reducing first turns the
  * span into `` `⟦link⟧` ``, which is then short enough to unwrap normally.
  *
  * It runs **after** `removeBlocks`, which is why nothing here has to look
@@ -325,13 +356,22 @@ function reduceAddresses(line: string): string {
 }
 
 /**
- * Unwraps short inline code, elides long paths, and drops anything else that is
- * too long — a dropped span is better than a voice spelling out an expression.
+ * Unwraps short inline code, elides a path to its segment, and *names* anything
+ * else too long to follow by ear.
+ *
+ * Naming rather than dropping is the fix for the second silent disappearance: a
+ * span over the cap used to be replaced with nothing, so "call `<44 characters
+ * of expression>` first" was spoken as "call first" — a sentence the answer
+ * never wrote. `⟦expr⟧` costs a syllable and keeps the sentence true.
+ *
+ * A path is never named this way, however long the span: `elideLongPaths` has
+ * already reduced it to something speakable, and "expression" would be the
+ * wrong word for it anyway.
  */
 function reduceInlineCode(line: string): string {
   return line.replace(INLINE_CODE_RE, (_match, code: string) => {
-    const spoken = isWholePath(code) ? elideLongPaths(code) : code;
-    return spoken.length > MAX_SPOKEN_CODE_CHARS ? "" : spoken;
+    if (isWholePath(code)) return elideLongPaths(code);
+    return code.length > MAX_SPOKEN_CODE_CHARS ? SENTINEL.expr : code;
   });
 }
 
