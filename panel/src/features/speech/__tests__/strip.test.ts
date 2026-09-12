@@ -330,6 +330,10 @@ describe("stripToSpeakableText", () => {
       "```diff",
       "-const a = 1;",
       "+const a = 2;",
+      // A blank line INSIDE the unclosed run is what pins "runs to the end":
+      // without it, a fence loop that stopped at the first blank line would
+      // pass this test and then read the truncated tail aloud.
+      "",
       "  and the response was truncated here",
     ].join("\n");
 
@@ -353,6 +357,159 @@ describe("stripToSpeakableText", () => {
       "Body text.",
     ]);
   });
+  // ------------------------------------------------------------------
+  // Task 1 repairs — a stray tag must never swallow the answer.
+  // ------------------------------------------------------------------
+
+  it("treats a void tag as a block of exactly one line", () => {
+    // `<br>` can never carry a closing tag, so the search for `</br>` finds
+    // nothing and the block fell through to the fallback — which took the rest
+    // of the response with it, deleting real prose the answer did write.
+    const spoken = stripToSpeakableText(
+      "Before.\n<br>\nAfter, which is real prose that is now gone.",
+    );
+
+    expect(spoken).toContain("After, which is real prose that is now gone.");
+    expect(spoken).toBe(
+      "Before.\n\n\u27E6html\u27E7\n\nAfter, which is real prose that is now gone.",
+    );
+  });
+
+  it("never pairs a void tag with a stray closing tag further down", () => {
+    const markdown = [
+      "Before.",
+      '<img src="diagram.png">',
+      "The diagram shows two cells.",
+      // Sloppy but real: a model closes a void element it never had to close.
+      "</img>",
+      "After.",
+    ].join("\n");
+
+    // A void element holds no content, so nothing between it and a bogus
+    // `</img>` belongs to it — pairing the two deletes a whole sentence.
+    const spoken = stripToSpeakableText(markdown);
+
+    expect(spoken).toContain("The diagram shows two cells.");
+    expect(spoken).toBe(
+      [
+        "Before.",
+        "",
+        "\u27E6html\u27E7",
+        "",
+        "The diagram shows two cells.",
+        "",
+        "\u27E6html\u27E7",
+        "",
+        "After.",
+      ].join("\n"),
+    );
+  });
+
+  it("bounds an unbalanced tag to its own line, never to the rest of the response", () => {
+    const markdown = [
+      "First para.",
+      "",
+      "Prose line one.",
+      "<p> matters here.",
+      "Prose line three.",
+    ].join("\n");
+
+    const spoken = stripToSpeakableText(markdown);
+
+    expect(spoken).toContain("Prose line three.");
+    expect(spoken).toBe(
+      "First para.\n\nProse line one.\n\n\u27E6html\u27E7\n\nProse line three.",
+    );
+
+    // And the bound is the opening line even when a blank line IS ahead: the
+    // old fallback ran to it and ate every prose line in between.
+    expect(stripToSpeakableText("<p> stray tag.\nStill prose.\n\nNext paragraph.")).toBe(
+      "\u27E6html\u27E7\n\nStill prose.\n\nNext paragraph.",
+    );
+  });
+
+  it("treats a closing tag standing alone as a block of one line", () => {
+    const markdown = [
+      "Before.",
+      "</div>",
+      "Real prose in the middle.",
+      "</div>",
+      "After.",
+    ].join("\n");
+
+    // A `</div>` opens nothing, so it can never pair with the next one —
+    // pairing them would delete the sentence standing between them.
+    expect(stripToSpeakableText(markdown)).toBe(
+      [
+        "Before.",
+        "",
+        "\u27E6html\u27E7",
+        "",
+        "Real prose in the middle.",
+        "",
+        "\u27E6html\u27E7",
+        "",
+        "After.",
+      ].join("\n"),
+    );
+  });
+
+  it("treats a self-closing tag as a block of one line", () => {
+    const markdown = [
+      "Before.",
+      '<div class="spacer" />',
+      "Real prose in the middle.",
+      "</div>",
+      "After.",
+    ].join("\n");
+
+    // Same argument as the closing tag: a self-closed element is finished on
+    // its own line, so the `</div>` below it belongs to something else.
+    expect(stripToSpeakableText(markdown)).toBe(
+      [
+        "Before.",
+        "",
+        "\u27E6html\u27E7",
+        "",
+        "Real prose in the middle.",
+        "",
+        "\u27E6html\u27E7",
+        "",
+        "After.",
+      ].join("\n"),
+    );
+  });
+
+  it("leaves a line that merely starts with an inline tag alone", () => {
+    // The block rule is anchored to the start of a line, and inline markup does
+    // start one. `<em>` and `<span>` are not block-level, so these are
+    // sentences — treating them as blocks would eat the prose after the tag.
+    expect(stripToSpeakableText("<em>this</em> matters.")).toBe("<em>this</em> matters.");
+    expect(stripToSpeakableText("<span>and so</span> does this.")).toBe(
+      "<span>and so</span> does this.",
+    );
+  });
+
+  it("keeps two removals of the same kind apart when prose stands between them", () => {
+    const markdown = [
+      "```ts",
+      "const a = 1;",
+      "```",
+      "A sentence between them.",
+      "```ts",
+      "const b = 2;",
+      "```",
+    ].join("\n");
+
+    const spoken = stripToSpeakableText(markdown);
+
+    // Collapsing is for removals with NOTHING spoken between them. A sentence
+    // in between is something the listener hears, so the second block is a
+    // second omission and needs its own name.
+    expect(spoken.match(/\u27E6code\u27E7/g)).toHaveLength(2);
+    expect(spoken).toBe("\u27E6code\u27E7\n\nA sentence between them.\n\n\u27E6code\u27E7");
+  });
+
   // ------------------------------------------------------------------
   // Task 2 — links, images and bare addresses.
   // ------------------------------------------------------------------

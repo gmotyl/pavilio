@@ -50,6 +50,54 @@ describe("prepare", () => {
     expect(units[1].text).toBe("It chunks it first so playback starts fast.");
   });
 
+  it("a leading removed block does not cost the response its fast start", () => {
+    // A response that opens with a fence, a table or an HTML block starts with
+    // a sentinel paragraph. A sentinel carries no sentence terminator, so the
+    // first-sentence rule found nothing in it and the sentinel packed together
+    // with the whole first prose paragraph into one long unit 0 — the first
+    // synthesis, the one playback waits on, tripled in length.
+    const body =
+      "The grid keeps its own ordering. It is stored per cell and never derived from the " +
+      "DOM, so a reorder survives a reload and two cells never disagree about which of " +
+      "them comes first in the list the panel renders.";
+
+    const { units } = prepare(
+      ["```ts", "const order = useTerminalOrdering();", "```", "", body, ""].join("\n"),
+    );
+
+    expect(units[0].text).toBe("\u27E6code\u27E7");
+    expect(units[1].text).toBe("The grid keeps its own ordering.");
+    expect(units[0].chars).toBeLessThan(UNIT_MIN_CHARS);
+    expect(units[1].chars).toBeLessThan(UNIT_MIN_CHARS);
+
+    // Same for a leading table, and the sentinel still stands before the prose
+    // it replaced rather than being hoisted past it.
+    const table = prepare(["| a | b |", "| - | - |", "", body, ""].join("\n"));
+
+    expect(table.units[0].text).toBe("\u27E6table\u27E7");
+    expect(table.units[1].text).toBe("The grid keeps its own ordering.");
+  });
+
+  it("a leading removed block still lets the TLDR behind it be hoisted", () => {
+    const { units } = prepare(
+      [
+        "```ts",
+        "const x = 1;",
+        "```",
+        "",
+        "**TLDR:** the fence above is noise. The sentence after it is not, and both of",
+        "them have to reach the listener in the order the answer wrote them.",
+        "",
+        "Body paragraph that follows the summary.",
+        "",
+      ].join("\n"),
+    );
+
+    expect(units[0].text).toBe("\u27E6code\u27E7");
+    expect(units[1].text).toMatch(/^TLDR: the fence above is noise\./);
+    expect(units[1].text).toContain("in the order the answer wrote them.");
+  });
+
   it("a leading TLDR paragraph becomes its own second unit", () => {
     // The TLDR is deliberately MORE than one sentence: a single-sentence TLDR
     // is indistinguishable from the generic first-sentence fast start, so a

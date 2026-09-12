@@ -122,8 +122,14 @@ const LIST_MARKER_RE = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
 /** Punctuation a text-to-speech voice already reads as an end of sentence. */
 const SENTENCE_TERMINATOR_RE = /[.!?:;…]$/;
 
-/** Text that is nothing but sentinels and whitespace — an answer with no answer in it. */
-const SENTINEL_ONLY_RE = /^(?:\s*⟦[a-z]+⟧)*\s*$/;
+/**
+ * Text that is nothing but sentinels and whitespace — an answer with no answer
+ * in it. Exported because `prepare.ts` needs the same question answered of a
+ * single paragraph: a paragraph that is only a sentinel has no sentence in it
+ * to use as a fast start, so it has to be recognised rather than guessed at.
+ * It matches the empty string too, which is harmless at both call sites.
+ */
+export const SENTINEL_ONLY_RE = /^(?:\s*⟦[a-z]+⟧)*\s*$/;
 
 /**
  * The removals this stage can make. One sentinel per kind, not per block: the
@@ -177,6 +183,17 @@ const HTML_BLOCK_TAGS = new Set([
 ]);
 
 /**
+ * The block tags that can never carry a closing tag. A strict subset of
+ * {@link HTML_BLOCK_TAGS}, and it must stay one — a name reaches
+ * {@link htmlBlockEnd} only after passing the whitelist above.
+ *
+ * Without this set the search for `</br>` finds nothing, every void tag fell
+ * through to the fallback, and a lone `<br>` between two paragraphs deleted
+ * everything after it.
+ */
+const HTML_VOID_TAGS = new Set(["br", "col", "hr", "img", "source"]);
+
+/**
  * A line that opens (or closes) an HTML block: up to three leading spaces, then
  * a tag whose name is followed by whitespace, `/` or `>`. That lookahead is
  * what keeps `<- see above` and `<3` out of it.
@@ -188,40 +205,48 @@ const HTML_TAG_LINE_RE = /^ {0,3}<(\/?)([A-Za-z][A-Za-z0-9-]*)(?=[\s/>])/;
  * starts there. Three cases, in the spirit of `isTableLine` rather than of a
  * parser:
  *
- * - a closing or self-closing tag is a block of exactly one line;
+ * - a closing tag, a void tag (`<br>`, `<hr>`, `<img>`, …) and a self-closing
+ *   tag are each a block of exactly one line. None of the three can ever be
+ *   paired with a `</tag>` further down — a closing tag opens nothing, a void
+ *   element holds nothing, a self-closed one is already finished — so pairing
+ *   them with one would delete every line standing in between;
  * - otherwise the block runs through the first line carrying the matching
  *   `</tag>`, however many blank lines sit inside it — a `<details>` with prose
  *   folded into it is one removal, not three;
- * - and when that closing tag never comes, the block stops at the next blank
- *   line. Unlike an unclosed fence, where swallowing the rest of the response
- *   is exactly right, an unbalanced tag is far likelier to be a stray than a
- *   truncation, so its damage is bounded to its own paragraph.
+ * - and when that closing tag never comes, the block is its **opening line and
+ *   nothing else**. Unlike an unclosed fence, where swallowing the rest of the
+ *   response is exactly right, an unbalanced tag is far likelier to be a stray
+ *   than a truncation. The fallback used to run to the next blank line, and
+ *   with none ahead to the end of the response, so a single stray `<p>` — or
+ *   any void tag, which can never find its closing tag — silently deleted
+ *   every word after it. Leaving one line of markup to be spoken is the cheap
+ *   failure; deleting the answer is not, and no fallback may cost more than
+ *   the line that triggered it.
  *
  * Nesting of the same tag is not counted. It costs a loop and buys almost
  * nothing: nested markup arrives inside a fence, and that is already gone.
  */
 function htmlBlockEnd(lines: readonly string[], from: number): number | null {
   const opening = HTML_TAG_LINE_RE.exec(lines[from]);
-  if (!opening || !HTML_BLOCK_TAGS.has(opening[2].toLowerCase())) return null;
+  if (!opening) return null;
+
+  const tag = opening[2].toLowerCase();
+  if (!HTML_BLOCK_TAGS.has(tag)) return null;
 
   const line = lines[from];
-  if (opening[1] === "/" || line.trimEnd().endsWith("/>")) return from + 1;
+  if (opening[1] === "/" || HTML_VOID_TAGS.has(tag) || line.trimEnd().endsWith("/>")) {
+    return from + 1;
+  }
 
-  const closing = `</${opening[2].toLowerCase()}`;
+  const closing = `</${tag}`;
   if (line.slice(opening[0].length).toLowerCase().includes(closing)) return from + 1;
 
   for (let i = from + 1; i < lines.length; i += 1) {
     if (lines[i].toLowerCase().includes(closing)) return i + 1;
   }
 
-  // No closing tag anywhere ahead. The blank line is checked only now, not
-  // during the search above: a `<details>` normally has blank lines inside it,
-  // and stopping at the first one would end the block before its `</details>`
-  // and read the folded prose aloud.
-  for (let i = from + 1; i < lines.length; i += 1) {
-    if (lines[i].trim() === "") return i;
-  }
-  return lines.length;
+  // No closing tag anywhere ahead: the opening line is the whole block.
+  return from + 1;
 }
 
 /**

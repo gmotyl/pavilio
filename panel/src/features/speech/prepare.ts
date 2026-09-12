@@ -25,7 +25,7 @@
  * across utterances, and defaults to English — the branch that changes nothing.
  */
 import { applyPronunciation } from "./pronunciation";
-import { stripToSpeakableText } from "./strip";
+import { SENTINEL_ONLY_RE, stripToSpeakableText } from "./strip";
 import type { PreparedSpeech, SpeechUnit } from "./types";
 
 /** Characters of prepared speech one utterance may spend — ~90s of Polish. */
@@ -258,16 +258,35 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
   const paragraphs = splitParagraphs(stripToSpeakableText(markdown));
   const heading = takeHeading(paragraphs);
 
-  // Only the FIRST body paragraph can be the TLDR, because the TLDR unit is
-  // hoisted to index 1 — honouring a mid-body one would speak the response out
-  // of order. A `**TLDR:**` paragraph anywhere else is ordinary body.
-  const tldr = paragraphs.length > 0 && TLDR_PARAGRAPH_RE.test(paragraphs[0]) ? paragraphs[0] : null;
-
   const opening: string[] = [];
   if (heading) {
     const spoken = toSpokenText(heading, language);
     if (spoken) opening.push(spoken);
   }
+
+  // A response that opens with a removed block opens with a sentinel paragraph.
+  // It carries no sentence terminator, so `firstSentence` finds nothing in it
+  // and the fast-start rule below is skipped entirely — the sentinel then packs
+  // together with the whole first prose paragraph, and unit 0, the one playback
+  // waits on, becomes a long synthesis instead of a short one.
+  //
+  // Taking such a paragraph as its own opening unit fixes that without
+  // reordering anything: it is already the shortest unit there can be, it stays
+  // exactly where the answer put it, and the first *prose* paragraph behind it
+  // is then free to give up its opening sentence as usual. The alternative —
+  // skipping past the sentinel to pick the fast start — would speak the answer
+  // out of order, which is the one thing this stage must never do.
+  while (paragraphs.length > 0 && SENTINEL_ONLY_RE.test(paragraphs[0])) {
+    const spoken = toSpokenText(paragraphs.shift() as string, language);
+    if (spoken) opening.push(spoken);
+  }
+
+  // Only the FIRST body paragraph can be the TLDR, because the TLDR unit is
+  // hoisted to the front — honouring a mid-body one would speak the response
+  // out of order. A `**TLDR:**` paragraph anywhere else is ordinary body. The
+  // sentinels above do not count against "first": they are omissions, not
+  // prose, so a TLDR standing behind one is still the response's summary.
+  const tldr = paragraphs.length > 0 && TLDR_PARAGRAPH_RE.test(paragraphs[0]) ? paragraphs[0] : null;
 
   let body = (tldr === null ? paragraphs : paragraphs.slice(1))
     .map((paragraph) => toSpokenText(paragraph, language))
