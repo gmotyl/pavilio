@@ -4,6 +4,7 @@ import {
   __resetSessionStoreForTests,
   getSessions,
   refreshSessions,
+  sessionSubscriberCount,
   subscribeSessions,
 } from "../sessionStore";
 
@@ -295,8 +296,12 @@ describe("terminal session store", () => {
     respond([session("a")]);
     const unsubscribe = subscribeSessions(vi.fn());
     await flush();
+    expect(sessionSubscriberCount()).toBe(1);
 
     unsubscribe();
+
+    // The unsubscribe drops the listener; it does not merely stop it being useful.
+    expect(sessionSubscriberCount()).toBe(0);
 
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -306,6 +311,7 @@ describe("terminal session store", () => {
     const late = vi.fn();
     subscribeSessions(late);
     expect(late).toHaveBeenCalledWith(getSessions());
+    expect(sessionSubscriberCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });

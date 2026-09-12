@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAllTerminalSessions } from "../useAllTerminalSessions";
-import { __resetSessionStoreForTests } from "../sessionStore";
+import { __resetSessionStoreForTests, sessionSubscriberCount } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, readingOrder, type TileLayout } from "../tileLayout";
 
@@ -157,8 +157,16 @@ describe("useAllTerminalSessions over the shared session store", () => {
     const consumer = mountConsumer();
     await settle();
     const atUnmount = consumer.renders.count;
+    expect(sessionSubscriberCount()).toBe(1);
 
     consumer.unmount();
+
+    // Asserted on the store, not on the render count: React swallows a setState on
+    // an unmounted component, so an unmoved counter cannot tell a released
+    // subscription from a leaked one. A leak here pins this fiber's `setSessions`
+    // closure for the life of the tab, and these surfaces remount on every route
+    // change.
+    expect(sessionSubscriberCount()).toBe(0);
 
     // The store is tab-scoped: it keeps polling with no subscriber left.
     respond(["a", "b"]);
@@ -172,6 +180,7 @@ describe("useAllTerminalSessions over the shared session store", () => {
     const late = mountConsumer();
     expect(idsOf(late)).toEqual(["a", "b"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sessionSubscriberCount()).toBe(1);
   });
 
   it("each consumer keeps its own tiles state", async () => {

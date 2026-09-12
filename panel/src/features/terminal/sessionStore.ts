@@ -110,6 +110,11 @@ export function subscribeSessions(listener: Listener): () => void {
   };
 }
 
+/** Open subscriber count. For tests and diagnostics only. */
+export function sessionSubscriberCount(): number {
+  return listeners.size;
+}
+
 /**
  * The list as last fetched. This is the store's live array, handed out by
  * reference on purpose — the stable identity is what lets consumers skip work on
@@ -122,7 +127,11 @@ export function getSessions(): SessionMeta[] {
   return sessions;
 }
 
-/** Force a refetch; resolves when the list has been republished. */
+/**
+ * Force a refetch; resolves once this load is done with. A load superseded by a
+ * later one resolves without publishing — nothing is lost, because the load that
+ * superseded it publishes in its place.
+ */
 export function refreshSessions(): Promise<void> {
   return load();
 }
