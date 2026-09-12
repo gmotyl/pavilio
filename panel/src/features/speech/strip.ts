@@ -1,9 +1,8 @@
 /**
  * The deterministic speech-prep filter: response markdown in, speakable prose
- * out. Nothing here is language-aware and nothing here is a budget — this stage
- * only decides *what is worth speaking at all*. Ordering, packing, the
- * pronunciation map and the budget cut belong to the unit builder that calls
- * this.
+ * out. Nothing here is language-aware — this stage only decides *what is worth
+ * speaking at all*. Ordering, packing and the pronunciation map belong to the
+ * unit builder that calls this.
  *
  * An agent answer is not prose. Read literally, a fenced diff is a minute of
  * noise and a path with a line range is spoken character by character, so both

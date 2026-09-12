@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyPronunciation } from "../pronunciation";
-import {
-  SPEECH_BUDGET_CHARS,
-  UNIT_MAX_CHARS,
-  UNIT_MIN_CHARS,
-  closingMarkerUnit,
-  prepare,
-} from "../prepare";
+import { UNIT_MAX_CHARS, UNIT_MIN_CHARS, prepare } from "../prepare";
 
 /** Five short paragraphs, each well under the packing floor. */
 const short = (n: number): string => `Short paragraph ${n} about the panel and its speech units.`;
@@ -256,40 +250,29 @@ describe("prepare", () => {
     expect(cut.length).toBeGreaterThan(1);
   });
 
-  it("stops at the budget and counts the remaining paragraphs", () => {
-    expect(SPEECH_BUDGET_CHARS).toBe(1300);
+  it("speaks a response longer than the old budget in full", () => {
+    // Twelve paragraphs of ~240 characters — several times over the 1300-char
+    // budget this feature used to carry.
+    const markdown = Array.from({ length: 12 }, (_, i) => {
+      const head = `Paragraph ${String(i).padStart(2, "0")} `;
+      return head + "x".repeat(238 - head.length) + ".";
+    }).join("\n\n");
 
-    const { units, spokenUnits, remainderParagraphs } = prepare(packingResponse, {
-      budgetChars: 300,
-    });
+    const prepared = prepare(markdown);
+    const spent = prepared.units.reduce((sum, unit) => sum + unit.chars, 0);
 
-    expect(spokenUnits).toBeGreaterThan(0);
-    expect(spokenUnits).toBeLessThan(units.length);
-
-    const spent = units.slice(0, spokenUnits).reduce((sum, unit) => sum + unit.chars, 0);
-    expect(spent).toBeLessThanOrEqual(300);
-    expect(spent + units[spokenUnits].chars).toBeGreaterThan(300);
-    expect(remainderParagraphs).toBe(units.length - spokenUnits);
-
-    // Without the cut the whole response is spoken and nothing remains.
-    const full = prepare(packingResponse);
-    expect(full.spokenUnits).toBe(full.units.length);
-    expect(full.remainderParagraphs).toBe(0);
+    expect(spent).toBeGreaterThan(1300);
+    // The last paragraph is prepared like every other one: nothing is held back.
+    expect(prepared.units.map((unit) => unit.text).join(" ")).toContain("Paragraph 11");
+    // The cut is gone from the SHAPE, not merely left unused — a caller cannot
+    // reach for a remainder that no longer exists.
+    expect(prepared).not.toHaveProperty("spokenUnits");
+    expect(prepared).not.toHaveProperty("remainderParagraphs");
   });
 
-  it("speaks one unit even when the budget cannot afford it", () => {
-    const { units, spokenUnits, remainderParagraphs } = prepare(packingResponse, { budgetChars: 1 });
-
-    // A budget smaller than unit 0 still says something rather than falling
-    // silent — and it says exactly one unit, not one plus whatever follows.
-    expect(units[0].chars).toBeGreaterThan(1);
-    expect(spokenUnits).toBe(1);
-    expect(remainderParagraphs).toBe(units.length - 1);
-  });
-
-  it("spends the budget on prose in a diff-heavy response", () => {
+  it("keeps the prose of a diff-heavy response and none of the diff", () => {
     const diff = ["```diff", ...Array.from({ length: 200 }, (_, i) => `-  const old${i} = 1;`), "```"];
-    const { units, spokenUnits, remainderParagraphs } = prepare(
+    const { units } = prepare(
       [
         "# Fix",
         "",
@@ -306,9 +289,6 @@ describe("prepare", () => {
     expect(spoken).not.toContain("const old");
     expect(spoken).toContain("The ordering hook no longer drops the last cell");
     expect(spoken).toContain("The regression test covers the closing cell");
-    // Stripping precedes the cut, so the diff costs the budget nothing.
-    expect(spokenUnits).toBe(units.length);
-    expect(remainderParagraphs).toBe(0);
   });
 
   it("applies the pronunciation map only on the Polish branch", () => {
@@ -333,42 +313,10 @@ describe("prepare", () => {
     );
   });
 
-  it("names the remaining paragraph count in the session's language", () => {
-    expect(closingMarkerUnit(7, "en").text).toBe("End of the excerpt. Remaining paragraphs: 7.");
-    expect(closingMarkerUnit(7, "pl").text).toBe("Koniec fragmentu. Pozostałe akapity: 7.");
-
-    // The count sits after a label, so no count needs a different sentence —
-    // Polish would otherwise need `1 akapit` / `2 akapity` / `5 akapitów` and a
-    // verb that agrees with each of them.
-    for (const remaining of [1, 2, 5, 12, 22]) {
-      expect(closingMarkerUnit(remaining, "pl").text).toBe(
-        `Koniec fragmentu. Pozostałe akapity: ${remaining}.`,
-      );
-    }
-
-    const marker = closingMarkerUnit(3, "en");
-    expect(marker.chars).toBe(marker.text.length);
-  });
-
-  it("does not count the closing marker against the budget", () => {
-    // The marker is not one of the prepared units, so it can neither displace a
-    // budgeted unit nor change how many of them fit.
-    const markdown = Array.from({ length: 12 }, (_, i) => `Paragraph ${i}. ${"x".repeat(230)}.`)
-      .join("\n\n");
-    const prepared = prepare(markdown);
-
-    expect(prepared.spokenUnits).toBeLessThan(prepared.units.length);
-    expect(prepared.remainderParagraphs).toBe(prepared.units.length - prepared.spokenUnits);
-    const marker = closingMarkerUnit(prepared.remainderParagraphs, prepared.language);
-    expect(prepared.units).not.toContainEqual(marker);
-  });
-
   it("returns no units for a response that is only code", () => {
     const result = prepare("```ts\nconst x = 1;\n```\n");
 
     expect(result.units).toEqual([]);
-    expect(result.spokenUnits).toBe(0);
-    expect(result.remainderParagraphs).toBe(0);
     expect(result.language).toBe("en");
   });
 

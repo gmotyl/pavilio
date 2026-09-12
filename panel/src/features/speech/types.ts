@@ -36,9 +36,9 @@
  *                 player keeps naming a paused run as the speaking one: a
  *                 pause suspends the element rather than ending the ladder.
  * - `heard`     — the **final unit played to its end**, and nothing else. A
- *                 barge-in, a budget stop, a pause, a deliberate stop and a
- *                 systemic synthesis failure all leave the cell `ready`,
- *                 because something in it has still not been listened to.
+ *                 barge-in, a pause, a deliberate stop and a systemic synthesis
+ *                 failure all leave the cell `ready`, because something in it
+ *                 has still not been listened to.
  *
  * `heard` is a flag, never a deletion, so the utterance stays retrievable and a
  * click replays it. A session with nothing speakable in it is `empty` whatever
@@ -117,10 +117,9 @@ export interface SpeechUnit {
 }
 
 /**
- * One response, turned into something speakable. `units` is the whole response;
- * only the first `spokenUnits` of them fit the speech budget, and
- * `remainderParagraphs` is how many units were left unspoken — the number the
- * panel reports as "there is more to read".
+ * One response, turned into something speakable. `units` is the whole response,
+ * and the whole response is what a run plays: nothing caps the spoken length,
+ * so no unit is ever held back.
  *
  * `language` is the language the pronunciation map was gated on. It is the
  * session's language, handed *to* preparation rather than detected from this one
@@ -130,7 +129,4 @@ export interface PreparedSpeech {
   /** May be empty — an utterance with nothing to say. */
   units: SpeechUnit[];
   language: "pl" | "en";
-  /** Units inside the budget; the rest are the remainder. */
-  spokenUnits: number;
-  remainderParagraphs: number;
 }

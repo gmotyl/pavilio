@@ -4,15 +4,11 @@
  *
  * The stage order matters and is easy to get wrong:
  *
- * 1. `stripToSpeakableText` first — the **budget cut happens after stripping**,
- *    so a response that is 90% diff still spends its whole budget on the 10%
- *    that is prose.
+ * 1. `stripToSpeakableText` first, so everything after it sees only what will
+ *    actually be spoken.
  * 2. Then ordering: the response's opening heading becomes unit 0, a leading
  *    `**TLDR:**` becomes unit 1, and the body is packed into units. Playback
  *    awaits only unit 0, so the first two units are deliberately small.
- * 3. Then the budget cut, which only decides *how many* of those units are
- *    spoken. The rest are reported as the remainder rather than dropped, so the
- *    panel can offer them.
  *
  * `strip.ts` deliberately leaves heading `#` and emphasis `**` markers in place
  * so this module can find the heading and the TLDR. Removing them is therefore
@@ -33,9 +29,6 @@ import { applyPronunciation } from "./pronunciation";
 import { SENTINEL, SENTINEL_ONLY_RE, stripToSpeakableText } from "./strip";
 import type { PreparedSpeech, SpeechUnit } from "./types";
 
-/** Characters of prepared speech one utterance may spend — ~90s of Polish. */
-export const SPEECH_BUDGET_CHARS = 1300;
-
 /** Floor a packed unit is merged up to. */
 export const UNIT_MIN_CHARS = 200;
 
@@ -43,7 +36,6 @@ export const UNIT_MIN_CHARS = 200;
 export const UNIT_MAX_CHARS = 450;
 
 export interface PrepareOptions {
-  budgetChars?: number;
   /**
    * The session's language, as accumulated by `nextLanguageState`. Defaults to
    * `"en"`: misapplying the pronunciation map is the harm, so the default is
@@ -430,59 +422,8 @@ function toUnits(texts: readonly string[]): SpeechUnit[] {
     .map((text) => ({ text, chars: text.length }));
 }
 
-/**
- * How many leading units fit the budget. At least one unit is always spoken
- * when there is one: a budget smaller than unit 0 should still say something
- * rather than fall silent and report the whole response as a remainder.
- */
-function countWithinBudget(units: readonly SpeechUnit[], budgetChars: number): number {
-  let spent = 0;
-  let spoken = 0;
-
-  for (const unit of units) {
-    if (spoken > 0 && spent + unit.chars > budgetChars) break;
-    spent += unit.chars;
-    spoken += 1;
-  }
-
-  return spoken;
-}
-
-/**
- * The closing marker's wording, per language.
- *
- * The count sits after a label instead of inside a noun phrase on purpose.
- * Polish would otherwise need three noun forms (`1 akapit`, `2-4 akapity`,
- * `5+ akapitów`) **and** a verb that agrees with them (`pozostał` / `pozostały`
- * / `pozostało`), and a marker that gets that wrong is worse than one that does
- * not inflect at all. The label form is correct for every count in both
- * languages. The Polish wording is plain Polish with no English tech terms in
- * it, so it needs no pass through the pronunciation map.
- */
-const CLOSING_MARKER: Readonly<Record<"pl" | "en", (remaining: number) => string>> = {
-  en: (remaining) => `End of the excerpt. Remaining paragraphs: ${remaining}.`,
-  pl: (remaining) => `Koniec fragmentu. Pozostałe akapity: ${remaining}.`,
-};
-
-/**
- * The unit spoken after the budgeted ones when the budget cut a response short:
- * it names how much is left, so the silence that follows is heard as a cut
- * rather than as the end of the answer.
- *
- * It is deliberately **not** one of {@link PreparedSpeech.units}. It is an
- * addition to the spoken sequence, so it is never counted against the budget
- * and never shifts the resume point — which is an index into the prepared
- * units, and those are exactly what {@link prepare} returns.
- */
-export function closingMarkerUnit(remainderParagraphs: number, language: "pl" | "en"): SpeechUnit {
-  const text = CLOSING_MARKER[language](remainderParagraphs);
-
-  return { text, chars: text.length };
-}
-
 export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech {
   const language = opts?.language ?? "en";
-  const budgetChars = opts?.budgetChars ?? SPEECH_BUDGET_CHARS;
 
   const paragraphs = splitParagraphs(stripToSpeakableText(markdown));
   const heading = takeHeading(paragraphs);
@@ -537,13 +478,5 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
     }
   }
 
-  const units = toUnits([...opening, ...packUnits(body)]);
-  const spokenUnits = countWithinBudget(units, budgetChars);
-
-  return {
-    units,
-    language,
-    spokenUnits,
-    remainderParagraphs: units.length - spokenUnits,
-  };
+  return { units: toUnits([...opening, ...packUnits(body)]), language };
 }

@@ -26,8 +26,8 @@ import { getStoredArmedSession, setStoredArmedSession } from "./voices";
  * What the channel itself decides is exactly one bit: `heard`. It means the
  * **final unit played to its end**, nothing less — {@link Channel.markHeard} is
  * called only from the host's natural end, never from a stop, a pause, a
- * barge-in, a budget cut or a dead synthesizer, all of which leave the cell
- * `ready` because something in it has still not been listened to.
+ * barge-in or a dead synthesizer, all of which leave the cell `ready` because
+ * something in it has still not been listened to.
  *
  * `heard` is a flag, never a deletion: the utterance stays retrievable through
  * {@link Channel.utteranceFor} so a click replays it out of the synthesis LRU
@@ -282,8 +282,8 @@ export function useUtteranceChannel({
       if (preparingSessionIds.has(sessionId)) return "preparing";
       // `heard` is set by `markHeard` alone, and the host calls it only when
       // the final unit has played to its end. Everything else — a barge-in, a
-      // budget stop, a stop, a refusal, a dead synthesizer — leaves the flag
-      // where it was, which is `ready`.
+      // stop, a refusal, a dead synthesizer — leaves the flag where it was,
+      // which is `ready`.
       return record.heard ? "heard" : "ready";
     },
     [pausedSessionId, preparingSessionIds, sessions, speakingSessionId, waitingForSynthesis],
