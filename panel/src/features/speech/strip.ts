@@ -55,9 +55,17 @@ const INLINE_CODE_RE = /`+([^`\n]+)`+/g;
  * slash beside the elided segment, and what stopped `isWholePath` recognising
  * such a path inside a code span at all — where the span was then dropped for
  * length and the whole token spoken as nothing.
+ *
+ * The final segment may not *end* in a dot, which is what keeps the sentence's
+ * own full stop out of the token — the commonest position a path appears in at
+ * all. `…/speech-flow-and-diction/.` used to match through the stop, so the
+ * last segment was `"."`, and `tidySpacing`'s "no space before punctuation"
+ * rule then glued it back onto the preceding word: "The plan lives in. Next."
+ * A filename's internal dots are untouched, because only the last character of
+ * the token is constrained.
  */
 const PATH_RE =
-  /(?:[\w.@~+-]+\/+)+[\w.@+-]*(?::\d+(?:[-:]\d+)?)?|[\w.@+-]+\.[A-Za-z]\w{0,4}:\d+(?:[-:]\d+)?/g;
+  /(?:[\w.@~+-]+\/+)+(?:[\w.@+-]*[\w@+-])?(?::\d+(?:[-:]\d+)?)?|[\w.@+-]+\.[A-Za-z]\w{0,4}:\d+(?:[-:]\d+)?/g;
 
 /** A path token's own trailing line reference. */
 const LINE_REFERENCE_RE = /:\d+(?:[-:]\d+)?$/;
@@ -98,18 +106,44 @@ const IMAGE_RE = new RegExp(String.raw`!\[${LINK_TEXT}\]${LINK_TAIL}`, "g");
 const LINK_RE = new RegExp(String.raw`\[(${LINK_TEXT})\]${LINK_TAIL}`, "g");
 
 /**
+ * A reference definition's destination: angle-bracketed, or a run without
+ * whitespace that carries a path separator, a scheme colon, a fragment or a
+ * dotted domain. Those marks are what separate an address from an ordinary
+ * word, and the whole safety of the rule below rests on them.
+ */
+const REFERENCE_DESTINATION = String.raw`<[^<>]*>|(?=\S*[/:#]|\S*\.[A-Za-z])\S+`;
+
+/** A definition's optional title, quoted or parenthesised, as CommonMark has it. */
+const REFERENCE_TITLE = String.raw`"[^"]*"|'[^']*'|\([^()]*\)`;
+
+/**
  * A whole line that is a reference definition: `[ref]: url "title"`. It is pure
  * link plumbing with no prose in it, so it is dropped rather than named — a
  * sentinel here would announce an omission the listener never had.
+ *
+ * That makes it the one removal in this module that leaves no trace, so it has
+ * to be *certain*, and matching on the bracket shape alone was not: `[label]:
+ * text` is equally how a log line, a footnote and a bracketed aside are
+ * written, and agent answers are full of all three. `[WARN]: connection
+ * refused` and `[1]: Kowalski, 2026, page 14` vanished silently. Requiring an
+ * address-shaped destination — and nothing after it but a title — is what
+ * distinguishes plumbing from prose, since prose after a label runs on into
+ * words a destination may not contain.
  */
-const REFERENCE_DEFINITION_RE = /^ {0,3}\[[^\]]+\]:\s*\S+.*$/;
+const REFERENCE_DEFINITION_RE = new RegExp(
+  String.raw`^ {0,3}\[[^\]]+\]:\s*(?:${REFERENCE_DESTINATION})(?:\s+(?:${REFERENCE_TITLE}))?\s*$`,
+);
 
 /**
  * A bare `http(s)://…`, optionally wrapped in an autolink's angle brackets. The
  * final character class is what keeps the sentence's own punctuation out of the
  * match, so "…at https://pavil.io/x." keeps its full stop after the sentinel.
  * `www.`-style addresses are deliberately not matched: without a scheme the
- * pattern starts eating ordinary prose, and an unmatched one is merely spoken.
+ * pattern starts eating ordinary prose. Unmatched does not mean untouched,
+ * though — `www.pavil.io/getting-started` has slashes in it, so `PATH_RE`
+ * claims it and speaks its last segment, "getting started". That is a lossy
+ * answer rather than a wrong one, and cheaper than a scheme-less address
+ * pattern that would have to tell `pavil.io/x` apart from `e.g./x`.
  * The backtick is excluded from the body for the same reason as the closing
  * angle bracket: no URL contains one, and swallowing a span's closing backtick
  * would leave the opening one behind for the voice to trip over.
@@ -320,22 +354,34 @@ function removeBlocks(lines: readonly string[]): string[] {
  * locates the file, while the directories and "colon four five three dash four
  * seven eight" are pure noise at listening speed.
  *
- * *Last non-empty*, not "everything after the last slash": a directory path is
- * routinely written with a trailing separator, and its text after the last
- * slash is the empty string — so `openspec/changes/speech-flow-and-diction/`
- * used to be spoken as nothing at all, mid-sentence, with no sign anything had
- * gone missing.
+ * The last segment with anything *left to say*, not "everything after the last
+ * slash" and not "the last non-empty segment" either. A directory path is
+ * routinely written with a trailing separator, so the text after the last slash
+ * is the empty string — `openspec/changes/speech-flow-and-diction/` was spoken
+ * as nothing at all, mid-sentence, with no sign anything had gone missing. But
+ * skipping empty segments is not enough on its own: a segment of separators
+ * alone (`…/speech/__`) is non-empty, and `_` is a word character, so both
+ * "non-empty" and "contains a word character" still hand back a segment that
+ * *becomes* the empty string once the separators turn into spaces. The test has
+ * to be applied to the spoken form, which is why the loop reduces first and
+ * asks afterwards. The invariant it buys: this function never returns "".
  *
  * The segment's own `-`/`_` become spaces here and only here, because here is
  * the one place we know we are inside a path rather than inside prose.
  */
 function elidePath(token: string): string {
-  const segments = token
-    .replace(LINE_REFERENCE_RE, "")
-    .split("/")
-    .filter((segment) => segment !== "");
-  const last = segments.pop() ?? "";
-  return last.replace(SEGMENT_SEPARATOR_RE, " ").trim();
+  const withoutReference = token.replace(LINE_REFERENCE_RE, "");
+  const segments = withoutReference.split("/");
+
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const spoken = segments[i].replace(SEGMENT_SEPARATOR_RE, " ").trim();
+    if (spoken !== "") return spoken;
+  }
+
+  // Nothing in the whole token survives being spoken — separators end to end.
+  // Speaking it as written is this module's standard safe failure, and it is
+  // the one answer that cannot be silence.
+  return withoutReference;
 }
 
 function isWholePath(value: string): boolean {
@@ -351,6 +397,50 @@ function elideLongPaths(text: string): string {
 }
 
 /**
+ * Applies `reduce` to the parts of a line that are **not** inside an inline code
+ * span, passing every span through byte for byte.
+ *
+ * Only the link rule needs this, and the asymmetry is the point: an address is
+ * an address whether or not someone wrapped it in backticks, but a `[…](…)`
+ * shape inside backticks is a *quotation of source code*, and the one thing a
+ * quotation may not do is come out as something else.
+ */
+function outsideCodeSpans(line: string, reduce: (text: string) => string): string {
+  let out = "";
+  let cursor = 0;
+
+  for (const span of line.matchAll(INLINE_CODE_RE)) {
+    const at = span.index ?? 0;
+    out += reduce(line.slice(cursor, at)) + span[0];
+    cursor = at + span[0].length;
+  }
+
+  return out + reduce(line.slice(cursor));
+}
+
+/**
+ * Replaces links with their text — but only where the construct really is a
+ * link, which the shape alone does not settle.
+ *
+ * A link never abuts a word character on its left. Indexing does, and that one
+ * character is the whole difference between `see [the plan](url)` and
+ * `arr[0](x)`, `x[i][j]`, `note[1](x)` — expressions that markdown will happily
+ * read as links and that the rule then rewrote into `arr0`, `xi`, `note1`.
+ * Swapping a token for a different, plausible-sounding token is worse than
+ * reading the original aloud: the listener cannot tell it happened.
+ *
+ * With the text empty there is nothing readable attached, so the named
+ * exception that lets a link go unannounced has not been paid for — `[](url)`
+ * is a bare address by another spelling and is named like one.
+ */
+function reduceLinks(segment: string): string {
+  return segment.replace(LINK_RE, (match: string, text: string, offset: number) => {
+    if (offset > 0 && /\w/.test(segment[offset - 1])) return match;
+    return text.trim() === "" ? SENTINEL.link : text;
+  });
+}
+
+/**
  * Takes the addresses out of a line: images and bare URLs become sentinels,
  * links keep their text and lose their destination, and a reference definition
  * line disappears entirely.
@@ -362,9 +452,20 @@ function elideLongPaths(text: string): string {
  * missed. Reducing first turns the
  * span into `` `⟦link⟧` ``, which is then short enough to unwrap normally.
  *
+ * The link rule is the exception and skips spans entirely, because that
+ * argument does not carry it: a bracket-and-paren shape in quoted code is code,
+ * not an address, and nothing is gained by naming it. Skipping spans is
+ * preferred to running the rule *after* `reduceInlineCode`, which would fix
+ * only the long spans — a short one is unwrapped verbatim and would be caught
+ * by the rule anyway — and would force the bare-address rule ahead of the link
+ * rule, breaking the ordering the next paragraph turns on.
+ *
  * It runs **after** `removeBlocks`, which is why nothing here has to look
  * inside a fence, a table or an HTML block: those are already sentinels, and
- * the addresses that were in them went with the block they belonged to.
+ * the addresses that were in them went with the block they belonged to. That
+ * ordering is also load-bearing in the other direction — a destination swallows
+ * anything without parens in it, a closing `</details>` included, so running
+ * these rules first could delete a block's boundary and spill its contents.
  *
  * The order within the line is load-bearing twice over. Images before links, or
  * the link rule strands the `!`. Bare addresses last, so a link whose text is
@@ -374,10 +475,9 @@ function elideLongPaths(text: string): string {
 function reduceAddresses(line: string): string {
   if (REFERENCE_DEFINITION_RE.test(line)) return "";
 
-  return line
-    .replace(IMAGE_RE, SENTINEL.image)
-    .replace(LINK_RE, "$1")
-    .replace(BARE_ADDRESS_RE, SENTINEL.link);
+  const withoutImages = line.replace(IMAGE_RE, SENTINEL.image);
+
+  return outsideCodeSpans(withoutImages, reduceLinks).replace(BARE_ADDRESS_RE, SENTINEL.link);
 }
 
 /**
@@ -412,13 +512,19 @@ function tidySpacing(line: string): string {
  * Turns a list item into a sentence: the marker is dropped (a voice reads it as
  * a stray "dash") and a terminator is appended when the item has none, so items
  * are spoken as separate sentences instead of one breathless clause.
+ *
+ * An item that is nothing but sentinels gets no terminator, because the period
+ * would be the only thing distinguishing it from a bare sentinel — and that is
+ * exactly what {@link SENTINEL_ONLY_RE} looks for downstream. `- ![a](url)`
+ * became `⟦image⟧.`, which no longer reads as sentinel-only, so a response that
+ * was one bulleted image woke the cell up to say "obrazek".
  */
 function listItemToSentence(line: string): string {
   const item = LIST_MARKER_RE.exec(line);
   if (!item) return line;
 
   const content = item[2].trim();
-  if (content === "") return "";
+  if (content === "" || SENTINEL_ONLY_RE.test(content)) return content;
 
   return SENTENCE_TERMINATOR_RE.test(content) ? content : `${content}.`;
 }
