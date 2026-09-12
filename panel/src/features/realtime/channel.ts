@@ -37,7 +37,15 @@ let watchdog: ReturnType<typeof setInterval> | null = null;
 
 function publish(frame: RealtimeFrame): void {
   // Copy first: a listener may unsubscribe while being notified.
-  for (const listener of [...listeners]) listener(frame);
+  for (const listener of [...listeners]) {
+    // Isolated: the channel is tab-wide, so one broken consumer must not cut
+    // realtime off for the dozen others sharing this socket.
+    try {
+      listener(frame);
+    } catch (err) {
+      console.warn("[realtime] subscriber threw on a frame:", err);
+    }
+  }
 }
 
 function connect(): void {
@@ -52,17 +60,23 @@ function connect(): void {
 
   ws.onmessage = (event) => {
     lastMessageAt = Date.now();
+    let frame: RealtimeFrame;
     try {
-      publish(JSON.parse(event.data));
+      frame = JSON.parse(event.data);
     } catch {
-      // ignore non-JSON messages
+      return; // ignore non-JSON messages
     }
+    // Outside the try: a subscriber failure is not a parse failure.
+    publish(frame);
   };
 
   ws.onclose = () => {
     // A socket we already replaced or tore down owns no reconnect.
     if (socket !== ws) return;
-    reconnectTimer = setTimeout(connect, RECONNECT_MS);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null; // it has fired; the handle is stale from here on
+      connect();
+    }, RECONNECT_MS);
   };
 
   ws.onerror = () => {
@@ -121,7 +135,7 @@ export function realtimeSubscriberCount(): number {
 export function __resetRealtimeChannelForTests(): void {
   started = false;
   connections = 0;
-  lastMessageAt = 0;
+  lastMessageAt = Date.now();
   listeners.clear();
   if (watchdog) clearInterval(watchdog);
   watchdog = null;

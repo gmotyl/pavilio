@@ -194,6 +194,57 @@ describe("realtime channel", () => {
     expect(listener).toHaveBeenCalledWith({ type: "ping" });
   });
 
+  it("keeps delivering to later subscribers when an earlier one throws", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const throws = vi.fn(() => {
+      throw new Error("subscriber boom");
+    });
+    const good = vi.fn();
+    subscribeRealtime(throws);
+    subscribeRealtime(good);
+
+    last().deliver({ type: "file-change", path: "/a.md" });
+
+    expect(throws).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledWith({ type: "file-change", path: "/a.md" });
+    expect(warn).toHaveBeenCalled();
+
+    // The channel survives the failure: the next frame still lands.
+    last().deliver({ type: "ping" });
+    expect(good).toHaveBeenCalledTimes(2);
+
+    warn.mockRestore();
+  });
+
+  it("an arriving frame refreshes the staleness window", () => {
+    subscribeRealtime(vi.fn());
+    const ws = last();
+
+    // 100s of traffic, well past the 35s window, one frame every 20s.
+    for (let i = 0; i < 5; i += 1) {
+      vi.advanceTimersByTime(20_000);
+      ws.deliver({ type: "ping" });
+    }
+
+    expect(ws.closed).toBe(false);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("the test reset tears an open socket down without arming a reconnect", () => {
+    subscribeRealtime(vi.fn());
+    const ws = last();
+    expect(ws.closed).toBe(false);
+
+    __resetRealtimeChannelForTests();
+
+    expect(ws.closed).toBe(true);
+    expect(realtimeSubscriberCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    vi.advanceTimersByTime(120_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
   it("the test reset closes the socket and clears subscribers and timers", () => {
     subscribeRealtime(vi.fn());
     vi.advanceTimersByTime(40_000); // leaves a reconnect timer armed
