@@ -351,4 +351,102 @@ describe("stripToSpeakableText", () => {
       "Body text.",
     ]);
   });
+  // ------------------------------------------------------------------
+  // Task 2 — links, images and bare addresses.
+  // ------------------------------------------------------------------
+
+  it("speaks a link's text and drops its address", () => {
+    const spoken = stripToSpeakableText(
+      "See [the ordering hook](https://pavil.io/docs/ordering) for the rule.",
+    );
+
+    // The text is the only part of a link a listener can use; the address is
+    // unspeakable and gets no placeholder either, because the sentence already
+    // reads as a whole sentence without it.
+    expect(spoken).toBe("See the ordering hook for the rule.");
+    expect(spoken).not.toContain("pavil.io");
+    expect(spoken).not.toContain("⟦link⟧");
+
+    // The markers the unit builder needs survive inside link text.
+    expect(stripToSpeakableText("Read [**the ordering hook**](https://pavil.io/d) now.")).toBe(
+      "Read **the ordering hook** now.",
+    );
+  });
+
+  it("names an image instead of reading its alt and address", () => {
+    const spoken = stripToSpeakableText(
+      "The layout is below. ![the grid, annotated](https://pavil.io/img/grid.png) It has three columns.",
+    );
+
+    // Alt text is written for a reader who cannot see the image, not for a
+    // listener who cannot see it either — read aloud it is a description of a
+    // picture nobody is looking at, so the whole construct goes.
+    expect(spoken).toBe("The layout is below. ⟦image⟧ It has three columns.");
+    expect(spoken).not.toContain("annotated");
+
+    // A response that is nothing but an image has nothing to say, exactly as a
+    // response that is nothing but code has nothing to say.
+    expect(stripToSpeakableText("![the grid, annotated](https://pavil.io/img/grid.png)")).toBe("");
+  });
+
+  it("names a bare address", () => {
+    // The trailing full stop is the sentence's, not the address's.
+    expect(stripToSpeakableText("The spec lives at https://pavil.io/specs/speech.")).toBe(
+      "The spec lives at ⟦link⟧.",
+    );
+
+    // An address in backticks is an address, not an expression: addresses are
+    // reduced before inline code is unwrapped, so the span names a link rather
+    // than being dropped for length.
+    expect(stripToSpeakableText("Fetch it from `https://pavil.io/specs/speech.md` first.")).toBe(
+      "Fetch it from ⟦link⟧ first.",
+    );
+  });
+
+  it("names a link whose text is itself an address", () => {
+    // Keeping the text here would defeat the point of dropping the address.
+    expect(
+      stripToSpeakableText("See [https://pavil.io/specs/speech](https://pavil.io/specs/speech)."),
+    ).toBe("See ⟦link⟧.");
+  });
+
+  it("keeps the text of a reference-style link and drops the definition", () => {
+    const markdown = [
+      "The ordering is described in [the ordering hook][ordering].",
+      "",
+      '[ordering]: https://pavil.io/docs/ordering "The ordering hook"',
+    ].join("\n");
+
+    const spoken = stripToSpeakableText(markdown);
+
+    // A definition line is pure link plumbing — it has no prose in it at all.
+    expect(spoken).toBe("The ordering is described in the ordering hook.");
+    expect(spoken).not.toContain("pavil.io");
+    expect(spoken).not.toContain("ordering]");
+  });
+
+  it("emits no link sentinel for an address inside a removed block", () => {
+    const markdown = [
+      "The fetch is one line.",
+      "",
+      "```ts",
+      'await fetch("https://pavil.io/api/units");',
+      "```",
+      "",
+      "| endpoint | https://pavil.io/api/units |",
+      "| --- | --- |",
+      "",
+      "Nothing else changed.",
+    ].join("\n");
+
+    const spoken = stripToSpeakableText(markdown);
+
+    // Block removal runs first, so by the time addresses are looked for the
+    // fence and the table are already sentinels — the address never exists to
+    // be named a second time.
+    expect(spoken).toBe(
+      "The fetch is one line.\n\n⟦code⟧\n\n⟦table⟧\n\nNothing else changed.",
+    );
+    expect(spoken).not.toContain("⟦link⟧");
+  });
 });

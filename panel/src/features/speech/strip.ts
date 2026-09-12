@@ -15,11 +15,17 @@
  *
  * What is removed is *named*. A silent removal is indistinguishable from an
  * answer that never mentioned the thing, so every removal leaves a neutral
- * sentinel behind — `⟦code⟧`, `⟦table⟧`, `⟦html⟧`. They are deliberately not
+ * sentinel behind — `⟦code⟧`, `⟦table⟧`, `⟦html⟧` for whole blocks, `⟦image⟧`
+ * and `⟦link⟧` for the addresses inside a line. They are deliberately not
  * words: this stage does not know the session's language, so it names the
  * *kind* and leaves the wording to `prepare.ts`, which does. The corner
  * brackets are the point — no answer contains them, so the substitution
  * downstream cannot collide with the response's own prose.
+ *
+ * An address is the one removal with a *named* exception: `[text](url)` keeps
+ * its text and gets no sentinel, because the sentence around it already reads
+ * as a whole sentence without the address. Only an address with nothing
+ * readable attached — a bare URL, an image — is worth interrupting for.
  */
 
 /**
@@ -47,6 +53,52 @@ const PATH_RE =
 /** A path token's own trailing line reference. */
 const LINE_REFERENCE_RE = /:\d+(?:[-:]\d+)?$/;
 
+/**
+ * A link's visible text: anything without brackets, plus **one** level of
+ * nested `[...]` so `[see [this] note](url)` survives whole. One level is a
+ * deliberate stopping point — deeper nesting cannot be matched by a regular
+ * expression at all, and the failure mode is the safe one: the construct is
+ * simply left as written and spoken with its brackets.
+ */
+const LINK_TEXT = String.raw`(?:[^\[\]]|\[[^\[\]]*\])*`;
+
+/**
+ * A link's destination: the URL and any title after it, with one level of
+ * nested parens for the `(a(b))`-shaped URLs that do occur in the wild.
+ */
+const LINK_DESTINATION = String.raw`(?:[^()]|\([^()]*\))*`;
+
+/** Either half of a link's tail: `(url)` inline, or `[ref]` reference-style. */
+const LINK_TAIL = String.raw`(?:\(${LINK_DESTINATION}\)|\[[^\[\]]*\])`;
+
+/**
+ * `![alt](url)` and `![alt][ref]`. Matched before links so the `!` cannot be
+ * left stranded in front of the alt text by the link rule.
+ */
+const IMAGE_RE = new RegExp(String.raw`!\[${LINK_TEXT}\]${LINK_TAIL}`, "g");
+
+/** `[text](url)` and `[text][ref]` — capture group 1 is the spoken text. */
+const LINK_RE = new RegExp(String.raw`\[(${LINK_TEXT})\]${LINK_TAIL}`, "g");
+
+/**
+ * A whole line that is a reference definition: `[ref]: url "title"`. It is pure
+ * link plumbing with no prose in it, so it is dropped rather than named — a
+ * sentinel here would announce an omission the listener never had.
+ */
+const REFERENCE_DEFINITION_RE = /^ {0,3}\[[^\]]+\]:\s*\S+.*$/;
+
+/**
+ * A bare `http(s)://…`, optionally wrapped in an autolink's angle brackets. The
+ * final character class is what keeps the sentence's own punctuation out of the
+ * match, so "…at https://pavil.io/x." keeps its full stop after the sentinel.
+ * `www.`-style addresses are deliberately not matched: without a scheme the
+ * pattern starts eating ordinary prose, and an unmatched one is merely spoken.
+ * The backtick is excluded from the body for the same reason as the closing
+ * angle bracket: no URL contains one, and swallowing a span's closing backtick
+ * would leave the opening one behind for the voice to trip over.
+ */
+const BARE_ADDRESS_RE = /<?https?:\/\/[^\s<>`]*[^\s<>`.,;:!?'")\]]>?/gi;
+
 /** Bullet or ordered list marker at the start of a line. */
 const LIST_MARKER_RE = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
 
@@ -61,7 +113,15 @@ const SENTINEL_ONLY_RE = /^(?:\s*⟦[a-z]+⟧)*\s*$/;
  * listener needs to know that *something of this kind* was skipped, and hearing
  * "code block" three times in a row tells them nothing the first one did not.
  */
-type RemovedKind = "code" | "table" | "html";
+type RemovedKind = "code" | "table" | "html" | "image" | "link";
+
+/**
+ * The half of the vocabulary `removeBlocks` may emit. Splitting it out is not
+ * decoration: the "adjacent removals collapse" rule is a property of *blocks*
+ * standing on their own lines, and two links in one sentence are two links.
+ * Typing the block pass narrowly is what stops that rule leaking inline.
+ */
+type RemovedBlockKind = Extract<RemovedKind, "code" | "table" | "html">;
 
 /**
  * The neutral names a removal leaves behind. Language-unaware by construction —
@@ -73,6 +133,8 @@ export const SENTINEL: Record<RemovedKind, string> = {
   code: "⟦code⟧",
   table: "⟦table⟧",
   html: "⟦html⟧",
+  image: "⟦image⟧",
+  link: "⟦link⟧",
 };
 
 function isTableLine(line: string): boolean {
@@ -160,10 +222,10 @@ function htmlBlockEnd(lines: readonly string[], from: number): number | null {
  */
 function removeBlocks(lines: readonly string[]): string[] {
   const kept: string[] = [];
-  let pendingKind: RemovedKind | null = null;
+  let pendingKind: RemovedBlockKind | null = null;
   let i = 0;
 
-  const name = (kind: RemovedKind): void => {
+  const name = (kind: RemovedBlockKind): void => {
     if (kind === pendingKind) return;
     kept.push("", SENTINEL[kind], "");
     pendingKind = kind;
@@ -233,6 +295,36 @@ function elideLongPaths(text: string): string {
 }
 
 /**
+ * Takes the addresses out of a line: images and bare URLs become sentinels,
+ * links keep their text and lose their destination, and a reference definition
+ * line disappears entirely.
+ *
+ * Runs **before** `reduceInlineCode` on purpose. An address is an address
+ * whether or not someone wrapped it in backticks, and inline code is judged by
+ * length: a 40-character URL in a span would otherwise be dropped for being
+ * unspeakable (and, once Task 3 lands, named an *expression*), which tells the
+ * listener the wrong thing about what they missed. Reducing first turns the
+ * span into `` `⟦link⟧` ``, which is then short enough to unwrap normally.
+ *
+ * It runs **after** `removeBlocks`, which is why nothing here has to look
+ * inside a fence, a table or an HTML block: those are already sentinels, and
+ * the addresses that were in them went with the block they belonged to.
+ *
+ * The order within the line is load-bearing twice over. Images before links, or
+ * the link rule strands the `!`. Bare addresses last, so a link whose text is
+ * itself an address — `[https://x](https://x)` — has already been reduced to
+ * its text by then and is named a link rather than read out as one.
+ */
+function reduceAddresses(line: string): string {
+  if (REFERENCE_DEFINITION_RE.test(line)) return "";
+
+  return line
+    .replace(IMAGE_RE, SENTINEL.image)
+    .replace(LINK_RE, "$1")
+    .replace(BARE_ADDRESS_RE, SENTINEL.link);
+}
+
+/**
  * Unwraps short inline code, elides long paths, and drops anything else that is
  * too long — a dropped span is better than a voice spelling out an expression.
  */
@@ -270,7 +362,7 @@ export function stripToSpeakableText(markdown: string): string {
   const lines = removeBlocks(markdown.replace(/\r\n?/g, "\n").split("\n"));
 
   const spoken = lines.map((line) =>
-    listItemToSentence(tidySpacing(elideLongPaths(reduceInlineCode(line)))),
+    listItemToSentence(tidySpacing(elideLongPaths(reduceInlineCode(reduceAddresses(line))))),
   );
 
   // Collapse the blank lines the removed blocks left behind to a single
