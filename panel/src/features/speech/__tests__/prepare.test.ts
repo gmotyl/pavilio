@@ -52,7 +52,10 @@ const everySentinelResponse = [
   "",
   "Obrazek ![alt](http://x/y.png) w środku, adres https://example.com/a też.",
   "",
-  "Wyrażenie `alfa.beta.gamma.delta.epsilon` w zdaniu.",
+  // Spaces are what make this an expression rather than a name: a span with
+  // none is read as written however long it runs, and never reaches the
+  // sentinel at all.
+  "Wyrażenie `alfa(beta, gamma) + delta(epsilon)` w zdaniu.",
   "",
 ].join("\n");
 
@@ -632,14 +635,15 @@ describe("prepare", () => {
     expect(spoken("Plik `panel/src/features/speech/heading_line_re.ts` tutaj.\n", "pl")).toBe(
       "Plik heading line re.ts tutaj.",
     );
-    // And a full-length digest in backticks never reaches the hash rule at all:
-    // it is over MAX_SPOKEN_CODE_CHARS and not a path, so it was already named
-    // an expression.
+    // And a full-length digest in backticks *does* reach the hash rule: it is
+    // one token, so the length cap no longer names it an expression on the way
+    // past. "hash" is the right word for it — "expression" was the cap
+    // answering a question it was never asked.
     expect(
       spoken(
         "Digest `9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08` tutaj.\n",
         "pl",
       ),
-    ).toBe("Digest, wyrażenie, tutaj.");
+    ).toBe("Digest hash tutaj.");
   });
 });

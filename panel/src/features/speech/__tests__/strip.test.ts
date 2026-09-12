@@ -96,11 +96,16 @@ describe("stripToSpeakableText", () => {
       `Call ${atThreshold} first.`,
     );
 
-    // One character past the threshold is no longer followable by ear, so it
-    // is named rather than spoken — it used to be dropped, which left the
-    // sentence describing a call to nothing at all.
-    const pastThreshold = "a".repeat(MAX_SPOKEN_CODE_CHARS + 1);
+    // Past the threshold the span is named rather than spoken — it used to be
+    // dropped, which left the sentence describing a call to nothing at all.
+    // The cap applies to expressions only: the span needs a space in it, or it
+    // is one name and is read however long it runs.
+    const pastThreshold = `${"a".repeat(MAX_SPOKEN_CODE_CHARS)} + 1`;
     expect(stripToSpeakableText(`Call \`${pastThreshold}\` first.`)).toBe("Call ⟦expr⟧ first.");
+
+    // A single token past the cap is a name, not an expression, and is spoken.
+    const longName = "a".repeat(MAX_SPOKEN_CODE_CHARS + 1);
+    expect(stripToSpeakableText(`Call \`${longName}\` first.`)).toBe(`Call ${longName} first.`);
   });
 
   it("elides a long file path with a line range", () => {
@@ -782,6 +787,32 @@ describe("stripToSpeakableText", () => {
     // spaced out, or the hyphen in `12-30` would be spoken as "twelve thirty".
     expect(stripToSpeakableText("See panel/src/use-speech-player.ts:12-30 for the swap.")).toBe(
       "See use speech player.ts for the swap.",
+    );
+  });
+
+  it("speaks a long single-token name as written", () => {
+    // The cap is there to catch expressions, not names. A change-id is one
+    // unbroken token: a listener follows it fine at any length, and naming it
+    // "expression" tells them something false about what they missed.
+    expect(
+      stripToSpeakableText(
+        "Active: `terminal-tab-reachability`, `terminal-resize-discipline`, " +
+          "`2026-04-19-launch-distribution`.",
+      ),
+    ).toBe(
+      "Active: terminal-tab-reachability, terminal-resize-discipline, " +
+        "2026-04-19-launch-distribution.",
+    );
+
+    // Underscores and dots join a token the same way a hyphen does.
+    expect(stripToSpeakableText("See `SPEECH_STREAM_STALL_TIMEOUT_MS` for the wait.")).toBe(
+      "See SPEECH_STREAM_STALL_TIMEOUT_MS for the wait.",
+    );
+
+    // A space is what makes a span an expression rather than a name, and that
+    // is still named once it runs past the cap.
+    expect(stripToSpeakableText("Call `const x = await synth(a, b, c, d)` first.")).toBe(
+      "Call ⟦expr⟧ first.",
     );
   });
 

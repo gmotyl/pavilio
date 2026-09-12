@@ -43,6 +43,19 @@ const FENCE_RE = /^ {0,3}(`{3,}|~{3,})\s*(.*)$/;
 const INLINE_CODE_RE = /`+([^`\n]+)`+/g;
 
 /**
+ * One unbroken name: word characters joined by the separators that join names
+ * (`-`, `_`, `.`), and nothing else.
+ *
+ * The length cap exists to catch *expressions* — calls, operators, punctuation
+ * a listener cannot follow by ear. A name is not that, however long it runs:
+ * `terminal-resize-discipline` is 26 characters and perfectly followable, and
+ * naming it "expression" tells the listener something false about what they
+ * missed. A space is what separates the two cases, which is why this is the
+ * whole test.
+ */
+const SINGLE_TOKEN_RE = /^[\w.-]+$/;
+
+/**
  * A path-ish token: either slash-separated segments, or a bare filename with a
  * line range (`useTerminalOrdering.ts:66-75`). A trailing `:12-34` / `:12:5`
  * line reference is part of the token so it can be dropped with it.
@@ -491,10 +504,15 @@ function reduceAddresses(line: string): string {
  * A path is never named this way, however long the span: `elideLongPaths` has
  * already reduced it to something speakable, and "expression" would be the
  * wrong word for it anyway.
+ *
+ * Neither is a {@link SINGLE_TOKEN_RE} name — a change-id, a constant, a
+ * dotted identifier. The cap is a proxy for "is this an expression", and on a
+ * span with no spaces in it the proxy is simply wrong.
  */
 function reduceInlineCode(line: string): string {
   return line.replace(INLINE_CODE_RE, (_match, code: string) => {
     if (isWholePath(code)) return elideLongPaths(code);
+    if (SINGLE_TOKEN_RE.test(code)) return code;
     return code.length > MAX_SPOKEN_CODE_CHARS ? SENTINEL.expr : code;
   });
 }
