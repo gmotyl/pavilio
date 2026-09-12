@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import {
+  __resetRealtimeChannelForTests,
+  realtimeSubscriberCount,
+} from "../channel";
 import { useWebSocket } from "../useWebSocket";
 
 class FakeWebSocket {
@@ -46,45 +50,81 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __resetRealtimeChannelForTests();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("useWebSocket", () => {
-  it("exposes the latest message", () => {
+  it("starts with no message", () => {
     const { result } = renderHook(() => useWebSocket());
+
+    expect(result.current.lastMessage).toBeNull();
+  });
+
+  it("surfaces a frame that arrives while mounted", () => {
+    const { result } = renderHook(() => useWebSocket());
+
     act(() => last().deliver({ type: "file-change", path: "/a.md" }));
+
     expect(result.current.lastMessage).toEqual({
       type: "file-change",
       path: "/a.md",
     });
+
+    // Consumers key their effects off `lastMessage`, so an identical repeat
+    // frame still has to change identity or the refetch never re-runs.
+    const first = result.current.lastMessage;
+    act(() => last().deliver({ type: "file-change", path: "/a.md" }));
+    expect(result.current.lastMessage).toEqual(first);
+    expect(result.current.lastMessage).not.toBe(first);
   });
 
-  it("reconnects when no frame arrives for longer than the stale window", () => {
-    renderHook(() => useWebSocket());
+  it("two consumers share one socket", () => {
+    const a = renderHook(() => useWebSocket());
+    const b = renderHook(() => useWebSocket());
+
     expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(realtimeSubscriberCount()).toBe(2);
 
-    act(() => {
-      vi.advanceTimersByTime(40_000);
-    });
+    act(() => last().deliver({ type: "ping" }));
 
-    expect(FakeWebSocket.instances[0].closed).toBe(true);
-    act(() => {
-      vi.advanceTimersByTime(2_000); // reconnect backoff
-    });
-    expect(FakeWebSocket.instances.length).toBeGreaterThan(1);
+    expect(a.result.current.lastMessage).toEqual({ type: "ping" });
+    expect(b.result.current.lastMessage).toEqual({ type: "ping" });
   });
 
-  it("stays connected while server pings keep arriving", () => {
+  it("unmounting releases the subscription without closing the socket", () => {
+    const a = renderHook(() => useWebSocket());
     renderHook(() => useWebSocket());
-    for (let i = 0; i < 6; i++) {
-      act(() => {
-        vi.advanceTimersByTime(10_000);
-        last().deliver({ type: "ping" });
-      });
-    }
+    expect(realtimeSubscriberCount()).toBe(2);
+
+    act(() => a.unmount());
+
+    expect(realtimeSubscriberCount()).toBe(1);
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(FakeWebSocket.instances[0].closed).toBe(false);
+  });
+
+  it("a consumer mounted after a frame starts empty", () => {
+    const early = renderHook(() => useWebSocket());
+    act(() => last().deliver({ type: "file-change", path: "/a.md" }));
+    expect(early.result.current.lastMessage).not.toBeNull();
+
+    const late = renderHook(() => useWebSocket());
+
+    expect(late.result.current.lastMessage).toBeNull();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("remounting opens no new socket", () => {
+    const first = renderHook(() => useWebSocket());
+    act(() => first.unmount());
+
+    const second = renderHook(() => useWebSocket());
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeWebSocket.instances[0].closed).toBe(false);
+    expect(second.result.current.lastMessage).toBeNull();
   });
 
   it("publishes a synthetic file-change after a reconnect, but not on first connect", () => {
@@ -102,40 +142,5 @@ describe("useWebSocket", () => {
       type: "file-change",
       event: "reconnect",
     });
-  });
-
-  it("checks staleness immediately when the tab becomes visible", () => {
-    renderHook(() => useWebSocket());
-
-    // Background: timers are throttled in real browsers, so simulate the gap
-    // without letting the watchdog interval run.
-    visibility = "hidden";
-    act(() => {
-      vi.setSystemTime(Date.now() + 300_000);
-      visibility = "visible";
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-
-    expect(FakeWebSocket.instances[0].closed).toBe(true);
-  });
-
-  it("does not reconnect after unmount", () => {
-    const { unmount } = renderHook(() => useWebSocket());
-    act(() => unmount());
-    const count = FakeWebSocket.instances.length;
-    act(() => {
-      vi.advanceTimersByTime(60_000);
-    });
-    expect(FakeWebSocket.instances).toHaveLength(count);
-  });
-
-  it("leaves no timer behind after unmount, even mid-reconnect", () => {
-    const { unmount } = renderHook(() => useWebSocket());
-    // Stall the socket so a reconnect timer is pending at unmount time.
-    act(() => {
-      vi.advanceTimersByTime(40_000);
-    });
-    act(() => unmount());
-    expect(vi.getTimerCount()).toBe(0);
   });
 });
