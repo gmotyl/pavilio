@@ -192,7 +192,7 @@ describe("useAllTerminalSessions tiling", () => {
     expect(new Set(flat).size).toBe(flat.length);
   });
 
-  // Every WebSocket message refetches on this page, on top of the 8s poll — so a
+  // Every realtime frame refetches tab-wide, on top of the 8s poll — so a
   // re-sync of an id set that did not change is the steady state, not an edge case.
   it("a re-sync of an unchanged id set does not alter the stored layout", async () => {
     const live = [session("a", "vector"), session("b", "metro"), session("c", "ch")];

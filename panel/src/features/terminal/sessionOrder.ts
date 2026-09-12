@@ -28,7 +28,8 @@ export function mergeOrder(storedOrder: string[], serverIds: string[]): string[]
   const appended = serverIds.filter((id) => !keptSet.has(id));
   const next = [...kept, ...appended];
   // Return the original reference when nothing actually changed, so React
-  // setState + the order-persist effect don't fire on every 8s poll tick.
+  // setState + the order-persist effect don't fire on every 8s tick of the
+  // shared session store's poll.
   if (
     next.length === storedOrder.length &&
     next.every((id, i) => id === storedOrder[i])

@@ -112,7 +112,9 @@ function start(): void {
 /**
  * Start listening. Returns the unsubscribe. The first subscriber opens the
  * socket; later ones join it. A subscriber is delivered only frames that arrive
- * after this call — never a replayed earlier frame.
+ * after this call — never a replayed earlier frame. The opposite of
+ * `subscribeSessions`, which replays on purpose: a frame is an event, a session
+ * list is state.
  */
 export function subscribeRealtime(listener: Listener): () => void {
   listeners.add(listener);
@@ -131,6 +133,11 @@ export function realtimeSubscriberCount(): number {
  * Test-only teardown: closes the socket, clears subscribers and timers. The
  * production path never closes the socket, so suites need this to avoid
  * leaking one between files.
+ *
+ * A suite that calls this must reset the session store too
+ * (`__resetSessionStoreForTests`): clearing the subscribers drops the store's
+ * own listener, while the store stays `started` and so never re-subscribes —
+ * leaving it permanently deaf to realtime frames for the rest of the file.
  */
 export function __resetRealtimeChannelForTests(): void {
   started = false;

@@ -232,6 +232,40 @@ describe("terminal session store", () => {
     warn.mockRestore();
   });
 
+  it("keeps delivering to the other subscribers when one throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const throws = vi.fn(() => {
+      throw new Error("subscriber boom");
+    });
+    const good = vi.fn();
+
+    // The thrower goes first on purpose: `subscribeSessions` notifies before it
+    // starts, so a throw escaping that immediate call would leave the store
+    // never fetching and never polling — deaf for the whole tab.
+    expect(() => subscribeSessions(throws)).not.toThrow();
+    subscribeSessions(good);
+
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    respond([session("a"), session("b")]);
+    await refreshSessions();
+
+    expect(throws).toHaveBeenCalledTimes(2); // the empty start, then the list
+    expect(good).toHaveBeenLastCalledWith(getSessions());
+    expect(getSessions()).toHaveLength(2);
+    expect(warn).toHaveBeenCalled();
+
+    // The store survives the failure: the poll still runs and still delivers.
+    respond([session("a")]);
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(good).toHaveBeenLastCalledWith(getSessions());
+    expect(getSessions()).toHaveLength(1);
+
+    warn.mockRestore();
+  });
+
   it("ignores a superseded fetch that lands after a newer one", async () => {
     // Two loads in flight at once is the steady state here — a realtime frame or a
     // refresh lands on top of the poll — so the store must honour the last request
