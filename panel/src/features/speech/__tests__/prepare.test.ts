@@ -75,6 +75,19 @@ const noSentinelResponse = [
   "",
   "Druga część jest krótka i nie ma w niej niczego do usunięcia.",
   "",
+  // A mid-body heading: `removeMarkers` strips the `##`, so this paragraph
+  // reaches the packer with no terminator. It is the shape that made a
+  // placeholder behind it lose its pause — and it is here so that no fix for
+  // that may pay for itself by rewriting prose that has no placeholder in it.
+  "## Trzecia część",
+  "",
+  // The trailing comma is the point of this line, not a typo. Tidy rule "a
+  // placeholder closing the paragraph becomes a full stop" would rewrite it,
+  // so this paragraph is what makes the byte-identity guard in
+  // `speakSentinels` load-bearing: delete the early `return text` and this
+  // comma becomes a period.
+  "Ostatni akapit urywa się przecinkiem,",
+  "",
 ].join("\n");
 
 const NO_SENTINEL_UNITS = [
@@ -83,8 +96,9 @@ const NO_SENTINEL_UNITS = [
   {
     text:
       "Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko. " +
-      "Druga część jest krótka i nie ma w niej niczego do usunięcia.",
-    chars: 127,
+      "Druga część jest krótka i nie ma w niej niczego do usunięcia. " +
+      "Trzecia część Ostatni akapit urywa się przecinkiem,",
+    chars: 179,
   },
 ];
 
@@ -459,6 +473,100 @@ describe("prepare", () => {
     // stood in it, so the tidy pass never runs over ordinary prose.
     expect(prepare(noSentinelResponse, { language: "pl" }).units).toEqual(NO_SENTINEL_UNITS);
     expect(prepare(noSentinelResponse, { language: "en" }).units).toEqual(NO_SENTINEL_UNITS);
+  });
+
+
+  it("a placeholder opening a paragraph still pauses after the one before it", () => {
+    // A paragraph start is NOT an utterance start. `packUnits` joins paragraphs
+    // with a single space, so a heading — which `removeMarkers` strips to bare
+    // words and which therefore carries no terminator — runs straight into the
+    // placeholder behind it. "Wyniki blok kodu" is one noun phrase to a
+    // listener, and a mid-body heading followed by a fenced block is the most
+    // common shape an agent answer has.
+    const markdown = [
+      "Wstęp jest tutaj.",
+      "",
+      "## Wyniki",
+      "",
+      "```ts",
+      "const x = 1;",
+      "```",
+      "",
+      "Dalszy akapit tutaj.",
+      "",
+    ].join("\n");
+
+    expect(spoken(markdown, "pl")).toContain("Wyniki, blok kodu. Dalszy akapit tutaj.");
+    expect(spoken(markdown, "en")).toContain("Wyniki, code block. Dalszy akapit tutaj.");
+    expect(spoken(markdown, "pl")).not.toContain("Wyniki blok kodu");
+
+    // …and the pause is not paid for with a stumble at the other end: when the
+    // paragraph before it does carry its own punctuation, that one wins and our
+    // comma is dropped rather than doubled.
+    const afterColon = [
+      "Kod poniżej:",
+      "",
+      "```ts",
+      "const x = 1;",
+      "```",
+      "",
+    ].join("\n");
+
+    expect(spoken(afterColon, "pl")).toBe("Kod poniżej: blok kodu.");
+  });
+
+  it("never opens an utterance with a comma", () => {
+    // The one place tidy rule 4's reasoning is actually true. A unit is exactly
+    // what synthesis receives, so a leading comma here is a beat before the
+    // first word — and unlike a paragraph edge, a unit edge really has nothing
+    // behind it.
+    const { units } = prepare("```ts\nconst x = 1;\n```\n\nZaczynamy od tego.\n", {
+      language: "pl",
+    });
+
+    for (const unit of units) {
+      expect(unit.text).not.toMatch(/^\s*,/);
+      expect(unit.chars).toBe(unit.text.length);
+    }
+    expect(units[0].text).toBe("blok kodu.");
+  });
+
+  it("keeps the author's own pause when a placeholder follows a colon", () => {
+    // Tidy rule 1, with the colon and the sentinel in the SAME paragraph — the
+    // only arrangement in which the rule can fire at all. Without it the voice
+    // gets "Obrazek: , obrazek, tutaj." and reads the colon's beat twice.
+    const text = spoken("Obrazek: ![alt](http://x/y.png) tutaj.\n", "pl");
+
+    expect(text).toBe("Obrazek: obrazek, tutaj.");
+    expect(text).not.toContain(": ,");
+  });
+
+  it("does not let a placeholder's comma lean on the sentence's terminator", () => {
+    // Tidy rule 2, in its two live shapes: a sentinel that ends the sentence,
+    // and two adjacent sentinels whose touching commas would otherwise double.
+    expect(spoken("Więcej tutaj: https://example.com/a.\n", "pl")).toBe("Więcej tutaj: link.");
+    expect(spoken("Dwa ![a](http://x/a.png) ![b](http://x/b.png) obok.\n", "pl")).toBe(
+      "Dwa, obrazek, obrazek, obok.",
+    );
+  });
+
+  it("drops the commas a bracket or a quote already carries", () => {
+    // A bracket or a quotation mark is an aside marker in its own right: the
+    // voice does not read it, but our comma landing hard against one is heard
+    // as a stumble — "Zobacz (, link,) tutaj." The rules knew sentence
+    // punctuation and nothing about brackets.
+    expect(spoken("Zobacz (https://example.com/a) tutaj.\n", "pl")).toBe("Zobacz (link) tutaj.");
+    // An image rather than a bare address, because `strip.ts` ends a bare
+    // address at whitespace and would swallow the closing „…” quote into it.
+    expect(spoken("Zobacz „![alt](http://x/y.png)” tutaj.\n", "pl")).toBe("Zobacz „obrazek” tutaj.");
+    expect(spoken("Zobacz [https://example.com/a] tutaj.\n", "en")).toBe("Zobacz [link] tutaj.");
+  });
+
+  it("keeps an em dash's own pause instead of doubling it", () => {
+    // The mirror gap: a dash pauses exactly like a terminator, but it needs the
+    // space around it kept, which is why it cannot simply join rule 2's class.
+    expect(spoken("Tekst ![alt](http://x/y.png) — dalej.\n", "pl")).toBe("Tekst, obrazek — dalej.");
+    expect(spoken("Tekst — ![alt](http://x/y.png) dalej.\n", "pl")).toBe("Tekst — obrazek, dalej.");
   });
 
   it("substitutes a sentinel before the pronunciation map can mangle it", () => {

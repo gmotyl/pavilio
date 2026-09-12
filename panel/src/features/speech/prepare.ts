@@ -115,28 +115,45 @@ const SENTINEL_RE = new RegExp(`⟦(${Object.keys(SENTINEL).join("|")})⟧`, "g"
  * sentinel actually stood in — see {@link speakSentinels} — so it cannot drift
  * into rewriting ordinary prose.
  *
- * The four rules are the four ways a `, phrase,` can land badly. What none of
- * them may do is *remove the pauses*: the commas are the whole reason the voice
- * sets the placeholder apart from the sentence instead of reading
- * "obrazek" as the next word of it.
+ * Every rule here is a way a `, phrase,` can land badly *within one paragraph*.
+ * What none of them may do is *remove the pauses*: the commas are the whole
+ * reason the voice sets the placeholder apart from the sentence instead of
+ * reading "obrazek" as the next word of it. The paragraph's two outer edges are
+ * deliberately NOT tidied here — a paragraph edge is not an utterance edge, and
+ * what the leading comma should become depends on the paragraph before it. That
+ * decision belongs to {@link joinPacked} and {@link toUnits}, which are the two
+ * places where the neighbour is known.
+ *
+ * Single quotes are absent from the bracket classes on purpose: `'` and `’` are
+ * Polish inflection apostrophes (`pipeline'y`), not aside markers, and the
+ * ASCII `"` is absent because it is both an opener and a closer — it would eat
+ * the legitimate comma in `⟦link⟧, "cytat"`.
  */
 function tidyAroundPlaceholder(text: string): string {
   return (
     text
       // "Kod poniżej: , blok kodu," — the author's mark already pauses; ours
-      // would be read as a second beat. Theirs wins, because it carries meaning.
-      .replace(/([,.;:!?…]) *, */g, "$1 ")
+      // would be read as a second beat. Theirs wins, because it carries
+      // meaning. An em or en dash pauses exactly the same way.
+      .replace(/([,.;:!?…—–]) *, */g, "$1 ")
       // The mirror case, where our trailing comma leans on the sentence's own
       // terminator. This is also what collapses two adjacent placeholders'
       // touching commas into one.
       .replace(/ *, *([,.;:!?…])/g, "$1")
+      // A dash is that mirror case too, but it cannot share the class above:
+      // that replacement drops the space, and "obrazek— dalej" is not a dash.
+      .replace(/ *, *(?=[—–])/g, " ")
+      // "Zobacz (, link,) tutaj." — a bracket or a quotation mark is the
+      // author's own setting-apart. The voice does not read it, but our comma
+      // hard against one is heard as a stumble, and brackets hug their content,
+      // so no space is left behind.
+      .replace(/([([{„“«]) *, */g, "$1")
+      .replace(/ *, *([)\]}”»])/g, "$1")
       // "Obrazek , obrazek," — a space before a comma is heard as a stumble.
       .replace(/ +,/g, ",")
-      // A placeholder opening the text has nothing behind it to pause after.
-      .replace(/^ *, */, "")
-      // One closing it becomes a full stop rather than losing its pause: units
-      // are packed from paragraphs joined by a single space, so a dangling
-      // comma would let this paragraph run straight into the next one.
+      // One closing the paragraph becomes a full stop rather than losing its
+      // pause: units are packed from paragraphs joined by a single space, so a
+      // dangling comma would let this paragraph run straight into the next one.
       .replace(/ *, *$/, ".")
       .trim()
   );
@@ -225,6 +242,29 @@ function cutAtCeiling(text: string, max: number): string[] {
 }
 
 /**
+ * Joins one packed paragraph onto the unit being built.
+ *
+ * A paragraph that begins with a comma begins with a placeholder, and that
+ * comma is its pause. Whether the pause is *needed* is decidable only here, at
+ * the seam, because it depends on the paragraph before it. Paragraphs are
+ * joined by a single space, so a left side carrying no punctuation of its own —
+ * a mid-body heading, which `removeMarkers` strips to bare words and which
+ * therefore never has a terminator — would otherwise run straight into the
+ * placeholder, and "Wyniki blok kodu" is one noun phrase to a listener. A
+ * heading followed by a fenced block is the most common shape an agent answer
+ * has, so this is the common case, not a corner.
+ *
+ * When the left side does already pause, theirs wins and ours goes: that is
+ * {@link tidyAroundPlaceholder}'s first rule, applied at the one place where
+ * the thing it reasons about is actually visible.
+ */
+function joinPacked(pending: string, paragraph: string): string {
+  if (!paragraph.startsWith(", ")) return `${pending} ${paragraph}`;
+
+  return /[,.;:!?…—–]$/.test(pending) ? `${pending} ${paragraph.slice(2)}` : `${pending}${paragraph}`;
+}
+
+/**
  * Packs spoken paragraphs into units: merge consecutive ones until the unit
  * reaches {@link UNIT_MIN_CHARS}, never merging past {@link UNIT_MAX_CHARS}, and
  * cut a paragraph that is oversized on its own.
@@ -250,10 +290,14 @@ function packUnits(paragraphs: readonly string[]): string[] {
     }
 
     if (!pending) pending = paragraph;
-    else if (`${pending} ${paragraph}`.length > UNIT_MAX_CHARS) {
-      flush();
-      pending = paragraph;
-    } else pending = `${pending} ${paragraph}`;
+    else {
+      const joined = joinPacked(pending, paragraph);
+
+      if (joined.length > UNIT_MAX_CHARS) {
+        flush();
+        pending = paragraph;
+      } else pending = joined;
+    }
 
     if (pending.length >= UNIT_MIN_CHARS) flush();
   }
@@ -289,8 +333,24 @@ function takeHeading(paragraphs: string[]): string | null {
   return heading[1].trim();
 }
 
+/**
+ * The other half of {@link joinPacked}, and the one place where "a placeholder
+ * opening the text has nothing behind it to pause after" is actually true: a
+ * unit is exactly the string handed to synthesis, so an utterance can no more
+ * open with a comma than a sentence can. A paragraph, by contrast, is only ever
+ * a fragment of one — which is why this rule used to fire a paragraph too early
+ * and silently delete the pause a packed paragraph needed.
+ *
+ * Unconditional rather than gated on a substitution having happened, because
+ * the invariant is about utterances, not about placeholders — and ordinary
+ * prose cannot reach here starting with a comma anyway: a paragraph would have
+ * to literally begin with one, after `removeMarkers`, whitespace collapse and a
+ * trim.
+ */
 function toUnits(texts: readonly string[]): SpeechUnit[] {
-  return texts.map((text) => ({ text, chars: text.length }));
+  return texts
+    .map((text) => text.replace(/^ *, */, ""))
+    .map((text) => ({ text, chars: text.length }));
 }
 
 /**
