@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetRealtimeChannelForTests,
+  type RealtimeFrame,
   realtimeSubscriberCount,
   subscribeRealtime,
 } from "../channel";
@@ -181,6 +182,26 @@ describe("realtime channel", () => {
     expect(listener).toHaveBeenCalledWith(
       expect.objectContaining({ type: "file-change", event: "reconnect", path: "" }),
     );
+  });
+
+  it("gives every reconnect frame its own object", () => {
+    const frames: RealtimeFrame[] = [];
+    subscribeRealtime((frame) => {
+      frames.push(frame);
+    });
+
+    // Two reconnects with no data frame in between: server down, reconnect,
+    // silence past the stale window, watchdog, reconnect again.
+    vi.advanceTimersByTime(40_000);
+    vi.advanceTimersByTime(2_000);
+    vi.advanceTimersByTime(40_000);
+    vi.advanceTimersByTime(2_000);
+
+    expect(frames).toHaveLength(2);
+    expect(frames[1]).toEqual(frames[0]);
+    // Equal in value but never the same object: consumers key their effects off
+    // `lastMessage` identity, so a shared one would skip the second refetch.
+    expect(frames[1]).not.toBe(frames[0]);
   });
 
   it("ignores a non-JSON message", () => {
