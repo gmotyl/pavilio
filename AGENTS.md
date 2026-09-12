@@ -6,6 +6,21 @@ This file defines your project registry and workflow for AI agents (Claude Code,
 
 - When reporting information to me, be extremely concise and sacrifise grammar fo the sake of concision.
 
+## Writing for the voice
+
+The panel speaks finished responses aloud. The voice cannot read a table, a diagram or a URL, so
+those are stripped before synthesis and announced as `, tabela,` / `, link,` — the listener hears
+that something was there, but not what it said. Two habits close that gap:
+
+- **After a table, add one sentence saying what it shows.** The table itself is never spoken, so
+  without that sentence the listener gets a placeholder and no content.
+- **After a link, name the destination in parentheses** — `[the ordering hook](https://…)
+  (link do githuba)`. The address is dropped before synthesis, so the parenthetical is the only
+  thing that survives to say where it pointed.
+
+Both are written for the ear, not the eye. They cost one line each, and they are the difference
+between an answer that survives being heard and one that does not.
+
 ## Projects Registry
 
 > **Your projects are private.** Create `.projects.local.md` in the repo root (gitignored) to define your project list. See `AGENTS.md.example` to get started.
