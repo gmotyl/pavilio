@@ -213,7 +213,7 @@ export function useSpeechHost(): SpeechHost {
     // red state exists to remove.
     for (const utterance of speakableUtterances) {
       // A newer answer for a cell the user left PAUSED abandons the held run,
-      // exactly as a barge-in abandons it in `speakFrom`. Without this the run
+      // exactly as a barge-in abandons it in `speak`. Without this the run
       // stays `pending` — `onPause` stamps nothing, on purpose — so the player
       // goes on naming the cell as its paused one, `paused` outranks every
       // other state in the channel, and the control routes the next click to
@@ -246,7 +246,7 @@ export function useSpeechHost(): SpeechHost {
         held.utteranceId !== utterance.id &&
         player.pausedSessionId === utterance.sessionId
       ) {
-        // Stamped before `stop()` to read the same way `speakFrom`'s barge-in
+        // Stamped before `stop()` to read the same way `speak`'s barge-in
         // does — but the order is not what makes it work: `stop()` resolves the
         // pending `play` on a microtask, so the synchronous stamp lands first
         // either way. What it buys is the outcome: `superseded`, so the

@@ -478,9 +478,18 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
        * half of cover; hanging the remainder off it left every later unit
        * synthesizing barely one step ahead of the voice.
        *
-       * Only on a unit actually in hand, and only past unit 0: a run whose
-       * second unit failed is far more likely to be a synthesizer that is down
-       * than one worth opening three more connections against.
+       * Only on a unit actually in hand, and only past unit 0: a failed load
+       * carries no index to cascade from. A failure therefore DEFERS the
+       * warming by one unit rather than abandoning it — `cascaded` stays
+       * false, so the next unit that does land kicks the cascade instead, and
+       * one flaky unit does not cost the run its remainder. Three consecutive
+       * failures, not one, are what stop a run.
+       *
+       * The `isStale()` below is defence in depth, not the thing that holds
+       * the line: `cascadeWarm`'s own `!run.active` check is what stops an
+       * abandoned run from warming on, and removing this one alone changes no
+       * behaviour. It is kept because declining to start a cascade for a run
+       * that is already gone costs nothing.
        */
       const startCascade = (loaded: LoadedUnit): void => {
         if (cascaded || "error" in loaded || isStale()) return;

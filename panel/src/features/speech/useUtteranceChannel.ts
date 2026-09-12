@@ -36,7 +36,7 @@ import { getStoredArmedSession, setStoredArmedSession } from "./voices";
  *
  * Arrival is also where a response with **nothing to say** is filtered out. That
  * has to happen here rather than at the click: marking the cell `ready` first
- * and discovering the emptiness only inside `speakFrom` leaves every cell
+ * and discovering the emptiness only inside `speak` leaves every cell
  * pulsing for a pure-code answer, and an unarmed cell — the common case — stands
  * there with a pip until the user clicks it and nothing happens. So
  * {@link prepare} runs on arrival. It is pure text work (no synthesis, no

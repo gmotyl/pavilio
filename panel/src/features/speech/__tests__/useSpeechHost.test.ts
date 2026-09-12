@@ -672,6 +672,14 @@ describe("useSpeechHost — no budget, no resume point", () => {
 
     const beforeResume = played.length;
     await clickControl(result.current, "cell-a");
+
+    // The resume mechanism itself, pinned: the click re-issued `play()` on the
+    // unit the element was still holding — unit 1 again, not a rewind to unit 0
+    // and not a silent hand-off to the ladder. Without this assertion the test
+    // passes on a `resume` that merely clears the paused flag, because the
+    // harness fires `ended` by hand and the run would advance either way.
+    expect(played.slice(beforeResume)).toEqual([`blob:${units[1]}`]);
+
     await endRun();
 
     expect(played.slice(0, beforeResume)).toEqual([`blob:${units[0]}`, `blob:${units[1]}`]);

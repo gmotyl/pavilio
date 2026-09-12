@@ -429,6 +429,39 @@ describe("useSpeechPlayer", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it("cascades from the next unit that lands when one fails", async () => {
+    // Unit 1's synthesis fails. The cascade hangs off a unit actually in hand,
+    // so a failure defers it by one unit rather than abandoning it: unit 2
+    // lands and warms the whole remainder. One flaky socket must not cost the
+    // answer its warming — three consecutive failures are what stop a run.
+    synth.failOn("unit-1");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(6));
+
+    // Nothing beyond the failed unit yet: there is no loaded unit to cascade
+    // from, and the ladder does not reach unit 2 until unit 0 has been spoken.
+    expect(requested()).toEqual(["unit-0", "unit-1"]);
+    expect(played).toEqual(["blob:unit-0"]);
+
+    await endCurrentUnit();
+
+    // Unit 1 is skipped, unit 2 plays — and warming resumes behind it all the
+    // way to the last unit, exactly as an unbroken run would have warmed from
+    // unit 2 onwards.
+    expect(played).toEqual(["blob:unit-0", "blob:unit-2"]);
+    expect(requested()).toEqual([
+      "unit-0",
+      "unit-1",
+      "unit-2",
+      "unit-3",
+      "unit-4",
+      "unit-5",
+    ]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("keeps at most the window's worth of syntheses in flight", async () => {
     // Everything from unit 2 on is held open, so the window cannot drain:
     // whatever is in flight when the dust settles *is* the window.
@@ -479,6 +512,39 @@ describe("useSpeechPlayer", () => {
     // Never once did a fourth connection open.
     expect(synth.peakInFlight).toBe(SYNTHESIS_CONCURRENCY);
     expect(played).toEqual(["blob:unit-0"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("stops warming the moment the run loses the element", async () => {
+    // The window is what makes an abandoned run expensive: every slot it still
+    // holds refills itself when its request settles, so a run that was stopped
+    // or barged in on would go on opening sockets for its whole remaining tail
+    // — against the run that replaced it. Nothing else in the player notices,
+    // because warming touches neither the element nor any object URL.
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    expect(synth.inFlight).toEqual(["unit-2", "unit-3", "unit-4"]);
+
+    await settle(() => result.current.stop());
+    const before = requested().length;
+
+    // A slot comes free *after* the stop. On a live run this is exactly what
+    // starts unit 5; on a run that is over it must start nothing at all.
+    await settle(() => synth.release("unit-3"));
+
+    expect(requested()).toHaveLength(before);
+    expect(requested()).not.toContain("unit-5");
+
+    // And it stays stopped as the rest of the tail settles, rather than merely
+    // skipping the one refill.
+    await settle(() => {
+      synth.release("unit-2");
+      synth.release("unit-4");
+    });
+    expect(requested()).toHaveLength(before);
     expect(onError).not.toHaveBeenCalled();
   });
 

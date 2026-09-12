@@ -718,9 +718,11 @@ describe("autoplay — refusal and synthesis failure", () => {
     expect(getToastSnapshot()?.text).toMatch(/speech/i);
     // Consecutive is the point: the run gives up inside the first three units
     // rather than hammering the synthesizer through all twelve. Nothing beyond
-    // them is even warmed — the cascade is kicked by a unit actually *in hand*,
-    // and a run whose second unit failed is a synthesizer that is down, not one
-    // worth opening three more connections against.
+    // them is warmed either, but only because the synthesizer is down for
+    // *every* unit here: the cascade is kicked by a unit actually in hand, and
+    // no unit ever lands. A single failure mid-run would merely defer the
+    // warming to the next unit that did land — see `useSpeechPlayer.test.ts`,
+    // "cascades from the next unit that lands when one fails".
     expect(new Set(synth.requests)).toEqual(
       new Set(prepared.units.slice(0, 3).map((unit) => unit.text)),
     );
