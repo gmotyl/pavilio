@@ -231,6 +231,66 @@ describe("terminal session store", () => {
     warn.mockRestore();
   });
 
+  it("ignores a superseded fetch that lands after a newer one", async () => {
+    // Two loads in flight at once is the steady state here — a realtime frame or a
+    // refresh lands on top of the poll — so the store must honour the last request
+    // *issued*, not the last one to resolve.
+    const pending: ((list: SessionMeta[]) => void)[] = [];
+    const deferred = () =>
+      new Promise<Response>((resolve) => {
+        pending.push((list) =>
+          resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(list),
+          } as unknown as Response),
+        );
+      });
+    fetchMock.mockImplementationOnce(deferred).mockImplementationOnce(deferred);
+
+    subscribeSessions(vi.fn()); // the initial load
+    const refreshed = refreshSessions(); // issued on top of it
+    expect(pending).toHaveLength(2);
+
+    pending[1]([session("a"), session("b")]); // the newer request answers first
+    await flush();
+    expect(getSessions().map((s) => s.id)).toEqual(["a", "b"]);
+
+    pending[0]([session("a")]); // and the older one, now stale, second
+    await refreshed;
+    await flush();
+
+    expect(getSessions().map((s) => s.id)).toEqual(["a", "b"]);
+  });
+
+  it("the test reset fences a load already in flight", async () => {
+    let land!: (list: SessionMeta[]) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          land = (list) =>
+            resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve(list),
+            } as unknown as Response);
+        }),
+    );
+
+    const listener = vi.fn();
+    subscribeSessions(listener);
+    listener.mockClear(); // the immediate call with the empty starting list
+
+    __resetSessionStoreForTests();
+
+    // The response the reset was supposed to have fenced off.
+    land([session("a")]);
+    await flush();
+
+    expect(getSessions()).toEqual([]);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it("keeps polling after the last subscriber leaves", async () => {
     respond([session("a")]);
     const unsubscribe = subscribeSessions(vi.fn());

@@ -12,6 +12,7 @@ let sessions: SessionMeta[] = [];
 let started = false;
 let poll: ReturnType<typeof setInterval> | null = null;
 let stopRealtime: (() => void) | null = null;
+let loadGen = 0;
 
 function notify(listener: Listener): void {
   // Isolated: the store is tab-wide, so one broken consumer must not stop the
@@ -57,6 +58,11 @@ function publish(next: SessionMeta[]): void {
 }
 
 async function load(): Promise<void> {
+  // Overlapping loads are routine — a realtime frame or a refresh lands on top of
+  // the poll — and responses can come back out of order. Without this generation
+  // stamp the last request to *resolve* wins over the last one issued, so an older
+  // list silently overwrites a newer one for the whole tab.
+  const gen = ++loadGen;
   let next: SessionMeta[];
   try {
     const res = await fetch(ENDPOINT);
@@ -69,6 +75,8 @@ async function load(): Promise<void> {
     console.warn("[terminal] session store fetch failed:", err);
     return;
   }
+  // Superseded by a later load, or fenced off by a reset.
+  if (gen !== loadGen) return;
   publish(next);
 }
 
@@ -102,7 +110,14 @@ export function subscribeSessions(listener: Listener): () => void {
   };
 }
 
-/** The list as last fetched. */
+/**
+ * The list as last fetched. This is the store's live array, handed out by
+ * reference on purpose — the stable identity is what lets consumers skip work on
+ * an unchanged republish. Callers must treat it as frozen: an in-place `.sort()`
+ * in ordering code would rewrite the stability gate's own baseline, so the store
+ * would then compare the next payload against a list it never received and stop
+ * publishing real changes. Copy before mutating.
+ */
 export function getSessions(): SessionMeta[] {
   return sessions;
 }
@@ -118,6 +133,9 @@ export function refreshSessions(): Promise<void> {
  * files.
  */
 export function __resetSessionStoreForTests(): void {
+  // A fence, not just a clear: a load still in flight would otherwise land after
+  // the reset and republish into the cleared store, leaking one test into the next.
+  loadGen += 1;
   started = false;
   sessions = [];
   listeners.clear();
