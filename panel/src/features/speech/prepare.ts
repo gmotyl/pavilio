@@ -182,15 +182,92 @@ function speakSentinels(text: string, language: "pl" | "en"): string {
 }
 
 /**
+ * The shapes a listener cannot follow when they are spelled out, as source
+ * fragments so the recogniser and the classifier below cannot drift apart.
+ *
+ * `HEX_RUN` carries two lookaheads and both are load-bearing:
+ * - **at least one digit** is the safety argument for the whole rule. Without
+ *   it, `deadbeef`, `defaced`, `facade` and `decade` are ordinary English words
+ *   drawn entirely from the hex alphabet, and the voice eats them.
+ * - **at least one hex letter** is the mirror the contract's table does not
+ *   spell out: a run of seven digits is also a run of seven hex characters, so
+ *   "1048576 bytes" would be spoken as "hash bytes". A hash has both.
+ *
+ * `camelCase` is deliberately absent. The same rule that would improve
+ * `useSpeechHost` ruins `TypeScript` and `GitHub`: capitalisation is not a word
+ * boundary in prose, and an underscore is one nowhere else.
+ */
+const UUID_SHAPE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const DIGEST_SHAPE = "(?:sha1|sha224|sha256|sha384|sha512|md5|blake2b|blake2s|blake3):[0-9a-f]{4,}";
+const IDENTIFIER_SHAPE = "[a-z][a-z0-9]*(?:_[a-z0-9]+)+";
+const HEX_RUN_SHAPE = "(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,}";
+
+/**
+ * One pass, ordered alternation, so no rule can ever re-read another's output.
+ * The order matters twice: a UUID's last group is twelve hex characters and
+ * would otherwise be eaten by `HEX_RUN_SHAPE`, and a digest's prefix belongs to
+ * the token rather than being a word standing in front of it.
+ *
+ * The token boundaries are Unicode word boundaries rather than `\b`, so a hex
+ * run buried inside a longer word (`abc1234def5678xyz`) is left alone.
+ */
+const CODE_SHAPE_RE = new RegExp(
+  `(?<![\\p{L}\\p{N}_])(?:${UUID_SHAPE}|${DIGEST_SHAPE}|${IDENTIFIER_SHAPE}|${HEX_RUN_SHAPE})(?![\\p{L}\\p{N}_])`,
+  "giu",
+);
+
+const IS_UUID = new RegExp(`^${UUID_SHAPE}$`, "i");
+const IS_DIGEST = new RegExp(`^${DIGEST_SHAPE}$`, "i");
+const IS_IDENTIFIER = new RegExp(`^${IDENTIFIER_SHAPE}$`, "i");
+
+/** The label each shape is announced with. `hash` needs no translating. */
+const SPOKEN_SHAPE: Readonly<Record<"pl" | "en", { variable: string; id: string }>> = {
+  pl: { variable: "zmienna", id: "identyfikator" },
+  en: { variable: "variable", id: "identifier" },
+};
+
+/**
+ * Says the code-shaped tokens in the surviving prose as words.
+ *
+ * This runs AFTER {@link speakSentinels} and BEFORE {@link applyPronunciation},
+ * and the second half of that is the part with teeth: the acronym table matches
+ * `html` only as a standalone word and treats `_` as a word character, so
+ * `HTML_PARSER` is invisible to the map until this stage has split it. Run the
+ * map first and the acronym is simply never said. Substituting first hands the
+ * map ordinary words, which is the only input it was tuned for.
+ *
+ * What `strip.ts` already did is not re-derived here. Short inline code arrives
+ * unwrapped (so a backticked `user_id` is labelled like any bare token), an
+ * over-long expression arrives as `⟦expr⟧` (so a full 64-character digest in
+ * backticks is named an expression and never reaches the hash rule), and a path
+ * arrives as its last segment with `-` and `_` already spoken as spaces — which
+ * removes the very evidence the identifier rule keys on, so a path is spoken as
+ * bare words with no label. That is right: it was named as a path, not as a
+ * variable. A hash that IS a path's last segment keeps its shape and is named.
+ */
+function speakCodeShapes(text: string, language: "pl" | "en"): string {
+  const labels = SPOKEN_SHAPE[language];
+
+  return text.replace(CODE_SHAPE_RE, (token) => {
+    if (IS_UUID.test(token)) return labels.id;
+    if (IS_DIGEST.test(token)) return "hash";
+    if (IS_IDENTIFIER.test(token)) return `${labels.variable} ${token.toLowerCase().replace(/_/g, " ")}`;
+
+    return "hash";
+  });
+}
+
+/**
  * A paragraph as the voice will receive it: markers gone, line breaks collapsed
- * into spaces, placeholders said in words, and the pronunciation map applied on
- * the Polish branch only — in that order, for the reason on
- * {@link speakSentinels}.
+ * into spaces, placeholders said in words, code-shaped tokens said as words,
+ * and the pronunciation map applied on the Polish branch only — in that order,
+ * for the reasons on {@link speakSentinels} and {@link speakCodeShapes}.
  */
 function toSpokenText(text: string, language: "pl" | "en"): string {
   const spoken = speakSentinels(removeMarkers(text).replace(/\s+/g, " ").trim(), language);
+  const said = speakCodeShapes(spoken, language);
 
-  return language === "pl" ? applyPronunciation(spoken) : spoken;
+  return language === "pl" ? applyPronunciation(said) : said;
 }
 
 /** Blank-line-separated blocks, the shape `stripToSpeakableText` leaves behind. */

@@ -585,4 +585,113 @@ describe("prepare", () => {
     expect(text).not.toContain("koud");
     expect(text).not.toContain("⟦");
   });
+
+  it("speaks an underscored identifier as its words", () => {
+    expect(spoken("Regex HEADING_LINE_RE tutaj.\n", "en")).toBe(
+      "Regex variable heading line re tutaj.",
+    );
+    expect(spoken("Regex HEADING_LINE_RE tutaj.\n", "pl")).toBe(
+      "Regex zmienna heading line re tutaj.",
+    );
+
+    // `strip.ts` has already unwrapped short inline code, so a backticked
+    // identifier arrives here as a bare token and is labelled like any other.
+    expect(spoken("Stała `user_id` tutaj.\n", "pl")).toBe("Stała zmienna user id tutaj.");
+  });
+
+  it("names a hash instead of spelling it", () => {
+    expect(spoken("The tag points at 3f9a2b1c7d today.\n", "en")).toBe(
+      "The tag points at hash today.",
+    );
+    expect(spoken("Skrót 3f9a2b1c7d jest tutaj.\n", "pl")).toBe("Skrót hash jest tutaj.");
+
+    // A digest prefix is part of the token, not a word before it: without this
+    // shape the address would be read as "sha256 colon hash".
+    expect(spoken("Digest sha256:9f86d081884c7d65 matches.\n", "en")).toBe("Digest hash matches.");
+    expect(spoken("Digest md5:0cc175b9c0f1b6a8 matches.\n", "en")).toBe("Digest hash matches.");
+
+    // A hex run buried inside a longer word is not a token. `abc1234def5678xyz`
+    // is one word to a reader and must stay one word to the voice — the token
+    // boundaries, not the run length, are what decide that.
+    expect(spoken("Klucz abc1234def5678xyz tutaj.\n", "en")).toBe("Klucz abc1234def5678xyz tutaj.");
+  });
+
+  it("leaves a hex-looking word that has no digit alone", () => {
+    // The digit condition is the whole safety argument for the hash rule.
+    // `deadbeef` and `defaced` are seven-plus characters drawn entirely from
+    // the hex alphabet; drop the condition and the voice eats them as hashes.
+    const sentence = "The deadbeef and the defaced facade decade.";
+
+    expect(spoken(`${sentence}\n`, "en")).toBe(sentence);
+    expect(spoken(`${sentence}\n`, "pl")).toBe(sentence);
+  });
+
+  it("leaves a plain long number alone", () => {
+    // The mirror of the digit condition, and not in the contract's table: a run
+    // of seven digits is also a run of seven hex characters. A hash has both
+    // digits and letters in it; a byte count has only digits and must be read
+    // as the number it is.
+    expect(spoken("The build produced 1048576 bytes.\n", "en")).toBe(
+      "The build produced 1048576 bytes.",
+    );
+  });
+
+  it("names a UUID instead of spelling it", () => {
+    expect(spoken("Session 550e8400-e29b-41d4-a716-446655440000 ended.\n", "en")).toBe(
+      "Session identifier ended.",
+    );
+    expect(spoken("Sesja 550e8400-e29b-41d4-a716-446655440000 zakończona.\n", "pl")).toBe(
+      "Sesja identyfikator zakończona.",
+    );
+  });
+
+  it("does not split camel case", () => {
+    // The same rule that would improve `useSpeechHost` ruins `TypeScript` and
+    // `GitHub`: capitalisation is not a word boundary, an underscore is. Only
+    // the underscore is treated as one.
+    const sentence = "We use useSpeechHost with TypeScript and GitHub.";
+
+    expect(spoken(`${sentence}\n`, "en")).toBe(sentence);
+  });
+
+  it("applies the pronunciation map after the substitution, not before", () => {
+    // The order is verified against the map rather than asserted about it. The
+    // acronym table matches `html` only as a STANDALONE word, and `_` is a word
+    // character to it, so `HTML_PARSER` is invisible to the map until this
+    // stage has split it — run the map first and the acronym is never said.
+    expect(applyPronunciation("HTML_PARSER")).toBe("HTML_PARSER");
+
+    expect(spoken("Zmieniamy HTML_PARSER dzisiaj.\n", "pl")).toBe(
+      "Zmieniamy zmienna ejcz-ti-em-el parser dzisiaj.",
+    );
+    // …and the English branch, which never runs the map, keeps the acronym.
+    expect(spoken("We change HTML_PARSER today.\n", "en")).toBe(
+      "We change variable html parser today.",
+    );
+  });
+
+  it("leaves a token the path rule has already reduced to whatever it produced", () => {
+    // `strip.ts` runs first and its path rule is destructive in both directions.
+    // A hash that is a path's last segment keeps its shape, so it is still
+    // named here…
+    expect(spoken("Zobacz `.git/objects/ab/cdef1234567890` tutaj.\n", "pl")).toBe(
+      "Zobacz hash tutaj.",
+    );
+    // …but an underscored filename has already had its underscores spoken as
+    // spaces, which removes the very evidence this stage keys on. It is spoken
+    // as bare words with no "zmienna" label — correct, because it was named as
+    // a path, not as a variable.
+    expect(spoken("Plik `panel/src/features/speech/heading_line_re.ts` tutaj.\n", "pl")).toBe(
+      "Plik heading line re.ts tutaj.",
+    );
+    // And a full-length digest in backticks never reaches the hash rule at all:
+    // it is over MAX_SPOKEN_CODE_CHARS and not a path, so it was already named
+    // an expression.
+    expect(
+      spoken(
+        "Digest `9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08` tutaj.\n",
+        "pl",
+      ),
+    ).toBe("Digest, wyrażenie, tutaj.");
+  });
 });
