@@ -716,11 +716,13 @@ describe("autoplay — refusal and synthesis failure", () => {
 
     await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
     expect(getToastSnapshot()?.text).toMatch(/speech/i);
-    // Consecutive is the point: the run gives up inside the first few units —
-    // the three it tried to play, plus the one the ladder had warmed ahead of
-    // them — rather than hammering the synthesizer through all twelve.
+    // Consecutive is the point: the run gives up inside the first three units
+    // rather than hammering the synthesizer through all twelve. Nothing beyond
+    // them is even warmed — the cascade is kicked by a unit actually *in hand*,
+    // and a run whose second unit failed is a synthesizer that is down, not one
+    // worth opening three more connections against.
     expect(new Set(synth.requests)).toEqual(
-      new Set(prepared.units.slice(0, 4).map((unit) => unit.text)),
+      new Set(prepared.units.slice(0, 3).map((unit) => unit.text)),
     );
     expect(played).toEqual([]);
   });

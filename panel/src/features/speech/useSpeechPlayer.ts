@@ -1,6 +1,6 @@
 /**
- * The player: one `<audio>` element, a one-unit object-URL lookahead, and
- * barge-in by index reset.
+ * The player: one `<audio>` element, a one-unit object-URL lookahead over a
+ * cascade that warms the rest of the run, and barge-in by index reset.
  *
  * One element for the whole player, not one per unit and not one per cell: only
  * one thing is ever speaking, so barge-in is an index reset rather than a
@@ -18,16 +18,28 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { prefetchSpeech, synthesizeSpeech, toSpeechBlob } from "./synth";
+import { synthesizeSpeech, toSpeechBlob } from "./synth";
 import type { SpeechUnit } from "./types";
 import { getStoredVoice } from "./voices";
 
 /**
- * How far ahead of the playing unit the ladder reaches. The unit at +1 is
- * materialized all the way to an object URL (that is what makes the swap
- * local); the rest are only warmed in the synthesis cache.
+ * How many syntheses the run keeps in flight while it warms its remainder.
+ *
+ * A bound on *concurrency*, not on distance: the cascade reaches the last unit
+ * of the run no matter how long the answer is, it just never has more than this
+ * many connections open at once. Distance was the wrong bound — it made the
+ * warming keep pace with playback, so the tail of an answer was always
+ * synthesized late.
+ *
+ * Three, and not "all of them", because `prefetchSpeech`/`synthesizeSpeech`
+ * have no concurrency limit whatsoever: warming a ten-unit answer in one go
+ * opens ten edge-tts WebSocket handshakes, each with its own DRM token, all
+ * competing with the unit the listener is actually waiting for — and
+ * `SPEECH_STREAM_STALL_TIMEOUT_MS` is 15 s, so the losers stall rather than
+ * merely queue. Three is already many multiples ahead of playback: a unit is
+ * 20-30 s of audio and a synthesis a few seconds.
  */
-export const PREFETCH_AHEAD = 2;
+export const SYNTHESIS_CONCURRENCY = 3;
 
 /**
  * Consecutive unit failures that stop the run. Consecutive is the point: a
@@ -237,16 +249,46 @@ async function loadUnit(
   }
 }
 
-/** Warms the synthesis cache for the units past the materialized lookahead. */
-function warmAhead(
+/**
+ * Warms the synthesis cache for `[from, end)` behind a rolling window of
+ * {@link SYNTHESIS_CONCURRENCY} requests, each slot refilled the moment the
+ * request holding it settles, until the slice is exhausted.
+ *
+ * `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the whole
+ * point — it is what refills the slot — and a fire-and-forget warm cannot bound
+ * anything, since nothing can observe it finishing. The failure is swallowed
+ * exactly as `prefetchSpeech` swallows it, and the cache dedupes an in-flight
+ * request, so the ladder materializing a unit this is already warming costs no
+ * second connection.
+ *
+ * Fire-and-forget as a whole: nothing awaits this, which is what keeps a stalled
+ * unit far ahead of playback from touching the audio the listener is on.
+ */
+function cascadeWarm(
+  run: PlaybackRun,
   units: readonly SpeechUnit[],
   from: number,
-  through: number,
+  end: number,
   voice: string,
 ): void {
-  for (let index = from; index <= through && index < units.length; index += 1) {
-    prefetchSpeech(units[index].text, { voice });
-  }
+  let next = from;
+
+  const fill = (): void => {
+    // A torn-down or barged-in run must stop opening sockets the moment it
+    // loses the element: nothing will ever play what it warms from here on.
+    if (!run.active || next >= end) return;
+
+    const { text } = units[next];
+    next += 1;
+    void synthesizeSpeech(text, { voice })
+      .catch(() => {
+        // Best-effort: the unit is synthesized for real when the ladder
+        // reaches it, and that is where a failure gets reported.
+      })
+      .then(fill);
+  };
+
+  for (let slot = 0; slot < SYNTHESIS_CONCURRENCY; slot += 1) fill();
 }
 
 /**
@@ -423,17 +465,45 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
 
       const isStale = (): boolean => !run.active || runRef.current !== run;
       /**
-       * Materializes the next unit's object URL and warms the rest of the
-       * ladder behind it. Called with the index *after* the one just handled,
-       * so the warming is measured from the unit that is about to play.
+       * Whether the cascade has been kicked. Once per run: it warms all the way
+       * to the last unit of the slice, so a second one would have nothing left
+       * to reach.
+       */
+      let cascaded = false;
+      /**
+       * Kicked off the *promise* of the unit after unit 0, never from the run
+       * loop — the loop does not come back round until the unit now playing has
+       * finished, and that wait is the whole bug. Unit 0 is deliberately tiny (a
+       * heading, a first sentence), so its playback buys perhaps a second and a
+       * half of cover; hanging the remainder off it left every later unit
+       * synthesizing barely one step ahead of the voice.
+       *
+       * Only on a unit actually in hand, and only past unit 0: a run whose
+       * second unit failed is far more likely to be a synthesizer that is down
+       * than one worth opening three more connections against.
+       */
+      const startCascade = (loaded: LoadedUnit): void => {
+        if (cascaded || "error" in loaded || isStale()) return;
+        cascaded = true;
+        cascadeWarm(run, units, loaded.index + 1, units.length, voice);
+      };
+      /**
+       * Materializes one unit's object URL — that is what makes the swap local
+       * — and hangs the cascade off it. Called with the index *after* the one
+       * just handled, so it is always the unit that plays next.
        */
       const ladderFrom = (index: number): Promise<LoadedUnit> | null => {
-        warmAhead(units, index + 1, index + PREFETCH_AHEAD - 1, voice);
-        return index < units.length ? loadUnit(run, units, index, voice) : null;
+        if (index >= units.length) return null;
+        const loading = loadUnit(run, units, index, voice);
+        void loading.then(startCascade);
+        return loading;
       };
 
       // Nothing is warmed before the first unit: it is the one the listener is
-      // waiting on, so it gets the connection to itself.
+      // waiting on, so it gets the connection to itself. `loadUnit` directly
+      // rather than `ladderFrom`, because unit 0 landing must not kick the
+      // cascade — the remainder waits for unit 1, the unit that has to be ready
+      // before unit 0's short playback runs out.
       let pending: Promise<LoadedUnit> | null = loadUnit(run, units, start, voice);
       let consecutiveFailures = 0;
       /** Units the listener actually heard. Zero at the end is a failed run. */
@@ -470,7 +540,9 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
         }
 
         // The next unit's URL is built while this one plays, so it exists
-        // before `ended` fires. Started before the await, never after it.
+        // before `ended` fires, and — once that unit lands — the rest of the run
+        // is warmed behind it. Started before the await, never after it: after
+        // it, both would wait on this unit's playback.
         pending = ladderFrom(loaded.index + 1);
 
         try {
