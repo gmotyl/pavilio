@@ -23,9 +23,14 @@
  * Language is **received, not detected**. It is a property of the session (see
  * `voteLanguage` / `nextLanguageState` in `pronunciation.ts`), accumulated
  * across utterances, and defaults to English — the branch that changes nothing.
+ *
+ * It is also this module that turns `strip.ts`'s neutral sentinels into words,
+ * and it does so **before** the pronunciation map — see
+ * {@link speakSentinels}, where the collision that forces that order is spelled
+ * out.
  */
 import { applyPronunciation } from "./pronunciation";
-import { SENTINEL_ONLY_RE, stripToSpeakableText } from "./strip";
+import { SENTINEL, SENTINEL_ONLY_RE, stripToSpeakableText } from "./strip";
 import type { PreparedSpeech, SpeechUnit } from "./types";
 
 /** Characters of prepared speech one utterance may spend — ~90s of Polish. */
@@ -74,12 +79,99 @@ function removeMarkers(text: string): string {
     .replace(/\*/g, "");
 }
 
+/** The removal kinds `strip.ts` names, borrowed rather than re-declared. */
+type Sentinel = keyof typeof SENTINEL;
+
+/**
+ * What each of `strip.ts`'s neutral sentinels is said as, per language. The
+ * phrases are stored bare; {@link speakSentinels} adds the pauses, so the one
+ * fiddly part of this — punctuation — lives in one place instead of being baked
+ * into twelve string literals.
+ */
+const SPOKEN_SENTINEL: Readonly<Record<"pl" | "en", Readonly<Record<Sentinel, string>>>> = {
+  pl: {
+    code: "blok kodu",
+    table: "tabela",
+    html: "blok HTML",
+    image: "obrazek",
+    link: "link",
+    expr: "wyrażenie",
+  },
+  en: {
+    code: "code block",
+    table: "table",
+    html: "HTML block",
+    image: "image",
+    link: "link",
+    expr: "expression",
+  },
+};
+
+/** Built from {@link SENTINEL} so a new removal kind cannot be spelled twice. */
+const SENTINEL_RE = new RegExp(`⟦(${Object.keys(SENTINEL).join("|")})⟧`, "g");
+
+/**
+ * Tidies the punctuation a substitution just created. Only ever runs on text a
+ * sentinel actually stood in — see {@link speakSentinels} — so it cannot drift
+ * into rewriting ordinary prose.
+ *
+ * The four rules are the four ways a `, phrase,` can land badly. What none of
+ * them may do is *remove the pauses*: the commas are the whole reason the voice
+ * sets the placeholder apart from the sentence instead of reading
+ * "obrazek" as the next word of it.
+ */
+function tidyAroundPlaceholder(text: string): string {
+  return (
+    text
+      // "Kod poniżej: , blok kodu," — the author's mark already pauses; ours
+      // would be read as a second beat. Theirs wins, because it carries meaning.
+      .replace(/([,.;:!?…]) *, */g, "$1 ")
+      // The mirror case, where our trailing comma leans on the sentence's own
+      // terminator. This is also what collapses two adjacent placeholders'
+      // touching commas into one.
+      .replace(/ *, *([,.;:!?…])/g, "$1")
+      // "Obrazek , obrazek," — a space before a comma is heard as a stumble.
+      .replace(/ +,/g, ",")
+      // A placeholder opening the text has nothing behind it to pause after.
+      .replace(/^ *, */, "")
+      // One closing it becomes a full stop rather than losing its pause: units
+      // are packed from paragraphs joined by a single space, so a dangling
+      // comma would let this paragraph run straight into the next one.
+      .replace(/ *, *$/, ".")
+      .trim()
+  );
+}
+
+/**
+ * Substitutes each sentinel for its spoken form in the session's language.
+ *
+ * This MUST run before {@link applyPronunciation}, and the reason is concrete
+ * rather than stylistic: the Polish maps contain `code → koud` and the acronym
+ * `html → ejcz-ti-em-el`, and `⟦` is a word boundary to both. Applied first,
+ * the map turns `⟦code⟧` into `⟦koud⟧` — no longer a sentinel, so nothing here
+ * recognises it, and the voice spells the brackets out. Substituting first also
+ * leaves the map a useful job: `blok HTML` then becomes `blok ejcz-ti-em-el`,
+ * which is the acronym said correctly.
+ *
+ * Returning `text` itself when nothing matched is not an optimisation — it is
+ * what guarantees a response with no removals is prepared byte-for-byte as it
+ * was before placeholders existed, because the tidy pass never sees it.
+ */
+function speakSentinels(text: string, language: "pl" | "en"): string {
+  const phrases = SPOKEN_SENTINEL[language];
+  const substituted = text.replace(SENTINEL_RE, (_match, kind: Sentinel) => `, ${phrases[kind]},`);
+
+  return substituted === text ? text : tidyAroundPlaceholder(substituted);
+}
+
 /**
  * A paragraph as the voice will receive it: markers gone, line breaks collapsed
- * into spaces, and the pronunciation map applied on the Polish branch only.
+ * into spaces, placeholders said in words, and the pronunciation map applied on
+ * the Polish branch only — in that order, for the reason on
+ * {@link speakSentinels}.
  */
 function toSpokenText(text: string, language: "pl" | "en"): string {
-  const spoken = removeMarkers(text).replace(/\s+/g, " ").trim();
+  const spoken = speakSentinels(removeMarkers(text).replace(/\s+/g, " ").trim(), language);
 
   return language === "pl" ? applyPronunciation(spoken) : spoken;
 }

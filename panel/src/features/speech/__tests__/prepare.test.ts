@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { applyPronunciation } from "../pronunciation";
 import {
   SPEECH_BUDGET_CHARS,
   UNIT_MAX_CHARS,
@@ -31,6 +32,67 @@ const packingResponse = [
   longParagraph.trim(),
   "",
 ].join("\n");
+
+/**
+ * One response carrying every sentinel `strip.ts` can emit: a fence, a table, an
+ * HTML block, an image, a bare address, and an inline span too long to speak.
+ */
+const everySentinelResponse = [
+  "# Przegląd",
+  "",
+  "Zaczynamy od tego. Kod poniżej:",
+  "",
+  "```ts",
+  "const x = 1;",
+  "```",
+  "",
+  "Tabela poniżej:",
+  "",
+  "| a | b |",
+  "| --- | --- |",
+  "| 1 | 2 |",
+  "",
+  "<details>",
+  "<summary>x</summary>",
+  "</details>",
+  "",
+  "Obrazek ![alt](http://x/y.png) w środku, adres https://example.com/a też.",
+  "",
+  "Wyrażenie `alfa.beta.gamma.delta.epsilon` w zdaniu.",
+  "",
+].join("\n");
+
+/**
+ * A response with nothing removable in it — the control for "substitution is a
+ * no-op when there is nothing to substitute". Its expected units below were
+ * captured from the build before placeholders were spoken at all, so the
+ * assertion is literally "byte-identical to what this used to produce".
+ */
+const noSentinelResponse = [
+  "# Co się zmieniło",
+  "",
+  "Panel mówi ostatnią odpowiedź na głos. Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko.",
+  "",
+  "Druga część jest krótka i nie ma w niej niczego do usunięcia.",
+  "",
+].join("\n");
+
+const NO_SENTINEL_UNITS = [
+  { text: "Co się zmieniło", chars: 15 },
+  { text: "Panel mówi ostatnią odpowiedź na głos.", chars: 38 },
+  {
+    text:
+      "Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko. " +
+      "Druga część jest krótka i nie ma w niej niczego do usunięcia.",
+    chars: 127,
+  },
+];
+
+/** Everything the voice will say, in order — the only thing these tests judge. */
+const spoken = (markdown: string, language: "pl" | "en"): string =>
+  prepare(markdown, { language })
+    .units.map((unit) => unit.text)
+    .join(" ");
 
 describe("prepare", () => {
   it("unit 0 is the heading when there is one", () => {
@@ -65,7 +127,7 @@ describe("prepare", () => {
       ["```ts", "const order = useTerminalOrdering();", "```", "", body, ""].join("\n"),
     );
 
-    expect(units[0].text).toBe("\u27E6code\u27E7");
+    expect(units[0].text).toBe("code block.");
     expect(units[1].text).toBe("The grid keeps its own ordering.");
     expect(units[0].chars).toBeLessThan(UNIT_MIN_CHARS);
     expect(units[1].chars).toBeLessThan(UNIT_MIN_CHARS);
@@ -74,7 +136,7 @@ describe("prepare", () => {
     // it replaced rather than being hoisted past it.
     const table = prepare(["| a | b |", "| - | - |", "", body, ""].join("\n"));
 
-    expect(table.units[0].text).toBe("\u27E6table\u27E7");
+    expect(table.units[0].text).toBe("table.");
     expect(table.units[1].text).toBe("The grid keeps its own ordering.");
   });
 
@@ -93,7 +155,7 @@ describe("prepare", () => {
       ].join("\n"),
     );
 
-    expect(units[0].text).toBe("\u27E6code\u27E7");
+    expect(units[0].text).toBe("code block.");
     expect(units[1].text).toMatch(/^TLDR: the fence above is noise\./);
     expect(units[1].text).toContain("in the order the answer wrote them.");
   });
@@ -320,5 +382,99 @@ describe("prepare", () => {
     }
     expect(units[0].text).toBe("Heading with bold");
     expect(units.map((unit) => unit.text).join(" ")).toContain("A later heading");
+  });
+  it("speaks every sentinel in Polish for a Polish session", () => {
+    const text = spoken(everySentinelResponse, "pl");
+
+    expect(text).toContain("blok kodu");
+    expect(text).toContain("tabela");
+    // `blok HTML` reaches the voice as `blok ejcz-ti-em-el`: the substitution
+    // lands first and the pronunciation map then does its job on the acronym,
+    // which is exactly the stage order this task establishes.
+    expect(text).toContain("blok ejcz-ti-em-el");
+    expect(text).toContain("obrazek");
+    expect(text).toContain("link");
+    expect(text).toContain("wyrażenie");
+    // No sentinel may reach synthesis: the voice would spell the brackets out.
+    expect(text).not.toContain("⟦");
+    expect(text).not.toContain("⟧");
+  });
+
+  it("speaks every sentinel in English for an English session", () => {
+    const text = spoken(everySentinelResponse, "en");
+
+    expect(text).toContain("code block");
+    expect(text).toContain("table");
+    expect(text).toContain("HTML block");
+    expect(text).toContain("image");
+    expect(text).toContain("link");
+    expect(text).toContain("expression");
+    expect(text).not.toContain("⟦");
+    expect(text).not.toContain("⟧");
+  });
+
+  it("leaves no doubled comma or stray space around a substitution", () => {
+    const text = spoken(
+      [
+        "Obrazek ![alt](http://x/y.png) w środku, adres https://example.com/a też.",
+        "",
+        "Kod poniżej:",
+        "",
+        "```ts",
+        "const x = 1;",
+        "```",
+        "",
+      ].join("\n"),
+      "pl",
+    );
+
+    expect(text).not.toMatch(/ ,/); // no space before a comma
+    expect(text).not.toMatch(/,\s*,/); // no doubled comma
+    expect(text).not.toMatch(/,\s*[.;:!?]/); // no comma leaning on other punctuation
+    expect(text).not.toMatch(/[.;:!?]\s*,/);
+
+    // …and the pauses the commas exist for are still there. This pair of
+    // assertions is the whole point: a tidy pass that swallowed them would
+    // satisfy the four above and ruin the diction.
+    expect(text).toContain("Obrazek, obrazek, w środku");
+    expect(text).toContain("adres, link, też.");
+  });
+
+  it("keeps a paragraph that is only a placeholder", () => {
+    // A response that opens with a fence: `prepare` hoists the sentinel-only
+    // paragraph into its own unit, so the substitution has to make that unit
+    // speakable — an empty unit 0 is a synthesis round trip for silence.
+    const { units } = prepare("```ts\nconst x = 1;\n```\n\nZaczynamy od tego.\n", {
+      language: "pl",
+    });
+
+    expect(units[0].text).toBe("blok kodu.");
+    expect(units[0].chars).toBe("blok kodu.".length);
+    for (const unit of units) expect(unit.text.length).toBeGreaterThan(0);
+  });
+
+  it("changes nothing for a response with no sentinels", () => {
+    // A pin, not a new behaviour: it passed before this change and must keep
+    // passing. The substitution returns the text untouched when no sentinel
+    // stood in it, so the tidy pass never runs over ordinary prose.
+    expect(prepare(noSentinelResponse, { language: "pl" }).units).toEqual(NO_SENTINEL_UNITS);
+    expect(prepare(noSentinelResponse, { language: "en" }).units).toEqual(NO_SENTINEL_UNITS);
+  });
+
+  it("substitutes a sentinel before the pronunciation map can mangle it", () => {
+    // The collision is real and verified against the map, not invented: the
+    // stem map holds `code → koud` and the acronym map holds
+    // `html → ejcz-ti-em-el`, and neither treats `⟦` as anything but a word
+    // boundary. Run the map first and the sentinel is no longer a sentinel —
+    // a Polish session then says the literal "⟦koud⟧" out loud, which is what
+    // it did before this commit.
+    expect(applyPronunciation("⟦code⟧")).toBe("⟦koud⟧");
+    expect(applyPronunciation("⟦html⟧")).toBe("⟦ejcz-ti-em-el⟧");
+
+    const text = spoken(everySentinelResponse, "pl");
+
+    expect(text).toContain("blok kodu");
+    expect(text).not.toContain("koud");
+    expect(text).not.toContain("⟦");
   });
 });
