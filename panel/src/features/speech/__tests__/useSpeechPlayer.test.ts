@@ -21,6 +21,23 @@ const synth = vi.hoisted(() => {
   const buffers = new Map<string, ArrayBuffer>();
   const bufferText = new Map<ArrayBuffer, string>();
   const blobText = new Map<Blob, string>();
+  /**
+   * The real module's cache, keyed on voice + text exactly as `synth.ts` keys
+   * it: a second caller is handed the promise the first one started — whether
+   * it is still in flight or long since resolved — and a rejection is evicted
+   * so a retry can reach the synthesizer again. A stub that re-synthesized on
+   * every call would make the window's occupancy a fiction, since the ladder
+   * materializing a unit the window already warmed would read here as a
+   * connection production never opens.
+   */
+  let cache = new Map<string, { text: string; promise: Promise<ArrayBuffer>; done: boolean }>();
+  let peakInFlight = 0;
+  /**
+   * Requests and playback starts in one ordered list. Two separate arrays
+   * cannot say which came first, and "unit 1 was requested *while* unit 0 was
+   * playing" is exactly an ordering claim.
+   */
+  let timeline: string[] = [];
   let requests: Array<{ text: string; voice: string | undefined }> = [];
   let prefetches: Array<{ text: string; voice: string | undefined }> = [];
   let blobbed: ArrayBuffer[] = [];
@@ -35,22 +52,54 @@ const synth = vi.hoisted(() => {
     return buffer;
   }
 
-  return {
-    synthesizeSpeech: async (
-      text: string,
-      options: { voice?: string } = {},
-    ): Promise<ArrayBuffer> => {
-      requests.push({ text, voice: options.voice });
+  /** The cache entries still waiting on the synthesizer, in request order. */
+  function inFlightEntries(): Array<{ text: string; done: boolean }> {
+    return [...cache.values()].filter((entry) => !entry.done);
+  }
 
-      const mode = modes.get(text) ?? "resolve";
-      if (mode === "hang") return new Promise<ArrayBuffer>(() => {});
-      if (mode === "defer") {
-        return new Promise<ArrayBuffer>((resolve) => {
-          releases.set(text, () => resolve(bufferFor(text)));
-        });
-      }
-      if (mode === "reject") throw new Error(`synthesis failed: ${text}`);
-      return bufferFor(text);
+  /** What this unit's synthesis does, per the mode the test set for it. */
+  function answer(text: string): Promise<ArrayBuffer> {
+    const mode = modes.get(text) ?? "resolve";
+    if (mode === "hang") return new Promise<ArrayBuffer>(() => {});
+    if (mode === "defer") {
+      return new Promise<ArrayBuffer>((resolve) => {
+        releases.set(text, () => resolve(bufferFor(text)));
+      });
+    }
+    if (mode === "reject") return Promise.reject(new Error(`synthesis failed: ${text}`));
+    return Promise.resolve(bufferFor(text));
+  }
+
+  return {
+    synthesizeSpeech: (text: string, options: { voice?: string } = {}): Promise<ArrayBuffer> => {
+      const key = `${options.voice ?? ""}::${text}`;
+      const cached = cache.get(key);
+      // A hit is a *recorded* non-request: the caller is served what is already
+      // there, which is exactly what "no second request is made" means.
+      if (cached) return cached.promise;
+
+      requests.push({ text, voice: options.voice });
+      timeline.push(`synthesize:${text}`);
+
+      const promise = answer(text);
+      const entry = { text, promise, done: false };
+      cache.set(key, entry);
+      peakInFlight = Math.max(peakInFlight, inFlightEntries().length);
+      // Registered before the caller's own continuation, so a unit has already
+      // left the window by the time the player reacts to it landing — which is
+      // what makes "at most three in flight" measurable at all.
+      promise.then(
+        () => {
+          entry.done = true;
+        },
+        () => {
+          entry.done = true;
+          // Never cache a failure, as the real module does not: the retry the
+          // ladder makes when it reaches the unit has to reach the synthesizer.
+          if (cache.get(key) === entry) cache.delete(key);
+        },
+      );
+      return promise;
     },
     prefetchSpeech: (text: string, options: { voice?: string } = {}): void => {
       prefetches.push({ text, voice: options.voice });
@@ -75,6 +124,21 @@ const synth = vi.hoisted(() => {
     get blobbed() {
       return blobbed;
     },
+    /** The units whose synthesis has been asked for and has not answered. */
+    get inFlight() {
+      return inFlightEntries().map((entry) => entry.text);
+    },
+    /** The most that were ever in flight at one moment, across the test. */
+    get peakInFlight() {
+      return peakInFlight;
+    },
+    get timeline() {
+      return timeline;
+    },
+    /** Lets the element spy drop playback into the same ordered list. */
+    note: (event: string): void => {
+      timeline.push(event);
+    },
     failOn: (text: string) => modes.set(text, "reject"),
     hangOn: (text: string) => modes.set(text, "hang"),
     /**
@@ -94,6 +158,9 @@ const synth = vi.hoisted(() => {
     reset: () => {
       modes.clear();
       releases.clear();
+      cache = new Map();
+      peakInFlight = 0;
+      timeline = [];
       requests = [];
       prefetches = [];
       blobbed = [];
@@ -109,12 +176,22 @@ vi.mock("../synth", () => ({
 }));
 
 import type { SpeechPlaybackError, SpeechPlayer } from "../useSpeechPlayer";
-import { PREFETCH_AHEAD, useSpeechPlayer } from "../useSpeechPlayer";
+import { SYNTHESIS_CONCURRENCY, useSpeechPlayer } from "../useSpeechPlayer";
 import type { SpeechUnit } from "../types";
 import { DEFAULT_SPEECH_VOICE, SPEECH_VOICE_STORAGE_KEY } from "../voices";
 
 function units(...texts: string[]): SpeechUnit[] {
   return texts.map((text) => ({ text, chars: text.length }));
+}
+
+/** `count` units named `unit-0` … `unit-<count-1>`, in playback order. */
+function manyUnits(count: number): SpeechUnit[] {
+  return units(...Array.from({ length: count }, (_, index) => `unit-${index}`));
+}
+
+/** The units synthesis was actually asked for, in the order it was asked. */
+function requested(): string[] {
+  return synth.requests.map((request) => request.text);
 }
 
 /** Every `<audio>` element the player drove, in the order it drove them. */
@@ -234,7 +311,9 @@ beforeEach(() => {
     this: HTMLMediaElement,
   ) {
     elements.push(this);
-    played.push(this.getAttribute("src") ?? "");
+    const src = this.getAttribute("src") ?? "";
+    played.push(src);
+    synth.note(`play:${src}`);
     return playResult();
   });
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (
@@ -279,19 +358,241 @@ describe("useSpeechPlayer", () => {
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
 
     // Mid-unit-0: unit 1's URL already exists, so the swap on `ended` is a
-    // local assignment with no network round-trip. Unit 2 is only warmed in the
-    // synthesis cache — the ladder reaches PREFETCH_AHEAD units, no further.
-    expect(PREFETCH_AHEAD).toBe(2);
+    // local assignment with no network round-trip. Unit 2 is warmed in the
+    // synthesis cache only — warming never builds a URL, because a URL nobody
+    // plays is a leak.
     expect(played).toEqual(["blob:unit-0"]);
     expect(createdUrls).toEqual(["blob:unit-0", "blob:unit-1"]);
     expect(revokedUrls).toEqual([]);
-    expect(synth.prefetches).toEqual([{ text: "unit-2", voice: DEFAULT_SPEECH_VOICE }]);
+    expect(requested()).toEqual(["unit-0", "unit-1", "unit-2"]);
+    // Warming goes through `synthesizeSpeech`, not the fire-and-forget
+    // `prefetchSpeech`: the promise is what refills the window, and a warm
+    // nobody can observe finishing cannot bound anything.
+    expect(synth.prefetches).toEqual([]);
 
     await endCurrentUnit();
 
-    // It played the URL that already existed rather than building a new one.
+    // It played the URL that already existed rather than building a new one,
+    // and the unit it materialized was served by the warm already in flight.
     expect(played).toEqual(["blob:unit-0", "blob:unit-1"]);
     expect(createdUrls).toEqual(["blob:unit-0", "blob:unit-1", "blob:unit-2"]);
+    expect(requested()).toEqual(["unit-0", "unit-1", "unit-2"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("requests the second unit while the first is playing", async () => {
+    // Deferred, so unit 1 is provably still *in flight* — not merely requested
+    // and long since finished — at the moment unit 0 reaches the element.
+    synth.deferOn("unit-1");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(4));
+
+    expect(played).toEqual(["blob:unit-0"]);
+    // An ordering claim, not a presence one: the request was issued *before*
+    // playback started, so unit 1 synthesizes under unit 0 rather than after
+    // it. A ladder re-entered only once the playing unit resolves would put
+    // these two the other way round.
+    expect(synth.timeline.indexOf("synthesize:unit-1")).toBeGreaterThanOrEqual(0);
+    expect(synth.timeline.indexOf("synthesize:unit-1")).toBeLessThan(
+      synth.timeline.indexOf("play:blob:unit-0"),
+    );
+    expect(synth.inFlight).toContain("unit-1");
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("requests the remainder once the second unit lands", async () => {
+    // Six units and not one `ended`: unit 0 is still speaking throughout. The
+    // whole remainder must therefore be under way on the strength of unit 1
+    // landing alone — waiting for playback is the head start unit 0, which is
+    // deliberately tiny, cannot give.
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(6));
+
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(requested()).toEqual([
+      "unit-0",
+      "unit-1",
+      "unit-2",
+      "unit-3",
+      "unit-4",
+      "unit-5",
+    ]);
+    // Warming with any other voice is a synthesis nobody ever plays: the cache
+    // keys on voice + text, so the click would pay for the unit all over again.
+    expect(new Set(synth.requests.map((request) => request.voice))).toEqual(
+      new Set([DEFAULT_SPEECH_VOICE]),
+    );
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("cascades from the next unit that lands when one fails", async () => {
+    // Unit 1's synthesis fails. The cascade hangs off a unit actually in hand,
+    // so a failure defers it by one unit rather than abandoning it: unit 2
+    // lands and warms the whole remainder. One flaky socket must not cost the
+    // answer its warming — three consecutive failures are what stop a run.
+    synth.failOn("unit-1");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(6));
+
+    // Nothing beyond the failed unit yet: there is no loaded unit to cascade
+    // from, and the ladder does not reach unit 2 until unit 0 has been spoken.
+    expect(requested()).toEqual(["unit-0", "unit-1"]);
+    expect(played).toEqual(["blob:unit-0"]);
+
+    await endCurrentUnit();
+
+    // Unit 1 is skipped, unit 2 plays — and warming resumes behind it all the
+    // way to the last unit, exactly as an unbroken run would have warmed from
+    // unit 2 onwards.
+    expect(played).toEqual(["blob:unit-0", "blob:unit-2"]);
+    expect(requested()).toEqual([
+      "unit-0",
+      "unit-1",
+      "unit-2",
+      "unit-3",
+      "unit-4",
+      "unit-5",
+    ]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("keeps at most the window's worth of syntheses in flight", async () => {
+    // Everything from unit 2 on is held open, so the window cannot drain:
+    // whatever is in flight when the dust settles *is* the window.
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+
+    expect(SYNTHESIS_CONCURRENCY).toBe(3);
+    // Seven units are still unwarmed and every one of them would resolve on
+    // its own connection. Three sockets, not seven.
+    expect(synth.inFlight).toEqual(["unit-2", "unit-3", "unit-4"]);
+    expect(synth.peakInFlight).toBe(SYNTHESIS_CONCURRENCY);
+    expect(requested()).toEqual(["unit-0", "unit-1", "unit-2", "unit-3", "unit-4"]);
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("refills the window as each synthesis completes", async () => {
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    expect(synth.inFlight).toEqual(["unit-2", "unit-3", "unit-4"]);
+
+    // One lands mid-window. A batch of three followed by a wait for all three
+    // would leave two in flight here; a rolling window starts unit 5 at once.
+    await settle(() => synth.release("unit-3"));
+    expect(synth.inFlight).toEqual(["unit-2", "unit-4", "unit-5"]);
+
+    await settle(() => {
+      synth.release("unit-2");
+      synth.release("unit-4");
+    });
+    expect(synth.inFlight).toEqual(["unit-5", "unit-6", "unit-7"]);
+
+    // And it runs to the end of the run rather than to a fixed distance: the
+    // last unit is reached with playback still sitting on unit 0.
+    await settle(() => {
+      synth.release("unit-5");
+      synth.release("unit-6");
+      synth.release("unit-7");
+    });
+    expect(synth.inFlight).toEqual(["unit-8"]);
+    expect(requested()).toHaveLength(9);
+    // Never once did a fourth connection open.
+    expect(synth.peakInFlight).toBe(SYNTHESIS_CONCURRENCY);
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("stops warming the moment the run loses the element", async () => {
+    // The window is what makes an abandoned run expensive: every slot it still
+    // holds refills itself when its request settles, so a run that was stopped
+    // or barged in on would go on opening sockets for its whole remaining tail
+    // — against the run that replaced it. Nothing else in the player notices,
+    // because warming touches neither the element nor any object URL.
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    expect(synth.inFlight).toEqual(["unit-2", "unit-3", "unit-4"]);
+
+    await settle(() => result.current.stop());
+    const before = requested().length;
+
+    // A slot comes free *after* the stop. On a live run this is exactly what
+    // starts unit 5; on a run that is over it must start nothing at all.
+    await settle(() => synth.release("unit-3"));
+
+    expect(requested()).toHaveLength(before);
+    expect(requested()).not.toContain("unit-5");
+
+    // And it stays stopped as the rest of the tail settles, rather than merely
+    // skipping the one refill.
+    await settle(() => {
+      synth.release("unit-2");
+      synth.release("unit-4");
+    });
+    expect(requested()).toHaveLength(before);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("synthesizes nothing beyond the run's slice", async () => {
+    // A subrange play: the slice is the bound at both ends. Warming the whole
+    // array would synthesize units this run will never speak.
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(6), 2);
+
+    expect(played).toEqual(["blob:unit-2"]);
+    expect(requested()).toEqual(["unit-2", "unit-3", "unit-4", "unit-5"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("keeps playing when a unit far ahead stalls", async () => {
+    // Unit 4's synthesis never answers — the 15 s stall timeout, or a socket
+    // that simply died. It sits three units ahead of the listener and holds one
+    // window slot for good; the other two must carry the rest of the run past
+    // it, and playback must not notice at all.
+    synth.hangOn("unit-4");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(8));
+
+    expect(synth.inFlight).toEqual(["unit-4"]);
+    expect(requested()).toEqual([
+      "unit-0",
+      "unit-1",
+      "unit-2",
+      "unit-3",
+      "unit-4",
+      "unit-5",
+      "unit-6",
+      "unit-7",
+    ]);
+
+    // The player awaits only the unit it is about to play, so the units before
+    // the stall speak in order and on time.
+    await endCurrentUnit();
+    await endCurrentUnit();
+    await endCurrentUnit();
+
+    expect(played).toEqual(["blob:unit-0", "blob:unit-1", "blob:unit-2", "blob:unit-3"]);
+    expect(result.current.speakingSessionId).toBe("cell-a");
+    expect(result.current.waitingForSynthesis).toBe(false);
     expect(onError).not.toHaveBeenCalled();
   });
 

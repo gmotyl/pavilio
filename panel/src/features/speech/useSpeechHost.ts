@@ -35,7 +35,6 @@
  *   user cut short was not listened to)
  * - another cell took over → `Ready` (*not* heard — this is the trap)
  * - the browser refused → `Ready`
- * - the budget cut it short → `Ready`, plus a resume point
  * - the synthesizer gave up → `Ready`, plus a toast
  *
  * So the outcome is not read off the promise at all. Each `play` gets a {@link
@@ -49,7 +48,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../../lib/toast";
-import { closingMarkerUnit, prepare } from "./prepare";
+import { prepare } from "./prepare";
 import { synthesizeSpeech } from "./synth";
 import type { GridSpeech, PreparedSpeech, Utterance } from "./types";
 import { useSpeechPlayer, type SpeechPlaybackError } from "./useSpeechPlayer";
@@ -61,10 +60,10 @@ import { getStoredVoice } from "./voices";
  * run that is still `"pending"` when its promise settles is a natural end.
  *
  * `"failed"` is the run the synthesizer killed. It resolves its promise exactly
- * like a finished answer, and `through === total` for a short utterance, so
- * without the stamp it would be indistinguishable from having been listened to
- * — silence, and a cell marked heard. It is not `"refused"`: that one is the
- * browser declining, and it is deliberately toast-free.
+ * like a finished answer, so without the stamp it would be indistinguishable
+ * from having been listened to — silence, and a cell marked heard. It is not
+ * `"refused"`: that one is the browser declining, and it is deliberately
+ * toast-free.
  */
 type RunOutcome = "pending" | "superseded" | "stopped" | "refused" | "failed";
 
@@ -95,24 +94,17 @@ const NOTHING_PREPARING: ReadonlySet<string> = new Set<string>();
 
 interface Run {
   readonly sessionId: string;
-  /** The utterance being spoken, so a resume point cannot outlive it. */
+  /**
+   * The utterance being spoken. It is what tells a pause on the session's
+   * current answer apart from a pause on one a newer answer has replaced —
+   * the supersession test in the arrival effect below.
+   */
   readonly utteranceId: string;
-  /** Index just past the last unit this run was handed. */
-  readonly through: number;
-  /** How many units the whole utterance has, remainder included. */
-  readonly total: number;
   outcome: RunOutcome;
-}
-
-/** Where a budget-capped run stopped, so a later click continues rather than restarts. */
-interface ResumePoint {
-  readonly utteranceId: string;
-  readonly fromUnit: number;
 }
 
 export function useSpeechHost(): SpeechHost {
   const runRef = useRef<Run | null>(null);
-  const resumeRef = useRef<Map<string, ResumePoint>>(new Map());
   // Keyed by utterance id: preparation is pure and the same utterance always
   // prepares the same way, so a replay must not pay for it twice.
   const preparedRef = useRef<Map<string, PreparedSpeech>>(new Map());
@@ -221,7 +213,7 @@ export function useSpeechHost(): SpeechHost {
     // red state exists to remove.
     for (const utterance of speakableUtterances) {
       // A newer answer for a cell the user left PAUSED abandons the held run,
-      // exactly as a barge-in abandons it in `speakFrom`. Without this the run
+      // exactly as a barge-in abandons it in `speak`. Without this the run
       // stays `pending` — `onPause` stamps nothing, on purpose — so the player
       // goes on naming the cell as its paused one, `paused` outranks every
       // other state in the channel, and the control routes the next click to
@@ -254,18 +246,13 @@ export function useSpeechHost(): SpeechHost {
         held.utteranceId !== utterance.id &&
         player.pausedSessionId === utterance.sessionId
       ) {
-        // Stamped before `stop()` to read the same way `speakFrom`'s barge-in
+        // Stamped before `stop()` to read the same way `speak`'s barge-in
         // does — but the order is not what makes it work: `stop()` resolves the
         // pending `play` on a microtask, so the synchronous stamp lands first
         // either way. What it buys is the outcome: `superseded`, so the
         // abandoned run lands on `ready` rather than `heard`.
         held.outcome = "superseded";
         player.stop();
-        // Belt and braces. `onSpeak` already discards a resume point whose
-        // `utteranceId` is not the session's current one, so the next click
-        // would start at unit 0 regardless; dropping it here keeps the map from
-        // carrying a point for a run nothing can ever continue.
-        resumeRef.current.delete(utterance.sessionId);
       }
 
       if (warmedRef.current.has(utterance.id)) continue;
@@ -317,8 +304,8 @@ export function useSpeechHost(): SpeechHost {
     speakableUtterances,
   ]);
 
-  const speakFrom = useCallback(
-    (sessionId: string, fromUnit: number): void => {
+  const speak = useCallback(
+    (sessionId: string): void => {
       const utterance = utteranceFor(sessionId);
       if (!utterance) return;
 
@@ -332,37 +319,12 @@ export function useSpeechHost(): SpeechHost {
         return;
       }
 
-      const start = Math.min(Math.max(fromUnit, 0), prepared.units.length - 1);
-      // The budget caps only the first run; a continue plays the remainder to
-      // the end. Slicing is what enforces it — the player always plays the
-      // array it is handed to the end, so the cut has to be made here.
-      const through = start === 0 ? prepared.spokenUnits : prepared.units.length;
-
-      const spoken = prepared.units.slice(0, through);
-      if (through < prepared.units.length) {
-        // The budget cut is the only place a remainder exists — a continue
-        // plays to the end — so `through < units.length` means `through ===
-        // spokenUnits`, and `remainderParagraphs` is exactly the count to name.
-        //
-        // The marker is APPENDED to what the player is handed rather than added
-        // to `prepared.units`: it costs nothing against the budget, and `run`
-        // below still counts in prepared units only, so the resume point stays
-        // the first unspoken unit rather than the marker.
-        spoken.push(closingMarkerUnit(prepared.remainderParagraphs, prepared.language));
-      }
-
       // Barge-in: whatever was speaking is *superseded*, not finished, so it
       // must revert to `unheard`. Stamped before `play`, which stops it.
       const previous = runRef.current;
       if (previous) previous.outcome = "superseded";
 
-      const run: Run = {
-        sessionId,
-        utteranceId: utterance.id,
-        through,
-        total: prepared.units.length,
-        outcome: "pending",
-      };
+      const run: Run = { sessionId, utteranceId: utterance.id, outcome: "pending" };
       runRef.current = run;
 
       function finish(ended: Run): void {
@@ -375,25 +337,11 @@ export function useSpeechHost(): SpeechHost {
         // settles is the only natural end there is.
         if (ended.outcome !== "pending") return;
 
-        if (ended.through < ended.total) {
-          // The budget cut is not the end of the response, so the cell stays
-          // `ready` — indistinguishable in the header from a cell nobody has
-          // clicked yet, on purpose, and only the resume point tells them
-          // apart. It is NOT the control's `paused`, which is a run the user
-          // is holding and the player is still naming as its speaking one.
-          resumeRef.current.set(ended.sessionId, {
-            utteranceId: ended.utteranceId,
-            fromUnit: ended.through,
-          });
-          return;
-        }
-
-        resumeRef.current.delete(ended.sessionId);
         markHeard(ended.sessionId);
       }
 
       void player
-        .play(sessionId, spoken, start)
+        .play(sessionId, prepared.units)
         .then(() => finish(run))
         .catch(() => finish(run));
     },
@@ -406,16 +354,13 @@ export function useSpeechHost(): SpeechHost {
       // play rides on it.
       player.unlock();
 
-      const utterance = utteranceFor(sessionId);
-      if (!utterance) return;
-
-      const resume = resumeRef.current.get(sessionId);
-      // A resume point belongs to one utterance. A newer one replaced it, so
-      // the click restarts rather than jumping into the middle of the old text.
-      const fromUnit = resume?.utteranceId === utterance.id ? resume.fromUnit : 0;
-      speakFrom(sessionId, fromUnit);
+      // A run always plays the whole answer, so there is never a part-way
+      // point to continue from: a click on a cell that has been heard replays
+      // it from unit 0. Holding a run part-way is the player's `paused`, and
+      // that click reaches `onResume`, never this.
+      speak(sessionId);
     },
-    [player, speakFrom, utteranceFor],
+    [player, speak],
   );
 
   const onStop = useCallback(
@@ -493,8 +438,8 @@ export function useSpeechHost(): SpeechHost {
     }
 
     autoplayedRef.current = armedUtterance.id;
-    speakFrom(armedSessionId, 0);
-  }, [armedSessionId, armedUtterance, player.unlocked, speakFrom]);
+    speak(armedSessionId);
+  }, [armedSessionId, armedUtterance, player.unlocked, speak]);
 
   return useMemo(
     () => ({

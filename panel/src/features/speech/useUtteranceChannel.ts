@@ -26,8 +26,8 @@ import { getStoredArmedSession, setStoredArmedSession } from "./voices";
  * What the channel itself decides is exactly one bit: `heard`. It means the
  * **final unit played to its end**, nothing less — {@link Channel.markHeard} is
  * called only from the host's natural end, never from a stop, a pause, a
- * barge-in, a budget cut or a dead synthesizer, all of which leave the cell
- * `ready` because something in it has still not been listened to.
+ * barge-in or a dead synthesizer, all of which leave the cell `ready` because
+ * something in it has still not been listened to.
  *
  * `heard` is a flag, never a deletion: the utterance stays retrievable through
  * {@link Channel.utteranceFor} so a click replays it out of the synthesis LRU
@@ -36,7 +36,7 @@ import { getStoredArmedSession, setStoredArmedSession } from "./voices";
  *
  * Arrival is also where a response with **nothing to say** is filtered out. That
  * has to happen here rather than at the click: marking the cell `ready` first
- * and discovering the emptiness only inside `speakFrom` leaves every cell
+ * and discovering the emptiness only inside `speak` leaves every cell
  * pulsing for a pure-code answer, and an unarmed cell — the common case — stands
  * there with a pip until the user clicks it and nothing happens. So
  * {@link prepare} runs on arrival. It is pure text work (no synthesis, no
@@ -282,8 +282,8 @@ export function useUtteranceChannel({
       if (preparingSessionIds.has(sessionId)) return "preparing";
       // `heard` is set by `markHeard` alone, and the host calls it only when
       // the final unit has played to its end. Everything else — a barge-in, a
-      // budget stop, a stop, a refusal, a dead synthesizer — leaves the flag
-      // where it was, which is `ready`.
+      // stop, a refusal, a dead synthesizer — leaves the flag where it was,
+      // which is `ready`.
       return record.heard ? "heard" : "ready";
     },
     [pausedSessionId, preparingSessionIds, sessions, speakingSessionId, waitingForSynthesis],

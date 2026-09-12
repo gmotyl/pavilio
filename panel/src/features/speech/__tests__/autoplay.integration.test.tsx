@@ -150,7 +150,7 @@ vi.mock("../prepare", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../prepare")>();
   return {
     ...actual,
-    prepare: (markdown: string, opts?: { language?: "pl" | "en"; budgetChars?: number }) => {
+    prepare: (markdown: string, opts?: { language?: "pl" | "en" }) => {
       prepareCalls.push({ text: markdown, language: opts?.language });
       return actual.prepare(markdown, opts);
     },
@@ -461,9 +461,9 @@ async function arm(sessionId: string): Promise<void> {
 }
 
 /**
- * A response of `count` units, comfortably inside the budget: every paragraph
- * is one sentence over the 200-char packing floor and under the 450-char
- * ceiling, so it is neither merged with its neighbour nor cut in half.
+ * A response of `count` units: every paragraph is one sentence over the
+ * 200-char packing floor and under the 450-char ceiling, so it is neither
+ * merged with its neighbour nor cut in half.
  */
 function shortResponse(count: number): string {
   return Array.from({ length: count }, (_, i) => {
@@ -472,22 +472,14 @@ function shortResponse(count: number): string {
   }).join("\n\n");
 }
 
-/** A response long enough that the speech budget cuts it in two. */
+/** A twelve-unit response — long enough that a run has a real tail to it. */
 function longResponse(): string {
   // 240 characters a paragraph: over the 200-char packing floor so each one is
   // its own unit, and two of them exceed the 450-char ceiling so they never
-  // merge. Twelve of them overrun the 1300-char budget several times over.
+  // merge.
   return Array.from({ length: 12 }, (_, i) => {
     const head = `Paragraph ${String(i).padStart(2, "0")} `;
     return head + "x".repeat(238 - head.length) + ".";
-  }).join("\n\n");
-}
-
-/** The same shape, in Polish: the diacritics are what vote the session `pl`. */
-function longPolishResponse(): string {
-  return Array.from({ length: 12 }, (_, i) => {
-    const head = `Akapit ${String(i).padStart(2, "0")} zażółć gęślą jaźń `;
-    return head + "ę".repeat(238 - head.length) + ".";
   }).join("\n\n");
 }
 
@@ -692,7 +684,7 @@ describe("autoplay — taking over and stopping", () => {
   });
 });
 
-describe("autoplay — refusal and the budget", () => {
+describe("autoplay — refusal and synthesis failure", () => {
   it("a refused autoplay falls back to ready", async () => {
     // The browser refuses the start even though a gesture reached the element:
     // `unlocked` says a gesture happened, never that playback is permitted.
@@ -724,11 +716,15 @@ describe("autoplay — refusal and the budget", () => {
 
     await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
     expect(getToastSnapshot()?.text).toMatch(/speech/i);
-    // Consecutive is the point: the run gives up inside the first few units —
-    // the three it tried to play, plus the one the ladder had warmed ahead of
-    // them — rather than hammering the synthesizer through all twelve.
+    // Consecutive is the point: the run gives up inside the first three units
+    // rather than hammering the synthesizer through all twelve. Nothing beyond
+    // them is warmed either, but only because the synthesizer is down for
+    // *every* unit here: the cascade is kicked by a unit actually in hand, and
+    // no unit ever lands. A single failure mid-run would merely defer the
+    // warming to the next unit that did land — see `useSpeechPlayer.test.ts`,
+    // "cascades from the next unit that lands when one fails".
     expect(new Set(synth.requests)).toEqual(
-      new Set(prepared.units.slice(0, 4).map((unit) => unit.text)),
+      new Set(prepared.units.slice(0, 3).map((unit) => unit.text)),
     );
     expect(played).toEqual([]);
   });
@@ -776,10 +772,9 @@ describe("autoplay — refusal and the budget", () => {
     // the cell ready" is what changed it, and it also closes follow-up #19.
     const markdown = shortResponse(4);
     const prepared = prepare(markdown);
-    // Fixture guard: four units, no budget cut, so the only thing standing
-    // between this run and `heard` is the failure itself.
+    // Fixture guard: four units, so the only thing standing between this run
+    // and `heard` is the failure itself.
     expect(prepared.units).toHaveLength(4);
-    expect(prepared.spokenUnits).toBe(prepared.units.length);
     // Unit 0 synthesizes; the synthesizer is down for units 1, 2 and 3.
     synth.setHealthyRequests(1);
 
@@ -792,86 +787,6 @@ describe("autoplay — refusal and the budget", () => {
 
     await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
     expect(speakState("cell-a")).toBe("ready");
-  });
-
-  it("continuing after the budget resumes at the first unspoken unit", async () => {
-    const markdown = longResponse();
-    const prepared = prepare(markdown);
-    // Fixture guard: without a remainder there is nothing to continue to.
-    expect(prepared.spokenUnits).toBeGreaterThan(0);
-    expect(prepared.spokenUnits).toBeLessThan(prepared.units.length);
-
-    await renderProjectSurface();
-    await arm("cell-a");
-    await emitUtterance("cell-a", "a1", markdown);
-
-    await endRun();
-    // The budget cut is not the end of the response: the cell is left with
-    // something unheard, which is the chart's `Paused`.
-    await waitFor(() => expect(speakState("cell-a")).toBe("ready"));
-    // Every budgeted unit, and then the marker. The marker is an addition to
-    // the spoken sequence, never one of the budgeted units — it displaces none
-    // of them, which is what the slice below pins.
-    //
-    // Compared as a set: the warm and the prefetch ladder both run ahead of
-    // the unit that is playing, so the request ORDER interleaves — what is
-    // pinned here is that each budgeted unit was synthesized exactly once and
-    // nothing past the cut was.
-    expect(synth.requests).toHaveLength(prepared.spokenUnits + 1);
-    expect(new Set(synth.requests.slice(0, prepared.spokenUnits))).toEqual(
-      new Set(prepared.units.slice(0, prepared.spokenUnits).map((unit) => unit.text)),
-    );
-    expect(synth.requests[synth.requests.length - 1]).toBe(
-      `End of the excerpt. Remaining paragraphs: ${prepared.remainderParagraphs}.`,
-    );
-
-    synth.reset();
-    await click("terminal-cell-speak-cell-a");
-
-    // And the marker has not consumed the resume point: the continue starts at
-    // the first unspoken *prepared* unit, not after the marker.
-    await waitFor(() => expect(synth.requests.length).toBeGreaterThan(0));
-    expect(synth.requests[0]).toBe(prepared.units[prepared.spokenUnits].text);
-  });
-
-  it("no closing marker is spoken when nothing was truncated", async () => {
-    await renderProjectSurface();
-    await arm("cell-a");
-
-    const markdown = "A short answer. It fits the budget with room to spare.";
-    // Fixture guard: nothing to report as remaining.
-    expect(prepare(markdown).remainderParagraphs).toBe(0);
-
-    await emitUtterance("cell-a", "a1", markdown);
-    await endRun();
-
-    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
-    expect(synth.requests.join(" ")).not.toMatch(/remaining paragraphs/i);
-  });
-
-  it("the closing marker is spoken in the session's language", async () => {
-    await renderProjectSurface();
-    await arm("cell-a");
-
-    // Two Polish votes are what flip the session; no single response can.
-    await emitUtterance("cell-a", "a1", "Zażółć gęślą jaźń. To jest odpowiedź.");
-    await endRun();
-    await emitUtterance("cell-a", "a2", "Drugie zdanie po polsku. Wciąż mówię tak samo.");
-    await endRun();
-
-    const markdown = longPolishResponse();
-    const prepared = prepare(markdown, { language: "pl" });
-    expect(prepared.remainderParagraphs).toBeGreaterThan(0);
-
-    synth.reset();
-    await emitUtterance("cell-a", "a3", markdown);
-    await endRun();
-
-    // The marker speaks the session's language, not the panel's default — an
-    // English sentence at the end of a Polish answer is the failure here.
-    expect(synth.requests[synth.requests.length - 1]).toBe(
-      `Koniec fragmentu. Pozostałe akapity: ${prepared.remainderParagraphs}.`,
-    );
   });
 });
 

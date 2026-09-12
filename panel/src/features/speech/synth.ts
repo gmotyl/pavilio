@@ -188,6 +188,11 @@ export function toSpeechBlob(buffer: ArrayBuffer): Blob {
 /**
  * Fire-and-forget warm of the synthesis cache. No-op on empty text; swallows
  * synthesis errors, since the eventual `synthesizeSpeech` call retries.
+ *
+ * Currently has no caller in the panel outside its own tests: the player's
+ * cascade warms through `synthesizeSpeech` instead, because the promise is what
+ * refills a window slot and a fire-and-forget warm — which nothing can observe
+ * finishing — cannot bound concurrency at all.
  */
 export function prefetchSpeech(text: string, options: SpeechSynthesisOptions = {}): void {
   if (!text || !text.trim()) return;
