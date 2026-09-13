@@ -569,7 +569,9 @@ describe("createSession with runAsUser", () => {
       })
 
       expect(lastSpawnCall!.file).toBe("su")
-      const command = lastSpawnCall!.args[3] as string
+      // args[4] is the -c command string: `su --pty - <user> -c <command>`.
+      expect(lastSpawnCall!.args.slice(0, 4)).toEqual(["--pty", "-", "greg-ip", "-c"])
+      const command = lastSpawnCall!.args[4] as string
       expect(command).toContain("PAVILIO_PANEL_URL='http://127.0.0.1:3012'")
       // A `su -c` command line is world-readable in `ps aux`, so the URL may
       // ride there and the token may not.

@@ -35,7 +35,7 @@ export interface RunAsSpawnCommand {
 }
 
 /**
- * `su - <user> -c "cd <quoted-cwd> && PAVILIO_TERMINAL_ID=<id>
+ * `su --pty - <user> -c "cd <quoted-cwd> && PAVILIO_TERMINAL_ID=<id>
  * [PAVILIO_PANEL_URL=<url> ]exec <shell> -l"`. Always the `su` form — the
  * inline assignments are the only way anything from this process's
  * environment survives: `su -` starts a login shell and resets the
@@ -46,6 +46,18 @@ export interface RunAsSpawnCommand {
  * is visible in `ps aux` to every account on the machine, so the panel's URL
  * (loopback, not a secret) is fine here and `PANEL_TOKEN` is deliberately
  * not — putting it here would leak it system-wide.
+ *
+ * `--pty` is load-bearing, not a stylistic flag. Without it `su` hands the
+ * caller's pty straight to the shell but stays in the middle of the control
+ * path, and it forwards no window-size change: measured with node-pty, two
+ * `pty.resize()` calls deliver 0 SIGWINCH to a `su -` session and 2 to a
+ * `su --pty -` one. That is why a TUI (Claude Code, opencode, codex) opened
+ * as another user never repaints when the pane is resized. The same flag
+ * fixes signal routing: under plain `su -`, Ctrl-C reaches `su` itself,
+ * which answers "Session terminated, killing shell..." and tears the whole
+ * terminal down instead of interrupting the foreground command. `--pty`
+ * (util-linux >= 2.33) makes `su` allocate its own pseudo-terminal, so both
+ * resizes and signals land where the user aimed them.
  *
  * The accounts this switches between are plain
  * Linux logins (the same ones `workspace-setup`'s account provisioning
@@ -89,6 +101,7 @@ export function buildRunAsSpawnCommand(opts: {
   return {
     file: "su",
     args: [
+      "--pty",
       "-",
       user.username,
       "-c",

@@ -54,12 +54,33 @@ describe("buildRunAsSpawnCommand", () => {
     expect(result).toEqual({
       file: "su",
       args: [
+        "--pty",
         "-",
         "greg-ip",
         "-c",
         "cd '/home/greg-ip/git/prv/pavilio' && PAVILIO_TERMINAL_ID=abc-123 exec '/bin/zsh' -l",
       ],
     });
+  });
+
+  it("buildRunAsSpawnCommand allocates a pty for the target user so resizes reach it", () => {
+    // Measured with node-pty against this very argv: `su - <user> -c ...`
+    // receives 0 SIGWINCH across two pty.resize() calls, `su --pty - <user>
+    // -c ...` receives both. Without --pty the resize stops at su and every
+    // TUI in the session (Claude Code, opencode, codex) keeps drawing at the
+    // size it started with.
+    const result = buildRunAsSpawnCommand({
+      user,
+      cwd: "/home/greg-ip",
+      sessionId: "abc-123",
+    });
+    expect(result.args[0]).toBe("--pty");
+    expect(result.args.slice(0, 4)).toEqual([
+      "--pty",
+      "-",
+      "greg-ip",
+      "-c",
+    ]);
   });
 
   it("buildRunAsSpawnCommand prints an optional notice before landing in cwd", () => {
@@ -76,6 +97,7 @@ describe("buildRunAsSpawnCommand", () => {
     expect(result).toEqual({
       file: "su",
       args: [
+        "--pty",
         "-",
         "greg-ip",
         "-c",
@@ -95,7 +117,7 @@ describe("buildRunAsSpawnCommand", () => {
       sessionId: "abc-123",
       panelUrl: "http://127.0.0.1:3012",
     });
-    expect(result.args[3]).toBe(
+    expect(result.args[4]).toBe(
       "cd '/home/greg-ip/git/prv/pavilio' && PAVILIO_TERMINAL_ID=abc-123 " +
         "PAVILIO_PANEL_URL='http://127.0.0.1:3012' exec '/bin/zsh' -l",
     );
@@ -111,7 +133,7 @@ describe("buildRunAsSpawnCommand", () => {
       sessionId: "abc-123",
       panelUrl: "http://127.0.0.1:3012'; touch /tmp/pwned; '",
     });
-    const command = result.args[3];
+    const command = result.args[4];
     expect(command).toContain(
       `PAVILIO_PANEL_URL='http://127.0.0.1:3012'\\''; touch /tmp/pwned; '\\'''`,
     );
@@ -127,8 +149,8 @@ describe("buildRunAsSpawnCommand", () => {
       cwd: "/home/greg-ip",
       sessionId: "abc-123",
     });
-    expect(result.args[3]).not.toContain("PAVILIO_PANEL_URL");
-    expect(result.args[3]).toBe(
+    expect(result.args[4]).not.toContain("PAVILIO_PANEL_URL");
+    expect(result.args[4]).toBe(
       "cd '/home/greg-ip' && PAVILIO_TERMINAL_ID=abc-123 exec '/bin/zsh' -l",
     );
   });
