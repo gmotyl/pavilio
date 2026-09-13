@@ -75,6 +75,14 @@ async function load(): Promise<void> {
     console.warn("[terminal] session store fetch failed:", err);
     return;
   }
+  // A non-array 200 (an error object, a wrapped `{ sessions }`) does not throw
+  // on the way in: `.length` is undefined, which `isUnchanged` reads as "changed",
+  // so it would be published and every consumer's `sessions.map(...)` would break.
+  // One tab-wide store means one bad response reaches every surface at once.
+  if (!Array.isArray(next)) {
+    console.warn("[terminal] session store got a non-array list from server");
+    return; // keep what we have; the poll will try again
+  }
   // Superseded by a later load, or fenced off by a reset.
   if (gen !== loadGen) return;
   publish(next);

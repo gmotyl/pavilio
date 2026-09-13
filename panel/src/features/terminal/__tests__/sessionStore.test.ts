@@ -202,6 +202,36 @@ describe("terminal session store", () => {
     expect(listener).toHaveBeenLastCalledWith(getSessions());
   });
 
+  it("keeps the previous list when the server returns a non-array", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    respond([session("a")]);
+    const listener = vi.fn();
+    subscribeSessions(listener);
+    await flush();
+    const loaded = getSessions();
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    // A 200 carrying an error object rather than a list. This does not throw on
+    // the way in: `.length` is undefined, which `isUnchanged` reads as "changed",
+    // so without the guard the object is published and every consumer's
+    // `sessions.map(...)` breaks during render.
+    body = { error: "boom" } as unknown as SessionMeta[];
+    await refreshSessions();
+
+    expect(getSessions()).toBe(loaded);
+    expect(Array.isArray(getSessions())).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    // And it recovers on the next good response rather than staying wedged.
+    respond([session("a"), session("b")]);
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(getSessions()).toHaveLength(2);
+    expect(listener).toHaveBeenCalledTimes(3);
+
+    warn.mockRestore();
+  });
+
   it("keeps the previous list when the fetch fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     respond([session("a")]);
