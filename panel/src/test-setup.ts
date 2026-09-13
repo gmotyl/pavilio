@@ -6,6 +6,28 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
+/**
+ * Imported lazily, from inside the hook: a static import at the top of this file
+ * would load the module before a suite's own `vi.mock` is registered, so a suite
+ * that stubs the realtime channel would end up with the real one wired into the
+ * store instead.
+ */
+async function reset(specifier: string, name: string): Promise<void> {
+  const mod: Record<string, unknown> = await import(/* @vite-ignore */ specifier);
+  // A stubbed module exports only what its suite needs, and vitest's mocked
+  // namespace throws rather than returning undefined for anything else.
+  if (!(name in mod)) return;
+  (mod[name] as () => void)();
+}
+
+async function resetTabScopedSingletons(): Promise<void> {
+  // Order matters: the store unsubscribes itself from the channel, so resetting
+  // it first stops the channel reset from dropping a listener whose owner still
+  // believes it is subscribed — and is left deaf for the rest of the file.
+  await reset("./features/terminal/sessionStore", "__resetSessionStoreForTests");
+  await reset("./features/realtime/channel", "__resetRealtimeChannelForTests");
+}
+
 function createMemoryStorage(): Storage {
   const store = new Map<string, string>();
 
@@ -60,8 +82,14 @@ Object.defineProperty(window, "sessionStorage", {
 // jsdom does not implement scrollIntoView
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // The channel and the session store are tab-scoped singletons that start on
+  // first use and never stop, so any suite rendering a consumer used to leave
+  // the channel's watchdog interval, its visibilitychange listener and the
+  // store's poll armed past the end of the file — a full-suite run once died on
+  // a reconnect timeout firing into an unrelated suite.
+  await resetTabScopedSingletons();
   localStorage.clear();
   sessionStorage.clear();
   vi.restoreAllMocks();
