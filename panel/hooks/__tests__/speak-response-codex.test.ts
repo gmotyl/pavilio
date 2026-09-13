@@ -42,6 +42,15 @@ const LEGACY_NODE_MAJOR =
 const COMMENTARY = "Finalizing the registry and note changes, then committing.";
 const ANSWER = "Notes and registry updated, and the batch is committed as 4f2a91c.";
 
+/**
+ * What codex hands the hook directly, as the `Stop` payload's
+ * `last_assistant_message`. Deliberately *different* from `ANSWER`, the answer
+ * sitting in the rollout: the two only ever agree a good ten seconds after the
+ * hook has exited, so every test below that expects one of them is asserting
+ * which source was consulted.
+ */
+const PAYLOAD_ANSWER = "Batch processed; the commit is 9e1c04d.";
+
 /** A real user turn, as codex records it: a `message` item with `input_text`. */
 function userTurn(text: string) {
   return {
@@ -214,6 +223,15 @@ function stopPayload(transcriptPath: string) {
   };
 }
 
+/**
+ * The same payload as codex 0.154.0 actually sends it — with the finished
+ * answer included. `message` is `unknown` on purpose: the fallback has to hold
+ * for a build that sends the field as something other than a filled-in string.
+ */
+function stopPayloadWith(transcriptPath: string, message: unknown) {
+  return { ...stopPayload(transcriptPath), last_assistant_message: message };
+}
+
 beforeEach(() => {
   captured = [];
   panelUrl = "";
@@ -272,6 +290,74 @@ describe("speak-response-codex", () => {
     expect(onFixture.status).toBe(0);
     expect(captured).toHaveLength(1);
     expect((JSON.parse(captured[0].body) as { text: string }).text).toBe(ANSWER);
+  });
+
+  it("posts the payload's answer, not the older one still sitting in the rollout", async () => {
+    // The regression test for the bug this hook shipped with. codex appends the
+    // turn's `task_complete` to the rollout roughly ten seconds AFTER the Stop
+    // hook has run and exited, so the newest one in the file at hook time is the
+    // PREVIOUS turn's — a valid, well-formed, wrong record. The fixture stands in
+    // for exactly that: its `task_complete` is ANSWER, and the turn that just
+    // ended said PAYLOAD_ANSWER. The payload wins.
+    await listenAsPanel();
+
+    const result = await run(stopPayloadWith(FIXTURE, PAYLOAD_ANSWER));
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    const { text } = JSON.parse(captured[0].body) as { text: string };
+    expect(text).toBe(PAYLOAD_ANSWER);
+    expect(text).not.toBe(ANSWER);
+  });
+
+  it("posts the payload's answer without needing the rollout at all", async () => {
+    // The point of preferring the payload is that the file leaves the hot path
+    // entirely: there is nothing to wait for and nothing to be stale. A rollout
+    // that does not exist yet, and one holding only the previous turn's answer
+    // under an unfinished turn, both speak — where the scan would have gone
+    // silent on each.
+    await listenAsPanel();
+
+    const missing = join(scratch, "not-written-yet.jsonl");
+    const unfinished = writeRollout("unfinished-with-payload.jsonl", [
+      userTurn("say one sentence"),
+      taskComplete("This is the previous turn's answer."),
+      userTurn("process the note batch and commit it"),
+      assistantMessage(COMMENTARY, "commentary"),
+    ]);
+
+    for (const path of [missing, unfinished]) {
+      const result = await run(stopPayloadWith(path, PAYLOAD_ANSWER));
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("");
+    }
+
+    expect(captured).toHaveLength(2);
+    for (const request of captured) {
+      expect(JSON.parse(request.body)).toEqual({ sessionId: TERMINAL_ID, text: PAYLOAD_ANSWER });
+    }
+  });
+
+  it("falls back to the rollout when the payload's answer is empty or not a string", async () => {
+    // Preferring the payload must not mean trusting it blindly: an older codex
+    // sends no such field at all, and a future one could send it empty or as
+    // something that is not a string. None of those is an utterance — speaking
+    // an empty one would replace the panel's last good line with silence — so
+    // each falls through to the scan the hook already had.
+    await listenAsPanel();
+
+    for (const message of ["", "   ", null, 42, { text: ANSWER }, [ANSWER]]) {
+      const result = await run(stopPayloadWith(FIXTURE, message));
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("");
+    }
+
+    expect(captured).toHaveLength(6);
+    for (const request of captured) {
+      expect(JSON.parse(request.body)).toEqual({ sessionId: TERMINAL_ID, text: ANSWER });
+    }
   });
 
   it("posts nothing when the turn has no task_complete yet", async () => {

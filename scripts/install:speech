@@ -1,0 +1,21 @@
+#!/bin/bash
+#
+# Install (or remove, with --uninstall) the speech Stop hooks for the agents
+# this workspace uses.
+#
+# This wrapper exists so the installer reaches downstream workspaces at all.
+# `update.sh` mirrors panel/, skills/, commands/ and scripts/ — and never the
+# downstream root package.json, which each workspace owns. So a root-level
+# `install:speech` script entry added here is invisible to every workspace:
+# `panel/scripts/install-speech-hook.mjs` arrives, but nothing names it. Every
+# `setup:*` already goes through scripts/ for the same reason; this one had not.
+#
+# Run as `bash scripts/install:speech` (or `pnpm install:speech` in this repo).
+
+set -e
+
+# Resolve the repo root from this script's own location, so it works from any
+# cwd rather than only from the root the sibling wrappers assume.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+exec node "$REPO_ROOT/panel/scripts/install-speech-hook.mjs" "$@"

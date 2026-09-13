@@ -2,12 +2,13 @@
 /*
  * codex `Stop` hook: emit the agent's finished response to the panel.
  *
- * Reads the hook payload as JSON on stdin, opens the rollout it names, takes
- * the **current turn's answer** out of it, and POSTs `{ sessionId, text }` to
- * `POST /api/speech/utterance` — the same endpoint, the same body and the same
- * auth as the Claude Code emitter next door. The panel keeps it as the latest
- * utterance for that session and broadcasts it to open tabs; the browser does
- * the preparation and the synthesis. Nothing is synthesized here.
+ * Reads the hook payload as JSON on stdin, takes the **current turn's answer**
+ * out of it — or, where codex sent none, out of the rollout the payload names —
+ * and POSTs `{ sessionId, text }` to `POST /api/speech/utterance` — the same
+ * endpoint, the same body and the same auth as the Claude Code emitter next
+ * door. The panel keeps it as the latest utterance for that session and
+ * broadcasts it to open tabs; the browser does the preparation and the
+ * synthesis. Nothing is synthesized here.
  *
  * ## Deliberately not sharing code with `speak-response.mjs`
  *
@@ -24,7 +25,40 @@
  * `node:http` rather than `fetch`, because codex alone re-resolves `node`
  * through a login shell and so picks the interpreter for us. See `post`.
  *
- * ## Which turn — `task_complete`, not the newest message
+ * ## Where the answer comes from — the payload, then the rollout
+ *
+ * codex's `Stop` payload carries `last_assistant_message`: the finished answer,
+ * handed to this hook directly, on stdin, for free. It wins over everything
+ * below, and the reason is a write ordering that cannot be worked around from
+ * in here.
+ *
+ * **codex 0.154.0 appends the turn's `task_complete` to the rollout roughly ten
+ * seconds AFTER this hook has run and exited.** Sampled from inside the hook,
+ * same rollout, two consecutive turns — the count of `task_complete` records in
+ * the file, at increasing delays from the moment the hook fired:
+ *
+ *     +0s  1   +2s 1   +5s 1   +10s 2   +20s 2
+ *     +0s  2   +2s 2   +5s 2   +10s 3   +20s 3
+ *
+ * At `+0s` — the only moment this process exists — the file holds the PREVIOUS
+ * turn's record and nothing else. The scan below then does exactly what it was
+ * built to do, refuses to speak a stale answer, and the hook says nothing. Every
+ * turn. For the life of the session. And since every failure here is silent by
+ * design, nothing ever surfaced: speech was dead on codex from the day it
+ * shipped, with no symptom but the quiet.
+ *
+ * No amount of waiting fixes that. `TRANSCRIPT_WAIT_MS` would have to grow to
+ * ten-plus seconds of the agent's turn spent blocked on a file, to learn what
+ * stdin had already said before the first read.
+ *
+ * So: do **not** "simplify" this back to a file read. Preferring the payload
+ * takes the rollout off the hot path altogether — no race, no poll, no deadline.
+ * The scan survives only as the fallback, for a codex build whose payload omits
+ * the field, and for one that sends it empty or as something that is not a
+ * string — an empty utterance would replace the panel's last good line with
+ * silence, so that falls through to the scan rather than being posted.
+ *
+ * ## Which turn the fallback takes — `task_complete`, not the newest message
  *
  * A rollout records the turn's prose twice over: as `response_item` `message`
  * items with a `phase` (`"commentary"` on the way through, `"final_answer"` at
@@ -431,6 +465,20 @@ function post(sessionId, text) {
   });
 }
 
+/**
+ * The answer codex handed us in the payload itself, or `null` when it handed us
+ * nothing usable. Trimmed like the rollout's is, and "usable" is deliberately
+ * strict: a build that omits the field, or sends it empty, or sends it as
+ * something that is not a string, falls through to the scan instead of posting
+ * an empty utterance. See the header for why this is the primary source.
+ */
+function payloadResponseText(payload) {
+  const message = payload?.last_assistant_message;
+  if (typeof message !== "string") return null;
+  const text = message.trim();
+  return text === "" ? null : text;
+}
+
 /** The rollout the payload names, or the one its session id leads to. */
 function rolloutPath(payload) {
   const named = payload?.transcript_path;
@@ -452,10 +500,16 @@ async function main() {
     return;
   }
 
-  const path = rolloutPath(payload);
-  if (path === null) return;
-
-  const text = await currentResponseText(path);
+  // The payload first: it is this turn's answer, it is already in hand, and it
+  // is the only source that is guaranteed to exist while this process does.
+  // Only when codex sent none do we go digging in the rollout — and then all the
+  // staleness machinery above applies, because there it is earned.
+  let text = payloadResponseText(payload);
+  if (text === null) {
+    const path = rolloutPath(payload);
+    if (path === null) return;
+    text = await currentResponseText(path);
+  }
   if (text === null) return;
 
   await post(sessionId, trimToCap(sessionId, text));
