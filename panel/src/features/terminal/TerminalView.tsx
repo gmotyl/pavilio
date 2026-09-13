@@ -68,10 +68,11 @@ export function TerminalView({
   const [ws, setWs] = useState<WebSocket | null>(null);
 
   // Latest-refs so changing callbacks don't blow away the mount effect.
-  // Parent re-renders (e.g. the 8s poll in useAllTerminalSessions) create
-  // new inline lambdas for onExit/onReady; without this the effect would
-  // re-run every poll tick, detaching the xterm DOM node to the hidden
-  // root and back — which silently drops keyboard focus every cycle.
+  // Parent re-renders (e.g. a session opened, killed or renamed anywhere in
+  // the tab — the shared session store republishes and every grid re-renders)
+  // create new inline lambdas for onExit/onReady; without this the effect would
+  // re-run on each one, detaching the xterm DOM node to the hidden root and
+  // back — which silently drops keyboard focus every time.
   const onExitRef = useRef(onExit);
   const onReadyRef = useRef(onReady);
   useEffect(() => {

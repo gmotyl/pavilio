@@ -2,11 +2,14 @@ import { StrictMode } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAllTerminalSessions } from "../useAllTerminalSessions";
+import { __resetSessionStoreForTests } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
 import { GRID, getLayoutPresets, readingOrder, type TileLayout } from "../tileLayout";
 
-vi.mock("../../realtime/useWebSocket", () => ({
-  useWebSocket: () => ({ lastMessage: null }),
+// The session list now arrives from the tab-wide store, so the realtime dependency
+// to stub is the store's channel rather than the hook's former `useWebSocket`.
+vi.mock("../../realtime/channel", () => ({
+  subscribeRealtime: () => () => {},
 }));
 
 function session(id: string, project: string): SessionMeta {
@@ -27,8 +30,8 @@ function mockFetchSessions(sessions: SessionMeta[]) {
   });
 }
 
-// Mounts the hook and flushes the mount-time fetchAll() effect so the returned
-// state reflects the post-fetch reconciliation.
+// Mounts the hook and flushes the store's mount-time load so the returned state
+// reflects the post-fetch reconciliation.
 async function setup() {
   let hook!: ReturnType<
     typeof renderHook<ReturnType<typeof useAllTerminalSessions>, unknown>
@@ -65,9 +68,14 @@ describe("useAllTerminalSessions tiling", () => {
   beforeEach(() => {
     localStorage.clear();
     global.fetch = vi.fn();
+    // The store is a tab-wide singleton and outlives any one mount, so each test
+    // needs it cold — otherwise the previous test's list is still what the hook
+    // subscribes to.
+    __resetSessionStoreForTests();
   });
 
   afterEach(() => {
+    __resetSessionStoreForTests();
     vi.restoreAllMocks();
   });
 
@@ -184,7 +192,7 @@ describe("useAllTerminalSessions tiling", () => {
     expect(new Set(flat).size).toBe(flat.length);
   });
 
-  // Every WebSocket message refetches on this page, on top of the 8s poll — so a
+  // Every realtime frame refetches tab-wide, on top of the 8s poll — so a
   // re-sync of an id set that did not change is the steady state, not an edge case.
   it("a re-sync of an unchanged id set does not alter the stored layout", async () => {
     const live = [session("a", "vector"), session("b", "metro"), session("c", "ch")];
