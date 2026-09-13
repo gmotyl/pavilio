@@ -21,9 +21,10 @@ async function reset(specifier: string, name: string): Promise<void> {
 }
 
 async function resetTabScopedSingletons(): Promise<void> {
-  // Order matters: the store unsubscribes itself from the channel, so resetting
-  // it first stops the channel reset from dropping a listener whose owner still
-  // believes it is subscribed — and is left deaf for the rest of the file.
+  // Store first, mirroring the dependency: the store subscribes to the channel,
+  // never the reverse. Order is not load-bearing while both run in the same hook
+  // — whichever goes second re-clears — but it keeps this reading the same way
+  // round as the teardown a suite would write by hand.
   await reset("./features/terminal/sessionStore", "__resetSessionStoreForTests");
   await reset("./features/realtime/channel", "__resetRealtimeChannelForTests");
 }

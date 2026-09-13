@@ -73,7 +73,7 @@
  *
  * **Known limitation — "run as another user" terminals have no speech on a
  * token-protected panel.** `server/lib/terminal-run-as.ts` spawns
- * `su - <user> -c "…"`, and `su -` resets the environment, so `PANEL_TOKEN`
+ * `su --pty - <user> -c "…"`, and `su -` resets the environment, so `PANEL_TOKEN`
  * does not reach the hook there. (`PAVILIO_PANEL_URL` does: it is re-injected
  * inline into that command string, which is safe precisely because a URL is
  * not a secret.) The token is deliberately NOT worked around the same way:
