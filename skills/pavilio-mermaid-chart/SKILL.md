@@ -95,6 +95,28 @@ Keep shared entry and exit nodes outside subgraphs so they get the neutral teal 
 - Avoid starting label text with `/` — mermaid interprets `[/text]` as a parallelogram shape. The panel auto-fixes this, but it's cleaner to avoid it
 - Keep labels concise — long text overflows node boundaries
 
+### Subgraph titles
+
+A bare `subgraph Title` accepts only plain words: letters, digits, spaces. Any punctuation — an
+em dash, comma, slash, colon, parenthesis — is a **lexical error that kills the whole diagram**
+(`Lexical error … Unrecognized text`). Node labels and `Note over` text are unaffected, which is
+why only the subgraph line blows up.
+
+Use the id + quoted-string form whenever the title is more than plain words:
+
+```mermaid
+flowchart TD
+    subgraph screen["Screen tab — unchanged"]
+        S1[Read cell] --> S2[Render]
+    end
+    subgraph fixed["Answer tab (new)"]
+        F1[Read cell] --> F2[Speak]
+    end
+```
+
+The id (`screen`, `fixed`) is what edges and `style` lines reference; the quoted string is what
+renders. Plain-word titles like `subgraph Current broken path` stay fine as they are.
+
 ### Three-way comparisons
 
 For before/during/after patterns, use three subgraphs:
@@ -300,6 +322,7 @@ pie title Time by area
 - [ ] Cross-system interaction? Add a `sequenceDiagram` with `rect` sections
 - [ ] Subgraphs ordered: broken/current first, fixed/new second
 - [ ] Entry and exit nodes outside subgraphs
+- [ ] Subgraph titles with punctuation (`—`, `,`, `/`, `(`) use `subgraph id["Title"]`, never the bare form
 - [ ] Solid arrows (`->>`) for calls, dotted (`-->>`) for responses — color follows the sending actor
 - [ ] `Note over` for section labels in sequence diagrams
 - [ ] Labels concise, `\n` for line breaks
