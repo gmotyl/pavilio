@@ -331,6 +331,105 @@ describe("SpeechControlBar", () => {
     expect(segmentAt("cell-a", 1)).toBe("cold");
   });
 
+  /**
+   * The scrubber is a POINTER affordance, and it says so.
+   *
+   * It used to carry `role="button"` with `tabIndex={-1}` and a keyboard
+   * handler nowhere — a role WAI-ARIA defines as focusable and Enter/Space
+   * operable, on an element that was neither. That advertises an action to a
+   * screen reader and then does not expose it, which is worse than not
+   * advertising it: the announcement is the promise.
+   *
+   * Making the segments genuinely operable was the other honest option and was
+   * rejected on the grid. An answer of fifteen units would put fifteen tab
+   * stops inside ONE cell's bar, in a panel that tiles many cells — crossing
+   * the grid by keyboard would mean tabbing through every unit of every answer
+   * on screen. The function is not lost by dropping the role: `previous` /
+   * `next` are real buttons with accessible names, and `Ctrl+Shift+←/→` walks
+   * the queue from anywhere (`features/speech/useSpeechKeys`). What the
+   * segments add over those is per-unit jumping and a drag-seek, both of which
+   * are pointer gestures refining a function the keyboard already reaches.
+   *
+   * So: no role, no tab stop, and the graphic is hidden from assistive tech
+   * rather than announced as a row of phantom buttons. The position readout
+   * next to it — "3/7" — stays visible to a screen reader, which is the part
+   * that carries information rather than affordance.
+   */
+  describe("the scrubber is a pointer affordance, not a row of buttons", () => {
+    const barWithUnits = () =>
+      makeSpeech({
+        state: "ready",
+        queue: queueWith({ current: utterance("u-1") }),
+        units: units(200, 200, 200),
+        progress: null,
+        durations: new Map<number, number>(),
+      });
+
+    it("no segment claims a role it does not implement", () => {
+      render(<SpeechControlBar sessionId="cell-a" speech={barWithUnits()} />);
+
+      for (const segment of screen.getAllByTestId(/^speech-bar-segment-cell-a-/)) {
+        expect(segment).not.toHaveAttribute("role");
+        // Not even -1: a non-interactive graphic has no business in the focus
+        // order, programmatic or otherwise.
+        expect(segment).not.toHaveAttribute("tabindex");
+        expect(segment).not.toHaveAttribute("aria-label");
+      }
+    });
+
+    it("the segments are not announced at all", () => {
+      render(<SpeechControlBar sessionId="cell-a" speech={barWithUnits()} />);
+
+      expect(screen.getByTestId("speech-bar-scrubber-cell-a")).toHaveAttribute(
+        "aria-hidden",
+        "true",
+      );
+      // Fifteen units would otherwise be fifteen announcements per cell.
+      expect(screen.queryAllByRole("button", { name: /^Unit \d/ })).toHaveLength(0);
+    });
+
+    it("the transport the scrubber refines is still reachable by keyboard", () => {
+      // The trade-off's other half: dropping the role is only honest because
+      // the function has a keyboard route. These are real buttons with names,
+      // and `useSpeechKeys` binds Ctrl+Shift+←/→ to the same two handlers.
+      const speech = makeSpeech({
+        state: "ready",
+        queue: queueWith({ previous: utterance("u-0"), current: utterance("u-1") }),
+        units: units(200, 200, 200),
+      });
+
+      render(<SpeechControlBar sessionId="cell-a" speech={speech} />);
+
+      const previous = screen.getByRole("button", { name: "Previous answer" });
+      const next = screen.getByRole("button", { name: "Next answer" });
+      expect(previous).not.toBeDisabled();
+      expect(previous.tabIndex).toBe(0);
+      expect(next.tabIndex).toBe(0);
+
+      fireEvent.click(previous);
+      expect(speech.onPrevious).toHaveBeenCalledWith("cell-a");
+    });
+
+    it("the position readout stays announced", () => {
+      // What a screen reader is left with is the fact, not the affordance.
+      render(
+        <SpeechControlBar
+          sessionId="cell-a"
+          speech={makeSpeech({
+            state: "speaking",
+            queue: queueWith({ current: utterance("u-1") }),
+            units: units(200, 200, 200),
+            progress: { unitIndex: 1, unitTime: 1, unitDuration: 3 },
+          })}
+        />,
+      );
+
+      const position = screen.getByTestId("speech-bar-position-cell-a");
+      expect(position).toHaveTextContent("2/3");
+      expect(position.closest("[aria-hidden='true']")).toBeNull();
+    });
+  });
+
   it("clicking a segment jumps to that unit", () => {
     const speech = makeSpeech({
       state: "ready",

@@ -103,6 +103,31 @@ function transportIntent(state: CellSpeechState): "speak" | "pause" | "resume" |
  * everything has been synthesized — which is exactly the up-front cost the fast
  * start exists to avoid. The axis is therefore **units**, one segment each,
  * present from the moment the utterance arrives.
+ *
+ * ## Why the scrubber is pointer-only, and hidden from assistive tech
+ *
+ * The segments carried `role="button"` with `tabIndex={-1}` and no key
+ * handler. WAI-ARIA defines that role as focusable and Enter/Space operable, so
+ * the markup announced an action to a screen reader and then did not expose
+ * it — the announcement is the promise, and this one was not kept.
+ *
+ * The honest alternative was to make them real: `tabIndex={0}` plus a keydown
+ * mapping Enter/Space to the jump. Rejected on the grid. An answer of fifteen
+ * units is fifteen tab stops inside ONE cell's bar, and the panel tiles many
+ * cells — crossing the grid by keyboard would mean tabbing through every unit
+ * of every answer on screen, to reach a function the keyboard already has.
+ *
+ * Because it does have it. `previous` and `next` are real buttons with
+ * accessible names, and `Ctrl+Shift+←/→` walks the queue from anywhere
+ * (`features/speech/useSpeechKeys`, which `terminalInstances` withholds from
+ * the PTY so a focused terminal cannot swallow it). What the segments add over
+ * that is per-unit jumping and a drag-seek — a refinement of a reachable
+ * function, and a drag has no keyboard spelling anyway.
+ *
+ * So the scrubber claims no role, takes no tab stop, and the whole strip is
+ * `aria-hidden`: a decorative rendering of a position, not fifteen phantom
+ * buttons. The position readout next to it stays announced, because "2/3" is
+ * the information; the segments were only ever the affordance.
  */
 export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
   const state = speech.stateFor(sessionId);
@@ -268,7 +293,15 @@ export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
 
         <span className="speech-bar-sep" />
 
-        <div className="speech-bar-scrub" data-testid={`speech-bar-scrubber-${sessionId}`}>
+        <div
+          className="speech-bar-scrub"
+          data-testid={`speech-bar-scrubber-${sessionId}`}
+          // A pointer affordance, hidden from assistive tech — see the note on
+          // the component. Announcing it would mean announcing one item per
+          // unit, and an answer runs to fifteen of them. The position readout
+          // beside it is what a screen reader is given instead, and it stays.
+          aria-hidden="true"
+        >
           {units.map((_unit, index) => {
             const segment = segmentStateAt(index);
             const width = total > 0 ? (weights[index] / total) * 100 : 100 / units.length;
@@ -282,9 +315,10 @@ export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
                 // Index is the identity here: the segment IS unit n of this
                 // utterance, and a re-prepare rebuilds the array in place.
                 key={index}
-                role="button"
-                tabIndex={-1}
-                aria-label={`Unit ${index + 1} of ${units.length}`}
+                // No `role`, no `tabIndex`, no `aria-label`: this is a
+                // graphic a mouse can act on, not a control. `title` stays —
+                // it is a hover tooltip for the pointer user, and an
+                // `aria-hidden` subtree never announces it.
                 title={`Unit ${index + 1} of ${units.length}`}
                 data-testid={`speech-bar-segment-${sessionId}-${index}`}
                 data-segment={segment}
