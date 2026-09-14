@@ -341,6 +341,18 @@ function TerminalCell({
   const handleRef = useRef<TerminalHandle | null>(null);
   const [snapshot, setSnapshot] = useState<BufferSnapshot | null>(null);
   const [editingName, setEditingName] = useState(false);
+  /**
+   * Whether this cell's speech bar is on screen. Per cell and on by DEFAULT —
+   * it is a standing transport, not something to be found — and owned here
+   * because the two components that care sit on opposite sides of the cell: the
+   * header icon toggles it and `TerminalView` renders it.
+   *
+   * Deliberately NOT persisted and NOT in the speech host: it is a view
+   * preference of one cell in one surface, while the armed cell is one value
+   * per browser. The panel mounts the same cell in two surfaces at once when
+   * the drawer is open, and each may reasonably show its own bar.
+   */
+  const [speechBarVisible, setSpeechBarVisible] = useState(true);
   // Escape and Enter both end the edit by unmounting the input, which can
   // fire a blur on the way out. Commit exactly once: whichever key handled
   // it raises this flag and the blur that follows is ignored.
@@ -490,7 +502,8 @@ function TerminalCell({
           <CellAutoplayToggle
             sessionId={session.id}
             armedSessionId={speech?.armedSessionId ?? null}
-            onArm={(id) => speech?.onArm(id)}
+            barVisible={speechBarVisible}
+            onToggleBar={() => setSpeechBarVisible((visible) => !visible)}
           />
           <CellIconButton
             testId={`terminal-cell-eye-${session.id}`}
@@ -520,6 +533,11 @@ function TerminalCell({
         <TerminalView
           sessionId={session.id}
           focused={focused}
+          // The speech bar is an overlay inside the view, pinned below this
+          // header — never a row in the cell's flexbox, which would refit the
+          // terminal and resize the PTY every time it appeared.
+          speech={speech}
+          speechBarVisible={speechBarVisible}
           onExit={() => onExit(session.id)}
           onReady={(h) => {
             handleRef.current = h;

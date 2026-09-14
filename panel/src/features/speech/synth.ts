@@ -42,6 +42,24 @@ function cacheKey(voice: string, text: string): string {
   return `${voice}::${text}`;
 }
 
+/**
+ * Whether this text is in the synthesis cache for this voice — i.e. whether
+ * playing it would start with no wait. Read-only: it does NOT touch the LRU,
+ * because a scrubber asking "is this segment warm?" on every render is not a
+ * use of the audio and must not protect it from eviction.
+ *
+ * It reports an in-flight synthesis as cached, exactly as `synthesizeSpeech`
+ * treats one: the caller dedupes onto the same promise rather than paying for a
+ * second synthesis, which is the whole question a `ready` segment is asking.
+ */
+export function isSpeechSynthesized(
+  text: string,
+  options: SpeechSynthesisOptions = {},
+): boolean {
+  if (!text || !text.trim()) return false;
+  return synthesisCache.has(cacheKey(options.voice || DEFAULT_VOICE, text));
+}
+
 /** Marks a key most-recently-used by moving it to the end of the Map's order. */
 function touchCache(key: string): void {
   const promise = synthesisCache.get(key);

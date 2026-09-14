@@ -211,6 +211,22 @@ let playResult: () => Promise<void>;
 // stand-in is taught to do the same. Patched once, at module scope: the
 // per-test `vi.restoreAllMocks()` only unwinds spies, and re-wrapping this in
 // `beforeEach` would stack one wrapper per test.
+/**
+ * jsdom has no media engine, so `duration` is a getter pinned to NaN and a
+ * unit's audio can never "load". Backed by a map here instead, written by
+ * {@link loadDuration} alongside the `loadedmetadata` a browser fires once it
+ * knows the figure — which is the only way the player can learn a unit's real
+ * length, and so the only way `unitDurations` can ever be populated.
+ */
+const unitLengths = new WeakMap<HTMLMediaElement, number>();
+Object.defineProperty(HTMLMediaElement.prototype, "duration", {
+  configurable: true,
+  enumerable: true,
+  get(this: HTMLMediaElement): number {
+    return unitLengths.get(this) ?? NaN;
+  },
+});
+
 const nativeSrc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src")!;
 Object.defineProperty(HTMLMediaElement.prototype, "src", {
   configurable: true,
@@ -220,6 +236,9 @@ Object.defineProperty(HTMLMediaElement.prototype, "src", {
   },
   set(this: HTMLMediaElement, value: string) {
     this.currentTime = 0;
+    // A fresh source has no duration until it loads, exactly as in a browser —
+    // so a unit's recorded length can only ever come from its own metadata.
+    unitLengths.delete(this);
     nativeSrc.set!.call(this, value);
   },
 });
@@ -276,6 +295,37 @@ function currentElement(): HTMLMediaElement {
   if (!element) throw new Error("nothing is playing");
   return element;
 }
+
+/**
+ * The unit in the element reports its real length, as a browser does when the
+ * metadata of the blob it was handed arrives.
+ */
+async function loadDuration(seconds: number): Promise<void> {
+  const element = currentElement();
+  unitLengths.set(element, seconds);
+  await act(async () => {
+    element.dispatchEvent(new Event("loadedmetadata"));
+    await drain();
+  });
+}
+
+/** The element reports a playback position, as `timeupdate` does. */
+async function reportTime(seconds: number): Promise<void> {
+  const element = currentElement();
+  element.currentTime = seconds;
+  await act(async () => {
+    element.dispatchEvent(new Event("timeupdate"));
+    await drain();
+  });
+}
+
+/**
+ * URLs in a comparable order. Object URLs are named after the unit they carry
+ * here, so a unit wrapped twice — a replay, a seek — yields the same string
+ * twice: only a *multiset* comparison can say that both wrappers were handed
+ * back, and a Set would quietly accept one revoke for two creates.
+ */
+const inOrder = (urls: readonly string[]): string[] => [...urls].sort();
 
 beforeEach(() => {
   synth.reset();
@@ -1197,6 +1247,333 @@ describe("useSpeechPlayer", () => {
     // being cell-a's paused unit audibly restarting.
     expect(played).toEqual(["", "blob:unit-0", "blob:other-0"]);
     expect(result.current.speakingSessionId).toBe("cell-b");
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("jumping to a synthesized unit starts without synthesizing", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    // Unit 0 is speaking and the cascade has warmed the whole remainder, so
+    // every unit of this run is already in the synthesis cache.
+    await startPlay(result.current, "cell-a", manyUnits(4));
+    expect(requested()).toEqual(["unit-0", "unit-1", "unit-2", "unit-3"]);
+    const requestedBefore = requested();
+
+    await settle(() => result.current.jumpToUnit("cell-a", 2));
+
+    // Straight there: the jump is served out of the cache, so not one further
+    // edge-tts connection is opened for a unit the run already paid for.
+    expect(played).toEqual(["blob:unit-0", "blob:unit-2"]);
+    expect(requested()).toEqual(requestedBefore);
+    expect(result.current.waitingForSynthesis).toBe(false);
+    expect(result.current.speakingSessionId).toBe("cell-a");
+    expect(result.current.progress).toEqual({ unitIndex: 2, unitTime: 0, unitDuration: null });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("jumping to a cold unit reports stalled and then plays it", async () => {
+    // Everything from unit 2 on is held open, so the warming window never gets
+    // past unit 4: unit 5 is genuinely un-synthesized when the jump lands on it.
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    expect(requested()).toEqual(["unit-0", "unit-1", "unit-2", "unit-3", "unit-4"]);
+
+    await settle(() => result.current.jumpToUnit("cell-a", 5));
+
+    // A speaking session that is waiting on synthesis is exactly what
+    // `useUtteranceChannel` reads as `stalled` — the red that already means
+    // *blocked on synthesis*, and is never terminal. No new state was invented
+    // for a cold jump, because the run is in the state that red already names.
+    expect(result.current.speakingSessionId).toBe("cell-a");
+    expect(result.current.waitingForSynthesis).toBe(true);
+    expect(requested()).toContain("unit-5");
+    expect(played).toEqual(["blob:unit-0"]);
+
+    await settle(() => synth.release("unit-5"));
+
+    expect(played).toEqual(["blob:unit-0", "blob:unit-5"]);
+    expect(result.current.waitingForSynthesis).toBe(false);
+    expect(result.current.progress?.unitIndex).toBe(5);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("seeking inside the playing unit moves currentTime without re-synthesis", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(3));
+    const element = currentElement();
+    await loadDuration(30);
+    const requestedBefore = requested();
+    const createdBefore = [...createdUrls];
+
+    await settle(() => result.current.seekWithinUnit(7.5));
+
+    expect(element.currentTime).toBe(7.5);
+    expect(result.current.progress).toEqual({ unitIndex: 0, unitTime: 7.5, unitDuration: 30 });
+    // Nothing was torn down and nothing was rebuilt: the unit the element is
+    // holding is the unit that goes on playing, from its new position.
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(requested()).toEqual(requestedBefore);
+    expect(createdUrls).toEqual(createdBefore);
+    expect(revokedUrls).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("seeking back ten seconds crosses into the previous unit", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(5));
+    // Walk to unit 3, each unit reporting twenty seconds as its audio loads.
+    await loadDuration(20);
+    await endCurrentUnit();
+    await loadDuration(20);
+    await endCurrentUnit();
+    await loadDuration(20);
+    await endCurrentUnit();
+    await loadDuration(20);
+    expect(played).toEqual(["blob:unit-0", "blob:unit-1", "blob:unit-2", "blob:unit-3"]);
+
+    await reportTime(4);
+    const requestedBefore = requested();
+
+    await settle(() => result.current.seekBackward(10));
+
+    // Four of the ten seconds were in unit 3, so the other six belong to unit 2
+    // — and it resumes six seconds before that unit's END, not at its start.
+    // The unit boundary is invisible for the one gesture that crosses it most.
+    expect(played).toEqual([
+      "blob:unit-0",
+      "blob:unit-1",
+      "blob:unit-2",
+      "blob:unit-3",
+      "blob:unit-2",
+    ]);
+    expect(currentElement().currentTime).toBe(14);
+    expect(result.current.progress).toEqual({ unitIndex: 2, unitTime: 14, unitDuration: 20 });
+    // Crossing back is a cache hit, not a second synthesis of a unit already
+    // spoken once.
+    expect(requested()).toEqual(requestedBefore);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("seeking back from the first unit restarts it at zero", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(3));
+    await loadDuration(20);
+    await reportTime(4);
+    const requestedBefore = requested();
+    const createdBefore = [...createdUrls];
+
+    await settle(() => result.current.seekBackward(10));
+
+    // There is nothing behind unit 0 to underflow into, so the ten seconds run
+    // out at the start of the run rather than off the end of it.
+    expect(currentElement().currentTime).toBe(0);
+    expect(result.current.progress).toEqual({ unitIndex: 0, unitTime: 0, unitDuration: 20 });
+    // And it is a rewind, not a restart: the same unit keeps the element, so no
+    // run was torn down, no URL rebuilt and no synthesis repeated.
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(requested()).toEqual(requestedBefore);
+    expect(createdUrls).toEqual(createdBefore);
+    expect(revokedUrls).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The stall a cold jump opens is the one moment the element and the transport
+   * disagree: `resetElement` removes the `src` attribute without running the
+   * element's load algorithm, so `currentTime` still reads the position of the
+   * unit that was torn down, while `unitIndexRef` already names the unit being
+   * waited on. A seek that does arithmetic there is doing it on a foreign clock,
+   * and the position it publishes is thrown away the moment the unit lands.
+   */
+  it("seeking back during a stall does not move on the torn-down unit's clock", async () => {
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    await loadDuration(20);
+    // Fifteen seconds into unit 0 — the clock the element is still holding when
+    // the jump below tears that unit out from under it.
+    await reportTime(15);
+    expect(currentElement().currentTime).toBe(15);
+
+    await settle(() => result.current.jumpToUnit("cell-a", 5));
+
+    expect(result.current.waitingForSynthesis).toBe(true);
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+    const playedBefore = [...played];
+
+    await settle(() => result.current.seekBackward(10));
+
+    // Unit 5 has not started, so there is no position inside it to move back
+    // from. Reading unit 0's fifteen seconds instead would publish `unitTime: 5`
+    // — a number the listener never hears, because the unit lands at zero.
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+    expect(played).toEqual(playedBefore);
+
+    await settle(() => synth.release("unit-5"));
+
+    // What was published during the stall is what actually plays.
+    expect(played).toEqual([...playedBefore, "blob:unit-5"]);
+    expect(currentElement().currentTime).toBe(0);
+    expect(result.current.progress?.unitIndex).toBe(5);
+    expect(result.current.progress?.unitTime).toBe(0);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The same stall, from below.
+   *
+   * The test above leaves the torn-down clock at fifteen seconds, which is
+   * `>= 10`, so `seekBackward(10)` takes the **within-unit** arm and the wrong
+   * position it would publish is caught by `seekWithinUnit`'s own stall guard.
+   * That makes `seekBackward`'s guard redundant there — remove it and the suite
+   * stays green.
+   *
+   * The arm the code comment calls the worse lie is the other one: with a stale
+   * clock BELOW the ten seconds, the arithmetic underflows into the units
+   * before the one being waited on, and a foreign clock no longer merely
+   * publishes a wrong position — it picks the wrong unit to land in and calls
+   * `play()` into it. Nothing pinned that, and `seekBackward` is about to get
+   * its first production caller (the Media Session transport's `seekbackward`).
+   */
+  it("seeking back during a stall does not pick a landing unit off a foreign clock", async () => {
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    await loadDuration(20);
+    // THREE seconds into unit 0 — below the ten, which is what routes the seek
+    // below into the cross-unit arm rather than the within-unit one.
+    await reportTime(3);
+    expect(currentElement().currentTime).toBe(3);
+
+    await settle(() => result.current.jumpToUnit("cell-a", 5));
+
+    expect(result.current.waitingForSynthesis).toBe(true);
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+    const playedBefore = [...played];
+
+    await settle(() => result.current.seekBackward(10));
+
+    // Unit 5 has not started, so there are no three seconds of it behind the
+    // playhead and no seven seconds to carry back into units 4, 3, … Doing the
+    // arithmetic anyway abandons the unit the user jumped to and starts a
+    // different one — unit 4 here, a unit nobody asked for and whose synthesis
+    // has not landed either, so the stall simply moves.
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+    expect(played).toEqual(playedBefore);
+
+    await settle(() => synth.release("unit-5"));
+
+    // The unit the jump named is still the one the run is waiting for, so it is
+    // the one that plays when it lands.
+    expect(played).toEqual([...playedBefore, "blob:unit-5"]);
+    expect(result.current.progress?.unitIndex).toBe(5);
+    expect(result.current.progress?.unitTime).toBe(0);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("seeking inside a stalled unit publishes nothing playback will discard", async () => {
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    await loadDuration(20);
+    await reportTime(15);
+
+    await settle(() => result.current.jumpToUnit("cell-a", 5));
+    expect(result.current.waitingForSynthesis).toBe(true);
+
+    await settle(() => result.current.seekWithinUnit(8));
+
+    // The element holds no source, so `currentTime = 8` moves nothing and the
+    // published eight seconds is a claim about audio that does not exist yet.
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+
+    await settle(() => synth.release("unit-5"));
+
+    expect(currentElement().currentTime).toBe(0);
+    expect(result.current.progress?.unitTime).toBe(0);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("a unit's real duration is recorded once its audio loads", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(3));
+
+    // Nothing is known before the audio says so: the bar has only its
+    // character-count estimate to draw the segment from.
+    expect(result.current.unitDurations.get(0)).toBeUndefined();
+    expect(result.current.progress).toEqual({ unitIndex: 0, unitTime: 0, unitDuration: null });
+
+    await loadDuration(12.5);
+
+    // This is what lets Task 7's scrubber correct a segment's width from the
+    // estimate to the truth, one unit at a time as the ladder climbs.
+    expect(result.current.unitDurations.get(0)).toBe(12.5);
+    expect(result.current.progress).toEqual({ unitIndex: 0, unitTime: 0, unitDuration: 12.5 });
+
+    // And the position under it follows the element rather than a timer.
+    await reportTime(3.25);
+    expect(result.current.progress).toEqual({ unitIndex: 0, unitTime: 3.25, unitDuration: 12.5 });
+
+    await endCurrentUnit();
+    await loadDuration(7.25);
+
+    expect([...result.current.unitDurations.entries()]).toEqual([
+      [0, 12.5],
+      [1, 7.25],
+    ]);
+    expect(result.current.progress).toEqual({ unitIndex: 1, unitTime: 0, unitDuration: 7.25 });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("every object URL created by a seek is revoked on teardown", async () => {
+    const onError = vi.fn();
+    const { result, unmount } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(4));
+    await loadDuration(20);
+    await endCurrentUnit();
+    await loadDuration(20);
+    await reportTime(4);
+    const createdBeforeSeek = createdUrls.length;
+
+    // `toSpeechBlob` COPIES the cached buffer, which is what lets a unit be
+    // wrapped again on a replay or a seek — and every wrapper is a live handle
+    // the browser holds until it is revoked. Both seek paths build them.
+    await settle(() => result.current.seekBackward(10));
+    expect(createdUrls.length).toBeGreaterThan(createdBeforeSeek);
+
+    const createdBeforeJump = createdUrls.length;
+    await settle(() => result.current.jumpToUnit("cell-a", 3));
+    expect(createdUrls.length).toBeGreaterThan(createdBeforeJump);
+
+    await act(async () => {
+      unmount();
+      await drain();
+    });
+
+    // One revoke per create, counted rather than de-duplicated: the same unit
+    // is wrapped more than once here, and a Set comparison would accept a
+    // single revoke for two of them.
+    expect(revokedUrls).toHaveLength(createdUrls.length);
+    expect(inOrder(revokedUrls)).toEqual(inOrder(createdUrls));
     expect(onError).not.toHaveBeenCalled();
   });
 });

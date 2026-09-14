@@ -13,6 +13,8 @@
  * `terminal → speech/types`, `speech/* → speech/types` — and nothing under
  * `features/speech/` imports `features/terminal/` any more.
  */
+import type { SpeechProgress } from "./useSpeechPlayer";
+import type { UtteranceQueue } from "./utteranceQueue";
 
 /**
  * What a cell's speech control shows. Seven states, feeding **two independent
@@ -65,8 +67,17 @@ export type CellSpeechState =
  * without typechecking — so `features/speech/__tests__/autoplay.integration.test.tsx`
  * mounts the real surfaces and reads the header attributes.
  */
+// The queue's shape is declared where the reducer that owns it lives; the
+// import is type-only, so the cycle it closes with `utteranceQueue.ts` erases.
 export interface GridSpeech {
   stateFor: (sessionId: string) => CellSpeechState;
+  /**
+   * The cell's queue: one step of history, the utterance the transport is on,
+   * and the answers waiting behind it. Every cell has one, including a cell
+   * nothing has ever arrived for — the transport renders before any arrival, so
+   * this never hands back `undefined`.
+   */
+  queueFor: (sessionId: string) => UtteranceQueue;
   /** The single armed session in this browser, or `null`. */
   armedSessionId: string | null;
   /** Speak the cell's utterance from the start — or replay a heard one. */
@@ -91,7 +102,87 @@ export interface GridSpeech {
    * programmatic "stop talking", and the host keeps it wired.
    */
   onStop: (sessionId: string) => void;
+  /**
+   * Step the transport back onto the answer before the current one, and play it
+   * from its first unit. History is one step deep, so a second press does
+   * nothing — and so does a press on a cell with nothing behind its cursor.
+   */
+  onPrevious: (sessionId: string) => void;
+  /**
+   * Step forward: back out of history if the cursor is in it, otherwise on into
+   * the oldest answer waiting. Nothing ahead, nothing happens.
+   */
+  onNext: (sessionId: string) => void;
   onArm: (sessionId: string | null) => void;
+  /**
+   * The speech units of the utterance the cell's transport is on — the
+   * scrubber's segments, one each. Non-empty from the moment an utterance
+   * ARRIVES: preparation is pure text work and costs no synthesis, which is
+   * what lets the bar draw the whole response before any of it is in hand.
+   * Empty for a cell nothing has ever arrived for.
+   */
+  unitsFor: (sessionId: string) => readonly SpeechUnit[];
+  /**
+   * Subscribe to the playhead. This — rather than a `progress` FIELD — is why
+   * the scrubber does not cost the grid a re-render four times a second.
+   *
+   * `progress` moves on every `timeupdate`, roughly 4 Hz. Put on this object it
+   * would change the host's identity at that rate, and every cell in the panel
+   * would re-render for the one cell that is speaking. So the playhead is an
+   * external store instead: this object stays stable, every bar reads its own
+   * snapshot through `useSyncExternalStore`, and a bar whose snapshot did not
+   * change — every cell except the speaking one, whose snapshot is the shared
+   * `null` — is not re-rendered at all.
+   *
+   * Notifies on {@link GridSpeech.progressFor} AND
+   * {@link GridSpeech.unitDurationsFor}: they are two readings of the same run.
+   *
+   * Both of those are read as store snapshots, so both MUST return a
+   * referentially stable value between notifications — a fresh `new Map()` or a
+   * fresh object per call is an infinite render loop, not a slow render. That
+   * is why "nothing here" is a shared constant everywhere it is produced.
+   */
+  subscribeProgress: (listener: () => void) => () => void;
+  /**
+   * Where the one run is, *if it is this cell's*. Null everywhere else — the
+   * panel has a single `<audio>` element, so at most one cell is ever running,
+   * and a bar that read the global progress would paint every other cell's
+   * scrubber with a position belonging to a different answer.
+   *
+   * A playhead, never a timeline: it is null again the moment a run ends, while
+   * {@link GridSpeech.unitDurationsFor} keeps the measurements. Anything the
+   * bar must still draw after the audio stops belongs to that one, not to this.
+   */
+  progressFor: (sessionId: string) => SpeechProgress | null;
+  /**
+   * Real per-unit durations of the utterance this cell last ran, by index. It
+   * is what corrects a segment's width from the `SpeechUnit.chars` estimate to
+   * the truth, one unit at a time, so the bar sharpens as the synthesis ladder
+   * climbs rather than lying and then jumping.
+   *
+   * Outlives the run, deliberately: a finished utterance still has a timeline,
+   * and a scrubber that collapsed back to character estimates the moment the
+   * audio stopped would throw away everything it had just learned. Empty for
+   * every cell but the one the player last ran.
+   */
+  unitDurationsFor: (sessionId: string) => ReadonlyMap<number, number>;
+  /**
+   * Start the cell's current utterance at `unitIndex` — a segment click.
+   *
+   * Deliberately NOT `SpeechPlayer.jumpToUnit`: that one is a no-op for a cell
+   * that has never spoken in this tab, because the player learns a session's
+   * units from `play` and from nothing else, while the scrubber's segments
+   * exist from the moment the utterance arrives. The host owns the utterance
+   * and its prepared units, so the jump goes through its own speak path and a
+   * segment click on an unplayed cell makes a sound like any other.
+   */
+  onJumpToUnit: (sessionId: string, unitIndex: number) => void;
+  /**
+   * Move to `seconds` inside the unit this cell is speaking — a drag across the
+   * playing segment. Re-synthesizes nothing, and does nothing at all for a cell
+   * that is not the one running.
+   */
+  onSeekWithinUnit: (sessionId: string, seconds: number) => void;
 }
 
 /** One finished agent response, as the server hands it to the browser. */

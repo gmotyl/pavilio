@@ -618,6 +618,277 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
 });
 
 /**
+ * The queue, seen from the host — the change the delta spec calls "a newer
+ * utterance no longer supersedes a live run".
+ *
+ * Shipped behaviour dropped the answer that was playing the moment a newer one
+ * arrived: the channel kept one utterance per session, so the arrival simply
+ * overwrote it and the armed cell barged in on itself. Now the arrival goes
+ * behind the run, and what happens when the run ends is the cell's own business:
+ * an armed cell advances into the queue by itself, an unarmed one holds it.
+ *
+ * The one arm that does NOT queue is a PAUSED cell — the living spec's "a
+ * paused cell does not hold the next answer hostage" — because a held run is
+ * not a run anyone is listening to.
+ */
+describe("useSpeechHost — arrivals queue behind a live run", () => {
+  it("a newer utterance queues behind a live run instead of superseding it", async () => {
+    const stale = unitsOf(response(3));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    // The run is untouched — the unit that was playing is still the only one
+    // that has played — and the answer is behind it rather than over it.
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+    expect(played).toEqual([`blob:${stale[0]}`]);
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("u-1");
+    expect(queue.pending.map((waiting) => waiting.id)).toEqual(["u-2"]);
+  });
+
+  it("an armed cell auto-advances into the queue when the run ends", async () => {
+    const stale = unitsOf(response(2));
+    const newer = unitsOf(response(2, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await settle(() => result.current.onArm("cell-a"));
+    await emitUtterance("cell-a", "u-1", response(2));
+    expect(played).toEqual([`blob:${stale[0]}`]);
+
+    await emitUtterance("cell-a", "u-2", response(2, "Newer"));
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["u-2"]);
+
+    await endCurrentUnit();
+    await endCurrentUnit();
+
+    // The last unit of u-1 ended, so u-1 is history and u-2 is speaking — with
+    // no click anywhere, because the cell is armed.
+    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`, `blob:${newer[0]}`]);
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.previous?.id).toBe("u-1");
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.pending).toEqual([]);
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+  });
+
+  it("an unarmed cell holds the queued utterance without speaking", async () => {
+    const stale = unitsOf(response(2));
+    const { result } = renderHook(() => useSpeechHost());
+
+    // A click, not an arming: the run is the user's, and nothing about it says
+    // the cell may start talking again on its own when it ends.
+    await emitUtterance("cell-a", "u-1", response(2));
+    await clickControl(result.current, "cell-a");
+    await emitUtterance("cell-a", "u-2", response(2, "Newer"));
+
+    await endCurrentUnit();
+    await endCurrentUnit();
+
+    expect(result.current.armedSessionId).toBeNull();
+    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.previous?.id).toBe("u-1");
+    // Holding it, not hiding it: green, with the newer answer under the click.
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+
+  it("a paused cell is superseded, not held hostage", async () => {
+    const stale = unitsOf(response(3));
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    // Part-way in, so a resumed stale run would be audibly the wrong thing
+    // rather than coincidentally the newer answer's first unit.
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    // NOT queued behind the held run: the queue moves on to it, exactly as the
+    // shipped behaviour did, and the held run is abandoned.
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.pending).toEqual([]);
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${newer[0]}`]);
+  });
+
+  /**
+   * The other ordering of the same scenario: the answer landed while the cell
+   * was still SPEAKING — so the queue took it, correctly — and only then did
+   * the user pause. The pause is what releases it; otherwise the queued answer
+   * would sit behind a run nobody is listening to until the user resumes it.
+   */
+  it("pausing a cell releases the answer queued behind it", async () => {
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    await endCurrentUnit();
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["u-2"]);
+
+    await clickControl(result.current, "cell-a");
+
+    expect(result.current.queueFor("cell-a").current?.id).toBe("u-2");
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${newer[0]}`]);
+  });
+
+  /**
+   * The same release at queue DEPTH TWO, which is where "releases the answer
+   * queued behind it" and "drains the queue" stop looking alike.
+   *
+   * The pause has to step the queue exactly ONE place — onto the oldest
+   * waiting answer — and leave the rest waiting. The effect re-runs after its
+   * own dispatch (the queue it read is part of its dependencies), so a guard
+   * that only asks "is anything pending?" re-enters and advances again, and
+   * again, until `pending` is empty. At depth one that is indistinguishable
+   * from a single step; at depth two it silently discards every answer between
+   * the held run and the newest one.
+   */
+  it("pausing a cell with two answers queued releases only the oldest", async () => {
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    await endCurrentUnit();
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+    await emitUtterance("cell-a", "u-3", response(3, "Latest"));
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["u-2", "u-3"]);
+
+    await clickControl(result.current, "cell-a");
+
+    const queue = result.current.queueFor("cell-a");
+    // Arrival order intact: u-2 is what the cell is on, u-3 is still behind
+    // it, and nothing was dropped on the way through.
+    expect(queue.previous?.id).toBe("u-1");
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.pending.map((w) => w.id)).toEqual(["u-3"]);
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${newer[0]}`]);
+  });
+
+  /**
+   * Warming sits outside every concurrency bound in the feature. The player's
+   * `SYNTHESIS_CONCURRENCY` limits the units of the ONE run it is playing; the
+   * host's warming loop fires a synthesis per warmable utterance with no await
+   * and no limiter at all. With a full queue behind a live run that was seven
+   * requests in flight, competing with the audio being listened to.
+   *
+   * The bound is the queue's reach: what is being spoken, and what the
+   * transport would reach next. The rest are warmed as they move up.
+   */
+  it("a full five-deep queue warms two utterances, not seven", async () => {
+    const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"];
+    const firstUnitOf = (word: string): string => unitsOf(response(3, word))[0];
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3, words[0]));
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    for (let i = 1; i < words.length; i += 1) {
+      await emitUtterance("cell-a", `u-${i + 1}`, response(3, words[i]));
+    }
+
+    // MAX_PENDING exactly: five answers waiting behind the one being spoken.
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("u-1");
+    expect(queue.pending).toHaveLength(5);
+
+    // Counted as first units, because that is what a warm IS. The live run's
+    // later units are the player's cascade, which has its own limiter.
+    const warmed = words.filter((word) => requestedTexts().includes(firstUnitOf(word)));
+    expect(warmed).toEqual([words[0], words[1]]);
+  });
+
+  /**
+   * The per-cell bound above is two. There was no PANEL bound at all: the warm
+   * loop walks every warmable utterance in every cell and fires a synthesis for
+   * each with no await, so a grid of ten busy terminals opened ten edge-tts
+   * WebSocket handshakes at once — each with its own DRM token, all competing
+   * with the unit the listener is actually waiting for.
+   *
+   * {@link WARM_CONCURRENCY} is that bound, and the rest queue. Two, matching
+   * the per-cell bound, so one cell's pair still goes out together — the common
+   * case is unchanged — while speculation across the panel never grows with the
+   * number of terminals. The live run keeps the larger share: its own cascade
+   * is bounded separately at `SYNTHESIS_CONCURRENCY = 3`.
+   *
+   * A queued warm is still an honest red: the cell IS waiting for its audio,
+   * and which side of the gate it is waiting on is not the user's question.
+   */
+  it("the panel warms two utterances at a time, however many cells have one", async () => {
+    const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
+    const firstUnitOf = (word: string): string => unitsOf(response(3, word))[0];
+    // Every warm held open, so "in flight" is observable rather than instant.
+    for (const word of words) synth.hold(firstUnitOf(word));
+
+    const { result } = renderHook(() => useSpeechHost());
+
+    // Eight cells, one arriving answer each: eight warmable utterances, and
+    // before the gate, eight sockets.
+    for (let i = 0; i < words.length; i += 1) {
+      await emitUtterance(`cell-${i}`, `u-${i}`, response(3, words[i]));
+    }
+
+    const requested = (): string[] => words.filter((w) => requestedTexts().includes(firstUnitOf(w)));
+
+    expect(requested()).toEqual([words[0], words[1]]);
+    // …and every one of the eight cells is reported preparing, including the
+    // six that have not reached the synthesizer yet.
+    expect(result.current.preparingSessionIds.size).toBe(words.length);
+
+    // A slot frees exactly one queued warm, in arrival order.
+    await act(async () => {
+      synth.release(firstUnitOf(words[0]));
+      await drain();
+    });
+    expect(requested()).toEqual([words[0], words[1], words[2]]);
+    expect(result.current.preparingSessionIds.has("cell-0")).toBe(false);
+
+    await act(async () => {
+      synth.release(firstUnitOf(words[1]));
+      await drain();
+    });
+    expect(requested()).toEqual([words[0], words[1], words[2], words[3]]);
+
+    // A FAILED warm frees its slot too: the gate must not be closed by the one
+    // outcome the warm swallows.
+    await act(async () => {
+      synth.fail(firstUnitOf(words[2]));
+      await drain();
+    });
+    expect(requested()).toHaveLength(5);
+    // And the cell whose warm failed is reported ready anyway — the click pays
+    // for the synthesis itself, which is how the user gets a retry.
+    expect(result.current.preparingSessionIds.has("cell-2")).toBe(false);
+  });
+});
+
+/**
  * The budget is gone, and with it the resume point that existed only to
  * continue from its cut. What must survive is everything the player's own state
  * holds: a pause goes on where it was paused, and a newer utterance still

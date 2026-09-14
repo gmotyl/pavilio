@@ -1,0 +1,69 @@
+{
+  "_provenance": {
+    "note": "Two real halves, spliced. Nothing here is invented.",
+    "envelope": {
+      "source": "live PreToolUse stdin capture",
+      "how": "claude 2.1.263 run interactively in a pty from an empty temp dir with --setting-sources \"\" --strict-mcp-config --settings <throwaway file registering a PreToolUse hook, matcher AskUserQuestion, that appends stdin to a file>. No live agent config was read or written.",
+      "captured_at": "2026-09-14",
+      "finding": "PreToolUse DOES fire for AskUserQuestion, and it fires while the question dialog is still open and unanswered — i.e. during the turn that never ends. It does NOT fire in print (-p) mode: AskUserQuestion is absent from the tool list there.",
+      "keys_observed": [
+        "session_id",
+        "transcript_path",
+        "cwd",
+        "scratchpad_dir",
+        "prompt_id",
+        "permission_mode",
+        "effort",
+        "hook_event_name",
+        "tool_name",
+        "tool_input",
+        "tool_use_id"
+      ],
+      "caveat": "The captured session ran with transcript saving off (inherited CLAUDE_CODE_CHILD_SESSION), so its transcript_path may not exist on disk. The path shape is real; the file is not guaranteed."
+    },
+    "tool_input": {
+      "source": "a real AskUserQuestion tool_use block from ~/.claude/projects/**/*.jsonl",
+      "session": "1fa9fab4-c140-4f49-9033-c5846866ac11",
+      "tool_use_id": "toolu_016stWaHZ45kcLaWVhizyEKK",
+      "why": "The live capture's own tool_input had 2 options and no preview. This one carries 3 options and a preview on each, so it exercises the fields the emitter has to survive. Same shape as the captured one, field for field."
+    }
+  },
+  "session_id": "1136d6de-cd18-4e3f-b8b9-724910dda43b",
+  "transcript_path": "/root/.claude/projects/-tmp-claude-0--root-git-prv-projects-2da6209b-4978-4e6d-8cbd-d8f78f902849-scratchpad-probe-work/1136d6de-cd18-4e3f-b8b9-724910dda43b.jsonl",
+  "cwd": "/tmp/claude-0/-root-git-prv-projects/2da6209b-4978-4e6d-8cbd-d8f78f902849/scratchpad/probe/work",
+  "scratchpad_dir": "/tmp/claude-0/-tmp-claude-0--root-git-prv-projects-2da6209b-4978-4e6d-8cbd-d8f78f902849-scratchpad-probe-work/1136d6de-cd18-4e3f-b8b9-724910dda43b/scratchpad",
+  "prompt_id": "7fa522e1-111d-4f11-b3a3-04878c242dbc",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "AskUserQuestion",
+  "tool_input": {
+    "questions": [
+      {
+        "question": "How should archived plans render in the plans tab?",
+        "header": "UI treatment",
+        "multiSelect": false,
+        "options": [
+          {
+            "label": "Collapsed “Archived” group",
+            "description": "Archived plans appear as their own group (reusing the existing collapsible SourceGroup), default-collapsed at the bottom of the project source. Strongest declutter; one click to expand history. Server exposes archived/ as a sub-group.",
+            "preview": "▾ projects (current)      3\n   2026-08-14-… ⭐\n   …\n▸ Archived               2      ← collapsed\n   (expand → #57, #59 stems)"
+          },
+          {
+            "label": "Dimmed rows + badge",
+            "description": "Archived plans stay in the same flat list but are muted and tagged with an 'archived' badge (like the QA review/run marker). Less declutter — they still take list space — but no expand/collapse needed.",
+            "preview": "2026-08-14-… ⭐\n2026-08-19-…-design      [archived]  (dim)\n2026-08-19-…-impl        [archived]  (dim)\n2026-08-14-…-design      [archived]  (dim)"
+          },
+          {
+            "label": "Filter toggle",
+            "description": "A control in the filter/sort bar (Show archived: on/off), default off. Archived hidden until toggled. Maximal declutter, but the history is invisible by default and needs discovery.",
+            "preview": "[ filter… ] [sort▾] [☐ Show archived]\n\nprojects (current)   3\n  2026-08-14-… ⭐\n  (archived hidden until toggled)"
+          }
+        ]
+      }
+    ]
+  },
+  "tool_use_id": "toolu_01YLK1Ju7fCPfnqz8iih8SVS"
+}
