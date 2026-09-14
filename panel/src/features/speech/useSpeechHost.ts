@@ -111,6 +111,12 @@ interface Run {
 
 export function useSpeechHost(): SpeechHost {
   const runRef = useRef<Run | null>(null);
+  /**
+   * The utterance the player was last handed. Not `runRef`, which is nulled the
+   * moment a run ends: the measurements outlive the run, and this is what says
+   * whose they are.
+   */
+  const playingUtteranceRef = useRef<string | null>(null);
   // Keyed by utterance id: preparation is pure and the same utterance always
   // prepares the same way, so a replay must not pay for it twice.
   const preparedRef = useRef<Map<string, PreparedSpeech>>(new Map());
@@ -342,6 +348,7 @@ export function useSpeechHost(): SpeechHost {
 
       const run: Run = { sessionId, utteranceId: utterance.id, outcome: "pending" };
       runRef.current = run;
+      playingUtteranceRef.current = utterance.id;
 
       function finish(ended: Run): void {
         if (runRef.current === ended) runRef.current = null;
@@ -521,20 +528,33 @@ export function useSpeechHost(): SpeechHost {
   const measuredRef = useRef<ReadonlyMap<number, number>>(NO_DURATIONS);
   const speakingRef = useRef<string | null>(null);
   /**
-   * The last cell the player actually ran. Not `speakingSessionId`, which goes
-   * null the moment a run ends: the measurements outlive the run, and a
-   * scrubber that collapsed back to character estimates the instant the audio
-   * stopped would throw away everything it had just learned. The player clears
-   * the map itself when a different utterance starts, so this only ever names
-   * the cell the map belongs to.
+   * The UTTERANCE the mirrored durations were measured for — never merely the
+   * cell. A duration map is keyed by unit INDEX, and an index means nothing
+   * without the utterance it indexes into: unit 0 of the answer that just
+   * finished and unit 0 of the answer that just arrived are both `0`. Keyed by
+   * cell alone, a never-played answer inherited the finished one's timings, and
+   * `SpeechControlBar` reads `durations.has(index)` as "played" — so the first
+   * segment of an answer nobody had heard rendered as already spoken.
+   *
+   * Not `speakingSessionId`, and not `runRef`, both of which go null the moment
+   * a run ends: the measurements outlive the run, and a scrubber that collapsed
+   * back to character estimates the instant the audio stopped would throw away
+   * everything it had just learned.
+   *
+   * Assigned HERE rather than in `speakUtterance`, in the same pass that
+   * mirrors the map, so the pair is never briefly mismatched: for the one
+   * render between a new `play` and this effect, the old utterance id still
+   * names the old map, and the cursor — already on the new answer — simply
+   * finds no measurements. The player clears the map for a new utterance, so by
+   * the next pass both halves have moved together.
    */
-  const measuredSessionRef = useRef<string | null>(null);
+  const measuredUtteranceRef = useRef<string | null>(null);
 
   useEffect(() => {
     progressRef.current = player.progress;
     measuredRef.current = player.unitDurations;
     speakingRef.current = player.speakingSessionId;
-    if (player.speakingSessionId) measuredSessionRef.current = player.speakingSessionId;
+    if (player.speakingSessionId) measuredUtteranceRef.current = playingUtteranceRef.current;
     for (const listener of progressListeners.current) listener();
   }, [player.progress, player.speakingSessionId, player.unitDurations]);
 
@@ -551,10 +571,23 @@ export function useSpeechHost(): SpeechHost {
     [],
   );
 
+  /**
+   * The measurements the cell's scrubber may draw with — and only the ones that
+   * were taken FROM the utterance it is drawing. The segments come from
+   * `utteranceUnderCursor`, so the durations have to be gated on the same
+   * utterance or the two disagree about what unit `n` is.
+   *
+   * Still a stable snapshot for `useSyncExternalStore`: both arms return a
+   * value that outlives the call — the shared empty map, or the map the player
+   * published — never a fresh one.
+   */
   const unitDurationsFor = useCallback(
-    (sessionId: string): ReadonlyMap<number, number> =>
-      measuredSessionRef.current === sessionId ? measuredRef.current : NO_DURATIONS,
-    [],
+    (sessionId: string): ReadonlyMap<number, number> => {
+      const under = utteranceUnderCursor(queueFor(sessionId));
+      if (!under || under.id !== measuredUtteranceRef.current) return NO_DURATIONS;
+      return measuredRef.current;
+    },
+    [queueFor],
   );
 
   const onJumpToUnit = useCallback(
