@@ -1,6 +1,6 @@
 import { Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { isSpeechSynthesized } from "../speech/synth";
+import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../speech/types";
 import { getStoredVoice } from "../speech/voices";
 
@@ -11,12 +11,18 @@ export interface SpeechControlBarProps {
 }
 
 /**
- * A scrubber segment's state. Four, and not one more: clicking a cold segment
- * is allowed and reports the existing `stalled` red — "blocked on synthesis,
- * more is coming" — rather than inventing a fifth colour for a wait the panel
- * already has a word for.
+ * A scrubber segment's state. Five, because `ready` had to split: the cache
+ * stores the in-flight promise, so "is it cached" said yes the moment the
+ * socket opened and `cascadeWarm`'s three concurrent slots flipped three
+ * segments together — a ladder that read as a single step.
+ *
+ * `warming` is not a fifth colour either: it borrows the red the speak control
+ * already uses for *blocked on synthesis*, which is the same fact at unit
+ * granularity. And it is never terminal — a failed synthesis evicts the entry,
+ * so the segment returns to `cold`, the honest state for a unit nothing is
+ * fetching. Clicking either is still allowed.
  */
-type SegmentState = "played" | "playing" | "ready" | "cold";
+type SegmentState = "played" | "playing" | "warming" | "ready" | "cold";
 
 /**
  * Characters per second to assume before anything has been measured. Only the
@@ -26,6 +32,35 @@ type SegmentState = "played" | "playing" | "ready" | "cold";
  * measured rate replaces it, so the bar sharpens rather than jumping.
  */
 const FALLBACK_CHARS_PER_SECOND = 15;
+
+/**
+ * A monotonic count of cache mutations, and the whole of the bar's cache
+ * snapshot.
+ *
+ * `useSyncExternalStore` compares snapshots by identity and throws "The result
+ * of getSnapshot should be cached" — then loops to "Maximum update depth
+ * exceeded" — for any snapshot built per call. A collection of segment states
+ * is exactly that trap: a fresh array or Map every render. So the store's value
+ * is this number, which is referentially stable by construction, and the states
+ * themselves are read during render by {@link speechCacheState} — a Map lookup
+ * and a property read, once per unit, cheap enough to pay on every pass.
+ *
+ * Module-level rather than per-bar because the two functions below are handed
+ * to `useSyncExternalStore` directly: a hook argument that changed identity on
+ * every render would re-subscribe on every render.
+ */
+let cacheVersion = 0;
+
+function subscribeCacheVersion(onStoreChange: () => void): () => void {
+  return subscribeSpeechCache(() => {
+    cacheVersion += 1;
+    onStoreChange();
+  });
+}
+
+function readCacheVersion(): number {
+  return cacheVersion;
+}
 
 /** How long a unit is, in seconds — measured where it can be, estimated where not. */
 function segmentWeights(
@@ -149,6 +184,15 @@ export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
   const durations = useSyncExternalStore(speech.subscribeProgress, () =>
     speech.unitDurationsFor(sessionId),
   );
+  // Told, not asked. The bar reads the cache during render, and progress was
+  // its only other re-render trigger — which bounds staleness to ~250ms while
+  // playing and to nothing at all while paused or stalled, because neither
+  // publishes. `cascadeWarm` checks `run.active`, which a pause does not clear,
+  // so warming continues while the bar is frozen: a user who pauses to read the
+  // screen would watch a bar that has stopped telling the truth, and a stall is
+  // when they are watching it hardest. The value is discarded — subscribing IS
+  // the point, and the states are read below.
+  useSyncExternalStore(subscribeCacheVersion, readCacheVersion);
 
   const armed = speech.armedSessionId === sessionId;
   const intent = transportIntent(state);
@@ -171,12 +215,11 @@ export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
     // A measured unit is one whose audio has been in the element: played, this
     // run, whether or not a run is still going.
     if (durations.has(index)) return "played";
-    // Warm: in the synthesis cache, so a click starts with no wait. Read from
-    // the cache rather than tracked, because the warming cascade fills it from
-    // two places (the host's arrival warm and the player's ladder) and neither
-    // reports to the bar.
-    if (isSpeechSynthesized(units[index]?.text ?? "", { voice })) return "ready";
-    return "cold";
+    // Absent, in flight, or in hand — the cache's own three answers, which are
+    // three of this type's five. Read from the cache rather than tracked,
+    // because the warming cascade fills it from two places (the host's arrival
+    // warm and the player's ladder) and neither reports to the bar.
+    return speechCacheState(units[index]?.text ?? "", { voice });
   };
 
   const seekAt = useCallback(
