@@ -8,6 +8,13 @@ import {
   type LanguageState,
 } from "./pronunciation";
 import type { CellSpeechState, Utterance } from "./types";
+import {
+  emptyUtteranceQueue,
+  utteranceQueueReducer,
+  utteranceUnderCursor,
+  type UtteranceQueue,
+  type UtteranceQueueEvent,
+} from "./utteranceQueue";
 import { getStoredArmedSession, setStoredArmedSession } from "./voices";
 
 /**
@@ -53,14 +60,21 @@ import { getStoredArmedSession, setStoredArmedSession } from "./voices";
  */
 interface SessionSpeech {
   /**
-   * The latest **speakable** utterance for the session — retained after it is
-   * heard. `null` when the only thing the session has ever received had nothing
-   * to say: the vote below still had to be recorded, and a record exists for
-   * that alone.
+   * The cell's whole transport state: one step of history, the utterance the
+   * transport is on, and the answers waiting behind it. Empty until the session
+   * has received something speakable — the vote below still had to be recorded
+   * for a response with nothing to say, and a record exists for that alone.
    */
-  utterance: Utterance | null;
-  /** Spoken in this browser. Flipped back by a newer utterance. */
-  heard: boolean;
+  queue: UtteranceQueue;
+  /**
+   * Utterance ids that played to their last unit in this browser.
+   *
+   * A SET rather than the flag it used to be, because the cursor no longer sits
+   * on one fixed utterance: a cell can hold a heard answer in `previous` and an
+   * unheard one in `current` at the same time, and a single flag would report
+   * whichever of the two the cursor was not on.
+   */
+  heard: ReadonlySet<string>;
   /**
    * The session's running language tally. Language is a property of the
    * SESSION, not of one response, so the vote is folded in here — where the
@@ -90,7 +104,69 @@ function hasSomethingToSay(text: string, language: "pl" | "en"): boolean {
  * already had, so there is no pulse, no pip and no audio.
  */
 function languageOnly(existing: SessionSpeech | undefined, language: LanguageState): SessionSpeech {
-  return existing ? { ...existing, language } : { utterance: null, heard: false, language };
+  return existing ? { ...existing, language } : emptySession(language);
+}
+
+/** Shared so a panel of silent cells does not allocate a Set per session. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
+const emptySession = (language: LanguageState): SessionSpeech => ({
+  queue: emptyUtteranceQueue,
+  heard: NOTHING_HEARD,
+  language,
+});
+
+/**
+ * The session's heard set with the utterance under the cursor folded into it.
+ * Returns the set it was handed when there is nothing to add, so a repeated
+ * mark stays a no-op all the way out to the Map.
+ */
+function withHeard(existing: SessionSpeech | undefined): ReadonlySet<string> {
+  if (!existing) return NOTHING_HEARD;
+  const spoken = utteranceUnderCursor(existing.queue);
+  if (!spoken || existing.heard.has(spoken.id)) return existing.heard;
+  return new Set([...existing.heard, spoken.id]);
+}
+
+/** Folds an arriving utterance into a session's record, queue and all. */
+function withArrival(
+  existing: SessionSpeech | undefined,
+  utterance: Utterance,
+  language: LanguageState,
+  speaking: boolean,
+): SessionSpeech {
+  const base = existing ?? emptySession(language);
+  return {
+    ...base,
+    language,
+    queue: utteranceQueueReducer(base.queue, { type: "arrived", utterance, speaking }),
+  };
+}
+
+/**
+ * Whether the queue already holds this utterance anywhere — history, the
+ * cursor, or the answers waiting behind it. The reducer has no dedupe of its
+ * own, so this is the whole of the panel's defence against a reconnect replay
+ * appending a second copy of an answer the cell already has.
+ */
+function queueHolds(queue: UtteranceQueue, id: string): boolean {
+  return (
+    queue.previous?.id === id ||
+    queue.current?.id === id ||
+    queue.pending.some((waiting) => waiting.id === id)
+  );
+}
+
+/**
+ * Everything the cell might yet be asked to speak, which is what the host warms
+ * from: the utterance under the cursor and the ones queued behind it. `previous`
+ * is not in it — it was warmed when it was current, and a replay plays it out of
+ * the synthesis cache.
+ */
+function speakableOf(queue: UtteranceQueue): Utterance[] {
+  const under = utteranceUnderCursor(queue);
+  const ahead = under === queue.current ? queue.pending : [queue.current, ...queue.pending];
+  return [under, ...ahead].filter((entry): entry is Utterance => entry !== null);
 }
 
 /**
@@ -125,9 +201,28 @@ export interface UtteranceChannelOptions {
   preparingSessionIds: ReadonlySet<string>;
 }
 
+/**
+ * A transport event the *caller* may raise on a queue. `arrived` is not in it:
+ * arrival is the channel's own business, and the `speaking` flag it carries is
+ * something only the channel knows at the moment a frame lands.
+ */
+export type QueueCommand = Exclude<UtteranceQueueEvent, { type: "arrived" }>;
+
 export interface Channel {
   stateFor(sessionId: string): CellSpeechState;
+  /** The utterance the transport is on — `previous` while history is replaying. */
   utteranceFor(sessionId: string): Utterance | null;
+  /** The cell's whole queue: one step of history, the cursor, what waits. */
+  queueFor(sessionId: string): UtteranceQueue;
+  /** Raise previous / next / finished on a cell's queue. */
+  dispatchQueue(sessionId: string, command: QueueCommand): void;
+  /**
+   * The utterance under the cursor played its last unit. It is marked heard,
+   * and the queue moves on — but ONLY if something is waiting behind it, or the
+   * cursor was replaying history. With neither, the cell keeps what it has:
+   * `heard` is a flag and never a deletion, so a click still replays it.
+   */
+  finishUtterance(sessionId: string): void;
   /**
    * The session's accumulated language, for `prepare`. Never a detection of
    * one response: it is the tally every utterance so far has voted into.
@@ -184,6 +279,18 @@ export function useUtteranceChannel({
    */
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+  /**
+   * The playback inputs, mirrored for the arrival effects below.
+   *
+   * The `speaking` flag on an `arrived` event is what decides queue-versus-
+   * current, so it has to be about THIS cell at the moment the frame lands —
+   * not about the panel as a whole, and not about whichever render an effect's
+   * closure happened to capture. A ref rather than a dependency, because adding
+   * the two ids to the arrival effect's deps would re-run it on every playback
+   * change and re-deliver the same frame.
+   */
+  const playbackRef = useRef({ speakingSessionId, pausedSessionId });
+  playbackRef.current = { speakingSessionId, pausedSessionId };
   // Read once at mount, so a remount restores the armed cell (DECISION 12).
   const [armedSessionId, setArmedSessionId] = useState<string | null>(getStoredArmedSession);
 
@@ -215,8 +322,14 @@ export function useUtteranceChannel({
               continue;
             }
             // A tab that mounts after the broadcast has not heard it, and the
-            // server keeps only the latest — so a seeded cell is unheard.
-            next.set(utterance.sessionId, { utterance, heard: false, language });
+            // server keeps only the latest — so a seeded cell is unheard, and
+            // its queue is the one stored utterance with nothing on either side
+            // of it. Nothing is playing on a tab that has just mounted, so the
+            // arrival is an idle one by construction.
+            next.set(
+              utterance.sessionId,
+              withArrival(undefined, utterance, language, false),
+            );
           }
           return next;
         });
@@ -240,9 +353,11 @@ export function useUtteranceChannel({
 
     setSessions((current) => {
       const existing = current.get(utterance.sessionId);
-      // Re-delivery of the same utterance (a reconnect replay, a double effect
-      // run) must not make a heard cell pulse again. Only a new id is news.
-      if (existing?.utterance?.id === utterance.id) return current;
+      // Re-delivery of an utterance the cell already holds — a reconnect replay,
+      // a double effect run — must not make a heard cell pulse again, and must
+      // not append a second copy of it to the queue. Only a new id is news, and
+      // the reducer past this gate has no dedupe of its own.
+      if (existing && queueHolds(existing.queue, utterance.id)) return current;
 
       const next = new Map(current);
       // The vote is folded in whatever the response turns out to be: language is
@@ -257,7 +372,13 @@ export function useUtteranceChannel({
 
       // A frame can be the first news of a session — a terminal's response may
       // arrive before anything else told the channel the cell exists.
-      next.set(utterance.sessionId, { utterance, heard: false, language });
+      //
+      // A cell the user has PAUSED does not count as speaking: the living spec
+      // is that a paused cell does not hold the next answer hostage, so the
+      // arrival supersedes the held run rather than queueing behind it.
+      const { speakingSessionId: live, pausedSessionId: held } = playbackRef.current;
+      const speaking = live === utterance.sessionId && held !== utterance.sessionId;
+      next.set(utterance.sessionId, withArrival(existing, utterance, language, speaking));
       return next;
     });
   }, [lastMessage]);
@@ -265,11 +386,12 @@ export function useUtteranceChannel({
   const stateFor = useCallback(
     (sessionId: string): CellSpeechState => {
       const record = sessions.get(sessionId);
-      // A record with no speakable utterance is as inert as no record at all:
-      // it exists only to carry the session's language tally. Checked first, so
-      // a stray preparing, paused or speaking id cannot invent a state for a
-      // cell that has nothing to play.
-      if (!record?.utterance) return "empty";
+      // A record whose queue has nothing under the cursor is as inert as no
+      // record at all: it exists only to carry the session's language tally.
+      // Checked first, so a stray preparing, paused or speaking id cannot
+      // invent a state for a cell that has nothing to play.
+      const under = record ? utteranceUnderCursor(record.queue) : null;
+      if (!record || !under) return "empty";
 
       // Playback outranks warming, and it has to. `preparing` is the control's
       // INERT red — a click raises nothing — so letting a late-landing warm
@@ -284,13 +406,26 @@ export function useUtteranceChannel({
       // the final unit has played to its end. Everything else — a barge-in, a
       // stop, a refusal, a dead synthesizer — leaves the flag where it was,
       // which is `ready`.
-      return record.heard ? "heard" : "ready";
+      // Asked of the utterance under the cursor, not of the cell: a cell whose
+      // last answer played out and whose next one has arrived is `ready`, and
+      // stepping back onto the one that was heard says `heard` again.
+      return record.heard.has(under.id) ? "heard" : "ready";
     },
     [pausedSessionId, preparingSessionIds, sessions, speakingSessionId, waitingForSynthesis],
   );
 
   const utteranceFor = useCallback(
-    (sessionId: string): Utterance | null => sessions.get(sessionId)?.utterance ?? null,
+    (sessionId: string): Utterance | null => {
+      const queue = sessions.get(sessionId)?.queue;
+      return queue ? utteranceUnderCursor(queue) : null;
+    },
+    [sessions],
+  );
+
+  // Every cell has a queue, including one nothing has ever arrived for: the
+  // transport renders in every cell, so this never hands back `undefined`.
+  const queueFor = useCallback(
+    (sessionId: string): UtteranceQueue => sessions.get(sessionId)?.queue ?? emptyUtteranceQueue,
     [sessions],
   );
 
@@ -307,9 +442,7 @@ export function useUtteranceChannel({
   /** The last list handed out, so an unchanged set keeps its identity. */
   const speakableRef = useRef<Utterance[]>([]);
   const speakableUtterances = useMemo(() => {
-    const next = [...sessions.values()]
-      .map((record) => record.utterance)
-      .filter((utterance): utterance is Utterance => utterance !== null);
+    const next = [...sessions.values()].flatMap((record) => speakableOf(record.queue));
 
     // `sessions` is a fresh Map on every change, including a `markHeard` that
     // touches no utterance at all, so the array it derives is fresh too. Utterance
@@ -331,10 +464,50 @@ export function useUtteranceChannel({
   const markHeard = useCallback((sessionId: string) => {
     setSessions((current) => {
       const existing = current.get(sessionId);
-      if (!existing?.utterance || existing.heard) return current;
+      const heard = withHeard(existing);
+      if (!existing || heard === existing.heard) return current;
 
       const next = new Map(current);
-      next.set(sessionId, { ...existing, heard: true });
+      next.set(sessionId, { ...existing, heard });
+      return next;
+    });
+  }, []);
+
+  const dispatchQueue = useCallback((sessionId: string, command: QueueCommand) => {
+    setSessions((current) => {
+      const existing = current.get(sessionId);
+      if (!existing) return current;
+
+      // The reducer returns the SAME object for a genuine no-op, which is what
+      // stops a second `previous` press repainting the grid. Passing that
+      // through as an unchanged Map keeps the property all the way out here.
+      const queue = utteranceQueueReducer(existing.queue, command);
+      if (queue === existing.queue) return current;
+
+      const next = new Map(current);
+      next.set(sessionId, { ...existing, queue });
+      return next;
+    });
+  }, []);
+
+  const finishUtterance = useCallback((sessionId: string) => {
+    setSessions((current) => {
+      const existing = current.get(sessionId);
+      if (!existing) return current;
+
+      const heard = withHeard(existing);
+      // The queue moves on only when there is somewhere to move to. With an
+      // empty queue and the cursor on `current`, `finished` would null the
+      // cell out — and `heard` is a flag, never a deletion: the utterance has
+      // to stay retrievable so a click replays it.
+      const advances = existing.queue.pending.length > 0 || existing.queue.cursor === "previous";
+      const queue = advances
+        ? utteranceQueueReducer(existing.queue, { type: "finished" })
+        : existing.queue;
+      if (heard === existing.heard && queue === existing.queue) return current;
+
+      const next = new Map(current);
+      next.set(sessionId, { ...existing, heard, queue });
       return next;
     });
   }, []);
@@ -348,6 +521,9 @@ export function useUtteranceChannel({
   return {
     stateFor,
     utteranceFor,
+    queueFor,
+    dispatchQueue,
+    finishUtterance,
     languageFor,
     speakableUtterances,
     armedSessionId,

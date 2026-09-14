@@ -53,6 +53,7 @@ import { synthesizeSpeech } from "./synth";
 import type { GridSpeech, PreparedSpeech, Utterance } from "./types";
 import { useSpeechPlayer, type SpeechPlaybackError } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
+import { utteranceUnderCursor } from "./utteranceQueue";
 import { getStoredVoice } from "./voices";
 
 /**
@@ -174,8 +175,11 @@ export function useSpeechHost(): SpeechHost {
   });
   const {
     armedSessionId,
+    dispatchQueue,
+    finishUtterance,
     languageFor,
     markHeard,
+    queueFor,
     setArmed,
     speakableUtterances,
     stateFor,
@@ -212,49 +216,6 @@ export function useSpeechHost(): SpeechHost {
     // control that might still be synthesizing is exactly the ambiguity the
     // red state exists to remove.
     for (const utterance of speakableUtterances) {
-      // A newer answer for a cell the user left PAUSED abandons the held run,
-      // exactly as a barge-in abandons it in `speak`. Without this the run
-      // stays `pending` — `onPause` stamps nothing, on purpose — so the player
-      // goes on naming the cell as its paused one, `paused` outranks every
-      // other state in the channel, and the control routes the next click to
-      // `onResume`. The arriving answer is warmed and unreachable: the user has
-      // to listen the stale one out to its end before the new one can be
-      // played at all.
-      //
-      // Deliberately ABOVE the `warmedRef` short-circuit, and so re-evaluated
-      // on every run of this effect rather than once per utterance. The two
-      // halves of the situation arrive in either order — the answer can land
-      // while the cell is still speaking and the pause follow it, in which case
-      // the utterance is long since warmed by the time the condition first
-      // becomes true, and a check behind the `continue` would never look again.
-      // Re-evaluating is safe because the block is idempotent: `finish` nulls
-      // `runRef` when the stopped `play` settles, so a second pass has no held
-      // run to find. `player.pausedSessionId` is in the dependency list for
-      // exactly this — the pause is what re-runs the effect.
-      //
-      // The `utteranceId` guard is load-bearing HERE, not defence: the ordinary
-      // pause is a run paused on the utterance that is still the session's
-      // current one, and this effect re-runs the moment that pause is taken.
-      // Without the guard every pause would supersede itself.
-      //
-      // Paused ONLY. A run that is still speaking is one the user is listening
-      // to right now, and cutting that off mid-sentence because the agent
-      // answered again is not the same favour.
-      const held = runRef.current;
-      if (
-        held?.sessionId === utterance.sessionId &&
-        held.utteranceId !== utterance.id &&
-        player.pausedSessionId === utterance.sessionId
-      ) {
-        // Stamped before `stop()` to read the same way `speak`'s barge-in
-        // does — but the order is not what makes it work: `stop()` resolves the
-        // pending `play` on a microtask, so the synchronous stamp lands first
-        // either way. What it buys is the outcome: `superseded`, so the
-        // abandoned run lands on `ready` rather than `heard`.
-        held.outcome = "superseded";
-        player.stop();
-      }
-
       if (warmedRef.current.has(utterance.id)) continue;
       // Marked before the synthesis, not after: a second render must not start
       // a second warm of the same utterance while the first is in flight.
@@ -288,27 +249,62 @@ export function useSpeechHost(): SpeechHost {
           setPreparing(utterance.sessionId, false);
         });
     }
-    // `player.pausedSessionId` and `player.stop` rather than `player`: the
-    // player's identity changes on every playback state change, and all a
-    // re-run costs for an already-warmed utterance is the supersession test
-    // above, so depending on the two members it actually reads keeps the
-    // re-runs cheap and their reason legible. `pausedSessionId` in particular
-    // is not bookkeeping — it is the edge the supersession fires on when the
-    // answer arrived first and the pause came after.
-  }, [
-    languageFor,
-    player.pausedSessionId,
-    player.stop,
-    preparedFor,
-    setPreparing,
-    speakableUtterances,
-  ]);
+    // Warming reads nothing from the player any more: the supersession that
+    // used to ride along inside this loop is its own effect below, because it
+    // is about the QUEUE rather than about the cache, and a loop over every
+    // speakable utterance in the panel was never the honest place to ask "is
+    // this one cell's held run stale".
+  }, [languageFor, preparedFor, setPreparing, speakableUtterances]);
 
-  const speak = useCallback(
-    (sessionId: string): void => {
-      const utterance = utteranceFor(sessionId);
-      if (!utterance) return;
+  useEffect(() => {
+    // "A paused cell does not hold the next answer hostage" — the living spec,
+    // and the one arm where an arrival still supersedes rather than queueing.
+    //
+    // The next answer can be sitting in either of two places, because the two
+    // halves arrive in either order. If the cell was ALREADY paused when the
+    // answer landed, the queue put it straight into `current` and the held run
+    // is playing something the cell has moved on from. If the answer landed
+    // while the cell was still SPEAKING — correctly queued, a live run is never
+    // cut short — then the pause is what releases it, and the queue has to be
+    // stepped on first.
+    //
+    // Paused ONLY. A run that is still speaking is one the user is listening to
+    // right now, and cutting that off because the agent answered again is not
+    // the same favour.
+    const held = runRef.current;
+    const paused = player.pausedSessionId;
+    if (!held || !paused || held.sessionId !== paused) return;
 
+    const queue = queueFor(paused);
+    if (queue.cursor === "current" && queue.pending.length > 0) {
+      // The stop follows on the next pass, once `current` has moved onto it.
+      dispatchQueue(paused, { type: "next" });
+      return;
+    }
+
+    // The guard is load-bearing, not defence: the ordinary pause is a run
+    // paused on the utterance the cursor is still on, and this effect runs the
+    // moment that pause is taken. Without it every pause would supersede
+    // itself.
+    const under = utteranceUnderCursor(queue);
+    if (!under || under.id === held.utteranceId) return;
+
+    // Stamped before `stop()` so the abandoned run lands on `ready` rather than
+    // `heard` — the order is not what makes it work (`stop()` resolves the
+    // pending `play` on a microtask, so the synchronous stamp lands first
+    // either way), the outcome is.
+    held.outcome = "superseded";
+    player.stop();
+  }, [dispatchQueue, player.pausedSessionId, player.stop, queueFor]);
+
+  /**
+   * Play one named utterance in a cell. Named rather than looked up, because
+   * the transport moves the cursor and then plays what it moved onto, and the
+   * `utteranceFor` of the render the click happened in still points at where
+   * the cursor WAS.
+   */
+  const speakUtterance = useCallback(
+    (sessionId: string, utterance: Utterance): void => {
       const prepared = preparedFor(utterance, languageFor(sessionId));
       if (prepared.units.length === 0) {
         // Defence in depth. `useUtteranceChannel` never announces a response
@@ -337,7 +333,12 @@ export function useSpeechHost(): SpeechHost {
         // settles is the only natural end there is.
         if (ended.outcome !== "pending") return;
 
-        markHeard(ended.sessionId);
+        // Marks it heard AND moves the queue on — the queue's own "finished",
+        // which advances into what is waiting, returns the cursor out of a
+        // replay, and does nothing at all when neither applies. The autoplay
+        // effect below is what turns that advance into sound, so an unarmed
+        // cell ends up simply HOLDING the next answer.
+        finishUtterance(ended.sessionId);
       }
 
       void player
@@ -345,7 +346,16 @@ export function useSpeechHost(): SpeechHost {
         .then(() => finish(run))
         .catch(() => finish(run));
     },
-    [languageFor, markHeard, player, preparedFor, utteranceFor],
+    [finishUtterance, languageFor, markHeard, player, preparedFor],
+  );
+
+  const speak = useCallback(
+    (sessionId: string): void => {
+      const utterance = utteranceFor(sessionId);
+      if (!utterance) return;
+      speakUtterance(sessionId, utterance);
+    },
+    [speakUtterance, utteranceFor],
   );
 
   const onSpeak = useCallback(
@@ -403,6 +413,56 @@ export function useSpeechHost(): SpeechHost {
     [player],
   );
 
+  /**
+   * The cursor moved under the armed cell, and the move is about to be played
+   * here — so it is recorded as already autoplayed, or the effect below would
+   * see "the armed cell's utterance changed" and start the same thing twice.
+   * Only the armed cell has such a record to corrupt.
+   */
+  const recordAutoplayed = useCallback(
+    (sessionId: string, utteranceId: string): void => {
+      if (sessionId === armedSessionId) autoplayedRef.current = utteranceId;
+    },
+    [armedSessionId],
+  );
+
+  const onPrevious = useCallback(
+    (sessionId: string): void => {
+      const queue = queueFor(sessionId);
+      // History is one step deep, so a second press is a no-op — and so is a
+      // press on a cell with nothing behind its cursor. The reducer says the
+      // same; asking here is what keeps it from making a sound anyway.
+      if (queue.cursor === "previous" || queue.previous === null) return;
+
+      player.unlock();
+      dispatchQueue(sessionId, { type: "previous" });
+      recordAutoplayed(sessionId, queue.previous.id);
+      // From its first unit: the transport steps onto a whole answer, never
+      // into the middle of the one it was cut off in.
+      speakUtterance(sessionId, queue.previous);
+    },
+    [dispatchQueue, player, queueFor, recordAutoplayed, speakUtterance],
+  );
+
+  const onNext = useCallback(
+    (sessionId: string): void => {
+      const queue = queueFor(sessionId);
+      // From history, next means "come back", and what plays is the utterance
+      // that was current. Otherwise it means "skip ahead" into what is waiting.
+      const returning = queue.cursor === "previous";
+      const target = returning ? queue.current : (queue.pending[0] ?? null);
+      if (!returning && !target) return;
+
+      player.unlock();
+      dispatchQueue(sessionId, { type: "next" });
+      if (!target) return;
+
+      recordAutoplayed(sessionId, target.id);
+      speakUtterance(sessionId, target);
+    },
+    [dispatchQueue, player, queueFor, recordAutoplayed, speakUtterance],
+  );
+
   const onArm = useCallback(
     (sessionId: string | null): void => {
       // Arming is a click too, and it is the gesture the autoplay that follows
@@ -444,22 +504,28 @@ export function useSpeechHost(): SpeechHost {
   return useMemo(
     () => ({
       stateFor,
+      queueFor,
       armedSessionId,
       onSpeak,
       onPause,
       onResume,
       onStop,
+      onPrevious,
+      onNext,
       onArm,
       preparingSessionIds,
     }),
     [
       armedSessionId,
       onArm,
+      onNext,
       onPause,
+      onPrevious,
       onResume,
       onSpeak,
       onStop,
       preparingSessionIds,
+      queueFor,
       stateFor,
     ],
   );

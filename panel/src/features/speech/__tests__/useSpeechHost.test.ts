@@ -618,6 +618,142 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
 });
 
 /**
+ * The queue, seen from the host — the change the delta spec calls "a newer
+ * utterance no longer supersedes a live run".
+ *
+ * Shipped behaviour dropped the answer that was playing the moment a newer one
+ * arrived: the channel kept one utterance per session, so the arrival simply
+ * overwrote it and the armed cell barged in on itself. Now the arrival goes
+ * behind the run, and what happens when the run ends is the cell's own business:
+ * an armed cell advances into the queue by itself, an unarmed one holds it.
+ *
+ * The one arm that does NOT queue is a PAUSED cell — the living spec's "a
+ * paused cell does not hold the next answer hostage" — because a held run is
+ * not a run anyone is listening to.
+ */
+describe("useSpeechHost — arrivals queue behind a live run", () => {
+  it("a newer utterance queues behind a live run instead of superseding it", async () => {
+    const stale = unitsOf(response(3));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    // The run is untouched — the unit that was playing is still the only one
+    // that has played — and the answer is behind it rather than over it.
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+    expect(played).toEqual([`blob:${stale[0]}`]);
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("u-1");
+    expect(queue.pending.map((waiting) => waiting.id)).toEqual(["u-2"]);
+  });
+
+  it("an armed cell auto-advances into the queue when the run ends", async () => {
+    const stale = unitsOf(response(2));
+    const newer = unitsOf(response(2, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await settle(() => result.current.onArm("cell-a"));
+    await emitUtterance("cell-a", "u-1", response(2));
+    expect(played).toEqual([`blob:${stale[0]}`]);
+
+    await emitUtterance("cell-a", "u-2", response(2, "Newer"));
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["u-2"]);
+
+    await endCurrentUnit();
+    await endCurrentUnit();
+
+    // The last unit of u-1 ended, so u-1 is history and u-2 is speaking — with
+    // no click anywhere, because the cell is armed.
+    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`, `blob:${newer[0]}`]);
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.previous?.id).toBe("u-1");
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.pending).toEqual([]);
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+  });
+
+  it("an unarmed cell holds the queued utterance without speaking", async () => {
+    const stale = unitsOf(response(2));
+    const { result } = renderHook(() => useSpeechHost());
+
+    // A click, not an arming: the run is the user's, and nothing about it says
+    // the cell may start talking again on its own when it ends.
+    await emitUtterance("cell-a", "u-1", response(2));
+    await clickControl(result.current, "cell-a");
+    await emitUtterance("cell-a", "u-2", response(2, "Newer"));
+
+    await endCurrentUnit();
+    await endCurrentUnit();
+
+    expect(result.current.armedSessionId).toBeNull();
+    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.previous?.id).toBe("u-1");
+    // Holding it, not hiding it: green, with the newer answer under the click.
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+
+  it("a paused cell is superseded, not held hostage", async () => {
+    const stale = unitsOf(response(3));
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    // Part-way in, so a resumed stale run would be audibly the wrong thing
+    // rather than coincidentally the newer answer's first unit.
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    // NOT queued behind the held run: the queue moves on to it, exactly as the
+    // shipped behaviour did, and the held run is abandoned.
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.pending).toEqual([]);
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${newer[0]}`]);
+  });
+
+  /**
+   * The other ordering of the same scenario: the answer landed while the cell
+   * was still SPEAKING — so the queue took it, correctly — and only then did
+   * the user pause. The pause is what releases it; otherwise the queued answer
+   * would sit behind a run nobody is listening to until the user resumes it.
+   */
+  it("pausing a cell releases the answer queued behind it", async () => {
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    await endCurrentUnit();
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["u-2"]);
+
+    await clickControl(result.current, "cell-a");
+
+    expect(result.current.queueFor("cell-a").current?.id).toBe("u-2");
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${newer[0]}`]);
+  });
+});
+
+/**
  * The budget is gone, and with it the resume point that existed only to
  * continue from its cut. What must survive is everything the player's own state
  * holds: a pause goes on where it was paused, and a newer utterance still

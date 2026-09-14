@@ -440,6 +440,28 @@ describe("useUtteranceChannel", () => {
     ]);
   });
 
+  /**
+   * Nothing about the queue is persisted. A reloaded tab hydrates from the
+   * server's latest-per-session store, which keeps exactly one utterance per
+   * cell — so the cell comes back holding that one, with nothing behind the
+   * cursor and nothing waiting in front of it.
+   */
+  it("a reload leaves the queue and history empty", async () => {
+    serveLatest([utterance("cell-a", "a7")]);
+
+    const { result } = await renderChannel();
+
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current).toEqual(utterance("cell-a", "a7"));
+    expect(queue.previous).toBeNull();
+    expect(queue.pending).toEqual([]);
+    expect(queue.cursor).toBe("current");
+    // A cell the tab has never heard of has an EMPTY queue, not an undefined
+    // one: the transport is rendered in every cell, before any arrival.
+    expect(result.current.queueFor("cell-z").current).toBeNull();
+  });
+
   it("preparing and ready are distinguished for a waiting utterance", async () => {
     preparing = new Set(["cell-a"]);
     const { result, rerender } = await renderChannel();
@@ -463,7 +485,13 @@ describe("useUtteranceChannel", () => {
   it("speaking and stalled are distinguished by the waiting input", async () => {
     const { result, rerender } = await renderChannel();
 
+    // The arrival first, then the run: a cell can only be speaking something
+    // that already reached it, and an arrival for a cell that IS speaking is
+    // queued behind the run rather than put under the cursor.
     lastMessage = frame(utterance("cell-a", "a1"));
+    await act(async () => {
+      rerender();
+    });
     speaking = "cell-a";
     await act(async () => {
       rerender();
@@ -512,6 +540,9 @@ describe("useUtteranceChannel", () => {
     const { result, rerender } = await renderChannel();
 
     lastMessage = frame(utterance("cell-a", "a1"));
+    await act(async () => {
+      rerender();
+    });
     // `preparing` is the control's INERT red — a click raises nothing. So it
     // must never mask a run the user has to be able to pause, however late a
     // warm reports itself.

@@ -13,6 +13,7 @@
  * `terminal → speech/types`, `speech/* → speech/types` — and nothing under
  * `features/speech/` imports `features/terminal/` any more.
  */
+import type { UtteranceQueue } from "./utteranceQueue";
 
 /**
  * What a cell's speech control shows. Seven states, feeding **two independent
@@ -65,8 +66,17 @@ export type CellSpeechState =
  * without typechecking — so `features/speech/__tests__/autoplay.integration.test.tsx`
  * mounts the real surfaces and reads the header attributes.
  */
+// The queue's shape is declared where the reducer that owns it lives; the
+// import is type-only, so the cycle it closes with `utteranceQueue.ts` erases.
 export interface GridSpeech {
   stateFor: (sessionId: string) => CellSpeechState;
+  /**
+   * The cell's queue: one step of history, the utterance the transport is on,
+   * and the answers waiting behind it. Every cell has one, including a cell
+   * nothing has ever arrived for — the transport renders before any arrival, so
+   * this never hands back `undefined`.
+   */
+  queueFor: (sessionId: string) => UtteranceQueue;
   /** The single armed session in this browser, or `null`. */
   armedSessionId: string | null;
   /** Speak the cell's utterance from the start — or replay a heard one. */
@@ -91,6 +101,17 @@ export interface GridSpeech {
    * programmatic "stop talking", and the host keeps it wired.
    */
   onStop: (sessionId: string) => void;
+  /**
+   * Step the transport back onto the answer before the current one, and play it
+   * from its first unit. History is one step deep, so a second press does
+   * nothing — and so does a press on a cell with nothing behind its cursor.
+   */
+  onPrevious: (sessionId: string) => void;
+  /**
+   * Step forward: back out of history if the cursor is in it, otherwise on into
+   * the oldest answer waiting. Nothing ahead, nothing happens.
+   */
+  onNext: (sessionId: string) => void;
   onArm: (sessionId: string | null) => void;
 }
 

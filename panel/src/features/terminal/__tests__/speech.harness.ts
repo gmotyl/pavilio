@@ -1,4 +1,5 @@
 import type { GridSpeech } from "../../speech/types";
+import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
 
 /**
  * A speech host that does nothing, for the suites whose subject is not speech.
@@ -13,10 +14,13 @@ import type { GridSpeech } from "../../speech/types";
  */
 export const INERT_SPEECH: GridSpeech = {
   stateFor: () => "empty",
+  queueFor: () => emptyUtteranceQueue,
   armedSessionId: null,
   onSpeak: () => {},
   onPause: () => {},
   onResume: () => {},
   onStop: () => {},
+  onPrevious: () => {},
+  onNext: () => {},
   onArm: () => {},
 };
