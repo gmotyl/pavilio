@@ -101,6 +101,37 @@ export class SpeechPlaybackError extends Error {
   }
 }
 
+/**
+ * Where the run is, expressed the only way a run of many MP3s can express it:
+ * which unit is in the element, and how far into that one unit playback has
+ * got. There is no single timeline to report a position on — a response is
+ * synthesized unit by unit, and the total length is unknown until the last of
+ * them has been synthesized, which is exactly the up-front cost ADR 0013's
+ * fast start exists to avoid paying.
+ */
+export interface SpeechProgress {
+  /** Index into the units of the run, not of the utterance's text. */
+  unitIndex: number;
+  /** Seconds into that unit. */
+  unitTime: number;
+  /** That unit's real length, once its audio has reported one. */
+  unitDuration: number | null;
+}
+
+/** Shared, so a player that never learns a duration allocates no map. */
+const NO_UNIT_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
+
+/**
+ * Whether two slices are the same utterance's units. Text, not identity: the
+ * host rebuilds the array on a re-prepare, and what the durations below are
+ * measurements OF is the audio, which is keyed on the text.
+ */
+function sameUnits(left: readonly SpeechUnit[] | undefined, right: readonly SpeechUnit[]): boolean {
+  if (left === right) return true;
+  if (!left || left.length !== right.length) return false;
+  return left.every((unit, index) => unit.text === right[index].text);
+}
+
 export interface SpeechPlayerOptions {
   /**
    * Where failures go. Optional, but a missing handler is not a licence to be
@@ -127,6 +158,42 @@ export interface SpeechPlayer {
    * given up — a red control always means more is still coming.
    */
   waitingForSynthesis: boolean;
+  /**
+   * Where the run is: which unit, and how far into it. Null when nothing is
+   * running — a run that has ended reports no position, the way a stopped one
+   * does. A PAUSED run keeps reporting, because it is still the run the user
+   * is on, and a stalled one reports the unit it is blocked on.
+   */
+  progress: SpeechProgress | null;
+  /**
+   * Real durations of the units of the run in hand, by index — absent until a
+   * unit's audio has actually loaded and said so. This is what lets a segmented
+   * scrubber correct a segment's width from `SpeechUnit.chars` to the truth,
+   * one unit at a time, rather than lying and then jumping.
+   *
+   * Kept across a stop and across seeks within the same utterance: the
+   * measurements belong to the audio, not to one run of it. A different
+   * utterance — or the same one in a different cell — starts over.
+   */
+  unitDurations: ReadonlyMap<number, number>;
+  /**
+   * Starts the run at a unit. The unit is synthesized first when it is cold,
+   * which the run reports as {@link SpeechPlayer.waitingForSynthesis} — the
+   * existing "blocked on synthesis" red, never a new state.
+   *
+   * The units are the ones the session last played: the player remembers the
+   * most recent slice per session, so this is a no-op for a cell that has never
+   * spoken in this tab.
+   */
+  jumpToUnit(sessionId: string, unitIndex: number): void;
+  /** Moves inside the unit being spoken. Re-synthesizes nothing. */
+  seekWithinUnit(seconds: number): void;
+  /**
+   * Moves back `seconds`, underflowing into earlier units — which is what makes
+   * the unit boundary invisible for the one gesture that crosses it most. From
+   * inside the first unit it rewinds to zero and no further.
+   */
+  seekBackward(seconds: number): void;
   play(sessionId: string, units: SpeechUnit[], fromUnit?: number): Promise<void>;
   /**
    * Holds the current run: the element pauses where it is and the ladder stops
@@ -298,7 +365,12 @@ function cascadeWarm(
  * and with a plain error when the element fails on this one unit, which is
  * treated like a failed synthesis and skipped.
  */
-function playUnit(element: HTMLAudioElement, url: string, run: PlaybackRun): Promise<void> {
+function playUnit(
+  element: HTMLAudioElement,
+  url: string,
+  run: PlaybackRun,
+  startAt = 0,
+): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     let settled = false;
 
@@ -332,6 +404,10 @@ function playUnit(element: HTMLAudioElement, url: string, run: PlaybackRun): Pro
     run.abandonUnit = () => settle(resolve);
 
     element.src = url;
+    // Assigning `src` rewinds the element, so a seek that landed part-way into
+    // this unit has to be re-applied after it — and before `play()`, or the
+    // first fraction of a second of the wrong part of the unit is audible.
+    if (startAt > 0) element.currentTime = startAt;
 
     const start = (): void => {
       let started: unknown;
@@ -365,12 +441,35 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
   const [pausedSessionId, setPausedSessionId] = useState<string | null>(null);
   const [waitingForSynthesis, setWaitingForSynthesis] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
+  const [progress, setProgress] = useState<SpeechProgress | null>(null);
+  const [unitDurations, setUnitDurations] =
+    useState<ReadonlyMap<number, number>>(NO_UNIT_DURATIONS);
   /**
    * Mirrors {@link unlocked} for `unlock` itself, which has to know whether the
    * gesture has already been spent *synchronously* — two clicks in one tick
    * would both see the stale state value and both reach the element.
    */
   const unlockedRef = useRef(false);
+  /**
+   * The three below are mirrors of state the *callbacks* have to read
+   * synchronously. A seek computes its landing unit from the durations and the
+   * position at the moment the key is pressed — a render behind is a seek into
+   * the wrong unit — and the element's own listeners fire outside React's
+   * render cycle entirely.
+   */
+  const progressRef = useRef<SpeechProgress | null>(null);
+  const durationsRef = useRef<ReadonlyMap<number, number>>(NO_UNIT_DURATIONS);
+  /** The unit in the element right now, or null when nothing is running. */
+  const unitIndexRef = useRef<number | null>(null);
+  /**
+   * The most recent slice each session played, so {@link SpeechPlayer.jumpToUnit}
+   * and a backward seek can restart a run without being handed the units again
+   * — the transport surfaces that call them know a cell and an index, not an
+   * utterance. Bounded by the cells that have spoken in this tab.
+   */
+  const unitsRef = useRef(new Map<string, SpeechUnit[]>());
+  /** Which session the durations map was measured for. */
+  const measuredRef = useRef<string | null>(null);
   const elementRef = useRef<HTMLAudioElement | null>(null);
   const runRef = useRef<PlaybackRun | null>(null);
   const onErrorRef = useRef<SpeechPlayerOptions["onError"]>(undefined);
@@ -379,16 +478,85 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
     onErrorRef.current = options.onError;
   }, [options.onError]);
 
+  /** Publishes a position, skipping the render when nothing actually moved. */
+  const publishProgress = useCallback((next: SpeechProgress | null): void => {
+    const previous = progressRef.current;
+    if (
+      previous === next ||
+      (previous !== null &&
+        next !== null &&
+        previous.unitIndex === next.unitIndex &&
+        previous.unitTime === next.unitTime &&
+        previous.unitDuration === next.unitDuration)
+    ) {
+      return;
+    }
+    progressRef.current = next;
+    setProgress(next);
+  }, []);
+
+  /** The unit now in the element, at `unitTime`, with whatever length is known. */
+  const publishUnit = useCallback(
+    (unitIndex: number, unitTime: number): void => {
+      unitIndexRef.current = unitIndex;
+      publishProgress({
+        unitIndex,
+        unitTime,
+        unitDuration: durationsRef.current.get(unitIndex) ?? null,
+      });
+    },
+    [publishProgress],
+  );
+
+  /**
+   * The element knows how long the unit it loaded is. Recorded per index, which
+   * is the only place a real duration can ever come from: nothing else in the
+   * pipeline measures audio.
+   */
+  const noteDuration = useCallback((): void => {
+    const element = elementRef.current;
+    const unitIndex = unitIndexRef.current;
+    if (!element || unitIndex === null) return;
+
+    const seconds = element.duration;
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
+    if (durationsRef.current.get(unitIndex) === seconds) return;
+
+    const next = new Map(durationsRef.current);
+    next.set(unitIndex, seconds);
+    durationsRef.current = next;
+    setUnitDurations(next);
+
+    const current = progressRef.current;
+    if (current && current.unitIndex === unitIndex) {
+      publishProgress({ ...current, unitDuration: seconds });
+    }
+  }, [publishProgress]);
+
+  /** The element's own clock, which is the only honest source for a position. */
+  const noteTime = useCallback((): void => {
+    const element = elementRef.current;
+    const unitIndex = unitIndexRef.current;
+    if (!element || unitIndex === null) return;
+    publishUnit(unitIndex, element.currentTime);
+  }, [publishUnit]);
+
   const ensureElement = useCallback((): HTMLAudioElement => {
     if (!elementRef.current) {
       // Never attached to the document: it has no controls and nothing to lay
       // out, and the cell header is the whole UI for it.
       const element = document.createElement("audio");
       element.preload = "auto";
+      // Bound once, to the one element the whole player drives, rather than per
+      // unit: the listeners read the unit index off a ref, so a swap costs
+      // nothing and cannot leave a listener behind on a source that is gone.
+      element.addEventListener("timeupdate", noteTime);
+      element.addEventListener("loadedmetadata", noteDuration);
+      element.addEventListener("durationchange", noteDuration);
       elementRef.current = element;
     }
     return elementRef.current;
-  }, []);
+  }, [noteDuration, noteTime]);
 
   const stop = useCallback((): void => {
     const run = runRef.current;
@@ -399,10 +567,15 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
     if (elementRef.current) resetElement(elementRef.current);
     setSpeakingSessionId(null);
     setPausedSessionId(null);
+    // No run, no position. The durations are NOT cleared with it: they belong
+    // to the utterance, so a bar drawn over a finished run keeps its corrected
+    // widths, and a seek that restarts the run keeps its measurements.
+    unitIndexRef.current = null;
+    publishProgress(null);
     // A run that is over is not waiting for anything. Red means more is still
     // coming, so a torn-down run must never be left wearing it.
     setWaitingForSynthesis(false);
-  }, []);
+  }, [publishProgress]);
 
   const pause = useCallback((): void => {
     const run = runRef.current;
@@ -444,13 +617,40 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
   );
 
   const play = useCallback(
-    async (sessionId: string, units: SpeechUnit[], fromUnit = 0): Promise<void> => {
+    /**
+     * `startAt` is internal and deliberately absent from {@link SpeechPlayer}:
+     * it is how a backward seek lands part-way into the unit it underflowed
+     * into. Everything outside starts a unit at its beginning.
+     */
+    async (
+      sessionId: string,
+      units: SpeechUnit[],
+      fromUnit = 0,
+      startAt = 0,
+    ): Promise<void> => {
       const element = ensureElement();
       // Barge-in: an explicit play outranks whatever is speaking, mid-unit.
       stop();
       if (units.length === 0) return;
 
       const start = Math.min(Math.max(Math.trunc(fromUnit), 0), units.length - 1);
+      // Remembered so a later jump or seek can restart this run from a unit
+      // index alone — the bar and the media keys know a cell, not an utterance.
+      const remembered = unitsRef.current.get(sessionId);
+      const sameUtterance = sameUnits(remembered, units);
+      if (!sameUtterance) unitsRef.current.set(sessionId, units);
+      // Durations are measurements of THIS utterance's audio: a new utterance,
+      // or the same one in another cell, starts measuring again. A jump, a
+      // replay and a seek all keep them, which is what stops the scrubber
+      // losing its corrected widths every time the user touches it.
+      if (!sameUtterance || measuredRef.current !== sessionId) {
+        measuredRef.current = sessionId;
+        if (durationsRef.current.size > 0) {
+          durationsRef.current = NO_UNIT_DURATIONS;
+          setUnitDurations(NO_UNIT_DURATIONS);
+        }
+      }
+      publishUnit(start, startAt);
       const voice = getStoredVoice();
       const run: PlaybackRun = {
         sessionId,
@@ -554,8 +754,13 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
         // it, both would wait on this unit's playback.
         pending = ladderFrom(loaded.index + 1);
 
+        // Only the unit the run STARTED on carries the seek: a run that had to
+        // skip a failed unit lands on the next one at its beginning.
+        const seekTo = loaded.index === start ? startAt : 0;
+        publishUnit(loaded.index, seekTo);
+
         try {
-          await playUnit(element, loaded.url, run);
+          await playUnit(element, loaded.url, run, seekTo);
           consecutiveFailures = 0;
           playedUnits += 1;
         } catch (cause) {
@@ -614,7 +819,88 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
 
       stop();
     },
-    [ensureElement, report, stop],
+    [ensureElement, publishUnit, report, stop],
+  );
+
+  const jumpToUnit = useCallback(
+    (sessionId: string, unitIndex: number): void => {
+      const units = unitsRef.current.get(sessionId);
+      // A cell that has never spoken in this tab has no units to jump inside
+      // of. `play` is the only thing that ever learns them, and it is the
+      // caller's own path to hearing the cell in the first place.
+      if (!units || units.length === 0) return;
+      // A cold unit makes this run wait on synthesis exactly as the first unit
+      // of any run does — so the cell reports `stalled`, the red that already
+      // means blocked, until it lands.
+      void play(sessionId, units, unitIndex);
+    },
+    [play],
+  );
+
+  const seekWithinUnit = useCallback(
+    (seconds: number): void => {
+      const run = runRef.current;
+      const element = elementRef.current;
+      const unitIndex = unitIndexRef.current;
+      if (!run || !run.active || !element || unitIndex === null) return;
+
+      const duration = durationsRef.current.get(unitIndex);
+      const target = Math.max(0, duration === undefined ? seconds : Math.min(seconds, duration));
+      // The unit is already in the element, so this is a move and nothing else:
+      // no teardown, no new object URL, and no second synthesis of audio the
+      // listener is in the middle of.
+      element.currentTime = target;
+      publishUnit(unitIndex, target);
+    },
+    [publishUnit],
+  );
+
+  const seekBackward = useCallback(
+    (seconds: number): void => {
+      const run = runRef.current;
+      const element = elementRef.current;
+      const unitIndex = unitIndexRef.current;
+      if (!run || !run.active || !element || unitIndex === null || seconds <= 0) return;
+
+      const here = Number.isFinite(element.currentTime) ? element.currentTime : 0;
+      // Wholly inside the unit in hand: a move, not a restart.
+      if (here >= seconds) {
+        seekWithinUnit(here - seconds);
+        return;
+      }
+
+      // What is left of the ten seconds belongs to the units before this one.
+      let remaining = seconds - here;
+      let target = unitIndex;
+      let startAt = 0;
+      while (target > 0 && remaining > 0) {
+        target -= 1;
+        const duration = durationsRef.current.get(target);
+        if (duration === undefined) {
+          // Never measured — it has not been played in this run. Its start is
+          // the only position that is honest rather than invented.
+          startAt = 0;
+          break;
+        }
+        if (remaining < duration) {
+          startAt = duration - remaining;
+          break;
+        }
+        remaining -= duration;
+        startAt = 0;
+      }
+
+      const units = unitsRef.current.get(run.sessionId);
+      // Nowhere further back to go: the run rewinds to its own beginning rather
+      // than off the front of the utterance.
+      if (target === unitIndex || !units) {
+        seekWithinUnit(0);
+        return;
+      }
+
+      void play(run.sessionId, units, target, startAt);
+    },
+    [play, seekWithinUnit],
   );
 
   const unlock = useCallback((): void => {
@@ -658,6 +944,7 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
     () => () => {
       if (runRef.current) teardownRun(runRef.current);
       runRef.current = null;
+      unitIndexRef.current = null;
       if (elementRef.current) resetElement(elementRef.current);
     },
     [],
@@ -668,10 +955,15 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       speakingSessionId,
       pausedSessionId,
       waitingForSynthesis,
+      progress,
+      unitDurations,
       play,
       pause,
       resume,
       stop,
+      jumpToUnit,
+      seekWithinUnit,
+      seekBackward,
       unlock,
       unlocked,
     }),
@@ -679,10 +971,15 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       speakingSessionId,
       pausedSessionId,
       waitingForSynthesis,
+      progress,
+      unitDurations,
       play,
       pause,
       resume,
       stop,
+      jumpToUnit,
+      seekWithinUnit,
+      seekBackward,
       unlock,
       unlocked,
     ],
