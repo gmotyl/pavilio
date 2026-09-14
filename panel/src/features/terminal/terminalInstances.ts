@@ -420,14 +420,25 @@ export function refitAllAndFollow(): void {
  * Finally, it withholds the **speech transport chords** — `Ctrl+Shift+Space`
  * and `Ctrl+Shift+←/→` — from the PTY. It does not act on them: the action is
  * raised by `features/speech/useSpeechKeys`, a capture listener on `window`
- * that has already run by the time xterm's keydown listener fires here. All
- * this branch owes that feature is silence, which is the same `return false`
- * Shift+Enter has always used, and it deliberately does NOT preventDefault or
- * stopPropagation: suppression is the window listener's call, not this one's.
+ * that has already run by the time xterm's keydown listener fires here. So the
+ * branch owes that feature silence, which is the same `return false`
+ * Shift+Enter has always used — and it owes the USER `preventDefault`, because
+ * a chord claimed by the panel must not also do the browser's thing with it:
+ * `Ctrl+Shift+Space` scrolls the page, `Ctrl+Shift+←/→` navigate back and
+ * forward. Claiming and suppressing belong in the same branch: relying on the
+ * window listener to suppress leaves the chord half-handled the moment that
+ * listener is not mounted — a panel rendered outside `SpeechHostProvider`, or
+ * a provider reshuffle — and the failure is silent.
  *
- * Which chords those are is decided once, in `speechTransportKeyFor`, so the
- * two halves cannot drift. Everything it calls `null` — in particular
- * `Ctrl+Shift+1–6`, which `useITermShortcuts` owns — reaches the TUI as before.
+ * `stopPropagation` is still NOT called. Suppressing the browser's default is
+ * this branch's business; deciding that no other panel listener may see the key
+ * is not, and the one listener that acts on it has already run in capture.
+ *
+ * The `preventDefault` is on the claimed branch ONLY, never on the Ctrl+Shift
+ * family: which chords are claimed is decided once, in `speechTransportKeyFor`,
+ * so the two halves cannot drift. Everything it calls `null` — in particular
+ * `Ctrl+Shift+1–6`, which `useITermShortcuts` reads off an un-prevented event —
+ * reaches the TUI exactly as before.
  */
 export function shiftEnterHandler(
   sendToPty: (data: string) => void,
@@ -448,7 +459,11 @@ export function shiftEnterHandler(
     // First, because it is the cheapest and the most specific: a chord claimed
     // here is claimed whatever else the key might have meant.
     if (speechTransportKeyFor(e)) {
-      return false; // withheld from the PTY; useSpeechKeys already acted
+      // Withheld from the PTY (`useSpeechKeys` already acted on it in capture)
+      // AND from the browser, whose own action on these chords is a page scroll
+      // or a history navigation. Only this branch: see the note above.
+      e.preventDefault?.();
+      return false;
     }
     if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
       sendToPty("\\\r");

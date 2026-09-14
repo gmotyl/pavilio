@@ -971,12 +971,21 @@ describe("shiftEnterHandler", () => {
  *
  * The action itself is raised by `features/speech/useSpeechKeys`, a capture
  * listener on `window` that has already run by the time xterm's own keydown
- * listener fires on the helper textarea. All this handler owes the feature is
- * silence: return `false` so `Terminal._keyDown` bails before
- * `evaluateKeyboardEvent` can write anything to the PTY — the same interception
- * `Shift+Enter` has always used — and do NOT suppress the event, because
- * suppression is not this handler's to decide and the window listener above has
- * already had its say.
+ * listener fires on the helper textarea. This handler owes the feature two
+ * things: silence — return `false` so `Terminal._keyDown` bails before
+ * `evaluateKeyboardEvent` can write anything to the PTY, the same interception
+ * `Shift+Enter` has always used — and `preventDefault`, so the BROWSER's own
+ * action on the chord (page scroll on Space, back/forward navigation on the
+ * arrows) never fires either.
+ *
+ * The `preventDefault` is deliberately not left to the window listener. That
+ * listener is only mounted under `SpeechHostProvider`; a panel mounted outside
+ * it, or a future provider reshuffle, would leave the chord claimed here and
+ * suppressed nowhere. Claiming and suppressing belong in the same branch.
+ *
+ * It is that branch ONLY. Every other `Ctrl+Shift` combination has to leave
+ * this handler untouched — `Ctrl+Shift+1–6` above all, which `useITermShortcuts`
+ * reads off an un-prevented event.
  *
  * The line between "mine" and "the TUI's" is drawn once, in
  * `speechTransportKeyFor`, so it cannot drift from the handler that acts on it.
@@ -992,7 +1001,7 @@ describe("shiftEnterHandler: speech transport keys", () => {
     metaKey: false,
   });
 
-  it("ctrl+shift+space toggles playback and is withheld from the PTY", async () => {
+  it("ctrl+shift+space toggles playback, is withheld from the PTY and suppressed", async () => {
     const { shiftEnterHandler } = await import("../terminalInstances");
     const send = vi.fn();
     const preventDefault = vi.fn();
@@ -1003,19 +1012,44 @@ describe("shiftEnterHandler: speech transport keys", () => {
 
     expect(result).toBe(false);
     expect(send).not.toHaveBeenCalled();
-    // Left un-suppressed on purpose: see the block comment above.
-    expect(preventDefault).not.toHaveBeenCalled();
+    // Space scrolls the page. The chord is claimed here, so it is suppressed
+    // here — not left to a window listener that may not be mounted.
+    expect(preventDefault).toHaveBeenCalled();
+    // Propagation is NOT stopped: other panel listeners may legitimately see
+    // the key, and the capture listener that acts on it has already run.
     expect(stopPropagation).not.toHaveBeenCalled();
   });
 
-  it("ctrl+shift+arrows walk the queue and are withheld from the PTY", async () => {
+  it("ctrl+shift+arrows walk the queue, are withheld from the PTY and suppressed", async () => {
     const { shiftEnterHandler } = await import("../terminalInstances");
     const send = vi.fn();
     const handler = shiftEnterHandler(send);
 
-    expect(handler(chord("ArrowLeft"))).toBe(false);
-    expect(handler(chord("ArrowRight"))).toBe(false);
+    for (const code of ["ArrowLeft", "ArrowRight"]) {
+      const preventDefault = vi.fn();
+      // The browser's own action on these is back/forward navigation.
+      expect(handler({ ...chord(code), preventDefault })).toBe(false);
+      expect(preventDefault).toHaveBeenCalled();
+    }
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("a real event on a transport chord comes out defaultPrevented", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const handler = shiftEnterHandler(vi.fn());
+
+    // Not a stub: `defaultPrevented` is the property the browser actually acts
+    // on, and the one the suppression exists to set.
+    const event = new KeyboardEvent("keydown", {
+      key: " ",
+      code: "Space",
+      ctrlKey: true,
+      shiftKey: true,
+      cancelable: true,
+    });
+
+    expect(handler(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("ctrl+shift+digits still reach the existing shortcut family", async () => {
@@ -1033,6 +1067,37 @@ describe("shiftEnterHandler: speech transport keys", () => {
     expect(handler(chord("ArrowUp"))).toBe(true);
     expect(handler(chord("ArrowDown"))).toBe(true);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("every other ctrl+shift chord comes out un-prevented", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const handler = shiftEnterHandler(vi.fn());
+
+    // `useITermShortcuts` reads Ctrl+Shift+1–6 off a live event. A blanket
+    // `preventDefault` on the Ctrl+Shift family — rather than on the claimed
+    // branch alone — would take the digits with it, silently.
+    for (const [code, key] of [
+      ["Digit1", "1"],
+      ["Digit2", "2"],
+      ["Digit3", "3"],
+      ["Digit4", "4"],
+      ["Digit5", "5"],
+      ["Digit6", "6"],
+      ["KeyK", "K"],
+      ["ArrowUp", "ArrowUp"],
+      ["ArrowDown", "ArrowDown"],
+    ] as const) {
+      const event = new KeyboardEvent("keydown", {
+        key,
+        code,
+        ctrlKey: true,
+        shiftKey: true,
+        cancelable: true,
+      });
+
+      expect(handler(event)).toBe(true);
+      expect(event.defaultPrevented).toBe(false);
+    }
   });
 
   it("shift+enter still sends backslash and CR", async () => {
