@@ -548,16 +548,47 @@ input[type="checkbox"] {
   background: rgba(158, 206, 106, 0.32);
 }
 
-/* Warm: in the synthesis cache, so a click starts with no wait. */
+/* Ready: the audio is in hand, so a click starts with no wait.
+
+   THE NEUTRAL PAIR CARRIES ITS WHOLE SEPARATION IN LUMINANCE. `warming` is red
+   and `played` is green, so either can sit anywhere on the luminance axis and
+   still be told apart from its neighbours. `ready` and `cold` have no hue to
+   fall back on — which is why the distinction has to be in the FILL, and why it
+   is the pair worth spending the strip's limited luminance range on. Measured
+   over the bar's own ground, `rgba(26,27,38,.97)`: it was 1.023 : 1, a 1px
+   inset outline on a 26px strip cut into six. It is 1.94 : 1 here, the
+   separation `played` vs `ready` used to have to itself.
+
+   The green hairline stays: it is the existing "in hand" hint, and the fill now
+   does the work it was being asked to do alone. */
 .speech-bar-seg[data-segment="ready"] {
-  background: var(--bg-elevated);
+  background: rgba(255, 255, 255, 0.18);
   box-shadow: inset 0 0 0 1px rgba(158, 206, 106, 0.28);
 }
 
-/* Cold: not synthesized. Clicking it is allowed — the run then reports the
-   existing `stalled` red until the unit lands. */
+/* Warming: requested, socket open, audio not here yet.
+
+   Not a new colour — this is what `.terminal-speak[data-speech="preparing"]`
+   and `[data-speech="stalled"]` already mean, *the panel is waiting for the
+   voice*, at unit granularity rather than cell. Red is never terminal here
+   either: a failed synthesis evicts the cache entry and the segment returns to
+   `cold`, the honest state for a unit nothing is fetching. */
+.speech-bar-seg[data-segment="warming"] {
+  background: var(--red-dim);
+  box-shadow: inset 0 0 0 1px var(--red);
+}
+
+/* Cold: nothing has been requested. A well cut into the bar rather than a
+   hairline drawn around one. Clicking it is still allowed — the run then
+   reports the existing `stalled` red until the unit lands.
+
+   `background-color` and `background-image` as LONGHANDS, deliberately: the
+   `background` shorthand resets `background-color` to transparent, which is why
+   cold used to be 5%-white hatching over bare bar ground and only 1.023 : 1
+   from a solid `ready`. The hatch stays as texture; the fill is now the fill. */
 .speech-bar-seg[data-segment="cold"] {
-  background: repeating-linear-gradient(
+  background-color: rgba(0, 0, 0, 0.55);
+  background-image: repeating-linear-gradient(
     115deg,
     rgba(255, 255, 255, 0.05) 0 3px,
     transparent 3px 7px
