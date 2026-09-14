@@ -20,6 +20,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { useMediaSessionTransport } from "./useMediaSessionTransport";
 import { useSpeechHost } from "./useSpeechHost";
+import { useSpeechKeys } from "./useSpeechKeys";
 import type { GridSpeech } from "./types";
 
 const SpeechHostContext = createContext<GridSpeech | null>(null);
@@ -37,6 +38,11 @@ export function SpeechHostProvider({ children }: Props) {
   // surfaces overwriting each other's action handlers and each clearing them on
   // the other's unmount. One host, one audio element, one transport.
   useMediaSessionTransport(speech);
+
+  // And here for the same reason again: one `window` keydown listener, not one
+  // per surface, or a single Ctrl+Shift+Space would toggle the transport twice
+  // — pause, then resume — and read as a key that does nothing at all.
+  useSpeechKeys(speech);
 
   return (
     <SpeechHostContext.Provider value={speech}>{children}</SpeechHostContext.Provider>

@@ -965,3 +965,97 @@ describe("shiftEnterHandler", () => {
     expect(result).toBe(true);
   });
 });
+
+/**
+ * The withholding half of the speech keyboard transport.
+ *
+ * The action itself is raised by `features/speech/useSpeechKeys`, a capture
+ * listener on `window` that has already run by the time xterm's own keydown
+ * listener fires on the helper textarea. All this handler owes the feature is
+ * silence: return `false` so `Terminal._keyDown` bails before
+ * `evaluateKeyboardEvent` can write anything to the PTY — the same interception
+ * `Shift+Enter` has always used — and do NOT suppress the event, because
+ * suppression is not this handler's to decide and the window listener above has
+ * already had its say.
+ *
+ * The line between "mine" and "the TUI's" is drawn once, in
+ * `speechTransportKeyFor`, so it cannot drift from the handler that acts on it.
+ */
+describe("shiftEnterHandler: speech transport keys", () => {
+  const chord = (code: string, key = code) => ({
+    type: "keydown",
+    key,
+    code,
+    ctrlKey: true,
+    shiftKey: true,
+    altKey: false,
+    metaKey: false,
+  });
+
+  it("ctrl+shift+space toggles playback and is withheld from the PTY", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const send = vi.fn();
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const handler = shiftEnterHandler(send);
+
+    const result = handler({ ...chord("Space", " "), preventDefault, stopPropagation });
+
+    expect(result).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+    // Left un-suppressed on purpose: see the block comment above.
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(stopPropagation).not.toHaveBeenCalled();
+  });
+
+  it("ctrl+shift+arrows walk the queue and are withheld from the PTY", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const send = vi.fn();
+    const handler = shiftEnterHandler(send);
+
+    expect(handler(chord("ArrowLeft"))).toBe(false);
+    expect(handler(chord("ArrowRight"))).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("ctrl+shift+digits still reach the existing shortcut family", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const send = vi.fn();
+    const handler = shiftEnterHandler(send);
+
+    // Ctrl+Shift+1–6 is `useITermShortcuts`'s project navigation. Swallowing it
+    // here would break shipped behaviour, so the handler must hand it on.
+    for (const digit of [1, 2, 3, 4, 5, 6]) {
+      expect(handler(chord(`Digit${digit}`, String(digit)))).toBe(true);
+    }
+    // And every other Ctrl+Shift chord is the TUI's, not ours.
+    expect(handler(chord("KeyK", "K"))).toBe(true);
+    expect(handler(chord("ArrowUp"))).toBe(true);
+    expect(handler(chord("ArrowDown"))).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("shift+enter still sends backslash and CR", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const send = vi.fn();
+    const handler = shiftEnterHandler(send);
+
+    // Pinned again alongside the speech keys: the new branch runs first, and a
+    // sloppy match there would eat the panel's oldest chord.
+    const result = handler({ type: "keydown", key: "Enter", code: "Enter", shiftKey: true });
+
+    expect(send).toHaveBeenCalledWith("\\\r");
+    expect(result).toBe(false);
+  });
+
+  it("does not withhold a speech chord on keyup or with alt/meta held", async () => {
+    const { shiftEnterHandler } = await import("../terminalInstances");
+    const send = vi.fn();
+    const handler = shiftEnterHandler(send);
+
+    expect(handler({ ...chord("Space", " "), type: "keyup" })).toBe(true);
+    expect(handler({ ...chord("Space", " "), altKey: true })).toBe(true);
+    expect(handler({ ...chord("Space", " "), metaKey: true })).toBe(true);
+    expect(handler({ ...chord("Space", " "), shiftKey: false })).toBe(true);
+  });
+});

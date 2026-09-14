@@ -9,6 +9,12 @@ import {
 } from "./imagePaste";
 import { viewportLooksBlank } from "./viewportBlank";
 import { WATCHDOG_STALE_MS } from "./watchdogConfig";
+// The dependency runs `terminal → speech`, the same direction as the grid's
+// `speech/types` import: nothing under `features/speech/` names this feature.
+// Sharing the predicate rather than copying the key list is the point — the
+// speech hook decides what a transport chord IS, and this module only decides
+// that such a chord never reaches the PTY.
+import { speechTransportKeyFor } from "../speech/useSpeechKeys";
 
 // Shared cache of live xterm instances, keyed by sessionId.
 // The Terminal (+ its DOM node) survive React unmounts so that scrollback
@@ -410,6 +416,18 @@ export function refitAllAndFollow(): void {
  *     chord now, so no copy capability is lost. preventDefault/
  *     stopPropagation are required here (unlike the plain-Ctrl+C branch)
  *     because this key is no longer meant to reach anything else.
+ *
+ * Finally, it withholds the **speech transport chords** — `Ctrl+Shift+Space`
+ * and `Ctrl+Shift+←/→` — from the PTY. It does not act on them: the action is
+ * raised by `features/speech/useSpeechKeys`, a capture listener on `window`
+ * that has already run by the time xterm's keydown listener fires here. All
+ * this branch owes that feature is silence, which is the same `return false`
+ * Shift+Enter has always used, and it deliberately does NOT preventDefault or
+ * stopPropagation: suppression is the window listener's call, not this one's.
+ *
+ * Which chords those are is decided once, in `speechTransportKeyFor`, so the
+ * two halves cannot drift. Everything it calls `null` — in particular
+ * `Ctrl+Shift+1–6`, which `useITermShortcuts` owns — reaches the TUI as before.
  */
 export function shiftEnterHandler(
   sendToPty: (data: string) => void,
@@ -420,9 +438,18 @@ export function shiftEnterHandler(
     key: string;
     shiftKey: boolean;
     ctrlKey?: boolean;
+    /** Present on every real KeyboardEvent; optional for the unit tests. */
+    code?: string;
+    altKey?: boolean;
+    metaKey?: boolean;
     preventDefault?: () => void;
     stopPropagation?: () => void;
   }) => {
+    // First, because it is the cheapest and the most specific: a chord claimed
+    // here is claimed whatever else the key might have meant.
+    if (speechTransportKeyFor(e)) {
+      return false; // withheld from the PTY; useSpeechKeys already acted
+    }
     if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
       sendToPty("\\\r");
       return false; // stop xterm from also sending \r
