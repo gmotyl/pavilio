@@ -1387,6 +1387,75 @@ describe("useSpeechPlayer", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  /**
+   * The stall a cold jump opens is the one moment the element and the transport
+   * disagree: `resetElement` removes the `src` attribute without running the
+   * element's load algorithm, so `currentTime` still reads the position of the
+   * unit that was torn down, while `unitIndexRef` already names the unit being
+   * waited on. A seek that does arithmetic there is doing it on a foreign clock,
+   * and the position it publishes is thrown away the moment the unit lands.
+   */
+  it("seeking back during a stall does not move on the torn-down unit's clock", async () => {
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    await loadDuration(20);
+    // Fifteen seconds into unit 0 — the clock the element is still holding when
+    // the jump below tears that unit out from under it.
+    await reportTime(15);
+    expect(currentElement().currentTime).toBe(15);
+
+    await settle(() => result.current.jumpToUnit("cell-a", 5));
+
+    expect(result.current.waitingForSynthesis).toBe(true);
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+    const playedBefore = [...played];
+
+    await settle(() => result.current.seekBackward(10));
+
+    // Unit 5 has not started, so there is no position inside it to move back
+    // from. Reading unit 0's fifteen seconds instead would publish `unitTime: 5`
+    // — a number the listener never hears, because the unit lands at zero.
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+    expect(played).toEqual(playedBefore);
+
+    await settle(() => synth.release("unit-5"));
+
+    // What was published during the stall is what actually plays.
+    expect(played).toEqual([...playedBefore, "blob:unit-5"]);
+    expect(currentElement().currentTime).toBe(0);
+    expect(result.current.progress?.unitIndex).toBe(5);
+    expect(result.current.progress?.unitTime).toBe(0);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("seeking inside a stalled unit publishes nothing playback will discard", async () => {
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    await loadDuration(20);
+    await reportTime(15);
+
+    await settle(() => result.current.jumpToUnit("cell-a", 5));
+    expect(result.current.waitingForSynthesis).toBe(true);
+
+    await settle(() => result.current.seekWithinUnit(8));
+
+    // The element holds no source, so `currentTime = 8` moves nothing and the
+    // published eight seconds is a claim about audio that does not exist yet.
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+
+    await settle(() => synth.release("unit-5"));
+
+    expect(currentElement().currentTime).toBe(0);
+    expect(result.current.progress?.unitTime).toBe(0);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("a unit's real duration is recorded once its audio loads", async () => {
     const onError = vi.fn();
     const { result } = renderHook(() => useSpeechPlayer({ onError }));

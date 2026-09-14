@@ -282,6 +282,20 @@ function resetElement(element: HTMLAudioElement): void {
 }
 
 /**
+ * Whether the element is holding the unit the transport says it is on.
+ *
+ * False for the whole window a cold `play()` opens: {@link resetElement} removes
+ * the `src` attribute, which — unlike *assigning* `src` — runs no load
+ * algorithm, so the element keeps the `currentTime` of the unit that was just
+ * torn down while `unitIndexRef` already names the unit being waited on. That
+ * window is the red stall, and it is the one moment the element's clock belongs
+ * to a different unit than the one the transport is reporting.
+ */
+function hasLoadedUnit(element: HTMLAudioElement): boolean {
+  return element.getAttribute("src") !== null;
+}
+
+/**
  * Synthesizes one unit and wraps it in an object URL. Failures resolve as
  * `{ error }` rather than rejecting, so the caller decides between skipping the
  * unit and stopping the run, and a lookahead started for a run that is
@@ -843,6 +857,11 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       const element = elementRef.current;
       const unitIndex = unitIndexRef.current;
       if (!run || !run.active || !element || unitIndex === null) return;
+      // Nothing loaded: the unit being waited on has no position to move inside
+      // of, and `currentTime` is the torn-down unit's. Publishing a position
+      // here would be a claim about audio that does not exist yet — one the
+      // element discards the moment it loads the unit and starts it at zero.
+      if (!hasLoadedUnit(element)) return;
 
       const duration = durationsRef.current.get(unitIndex);
       const target = Math.max(0, duration === undefined ? seconds : Math.min(seconds, duration));
@@ -861,6 +880,10 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       const element = elementRef.current;
       const unitIndex = unitIndexRef.current;
       if (!run || !run.active || !element || unitIndex === null || seconds <= 0) return;
+      // Same stall, and the lie is worse here: every branch below is arithmetic
+      // that starts from `here`, so a foreign clock does not merely publish a
+      // wrong position — it picks the wrong unit to land in.
+      if (!hasLoadedUnit(element)) return;
 
       const here = Number.isFinite(element.currentTime) ? element.currentTime : 0;
       // Wholly inside the unit in hand: a move, not a restart.
