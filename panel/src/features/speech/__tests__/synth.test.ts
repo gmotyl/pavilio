@@ -99,6 +99,8 @@ let synthesizeSpeech: typeof import("../synth").synthesizeSpeech;
 let prefetchSpeech: typeof import("../synth").prefetchSpeech;
 let toSpeechBlob: typeof import("../synth").toSpeechBlob;
 let isSpeechSynthesized: typeof import("../synth").isSpeechSynthesized;
+let speechCacheState: typeof import("../synth").speechCacheState;
+let subscribeSpeechCache: typeof import("../synth").subscribeSpeechCache;
 let SPEECH_CACHE_MAX_ENTRIES: number;
 let SPEECH_STREAM_STALL_TIMEOUT_MS: number;
 
@@ -124,6 +126,8 @@ beforeEach(async () => {
   prefetchSpeech = mod.prefetchSpeech;
   toSpeechBlob = mod.toSpeechBlob;
   isSpeechSynthesized = mod.isSpeechSynthesized;
+  speechCacheState = mod.speechCacheState;
+  subscribeSpeechCache = mod.subscribeSpeechCache;
   SPEECH_CACHE_MAX_ENTRIES = mod.SPEECH_CACHE_MAX_ENTRIES;
   SPEECH_STREAM_STALL_TIMEOUT_MS = mod.SPEECH_STREAM_STALL_TIMEOUT_MS;
 });
@@ -324,5 +328,153 @@ describe("synthesizeSpeech cache", () => {
 
     expect(buffer).toBeInstanceOf(ArrayBuffer);
     expect(edgeMock.streamCount).toBe(2);
+  });
+});
+
+describe("speechCacheState", () => {
+  const voice = "en-GB-RyanNeural";
+
+  /**
+   * The split `isSpeechSynthesized` could not express. The cache stores the
+   * in-flight promise on purpose — a prefetch racing a real request must dedupe
+   * onto one synthesis — so "there is an entry" is true the moment the socket
+   * opens. That is the right dedupe answer and the wrong readiness answer: the
+   * scrubber reading it flips three units to ready in the tick the cascade
+   * opens its window, and the ladder looks like a single step.
+   */
+  it("reports warming while a synthesis is in flight and ready once it lands", async () => {
+    const inFlight = synthesizeSpeech("in flight", { voice });
+
+    expect(speechCacheState("in flight", { voice })).toBe("warming");
+    // ...while the dedupe-shaped answer is unchanged: an entry exists, so a
+    // second caller must join this synthesis rather than start another.
+    expect(isSpeechSynthesized("in flight", { voice })).toBe(true);
+
+    await inFlight;
+
+    expect(speechCacheState("in flight", { voice })).toBe("ready");
+    expect(isSpeechSynthesized("in flight", { voice })).toBe(true);
+    expect(edgeMock.constructCount).toBe(1);
+  });
+
+  it("reports cold for a text nothing has requested", async () => {
+    expect(speechCacheState("never asked", { voice })).toBe("cold");
+    expect(speechCacheState("", { voice })).toBe("cold");
+    expect(speechCacheState("   \n ", { voice })).toBe("cold");
+
+    await synthesizeSpeech("asked", { voice });
+
+    // Keyed on voice+text exactly as the cache is, and asking costs nothing: a
+    // miss must not start a synthesis of its own.
+    expect(speechCacheState("asked", { voice })).toBe("ready");
+    expect(speechCacheState("asked", { voice: "pl-PL-ZofiaNeural" })).toBe("cold");
+    expect(edgeMock.constructCount).toBe(1);
+  });
+
+  it("a rejected synthesis goes back to cold, not stuck warming", async () => {
+    edgeMock.setReject(true);
+
+    const failing = synthesizeSpeech("boom", { voice });
+    expect(speechCacheState("boom", { voice })).toBe("warming");
+    await expect(failing).rejects.toThrow();
+
+    // `storeInCache` evicts on rejection so a retry is possible; the peek has
+    // to agree with that, or a failed unit sits red forever with nothing
+    // fetching it.
+    expect(speechCacheState("boom", { voice })).toBe("cold");
+    expect(isSpeechSynthesized("boom", { voice })).toBe(false);
+  });
+
+  it("notifies subscribers when an entry is added, settles and is evicted", async () => {
+    let watched = "watch me";
+    let notifications = 0;
+    const seen: Array<"cold" | "warming" | "ready"> = [];
+    const unsubscribe = subscribeSpeechCache(() => {
+      notifications += 1;
+      seen.push(speechCacheState(watched, { voice }));
+    });
+    /** What the most recent notification told a reader. */
+    const lastSeen = () => seen[seen.length - 1];
+
+    try {
+      const inFlight = synthesizeSpeech("watch me", { voice });
+      expect(notifications).toBe(1);
+      expect(lastSeen()).toBe("warming");
+
+      await inFlight;
+      expect(notifications).toBe(2);
+      expect(lastSeen()).toBe("ready");
+
+      // A cache hit changes nothing a reader can see, so it announces nothing:
+      // a notification per read would re-render every open bar on every peek.
+      await synthesizeSpeech("watch me", { voice });
+      expect(notifications).toBe(2);
+
+      // An eviction with no add beside it — the rejection path — so the count
+      // pins that the eviction itself announces, not merely the add that
+      // happened to accompany it.
+      watched = "fails";
+      edgeMock.setReject(true);
+      await expect(synthesizeSpeech("fails", { voice })).rejects.toThrow();
+
+      expect(notifications).toBe(4); // the add, then the eviction
+      expect(lastSeen()).toBe("cold");
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("unsubscribing stops the notifications", async () => {
+    let first = 0;
+    const unsubscribe = subscribeSpeechCache(() => {
+      first += 1;
+    });
+
+    await synthesizeSpeech("one", { voice });
+    expect(first).toBeGreaterThan(0);
+
+    const atUnsubscribe = first;
+    unsubscribe();
+    await synthesizeSpeech("two", { voice });
+    expect(first).toBe(atUnsubscribe);
+
+    // Unsubscribing twice is harmless, and takes no later listener with it.
+    unsubscribe();
+    let second = 0;
+    const unsubscribeSecond = subscribeSpeechCache(() => {
+      second += 1;
+    });
+    await synthesizeSpeech("three", { voice });
+
+    expect(second).toBeGreaterThan(0);
+    expect(first).toBe(atUnsubscribe);
+    unsubscribeSecond();
+  });
+
+  /**
+   * Same teeth as the `isSpeechSynthesized` version above, for the peek the
+   * scrubber will actually call: it asks on every render of every bar, and a
+   * peek that counted as a *use* would re-insert the key at the most-recent
+   * end and could evict the very unit about to play.
+   */
+  it("peeking still does not mark an entry recently used", async () => {
+    const cap = SPEECH_CACHE_MAX_ENTRIES;
+
+    for (let i = 0; i < cap; i += 1) {
+      await synthesizeSpeech(`k-${i}`, { voice });
+    }
+    expect(edgeMock.constructCount).toBe(cap);
+
+    // k-0 is the LRU. Peek at it repeatedly, the way a re-rendering bar does.
+    expect(speechCacheState("k-0", { voice })).toBe("ready");
+    expect(speechCacheState("k-0", { voice })).toBe("ready");
+    expect(edgeMock.constructCount).toBe(cap);
+
+    // Overflow by one: the entry that goes is still k-0.
+    await synthesizeSpeech(`k-${cap}`, { voice });
+    expect(edgeMock.constructCount).toBe(cap + 1);
+
+    expect(speechCacheState("k-0", { voice })).toBe("cold");
+    expect(speechCacheState("k-1", { voice })).toBe("ready");
   });
 });
