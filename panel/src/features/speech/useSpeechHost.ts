@@ -173,13 +173,45 @@ export function useSpeechHost(): SpeechHost {
   }, []);
 
   const player = useSpeechPlayer({ onError });
+  /**
+   * Destructured on purpose, and depended on **as methods** everywhere below —
+   * never as `player`.
+   *
+   * `useSpeechPlayer` memoizes its return value on `progress` and
+   * `unitDurations`, so the player OBJECT changes identity on every
+   * `timeupdate`: roughly 4 Hz while anything is speaking. Each of its methods
+   * is individually `useCallback`-stable, so a callback that names the methods
+   * it uses is stable too — while one that names `player` inherits the whole
+   * churn. Nine of the callbacks below did, which handed 4 Hz back to the
+   * `GridSpeech` memo and re-rendered every bar in the grid through the
+   * `speech` prop — precisely what moving the playhead onto an external store
+   * was done to prevent. `useSpeechHost.identity.test.tsx` is the pin.
+   *
+   * The readings in here are state, not methods, and they change on run
+   * transitions rather than on the clock: a host identity that moves when a
+   * cell starts or stops speaking is the point of those fields.
+   */
+  const {
+    pause: pausePlayback,
+    pausedSessionId,
+    play: playUnits,
+    progress,
+    resume: resumePlayback,
+    seekWithinUnit: seekPlaybackWithinUnit,
+    speakingSessionId,
+    stop: stopPlayback,
+    unitDurations,
+    unlock,
+    unlocked,
+    waitingForSynthesis,
+  } = player;
   // The channel never observes playback or synthesis, so everything it needs to
   // know about either has to be handed to it on every render. Forgetting one of
   // these deletes that state from the grid.
   const channel = useUtteranceChannel({
-    speakingSessionId: player.speakingSessionId,
-    pausedSessionId: player.pausedSessionId,
-    waitingForSynthesis: player.waitingForSynthesis,
+    speakingSessionId,
+    pausedSessionId,
+    waitingForSynthesis,
     // The warm this module owns, handed back so one function — `stateFor` —
     // answers the whole of the control's question.
     preparingSessionIds,
@@ -283,7 +315,7 @@ export function useSpeechHost(): SpeechHost {
     // right now, and cutting that off because the agent answered again is not
     // the same favour.
     const held = runRef.current;
-    const paused = player.pausedSessionId;
+    const paused = pausedSessionId;
     if (!held || !paused || held.sessionId !== paused) return;
 
     const queue = queueFor(paused);
@@ -320,8 +352,8 @@ export function useSpeechHost(): SpeechHost {
     // pending `play` on a microtask, so the synchronous stamp lands first
     // either way), the outcome is.
     held.outcome = "superseded";
-    player.stop();
-  }, [dispatchQueue, player.pausedSessionId, player.stop, queueFor]);
+    stopPlayback();
+  }, [dispatchQueue, pausedSessionId, queueFor, stopPlayback]);
 
   /**
    * Play one named utterance in a cell. Named rather than looked up, because
@@ -368,16 +400,19 @@ export function useSpeechHost(): SpeechHost {
         finishUtterance(ended.sessionId);
       }
 
-      void player
-        // `fromUnit` is the segment click's whole implementation: the player
-        // already takes a starting unit, and starting there is what a jump IS.
-        // Clamped, because the index comes off a rendered scrubber and a stale
-        // render could name a unit a newer, shorter utterance does not have.
-        .play(sessionId, prepared.units, Math.min(Math.max(0, fromUnit), prepared.units.length - 1))
+      // `fromUnit` is the segment click's whole implementation: the player
+      // already takes a starting unit, and starting there is what a jump IS.
+      // Clamped, because the index comes off a rendered scrubber and a stale
+      // render could name a unit a newer, shorter utterance does not have.
+      void playUnits(
+        sessionId,
+        prepared.units,
+        Math.min(Math.max(0, fromUnit), prepared.units.length - 1),
+      )
         .then(() => finish(run))
         .catch(() => finish(run));
     },
-    [finishUtterance, languageFor, markHeard, player, preparedFor],
+    [finishUtterance, languageFor, markHeard, playUnits, preparedFor],
   );
 
   const speak = useCallback(
@@ -393,7 +428,7 @@ export function useSpeechHost(): SpeechHost {
     (sessionId: string): void => {
       // The click is the gesture the element needs; every later programmatic
       // play rides on it.
-      player.unlock();
+      unlock();
 
       // A run always plays the whole answer, so there is never a part-way
       // point to continue from: a click on a cell that has been heard replays
@@ -401,7 +436,7 @@ export function useSpeechHost(): SpeechHost {
       // that click reaches `onResume`, never this.
       speak(sessionId);
     },
-    [player, speak],
+    [speak, unlock],
   );
 
   const onStop = useCallback(
@@ -412,9 +447,9 @@ export function useSpeechHost(): SpeechHost {
       // `stop()`, which resolves the pending `play`.
       const run = runRef.current;
       if (run?.sessionId === sessionId) run.outcome = "stopped";
-      player.stop();
+      stopPlayback();
     },
-    [player],
+    [stopPlayback],
   );
 
   const onPause = useCallback(
@@ -427,21 +462,21 @@ export function useSpeechHost(): SpeechHost {
       // Guarded on the session the player is actually running: the control
       // only offers a pause on that one cell, and a stray call from anywhere
       // else must not silence a run the user did not touch.
-      if (player.speakingSessionId !== sessionId) return;
-      player.pause();
+      if (speakingSessionId !== sessionId) return;
+      pausePlayback();
     },
-    [player],
+    [pausePlayback, speakingSessionId],
   );
 
   const onResume = useCallback(
     (sessionId: string): void => {
-      if (player.pausedSessionId !== sessionId) return;
+      if (pausedSessionId !== sessionId) return;
       // Deliberately NOT `player.unlock()`: the element is holding the paused
       // unit, so unlocking would play it here rather than through `resume()` —
       // and the gesture was already spent on the click that started the run.
-      player.resume();
+      resumePlayback();
     },
-    [player],
+    [pausedSessionId, resumePlayback],
   );
 
   /**
@@ -465,14 +500,14 @@ export function useSpeechHost(): SpeechHost {
       // same; asking here is what keeps it from making a sound anyway.
       if (queue.cursor === "previous" || queue.previous === null) return;
 
-      player.unlock();
+      unlock();
       dispatchQueue(sessionId, { type: "previous" });
       recordAutoplayed(sessionId, queue.previous.id);
       // From its first unit: the transport steps onto a whole answer, never
       // into the middle of the one it was cut off in.
       speakUtterance(sessionId, queue.previous);
     },
-    [dispatchQueue, player, queueFor, recordAutoplayed, speakUtterance],
+    [dispatchQueue, queueFor, recordAutoplayed, speakUtterance, unlock],
   );
 
   const onNext = useCallback(
@@ -484,14 +519,14 @@ export function useSpeechHost(): SpeechHost {
       const target = returning ? queue.current : (queue.pending[0] ?? null);
       if (!returning && !target) return;
 
-      player.unlock();
+      unlock();
       dispatchQueue(sessionId, { type: "next" });
       if (!target) return;
 
       recordAutoplayed(sessionId, target.id);
       speakUtterance(sessionId, target);
     },
-    [dispatchQueue, player, queueFor, recordAutoplayed, speakUtterance],
+    [dispatchQueue, queueFor, recordAutoplayed, speakUtterance, unlock],
   );
 
   /**
@@ -518,10 +553,21 @@ export function useSpeechHost(): SpeechHost {
    * field it would change this object's identity at that rate, and since one
    * host serves the whole panel, every cell in the grid would re-render four
    * times a second for the one cell that is speaking. So the three moving
-   * readings are mirrored into refs, the callbacks below read those refs and
-   * are permanently stable (`[]`), and subscribers are told when something
-   * moved. A bar whose own snapshot did not change — every cell but the
-   * speaking one — is not re-rendered at all.
+   * readings are mirrored into refs, the callbacks below read those refs rather
+   * than the moving values, and subscribers are told when something moved. A
+   * bar whose own snapshot did not change — every cell but the speaking one —
+   * is not re-rendered at all.
+   *
+   * The refs are half of it. The other half is that nothing else in the
+   * returned object may move at that rate either, which is why the player is
+   * destructured at the top of this hook: a callback that depends on `player`
+   * depends on `progress`, and the whole saving is gone. Both halves are pinned
+   * by `useSpeechHost.identity.test.tsx`.
+   *
+   * `progressFor` is `[]`-stable; `unitDurationsFor` depends on `queueFor`,
+   * because measurements belong to an utterance rather than to a cell and the
+   * cursor is what says which utterance the bar is on. `queueFor` moves when a
+   * queue does, which is not on the clock.
    */
   const progressListeners = useRef<Set<() => void>>(new Set());
   const progressRef = useRef<SpeechProgress | null>(null);
@@ -551,12 +597,12 @@ export function useSpeechHost(): SpeechHost {
   const measuredUtteranceRef = useRef<string | null>(null);
 
   useEffect(() => {
-    progressRef.current = player.progress;
-    measuredRef.current = player.unitDurations;
-    speakingRef.current = player.speakingSessionId;
-    if (player.speakingSessionId) measuredUtteranceRef.current = playingUtteranceRef.current;
+    progressRef.current = progress;
+    measuredRef.current = unitDurations;
+    speakingRef.current = speakingSessionId;
+    if (speakingSessionId) measuredUtteranceRef.current = playingUtteranceRef.current;
     for (const listener of progressListeners.current) listener();
-  }, [player.progress, player.speakingSessionId, player.unitDurations]);
+  }, [progress, speakingSessionId, unitDurations]);
 
   const subscribeProgress = useCallback((listener: () => void): (() => void) => {
     progressListeners.current.add(listener);
@@ -595,7 +641,7 @@ export function useSpeechHost(): SpeechHost {
       const utterance = utteranceUnderCursor(queueFor(sessionId));
       if (!utterance) return;
 
-      player.unlock();
+      unlock();
       // NOT `player.jumpToUnit`, for two independent reasons, either of which
       // on its own would be enough:
       //
@@ -615,7 +661,7 @@ export function useSpeechHost(): SpeechHost {
       // `superseded` before starting the new one.
       speakUtterance(sessionId, utterance, unitIndex);
     },
-    [player, queueFor, speakUtterance],
+    [queueFor, speakUtterance, unlock],
   );
 
   const onSeekWithinUnit = useCallback(
@@ -623,20 +669,20 @@ export function useSpeechHost(): SpeechHost {
       // The drag is only meaningful on the segment that is in the element, and
       // only this cell's run has one. A stray call from any other bar must not
       // move a run the user did not touch.
-      if (player.speakingSessionId !== sessionId) return;
-      player.seekWithinUnit(seconds);
+      if (speakingSessionId !== sessionId) return;
+      seekPlaybackWithinUnit(seconds);
     },
-    [player],
+    [seekPlaybackWithinUnit, speakingSessionId],
   );
 
   const onArm = useCallback(
     (sessionId: string | null): void => {
       // Arming is a click too, and it is the gesture the autoplay that follows
       // will need — so it is spent on the element here rather than lost.
-      player.unlock();
+      unlock();
       setArmed(sessionId);
     },
-    [player, setArmed],
+    [setArmed, unlock],
   );
 
   const armedUtterance = armedSessionId ? utteranceFor(armedSessionId) : null;
@@ -654,7 +700,7 @@ export function useSpeechHost(): SpeechHost {
     if (!armedSessionId || !armedUtterance) return;
     if (autoplayedRef.current === armedUtterance.id) return;
 
-    if (!player.unlocked) {
+    if (!unlocked) {
       // No gesture has reached the element yet, so the browser would refuse
       // this anyway — and a tab that has just hydrated `/api/speech/latest`
       // must not start talking on its own. Absorb it: it is old news by the
@@ -665,7 +711,7 @@ export function useSpeechHost(): SpeechHost {
 
     autoplayedRef.current = armedUtterance.id;
     speak(armedSessionId);
-  }, [armedSessionId, armedUtterance, player.unlocked, speak]);
+  }, [armedSessionId, armedUtterance, speak, unlocked]);
 
   return useMemo(
     () => ({
