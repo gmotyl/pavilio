@@ -543,6 +543,51 @@ describe("useUtteranceChannel", () => {
   });
 
   /**
+   * The retention half of `heard`. The prune above pins what falls OUT of the
+   * set; this pins what has to stay IN it — a set that kept only the newest id
+   * passes every other test in this file, because nothing else ever hears two
+   * utterances and then steps back onto the older one. Only the transport makes
+   * that reachable, so it is pinned here rather than left to the next reader.
+   */
+  it("hearing a newer utterance keeps the older one heard when the cursor steps back", async () => {
+    const { result, rerender } = await renderChannel();
+
+    lastMessage = frame(utterance("cell-a", "u-1"));
+    await act(async () => {
+      rerender();
+    });
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    // u-1 steps into history, u-2 takes the cursor, and it is heard too.
+    lastMessage = frame(utterance("cell-a", "u-2", 2_000));
+    await act(async () => {
+      rerender();
+    });
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    await act(async () => {
+      result.current.dispatchQueue("cell-a", { type: "previous" });
+    });
+
+    // Both are still reachable, so both are still heard: marking u-2 REPLACING
+    // the set rather than adding to it would report the one the user has
+    // already listened to as unheard news the moment they stepped back to it.
+    expect(result.current.queueFor("cell-a").previous?.id).toBe("u-1");
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    await act(async () => {
+      result.current.dispatchQueue("cell-a", { type: "next" });
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+  });
+
+  /**
    * Nothing about the queue is persisted. A reloaded tab hydrates from the
    * server's latest-per-session store, which keeps exactly one utterance per
    * cell — so the cell comes back holding that one, with nothing behind the
