@@ -84,7 +84,14 @@ export function speechTransportKeyFor(event: SpeechKeyEvent): SpeechTransportKey
   // `code` is the physical key and is what a layout-independent chord should be
   // matched on; `key` is the fallback for the synthetic events a test or an
   // older browser produces, where `code` may be absent.
-  switch (event.code ?? event.key) {
+  //
+  // `||`, not `??`: "absent" has two spellings here. This predicate is
+  // structural and all-optional — `terminalInstances.ts` hands it xterm's own
+  // event object — and a dispatcher that does not set `code` commonly yields
+  // `""` rather than `undefined`. An empty physical key matches nothing, so
+  // treating it as present would silently kill the transport on exactly the
+  // events the fallback exists for. No real `code` is falsy.
+  switch (event.code || event.key) {
     case "Space":
     case " ":
       return "toggle";

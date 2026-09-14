@@ -20,7 +20,7 @@
  */
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
-import { speechTransportKeyFor, useSpeechKeys } from "../useSpeechKeys";
+import { isTypingInPanelField, speechTransportKeyFor, useSpeechKeys } from "../useSpeechKeys";
 import type { MediaSessionTransportTarget } from "../useMediaSessionTransport";
 
 /**
@@ -117,6 +117,35 @@ function focusXtermHelper(): HTMLTextAreaElement {
   screen.className = "xterm";
   const helper = document.createElement("textarea");
   helper.className = "xterm-helper-textarea";
+  screen.appendChild(helper);
+  document.body.appendChild(screen);
+  helper.focus();
+  return helper;
+}
+
+/**
+ * Half an xterm: the CLASS, with no `.xterm` ancestor over it.
+ *
+ * `focusXtermHelper` above carries both markers, which is faithful to xterm but
+ * makes each check individually invisible — either one alone still recognizes
+ * that fixture, so dropping one passes the whole suite. The redundancy is
+ * deliberate and worth keeping, so each half gets a fixture that only it can
+ * answer, and a future xterm release that stops stamping one marker is a red
+ * test rather than a silently dead branch.
+ */
+function focusXtermHelperByClassOnly(): HTMLTextAreaElement {
+  const helper = document.createElement("textarea");
+  helper.className = "xterm-helper-textarea";
+  document.body.appendChild(helper);
+  helper.focus();
+  return helper;
+}
+
+/** The other half: inside `.xterm`, with no helper class on the textarea. */
+function focusXtermHelperByAncestorOnly(): HTMLTextAreaElement {
+  const screen = document.createElement("div");
+  screen.className = "xterm";
+  const helper = document.createElement("textarea");
   screen.appendChild(helper);
   document.body.appendChild(screen);
   helper.focus();
@@ -230,6 +259,71 @@ describe("useSpeechKeys", () => {
     focusXtermHelper();
     press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true });
     expect(target.onPause).toHaveBeenCalledWith("cell-a");
+  });
+
+  it("either xterm marker alone is enough to recognize the terminal", () => {
+    // One fixture per marker, because the realistic one carries both: with both
+    // present each check alone answers, so neither is load-bearing and dropping
+    // one is invisible. Here each fixture can only be answered by its own check.
+    const fixtures = [
+      { name: "class, no .xterm ancestor", focus: focusXtermHelperByClassOnly },
+      { name: "inside .xterm, no helper class", focus: focusXtermHelperByAncestorOnly },
+    ];
+
+    for (const fixture of fixtures) {
+      document.body.innerHTML = "";
+      const element = fixture.focus();
+      // The predicate first, for a failure that names the marker that stopped
+      // being recognized rather than just "nothing spoke".
+      expect(isTypingInPanelField(element), fixture.name).toBe(false);
+
+      const target = stubTarget({ speakingSessionId: "cell-a" });
+      mounted(target, () => press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true }));
+      expect(target.onPause, fixture.name).toHaveBeenCalledWith("cell-a");
+    }
+  });
+
+  it("falls back to key when code is absent, however that is spelled", () => {
+    // The predicate is structural and all-optional — `terminalInstances.ts`
+    // hands it xterm's event object — so a caller that does not set `code`
+    // reaches it as `undefined` from one dispatcher and as `""` from another.
+    // Both mean "no physical key was reported", and `??` only understands one
+    // of them.
+    for (const code of [undefined, ""]) {
+      expect(
+        speechTransportKeyFor({ type: "keydown", code, key: " ", ctrlKey: true, shiftKey: true }),
+      ).toBe("toggle");
+      expect(
+        speechTransportKeyFor({
+          type: "keydown",
+          code,
+          key: "ArrowRight",
+          ctrlKey: true,
+          shiftKey: true,
+        }),
+      ).toBe("next");
+    }
+  });
+
+  it("a region that swallows keydown cannot silence the transport", () => {
+    // Capture is not only about running before xterm. It is also what makes the
+    // listener immune to a `stopPropagation` from something nested — and the
+    // panel has one: `TerminalLayoutGrid` stops the event for Cmd/Ctrl+U. A
+    // bubble-phase listener would never see a key pressed inside such a region,
+    // so the transport would die exactly where it is needed most.
+    const target = stubTarget({ speakingSessionId: "cell-a" });
+    mounted(target, () => {
+      const helper = focusXtermHelper();
+      const region = helper.closest(".xterm");
+      if (!region) throw new Error("the fixture lost its .xterm region");
+      region.addEventListener("keydown", (event) => event.stopPropagation());
+
+      press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true });
+      expect(target.onPause).toHaveBeenCalledWith("cell-a");
+
+      press({ code: "ArrowRight", ctrlKey: true, shiftKey: true });
+      expect(target.onNext).toHaveBeenCalledWith("cell-a");
+    });
   });
 
   it("ignores the combo when alt or meta is held, and on keyup", () => {

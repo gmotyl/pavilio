@@ -408,6 +408,32 @@ async function click(testId: string): Promise<void> {
   });
 }
 
+/**
+ * One transport chord, dispatched at `document.body` — nothing focused, exactly
+ * as a user who has not clicked into a cell leaves the page.
+ *
+ * `useSpeechKeys.test.ts` drives the hook directly, so it says nothing about
+ * whether anything MOUNTS it: deleting `useSpeechKeys(speech)` from
+ * `SpeechHostProvider` leaves that suite, and the whole panel's keyboard
+ * transport, green and absent. This is the mount's own assertion, and it is the
+ * same class of gap the rest of this file exists for.
+ */
+async function pressTransport(code: string): Promise<void> {
+  await act(async () => {
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        code,
+        key: code === "Space" ? " " : code,
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await drain();
+  });
+}
+
 const speakState = (sessionId: string): string | null =>
   screen.getByTestId(`terminal-cell-speak-${sessionId}`).getAttribute("data-speech");
 
@@ -891,6 +917,69 @@ describe("autoplay — the surfaces and the session language", () => {
 
     await emitUtterance("cell-a", "a3", "Trzecie zdanie, dalej po polsku.");
     expect(lastLanguage()).toBe("pl");
+  });
+});
+
+/**
+ * The transports the provider MOUNTS.
+ *
+ * `useSpeechKeys` and `useMediaSessionTransport` each have a suite that drives
+ * the hook directly with a stub target, and both of those stay green with the
+ * hook deleted from `SpeechHostProvider` — the surface would simply not exist
+ * in the product, and nothing would say so. That is the same shape as the
+ * forgotten `speech` prop this file was written for, so the mount is pinned the
+ * same way: through the real provider, the real host, and the cell header's own
+ * attributes.
+ */
+describe("the keyboard transport, mounted", () => {
+  it("ctrl+shift+space drives the panel's one host", async () => {
+    await renderProjectSurface();
+
+    // Arrives while nothing is armed, so the cell is warmed and SILENT: every
+    // sound after this line is the key press's doing and nothing else's.
+    await emitUtterance("cell-a", "a1", "Hello there. This is the answer.");
+    expect(played).toEqual([]);
+    expect(speakState("cell-a")).toBe("ready");
+
+    // The click that arms is also the gesture the `<audio>` element needs.
+    await arm("cell-a");
+    expect(played).toEqual([]);
+
+    // Nothing is running, so the chord starts the armed cell.
+    await pressTransport("Space");
+    expect(played).toEqual(["blob:Hello there."]);
+    expect(speakState("cell-a")).toBe("speaking");
+
+    // The same chord on a live run holds it, and holds the run rather than
+    // ending it — `heard` here would mean the key raised the wrong callback.
+    await pressTransport("Space");
+    expect(speakState("cell-a")).toBe("paused");
+
+    // And resumes it, without materializing the unit a second time.
+    await pressTransport("Space");
+    expect(speakState("cell-a")).toBe("speaking");
+    expect(objectUrls.filter((url) => url === "blob:Hello there.")).toHaveLength(1);
+  });
+
+  it("ctrl+shift+arrows step the run's queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+
+    // Two answers on one cell: the second queues behind the first rather than
+    // superseding it, so there is something for `next` to step onto.
+    await emitUtterance("cell-a", "a1", "The first answer.");
+    await emitUtterance("cell-a", "a2", "The second answer.");
+    expect(played).toEqual(["blob:The first answer."]);
+
+    await pressTransport("ArrowRight");
+    expect(played).toEqual(["blob:The first answer.", "blob:The second answer."]);
+
+    await pressTransport("ArrowLeft");
+    expect(played).toEqual([
+      "blob:The first answer.",
+      "blob:The second answer.",
+      "blob:The first answer.",
+    ]);
   });
 });
 
