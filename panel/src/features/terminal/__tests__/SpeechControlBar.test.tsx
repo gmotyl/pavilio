@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 import type { Utterance } from "../../speech/types";
+import { CellSpeakButton } from "../CellSpeakButton";
 import { SpeechControlBar } from "../SpeechControlBar";
 
 /**
@@ -584,6 +585,79 @@ describe("SpeechControlBar", () => {
       const position = screen.getByTestId("speech-bar-position-cell-a");
       expect(position).toHaveTextContent("2/3");
       expect(position.closest("[aria-hidden='true']")).toBeNull();
+    });
+  });
+
+  /**
+   * The pulse, repeated.
+   *
+   * The header speak control pulses on `data-pulse="1"` — set for `ready`, the
+   * one state that is asking for something. An open bar covers the top of the
+   * cell, so a user watching the transport would have to look back up at the
+   * header to learn that anything is waiting. The bar's play button carries the
+   * same attribute, from the same derivation: one fact in two places, and no
+   * second rule to keep in sync.
+   */
+  describe("the pulse", () => {
+    const ALL_STATES: CellSpeechState[] = [
+      "empty",
+      "preparing",
+      "ready",
+      "speaking",
+      "stalled",
+      "paused",
+      "heard",
+    ];
+
+    const barFor = (state: CellSpeechState): GridSpeech =>
+      makeSpeech({
+        state,
+        queue: queueWith({ current: utterance("u-1") }),
+        units: units(200, 240),
+      });
+
+    const pulseOf = (testId: string): string | null =>
+      screen.getByTestId(testId).getAttribute("data-pulse");
+
+    it("the play button pulses while an unheard utterance waits", () => {
+      render(<SpeechControlBar sessionId="cell-a" speech={barFor("ready")} />);
+
+      expect(pulseOf("speech-bar-playpause-cell-a")).toBe("1");
+    });
+
+    it("the play button stops pulsing once the cell is speaking", () => {
+      const view = render(<SpeechControlBar sessionId="cell-a" speech={barFor("speaking")} />);
+      expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
+
+      // …and once it has been listened to all the way through.
+      view.rerender(<SpeechControlBar sessionId="cell-a" speech={barFor("heard")} />);
+      expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
+    });
+
+    it("the play button and the header control always agree", () => {
+      // The criterion is not "both pulse on ready" — it is that there is only
+      // one derivation. Checking every state is how a second rule, computed in
+      // the bar, would be caught the first time the two drifted.
+      for (const state of ALL_STATES) {
+        const view = render(
+          <>
+            <CellSpeakButton
+              sessionId="cell-a"
+              state={state}
+              onSpeak={() => {}}
+              onPause={() => {}}
+              onResume={() => {}}
+            />
+            <SpeechControlBar sessionId="cell-a" speech={barFor(state)} />
+          </>,
+        );
+
+        const header = pulseOf("terminal-cell-speak-cell-a");
+        expect(header).toMatch(/^[01]$/);
+        expect(pulseOf("speech-bar-playpause-cell-a")).toBe(header);
+
+        view.unmount();
+      }
     });
   });
 

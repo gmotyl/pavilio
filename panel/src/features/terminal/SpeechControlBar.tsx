@@ -1,6 +1,7 @@
 import { Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
+import { speechPulse } from "./CellSpeakButton";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../speech/types";
 import { getStoredVoice } from "../speech/voices";
 
@@ -310,6 +311,13 @@ export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
           data-testid={`speech-bar-playpause-${sessionId}`}
           data-speech={state}
           data-icon={intent}
+          // The header speak control's own switch, from the header speak
+          // control's own function — not a second rule computed here. The bar
+          // sits over the top of the cell, so without this a user watching the
+          // transport has to look back at the header to learn that something is
+          // waiting. `index.css` styles both selectors in one rule, which is
+          // what keeps the two pulses the same pulse.
+          data-pulse={speechPulse(state)}
           className="speech-bar-btn speech-bar-primary"
           disabled={state === "empty"}
           aria-disabled={intent === "none" || undefined}
