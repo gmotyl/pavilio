@@ -789,6 +789,40 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     await clickControl(result.current, "cell-a");
     expect(played).toEqual([`blob:${newer[0]}`]);
   });
+
+  /**
+   * Warming sits outside every concurrency bound in the feature. The player's
+   * `SYNTHESIS_CONCURRENCY` limits the units of the ONE run it is playing; the
+   * host's warming loop fires a synthesis per warmable utterance with no await
+   * and no limiter at all. With a full queue behind a live run that was seven
+   * requests in flight, competing with the audio being listened to.
+   *
+   * The bound is the queue's reach: what is being spoken, and what the
+   * transport would reach next. The rest are warmed as they move up.
+   */
+  it("a full five-deep queue warms two utterances, not seven", async () => {
+    const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"];
+    const firstUnitOf = (word: string): string => unitsOf(response(3, word))[0];
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3, words[0]));
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    for (let i = 1; i < words.length; i += 1) {
+      await emitUtterance("cell-a", `u-${i + 1}`, response(3, words[i]));
+    }
+
+    // MAX_PENDING exactly: five answers waiting behind the one being spoken.
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("u-1");
+    expect(queue.pending).toHaveLength(5);
+
+    // Counted as first units, because that is what a warm IS. The live run's
+    // later units are the player's cascade, which has its own limiter.
+    const warmed = words.filter((word) => requestedTexts().includes(firstUnitOf(word)));
+    expect(warmed).toEqual([words[0], words[1]]);
+  });
 });
 
 /**

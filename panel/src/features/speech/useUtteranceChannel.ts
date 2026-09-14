@@ -128,6 +128,46 @@ function withHeard(existing: SessionSpeech | undefined): ReadonlySet<string> {
   return new Set([...existing.heard, spoken.id]);
 }
 
+/**
+ * The heard set narrowed to the ids the queue can still reach — its history,
+ * its cursor, and everything waiting behind it.
+ *
+ * `heard` is only ever asked of the utterance under the cursor, so an id that
+ * has fallen out of the queue (the `previous` a newer answer discarded, a
+ * pending answer dropped past `MAX_PENDING`) can never be asked about again.
+ * Left alone the set grows for the life of the tab, and {@link withHeard}
+ * rebuilds the whole of it on every mark — quadratic over a long session. Cut
+ * on every advance it is bounded by the queue itself: seven utterances at its
+ * very widest.
+ *
+ * The one shadow this casts is a re-broadcast of an utterance the cell has
+ * already let go of: it arrives as news rather than as something heard. The
+ * server keeps one utterance per session and replays only that one, so the
+ * cell's own dedupe gate covers every re-delivery that can actually happen.
+ *
+ * Returns the set it was handed when nothing has fallen out, so an advance that
+ * drops nothing stays referentially a no-op all the way out to the Map.
+ */
+function prunedHeard(heard: ReadonlySet<string>, queue: UtteranceQueue): ReadonlySet<string> {
+  if (heard.size === 0) return heard;
+
+  const reachable = new Set<string>();
+  if (queue.previous) reachable.add(queue.previous.id);
+  if (queue.current) reachable.add(queue.current.id);
+  for (const waiting of queue.pending) reachable.add(waiting.id);
+
+  let dropped = false;
+  for (const id of heard) {
+    if (!reachable.has(id)) {
+      dropped = true;
+      break;
+    }
+  }
+  if (!dropped) return heard;
+
+  return new Set([...heard].filter((id) => reachable.has(id)));
+}
+
 /** Folds an arriving utterance into a session's record, queue and all. */
 function withArrival(
   existing: SessionSpeech | undefined,
@@ -136,11 +176,10 @@ function withArrival(
   speaking: boolean,
 ): SessionSpeech {
   const base = existing ?? emptySession(language);
-  return {
-    ...base,
-    language,
-    queue: utteranceQueueReducer(base.queue, { type: "arrived", utterance, speaking }),
-  };
+  // An idle arrival discards whatever was in `previous`, so it is an advance
+  // like any other and the heard set is cut back with it.
+  const queue = utteranceQueueReducer(base.queue, { type: "arrived", utterance, speaking });
+  return { ...base, language, queue, heard: prunedHeard(base.heard, queue) };
 }
 
 /**
@@ -158,15 +197,29 @@ function queueHolds(queue: UtteranceQueue, id: string): boolean {
 }
 
 /**
- * Everything the cell might yet be asked to speak, which is what the host warms
- * from: the utterance under the cursor and the ones queued behind it. `previous`
- * is not in it — it was warmed when it was current, and a replay plays it out of
- * the synthesis cache.
+ * What the host **warms**, per cell: the utterance the transport is on, and the
+ * one it would reach next — `current` while history is replaying, otherwise the
+ * oldest answer waiting behind it.
+ *
+ * Deliberately NOT "everything the cell might yet be asked to speak". That list
+ * is up to seven utterances per cell; the host fires a `synthesizeSpeech` for
+ * each of them with no await and no limiter, and the player's own
+ * `SYNTHESIS_CONCURRENCY` bounds the units of the one RUN it is playing and
+ * nothing else — so a full queue behind a live run put seven requests in flight
+ * against the audio somebody is actually listening to.
+ *
+ * Two is what the bound buys and what it costs: a queued answer still has its
+ * first unit in hand before the transport reaches it, and the ones further back
+ * are warmed as they move up — this list changes whenever the queue advances,
+ * and the host's warming effect is keyed on it.
+ *
+ * `previous` is not in it either: it was warmed when it was current, and a
+ * replay plays it out of the synthesis cache.
  */
-function speakableOf(queue: UtteranceQueue): Utterance[] {
+function warmableOf(queue: UtteranceQueue): Utterance[] {
   const under = utteranceUnderCursor(queue);
-  const ahead = under === queue.current ? queue.pending : [queue.current, ...queue.pending];
-  return [under, ...ahead].filter((entry): entry is Utterance => entry !== null);
+  const next = under === queue.current ? (queue.pending[0] ?? null) : queue.current;
+  return [under, next].filter((entry): entry is Utterance => entry !== null);
 }
 
 /**
@@ -229,14 +282,19 @@ export interface Channel {
    */
   languageFor(sessionId: string): "pl" | "en";
   /**
-   * Every session's current speakable utterance, armed or not. It is how the
-   * host learns that something ARRIVED — `utteranceFor` answers only about a
-   * session the caller already knows to ask about, and warming has to react to
-   * the arrival itself. The identity changes only when the set does, so an
-   * effect keyed on it runs once per arrival rather than once per render, and
-   * both arrival paths — a live frame and `/latest` hydration — land in it.
+   * What the host warms, across every session, armed or not: per cell the
+   * utterance under the cursor and the one the transport would reach next, and
+   * no more than those two — see {@link warmableOf} for why the rest of a cell's
+   * queue is not in it.
+   *
+   * It is also how the host learns that something ARRIVED: `utteranceFor`
+   * answers only about a session the caller already knows to ask about, and
+   * warming has to react to the arrival itself. The identity changes only when
+   * the set does, so an effect keyed on it runs once per arrival rather than
+   * once per render, and both arrival paths — a live frame and `/latest`
+   * hydration — land in it.
    */
-  speakableUtterances: Utterance[];
+  warmableUtterances: Utterance[];
   armedSessionId: string | null;
   /** Exclusive: arming a session disarms whichever was armed. `null` disarms. */
   setArmed(sessionId: string | null): void;
@@ -272,7 +330,7 @@ export function useUtteranceChannel({
   /**
    * The rendered `sessions`, mirrored so the *callbacks* below can read the
    * current tally without taking it as a dependency. The host's warming effect
-   * is keyed on `languageFor` and `speakableUtterances` together, so both have
+   * is keyed on `languageFor` and `warmableUtterances` together, so both have
    * to hold their identity across a `markHeard` or the effect churns on every
    * cell that finishes speaking — and stabilising only one of them changes
    * nothing, because the effect re-runs when either moves.
@@ -290,7 +348,19 @@ export function useUtteranceChannel({
    * change and re-deliver the same frame.
    */
   const playbackRef = useRef({ speakingSessionId, pausedSessionId });
-  playbackRef.current = { speakingSessionId, pausedSessionId };
+  // Written in an EFFECT, never during render. A render can be thrown away —
+  // a concurrent render React abandons, StrictMode's double invocation — and a
+  // mirror written during one of those runs ahead of the state that was
+  // actually committed. An effect only runs for a commit, so the mirror can
+  // never be newer than what the rest of the panel is looking at.
+  //
+  // Declared ABOVE the two arrival effects on purpose: effects run in
+  // declaration order within a commit, so when a playback change and a frame
+  // land in the same commit the mirror is already the committed one by the
+  // time the arrival reads it.
+  useEffect(() => {
+    playbackRef.current = { speakingSessionId, pausedSessionId };
+  }, [pausedSessionId, speakingSessionId]);
   // Read once at mount, so a remount restores the armed cell (DECISION 12).
   const [armedSessionId, setArmedSessionId] = useState<string | null>(getStoredArmedSession);
 
@@ -440,16 +510,16 @@ export function useUtteranceChannel({
   );
 
   /** The last list handed out, so an unchanged set keeps its identity. */
-  const speakableRef = useRef<Utterance[]>([]);
-  const speakableUtterances = useMemo(() => {
-    const next = [...sessions.values()].flatMap((record) => speakableOf(record.queue));
+  const warmableRef = useRef<Utterance[]>([]);
+  const warmableUtterances = useMemo(() => {
+    const next = [...sessions.values()].flatMap((record) => warmableOf(record.queue));
 
     // `sessions` is a fresh Map on every change, including a `markHeard` that
     // touches no utterance at all, so the array it derives is fresh too. Utterance
     // objects are stored once and never rewritten, so element identity is the
     // honest test of whether the SET changed — and returning the previous array
     // when it did not is what stops the host warming effect churning.
-    const previous = speakableRef.current;
+    const previous = warmableRef.current;
     if (
       previous.length === next.length &&
       previous.every((utterance, index) => utterance === next[index])
@@ -457,7 +527,7 @@ export function useUtteranceChannel({
       return previous;
     }
 
-    speakableRef.current = next;
+    warmableRef.current = next;
     return next;
   }, [sessions]);
 
@@ -485,7 +555,7 @@ export function useUtteranceChannel({
       if (queue === existing.queue) return current;
 
       const next = new Map(current);
-      next.set(sessionId, { ...existing, queue });
+      next.set(sessionId, { ...existing, queue, heard: prunedHeard(existing.heard, queue) });
       return next;
     });
   }, []);
@@ -504,10 +574,13 @@ export function useUtteranceChannel({
       const queue = advances
         ? utteranceQueueReducer(existing.queue, { type: "finished" })
         : existing.queue;
-      if (heard === existing.heard && queue === existing.queue) return current;
+      // The mark goes in before the cut, and survives it: what was just heard
+      // is what the advance moves into `previous`, which is still reachable.
+      const kept = queue === existing.queue ? heard : prunedHeard(heard, queue);
+      if (kept === existing.heard && queue === existing.queue) return current;
 
       const next = new Map(current);
-      next.set(sessionId, { ...existing, heard, queue });
+      next.set(sessionId, { ...existing, heard: kept, queue });
       return next;
     });
   }, []);
@@ -525,7 +598,7 @@ export function useUtteranceChannel({
     dispatchQueue,
     finishUtterance,
     languageFor,
-    speakableUtterances,
+    warmableUtterances,
     armedSessionId,
     setArmed,
     markHeard,

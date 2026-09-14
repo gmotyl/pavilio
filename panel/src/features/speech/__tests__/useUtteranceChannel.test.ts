@@ -415,15 +415,15 @@ describe("useUtteranceChannel", () => {
     expect(result.current.stateFor("cell-b")).toBe("ready");
   });
 
-  it("lists every speakable utterance, from both arrival paths", async () => {
-    // This is what the host warms from, so both paths have to land in it — a
+  it("lists what the host warms, from both arrival paths", async () => {
+    // Both paths have to land in it — a
     // list carrying only live frames would leave a hydrated tab's control lit
     // and cold. A session whose arrival had nothing to say is not in it: there
     // is no unit 0 to warm.
     serveLatest([utterance("cell-a", "a1")]);
     const { result, rerender } = await renderChannel();
 
-    await waitFor(() => expect(result.current.speakableUtterances).toHaveLength(1));
+    await waitFor(() => expect(result.current.warmableUtterances).toHaveLength(1));
 
     lastMessage = frame(utterance("cell-b", "b1"));
     await act(async () => {
@@ -434,10 +434,112 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
 
-    expect(result.current.speakableUtterances).toEqual([
+    expect(result.current.warmableUtterances).toEqual([
       utterance("cell-a", "a1"),
       utterance("cell-b", "b1"),
     ]);
+  });
+
+  /**
+   * The dedupe gate is wider than the cursor, and this is the test that says
+   * so. An answer already WAITING behind the live run, or already stepped back
+   * into history, is just as much a re-delivery as the one being spoken —
+   * a reconnect replays the lot. Narrow `queueHolds` to `queue.current?.id`
+   * and every other test in this file still passes; only this one fails.
+   */
+  it("re-delivering a queued or historical utterance does not duplicate it", async () => {
+    const { result, rerender } = await renderChannel();
+
+    const first = utterance("cell-a", "a1");
+    lastMessage = frame(first);
+    await act(async () => {
+      rerender();
+    });
+
+    // Behind a live run the arrival is queued rather than taking the cursor.
+    speaking = "cell-a";
+    const queued = utterance("cell-a", "a2", 2_000);
+    lastMessage = frame(queued);
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["a2"]);
+
+    // The reconnect replays it. Same id, later `at`: nothing may be appended.
+    lastMessage = frame({ ...queued, at: queued.at + 5_000 });
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["a2"]);
+    expect(result.current.queueFor("cell-a").current?.id).toBe("a1");
+
+    // Step a1 into history, then replay THAT: the one step behind the cursor
+    // holds an id too, and a cell cannot queue the answer it just played.
+    await act(async () => {
+      result.current.dispatchQueue("cell-a", { type: "finished" });
+    });
+    expect(result.current.queueFor("cell-a").previous?.id).toBe("a1");
+
+    lastMessage = frame({ ...first, at: first.at + 9_000 });
+    await act(async () => {
+      rerender();
+    });
+    const after = result.current.queueFor("cell-a");
+    expect(after.previous?.id).toBe("a1");
+    expect(after.current?.id).toBe("a2");
+    expect(after.pending).toEqual([]);
+  });
+
+  /**
+   * The heard set is cut back to what the queue can still reach, on every
+   * advance. Nothing used to take anything out of it: it grew for the life of
+   * the tab, and `withHeard` rebuilds the whole of it on each mark.
+   *
+   * Both halves are asserted here — that the cut KEEPS what the cursor can
+   * still be moved onto, and that it drops what the queue has let go of.
+   */
+  it("prunes heard to the ids the queue can still reach", async () => {
+    const { result, rerender } = await renderChannel();
+
+    lastMessage = frame(utterance("cell-a", "a1"));
+    await act(async () => {
+      rerender();
+    });
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    // a1 steps into history and is still reachable, so stepping the cursor
+    // back onto it says `heard` again: the cut keeps what can be asked for.
+    lastMessage = frame(utterance("cell-a", "a2", 2_000));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    await act(async () => {
+      result.current.dispatchQueue("cell-a", { type: "previous" });
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+    await act(async () => {
+      result.current.dispatchQueue("cell-a", { type: "next" });
+    });
+
+    // a3 discards a1 out of the queue altogether. Nothing can ask about it
+    // again, so the session stops carrying it — and a re-broadcast of it is
+    // news, which is the one shadow the cut casts.
+    lastMessage = frame(utterance("cell-a", "a3", 3_000));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.queueFor("cell-a").previous?.id).toBe("a2");
+
+    lastMessage = frame(utterance("cell-a", "a1", 4_000));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.queueFor("cell-a").current?.id).toBe("a1");
+    expect(result.current.stateFor("cell-a")).toBe("ready");
   });
 
   /**
@@ -615,7 +717,7 @@ describe("useUtteranceChannel", () => {
     // identity on every `sessions` update the effect churns on every heard
     // cell — and stabilising only one of them changes nothing, because the
     // effect re-runs when *either* moves.
-    const utterances = result.current.speakableUtterances;
+    const utterances = result.current.warmableUtterances;
     const language = result.current.languageFor;
 
     await act(async () => {
@@ -623,7 +725,7 @@ describe("useUtteranceChannel", () => {
     });
     expect(result.current.stateFor("cell-a")).toBe("heard");
 
-    expect(result.current.speakableUtterances).toBe(utterances);
+    expect(result.current.warmableUtterances).toBe(utterances);
     expect(result.current.languageFor).toBe(language);
 
     // A genuinely new arrival still moves the list — stability must not mean
@@ -632,7 +734,7 @@ describe("useUtteranceChannel", () => {
     await act(async () => {
       rerender();
     });
-    expect(result.current.speakableUtterances).not.toBe(utterances);
-    expect(result.current.speakableUtterances).toHaveLength(2);
+    expect(result.current.warmableUtterances).not.toBe(utterances);
+    expect(result.current.warmableUtterances).toHaveLength(2);
   });
 });

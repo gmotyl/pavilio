@@ -17,7 +17,7 @@
  * It is also where **warming** lives, for the same reason: warming needs the
  * channel's arrivals and the player's voice and cache, and neither of those two
  * may reach across to the other. The channel stays pure text work; this module
- * reads `speakableUtterances`, fills the synthesis cache, and reports which
+ * reads `warmableUtterances`, fills the synthesis cache, and reports which
  * cells are still waiting on it — {@link SpeechHost.preparingSessionIds}, the
  * red the control shows before anyone has clicked anything.
  *
@@ -181,9 +181,9 @@ export function useSpeechHost(): SpeechHost {
     markHeard,
     queueFor,
     setArmed,
-    speakableUtterances,
     stateFor,
     utteranceFor,
+    warmableUtterances,
   } = channel;
 
   const preparedFor = useCallback(
@@ -215,7 +215,7 @@ export function useSpeechHost(): SpeechHost {
     // reported preparing until the audio is actually in hand, because a green
     // control that might still be synthesizing is exactly the ambiguity the
     // red state exists to remove.
-    for (const utterance of speakableUtterances) {
+    for (const utterance of warmableUtterances) {
       if (warmedRef.current.has(utterance.id)) continue;
       // Marked before the synthesis, not after: a second render must not start
       // a second warm of the same utterance while the first is in flight.
@@ -254,7 +254,7 @@ export function useSpeechHost(): SpeechHost {
     // is about the QUEUE rather than about the cache, and a loop over every
     // speakable utterance in the panel was never the honest place to ask "is
     // this one cell's held run stale".
-  }, [languageFor, preparedFor, setPreparing, speakableUtterances]);
+  }, [languageFor, preparedFor, setPreparing, warmableUtterances]);
 
   useEffect(() => {
     // "A paused cell does not hold the next answer hostage" — the living spec,
