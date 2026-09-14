@@ -14,9 +14,14 @@
  * contained — it is reported and the walk continues, so a broken ~/.claude
  * cannot stop codex and opencode from being registered.
  *
- * Registers each agent's finished-turn event only: Claude Code's `SubagentStop`
- * would fire once per subagent (a dozen times during an execute-plan run) and
- * `Notification` belongs to peon-ping.
+ * Claude Code gets two registrations — the finished-turn `Stop` emitter and a
+ * `PreToolUse` emitter matched on `AskUserQuestion`, for the turn that parks on
+ * a question and so never finishes. codex and opencode get their finished-turn
+ * registration only; neither exposes the question as an event.
+ *
+ * `SubagentStop` would fire once per subagent (a dozen times during an
+ * execute-plan run) and `Notification` belongs to peon-ping, so neither is ever
+ * written. `CLAUDE_REGISTRATIONS` below is the complete list.
  *
  * Run from the repo root as `pnpm install:speech` (add `--uninstall` to remove).
  */
@@ -99,13 +104,15 @@ function writeFileAtomically(targetPath, text) {
 }
 
 /* ────────────────────────────── claude ────────────────────────────────────
- * Merges exactly one entry into ~/.claude/settings.json and removes exactly
- * that entry again on uninstall. Everything else in the file — other hooks,
- * other events, unrelated settings — is read, kept, and written back untouched.
+ * Merges exactly the registrations below into ~/.claude/settings.json and
+ * removes exactly those again on uninstall. Everything else in the file —
+ * other hooks, other events, unrelated settings — is read, kept, and written
+ * back untouched.
  *
- * These five functions are the shipped single-agent installer, unchanged in
- * behaviour; only `fail()` differs, and only in that it now throws for the walk
- * to report rather than exiting the process outright.
+ * These functions are the shipped single-agent installer generalised over a
+ * *list* of registrations rather than one; the behaviour for the `Stop` entry
+ * is unchanged. `fail()` differs from the original only in that it throws for
+ * the walk to report rather than exiting the process outright.
  * ────────────────────────────────────────────────────────────────────────── */
 
 const HOOK_EVENT = "Stop";
@@ -117,6 +124,42 @@ const HOOK_MARKER = "panel/hooks/speak-response.mjs";
 // point at a path that does not exist yet.
 const hookPath = resolve(scriptDir, "..", "hooks", "speak-response.mjs");
 const hookCommand = `node "${hookPath}"`;
+
+const QUESTION_HOOK_EVENT = "PreToolUse";
+// Claude Code parks the turn on AskUserQuestion and waits, so that turn never
+// reaches `Stop` and the finished-turn emitter never sees it. `PreToolUse`
+// fires while the question is still open, which is the only moment at which
+// speaking it is any use.
+const QUESTION_MATCHER = "AskUserQuestion";
+const QUESTION_HOOK_MARKER = "panel/hooks/speak-question.mjs";
+
+const questionHookPath = resolve(scriptDir, "..", "hooks", "speak-question.mjs");
+const questionHookCommand = `node "${questionHookPath}"`;
+
+/**
+ * Every entry this installer owns in the Claude Code settings file, in the
+ * order they are appended. Each carries its own `marker`: any command under
+ * that event referencing that file is ours, whatever the absolute prefix or
+ * the surrounding shell. The two markers share no substring, so neither
+ * registration can ever prune or overwrite the other.
+ *
+ * The matcher is *not* part of the identity test. An `AskUserQuestion` entry
+ * somebody else wrote is not ours to touch; keying on the command is what
+ * leaves it alone.
+ *
+ * This list is the whole answer to "what events does this write": `Stop` and
+ * `PreToolUse`. `SubagentStop` would fire once per subagent (a dozen times
+ * during an execute-plan run) and `Notification` belongs to peon-ping.
+ */
+const CLAUDE_REGISTRATIONS = [
+  { event: HOOK_EVENT, marker: HOOK_MARKER, command: hookCommand },
+  {
+    event: QUESTION_HOOK_EVENT,
+    matcher: QUESTION_MATCHER,
+    marker: QUESTION_HOOK_MARKER,
+    command: questionHookCommand,
+  },
+];
 
 const claudeRoot = join(home, ".claude");
 const settingsPath = join(claudeRoot, "settings.json");
@@ -141,33 +184,42 @@ function readSettings() {
   return parsed;
 }
 
-function isOurs(hook) {
+function isOurs(hook, marker) {
   return (
     hook !== null &&
     typeof hook === "object" &&
     typeof hook.command === "string" &&
-    hook.command.includes(HOOK_MARKER)
+    hook.command.includes(marker)
   );
 }
 
-/** Every Stop entry except ours, with our command pruned out of shared entries. */
-function withoutOurHook(settings) {
-  const hooks = { ...(settings.hooks ?? {}) };
-  const stop = Array.isArray(hooks[HOOK_EVENT]) ? hooks[HOOK_EVENT] : [];
+/**
+ * Prunes one registration out of `hooks`, in place. Every entry under that
+ * event except ours survives, with our command taken out of any entry we share
+ * with somebody else. The event key itself disappears only if we emptied it.
+ */
+function pruneRegistration(hooks, { event, marker }) {
+  const entries = Array.isArray(hooks[event]) ? hooks[event] : [];
   const kept = [];
-  for (const entry of stop) {
+  for (const entry of entries) {
     if (entry === null || typeof entry !== "object" || !Array.isArray(entry.hooks)) {
       kept.push(entry);
       continue;
     }
-    const remaining = entry.hooks.filter((hook) => !isOurs(hook));
+    const remaining = entry.hooks.filter((hook) => !isOurs(hook, marker));
     if (remaining.length === entry.hooks.length) kept.push(entry);
     else if (remaining.length > 0) kept.push({ ...entry, hooks: remaining });
     // An entry left with no commands was the wrapper we added; drop it.
   }
 
-  if (kept.length > 0) hooks[HOOK_EVENT] = kept;
-  else delete hooks[HOOK_EVENT];
+  if (kept.length > 0) hooks[event] = kept;
+  else if (event in hooks) delete hooks[event];
+}
+
+/** The settings with every registration of ours taken back out. */
+function withoutOurHooks(settings) {
+  const hooks = { ...(settings.hooks ?? {}) };
+  for (const registration of CLAUDE_REGISTRATIONS) pruneRegistration(hooks, registration);
 
   const next = { ...settings };
   if (Object.keys(hooks).length > 0) next.hooks = hooks;
@@ -175,14 +227,19 @@ function withoutOurHook(settings) {
   return next;
 }
 
-function withOurHook(settings) {
-  // Strip first, then append: a re-run refreshes the command in place instead of
-  // stacking a second entry, and any duplicate from an earlier version collapses.
-  const base = withoutOurHook(settings);
+function withOurHooks(settings) {
+  // Strip first, then append: a re-run refreshes each command in place instead
+  // of stacking a second entry, and any duplicate from an earlier version
+  // collapses. Assigning back into the spread object keeps an event the file
+  // already had in its original position; a new one lands at the end.
+  const base = withoutOurHooks(settings);
   const hooks = { ...(base.hooks ?? {}) };
-  const stop = Array.isArray(hooks[HOOK_EVENT]) ? [...hooks[HOOK_EVENT]] : [];
-  stop.push({ hooks: [{ type: "command", command: hookCommand }] });
-  hooks[HOOK_EVENT] = stop;
+  for (const { event, matcher, command } of CLAUDE_REGISTRATIONS) {
+    const entries = Array.isArray(hooks[event]) ? [...hooks[event]] : [];
+    const wrapper = { hooks: [{ type: "command", command }] };
+    entries.push(matcher === undefined ? wrapper : { matcher, ...wrapper });
+    hooks[event] = entries;
+  }
   return { ...base, hooks };
 }
 
@@ -194,8 +251,16 @@ const claudeTarget = {
   name: "claude",
   root: claudeRoot,
   install() {
-    writeSettings(withOurHook(readSettings()));
-    return `Registered the speech ${HOOK_EVENT} hook in ${settingsPath}\n  ${hookCommand}`;
+    writeSettings(withOurHooks(readSettings()));
+    // One `claude: …` line, then one indented continuation per registration —
+    // the per-agent report stays one line per agent.
+    return [
+      `Registered the speech hooks in ${settingsPath}`,
+      ...CLAUDE_REGISTRATIONS.map(
+        ({ event, matcher, command }) =>
+          `  ${event}${matcher ? ` (${matcher})` : ""}: ${command}`,
+      ),
+    ].join("\n");
   },
   uninstall() {
     // No settings file means no registration to strip — and writing one here
@@ -203,8 +268,8 @@ const claudeTarget = {
     if (!existsSync(settingsPath)) {
       return `Nothing to remove — ${settingsPath} does not exist.`;
     }
-    writeSettings(withoutOurHook(readSettings()));
-    return `Removed the speech ${HOOK_EVENT} hook from ${settingsPath}`;
+    writeSettings(withoutOurHooks(readSettings()));
+    return `Removed the speech hooks from ${settingsPath}`;
   },
 };
 
