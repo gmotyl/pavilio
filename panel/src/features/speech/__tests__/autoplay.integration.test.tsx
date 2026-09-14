@@ -576,8 +576,14 @@ const latestFetches = (): number =>
  * click is also the gesture the `<audio>` element needs, so everything after it
  * is a programmatic play riding on a real user gesture, which is exactly what
  * the browser requires.
+ *
+ * The bar now waits for the cell's first utterance, so on a cell that has not
+ * spoken this walks the route a user walks: the header icon opens the bar, and
+ * the switch inside it arms. On a cell whose bar is already out — one that has
+ * spoken, or one already opened — it is the single click it always was.
  */
 async function arm(sessionId: string): Promise<void> {
+  if (!barVisible(sessionId)) await click(testIdFor("autoplay", sessionId));
   await click(testIdFor("bar-autoplay", sessionId));
 }
 
@@ -1032,12 +1038,103 @@ describe("the keyboard transport, mounted", () => {
  * real surface, because the header icon and the bar it toggles sit in different
  * components and only the cell between them knows they are the same cell.
  */
+/**
+ * The bar is a transport for something to play, and on a FRESH terminal the
+ * prompt sits on the row the bar covers. So it waits for the cell's own first
+ * utterance — and an explicit toggle outranks that arrival from then on, in
+ * both directions, for that cell.
+ */
+describe("the bar waits for something to play", () => {
+  it("a cell that has never spoken shows no bar", async () => {
+    await renderProjectSurface();
+
+    expect([barVisible("cell-a"), barVisible("cell-b"), barVisible("cell-c")]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    // The way back is still in the header, and it says the bar is closed.
+    expect(screen.getByTestId(testIdFor("autoplay", "cell-a"))).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("the first utterance brings the bar out", async () => {
+    await renderProjectSurface();
+
+    await emitUtterance("cell-a", "a1", "The first thing this cell has to say.");
+
+    expect(barVisible("cell-a")).toBe(true);
+    // Only the cell that spoke: the arrival is per cell, not per grid.
+    expect([barVisible("cell-b"), barVisible("cell-c")]).toEqual([false, false]);
+    // And it comes out as the whole transport, pulsing exactly as it does for a
+    // bar that was already open — same contents, nothing degraded.
+    const play = screen.getByTestId("speech-bar-playpause-cell-a");
+    expect(play).toHaveAttribute("data-speech", "ready");
+    expect(play).toHaveAttribute("data-pulse", "1");
+    expect(screen.getByTestId(testIdFor("bar-autoplay", "cell-a"))).toBeInTheDocument();
+    expect(screen.getByTestId(testIdFor("autoplay", "cell-a"))).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("the toggle still opens the bar on a cell that has never spoken", async () => {
+    await renderProjectSurface();
+
+    await click(testIdFor("autoplay", "cell-a"));
+
+    expect(barVisible("cell-a")).toBe(true);
+    // Empty and inert, as it is for any cell with nothing to play.
+    const play = screen.getByTestId("speech-bar-playpause-cell-a");
+    expect(play).toHaveAttribute("data-speech", "empty");
+    expect(play).toBeDisabled();
+    // Inert transport, live switch: arming ahead of the first answer is the
+    // reason the bar is reachable before it at all.
+    await click(testIdFor("bar-autoplay", "cell-a"));
+    expect(armed("cell-a")).toBe("1");
+  });
+
+  it("hiding the bar survives a later utterance", async () => {
+    await renderProjectSurface();
+    await emitUtterance("cell-a", "a1", "The cell has spoken once.");
+    expect(barVisible("cell-a")).toBe(true);
+
+    await click(testIdFor("autoplay", "cell-a"));
+    expect(barVisible("cell-a")).toBe(false);
+
+    await emitUtterance("cell-a", "a2", "And here is the next answer.");
+
+    expect(barVisible("cell-a")).toBe(false);
+    // The cell did receive it — hiding the bar is not muting the cell.
+    expect(speakState("cell-a")).toBe("ready");
+  });
+
+  it("showing the bar on a silent cell survives its first utterance", async () => {
+    await renderProjectSurface();
+    await click(testIdFor("autoplay", "cell-a"));
+    expect(barVisible("cell-a")).toBe(true);
+
+    await emitUtterance("cell-a", "a1", "The cell finally says something.");
+
+    expect(barVisible("cell-a")).toBe(true);
+    // And the choice keeps outranking the cell in the other direction too: a
+    // cell with something to play still closes when the user says so.
+    await click(testIdFor("autoplay", "cell-a"));
+    expect(barVisible("cell-a")).toBe(false);
+  });
+});
+
 describe("the header icons and the bar", () => {
   it("the header icon toggles the bar and leaves arming alone", async () => {
     await renderProjectSurface();
-    // Visible by DEFAULT — a standing control, not one to be found.
-    expect(barVisible("cell-a")).toBe(true);
+    // Hidden until the cell has something to play, so the icon is not merely a
+    // way to get the bar out of the way — it is the way to it.
+    expect(barVisible("cell-a")).toBe(false);
+    // `arm` opens the bar from this very icon, then arms from the switch in it.
     await arm("cell-a");
+    expect(barVisible("cell-a")).toBe(true);
     expect(armed("cell-a")).toBe("1");
 
     await click(testIdFor("autoplay", "cell-a"));
@@ -1050,9 +1147,9 @@ describe("the header icons and the bar", () => {
     expect(barVisible("cell-a")).toBe(true);
     expect(armed("cell-a")).toBe("1");
 
-    // And it is per cell: cell b's icon closes cell b's bar and nothing else.
+    // And it is per cell: cell b's icon opens cell b's bar and nothing else.
     await click(testIdFor("autoplay", "cell-b"));
-    expect(barVisible("cell-b")).toBe(false);
+    expect(barVisible("cell-b")).toBe(true);
     expect(barVisible("cell-a")).toBe(true);
     expect(armed("cell-a")).toBe("1");
     expect(armed("cell-b")).toBe("0");
@@ -1064,9 +1161,9 @@ describe("the header icons and the bar", () => {
 
     // Close every bar in the grid: arming has to stay legible at a glance with
     // nothing open, which is the whole reason the icon stayed in the header.
-    await click(testIdFor("autoplay", "cell-a"));
+    // Only b's is open — a and c have neither spoken nor been asked for, so
+    // clicking their icons would OPEN them, which is the opposite of the point.
     await click(testIdFor("autoplay", "cell-b"));
-    await click(testIdFor("autoplay", "cell-c"));
     expect([barVisible("cell-a"), barVisible("cell-b"), barVisible("cell-c")]).toEqual([
       false,
       false,
@@ -1104,6 +1201,11 @@ describe("the header icons and the bar", () => {
 
     expect(armed("cell-a")).toBe("1");
     expect(armed("cell-b")).toBe("0");
+    // The bar's visibility is a view preference and deliberately NOT persisted,
+    // so the new tab comes up with no bar on a cell that has said nothing yet —
+    // the armed cell is what survives, not the disclosure. The user opens it.
+    expect(barVisible("cell-a")).toBe(false);
+    await click(testIdFor("autoplay", "cell-a"));
     // And the bar agrees with the header, which is what makes the second click
     // — the one that disarms — land on a control already drawn armed.
     expect(controls("bar-autoplay", "cell-a")[0]).toHaveAttribute("data-armed", "1");
@@ -1168,6 +1270,11 @@ describe("one speech host for the panel, not one per surface", () => {
     expect(controls("autoplay", "cell-a")).toHaveLength(2);
     expect(armedInViews("cell-a")).toEqual(["1", "1"]);
 
+    // Nothing has spoken yet, so neither view has a bar out: each is opened
+    // from its own header icon, the choice being per cell AND per view.
+    await clickIn(0, "autoplay", "cell-a");
+    await clickIn(1, "autoplay", "cell-a");
+
     // The user works in both views, as they do whenever the drawer is open.
     await clickAround(0, "cell-a");
     await clickAround(1, "cell-a");
@@ -1191,6 +1298,15 @@ describe("one speech host for the panel, not one per surface", () => {
   it("arming stays exclusive across both views", async () => {
     await renderBothViews();
     expect(armedInViews("cell-a")).toEqual(["0", "0"]);
+
+    // No cell has spoken, so every bar is closed: both cells are opened in both
+    // views — cell a's second bar is what makes "what the OTHER view reports" a
+    // real question, and a cell whose bar is open in one view only would make
+    // the per-view indexing below a lie.
+    await clickIn(0, "autoplay", "cell-a");
+    await clickIn(1, "autoplay", "cell-a");
+    await clickIn(0, "autoplay", "cell-b");
+    await clickIn(1, "autoplay", "cell-b");
 
     // From the bar, which is where arming lives — and from ONE view's bar, so
     // what the other view reports is the shared value and not its own click.
