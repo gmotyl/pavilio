@@ -140,12 +140,29 @@ const questionHookCommand = `node "${questionHookPath}"`;
  * Every entry this installer owns in the Claude Code settings file, in the
  * order they are appended. Each carries its own `marker`: any command under
  * that event referencing that file is ours, whatever the absolute prefix or
- * the surrounding shell. The two markers share no substring, so neither
- * registration can ever prune or overwrite the other.
+ * the surrounding shell.
+ *
+ * What keeps these two registrations from pruning each other is the *event*,
+ * not the markers. `pruneRegistration` only ever reads `hooks[event]`, so the
+ * `Stop` registration and the `PreToolUse` one are never shown each other's
+ * entries at all. That the two markers also happen to share no substring is
+ * incidental, and leaning on it would be a mistake: the moment two
+ * registrations sit on the *same* event, every entry there is tested against
+ * both markers, and one marker being a substring of the other would have the
+ * broader registration prune — and on install re-own — the narrower one's
+ * entry. Same event ⇒ the markers have to be disjoint for real.
  *
  * The matcher is *not* part of the identity test. An `AskUserQuestion` entry
  * somebody else wrote is not ours to touch; keying on the command is what
  * leaves it alone.
+ *
+ * Entries are never *deleted* from this list — mark one `retired: true`
+ * instead. This one list is both what install writes and what uninstall
+ * prunes, so deleting an entry does not remove the hook, it orphans it: it
+ * stays in every existing user's settings, Claude Code keeps invoking it, and
+ * once the clone it points at is gone the agent spawns a failing command on
+ * every turn it fired for. A retired entry is still pruned and no longer
+ * written, which is what actually retires it.
  *
  * This list is the whole answer to "what events does this write": `Stop` and
  * `PreToolUse`. `SubagentStop` would fire once per subagent (a dozen times
@@ -160,6 +177,15 @@ const CLAUDE_REGISTRATIONS = [
     command: questionHookCommand,
   },
 ];
+
+/**
+ * The entries install writes. A `retired: true` entry is deliberately absent
+ * here while staying in `CLAUDE_REGISTRATIONS` above, so uninstall keeps
+ * pruning it out of settings files that still carry it.
+ */
+const ACTIVE_CLAUDE_REGISTRATIONS = CLAUDE_REGISTRATIONS.filter(
+  (registration) => !registration.retired,
+);
 
 const claudeRoot = join(home, ".claude");
 const settingsPath = join(claudeRoot, "settings.json");
@@ -234,7 +260,7 @@ function withOurHooks(settings) {
   // already had in its original position; a new one lands at the end.
   const base = withoutOurHooks(settings);
   const hooks = { ...(base.hooks ?? {}) };
-  for (const { event, matcher, command } of CLAUDE_REGISTRATIONS) {
+  for (const { event, matcher, command } of ACTIVE_CLAUDE_REGISTRATIONS) {
     const entries = Array.isArray(hooks[event]) ? [...hooks[event]] : [];
     const wrapper = { hooks: [{ type: "command", command }] };
     entries.push(matcher === undefined ? wrapper : { matcher, ...wrapper });
@@ -256,7 +282,7 @@ const claudeTarget = {
     // the per-agent report stays one line per agent.
     return [
       `Registered the speech hooks in ${settingsPath}`,
-      ...CLAUDE_REGISTRATIONS.map(
+      ...ACTIVE_CLAUDE_REGISTRATIONS.map(
         ({ event, matcher, command }) =>
           `  ${event}${matcher ? ` (${matcher})` : ""}: ${command}`,
       ),

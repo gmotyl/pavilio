@@ -31,8 +31,9 @@ const HOOK_PATH = resolve(TEST_DIR, "..", "..", "hooks", "speak-response.mjs");
 // The second Claude Code registration: the question emitter, hung off
 // `PreToolUse` with an `AskUserQuestion` matcher because the turn it speaks for
 // is still waiting and so never reaches `Stop`. Its own file path is its own
-// identity key, exactly as the response emitter's is — and the two markers
-// share no substring, so neither can prune the other.
+// identity key, exactly as the response emitter's is. What stops the two from
+// pruning each other is that pruning is scoped per event and these sit on
+// different ones — the markers sharing no substring is incidental.
 const QUESTION_HOOK_MARKER = "panel/hooks/speak-question.mjs";
 const QUESTION_HOOK_PATH = resolve(
   TEST_DIR,
@@ -420,6 +421,76 @@ command = "bash /root/.claude/hooks/peon-ping/adapters/codex.sh"
 timeout = 30
 # peon-ping Codex hooks end
 `;
+
+/*
+ * The retired-registration lever. `CLAUDE_REGISTRATIONS` is both the list
+ * install writes and the list uninstall prunes, so an entry *deleted* from it
+ * is not removed from anybody's settings — it is orphaned there, still invoked
+ * by Claude Code, and failing on every turn once the clone it names is gone.
+ * `retired: true` is the way out: pruned, never written. No shipped entry is
+ * retired yet, so the only way to exercise the flag is to stage a copy of the
+ * installer with one spliced in.
+ *
+ * The copy is staged under a directory literally named `panel`, so every path
+ * the installer resolves for itself still ends in the marker suffixes the real
+ * one uses and the live registrations behave exactly as they do in place.
+ */
+const RETIRED_EVENT = "SubagentStop";
+const RETIRED_MARKER = "panel/hooks/speak-retired.mjs";
+const RETIRED_COMMAND = "node retired-emitter";
+
+function runWithRetiredRegistration(...args: string[]) {
+  const anchor = "const CLAUDE_REGISTRATIONS = [\n";
+  const source = readFileSync(SCRIPT, "utf8");
+  // Guard against a vacuous pass: a renamed or reshaped constant would
+  // otherwise quietly turn this into an ordinary install.
+  expect(source).toContain(anchor);
+  const stagedDir = join(home, "staged-repo", "panel", "scripts");
+  mkdirSync(stagedDir, { recursive: true });
+  const staged = join(stagedDir, "install-speech-hook.mjs");
+  writeFileSync(
+    staged,
+    source.replace(
+      anchor,
+      `${anchor}  { event: ${JSON.stringify(RETIRED_EVENT)}, marker: ${JSON.stringify(
+        RETIRED_MARKER,
+      )}, command: ${JSON.stringify(RETIRED_COMMAND)}, retired: true },\n`,
+    ),
+  );
+  return spawnSync(process.execPath, [staged, ...args], {
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+    encoding: "utf8",
+  });
+}
+
+/** A settings file still carrying the hook a retired registration once wrote. */
+function seedRetiredHook() {
+  writeFileSync(
+    settingsPath,
+    `${JSON.stringify(
+      {
+        model: "opus",
+        hooks: {
+          [RETIRED_EVENT]: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: `node "/old/clone/${RETIRED_MARKER}"`,
+                },
+              ],
+            },
+          ],
+          Stop: [
+            { hooks: [{ type: "command", command: "echo other-stop-hook" }] },
+          ],
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "pavilio-install-speech-"));
@@ -1103,5 +1174,164 @@ command = "npx"
 
     expect(linkExists(opencodeLinkPath)).toBe(false);
     expect(readFileSync(neighbour, "utf8")).toBe(body);
+  });
+
+  // --- what the identity test is for ---------------------------------------
+
+  it("replaces stale entries left by a clone that has since moved", () => {
+    // The state a `git worktree remove`, a `mv`, or a re-clone leaves behind:
+    // both registrations still in the file, both naming a path that is not this
+    // checkout. `isOurs` matches on the marker *substring* precisely so these
+    // are still ours — an exact match would leave them in place and the
+    // install would stack a second copy of each beside them, so every finished
+    // turn and every question would be spoken twice, one of them by a command
+    // that no longer exists.
+    const staleStop = 'node "/old/clone/panel/hooks/speak-response.mjs"';
+    const staleQuestion = 'node "/old/clone/panel/hooks/speak-question.mjs"';
+    writeFileSync(
+      settingsPath,
+      `${JSON.stringify(
+        {
+          model: "opus",
+          hooks: {
+            Stop: [
+              {
+                hooks: [{ type: "command", command: "echo other-stop-hook" }],
+              },
+              { hooks: [{ type: "command", command: staleStop }] },
+            ],
+            PreToolUse: [
+              {
+                matcher: QUESTION_MATCHER,
+                hooks: [{ type: "command", command: staleQuestion }],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    expect(run().status).toBe(0);
+
+    const settings = readSettings();
+    // Exactly one of each, at this checkout's paths — replaced, not stacked.
+    expect(speechCommands(settings)).toEqual([`node "${HOOK_PATH}"`]);
+    expect(questionEntries(settings)).toEqual([
+      {
+        matcher: QUESTION_MATCHER,
+        hooks: [{ type: "command", command: `node "${QUESTION_HOOK_PATH}"` }],
+      },
+    ]);
+    expect(preToolUseEntries(settings)).toHaveLength(1);
+    // Nothing anywhere in the file still points at the old checkout.
+    expect(JSON.stringify(settings)).not.toContain("/old/clone");
+    // Guard against a vacuous pass: the unrelated hook was never at risk.
+    expect(allStopCommands(settings)).toContain("echo other-stop-hook");
+  });
+
+  it("uninstall keeps a foreign command sharing one of our entries", () => {
+    // Hand-merged settings: somebody put their own command into the same
+    // `hooks` array as ours rather than adding an entry of their own. Removing
+    // the whole entry would take their hook with it, so uninstall has to take
+    // out the one command and leave the wrapper — matcher included — standing.
+    const seed = {
+      model: "opus",
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              { type: "command", command: "echo neighbour-in-our-entry" },
+              { type: "command", command: `node "${HOOK_PATH}"` },
+            ],
+          },
+        ],
+        PreToolUse: [
+          {
+            matcher: QUESTION_MATCHER,
+            hooks: [
+              { type: "command", command: `node "${QUESTION_HOOK_PATH}"` },
+              { type: "command", command: "echo neighbour-question-guard" },
+            ],
+          },
+        ],
+      },
+    };
+    writeFileSync(settingsPath, `${JSON.stringify(seed, null, 2)}\n`);
+
+    expect(run("--uninstall").status).toBe(0);
+
+    const settings = readSettings();
+    // Ours is gone …
+    expect(speechCommands(settings)).toHaveLength(0);
+    expect(questionEntries(settings)).toHaveLength(0);
+    // … and the entries that carried it survive, holding only the neighbour.
+    expect(stopEntries(settings)).toEqual([
+      { hooks: [{ type: "command", command: "echo neighbour-in-our-entry" }] },
+    ]);
+    expect(preToolUseEntries(settings)).toEqual([
+      {
+        matcher: QUESTION_MATCHER,
+        hooks: [
+          { type: "command", command: "echo neighbour-question-guard" },
+        ],
+      },
+    ]);
+    expect(settings.model).toBe("opus");
+  });
+
+  it("uninstall deletes the PreToolUse event install had to invent", () => {
+    // The ordinary upgrade shape: a settings file from before the question
+    // emitter existed, so `PreToolUse` is an event the installer creates. An
+    // uninstall that emptied it instead of deleting it would leave a
+    // `"PreToolUse": []` behind — harmless to Claude Code, but it means
+    // uninstall no longer returns the file to what it was.
+    const seed = `${JSON.stringify(existingSettings, null, 2)}\n`;
+    expect(existingSettings.hooks).not.toHaveProperty("PreToolUse");
+    writeFileSync(settingsPath, seed);
+
+    expect(run().status).toBe(0);
+    // Guard against a vacuous pass: install really did invent the event.
+    expect(preToolUseEntries(readSettings())).toHaveLength(1);
+
+    expect(run("--uninstall").status).toBe(0);
+
+    expect(readSettings().hooks).not.toHaveProperty("PreToolUse");
+    // Byte-identical to the file we started from.
+    expect(readFileSync(settingsPath, "utf8")).toBe(seed);
+  });
+
+  it("prunes a retired registration without ever installing it", () => {
+    seedRetiredHook();
+
+    const result = runWithRetiredRegistration();
+
+    expect(result.status).toBe(0);
+    const settings = readSettings();
+    // Pruned: the hook a previous version wrote is gone, and so is the event
+    // it was the only occupant of.
+    expect(settings.hooks).not.toHaveProperty(RETIRED_EVENT);
+    expect(JSON.stringify(settings)).not.toContain("speak-retired");
+    // Never written: not re-added under any event, and absent from the report
+    // that tells the user what was registered.
+    expect(JSON.stringify(settings)).not.toContain(RETIRED_COMMAND);
+    expect(result.stdout).not.toContain(RETIRED_COMMAND);
+    // Guard against a vacuous pass: the live registrations still installed.
+    expect(speechCommands(settings)).toHaveLength(1);
+    expect(questionEntries(settings)).toHaveLength(1);
+    expect(allStopCommands(settings)).toContain("echo other-stop-hook");
+
+    // And uninstall prunes it from an untouched file just the same — which is
+    // the whole point of keeping a retired entry in the list rather than
+    // deleting it.
+    seedRetiredHook();
+
+    expect(runWithRetiredRegistration("--uninstall").status).toBe(0);
+
+    const afterUninstall = readSettings();
+    expect(afterUninstall.hooks).not.toHaveProperty(RETIRED_EVENT);
+    expect(JSON.stringify(afterUninstall)).not.toContain("speak-retired");
+    expect(allStopCommands(afterUninstall)).toEqual(["echo other-stop-hook"]);
   });
 });
