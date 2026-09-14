@@ -51,12 +51,30 @@ export type UtteranceQueueEvent =
   /** Next pressed, on any of the three surfaces. */
   | { type: "next" };
 
-export const emptyUtteranceQueue: UtteranceQueue = {
+/**
+ * The state every cell starts in — and a **module singleton**, handed out as
+ * the initial state of every queue in the panel. So it is frozen, list and all:
+ * one stray mutation anywhere would not corrupt one cell, it would poison the
+ * starting point of every cell that has not received an utterance yet.
+ *
+ * Freezing takes nothing away from the declared type: `Object.freeze` narrows
+ * no member, it only makes the writes the type would have permitted throw.
+ */
+export const emptyUtteranceQueue: UtteranceQueue = Object.freeze({
   previous: null,
   current: null,
-  pending: [],
+  pending: Object.freeze([]) as unknown as Utterance[],
   cursor: "current",
-};
+});
+
+/**
+ * The utterance the transport is on — the one a play, a pause or a `finished`
+ * is about. The cursor's meaning lives here, in the file that owns the cursor,
+ * rather than being re-inlined as `cursor === "previous" ? previous : current`
+ * at every surface that has to ask it.
+ */
+export const utteranceUnderCursor = (state: UtteranceQueue): Utterance | null =>
+  state.cursor === "previous" ? state.previous : state.current;
 
 /**
  * `current` steps back into `previous` and the head of `pending` takes its
