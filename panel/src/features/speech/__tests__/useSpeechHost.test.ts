@@ -823,6 +823,69 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     const warmed = words.filter((word) => requestedTexts().includes(firstUnitOf(word)));
     expect(warmed).toEqual([words[0], words[1]]);
   });
+
+  /**
+   * The per-cell bound above is two. There was no PANEL bound at all: the warm
+   * loop walks every warmable utterance in every cell and fires a synthesis for
+   * each with no await, so a grid of ten busy terminals opened ten edge-tts
+   * WebSocket handshakes at once — each with its own DRM token, all competing
+   * with the unit the listener is actually waiting for.
+   *
+   * {@link WARM_CONCURRENCY} is that bound, and the rest queue. Two, matching
+   * the per-cell bound, so one cell's pair still goes out together — the common
+   * case is unchanged — while speculation across the panel never grows with the
+   * number of terminals. The live run keeps the larger share: its own cascade
+   * is bounded separately at `SYNTHESIS_CONCURRENCY = 3`.
+   *
+   * A queued warm is still an honest red: the cell IS waiting for its audio,
+   * and which side of the gate it is waiting on is not the user's question.
+   */
+  it("the panel warms two utterances at a time, however many cells have one", async () => {
+    const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
+    const firstUnitOf = (word: string): string => unitsOf(response(3, word))[0];
+    // Every warm held open, so "in flight" is observable rather than instant.
+    for (const word of words) synth.hold(firstUnitOf(word));
+
+    const { result } = renderHook(() => useSpeechHost());
+
+    // Eight cells, one arriving answer each: eight warmable utterances, and
+    // before the gate, eight sockets.
+    for (let i = 0; i < words.length; i += 1) {
+      await emitUtterance(`cell-${i}`, `u-${i}`, response(3, words[i]));
+    }
+
+    const requested = (): string[] => words.filter((w) => requestedTexts().includes(firstUnitOf(w)));
+
+    expect(requested()).toEqual([words[0], words[1]]);
+    // …and every one of the eight cells is reported preparing, including the
+    // six that have not reached the synthesizer yet.
+    expect(result.current.preparingSessionIds.size).toBe(words.length);
+
+    // A slot frees exactly one queued warm, in arrival order.
+    await act(async () => {
+      synth.release(firstUnitOf(words[0]));
+      await drain();
+    });
+    expect(requested()).toEqual([words[0], words[1], words[2]]);
+    expect(result.current.preparingSessionIds.has("cell-0")).toBe(false);
+
+    await act(async () => {
+      synth.release(firstUnitOf(words[1]));
+      await drain();
+    });
+    expect(requested()).toEqual([words[0], words[1], words[2], words[3]]);
+
+    // A FAILED warm frees its slot too: the gate must not be closed by the one
+    // outcome the warm swallows.
+    await act(async () => {
+      synth.fail(firstUnitOf(words[2]));
+      await drain();
+    });
+    expect(requested()).toHaveLength(5);
+    // And the cell whose warm failed is reported ready anyway — the click pays
+    // for the synthesis itself, which is how the user gets a retry.
+    expect(result.current.preparingSessionIds.has("cell-2")).toBe(false);
+  });
 });
 
 /**

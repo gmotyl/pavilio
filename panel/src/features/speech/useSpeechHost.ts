@@ -19,7 +19,11 @@
  * may reach across to the other. The channel stays pure text work; this module
  * reads `warmableUtterances`, fills the synthesis cache, and reports which
  * cells are still waiting on it — {@link SpeechHost.preparingSessionIds}, the
- * red the control shows before anyone has clicked anything.
+ * red the control shows before anyone has clicked anything. It is also where
+ * the panel-wide bound on that work lives — {@link WARM_CONCURRENCY} — for the
+ * third time for the same reason: the channel cannot see the synthesizer and
+ * the player cannot see the other cells, so only this module can count what the
+ * whole grid has in flight.
  *
  * ## Why a run object rather than `await play(); markHeard()`
  *
@@ -98,6 +102,35 @@ export interface SpeechHost extends GridSpeech, MediaSessionTransportTarget {
   preparingSessionIds: ReadonlySet<string>;
 }
 
+/**
+ * How many warms the WHOLE PANEL may have in flight at once.
+ *
+ * The per-cell bound is the queue's reach — what is being spoken and what the
+ * transport would reach next, so two — and that was the only bound there was.
+ * The warm loop walks every warmable utterance in every cell and fires a
+ * synthesis for each with no await, so ten busy terminals opened ten edge-tts
+ * WebSocket handshakes at once, each with its own DRM token, all competing with
+ * the unit the listener is actually waiting for. `SPEECH_STREAM_STALL_TIMEOUT_MS`
+ * is 15 s, so the losers stall rather than merely queue.
+ *
+ * Two, and the rest wait their turn:
+ *
+ * - It matches the per-cell bound, so a single cell's pair still goes out
+ *   together. The common case — one terminal answering — is unchanged, and the
+ *   existing per-cell pin keeps meaning what it meant.
+ * - Speculation stops growing with the number of terminals. The gate is what
+ *   makes the panel's warm cost a constant rather than a function of the grid.
+ * - It leaves the listener the larger share. A live run's own cascade is
+ *   bounded separately at `SYNTHESIS_CONCURRENCY` = 3 inside the player,
+ *   and that one is audio somebody is waiting on; this one is a guess about a
+ *   click nobody has made. The guess does not get to outnumber it.
+ *
+ * Not one: that would serialize a single cell's own pair behind itself and slow
+ * the case the warm exists for. Not four or more: two cells' speculation would
+ * then match or beat the live cascade, which is the ratio being fixed.
+ */
+const WARM_CONCURRENCY = 2;
+
 /** Shared so a panel with nothing warming does not allocate a Set per render. */
 const NOTHING_PREPARING: ReadonlySet<string> = new Set<string>();
 
@@ -138,6 +171,51 @@ export function useSpeechHost(): SpeechHost {
    * would play the newer unit, which is still in flight.
    */
   const warmingRef = useRef<Map<string, string>>(new Map());
+  /**
+   * The panel-wide warm gate: how many warms are in flight, and the ones still
+   * waiting for a slot. See {@link WARM_CONCURRENCY}.
+   *
+   * A ref rather than a module-level counter, and that IS panel-wide: this hook
+   * is hosted exactly once per panel (`SpeechHostProvider`), which is the same
+   * reason the player's single `<audio>` element lives here. Holding it on the
+   * instance also means a host that unmounts takes its gate with it, rather
+   * than leaving a stuck slot behind for the next one.
+   */
+  const warmGateRef = useRef<{ active: number; waiting: Array<() => void> }>({
+    active: 0,
+    waiting: [],
+  });
+
+  /**
+   * Runs a warm now if the panel has a slot, and otherwise queues it in arrival
+   * order. The slot is released on EVERY ending — a warm that failed is not a
+   * warm that is still running, and a gate closed by a swallowed rejection
+   * would stop the panel warming anything ever again.
+   */
+  const runWarm = useCallback((warm: () => Promise<void>): void => {
+    const gate = warmGateRef.current;
+
+    const start = (): void => {
+      gate.active += 1;
+      void warm().then(
+        () => {
+          release();
+        },
+        () => {
+          release();
+        },
+      );
+    };
+
+    const release = (): void => {
+      gate.active -= 1;
+      const next = gate.waiting.shift();
+      if (next) next();
+    };
+
+    if (gate.active < WARM_CONCURRENCY) start();
+    else gate.waiting.push(start);
+  }, []);
   const [preparingSessionIds, setPreparingSessionIds] =
     useState<ReadonlySet<string>>(NOTHING_PREPARING);
 
@@ -282,34 +360,45 @@ export function useSpeechHost(): SpeechHost {
       warmingRef.current.set(utterance.sessionId, utterance.id);
       setPreparing(utterance.sessionId, true);
 
-      // `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the
-      // whole point here — it is what says when the cell stops being red — and
-      // a fire-and-forget warm cannot be reported on. The failure is swallowed
-      // exactly as `prefetchSpeech` swallows it.
+      // Through the panel-wide gate, which runs this now or queues it behind at
+      // most {@link WARM_CONCURRENCY} others. The red above is set OUTSIDE the
+      // gate on purpose: a cell waiting for a slot is a cell waiting for its
+      // audio, and which side of the gate it is waiting on is not the user's
+      // question.
       //
-      // The voice is the one the click will use, from the same source
-      // `useSpeechPlayer` reads. The cache keys on voice + text, so warming
-      // with any other voice would be a synthesis nobody ever plays.
-      void synthesizeSpeech(first.text, { voice: getStoredVoice() })
-        .catch(() => {
-          // A warm that failed must never strand a cell red: the cell is
-          // reported ready anyway, and the click pays for the synthesis
-          // itself — which is also how the user gets a retry.
-        })
-        .then(() => {
-          // A newer utterance took the cell over while this was in flight. It
-          // owns the cell's colour now, so this landing says nothing.
-          if (warmingRef.current.get(utterance.sessionId) !== utterance.id) return;
-          warmingRef.current.delete(utterance.sessionId);
-          setPreparing(utterance.sessionId, false);
-        });
+      // `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the
+      // whole point here — it is what says when the cell stops being red, and
+      // now also what says when the next warm may start — and a
+      // fire-and-forget warm cannot be reported on. The failure is swallowed
+      // exactly as `prefetchSpeech` swallows it.
+      runWarm(() =>
+        // The voice is the one the click will use, from the same source
+        // `useSpeechPlayer` reads, and it is read HERE rather than at the point
+        // the warm was queued: a warm that waited out a voice change should
+        // synthesize the voice the click is now going to want. The cache keys
+        // on voice + text, so warming with any other one is a synthesis nobody
+        // ever plays.
+        synthesizeSpeech(first.text, { voice: getStoredVoice() })
+          .catch(() => {
+            // A warm that failed must never strand a cell red: the cell is
+            // reported ready anyway, and the click pays for the synthesis
+            // itself — which is also how the user gets a retry.
+          })
+          .then(() => {
+            // A newer utterance took the cell over while this was in flight. It
+            // owns the cell's colour now, so this landing says nothing.
+            if (warmingRef.current.get(utterance.sessionId) !== utterance.id) return;
+            warmingRef.current.delete(utterance.sessionId);
+            setPreparing(utterance.sessionId, false);
+          }),
+      );
     }
     // Warming reads nothing from the player any more: the supersession that
     // used to ride along inside this loop is its own effect below, because it
     // is about the QUEUE rather than about the cache, and a loop over every
     // speakable utterance in the panel was never the honest place to ask "is
     // this one cell's held run stale".
-  }, [languageFor, preparedFor, setPreparing, warmableUtterances]);
+  }, [languageFor, preparedFor, runWarm, setPreparing, warmableUtterances]);
 
   useEffect(() => {
     // "A paused cell does not hold the next answer hostage" — the living spec,
