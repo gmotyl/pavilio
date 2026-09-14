@@ -342,17 +342,33 @@ function TerminalCell({
   const [snapshot, setSnapshot] = useState<BufferSnapshot | null>(null);
   const [editingName, setEditingName] = useState(false);
   /**
-   * Whether this cell's speech bar is on screen. Per cell and on by DEFAULT —
-   * it is a standing transport, not something to be found — and owned here
-   * because the two components that care sit on opposite sides of the cell: the
-   * header icon toggles it and `TerminalView` renders it.
+   * The user's standing answer for THIS cell's speech bar, or `null` while they
+   * have not given one. `null` is the state every cell starts in, and it is the
+   * only state in which the CELL decides.
+   *
+   * It decides on whether it has anything to play. A bar over a cell that has
+   * never spoken is a transport for nothing — and it lands on the top row,
+   * which on a fresh terminal is where the prompt is. So the default is: no
+   * utterance, no bar; the first utterance brings it out.
+   *
+   * `stateFor(...) !== "empty"` is already the panel's one answer to "does this
+   * cell hold something speakable" — the same value the header speak control
+   * renders — so the bar reads it rather than keeping a second notion of it.
+   *
+   * A toggle writes a BOOLEAN, never a flip of the derived value: from then on
+   * the choice outranks the cell in both directions, and no later arrival moves
+   * a bar the user has closed (or closes one they have opened).
+   *
+   * Owned here because the two components that care sit on opposite sides of
+   * the cell: the header icon toggles it and `TerminalView` renders it.
    *
    * Deliberately NOT persisted and NOT in the speech host: it is a view
    * preference of one cell in one surface, while the armed cell is one value
    * per browser. The panel mounts the same cell in two surfaces at once when
    * the drawer is open, and each may reasonably show its own bar.
    */
-  const [speechBarVisible, setSpeechBarVisible] = useState(true);
+  const [barChoice, setBarChoice] = useState<boolean | null>(null);
+  const speechBarVisible = barChoice ?? (speech?.stateFor(session.id) ?? "empty") !== "empty";
   // Escape and Enter both end the edit by unmounting the input, which can
   // fire a blur on the way out. Commit exactly once: whichever key handled
   // it raises this flag and the blur that follows is ignored.
@@ -503,7 +519,10 @@ function TerminalCell({
             sessionId={session.id}
             armedSessionId={speech?.armedSessionId ?? null}
             barVisible={speechBarVisible}
-            onToggleBar={() => setSpeechBarVisible((visible) => !visible)}
+            // The intent is "not what I am looking at", so the boolean written
+            // here comes from what is on screen now — `barChoice` may still be
+            // `null`, and negating that would say nothing.
+            onToggleBar={() => setBarChoice(!speechBarVisible)}
           />
           <CellIconButton
             testId={`terminal-cell-eye-${session.id}`}
