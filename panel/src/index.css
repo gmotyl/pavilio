@@ -428,3 +428,181 @@ input[type="checkbox"] {
   width: 0;
   height: 0;
 }
+
+/* ---------------------------------------------------------------------------
+   Speech control bar — layout A of
+   `projects/pavilio/mockups/2026-09-14-speech-control-bar-options.html`: one
+   56px rail with 44px tap targets, pinned below the cell header and floating
+   over the xterm.
+
+   ABSOLUTE, and that is not a style choice. `TerminalView` runs
+   `new ResizeObserver(() => inst.fit())` with no coalescing, and `inst.fit()`
+   refreshes the terminal AND sends a PTY resize even when nothing changed. A
+   bar in the cell's flexbox would fire that on every toggle. Out of flow, it
+   fires nothing.
+
+   Tokens are the panel's own (index.css `:root`) rather than the mockup's
+   literals; the one exception is the green, which is the Tokyo-Night #9ece6a
+   the speak control and the activity LED already share. */
+.speech-bar {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 6px;
+  z-index: 5;
+  background: rgba(26, 27, 38, 0.97);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+.speech-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  height: 56px;
+}
+
+.speech-bar-btn {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color 200ms ease,
+    background 200ms ease;
+}
+
+.speech-bar-btn:hover:not([disabled]) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.speech-bar-btn[disabled] {
+  opacity: 0.32;
+  cursor: default;
+}
+
+/* Armed reads the same as the header toggle: the same green, the same fill. */
+.speech-bar-btn[data-armed="1"] {
+  color: #9ece6a;
+  background: rgba(158, 206, 106, 0.16);
+}
+
+/* The primary control borrows the speak button's colour channel wholesale —
+   green for "something here is unheard", red for "blocked on synthesis" — so
+   the bar and the header never disagree about where the audio is. */
+.speech-bar-primary[data-speech="ready"],
+.speech-bar-primary[data-speech="speaking"],
+.speech-bar-primary[data-speech="paused"],
+.speech-bar-primary[data-speech="heard"] {
+  color: #9ece6a;
+  background: var(--green-dim);
+}
+
+.speech-bar-primary[data-speech="preparing"],
+.speech-bar-primary[data-speech="stalled"] {
+  color: var(--red);
+  background: var(--red-dim);
+}
+
+.speech-bar-sep {
+  width: 1px;
+  height: 22px;
+  flex: 0 0 auto;
+  background: var(--border-subtle);
+}
+
+.speech-bar-scrub {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 26px;
+  flex: 1 1 auto;
+  min-width: 60px;
+  padding: 0 1px;
+}
+
+/* One segment per speech unit. The axis is UNITS, not seconds: a response is
+   many synthesized files, so there is no single timeline to scrub. */
+.speech-bar-seg {
+  position: relative;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.speech-bar-seg[data-segment="played"] {
+  background: rgba(158, 206, 106, 0.32);
+}
+
+/* Warm: in the synthesis cache, so a click starts with no wait. */
+.speech-bar-seg[data-segment="ready"] {
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px rgba(158, 206, 106, 0.28);
+}
+
+/* Cold: not synthesized. Clicking it is allowed — the run then reports the
+   existing `stalled` red until the unit lands. */
+.speech-bar-seg[data-segment="cold"] {
+  background: repeating-linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0.05) 0 3px,
+    transparent 3px 7px
+  );
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.speech-bar-seg[data-segment="playing"] {
+  background: rgba(158, 206, 106, 0.18);
+  box-shadow: inset 0 0 0 1px #9ece6a;
+}
+
+.speech-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: #9ece6a;
+  opacity: 0.75;
+}
+
+.speech-bar-head {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--text-primary);
+}
+
+.speech-bar-meta {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+/* How many answers are waiting behind this one. */
+.speech-bar-pill {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}

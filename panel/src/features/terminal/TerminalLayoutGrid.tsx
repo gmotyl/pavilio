@@ -520,6 +520,10 @@ function TerminalCell({
         <TerminalView
           sessionId={session.id}
           focused={focused}
+          // The speech bar is an overlay inside the view, pinned below this
+          // header — never a row in the cell's flexbox, which would refit the
+          // terminal and resize the PTY every time it appeared.
+          speech={speech}
           onExit={() => onExit(session.id)}
           onReady={(h) => {
             handleRef.current = h;

@@ -6,14 +6,28 @@ import {
   type LiveTerminal,
 } from "./terminalInstances";
 import { captureBufferSnapshot } from "./bufferSnapshot";
+import { SpeechControlBar } from "./SpeechControlBar";
 import { useMobileReconnect } from "./useMobileReconnect";
 import { viewportLooksBlank } from "./viewportBlank";
+import type { GridSpeech } from "../speech/types";
 
 interface TerminalViewProps {
   sessionId: string;
   focused?: boolean;
   onExit?: () => void;
   onReady?: (api: TerminalHandle) => void;
+  /**
+   * The panel's speech host. Passed by every grid cell; absent only where a
+   * terminal is shown outside one (the quick-terminal modal), which is the one
+   * place with no cell transport to offer.
+   */
+  speech?: GridSpeech;
+  /**
+   * Whether the speech bar is shown. On by DEFAULT — it is a standing control,
+   * not something to be found — and safe to be so because it sits at the TOP of
+   * the cell, over the oldest rows, while a TUI's live prompt is at the bottom.
+   */
+  speechBarVisible?: boolean;
 }
 
 export interface ColoredRun {
@@ -59,6 +73,8 @@ export function TerminalView({
   focused = true,
   onExit,
   onReady,
+  speech,
+  speechBarVisible = true,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const instRef = useRef<LiveTerminal | null>(null);
@@ -165,15 +181,26 @@ export function TerminalView({
   useMobileReconnect({ ws, getDims, reopen, isViewportBlank });
 
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-full"
-      style={{
-        opacity: focused ? 1 : 0.82,
-        transition: "opacity 150ms ease",
-        background: "#1a1b26",
-      }}
-    />
+    // The bar is a SIBLING of the observed container, never a child of it and
+    // never in its flow. `resizeObserver.observe(container)` above watches the
+    // inner div only, and `inst.fit()` — which refreshes the terminal AND sends
+    // a PTY resize unconditionally — is the thing that must not be provoked by
+    // a control appearing. Absolute positioning over the xterm is what buys
+    // that: showing or hiding the bar changes no box that anything measures.
+    <div className="w-full h-full relative">
+      <div
+        ref={containerRef}
+        className="w-full h-full"
+        style={{
+          opacity: focused ? 1 : 0.82,
+          transition: "opacity 150ms ease",
+          background: "#1a1b26",
+        }}
+      />
+      {speech && speechBarVisible ? (
+        <SpeechControlBar sessionId={sessionId} speech={speech} />
+      ) : null}
+    </div>
   );
 }
 

@@ -50,8 +50,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../../lib/toast";
 import { prepare } from "./prepare";
 import { synthesizeSpeech } from "./synth";
-import type { GridSpeech, PreparedSpeech, Utterance } from "./types";
-import { useSpeechPlayer, type SpeechPlaybackError } from "./useSpeechPlayer";
+import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
+import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
 import { utteranceUnderCursor } from "./utteranceQueue";
 import { getStoredVoice } from "./voices";
@@ -92,6 +92,11 @@ export interface SpeechHost extends GridSpeech {
 
 /** Shared so a panel with nothing warming does not allocate a Set per render. */
 const NOTHING_PREPARING: ReadonlySet<string> = new Set<string>();
+
+/** Shared, for the same reason: a cell with nothing in it has no segments… */
+const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
+/** …and a cell that is not the one running has measured nothing. */
+const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
 interface Run {
   readonly sessionId: string;
@@ -319,7 +324,7 @@ export function useSpeechHost(): SpeechHost {
    * the cursor WAS.
    */
   const speakUtterance = useCallback(
-    (sessionId: string, utterance: Utterance): void => {
+    (sessionId: string, utterance: Utterance, fromUnit = 0): void => {
       const prepared = preparedFor(utterance, languageFor(sessionId));
       if (prepared.units.length === 0) {
         // Defence in depth. `useUtteranceChannel` never announces a response
@@ -357,7 +362,11 @@ export function useSpeechHost(): SpeechHost {
       }
 
       void player
-        .play(sessionId, prepared.units)
+        // `fromUnit` is the segment click's whole implementation: the player
+        // already takes a starting unit, and starting there is what a jump IS.
+        // Clamped, because the index comes off a rendered scrubber and a stale
+        // render could name a unit a newer, shorter utterance does not have.
+        .play(sessionId, prepared.units, Math.min(Math.max(0, fromUnit), prepared.units.length - 1))
         .then(() => finish(run))
         .catch(() => finish(run));
     },
@@ -478,6 +487,115 @@ export function useSpeechHost(): SpeechHost {
     [dispatchQueue, player, queueFor, recordAutoplayed, speakUtterance],
   );
 
+  /**
+   * The scrubber's segments: the units of the utterance the cell's cursor is
+   * on. Preparation is memoized per utterance id and costs no synthesis, so
+   * calling this on every render of every cell is a Map lookup after the first
+   * — and it is what lets the bar draw the whole response before a single unit
+   * has been synthesized.
+   */
+  const unitsFor = useCallback(
+    (sessionId: string): readonly SpeechUnit[] => {
+      const utterance = utteranceUnderCursor(queueFor(sessionId));
+      if (!utterance) return NO_UNITS;
+      return preparedFor(utterance, languageFor(sessionId)).units;
+    },
+    [languageFor, preparedFor, queueFor],
+  );
+
+  /**
+   * The playhead is an EXTERNAL STORE, not a field on the value this hook
+   * returns.
+   *
+   * `player.progress` moves on every `timeupdate` — roughly 4 Hz. Returned as a
+   * field it would change this object's identity at that rate, and since one
+   * host serves the whole panel, every cell in the grid would re-render four
+   * times a second for the one cell that is speaking. So the three moving
+   * readings are mirrored into refs, the callbacks below read those refs and
+   * are permanently stable (`[]`), and subscribers are told when something
+   * moved. A bar whose own snapshot did not change — every cell but the
+   * speaking one — is not re-rendered at all.
+   */
+  const progressListeners = useRef<Set<() => void>>(new Set());
+  const progressRef = useRef<SpeechProgress | null>(null);
+  const measuredRef = useRef<ReadonlyMap<number, number>>(NO_DURATIONS);
+  const speakingRef = useRef<string | null>(null);
+  /**
+   * The last cell the player actually ran. Not `speakingSessionId`, which goes
+   * null the moment a run ends: the measurements outlive the run, and a
+   * scrubber that collapsed back to character estimates the instant the audio
+   * stopped would throw away everything it had just learned. The player clears
+   * the map itself when a different utterance starts, so this only ever names
+   * the cell the map belongs to.
+   */
+  const measuredSessionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    progressRef.current = player.progress;
+    measuredRef.current = player.unitDurations;
+    speakingRef.current = player.speakingSessionId;
+    if (player.speakingSessionId) measuredSessionRef.current = player.speakingSessionId;
+    for (const listener of progressListeners.current) listener();
+  }, [player.progress, player.speakingSessionId, player.unitDurations]);
+
+  const subscribeProgress = useCallback((listener: () => void): (() => void) => {
+    progressListeners.current.add(listener);
+    return () => {
+      progressListeners.current.delete(listener);
+    };
+  }, []);
+
+  const progressFor = useCallback(
+    (sessionId: string): SpeechProgress | null =>
+      speakingRef.current === sessionId ? progressRef.current : null,
+    [],
+  );
+
+  const unitDurationsFor = useCallback(
+    (sessionId: string): ReadonlyMap<number, number> =>
+      measuredSessionRef.current === sessionId ? measuredRef.current : NO_DURATIONS,
+    [],
+  );
+
+  const onJumpToUnit = useCallback(
+    (sessionId: string, unitIndex: number): void => {
+      const utterance = utteranceUnderCursor(queueFor(sessionId));
+      if (!utterance) return;
+
+      player.unlock();
+      // NOT `player.jumpToUnit`, for two independent reasons, either of which
+      // on its own would be enough:
+      //
+      // 1. It is a no-op for a cell that has never spoken in this tab — the
+      //    player learns a session's units from `play` and from nothing else,
+      //    while the scrubber's segments exist from the moment the utterance
+      //    ARRIVES. A segment that silently does nothing is the worst outcome
+      //    the bar can produce, and that is precisely what it would be on the
+      //    very first click of every cell.
+      // 2. It reaches `play` behind this module's back, so the run it
+      //    supersedes would resolve still stamped `pending` — the one outcome
+      //    that means "played to its end" — and the cell would be marked
+      //    HEARD by a click that restarted it.
+      //
+      // Going through `speakUtterance` fixes both at once: it knows the
+      // utterance, it prepares its units, and it stamps the outgoing run
+      // `superseded` before starting the new one.
+      speakUtterance(sessionId, utterance, unitIndex);
+    },
+    [player, queueFor, speakUtterance],
+  );
+
+  const onSeekWithinUnit = useCallback(
+    (sessionId: string, seconds: number): void => {
+      // The drag is only meaningful on the segment that is in the element, and
+      // only this cell's run has one. A stray call from any other bar must not
+      // move a run the user did not touch.
+      if (player.speakingSessionId !== sessionId) return;
+      player.seekWithinUnit(seconds);
+    },
+    [player],
+  );
+
   const onArm = useCallback(
     (sessionId: string | null): void => {
       // Arming is a click too, and it is the gesture the autoplay that follows
@@ -528,20 +646,32 @@ export function useSpeechHost(): SpeechHost {
       onPrevious,
       onNext,
       onArm,
+      unitsFor,
+      subscribeProgress,
+      progressFor,
+      unitDurationsFor,
+      onJumpToUnit,
+      onSeekWithinUnit,
       preparingSessionIds,
     }),
     [
       armedSessionId,
       onArm,
+      onJumpToUnit,
       onNext,
       onPause,
       onPrevious,
       onResume,
+      onSeekWithinUnit,
       onSpeak,
       onStop,
       preparingSessionIds,
+      progressFor,
       queueFor,
       stateFor,
+      subscribeProgress,
+      unitDurationsFor,
+      unitsFor,
     ],
   );
 }
