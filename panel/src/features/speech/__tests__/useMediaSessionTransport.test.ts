@@ -128,6 +128,29 @@ function installMediaSession(): FakeMediaSession {
   return session;
 }
 
+/**
+ * A browser that knows only *some* of the five actions.
+ *
+ * Real ones behave this way: `setActionHandler` throws `NotSupportedError` for
+ * an action the engine has no transport button for, rather than quietly
+ * ignoring it. The one shape that matters is the asymmetry — `play` and
+ * `pause` are universal, the other three are not.
+ */
+function installPartialMediaSession(supported: readonly MediaSessionAction[]): FakeMediaSession {
+  handlers = new Map();
+  const session: FakeMediaSession = {
+    playbackState: "none",
+    setActionHandler(action, handler) {
+      if (!supported.includes(action)) {
+        throw new DOMException(`unsupported action: ${action}`, "NotSupportedError");
+      }
+      handlers.set(action, handler);
+    },
+  };
+  Object.defineProperty(navigator, "mediaSession", { configurable: true, value: session });
+  return session;
+}
+
 /** A browser — or a non-secure context — with no Media Session API at all. */
 function removeMediaSession(): void {
   Object.defineProperty(navigator, "mediaSession", { configurable: true, value: undefined });
@@ -191,7 +214,7 @@ describe("useMediaSessionTransport", () => {
   });
 
   it("binds all five action handlers on mount", () => {
-    const target = stubTarget();
+    const target = stubTarget({ speakingSessionId: "cell-a" });
     const { unmount } = renderHook(() => useMediaSessionTransport(target));
 
     expect(boundActions()).toEqual([
@@ -201,11 +224,17 @@ describe("useMediaSessionTransport", () => {
       "previoustrack",
       "seekbackward",
     ]);
+    expect(session.playbackState).toBe("playing");
 
     // And releases them: the handlers are document-global state, so a host that
     // unmounts while leaving them bound keeps the OS talking to a dead closure.
     unmount();
     expect(boundActions()).toEqual([]);
+    // `playbackState` is that same document-global state and has to go with
+    // them. Left on "playing", the OS goes on offering a pause button for a
+    // playback nothing is driving, and the next host to mount inherits a
+    // document that claims the panel is already talking.
+    expect(session.playbackState).toBe("none");
   });
 
   it("playbackState tracks the run", () => {
@@ -297,6 +326,50 @@ describe("useMediaSessionTransport", () => {
     fire("pause");
 
     expect(playing.onPause).toHaveBeenCalledWith("cell-a");
+
+    // `pause` reads the ref inline, but `transportTarget()` — behind next,
+    // previous and nothing else — holds a second read of its own. Pinning one
+    // says nothing about the other, and a `transportTarget` closed over the
+    // mount-time target would answer `null` here while every other test in
+    // this file stayed green.
+    fire("nexttrack");
+
+    expect(playing.onNext).toHaveBeenCalledWith("cell-a");
+  });
+
+  it("keeps the actions a browser does support when it rejects the others", () => {
+    // Chromium binds all five. Others throw `NotSupportedError` for the ones
+    // they have no transport button for — and an exception out of the binding
+    // effect is not a lost media key, it is the render throwing and taking the
+    // whole `SpeechHostProvider` down. The try/catch is the difference between
+    // "seekbackward does nothing here" and "this browser has no speech host".
+    const partial = installPartialMediaSession(["play", "pause"]);
+    const target = stubTarget({
+      speakingSessionId: "cell-a",
+      pausedSessionId: "cell-a",
+      armedSessionId: "cell-b",
+    });
+
+    const { unmount } = renderHook(() => useMediaSessionTransport(target));
+
+    // The three it refused are simply absent; the two it knows are bound.
+    expect(boundActions()).toEqual(["pause", "play"]);
+    expect(partial.playbackState).toBe("paused");
+
+    // And they are live, not merely present: a handler that survived the throw
+    // but closed over nothing would satisfy the assertion above.
+    fire("pause");
+    fire("play");
+
+    expect(target.onPause).toHaveBeenCalledWith("cell-a");
+    expect(target.onResume).toHaveBeenCalledWith("cell-a");
+
+    // Teardown re-enters the same throwing setter, once per action, and must
+    // not escape there either — an unmount that throws is a React error
+    // boundary away from the same outage.
+    expect(() => unmount()).not.toThrow();
+    expect(boundActions()).toEqual([]);
+    expect(partial.playbackState).toBe("none");
   });
 
   it("is inert where mediaSession is unavailable", () => {

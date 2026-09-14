@@ -38,8 +38,12 @@ export interface MediaSessionTransportTarget {
   speakingSessionId: string | null;
   /**
    * The cell whose run is suspended. Still the speaking session too — a pause
-   * suspends the element rather than ending the ladder — which is why this is
-   * read first everywhere below.
+   * suspends the element rather than ending the ladder — so the two can never
+   * name different cells, and `transportTarget()` reading this *second* lands
+   * on the same one either way.
+   *
+   * Where the order is load-bearing is `play`, which reads this first on
+   * purpose: a held run has to resume rather than restart.
    */
   pausedSessionId: string | null;
   /** The one armed cell in this browser, or `null`. */
@@ -54,9 +58,20 @@ export interface MediaSessionTransportTarget {
 }
 
 /**
- * How far one `seekbackward` goes. The Media Session spec lets the OS suggest
- * its own `seekOffset`; this ignores it on purpose, so the hardware key, the
- * bar's button and the keyboard combo all step the same distance.
+ * How far one `seekbackward` goes.
+ *
+ * The Media Session spec lets the OS suggest its own `seekOffset` on the
+ * action's details; this ignores it on purpose, so the step is the panel's own
+ * and is the same distance on every OS that sends the action.
+ *
+ * Ten seconds because this is the "say that again" key, not a scrub: it has to
+ * carry back over a sentence that was missed without leaving the paragraph it
+ * was in, and the units are packed to roughly a paragraph. Going further back
+ * than that is the bar's job — a segment click or a drag — not this key's.
+ *
+ * The media session is its only production caller today. `useSpeechKeys` binds
+ * toggle, previous and next and deliberately leaves seek-backward off the
+ * keyboard so a TUI keeps the chord, and the bar has no seek button.
  */
 export const TRANSPORT_SEEK_SECONDS = 10;
 
@@ -76,9 +91,13 @@ const TRANSPORT_ACTIONS: readonly MediaSessionAction[] = [
  * panel is served over plain HTTP on a LAN often enough that this is a live
  * case, not a theoretical one. Typed as possibly-undefined against a lib.dom
  * that promises it is always there.
+ *
+ * No `typeof navigator` guard, deliberately: the panel is a plain Vite SPA with
+ * no server render, and both callers are effect bodies, which do not run
+ * outside a browser even where one exists. A guard here would be a branch no
+ * test could honestly reach.
  */
 function mediaSessionOrNull(): MediaSession | null {
-  if (typeof navigator === "undefined") return null;
   return (navigator as Navigator & { mediaSession?: MediaSession }).mediaSession ?? null;
 }
 

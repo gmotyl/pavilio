@@ -184,6 +184,10 @@ export interface SpeechPlayer {
    * The units are the ones the session last played: the player remembers the
    * most recent slice per session, so this is a no-op for a cell that has never
    * spoken in this tab.
+   *
+   * No production caller: a segment click goes through the host's
+   * `onJumpToUnit` instead, for the two reasons that method's own comment
+   * gives. Kept as the player-level primitive those tests measure against.
    */
   jumpToUnit(sessionId: string, unitIndex: number): void;
   /** Moves inside the unit being spoken. Re-synthesizes nothing. */
