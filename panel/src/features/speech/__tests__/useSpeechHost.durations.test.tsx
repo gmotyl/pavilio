@@ -315,6 +315,103 @@ describe("the scrubber's durations belong to an utterance, not to a cell", () =>
     expect(widthOf(2)).toBeCloseTo(30.8, 1);
   });
 
+  it("a barge-in onto the queued answer does not hand it the live run's durations", async () => {
+    // The race the doc comment above `measuredUtteranceRef` argues away:
+    // `playingUtteranceRef` is written eagerly inside the click, while the
+    // effect that copies it into `measuredUtteranceRef` runs a pass later. If
+    // the player's map survived into that pass, the new answer would be
+    // painted with the old one's seconds.
+    render(<Harness sessionId="cell-a" />);
+
+    await emitUtterance("cell-a", "u-1", MEASURED);
+    await settle(() => host.onSpeak("cell-a"));
+    await loadDuration(2);
+    await endCurrentUnit();
+    await loadDuration(20);
+
+    // A live run, both of its units measured, and the next answer QUEUED
+    // behind it — a live run is never cut short by an arrival.
+    expect(host.stateFor("cell-a")).toBe("speaking");
+    expect([...host.unitDurationsFor("cell-a")]).toEqual([
+      [0, 2],
+      [1, 20],
+    ]);
+    await emitUtterance("cell-a", "u-2", ARRIVING);
+    expect(host.queueFor("cell-a").pending.map((u) => u.id)).toEqual(["u-2"]);
+
+    // Every intermediate pass is recorded, not only the settled one: the
+    // question is whether the player's map clears in the SAME React batch as
+    // the new `play` or one render later, and only a mid-flight reading can
+    // tell those apart. The listener fires from the very effect that mirrors
+    // the map, so it sees each pair exactly as the bar would.
+    const seen: Array<{ cursor: string | undefined; measured: number }> = [];
+    const unsubscribe = host.subscribeProgress(() => {
+      seen.push({
+        cursor: host.queueFor("cell-a").current?.id,
+        measured: host.unitDurationsFor("cell-a").size,
+      });
+    });
+
+    // `next` supersedes the live run mid-unit and plays the new answer.
+    await settle(() => host.onNext("cell-a"));
+    unsubscribe();
+
+    // `play` clears the map synchronously, inside the same call `speakUtterance`
+    // makes right after writing `playingUtteranceRef` — so the two never
+    // disagree, in any pass, not merely in the settled one.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((pass) => pass.cursor === "u-2" && pass.measured > 0)).toEqual([]);
+
+    expect(host.queueFor("cell-a").current?.id).toBe("u-2");
+    expect(host.unitsFor("cell-a")).toHaveLength(3);
+    // Unit 0 is the one in the element, so it is `playing`; nothing BEHIND the
+    // playhead has been heard, which is where an inherited map would show.
+    expect(segmentAt(0)).toBe("playing");
+    expect(segmentAt(1)).toBe("cold");
+    expect(segmentAt(2)).toBe("cold");
+    // And the widths are still the character estimate: 240/300/240 of 780.
+    expect(widthOf(0)).toBeCloseTo(30.8, 1);
+    expect(widthOf(1)).toBeCloseTo(38.5, 1);
+    expect(widthOf(2)).toBeCloseTo(30.8, 1);
+  });
+
+  it("an arrival superseding a paused run does not hand the new answer its durations", async () => {
+    // The third route onto a new utterance, and the one with the most passes
+    // between the two halves: the arrival effect stops the held run (which
+    // leaves `speakingSessionId` null while the player's map still stands),
+    // the queue advances, and only then does autoplay call `play`.
+    render(<Harness sessionId="cell-a" />);
+
+    await emitUtterance("cell-a", "u-1", MEASURED);
+    // Armed, so the answer that lands next speaks by itself.
+    await settle(() => host.onArm("cell-a"));
+    await settle(() => host.onSpeak("cell-a"));
+    await loadDuration(2);
+    await endCurrentUnit();
+    await loadDuration(20);
+    await settle(() => host.onPause("cell-a"));
+
+    expect(host.stateFor("cell-a")).toBe("paused");
+    expect([...host.unitDurationsFor("cell-a")]).toEqual([
+      [0, 2],
+      [1, 20],
+    ]);
+
+    // "A paused cell does not hold the next answer hostage": the arrival
+    // supersedes the held run and autoplay speaks it.
+    await emitUtterance("cell-a", "u-2", ARRIVING);
+
+    expect(host.queueFor("cell-a").current?.id).toBe("u-2");
+    expect(host.stateFor("cell-a")).toBe("speaking");
+    expect([...host.unitDurationsFor("cell-a")]).toEqual([]);
+    expect(segmentAt(0)).toBe("playing");
+    expect(segmentAt(1)).toBe("cold");
+    expect(segmentAt(2)).toBe("cold");
+    expect(widthOf(0)).toBeCloseTo(30.8, 1);
+    expect(widthOf(1)).toBeCloseTo(38.5, 1);
+    expect(widthOf(2)).toBeCloseTo(30.8, 1);
+  });
+
   it("a replay of the measured answer keeps its own measurements", async () => {
     render(<Harness sessionId="cell-a" />);
 

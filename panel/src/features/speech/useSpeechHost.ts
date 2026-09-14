@@ -600,11 +600,32 @@ export function useSpeechHost(): SpeechHost {
    * everything it had just learned.
    *
    * Assigned HERE rather than in `speakUtterance`, in the same pass that
-   * mirrors the map, so the pair is never briefly mismatched: for the one
-   * render between a new `play` and this effect, the old utterance id still
-   * names the old map, and the cursor — already on the new answer — simply
-   * finds no measurements. The player clears the map for a new utterance, so by
-   * the next pass both halves have moved together.
+   * mirrors the map, so this ref and {@link measuredRef} always move together
+   * — that much is structural, both being written by the one effect below.
+   *
+   * What makes the PAIR honest is not that, though, and it is worth saying
+   * plainly because the obvious argument is circular: the value copied in is
+   * `playingUtteranceRef`, which `speakUtterance` writes EAGERLY, during the
+   * click. If the player's map outlived that click by even one render, this
+   * effect would stamp the new utterance's id onto the old utterance's
+   * seconds — exactly the bug `9f5b71a` fixed, a never-played answer rendering
+   * as already played.
+   *
+   * It does not, and the reason is in `useSpeechPlayer.play`: a play for a
+   * different utterance (or a different cell) drops `unitDurations`
+   * SYNCHRONOUSLY, inside the same call `speakUtterance` makes immediately
+   * after writing `playingUtteranceRef`. Both land in one React batch, so the
+   * first pass of this effect after a barge-in already sees the cleared map.
+   * There is no render in between to catch, on any of the three routes onto a
+   * new utterance — `onNext`, `onJumpToUnit`, or an arrival superseding a
+   * paused run. `useSpeechHost.durations.test.tsx` records every intermediate
+   * pass across a live barge-in and pins that; deferring the player's clear by
+   * a single tick turns it red.
+   *
+   * Not `speakUtterance`'s own eager write, then, but that write plus the
+   * player's synchronous clear — and the gate in `unitDurationsFor`, which
+   * refuses a map whose utterance is not the one under the cursor, is the belt
+   * to those braces.
    */
   const measuredUtteranceRef = useRef<string | null>(null);
 
