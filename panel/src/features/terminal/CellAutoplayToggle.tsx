@@ -8,42 +8,61 @@ export interface CellAutoplayToggleProps {
    * this control renders that value and never enforces exclusivity itself.
    */
   armedSessionId: string | null;
-  /** `useUtteranceChannel().setArmed`: the session id to arm, or `null` to disarm. */
-  onArm: (sessionId: string | null) => void;
+  /** Whether this cell's {@link SpeechControlBar} is on screen. */
+  barVisible: boolean;
+  /** Show or hide this cell's bar. Arming is the BAR's switch, not this one. */
+  onToggleBar: (sessionId: string) => void;
 }
 
 /**
- * The cell header's autoplay toggle: a standing, always-visible switch, not a
- * modifier-click and not a hidden popover. Presentational, like
- * {@link CellSpeakButton} — it raises `onArm` and reads its state from
- * `armedSessionId`, so arming one cell disarms the rest for free.
+ * The cell header's autoplay icon. It carries **two things that are no longer
+ * the same thing**: it REPORTS whether this cell is the armed one, and its
+ * click shows or hides the cell's speech control bar.
+ *
+ * Arming moved into the bar deliberately. Arming is rare and exclusive per
+ * browser, so it can afford the second click; *seeing* which cell is armed is
+ * needed constantly and across a whole grid, so it stays here, always visible,
+ * whether or not any bar is open.
+ *
+ * Which is why this is a plain button with `aria-expanded` and not the
+ * `role="switch"` it used to be: a switch whose `aria-checked` did not move
+ * when it was clicked would be a lie to a screen reader. The state the click
+ * moves is the disclosure; the armed state rides along in `data-armed` — which
+ * the stylesheet keys the green off — and in the accessible name, which is the
+ * only channel a screen-reader user has for it.
+ *
+ * Presentational, like {@link CellSpeakButton}: it raises intents and imports
+ * no speech hook, so the grid stays renderable without a speech host.
  */
 export function CellAutoplayToggle({
   sessionId,
   armedSessionId,
-  onArm,
+  barVisible,
+  onToggleBar,
 }: CellAutoplayToggleProps) {
   const armed = armedSessionId === sessionId;
-  const label = armed
-    ? "Autoplay armed — speak responses here automatically"
-    : "Autoplay off — arm this terminal";
+  const label = `${barVisible ? "Hide" : "Show"} the speech controls — ${
+    armed ? "autoplay is armed here" : "autoplay is off"
+  }`;
 
   return (
     <button
       type="button"
-      role="switch"
-      aria-checked={armed}
+      // The bar is the region this discloses. No `aria-controls`: the same
+      // cell's bar is mounted once per view, and the panel runs two views at
+      // once whenever the terminal drawer is open — an id would be duplicated.
+      aria-expanded={barVisible}
       title={label}
       aria-label={label}
       data-testid={`terminal-cell-autoplay-${sessionId}`}
-      // Rendered state, so on/off is legible with no hover and no click.
+      // Rendered state, so armed/off is legible with no hover and no click.
       data-armed={armed ? "1" : "0"}
       className="terminal-autoplay p-1 rounded"
       // See CellSpeakButton: the header drags and the cell root focuses.
       draggable={false}
       onClick={(e) => {
         e.stopPropagation();
-        onArm(armed ? null : sessionId);
+        onToggleBar(sessionId);
       }}
       onMouseDown={(e) => e.stopPropagation()}
       onDragStart={(e) => {

@@ -10,6 +10,14 @@
  * and a grid-level suite entirely green. So these tests mount
  * `ProjectTerminalsSurface` and `TerminalsPage` — the two hosts — and read the
  * cell header's own `data-speech` / `data-armed` attributes.
+ *
+ * Since Task 8 the SPEECH BAR is in that chain too: arming lives in the bar, and
+ * the bar is rendered by `TerminalView`, two prop hops below the surface
+ * (`speech` and `speechBarVisible`). The `TerminalView` stub below therefore
+ * renders the real `SpeechControlBar` out of the props it is handed rather than
+ * a placeholder — a surface, a grid or a cell that drops either prop leaves the
+ * bar absent or permanently open, and every arming test here fails loudly
+ * instead of quietly arming nothing.
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,6 +114,13 @@ const synth = vi.hoisted(() => {
     prefetchSpeech: (text: string, options: { voice?: string } = {}): void => {
       void synthesizeSpeech(text, options).catch(() => {});
     },
+    /**
+     * What the scrubber asks of every segment on every render. Read-only and
+     * cache-shaped exactly as the real one is — an in-flight synthesis counts,
+     * because the caller would dedupe onto it rather than pay twice.
+     */
+    isSpeechSynthesized: (text: string, options: { voice?: string } = {}): boolean =>
+      Boolean(text.trim()) && cache.has(`${options.voice ?? ""}::${text}`),
     toSpeechBlob: (buffer: ArrayBuffer): Blob => {
       const blob = new Blob([buffer], { type: "audio/mpeg" });
       blobText.set(blob, bufferText.get(buffer) ?? "unknown");
@@ -135,6 +150,7 @@ vi.mock("../synth", () => ({
   synthesizeSpeech: synth.synthesizeSpeech,
   prefetchSpeech: synth.prefetchSpeech,
   toSpeechBlob: synth.toSpeechBlob,
+  isSpeechSynthesized: synth.isSpeechSynthesized,
   SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
 }));
 
@@ -242,12 +258,34 @@ vi.mock("../../realtime/useWebSocket", async () => {
 });
 
 // xterm cannot render in jsdom, and the pool's sockets are not this suite's
-// subject — the cell header is.
-vi.mock("../../terminal/TerminalView", () => ({
-  TerminalView: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid={`terminal-view-${sessionId}`} />
-  ),
-}));
+// subject — the cell header and the bar are.
+//
+// The bar is NOT stubbed: it is the real component, mounted from the props the
+// grid actually passed, under the same `speech && speechBarVisible` condition
+// the real `TerminalView` applies and with the same default for a prop nobody
+// passed. That keeps the two prop hops below the surface inside the guard this
+// file exists to be: arming now happens in the bar, so a `speech` that never
+// arrives makes the arming control absent and every autoplay test here red.
+vi.mock("../../terminal/TerminalView", async () => {
+  const { SpeechControlBar } = await import("../../terminal/SpeechControlBar");
+  return {
+    TerminalView: ({
+      sessionId,
+      speech,
+      speechBarVisible = true,
+    }: {
+      sessionId: string;
+      speech?: import("../types").GridSpeech;
+      speechBarVisible?: boolean;
+    }) => (
+      <div data-testid={`terminal-view-${sessionId}`}>
+        {speech && speechBarVisible ? (
+          <SpeechControlBar sessionId={sessionId} speech={speech} />
+        ) : null}
+      </div>
+    ),
+  };
+});
 vi.mock("../../terminal/useTerminalConnection", () => ({
   useTerminalConnection: () => "connected",
 }));
@@ -380,8 +418,12 @@ const speakIcon = (sessionId: string): string | null =>
 const armed = (sessionId: string): string | null =>
   screen.getByTestId(`terminal-cell-autoplay-${sessionId}`).getAttribute("data-armed");
 
-async function renderProjectSurface(): Promise<void> {
-  render(
+/** Whether this cell's bar is on screen — what the header icon now toggles. */
+const barVisible = (sessionId: string): boolean =>
+  screen.queryByTestId(`speech-bar-${sessionId}`) !== null;
+
+async function renderProjectSurface(): Promise<{ unmount: () => void }> {
+  const view = render(
     <MemoryRouter>
       <SpeechHostProvider>
         <ProjectTerminalsSurface projectName="vector" active />
@@ -391,6 +433,7 @@ async function renderProjectSurface(): Promise<void> {
   await act(async () => {
     await drain();
   });
+  return view;
 }
 
 /**
@@ -414,19 +457,27 @@ async function renderBothViews(): Promise<void> {
   });
 }
 
+/**
+ * The three speech controls a cell has, by where they live. `autoplay` is the
+ * HEADER icon, which since Task 8 only shows the bar; `bar-autoplay` is the
+ * switch inside the bar, which is the one that arms.
+ */
+type ControlKind = "speak" | "autoplay" | "bar-autoplay";
+
+const testIdFor = (kind: ControlKind, sessionId: string): string =>
+  kind === "bar-autoplay"
+    ? `speech-bar-autoplay-${sessionId}`
+    : `terminal-cell-${kind}-${sessionId}`;
+
 /** One cell's control in each view: the main surface first, the drawer second. */
-const controls = (kind: "speak" | "autoplay", sessionId: string): HTMLElement[] =>
-  screen.getAllByTestId(`terminal-cell-${kind}-${sessionId}`);
+const controls = (kind: ControlKind, sessionId: string): HTMLElement[] =>
+  screen.getAllByTestId(testIdFor(kind, sessionId));
 
 /** What each view says about a cell's arming, in view order. */
 const armedInViews = (sessionId: string): (string | null)[] =>
   controls("autoplay", sessionId).map((el) => el.getAttribute("data-armed"));
 
-async function clickIn(
-  view: number,
-  kind: "speak" | "autoplay",
-  sessionId: string,
-): Promise<void> {
+async function clickIn(view: number, kind: ControlKind, sessionId: string): Promise<void> {
   await act(async () => {
     fireEvent.click(controls(kind, sessionId)[view]);
     await drain();
@@ -441,8 +492,8 @@ async function clickIn(
  * whether the panel has one host or (the bug) one per surface.
  */
 async function clickAround(view: number, sessionId: string): Promise<void> {
-  await clickIn(view, "autoplay", sessionId);
-  await clickIn(view, "autoplay", sessionId);
+  await clickIn(view, "bar-autoplay", sessionId);
+  await clickIn(view, "bar-autoplay", sessionId);
 }
 
 /** How many times the panel hydrated `/api/speech/latest` — one per channel. */
@@ -452,12 +503,13 @@ const latestFetches = (): number =>
   ).length;
 
 /**
- * Arms a cell. The click is also the gesture the `<audio>` element needs, so
- * everything after it is a programmatic play riding on a real user gesture —
- * which is exactly what the browser requires.
+ * Arms a cell — from the BAR, the only control that arms since Task 8. The
+ * click is also the gesture the `<audio>` element needs, so everything after it
+ * is a programmatic play riding on a real user gesture, which is exactly what
+ * the browser requires.
  */
 async function arm(sessionId: string): Promise<void> {
-  await click(`terminal-cell-autoplay-${sessionId}`);
+  await click(testIdFor("bar-autoplay", sessionId));
 }
 
 /**
@@ -843,6 +895,130 @@ describe("autoplay — the surfaces and the session language", () => {
 });
 
 /**
+ * The header icons after Task 8: the autoplay icon opens the bar and REPORTS
+ * arming, the bar arms, and the speak control is untouched. Driven through the
+ * real surface, because the header icon and the bar it toggles sit in different
+ * components and only the cell between them knows they are the same cell.
+ */
+describe("the header icons and the bar", () => {
+  it("the header icon toggles the bar and leaves arming alone", async () => {
+    await renderProjectSurface();
+    // Visible by DEFAULT — a standing control, not one to be found.
+    expect(barVisible("cell-a")).toBe(true);
+    await arm("cell-a");
+    expect(armed("cell-a")).toBe("1");
+
+    await click(testIdFor("autoplay", "cell-a"));
+    expect(barVisible("cell-a")).toBe(false);
+    // The cell is still the armed one: the icon reports arming, it does not
+    // change it, and hiding the bar is not disarming.
+    expect(armed("cell-a")).toBe("1");
+
+    await click(testIdFor("autoplay", "cell-a"));
+    expect(barVisible("cell-a")).toBe(true);
+    expect(armed("cell-a")).toBe("1");
+
+    // And it is per cell: cell b's icon closes cell b's bar and nothing else.
+    await click(testIdFor("autoplay", "cell-b"));
+    expect(barVisible("cell-b")).toBe(false);
+    expect(barVisible("cell-a")).toBe(true);
+    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-b")).toBe("0");
+  });
+
+  it("the header icon still reports which cell is armed", async () => {
+    await renderProjectSurface();
+    await arm("cell-b");
+
+    // Close every bar in the grid: arming has to stay legible at a glance with
+    // nothing open, which is the whole reason the icon stayed in the header.
+    await click(testIdFor("autoplay", "cell-a"));
+    await click(testIdFor("autoplay", "cell-b"));
+    await click(testIdFor("autoplay", "cell-c"));
+    expect([barVisible("cell-a"), barVisible("cell-b"), barVisible("cell-c")]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+
+    expect([armed("cell-a"), armed("cell-b"), armed("cell-c")]).toEqual(["0", "1", "0"]);
+  });
+
+  it("arming from the bar disarms the previously armed cell", async () => {
+    await renderProjectSurface();
+
+    await arm("cell-a");
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
+
+    // One armed cell per browser: arming b is what disarms a, and nothing had
+    // to click a to make that happen.
+    await arm("cell-b");
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "1"]);
+
+    // Clicking the armed cell's own bar switch disarms it, leaving none armed.
+    await arm("cell-b");
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "0"]);
+  });
+
+  it("arming survives a reload", async () => {
+    const first = await renderProjectSurface();
+    await arm("cell-a");
+    expect(armed("cell-a")).toBe("1");
+
+    // The tab goes away and comes back: nothing but the browser's own storage
+    // survives, and the armed cell is expected to be in it.
+    first.unmount();
+    await renderProjectSurface();
+
+    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-b")).toBe("0");
+    // And the bar agrees with the header, which is what makes the second click
+    // — the one that disarms — land on a control already drawn armed.
+    expect(controls("bar-autoplay", "cell-a")[0]).toHaveAttribute("data-armed", "1");
+  });
+
+  it("the header speak control is unchanged", async () => {
+    await renderProjectSurface();
+    await emitUtterance("cell-a", "a1", "The speak control keeps its job.");
+
+    const before = screen.getByTestId("terminal-cell-speak-cell-a");
+    const snapshot = {
+      state: before.getAttribute("data-speech"),
+      icon: before.getAttribute("data-icon"),
+      pulse: before.getAttribute("data-pulse"),
+      label: before.getAttribute("aria-label"),
+    };
+    expect(snapshot).toEqual({
+      state: "ready",
+      icon: "speaker",
+      pulse: "1",
+      label: "Speak the last response",
+    });
+
+    // Both of its neighbours' new jobs leave it exactly as it was: it is the
+    // "new text arrived" signal across a grid, and nothing in Task 8 touches it.
+    await click(testIdFor("autoplay", "cell-a"));
+    await arm("cell-b");
+    const after = screen.getByTestId("terminal-cell-speak-cell-a");
+    expect({
+      state: after.getAttribute("data-speech"),
+      icon: after.getAttribute("data-icon"),
+      pulse: after.getAttribute("data-pulse"),
+      label: after.getAttribute("aria-label"),
+    }).toEqual(snapshot);
+
+    // And its click still speaks — with cell a's bar closed and cell b armed,
+    // neither of which has any say over what this control does.
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("speaking");
+    expect(speakIcon("cell-a")).toBe("pause");
+    expect(played).toEqual(["blob:The speak control keeps its job."]);
+    // Speaking a cell is not arming it.
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "1"]);
+  });
+});
+
+/**
  * The panel mounts `ProjectTerminalsSurface` twice at once — ProjectView's and
  * the terminal drawer's — so hosting the channel and the player *per surface*
  * gave the panel two of each: the same utterance echoed twice, two cells could
@@ -884,14 +1060,20 @@ describe("one speech host for the panel, not one per surface", () => {
     await renderBothViews();
     expect(armedInViews("cell-a")).toEqual(["0", "0"]);
 
-    await clickIn(0, "autoplay", "cell-a");
+    // From the bar, which is where arming lives — and from ONE view's bar, so
+    // what the other view reports is the shared value and not its own click.
+    await clickIn(0, "bar-autoplay", "cell-a");
 
-    // The drawer is not a second browser: it shows the same armed cell.
+    // The drawer is not a second browser: it shows the same armed cell, in the
+    // header icon of both views and in both bars.
     expect(armedInViews("cell-a")).toEqual(["1", "1"]);
+    expect(
+      controls("bar-autoplay", "cell-a").map((el) => el.getAttribute("data-armed")),
+    ).toEqual(["1", "1"]);
 
     // Arming from the *other* view disarms the first cell everywhere — one
     // armed cell per browser, whichever view it was armed from.
-    await clickIn(1, "autoplay", "cell-b");
+    await clickIn(1, "bar-autoplay", "cell-b");
 
     expect(armedInViews("cell-a")).toEqual(["0", "0"]);
     expect(armedInViews("cell-b")).toEqual(["1", "1"]);
