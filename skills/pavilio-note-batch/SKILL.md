@@ -20,9 +20,8 @@ Spawn ONE general-purpose subagent with these instructions (include the exclusio
 1. Call Quill MCP `list_meetings` for the last 10 meetings. Drop any whose id is in the exclusion set.
 2. **Disk verification (the registry can be stale — notes are also created outside batch mode and sessions sometimes skip the registry write).** For each remaining meeting, convert its start time to Europe/Warsaw and search all projects' note dirs for an existing note with a matching date+time filename prefix:
    ```bash
-   # meeting at 2026-07-01T13:53 → try both filename conventions
-   ls projects/*/notes/2026-07-01_1353* projects/*/notes/2026-07-01_13-53* \
-      projects/*/projects/2026-07-01_1353* projects/*/projects/2026-07-01_13-53* 2>/dev/null
+   # meeting at 2026-07-01T13:53 → try both filename conventions (notes live ONLY in projects/<name>/notes/)
+   ls projects/*/notes/2026-07-01_1353* projects/*/notes/2026-07-01_13-53* 2>/dev/null
    ```
    Also allow ±2 min in the HHMM part (recording start vs meeting start can drift). A match → the meeting is **already processed**: do NOT fetch its transcript; instead record `{"meeting_id", "title", "meeting_date", "already_processed": true, "project": "<from matched path>", "note_ref": "<matched .md path>"}` for the registry backfill.
 3. Keep the first 5 meetings that survived BOTH filters (registry + disk). For each: call `get_transcript`, write the verbatim transcript to `projects/.tmp_transcripts/<meeting_id>.txt` (create the dir if missing) using the Write tool.
@@ -72,6 +71,8 @@ Each subagent prompt:
 > Read and follow the instructions in the `pavilio-note` skill (`skills/pavilio-note/SKILL.md`) exactly, with this input: projectname=`<project>` `-yolo` `--meeting-id <meeting_id>` `--transcript-file projects/.tmp_transcripts/<meeting_id>.txt`. Your final message must be ONLY the Batch Mode JSON output defined in that skill.
 
 Parse each subagent's JSON result. A subagent that errors or returns `status: error` does not stop the others.
+
+**Validate before accepting** a `status: ok` result: `registry_entry.note_ref` must match `^projects/<project>/notes/[^/]+\.md$` for the project the subagent was given, and that file plus its `notes/log/*.txt` transcript must exist on disk. A result that fails either check is downgraded to `status: error` with reason `wrong-path: <note_ref>` — its registry entry is NOT appended and it is reported in step 7.3. Never accept a note written under `projects/<project>/projects/` or any other directory.
 
 ### 7. Aggregate
 

@@ -13,6 +13,8 @@ The user will provide the transcript. Your process is:
 
 ## Core Processing Steps
 
+**Path anchor (read first):** every path below is relative to the **workspace repo root** (`git rev-parse --show-toplevel`). The repo is itself named `projects` and project folders live in its `projects/` subdirectory, so a project's notes dir is `<root>/projects/<projectname>/notes/` and transcripts go in `<root>/projects/<projectname>/notes/log/`. There is **no** `projects/<projectname>/projects/` — that layout is retired; never write there. Resolve `projectname` against `.projects.local.md` and confirm `projects/<projectname>/` exists before writing anything.
+
 1. **Check for `-yolo` flag** in input - if present, enable auto-accept mode (skip confirmations and participant confirmation)
 2. First get `projectname` from the user.
 3. **Select Transcript Source**:
@@ -40,11 +42,14 @@ The user will provide the transcript. Your process is:
    - Open questions or blockers
 9. Generate a temporary `json` as described below, by deep analyzing and processing provided transcript.
 10. Your final output **MUST** include these files:
-    1. `projects/projectname/projects/[datetime]_[shortname].md` - Detailed Summary formatted as described in **Detailed Summary Formatting Rules**
-    2. `projects/projectname/projects/log/[datetime]_transcript_shortname.txt` - plain 1:1 transcript
+    1. `projects/projectname/notes/[datetime]_[shortname].md` - Detailed Summary formatted as described in **Detailed Summary Formatting Rules**
+    2. `projects/projectname/notes/log/[datetime]_transcript_shortname.txt` - plain 1:1 transcript
     3. **Update** `projects/projectname/PROJECT.md` - See **PROJECT.md Update Rules**
     4. **Update** `projects/projectname/_index.json` - See **Index Update Rules** (including `known_participants` if updated)
     5. **Update** `projects/.processed_transcripts.json` — record this transcript as processed (skip if source was manual paste with no MCP id). See **Processed Transcripts Registry Rules**
+
+    **Pre-write assertion:** before writing files 1–2, both target paths MUST match `projects/<projectname>/notes/**` (the `.md` directly in `notes/`, the `.txt` in `notes/log/`) and `projects/<projectname>/` MUST already exist. If either check fails, stop and report the offending path — do not create a new directory to make it fit.
+    **Post-write check:** after step 10 confirm that the note `.md`, the `log/*.txt`, `PROJECT.md`, `_index.json` and (when applicable) the registry entry's `note_ref` all exist on disk and point at `projects/<projectname>/notes/...`. In `-yolo`/batch mode a failed check is a `status: error` result, not a silent success.
 11. Display numbered list of tasks for Greg, ask which numbers user wants to add to Todoist.
 12. Wait for user input with task numbers.
 13. Add selected tasks to Todoist using MCP. Task should have "[projectname]" prefix followed by short title and a bit longer description and should be for today.
@@ -434,7 +439,7 @@ A global registry at `projects/.processed_transcripts.json` tracks every transcr
       "meeting_date": "2026-05-07T09:00:00+02:00",
       "processed_date": "2026-05-07",
       "project": "ch",
-      "note_ref": "projects/ch/projects/2026-05-07_09-00-00_daily_standup.md"
+      "note_ref": "projects/ch/notes/2026-05-07_09-00-00_daily_standup.md"
     }
   ]
 }
