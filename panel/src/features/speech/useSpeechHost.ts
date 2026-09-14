@@ -51,6 +51,7 @@ import { toast } from "../../lib/toast";
 import { prepare } from "./prepare";
 import { synthesizeSpeech } from "./synth";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
+import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
 import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
 import { utteranceUnderCursor } from "./utteranceQueue";
@@ -70,11 +71,18 @@ type RunOutcome = "pending" | "superseded" | "stopped" | "refused" | "failed";
 
 /**
  * What the host adds to {@link GridSpeech}: which cells are still *getting*
- * their audio. The grid-facing contract in `./types` stays as it is — it is
- * consumed by hand-built stubs all over the terminal suites — so the extra
- * channel lives here, on the host's own return type.
+ * their audio, and the run-level readings the OS transport needs. The
+ * grid-facing contract in `./types` stays as it is — it is consumed by
+ * hand-built stubs all over the terminal suites — so the extra channels live
+ * here, on the host's own return type.
+ *
+ * The transport members make this a structural {@link MediaSessionTransportTarget},
+ * which is how `SpeechHostProvider` can hand the host straight to
+ * {@link useMediaSessionTransport}. They are deliberately NOT on `GridSpeech`:
+ * no cell surface may act on another cell's run, and only the one document-wide
+ * transport has any business asking which cell that is.
  */
-export interface SpeechHost extends GridSpeech {
+export interface SpeechHost extends GridSpeech, MediaSessionTransportTarget {
   /**
    * Sessions whose current utterance's first unit is still being synthesized.
    * A cell in here is **preparing** — the red "blocked on synthesis" — and one
@@ -197,6 +205,10 @@ export function useSpeechHost(): SpeechHost {
     play: playUnits,
     progress,
     resume: resumePlayback,
+    // Handed out under the transport's own name and otherwise untouched: it
+    // takes seconds and nothing else, because a seek has exactly one possible
+    // subject — the run in the element — and no session to guard against.
+    seekBackward: onSeekBackward,
     seekWithinUnit: seekPlaybackWithinUnit,
     speakingSessionId,
     stop: stopPlayback,
@@ -732,6 +744,14 @@ export function useSpeechHost(): SpeechHost {
       onJumpToUnit,
       onSeekWithinUnit,
       preparingSessionIds,
+      // The three the OS transport reads. They are run-level state, so they
+      // move this object's identity when a run starts, is held or ends — which
+      // is exactly when every cell's state changed anyway. Not on the 4 Hz
+      // clock: `progress` and `unitDurations` stay out on the store, and
+      // `useSpeechHost.identity.test.tsx` is the pin that says so.
+      speakingSessionId,
+      pausedSessionId,
+      onSeekBackward,
     }),
     [
       armedSessionId,
@@ -741,12 +761,15 @@ export function useSpeechHost(): SpeechHost {
       onPause,
       onPrevious,
       onResume,
+      onSeekBackward,
       onSeekWithinUnit,
       onSpeak,
       onStop,
+      pausedSessionId,
       preparingSessionIds,
       progressFor,
       queueFor,
+      speakingSessionId,
       stateFor,
       subscribeProgress,
       unitDurationsFor,

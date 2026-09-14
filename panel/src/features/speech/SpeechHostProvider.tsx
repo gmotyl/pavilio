@@ -18,6 +18,7 @@
  * Letting the grid reach into this context itself would delete that signal.
  */
 import { createContext, useContext, type ReactNode } from "react";
+import { useMediaSessionTransport } from "./useMediaSessionTransport";
 import { useSpeechHost } from "./useSpeechHost";
 import type { GridSpeech } from "./types";
 
@@ -30,6 +31,12 @@ interface Props {
 /** Mount once, above every terminals surface. See `App.tsx`. */
 export function SpeechHostProvider({ children }: Props) {
   const speech = useSpeechHost();
+
+  // Here for the same reason the host is: `navigator.mediaSession` is one state
+  // machine per DOCUMENT, so a transport mounted per surface would have the two
+  // surfaces overwriting each other's action handlers and each clearing them on
+  // the other's unmount. One host, one audio element, one transport.
+  useMediaSessionTransport(speech);
 
   return (
     <SpeechHostContext.Provider value={speech}>{children}</SpeechHostContext.Provider>
