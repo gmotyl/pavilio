@@ -72,9 +72,35 @@ const cacheListeners = new Set<() => void>();
  * than delivering a payload every reader would have to filter. Fired once per
  * cache mutation — an add that forces an eviction is one mutation and one
  * notification, not two.
+ *
+ * Two things make this a broadcast rather than a loop over a live `Set`:
+ *
+ * - **It iterates a snapshot.** React unsubscribes *during* a notification as a
+ *   matter of course — a bar unmounting, or `useSyncExternalStore`
+ *   re-subscribing because its arguments changed identity. Iterating the live
+ *   `Set` lets one listener's unsubscribe drop a listener that had not been
+ *   reached yet out of the round it was already part of, which is a reader
+ *   silently missing an update. The snapshot fixes membership when the round
+ *   begins: whoever was subscribed then hears it, and the unsubscribe takes
+ *   effect from the next round. Notifying an already-unsubscribed reader costs
+ *   one extra re-peek and nothing else.
+ * - **It isolates a throwing listener.** One bad reader must not silence the
+ *   others: an uncaught throw would abort the round and leave every subscriber
+ *   after it holding a stale answer. The error goes to `console.error` and
+ *   nowhere else — this is a hot path, so nothing is logged on the ordinary
+ *   round; only a subscriber that threw, which is a bug worth seeing, says
+ *   anything at all. It is deliberately not re-thrown: `storeInCache` calls
+ *   this synchronously, so a throw here would turn a stranger's broken listener
+ *   into a rejected synthesis.
  */
 function notifyCacheListeners(): void {
-  for (const listener of cacheListeners) listener();
+  for (const listener of [...cacheListeners]) {
+    try {
+      listener();
+    } catch (err) {
+      console.error("[speech] cache listener threw; continuing the round", err);
+    }
+  }
 }
 
 /**
@@ -155,6 +181,11 @@ function storeInCache(key: string, promise: Promise<ArrayBuffer>): void {
   // cold — so it has to be announced too. It happens inside this same
   // mutation, so the one notification below covers both the add and whatever
   // it pushed out; a reader re-peeks the keys it draws either way.
+  //
+  // Which is why the eviction runs BEFORE that notification, not after: the
+  // readers re-peek during it, and a notification sent mid-mutation would hand
+  // them the pre-eviction cache and leave the dropped unit drawn `ready` until
+  // something unrelated announced next.
   while (synthesisCache.size > SPEECH_CACHE_MAX_ENTRIES) {
     const lru = synthesisCache.keys().next().value;
     if (lru === undefined) break;

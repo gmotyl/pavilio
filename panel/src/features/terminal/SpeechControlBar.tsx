@@ -35,8 +35,14 @@ type SegmentState = "played" | "playing" | "warming" | "ready" | "cold";
 const FALLBACK_CHARS_PER_SECOND = 15;
 
 /**
- * A monotonic count of cache mutations, and the whole of the bar's cache
- * snapshot.
+ * A monotonic counter, and the whole of the bar's cache snapshot.
+ *
+ * Not a count of cache mutations: it is bumped inside the per-subscriber
+ * callback, so N mounted bars advance it N times per mutation, and a bar
+ * mounting or unmounting changes the step. Monotonic is the only property
+ * `useSyncExternalStore` needs — it compares the snapshot with `Object.is` and
+ * re-renders when it differs — so the number is deliberately left meaningless
+ * beyond "this changed". Do not read it as a statistic.
  *
  * `useSyncExternalStore` compares snapshots by identity and throws "The result
  * of getSnapshot should be cached" — then loops to "Maximum update depth

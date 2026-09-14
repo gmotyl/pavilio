@@ -477,4 +477,111 @@ describe("speechCacheState", () => {
     expect(speechCacheState("k-0", { voice })).toBe("cold");
     expect(speechCacheState("k-1", { voice })).toBe("ready");
   });
+
+  /**
+   * A notification is a broadcast to every reader, and one bad reader must not
+   * silence the others: a listener that throws would otherwise abort the `for`
+   * and leave every subscriber after it holding a stale answer — a scrubber
+   * stuck on `warming` for audio that is already in hand. The throw is
+   * isolated and reported once, on `console.error`; the round continues.
+   */
+  it("a listener that throws does not stop the rest of the round", async () => {
+    const reported = vi.spyOn(console, "error").mockImplementation(() => {});
+    let later = 0;
+    const unsubscribeThrower = subscribeSpeechCache(() => {
+      throw new Error("listener boom");
+    });
+    const unsubscribeLater = subscribeSpeechCache(() => {
+      later += 1;
+    });
+
+    try {
+      // The add notifies synchronously inside `synthesizeSpeech`, so an
+      // un-isolated throw surfaces here as a rejected synthesis too.
+      await expect(synthesizeSpeech("throwing round", { voice })).resolves.toBeInstanceOf(
+        ArrayBuffer,
+      );
+
+      expect(later).toBe(2); // the add, then the settle
+      expect(reported).toHaveBeenCalled();
+    } finally {
+      unsubscribeThrower();
+      unsubscribeLater();
+      reported.mockRestore();
+    }
+  });
+
+  /**
+   * React unsubscribes during a notification as a matter of course — a bar
+   * unmounting, or `useSyncExternalStore` re-subscribing because its arguments
+   * changed identity. Iterating the live `Set` lets one listener's unsubscribe
+   * drop a *later* listener out of the round it was already part of, which is a
+   * reader silently missing the update. Notifying from a snapshot fixes the
+   * membership when the round begins: whoever was subscribed then hears it, and
+   * the unsubscribe takes effect from the next round.
+   */
+  it("notifies every listener subscribed when the round began, even if one unsubscribes another", async () => {
+    let dropSecond: () => void = () => {};
+    let secondCalls = 0;
+
+    const unsubscribeFirst = subscribeSpeechCache(() => {
+      dropSecond();
+    });
+    const unsubscribeSecond = subscribeSpeechCache(() => {
+      secondCalls += 1;
+    });
+    dropSecond = unsubscribeSecond;
+
+    try {
+      await synthesizeSpeech("snapshot me", { voice });
+
+      // The add's round: the first listener unsubscribed the second while the
+      // round was in flight, and the second still heard that round.
+      expect(secondCalls).toBe(1);
+
+      // ...and the unsubscribe really took, from the next round on.
+      await synthesizeSpeech("snapshot me again", { voice });
+      expect(secondCalls).toBe(1);
+    } finally {
+      unsubscribeFirst();
+      unsubscribeSecond();
+    }
+  });
+
+  /**
+   * The acceptance criterion is "added, settles *or is evicted*", and the
+   * rejection path above covers only the eviction that has no add beside it.
+   * This is the other one: an overflowing add evicts the LRU, and the two share
+   * a single notification on purpose — one mutation, one notification, readers
+   * re-peek. Sharing is only correct if the eviction has already happened when
+   * that notification goes out. Moving the `notifyCacheListeners()` above the
+   * eviction loop keeps the count identical and every other test green, and
+   * leaves a bar drawing the dropped unit as `ready` until something else
+   * happens to announce.
+   */
+  it("announces the LRU eviction inside the overflowing add's own notification", async () => {
+    const cap = SPEECH_CACHE_MAX_ENTRIES;
+
+    for (let i = 0; i < cap; i += 1) {
+      await synthesizeSpeech(`k-${i}`, { voice });
+    }
+    expect(speechCacheState("k-0", { voice })).toBe("ready");
+
+    // Subscribe only now, so the first thing this listener hears is the add
+    // that overflows the cap.
+    const seen: Array<"cold" | "warming" | "ready"> = [];
+    const unsubscribe = subscribeSpeechCache(() => {
+      seen.push(speechCacheState("k-0", { voice }));
+    });
+
+    try {
+      await synthesizeSpeech(`k-${cap}`, { voice });
+
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen[0]).toBe("cold");
+      expect(speechCacheState("k-0", { voice })).toBe("cold");
+    } finally {
+      unsubscribe();
+    }
+  });
 });
