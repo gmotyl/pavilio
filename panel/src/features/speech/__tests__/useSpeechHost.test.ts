@@ -751,6 +751,44 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     await clickControl(result.current, "cell-a");
     expect(played).toEqual([`blob:${newer[0]}`]);
   });
+
+  /**
+   * The same release at queue DEPTH TWO, which is where "releases the answer
+   * queued behind it" and "drains the queue" stop looking alike.
+   *
+   * The pause has to step the queue exactly ONE place — onto the oldest
+   * waiting answer — and leave the rest waiting. The effect re-runs after its
+   * own dispatch (the queue it read is part of its dependencies), so a guard
+   * that only asks "is anything pending?" re-enters and advances again, and
+   * again, until `pending` is empty. At depth one that is indistinguishable
+   * from a single step; at depth two it silently discards every answer between
+   * the held run and the newest one.
+   */
+  it("pausing a cell with two answers queued releases only the oldest", async () => {
+    const newer = unitsOf(response(3, "Newer"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3));
+    await clickControl(result.current, "cell-a");
+    await endCurrentUnit();
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+    await emitUtterance("cell-a", "u-3", response(3, "Latest"));
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["u-2", "u-3"]);
+
+    await clickControl(result.current, "cell-a");
+
+    const queue = result.current.queueFor("cell-a");
+    // Arrival order intact: u-2 is what the cell is on, u-3 is still behind
+    // it, and nothing was dropped on the way through.
+    expect(queue.previous?.id).toBe("u-1");
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.pending.map((w) => w.id)).toEqual(["u-3"]);
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${newer[0]}`]);
+  });
 });
 
 /**

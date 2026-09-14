@@ -276,7 +276,23 @@ export function useSpeechHost(): SpeechHost {
     if (!held || !paused || held.sessionId !== paused) return;
 
     const queue = queueFor(paused);
-    if (queue.cursor === "current" && queue.pending.length > 0) {
+    const under = utteranceUnderCursor(queue);
+    // Whether the cursor is still on the utterance the held run is speaking.
+    // It is the whole question this effect asks, and it is asked TWICE below,
+    // because both arms turn on it: while it is true the cell has not moved on
+    // yet, and once it is false the held run is playing something stale.
+    const holdingTheCursor = under !== null && under.id === held.utteranceId;
+
+    // Release the answers waiting behind the held run — ONE of them. The guard
+    // is the identity of the utterance under the cursor, never "is anything
+    // pending": this effect re-runs on its own dispatch (the queue it reads is
+    // in its dependencies), so a pending-count guard re-enters and advances
+    // again, and again, until `pending` is empty — discarding every answer
+    // between the held run and the newest one. At depth one that is invisible;
+    // at depth three two whole answers are never played and never offered.
+    // With this guard the next pass finds the cursor moved off `held` and
+    // falls through to the stop below, which is where it was always going.
+    if (holdingTheCursor && queue.cursor === "current" && queue.pending.length > 0) {
       // The stop follows on the next pass, once `current` has moved onto it.
       dispatchQueue(paused, { type: "next" });
       return;
@@ -286,8 +302,7 @@ export function useSpeechHost(): SpeechHost {
     // paused on the utterance the cursor is still on, and this effect runs the
     // moment that pause is taken. Without it every pause would supersede
     // itself.
-    const under = utteranceUnderCursor(queue);
-    if (!under || under.id === held.utteranceId) return;
+    if (!under || holdingTheCursor) return;
 
     // Stamped before `stop()` so the abandoned run lands on `ready` rather than
     // `heard` — the order is not what makes it work (`stop()` resolves the
