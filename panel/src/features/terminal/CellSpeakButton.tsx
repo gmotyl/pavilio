@@ -51,6 +51,24 @@ const CHANNELS: Record<CellSpeechState, { icon: SpeakIcon; label: string }> = {
   heard: { icon: "speaker", label: "Replay the last response" },
 };
 
+/**
+ * Whether a cell's state is asking for something — the one fact the attention
+ * pulse encodes, as `data-pulse` for `index.css`.
+ *
+ * Exported because the speech control bar's play button carries the same
+ * attribute: an open bar covers the top of the cell, so a user watching the
+ * transport should not have to look back at the header to learn that something
+ * is waiting. Two places, ONE derivation. Recomputing it in the bar would be a
+ * second rule to keep in sync, and the day they disagreed the bug would be that
+ * it was computed twice.
+ *
+ * Only `ready` pulses: `speaking` and `paused` are also green, but a run
+ * already in hand is not asking, and `heard` has been answered.
+ */
+export function speechPulse(state: CellSpeechState): "1" | "0" {
+  return state === "ready" ? "1" : "0";
+}
+
 const ICONS: Record<SpeakIcon, ReactElement> = {
   mute: <VolumeX size={11} />,
   speaker: <Volume2 size={11} />,
@@ -98,8 +116,9 @@ export function CellSpeakButton({
       data-speech={state}
       data-icon={icon}
       // Read by index.css exactly as the activity LED reads it: "1" runs the
-      // attention pulse, "0" leaves the colour standing still.
-      data-pulse={state === "ready" ? "1" : "0"}
+      // attention pulse, "0" leaves the colour standing still. Derived, not
+      // inlined, because the bar's play button reads the same answer.
+      data-pulse={speechPulse(state)}
       className="terminal-speak p-1 rounded"
       // The header row is `draggable` and the cell root focuses on click, so
       // every gesture that could reach either has to stop here.

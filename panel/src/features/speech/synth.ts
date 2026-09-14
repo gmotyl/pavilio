@@ -25,6 +25,26 @@ export const SPEECH_AUDIO_MIME_TYPE = "audio/mpeg";
  */
 export const SPEECH_CACHE_MAX_ENTRIES = 200;
 
+/** Absent, in flight, or in hand — the three answers the cache can give. */
+export type SpeechCacheState = "cold" | "warming" | "ready";
+
+/**
+ * One cached synthesis: the promise callers dedupe onto, plus whether it has
+ * resolved.
+ *
+ * The flag is the cheap way to split *in flight* from *in hand*. The promise
+ * already knows — but only asynchronously, and the peek is called during
+ * render, once per unit per open bar, so it cannot await anything. Flipping a
+ * boolean in the promise's own `then` records that same fact synchronously,
+ * stores nothing twice (the buffer stays in the promise), and keeps the peek a
+ * Map lookup and a property read.
+ */
+interface SpeechCacheEntry {
+  promise: Promise<ArrayBuffer>;
+  /** True once `promise` has fulfilled. A rejection evicts instead. */
+  ready: boolean;
+}
+
 /**
  * Module-level synthesis cache keyed by `${voice}::${text}`.
  *
@@ -36,10 +56,88 @@ export const SPEECH_CACHE_MAX_ENTRIES = 200;
  * eviction drops the least-recently-used (front) key. That protects a prefetched
  * unit that has not been played yet, which pure FIFO could not.
  */
-const synthesisCache = new Map<string, Promise<ArrayBuffer>>();
+const synthesisCache = new Map<string, SpeechCacheEntry>();
 
 function cacheKey(voice: string, text: string): string {
   return `${voice}::${text}`;
+}
+
+const cacheListeners = new Set<() => void>();
+
+/**
+ * Announces that what a peek would report has changed somewhere.
+ *
+ * Listeners get no argument: the cache is keyed by voice+text and a reader
+ * cares about a handful of keys, so re-peeking the keys it draws is cheaper
+ * than delivering a payload every reader would have to filter. Fired once per
+ * cache mutation — an add that forces an eviction is one mutation and one
+ * notification, not two.
+ *
+ * Two things make this a broadcast rather than a loop over a live `Set`:
+ *
+ * - **It iterates a snapshot.** React unsubscribes *during* a notification as a
+ *   matter of course — a bar unmounting, or `useSyncExternalStore`
+ *   re-subscribing because its arguments changed identity. Iterating the live
+ *   `Set` lets one listener's unsubscribe drop a listener that had not been
+ *   reached yet out of the round it was already part of, which is a reader
+ *   silently missing an update. The snapshot fixes membership when the round
+ *   begins: whoever was subscribed then hears it, and the unsubscribe takes
+ *   effect from the next round. Notifying an already-unsubscribed reader costs
+ *   one extra re-peek and nothing else.
+ * - **It isolates a throwing listener.** One bad reader must not silence the
+ *   others: an uncaught throw would abort the round and leave every subscriber
+ *   after it holding a stale answer. The error goes to `console.error` and
+ *   nowhere else — this is a hot path, so nothing is logged on the ordinary
+ *   round; only a subscriber that threw, which is a bug worth seeing, says
+ *   anything at all. It is deliberately not re-thrown: `storeInCache` calls
+ *   this synchronously, so a throw here would turn a stranger's broken listener
+ *   into a rejected synthesis.
+ */
+function notifyCacheListeners(): void {
+  for (const listener of [...cacheListeners]) {
+    try {
+      listener();
+    } catch (err) {
+      console.error("[speech] cache listener threw; continuing the round", err);
+    }
+  }
+}
+
+/**
+ * Subscribes to cache changes; returns an unsubscribe.
+ *
+ * The scrubber reads the cache during render, and its only other re-render
+ * trigger is playback progress — which publishes nothing while a run is paused
+ * or stalled. Without this, a synthesis landing during a pause would be
+ * invisible until playback resumed. Shaped for `useSyncExternalStore`.
+ */
+export function subscribeSpeechCache(listener: () => void): () => void {
+  cacheListeners.add(listener);
+  return () => {
+    cacheListeners.delete(listener);
+  };
+}
+
+/**
+ * Whether this text is absent, still synthesizing, or in hand for this voice.
+ *
+ * This is the readiness answer — "would clicking this play with no wait" —
+ * which {@link isSpeechSynthesized} cannot give, because the cache holds the
+ * in-flight promise and so answers yes the moment the socket opens.
+ *
+ * Read-only in both senses: it does NOT touch the LRU (a scrubber asking on
+ * every render is not a *use* of the audio and must not protect it from
+ * eviction), and it starts nothing. Kept allocation-free — it runs during
+ * render, once per unit per open bar.
+ */
+export function speechCacheState(
+  text: string,
+  options: SpeechSynthesisOptions = {},
+): SpeechCacheState {
+  if (!text || !text.trim()) return "cold";
+  const entry = synthesisCache.get(cacheKey(options.voice || DEFAULT_VOICE, text));
+  if (entry === undefined) return "cold";
+  return entry.ready ? "ready" : "warming";
 }
 
 /**
@@ -50,7 +148,8 @@ function cacheKey(voice: string, text: string): string {
  *
  * It reports an in-flight synthesis as cached, exactly as `synthesizeSpeech`
  * treats one: the caller dedupes onto the same promise rather than paying for a
- * second synthesis, which is the whole question a `ready` segment is asking.
+ * second synthesis. That is the dedupe question, not the readiness question —
+ * for "is the audio actually in hand", ask {@link speechCacheState}.
  */
 export function isSpeechSynthesized(
   text: string,
@@ -60,29 +159,59 @@ export function isSpeechSynthesized(
   return synthesisCache.has(cacheKey(options.voice || DEFAULT_VOICE, text));
 }
 
-/** Marks a key most-recently-used by moving it to the end of the Map's order. */
+/**
+ * Marks a key most-recently-used by moving it to the end of the Map's order.
+ *
+ * Announces nothing: eviction order is not something a peek can report, so no
+ * reader's answer changed. Notifying here would re-render every open bar on
+ * every cache hit.
+ */
 function touchCache(key: string): void {
-  const promise = synthesisCache.get(key);
-  if (promise === undefined) return;
+  const entry = synthesisCache.get(key);
+  if (entry === undefined) return;
   synthesisCache.delete(key);
-  synthesisCache.set(key, promise);
+  synthesisCache.set(key, entry);
 }
 
 function storeInCache(key: string, promise: Promise<ArrayBuffer>): void {
-  synthesisCache.set(key, promise);
+  const entry: SpeechCacheEntry = { promise, ready: false };
+  synthesisCache.set(key, entry);
 
+  // LRU eviction changes what a peek reports for the dropped key — ready to
+  // cold — so it has to be announced too. It happens inside this same
+  // mutation, so the one notification below covers both the add and whatever
+  // it pushed out; a reader re-peeks the keys it draws either way.
+  //
+  // Which is why the eviction runs BEFORE that notification, not after: the
+  // readers re-peek during it, and a notification sent mid-mutation would hand
+  // them the pre-eviction cache and leave the dropped unit drawn `ready` until
+  // something unrelated announced next.
   while (synthesisCache.size > SPEECH_CACHE_MAX_ENTRIES) {
     const lru = synthesisCache.keys().next().value;
     if (lru === undefined) break;
     synthesisCache.delete(lru);
   }
 
-  // Never cache a failure permanently: evict on rejection so a retry is possible.
-  promise.catch(() => {
-    if (synthesisCache.get(key) === promise) {
+  notifyCacheListeners();
+
+  promise.then(
+    () => {
+      // A slow synthesis can land after its entry was evicted, or after a
+      // retry replaced it. Only the entry still in the cache may settle, and
+      // only a real transition announces.
+      if (synthesisCache.get(key) !== entry) return;
+      entry.ready = true;
+      notifyCacheListeners();
+    },
+    () => {
+      // Never cache a failure permanently: evict on rejection so a retry is
+      // possible — and so the peek reports `cold`, the honest state for a unit
+      // nothing is fetching, rather than a `warming` that never settles.
+      if (synthesisCache.get(key) !== entry) return;
       synthesisCache.delete(key);
-    }
-  });
+      notifyCacheListeners();
+    },
+  );
 }
 
 /**
@@ -185,7 +314,7 @@ export async function synthesizeSpeech(
   const cached = synthesisCache.get(key);
   if (cached) {
     touchCache(key); // LRU: reading an entry marks it most-recently-used.
-    return cached;
+    return cached.promise;
   }
 
   // Store the in-flight promise BEFORE awaiting so concurrent callers dedupe.

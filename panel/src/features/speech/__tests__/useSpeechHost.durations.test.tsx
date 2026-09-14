@@ -63,8 +63,13 @@ vi.mock("../synth", () => ({
   prefetchSpeech: synth.prefetchSpeech,
   toSpeechBlob: synth.toSpeechBlob,
   // Every segment cold, so `data-segment` can only ever say "played" because a
-  // duration was recorded for it — never because the cache happened to be warm.
+  // duration was recorded for it — never because the cache happened to be warm
+  // or still warming.
   isSpeechSynthesized: () => false,
+  speechCacheState: () => "cold",
+  // A cache that never changes still has to be subscribable: the bar subscribes
+  // on mount so a synthesis landing during a pause is not invisible.
+  subscribeSpeechCache: () => () => {},
   SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
 }));
 

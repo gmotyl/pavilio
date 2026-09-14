@@ -38,7 +38,17 @@ const synth = vi.hoisted(() => {
   const buffers = new Map<string, ArrayBuffer>();
   const bufferText = new Map<ArrayBuffer, string>();
   const blobText = new Map<Blob, string>();
-  const cache = new Map<string, Promise<ArrayBuffer>>();
+  /**
+   * Keyed and shaped as the real cache is: the in-flight promise plus whether
+   * it has settled. The flag is what lets a segment be *warming* rather than
+   * ready the moment the socket opens.
+   */
+  const cache = new Map<string, { promise: Promise<ArrayBuffer>; ready: boolean }>();
+  /** `subscribeSpeechCache` subscribers, notified on add, settle and evict. */
+  const cacheListeners = new Set<() => void>();
+  const notifyCache = (): void => {
+    for (const listener of [...cacheListeners]) listener();
+  };
   let requests: string[] = [];
   /** The voice each request carried, in the same order. */
   let requestVoices: (string | undefined)[] = [];
@@ -67,7 +77,7 @@ const synth = vi.hoisted(() => {
   function synthesizeSpeech(text: string, options: { voice?: string } = {}): Promise<ArrayBuffer> {
     const key = `${options.voice ?? ""}::${text}`;
     const cached = cache.get(key);
-    if (cached) return cached;
+    if (cached) return cached.promise;
 
     requests.push(text);
     requestVoices.push(options.voice);
@@ -79,12 +89,24 @@ const synth = vi.hoisted(() => {
       return bufferFor(text);
     })();
 
-    cache.set(key, promise);
-    // Never cache a failure, as the real module does not: a retry must be able
-    // to reach the synthesizer again.
-    void promise.catch(() => {
-      if (cache.get(key) === promise) cache.delete(key);
-    });
+    const entry = { promise, ready: false };
+    cache.set(key, entry);
+    notifyCache();
+    void promise.then(
+      () => {
+        if (cache.get(key) !== entry) return;
+        entry.ready = true;
+        notifyCache();
+      },
+      () => {
+        // Never cache a failure, as the real module does not: a retry must be
+        // able to reach the synthesizer again, and the peek must report `cold`
+        // rather than a `warming` that never settles.
+        if (cache.get(key) !== entry) return;
+        cache.delete(key);
+        notifyCache();
+      },
+    );
     return promise;
   }
 
@@ -121,6 +143,22 @@ const synth = vi.hoisted(() => {
      */
     isSpeechSynthesized: (text: string, options: { voice?: string } = {}): boolean =>
       Boolean(text.trim()) && cache.has(`${options.voice ?? ""}::${text}`),
+    /**
+     * The readiness question, which `isSpeechSynthesized` cannot answer: absent,
+     * in flight, or in hand.
+     */
+    speechCacheState: (text: string, options: { voice?: string } = {}): string => {
+      if (!text.trim()) return "cold";
+      const entry = cache.get(`${options.voice ?? ""}::${text}`);
+      if (entry === undefined) return "cold";
+      return entry.ready ? "ready" : "warming";
+    },
+    subscribeSpeechCache: (listener: () => void): (() => void) => {
+      cacheListeners.add(listener);
+      return () => {
+        cacheListeners.delete(listener);
+      };
+    },
     toSpeechBlob: (buffer: ArrayBuffer): Blob => {
       const blob = new Blob([buffer], { type: "audio/mpeg" });
       blobText.set(blob, bufferText.get(buffer) ?? "unknown");
@@ -137,6 +175,9 @@ const synth = vi.hoisted(() => {
       requests = [];
       requestVoices = [];
       cache.clear();
+      // Subscribers are NOT cleared: they belong to mounted components, which
+      // unsubscribe themselves on unmount.
+      notifyCache();
       failing = false;
       healthyRequests = Number.POSITIVE_INFINITY;
       releaseHeld?.();
@@ -151,6 +192,8 @@ vi.mock("../synth", () => ({
   prefetchSpeech: synth.prefetchSpeech,
   toSpeechBlob: synth.toSpeechBlob,
   isSpeechSynthesized: synth.isSpeechSynthesized,
+  speechCacheState: synth.speechCacheState,
+  subscribeSpeechCache: synth.subscribeSpeechCache,
   SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
 }));
 

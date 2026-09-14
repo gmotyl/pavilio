@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 import type { Utterance } from "../../speech/types";
+import { CellSpeakButton } from "../CellSpeakButton";
 import { SpeechControlBar } from "../SpeechControlBar";
 
 /**
@@ -77,17 +78,52 @@ vi.mock("../useMobileReconnect", () => ({ useMobileReconnect: () => {} }));
 
 /**
  * The synthesis cache the bar peeks into, made writable. A `ready` segment
- * means "this unit is in the cache, so clicking it starts with no wait", and
- * the cache is filled from two places the bar cannot see — the host's arrival
- * warm and the player's ladder — so the only honest way to drive that state
- * here is to say what is warm. Everything else in `synth` stays real.
+ * means "this unit's audio is in hand, so clicking it starts with no wait",
+ * and the cache is filled from two places the bar cannot see — the host's
+ * arrival warm and the player's ladder — so the only honest way to drive that
+ * state here is to say what is warm. Everything else in `synth` stays real.
  */
 const warm = vi.hoisted(() => new Set<string>());
+/**
+ * Requested, socket open, audio not here yet — the half of "cached" the peek
+ * used to swallow into `ready`. Held apart from {@link warm} so a test can walk
+ * a unit across the transition the bar exists to show.
+ */
+const warming = vi.hoisted(() => new Set<string>());
+/** Whoever `subscribeSpeechCache` handed an unsubscribe to. */
+const cacheListeners = vi.hoisted(() => new Set<() => void>());
 
 vi.mock("../../speech/synth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/synth")>()),
-  isSpeechSynthesized: (text: string) => warm.has(text),
+  // Unchanged meaning — the dedupe question, which an in-flight entry answers
+  // yes to. Kept faithful so no test here can accidentally pass while the bar
+  // is still reading it for readiness.
+  isSpeechSynthesized: (text: string) => warm.has(text) || warming.has(text),
+  speechCacheState: (text: string) =>
+    warm.has(text) ? "ready" : warming.has(text) ? "warming" : "cold",
+  subscribeSpeechCache: (listener: () => void) => {
+    cacheListeners.add(listener);
+    return () => {
+      cacheListeners.delete(listener);
+    };
+  },
 }));
+
+/**
+ * The cache announcing that a peek would now answer differently — what the real
+ * one fires on an add, a settle and an eviction. Nothing else in these tests
+ * publishes: `subscribeProgress` is inert, which is the whole point.
+ */
+function cacheChanged(): void {
+  for (const listener of [...cacheListeners]) listener();
+}
+
+/** One unit's synthesis landing, announced. */
+function settle(text: string): void {
+  warming.delete(text);
+  warm.add(text);
+  cacheChanged();
+}
 
 // Imported after the mocks so it picks them up.
 const { TerminalView } = await import("../TerminalView");
@@ -186,6 +222,8 @@ async function settleTerminal(): Promise<void> {
 
 beforeEach(() => {
   warm.clear();
+  warming.clear();
+  cacheListeners.clear();
   term.fit.mockClear();
   term.sent.length = 0;
   term.observed.length = 0;
@@ -332,6 +370,126 @@ describe("SpeechControlBar", () => {
   });
 
   /**
+   * The ladder, made watchable.
+   *
+   * `isSpeechSynthesized` answers "is there an entry under this key", and the
+   * cache stores the in-flight promise — so it says yes the moment the socket
+   * opens. `cascadeWarm` opens three slots in one tick, which made three
+   * segments flip to `ready` together and the ladder read as a single step.
+   * The states were not wrong about what they measured; they measured the
+   * wrong thing.
+   */
+  describe("warming", () => {
+    const barFor = (all: SpeechUnit[], over: SpeechOverrides = {}): GridSpeech =>
+      makeSpeech({
+        state: "ready",
+        queue: queueWith({ current: utterance("u-1") }),
+        units: all,
+        progress: null,
+        durations: new Map<number, number>(),
+        ...over,
+      });
+
+    it("a unit whose synthesis is in flight is drawn warming", () => {
+      const all = units(200, 240, 280);
+      warming.add(all[1].text); // requested, socket open, no audio yet
+      warm.add(all[2].text); // landed
+
+      render(<SpeechControlBar sessionId="cell-a" speech={barFor(all)} />);
+
+      expect(segmentAt("cell-a", 0)).toBe("cold");
+      expect(segmentAt("cell-a", 1)).toBe("warming");
+      expect(segmentAt("cell-a", 2)).toBe("ready");
+    });
+
+    it("a warming segment settles to ready with no progress tick", () => {
+      const all = units(200, 240);
+      warming.add(all[0].text);
+
+      render(<SpeechControlBar sessionId="cell-a" speech={barFor(all)} />);
+      expect(segmentAt("cell-a", 0)).toBe("warming");
+
+      // The audio lands while the run is paused or stalled. `subscribeProgress`
+      // publishes nothing in either state — and `cascadeWarm` keeps warming
+      // through a pause, because a pause does not clear `run.active` — so the
+      // cache's own notification is the only thing that can move this segment.
+      act(() => settle(all[0].text));
+
+      expect(segmentAt("cell-a", 0)).toBe("ready");
+    });
+
+    it("the cascade's window warms together and settles one at a time", () => {
+      // Distinct lengths, so distinct texts: the cache is keyed by text, and
+      // four identical units would be one entry with one state.
+      const all = units(200, 210, 220, 230);
+      // SYNTHESIS_CONCURRENCY slots open in the same tick.
+      for (const unit of all.slice(0, 3)) warming.add(unit.text);
+
+      render(<SpeechControlBar sessionId="cell-a" speech={barFor(all)} />);
+
+      const row = () => all.map((_unit, index) => segmentAt("cell-a", index));
+      expect(row()).toEqual(["warming", "warming", "warming", "cold"]);
+
+      // One landing is one step of the ladder, not the whole staircase.
+      act(() => settle(all[0].text));
+      expect(row()).toEqual(["ready", "warming", "warming", "cold"]);
+
+      act(() => settle(all[1].text));
+      expect(row()).toEqual(["ready", "ready", "warming", "cold"]);
+    });
+
+    it("played still wins over warming", () => {
+      const all = units(200, 240);
+      // Measured — so it has been through the element — and warming again,
+      // which a re-prepare or a neighbouring voice can do. Spoken is the
+      // stronger fact.
+      warming.add(all[0].text);
+
+      render(
+        <SpeechControlBar
+          sessionId="cell-a"
+          speech={barFor(all, { state: "heard", durations: new Map([[0, 3]]) })}
+        />,
+      );
+
+      expect(segmentAt("cell-a", 0)).toBe("played");
+      expect(segmentAt("cell-a", 1)).toBe("cold");
+    });
+
+    it("the playing segment still wins over warming", () => {
+      const all = units(200, 240, 280);
+      // Everything in flight at once, including the unit in the element.
+      for (const unit of all) warming.add(unit.text);
+
+      render(
+        <SpeechControlBar
+          sessionId="cell-a"
+          speech={barFor(all, {
+            state: "speaking",
+            progress: { unitIndex: 1, unitTime: 1, unitDuration: 3 },
+          })}
+        />,
+      );
+
+      expect(segmentAt("cell-a", 0)).toBe("played");
+      expect(segmentAt("cell-a", 1)).toBe("playing");
+      expect(segmentAt("cell-a", 2)).toBe("warming");
+    });
+
+    it("a cell with no utterance is still empty and still inert while warming", () => {
+      // Nothing to warm, nothing to draw: a cache notification for some other
+      // cell must not conjure a scrubber here.
+      const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
+
+      render(<SpeechControlBar sessionId="cell-a" speech={speech} />);
+      act(() => cacheChanged());
+
+      expect(screen.queryAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(0);
+      expect(screen.getByTestId("speech-bar-playpause-cell-a")).toBeDisabled();
+    });
+  });
+
+  /**
    * The scrubber is a POINTER affordance, and it says so.
    *
    * It used to carry `role="button"` with `tabIndex={-1}` and a keyboard
@@ -427,6 +585,79 @@ describe("SpeechControlBar", () => {
       const position = screen.getByTestId("speech-bar-position-cell-a");
       expect(position).toHaveTextContent("2/3");
       expect(position.closest("[aria-hidden='true']")).toBeNull();
+    });
+  });
+
+  /**
+   * The pulse, repeated.
+   *
+   * The header speak control pulses on `data-pulse="1"` — set for `ready`, the
+   * one state that is asking for something. An open bar covers the top of the
+   * cell, so a user watching the transport would have to look back up at the
+   * header to learn that anything is waiting. The bar's play button carries the
+   * same attribute, from the same derivation: one fact in two places, and no
+   * second rule to keep in sync.
+   */
+  describe("the pulse", () => {
+    const ALL_STATES: CellSpeechState[] = [
+      "empty",
+      "preparing",
+      "ready",
+      "speaking",
+      "stalled",
+      "paused",
+      "heard",
+    ];
+
+    const barFor = (state: CellSpeechState): GridSpeech =>
+      makeSpeech({
+        state,
+        queue: queueWith({ current: utterance("u-1") }),
+        units: units(200, 240),
+      });
+
+    const pulseOf = (testId: string): string | null =>
+      screen.getByTestId(testId).getAttribute("data-pulse");
+
+    it("the play button pulses while an unheard utterance waits", () => {
+      render(<SpeechControlBar sessionId="cell-a" speech={barFor("ready")} />);
+
+      expect(pulseOf("speech-bar-playpause-cell-a")).toBe("1");
+    });
+
+    it("the play button stops pulsing once the cell is speaking", () => {
+      const view = render(<SpeechControlBar sessionId="cell-a" speech={barFor("speaking")} />);
+      expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
+
+      // …and once it has been listened to all the way through.
+      view.rerender(<SpeechControlBar sessionId="cell-a" speech={barFor("heard")} />);
+      expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
+    });
+
+    it("the play button and the header control always agree", () => {
+      // The criterion is not "both pulse on ready" — it is that there is only
+      // one derivation. Checking every state is how a second rule, computed in
+      // the bar, would be caught the first time the two drifted.
+      for (const state of ALL_STATES) {
+        const view = render(
+          <>
+            <CellSpeakButton
+              sessionId="cell-a"
+              state={state}
+              onSpeak={() => {}}
+              onPause={() => {}}
+              onResume={() => {}}
+            />
+            <SpeechControlBar sessionId="cell-a" speech={barFor(state)} />
+          </>,
+        );
+
+        const header = pulseOf("terminal-cell-speak-cell-a");
+        expect(header).toMatch(/^[01]$/);
+        expect(pulseOf("speech-bar-playpause-cell-a")).toBe(header);
+
+        view.unmount();
+      }
     });
   });
 
