@@ -1431,6 +1431,60 @@ describe("useSpeechPlayer", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  /**
+   * The same stall, from below.
+   *
+   * The test above leaves the torn-down clock at fifteen seconds, which is
+   * `>= 10`, so `seekBackward(10)` takes the **within-unit** arm and the wrong
+   * position it would publish is caught by `seekWithinUnit`'s own stall guard.
+   * That makes `seekBackward`'s guard redundant there — remove it and the suite
+   * stays green.
+   *
+   * The arm the code comment calls the worse lie is the other one: with a stale
+   * clock BELOW the ten seconds, the arithmetic underflows into the units
+   * before the one being waited on, and a foreign clock no longer merely
+   * publishes a wrong position — it picks the wrong unit to land in and calls
+   * `play()` into it. Nothing pinned that, and `seekBackward` is about to get
+   * its first production caller (the Media Session transport's `seekbackward`).
+   */
+  it("seeking back during a stall does not pick a landing unit off a foreign clock", async () => {
+    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-a", manyUnits(9));
+    await loadDuration(20);
+    // THREE seconds into unit 0 — below the ten, which is what routes the seek
+    // below into the cross-unit arm rather than the within-unit one.
+    await reportTime(3);
+    expect(currentElement().currentTime).toBe(3);
+
+    await settle(() => result.current.jumpToUnit("cell-a", 5));
+
+    expect(result.current.waitingForSynthesis).toBe(true);
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+    const playedBefore = [...played];
+
+    await settle(() => result.current.seekBackward(10));
+
+    // Unit 5 has not started, so there are no three seconds of it behind the
+    // playhead and no seven seconds to carry back into units 4, 3, … Doing the
+    // arithmetic anyway abandons the unit the user jumped to and starts a
+    // different one — unit 4 here, a unit nobody asked for and whose synthesis
+    // has not landed either, so the stall simply moves.
+    expect(result.current.progress).toEqual({ unitIndex: 5, unitTime: 0, unitDuration: null });
+    expect(played).toEqual(playedBefore);
+
+    await settle(() => synth.release("unit-5"));
+
+    // The unit the jump named is still the one the run is waiting for, so it is
+    // the one that plays when it lands.
+    expect(played).toEqual([...playedBefore, "blob:unit-5"]);
+    expect(result.current.progress?.unitIndex).toBe(5);
+    expect(result.current.progress?.unitTime).toBe(0);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("seeking inside a stalled unit publishes nothing playback will discard", async () => {
     for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
     const onError = vi.fn();
