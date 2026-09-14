@@ -41,17 +41,30 @@
  *
  *     <question>
  *
- *     [More than one can be chosen.]
- *     <label>
- *     <label>
+ *     1: <label>.
+ *     2: <label>.
  *
  * - **Every** question in `questions[]`, in payload order, each immediately
- *   followed by its own options. The array is plural and the dialog shows all
- *   of it; speaking only the first would make the utterance misdescribe what
- *   the turn is actually waiting on.
- * - **`multiSelect`** gets one line ahead of the labels it governs. It is the
- *   single fact about the dialog that changes what the listener does when they
- *   get back to it, and it cannot be inferred from the labels.
+ *   followed by its own options, numbered from one. The array is plural and the
+ *   dialog shows all of it; speaking only the first would make the utterance
+ *   misdescribe what the turn is actually waiting on.
+ * - **The blank lines are not pauses.** They are packing boundaries and nothing
+ *   more. `prepare.ts` splits on `\n{2,}` into paragraphs, `packUnits` then
+ *   merges consecutive paragraphs up to `UNIT_MAX_CHARS` (450 characters) — a
+ *   question and its options are nowhere near that, so they arrive in the *same*
+ *   unit — and `toSpokenText` finishes by collapsing every run of whitespace,
+ *   newlines included, to a single space. Whatever the listener is meant to hear
+ *   as structure therefore has to be carried by the words and the punctuation,
+ *   because nothing else survives the trip to the voice. That is the whole
+ *   reason the options are numbered and closed with a full stop; see
+ *   {@link labelsOf}, which also says why the number is not written `1.`.
+ * - **`multiSelect` is not spoken.** It was, once — one English line ahead of
+ *   the labels it governed. Two things are wrong with that. The picker is on
+ *   screen the moment the listener acts on the question, so the fact is never
+ *   actually missing; and a sentence written here, in English, would be spliced
+ *   into a Polish session's own prose, because a hook process cannot know the
+ *   session's language. That language is accumulated browser-side across
+ *   utterances and gates only the pronunciation map — none of it reaches here.
  * - **Option `description` and `preview` are dropped.** They are the reading
  *   material of a dialog that is already on screen; a `preview` in particular
  *   is box-drawing ASCII art, which a TTS voice reads as line noise.
@@ -136,11 +149,12 @@ const BODY_MARGIN_BYTES = 1024;
 const QUESTION_TOOL = "AskUserQuestion";
 
 /**
- * Spoken ahead of the options of a `multiSelect` question. Kept here rather
- * than inline because it is user-facing copy, and because the test asserts it
- * verbatim.
+ * What counts as a label that already ends a sentence. Mirrors
+ * `SENTENCE_TERMINATOR_RE` in `src/features/speech/strip.ts`, which closes a
+ * list item that has none for exactly the reason {@link labelsOf} does it here:
+ * so the items are spoken as separate sentences rather than one long clause.
  */
-const MULTI_SELECT_NOTE = "More than one can be chosen.";
+const SENTENCE_TERMINATOR_RE = /[.!?:;…]$/;
 
 function readStdin() {
   try {
@@ -239,12 +253,38 @@ function proseFor(transcriptPath, toolUseId) {
   return "";
 }
 
-/** A question's option labels, one per line; malformed options are skipped. */
+/**
+ * A question's option labels, numbered, one per line. Malformed options are
+ * dropped before numbering, so the numbers always count what is actually said.
+ *
+ * The numbering is what makes the options audible *as* options. `prepare.ts`
+ * collapses every run of whitespace to a single space, so the newline between
+ * two labels is not a pause, not a boundary, not anything: `The bar\nMedia
+ * keys\nThe keyboard` reaches the voice as "The bar Media keys The keyboard" —
+ * one phrase, which a listener cannot take apart. A number in front of each
+ * label survives that collapse, and it is the same number the dialog on screen
+ * shows, so "two" names the same option in both places.
+ *
+ * `1.`, `1)` and `- ` are all avoided deliberately: those are markdown list
+ * markers, and `strip.ts` strips the marker off a list item before the browser
+ * prepares the text — the numbering would be deleted on the way to the voice,
+ * which is worse than never adding it, because the code would look right. A
+ * digit followed by a colon is a list marker nowhere, and it stays.
+ *
+ * Digits rather than words ("one", "two") because this process cannot know the
+ * session's language — see the `multiSelect` note in the module header. A digit
+ * is read by the voice in whatever language it is already speaking; "one" is
+ * English wherever it lands.
+ */
 function labelsOf(question) {
   const options = Array.isArray(question.options) ? question.options : [];
   return options
     .map((option) => (typeof option?.label === "string" ? option.label.trim() : ""))
-    .filter((label) => label !== "");
+    .filter((label) => label !== "")
+    .map(
+      (label, index) =>
+        `${index + 1}: ${SENTENCE_TERMINATOR_RE.test(label) ? label : `${label}.`}`,
+    );
 }
 
 /**
@@ -252,19 +292,27 @@ function labelsOf(question) {
  * so the listener hears what is being asked before what they may answer with.
  * A question with no usable options still gets asked; a question with no text
  * contributes nothing, since a bare list of labels answers nothing.
+ *
+ * Numbering restarts at one per question, because that is how the dialog
+ * numbers each question's own list.
  */
 function blocksFor(question) {
   const text = typeof question?.question === "string" ? question.question.trim() : "";
   if (text === "") return [];
   const lines = labelsOf(question);
-  if (question.multiSelect === true) lines.unshift(MULTI_SELECT_NOTE);
   return lines.length === 0 ? [text] : [text, lines.join("\n")];
 }
 
 /**
- * The whole utterance, or `""` when there is nothing to say. Blocks are joined
- * by a blank line, which is also what the browser's preparation stage splits
- * speech units on, so the pauses land where the structure does.
+ * The whole utterance, or `""` when there is nothing to say.
+ *
+ * Blocks are joined by a blank line because that is the paragraph separator
+ * `prepare.ts` reads — but a paragraph boundary is NOT a pause, and this is the
+ * one place where believing it is would be easy: `packUnits` merges short
+ * paragraphs into one unit and `toSpokenText` collapses the newlines to spaces,
+ * so this whole utterance typically reaches the voice as one or two units with
+ * single spaces where the blank lines were. The audible structure comes from
+ * the punctuation the blocks carry, not from how they are joined here.
  */
 function utteranceFor(payload, prose) {
   const questions = payload?.tool_input?.questions;
