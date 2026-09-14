@@ -31,11 +31,12 @@ function TwoCells({
             sessionId={id}
             armedSessionId={armed}
             barVisible={open.includes(id)}
-            onToggleBar={(sessionId) =>
+            // Closed over, not passed in: the callback takes nothing, exactly
+            // as `TerminalLayoutGrid`'s does. The harness knows which cell it
+            // is rendering because it is the one rendering it.
+            onToggleBar={() =>
               setOpen((current) =>
-                current.includes(sessionId)
-                  ? current.filter((one) => one !== sessionId)
-                  : [...current, sessionId],
+                current.includes(id) ? current.filter((one) => one !== id) : [...current, id],
               )
             }
           />
@@ -78,7 +79,7 @@ describe("CellAutoplayToggle", () => {
 
     expect(armed).toHaveAttribute("data-armed", "1");
     expect(armed).toHaveAttribute("aria-expanded", "false");
-    expect(armed).toHaveAccessibleName();
+    expect(armed).toHaveAccessibleName(/armed/i);
 
     expect(off).toHaveAttribute("data-armed", "0");
     expect(off).toHaveAttribute("aria-expanded", "true");
@@ -88,6 +89,36 @@ describe("CellAutoplayToggle", () => {
     expect(screen.getByTestId(idOf("a"))).toHaveAttribute("data-armed", "1");
     expect(screen.getByTestId(idOf("a"))).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId(idOf("b"))).toHaveAttribute("data-armed", "0");
+  });
+
+  /**
+   * `data-armed` is the stylesheet's channel and the suite's favourite, and it
+   * is invisible to a screen reader. The accessible NAME is the only channel a
+   * screen-reader user has for arming — the doc comment on the component says
+   * exactly that — and nothing pinned it: asserting that a name exists passes
+   * just as happily on a label that has forgotten to mention arming at all.
+   *
+   * Both bars are closed here on purpose. The disclosure half of the name is
+   * then identical for the two cells, so the armed clause is the ONLY thing
+   * that can tell them apart — and deleting it makes the two names equal rather
+   * than merely shorter.
+   */
+  it("the accessible name distinguishes the armed cell from the rest", () => {
+    render(<TwoCells initialArmed="a" />);
+
+    const nameOf = (id: string) => screen.getByTestId(idOf(id)).getAttribute("aria-label") ?? "";
+
+    expect(nameOf("a")).not.toBe(nameOf("b"));
+    expect(nameOf("a")).toMatch(/armed/i);
+    expect(nameOf("b")).not.toMatch(/armed/i);
+
+    // And it follows the armed cell rather than the position: with `b` armed,
+    // it is `b`'s name that says so.
+    render(<TwoCells initialArmed="b" />);
+    const [, secondA] = screen.getAllByTestId(idOf("a"));
+    const [, secondB] = screen.getAllByTestId(idOf("b"));
+    expect(secondB).toHaveAccessibleName(/armed/i);
+    expect(secondA).not.toHaveAccessibleName(/armed/i);
   });
 
   it("clicking a control does not focus the cell or start a drag", () => {

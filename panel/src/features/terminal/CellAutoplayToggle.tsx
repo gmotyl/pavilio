@@ -10,8 +10,17 @@ export interface CellAutoplayToggleProps {
   armedSessionId: string | null;
   /** Whether this cell's {@link SpeechControlBar} is on screen. */
   barVisible: boolean;
-  /** Show or hide this cell's bar. Arming is the BAR's switch, not this one. */
-  onToggleBar: (sessionId: string) => void;
+  /**
+   * Show or hide this cell's bar. Arming is the BAR's switch, not this one.
+   *
+   * Takes nothing. It used to advertise the cell's `sessionId`, and no caller
+   * in the panel ever read it: `TerminalLayoutGrid` renders ONE bar for the
+   * focused cell and toggles a single boolean, so the id it was handed was
+   * noise. Only the test harness routed by it — which made a parameter that
+   * existed for the tests alone look like part of the contract, and invited
+   * the next caller to build per-cell bars on a promise nothing keeps.
+   */
+  onToggleBar: () => void;
 }
 
 /**
@@ -62,7 +71,7 @@ export function CellAutoplayToggle({
       draggable={false}
       onClick={(e) => {
         e.stopPropagation();
-        onToggleBar(sessionId);
+        onToggleBar();
       }}
       onMouseDown={(e) => e.stopPropagation()}
       onDragStart={(e) => {
