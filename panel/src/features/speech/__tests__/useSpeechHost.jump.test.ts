@@ -199,12 +199,21 @@ describe("useSpeechHost jumps", () => {
     // The run the jump supersedes never reached its last unit, so the cell must
     // not land on `heard` — the trap `speakUtterance`'s stamp exists to avoid.
     await settle(() => result.current.onJumpToUnit("cell-a", 3));
-
     expect(played[played.length - 1]).toBe(`blob:${units[3]}`);
-    expect(result.current.stateFor("cell-a")).not.toBe("heard");
 
-    // And the run it started is a real one: its last unit ending is what marks
-    // the cell heard.
+    // Asserted only once the cell has LEFT `speaking`. `stateFor` ranks a live
+    // run above the heard flag, so a bar routed straight at `player.jumpToUnit`
+    // — which reaches `play` behind the host's back, leaves the superseded run
+    // stamped `pending` and therefore marks the cell HEARD — still reads
+    // `speaking` at this point and passes anyway. Stopping takes the mask off:
+    // a deliberate stop is `ready`, so anything else here is a stamp that
+    // should never have been made.
+    await settle(() => result.current.onStop("cell-a"));
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+
+    // And the run a jump starts is a real one: its last unit ending is what
+    // marks the cell heard.
+    await settle(() => result.current.onJumpToUnit("cell-a", 3));
     await endCurrentUnit();
     expect(result.current.stateFor("cell-a")).toBe("heard");
   });

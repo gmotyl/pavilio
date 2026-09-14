@@ -75,6 +75,20 @@ vi.mock("../terminalInstances", () => {
 
 vi.mock("../useMobileReconnect", () => ({ useMobileReconnect: () => {} }));
 
+/**
+ * The synthesis cache the bar peeks into, made writable. A `ready` segment
+ * means "this unit is in the cache, so clicking it starts with no wait", and
+ * the cache is filled from two places the bar cannot see — the host's arrival
+ * warm and the player's ladder — so the only honest way to drive that state
+ * here is to say what is warm. Everything else in `synth` stays real.
+ */
+const warm = vi.hoisted(() => new Set<string>());
+
+vi.mock("../../speech/synth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../speech/synth")>()),
+  isSpeechSynthesized: (text: string) => warm.has(text),
+}));
+
 // Imported after the mocks so it picks them up.
 const { TerminalView } = await import("../TerminalView");
 
@@ -150,6 +164,13 @@ function widthOf(sessionId: string, index: number): number {
   return Number.parseFloat(segment.style.width);
 }
 
+/** What a segment says it is: played, playing, ready or cold. */
+function segmentAt(sessionId: string, index: number): string | null {
+  return screen
+    .getByTestId(`speech-bar-segment-${sessionId}-${index}`)
+    .getAttribute("data-segment");
+}
+
 /** Gives a segment a real box, which jsdom otherwise reports as 0×0. */
 function boxFor(element: HTMLElement, left: number, width: number): void {
   element.getBoundingClientRect = () =>
@@ -164,6 +185,7 @@ async function settleTerminal(): Promise<void> {
 }
 
 beforeEach(() => {
+  warm.clear();
   term.fit.mockClear();
   term.sent.length = 0;
   term.observed.length = 0;
@@ -260,6 +282,53 @@ describe("SpeechControlBar", () => {
 
     expect(widthOf("cell-a", 0)).toBeCloseTo(25, 1);
     expect(widthOf("cell-a", 1)).toBeCloseTo(75, 1);
+  });
+
+  it("a unit in the synthesis cache is drawn ready, not cold", () => {
+    const all = units(200, 240, 280);
+    // Only the middle unit is warm. Nothing has played, so `ready` can only
+    // come from the cache — which is the entire reason `isSpeechSynthesized`
+    // exists: "clicking this segment starts with no wait".
+    warm.add(all[1].text);
+
+    const speech = makeSpeech({
+      state: "ready",
+      queue: queueWith({ current: utterance("u-1") }),
+      units: all,
+      progress: null,
+      durations: new Map<number, number>(),
+    });
+
+    render(<SpeechControlBar sessionId="cell-a" speech={speech} />);
+
+    expect(segmentAt("cell-a", 0)).toBe("cold");
+    expect(segmentAt("cell-a", 1)).toBe("ready");
+    expect(segmentAt("cell-a", 2)).toBe("cold");
+
+    // And a ready segment is still a jump: warm is about the wait, not about
+    // whether the click does anything.
+    fireEvent.click(screen.getByTestId("speech-bar-segment-cell-a-1"));
+    expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
+  });
+
+  it("a unit that has been heard stays played even while it is still warm", () => {
+    const all = units(200, 240);
+    // Warm AND measured. The run is over, so nothing is playing — the segment
+    // must report the stronger fact, which is that it was spoken.
+    warm.add(all[0].text);
+
+    const speech = makeSpeech({
+      state: "heard",
+      queue: queueWith({ current: utterance("u-1") }),
+      units: all,
+      progress: null,
+      durations: new Map([[0, 3]]),
+    });
+
+    render(<SpeechControlBar sessionId="cell-a" speech={speech} />);
+
+    expect(segmentAt("cell-a", 0)).toBe("played");
+    expect(segmentAt("cell-a", 1)).toBe("cold");
   });
 
   it("clicking a segment jumps to that unit", () => {

@@ -98,6 +98,7 @@ vi.mock("edge-tts-universal/browser", () => ({
 let synthesizeSpeech: typeof import("../synth").synthesizeSpeech;
 let prefetchSpeech: typeof import("../synth").prefetchSpeech;
 let toSpeechBlob: typeof import("../synth").toSpeechBlob;
+let isSpeechSynthesized: typeof import("../synth").isSpeechSynthesized;
 let SPEECH_CACHE_MAX_ENTRIES: number;
 let SPEECH_STREAM_STALL_TIMEOUT_MS: number;
 
@@ -122,6 +123,7 @@ beforeEach(async () => {
   synthesizeSpeech = mod.synthesizeSpeech;
   prefetchSpeech = mod.prefetchSpeech;
   toSpeechBlob = mod.toSpeechBlob;
+  isSpeechSynthesized = mod.isSpeechSynthesized;
   SPEECH_CACHE_MAX_ENTRIES = mod.SPEECH_CACHE_MAX_ENTRIES;
   SPEECH_STREAM_STALL_TIMEOUT_MS = mod.SPEECH_STREAM_STALL_TIMEOUT_MS;
 });
@@ -204,6 +206,55 @@ describe("synthesizeSpeech cache", () => {
 
     await synthesizeSpeech("k-1", { voice });
     expect(edgeMock.constructCount).toBe(cap + 2);
+  });
+
+  /**
+   * The scrubber's `ready` segment — "clicking this starts with no wait" — is
+   * the only consumer, and it asks on every render of every bar. So the peek
+   * has two obligations, and the LRU one has teeth: a peek that counted as a
+   * *use* would re-insert the key at the most-recent end, reordering eviction
+   * behind a question nobody asked the audio for, and could evict the very unit
+   * about to play. The eviction test above uses `synthesizeSpeech` as the
+   * toucher and so says nothing about the peek; these two do.
+   */
+  it("reports whether a text is already in the cache for that voice", async () => {
+    const voice = "en-GB-RyanNeural";
+
+    expect(isSpeechSynthesized("warm me", { voice })).toBe(false);
+
+    await synthesizeSpeech("warm me", { voice });
+    expect(isSpeechSynthesized("warm me", { voice })).toBe(true);
+
+    // Keyed on voice+text exactly as the cache is, and answering costs nothing:
+    // a miss must not start a synthesis of its own.
+    expect(isSpeechSynthesized("warm me", { voice: "pl-PL-ZofiaNeural" })).toBe(false);
+    expect(isSpeechSynthesized("something else", { voice })).toBe(false);
+    expect(isSpeechSynthesized("", { voice })).toBe(false);
+    expect(edgeMock.constructCount).toBe(1);
+  });
+
+  it("peeking does not mark an entry recently used", async () => {
+    const voice = "en-GB-RyanNeural";
+    const cap = SPEECH_CACHE_MAX_ENTRIES;
+
+    for (let i = 0; i < cap; i += 1) {
+      await synthesizeSpeech(`k-${i}`, { voice });
+    }
+    expect(edgeMock.constructCount).toBe(cap);
+
+    // k-0 is the LRU. Peek at it — repeatedly, the way a re-rendering bar
+    // does. A peek that touched the LRU would promote it, and k-1 would become
+    // the eviction candidate in its place.
+    expect(isSpeechSynthesized("k-0", { voice })).toBe(true);
+    expect(isSpeechSynthesized("k-0", { voice })).toBe(true);
+    expect(edgeMock.constructCount).toBe(cap);
+
+    // Overflow by one: the entry that goes is still k-0.
+    await synthesizeSpeech(`k-${cap}`, { voice });
+    expect(edgeMock.constructCount).toBe(cap + 1);
+
+    expect(isSpeechSynthesized("k-0", { voice })).toBe(false);
+    expect(isSpeechSynthesized("k-1", { voice })).toBe(true);
   });
 
   it("wraps the cached buffer in a fresh Blob on every playback", async () => {
