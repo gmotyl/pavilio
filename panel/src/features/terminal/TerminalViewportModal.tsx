@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronUp, Printer, X } from "lucide-react";
 import type { BufferSnapshot, ColoredRun } from "./TerminalView";
+import {
+  readCellReaderTab,
+  writeCellReaderTab,
+  type CellReaderTab,
+} from "./cellReaderTab";
+
+const TABS: { id: CellReaderTab; label: string }[] = [
+  { id: "screen", label: "Screen" },
+  { id: "answer", label: "Answer" },
+];
 
 interface Props {
   sessionName: string | null;
@@ -15,14 +25,16 @@ function runStyle(run: ColoredRun): React.CSSProperties {
   if (run.bold) s.fontWeight = 600;
   if (run.italic) s.fontStyle = "italic";
   if (run.underline) {
-    s.textDecorationLine = (s.textDecorationLine
-      ? `${s.textDecorationLine} underline`
-      : "underline") as React.CSSProperties["textDecorationLine"];
+    s.textDecorationLine = (
+      s.textDecorationLine ? `${s.textDecorationLine} underline` : "underline"
+    ) as React.CSSProperties["textDecorationLine"];
   }
   if (run.strike) {
-    s.textDecorationLine = (s.textDecorationLine
-      ? `${s.textDecorationLine} line-through`
-      : "line-through") as React.CSSProperties["textDecorationLine"];
+    s.textDecorationLine = (
+      s.textDecorationLine
+        ? `${s.textDecorationLine} line-through`
+        : "line-through"
+    ) as React.CSSProperties["textDecorationLine"];
   }
   if (run.dim) s.opacity = 0.6;
   return s;
@@ -85,6 +97,7 @@ export function TerminalViewportModal({
   onClose,
 }: Props) {
   const [topIndex, setTopIndex] = useState<number>(0);
+  const [tab, setTab] = useState<CellReaderTab>(() => readCellReaderTab());
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -93,6 +106,9 @@ export function TerminalViewportModal({
   useEffect(() => {
     if (!snapshot) return;
     setTopIndex(snapshot.viewportTopIndex);
+    // One modal is mounted per cell and stays mounted while closed, so a
+    // choice made in another cell is only picked up by re-reading on open.
+    setTab(readCellReaderTab());
   }, [snapshot]);
 
   useEffect(() => {
@@ -140,6 +156,11 @@ export function TerminalViewportModal({
     setTopIndex((cur) => Math.max(0, cur - snapshot.pageSize));
   };
 
+  const selectTab = (next: CellReaderTab) => {
+    setTab(next);
+    writeCellReaderTab(next);
+  };
+
   const handlePrint = () => {
     const text = snapshotToPlainText(
       snapshot,
@@ -182,6 +203,39 @@ export function TerminalViewportModal({
           >
             {title}
           </h2>
+          <div
+            role="tablist"
+            aria-label="Cell reader source"
+            className="flex items-center gap-0.5 mx-3 shrink-0"
+          >
+            {TABS.map(({ id, label }) => {
+              const selected = tab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  id={`cell-reader-tab-${id}`}
+                  aria-selected={selected}
+                  aria-controls={`cell-reader-panel-${id}`}
+                  data-testid={`cell-reader-tab-${id}`}
+                  onClick={() => selectTab(id)}
+                  className="px-2.5 py-1 rounded-md text-[12px] transition-colors"
+                  style={{
+                    background: selected ? "var(--bg-base)" : "transparent",
+                    color: selected
+                      ? "var(--text-primary)"
+                      : "var(--text-muted)",
+                    border: `1px solid ${
+                      selected ? "var(--border-subtle)" : "transparent"
+                    }`,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
           <div
             className="flex items-center gap-1"
             style={{ color: "var(--text-secondary)" }}
@@ -235,67 +289,81 @@ export function TerminalViewportModal({
           </div>
         </div>
 
-        <div
-          className="flex-1 min-h-0 overflow-auto"
-          style={{ background: snapshot.defaultBg }}
-        >
-          {canLoadMore && (
-            <button
-              type="button"
-              data-testid="viewport-modal-load-previous"
-              onClick={loadPrevious}
-              className="w-full flex items-center justify-center gap-1.5 py-2 text-[11px] tracking-widest uppercase transition-colors sticky top-0 z-10"
-              style={{
-                background: "var(--bg-elevated)",
-                color: "var(--text-secondary)",
-                borderBottom: "1px solid var(--border-subtle)",
-              }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "var(--bg-hover)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "var(--bg-elevated)")
-              }
-              title={`Load previous ${snapshot.pageSize} lines`}
-            >
-              <ChevronUp size={12} />
-              Load previous page
-            </button>
-          )}
+        {tab === "answer" ? (
           <div
-            className="px-4 py-3"
-            style={{
-              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-              fontSize: `${snapshot.fontSize}px`,
-              lineHeight: 1.35,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              color: snapshot.defaultFg,
-            }}
-            tabIndex={0}
-            aria-label="Terminal viewport text"
+            role="tabpanel"
+            id="cell-reader-panel-answer"
+            aria-labelledby="cell-reader-tab-answer"
+            data-testid="cell-reader-panel-answer"
+            className="flex-1 min-h-0 overflow-auto px-4 py-3"
+            style={{ background: snapshot.defaultBg }}
+          />
+        ) : (
+          <div
+            role="tabpanel"
+            id="cell-reader-panel-screen"
+            aria-labelledby="cell-reader-tab-screen"
+            className="flex-1 min-h-0 overflow-auto"
+            style={{ background: snapshot.defaultBg }}
           >
-            {visibleSlice.length === 0 ? (
-              <span style={{ color: "var(--text-muted)" }}>
-                (viewport is empty)
-              </span>
-            ) : (
-              visibleSlice.map(({ idx, runs }) => (
-                <div key={idx}>
-                  {runs.length === 0 ? (
-                    <>{" "}</>
-                  ) : (
-                    runs.map((run, j) => (
-                      <span key={j} style={runStyle(run)}>
-                        {run.text}
-                      </span>
-                    ))
-                  )}
-                </div>
-              ))
+            {canLoadMore && (
+              <button
+                type="button"
+                data-testid="viewport-modal-load-previous"
+                onClick={loadPrevious}
+                className="w-full flex items-center justify-center gap-1.5 py-2 text-[11px] tracking-widest uppercase transition-colors sticky top-0 z-10"
+                style={{
+                  background: "var(--bg-elevated)",
+                  color: "var(--text-secondary)",
+                  borderBottom: "1px solid var(--border-subtle)",
+                }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.background = "var(--bg-hover)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background = "var(--bg-elevated)")
+                }
+                title={`Load previous ${snapshot.pageSize} lines`}
+              >
+                <ChevronUp size={12} />
+                Load previous page
+              </button>
             )}
+            <div
+              className="px-4 py-3"
+              style={{
+                fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                fontSize: `${snapshot.fontSize}px`,
+                lineHeight: 1.35,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                color: snapshot.defaultFg,
+              }}
+              tabIndex={0}
+              aria-label="Terminal viewport text"
+            >
+              {visibleSlice.length === 0 ? (
+                <span style={{ color: "var(--text-muted)" }}>
+                  (viewport is empty)
+                </span>
+              ) : (
+                visibleSlice.map(({ idx, runs }) => (
+                  <div key={idx}>
+                    {runs.length === 0 ? (
+                      <>{" "}</>
+                    ) : (
+                      runs.map((run, j) => (
+                        <span key={j} style={runStyle(run)}>
+                          {run.text}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         <div
           className="flex items-center justify-between px-4 py-2 text-[11px] shrink-0"
