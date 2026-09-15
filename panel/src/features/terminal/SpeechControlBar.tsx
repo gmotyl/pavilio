@@ -1,4 +1,4 @@
-import { Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
+import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { segmentStateFor, type SegmentState } from "./segmentState";
@@ -10,6 +10,10 @@ export interface SpeechControlBarProps {
   sessionId: string;
   /** The panel's one speech host. See {@link GridSpeech}. */
   speech: GridSpeech;
+  /** Whether the cell's answer pane is open — the eye's pressed state. Owned by `TerminalView`. */
+  answerOpen: boolean;
+  /** The eye was pressed: open the pane if it is closed, close it if it is open. */
+  onToggleAnswer: () => void;
 }
 
 /**
@@ -155,10 +159,20 @@ function transportIntent(state: CellSpeechState): "speak" | "pause" | "resume" |
  *
  * So the scrubber claims no role, takes no tab stop, and the whole strip is
  * `aria-hidden`: a decorative rendering of a position, not fifteen phantom
- * buttons. The position readout next to it stays announced, because "2/3" is
- * the information; the segments were only ever the affordance.
+ * buttons. The position is still announced, because "unit 2 of 3" is the
+ * information and the segments were only ever the affordance — but it is
+ * announced from the eye, the button beside the strip that opens the answer
+ * pane: its accessible name is "Show answer, unit 2 of 3". That name is the
+ * ONLY place the position is spoken now; the `n/N` readout it replaced is
+ * gone, so the wording is not decoration and a change to it is a change to
+ * what a screen reader is told.
  */
-export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
+export function SpeechControlBar({
+  sessionId,
+  speech,
+  answerOpen,
+  onToggleAnswer,
+}: SpeechControlBarProps) {
   const state = speech.stateFor(sessionId);
   const queue = speech.queueFor(sessionId);
   const units = speech.unitsFor(sessionId);
@@ -195,6 +209,8 @@ export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
 
   const hasPrevious = queue.previous !== null && queue.cursor === "current";
   const hasNext = queue.cursor === "previous" || queue.pending.length > 0;
+
+  const eyeLabel = `${answerOpen ? "Hide" : "Show"} answer, unit ${(progress?.unitIndex ?? 0) + 1} of ${units.length}`;
 
   /** The segment a drag is in, while a drag is in progress. */
   const [dragging, setDragging] = useState<{ index: number; element: HTMLElement } | null>(null);
@@ -346,8 +362,9 @@ export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
           data-testid={`speech-bar-scrubber-${sessionId}`}
           // A pointer affordance, hidden from assistive tech — see the note on
           // the component. Announcing it would mean announcing one item per
-          // unit, and an answer runs to fifteen of them. The position readout
-          // beside it is what a screen reader is given instead, and it stays.
+          // unit, and an answer runs to fifteen of them. The eye beside it
+          // carries the position in its name instead, and that is what a
+          // screen reader is given.
           aria-hidden="true"
         >
           {units.map((_unit, index) => {
@@ -401,9 +418,23 @@ export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
         </div>
 
         {units.length > 0 ? (
-          <span className="speech-bar-meta" data-testid={`speech-bar-position-${sessionId}`}>
-            {(progress?.unitIndex ?? 0) + 1}/{units.length}
-          </span>
+          <button
+            type="button"
+            // The position rides in the name — `(unitIndex ?? 0) + 1`, exactly
+            // the readout's computation — so a screen reader loses nothing to
+            // the eye replacing it. See the note on the component.
+            title={eyeLabel}
+            aria-label={eyeLabel}
+            aria-pressed={answerOpen}
+            data-testid={`speech-bar-eye-${sessionId}`}
+            // Open borrows the armed toggle's fill — `index.css` styles the
+            // two attributes in one rule.
+            data-open={answerOpen ? "1" : "0"}
+            className="speech-bar-btn"
+            onClick={onToggleAnswer}
+          >
+            <Eye size={17} />
+          </button>
         ) : null}
 
         {queue.pending.length > 0 ? (

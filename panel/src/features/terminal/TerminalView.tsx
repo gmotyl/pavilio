@@ -83,6 +83,11 @@ export function TerminalView({
   // inside the mount effect below.
   const [ws, setWs] = useState<WebSocket | null>(null);
 
+  // Whether the cell's answer pane is open. Per cell, not persisted: a reload
+  // starts closed. The bar's eye toggles it; the pane itself mounts here, as a
+  // sibling of the observed container, exactly like the bar.
+  const [answerOpen, setAnswerOpen] = useState(false);
+
   // Latest-refs so changing callbacks don't blow away the mount effect.
   // Parent re-renders (e.g. a session opened, killed or renamed anywhere in
   // the tab — the shared session store republishes and every grid re-renders)
@@ -198,7 +203,12 @@ export function TerminalView({
         }}
       />
       {speech && speechBarVisible ? (
-        <SpeechControlBar sessionId={sessionId} speech={speech} />
+        <SpeechControlBar
+          sessionId={sessionId}
+          speech={speech}
+          answerOpen={answerOpen}
+          onToggleAnswer={() => setAnswerOpen((open) => !open)}
+        />
       ) : null}
     </div>
   );
