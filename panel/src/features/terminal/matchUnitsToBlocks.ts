@@ -18,10 +18,20 @@
  *
  * Two constants shape the rules (see {@link matchUnitsToBlocks}):
  *
- * - `MIN_BLOCK_CHARS` (12): a one-word list item — "Tests" — occurs inside
- *   almost every unit, and `u.includes(b)` would happily mark it for each of
- *   them. Below the floor a block is simply not matched; it is not spoken as
- *   its own unit anyway, since `prepare` packs such fragments into neighbours.
+ * - `MIN_MATCH_CHARS` (12): a floor on *both* sides of every substring and
+ *   prefix rule. On the block it keeps a one-word list item — "Tests" — from
+ *   matching every unit that contains the word through `u.includes(b)`. On the
+ *   unit it keeps a short unit — `## Result`, or a bare `Yes.` — from marking
+ *   every block that happens to contain "result" or "yes" through
+ *   `b.includes(u)`: without it, speaking the opening heading would scroll the
+ *   pane to whichever paragraph echoes the word. Exact equality is exempt from
+ *   the floor: a short heading is usually its own unit (`prepare` does not pack
+ *   a leading heading into its neighbour), and a block that *is* the unit has
+ *   no cross-unit ambiguity to guard against. Accepted residue: a heading of
+ *   twelve or more characters echoed as its paragraph's opener
+ *   (`## Installation steps` + "Installation steps are…") marks both blocks
+ *   while the heading is spoken — adjacent, overlapping segments, not a wrong
+ *   scroll.
  * - `PREFIX_CHARS` (40): `cutAtCeiling` turns one 900-character paragraph into
  *   two units. The second is a substring of the block and `b.includes(u)`
  *   finds it; the first is too, but the general case — the block having been
@@ -38,8 +48,11 @@ export interface UnitBlockMap {
   blockToUnit: readonly (number | null)[];
 }
 
-/** A normalized block shorter than this matches nothing; see the module comment. */
-export const MIN_BLOCK_CHARS = 12;
+/**
+ * Below this length neither a normalized block nor a normalized unit takes part
+ * in the substring and prefix rules; only equality does. See the module comment.
+ */
+export const MIN_MATCH_CHARS = 12;
 
 /** How much of an opening is compared by the prefix rules; see the module comment. */
 export const PREFIX_CHARS = 40;
@@ -63,10 +76,13 @@ export function normalizeForMatch(text: string): string {
 /**
  * Whether a rendered block was spoken as (part of) a unit, both already
  * normalized. Empty text never matches — an empty `startsWith` prefix would
- * otherwise match everything.
+ * otherwise match everything. A block that is the unit matches outright; the
+ * looser rules below need both sides at or above the floor.
  */
 function blockMatchesUnit(block: string, unit: string): boolean {
-  if (block.length < MIN_BLOCK_CHARS || unit.length === 0) return false;
+  if (unit.length === 0) return false;
+  if (block === unit) return true; // a block that IS the unit needs no floor
+  if (block.length < MIN_MATCH_CHARS || unit.length < MIN_MATCH_CHARS) return false;
 
   return (
     unit.includes(block) || // block packed whole into the unit

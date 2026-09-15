@@ -127,4 +127,51 @@ describe("matchUnitsToBlocks", () => {
     expect(result.unitToBlocks).toEqual([[0], [], [2]]);
     expect(result.blockToUnit).toEqual([0, null, 2]);
   });
+
+  it("a short heading is its own block", () => {
+    // `## Result` normalizes to 6 characters — under the floor — yet `prepare`
+    // speaks it as its own unit, so equality has to find it without a floor.
+    const body = "The pane marks the block being spoken and scrolls once per unit.";
+    const prepared = prepare(["## Result", "", body].join("\n"));
+    expect(prepared.units.map((unit) => unit.source)).toEqual(["## Result", body]);
+
+    const result = matchUnitsToBlocks(prepared.units, ["Result", body]);
+    expect(result.unitToBlocks[0]).toEqual([0]);
+    expect(result.blockToUnit[0]).toBe(0);
+    expect(result.unitToBlocks[1]).toEqual([1]);
+    expect(result.blockToUnit[1]).toBe(1);
+  });
+
+  it("a short fast-start unit marks nothing else", () => {
+    // `prepare` speaks the first sentence alone but keeps the whole paragraph
+    // as its source, so the real unit finds its own paragraph by equality —
+    // and only that one, although the next paragraph echoes "yes".
+    const first = "Yes. The pane marks the block being spoken and scrolls once per unit.";
+    const second = "Yes is the word every later paragraph seems to echo somewhere.";
+    const prepared = prepare([first, "", second].join("\n"));
+    expect(prepared.units[0].text).toBe("Yes.");
+    expect(prepared.units[0].source).toBe(first);
+
+    const result = matchUnitsToBlocks(prepared.units, [first, second]);
+    expect(result.unitToBlocks[0]).toEqual([0]);
+    expect(result.blockToUnit[1]).not.toBe(0);
+
+    // A unit whose source really is just the short sentence is under the floor
+    // on its side: `b.includes(u)` must not mark every block containing "yes".
+    const bare = matchUnitsToBlocks([{ source: "Yes." }], [first, second]);
+    expect(bare.unitToBlocks[0]).toEqual([]);
+    expect(bare.blockToUnit).toEqual([null, null]);
+  });
+
+  it("a heading is not credited with the paragraph that echoes it", () => {
+    // `# The bar` opens the paragraph that follows it; `b.includes(u)` would
+    // otherwise mark the paragraph for the heading and scroll past it.
+    const body = "The bar waits for the voice before it renders anything at all.";
+    const prepared = prepare(["# The bar", "", body].join("\n"));
+    expect(prepared.units.map((unit) => unit.source)).toEqual(["# The bar", body]);
+
+    const result = matchUnitsToBlocks(prepared.units, ["The bar", body]);
+    expect(result.blockToUnit[1]).toBe(1);
+    expect(result.unitToBlocks[0]).toEqual([0]);
+  });
 });
