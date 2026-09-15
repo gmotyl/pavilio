@@ -44,6 +44,18 @@ export interface PrepareOptions {
   language?: "pl" | "en";
 }
 
+/**
+ * One paragraph in both its readings: `source` as `strip.ts` left it — markers,
+ * sentinels and all — and `text` as the voice will receive it. The two travel
+ * together through packing so that a unit can say where it was spoken from.
+ * Every sizing and joining decision is made on `text`, because `text` is what
+ * synthesis gets; `source` only follows along.
+ */
+interface Packed {
+  source: string;
+  text: string;
+}
+
 /** An ATX heading line: `#` … `######`, up to three leading spaces. */
 const HEADING_LINE_RE = /^ {0,3}#{1,6}[ \t]+(.*)$/;
 
@@ -262,6 +274,13 @@ function toSpokenText(text: string, language: "pl" | "en"): string {
   return language === "pl" ? applyPronunciation(said) : said;
 }
 
+/** A paragraph paired with its spoken form, or `null` when nothing is left to say. */
+function speak(source: string, language: "pl" | "en"): Packed | null {
+  const text = toSpokenText(source, language);
+
+  return text ? { source, text } : null;
+}
+
 /** Blank-line-separated blocks, the shape `stripToSpeakableText` leaves behind. */
 function splitParagraphs(text: string): string[] {
   return text
@@ -311,6 +330,22 @@ function cutAtCeiling(text: string, max: number): string[] {
 }
 
 /**
+ * {@link cutAtCeiling} for a paragraph in both readings. The spoken text decides
+ * the pieces. The source is cut the same way and paired up when it falls into
+ * as many pieces — the usual case, since markers and sentinels move sentence
+ * ends very little — and otherwise every piece carries the whole paragraph:
+ * a piece is still spoken *from* that paragraph, and a wrong slice of it would
+ * be a lie where the whole is merely coarse.
+ */
+function cutPackedAtCeiling(paragraph: Packed, max: number): Packed[] {
+  const texts = cutAtCeiling(paragraph.text, max);
+  const sources = cutAtCeiling(paragraph.source, max);
+  const aligned = sources.length === texts.length;
+
+  return texts.map((text, i) => ({ source: aligned ? sources[i] : paragraph.source, text }));
+}
+
+/**
  * Joins one packed paragraph onto the unit being built.
  *
  * A paragraph that begins with a comma begins with a placeholder, and that
@@ -342,33 +377,38 @@ function joinPacked(pending: string, paragraph: string): string {
  * trip for half a second of audio; the ceiling exists because a unit is also the
  * barge-in granularity, and a 40-second unit cannot be interrupted mid-thought.
  */
-function packUnits(paragraphs: readonly string[]): string[] {
-  const units: string[] = [];
-  let pending = "";
+function packUnits(paragraphs: readonly Packed[]): Packed[] {
+  const units: Packed[] = [];
+  let pending: Packed | null = null;
 
   const flush = (): void => {
     if (pending) units.push(pending);
-    pending = "";
+    pending = null;
   };
 
   for (const paragraph of paragraphs) {
-    if (paragraph.length > UNIT_MAX_CHARS) {
+    if (paragraph.text.length > UNIT_MAX_CHARS) {
       flush();
-      units.push(...cutAtCeiling(paragraph, UNIT_MAX_CHARS));
+      units.push(...cutPackedAtCeiling(paragraph, UNIT_MAX_CHARS));
       continue;
     }
 
     if (!pending) pending = paragraph;
     else {
-      const joined = joinPacked(pending, paragraph);
+      const joined = joinPacked(pending.text, paragraph.text);
 
       if (joined.length > UNIT_MAX_CHARS) {
         flush();
         pending = paragraph;
-      } else pending = joined;
+      } else {
+        // Source paragraphs never open with a placeholder's comma — the
+        // sentinel is still a sentinel there — so a single space is the same
+        // join `joinPacked` performs on the spoken side.
+        pending = { source: `${pending.source} ${paragraph.source}`, text: joined };
+      }
     }
 
-    if (pending.length >= UNIT_MIN_CHARS) flush();
+    if (pending.text.length >= UNIT_MIN_CHARS) flush();
   }
   flush();
 
@@ -381,11 +421,34 @@ function firstSentence(text: string): string | null {
 }
 
 /**
+ * The source halves for a paragraph whose spoken text gave up its first
+ * sentence as the fast-start unit. The source splits at its own first sentence
+ * when that leaves the same shape — a remainder on both sides, or on neither —
+ * so each half is spoken from the half it names. When markers or a sentinel
+ * hide the sentence end, both halves point at the whole paragraph: a piece is
+ * still spoken *from* it, and a wrong slice would be a lie where the whole is
+ * merely coarse.
+ */
+function splitSourceLike(source: string, hasRemainder: boolean): [string, string] {
+  const sentence = firstSentence(source);
+  if (sentence === null) return [source, source];
+
+  const remainder = source.slice(sentence.length).trim();
+  if (remainder.length > 0 !== hasRemainder) return [source, source];
+
+  return [sentence, remainder];
+}
+
+/**
  * Pulls the response's opening heading off the front, if it has one. Only a
  * heading that *opens* the response is a title: a heading further down is a
  * section marker inside the body, and hoisting it to unit 0 would speak the
  * response out of order. Mutates `paragraphs`, which is this function's local
  * working list.
+ *
+ * Returns the heading *line*, `#` included: it is a paragraph like any other
+ * and goes through {@link speak}, whose `removeMarkers` is what drops the
+ * hashes — so the unit's source keeps them and its text does not.
  */
 function takeHeading(paragraphs: string[]): string | null {
   const first = paragraphs[0];
@@ -399,7 +462,7 @@ function takeHeading(paragraphs: string[]): string | null {
   if (remainder) paragraphs[0] = remainder;
   else paragraphs.shift();
 
-  return heading[1].trim();
+  return line.trim();
 }
 
 /**
@@ -416,10 +479,12 @@ function takeHeading(paragraphs: string[]): string | null {
  * to literally begin with one, after `removeMarkers`, whitespace collapse and a
  * trim.
  */
-function toUnits(texts: readonly string[]): SpeechUnit[] {
-  return texts
-    .map((text) => text.replace(/^ *, */, ""))
-    .map((text) => ({ text, chars: text.length }));
+function toUnits(packed: readonly Packed[]): SpeechUnit[] {
+  return packed.map(({ source, text: spoken }) => {
+    const text = spoken.replace(/^ *, */, "");
+
+    return { text, chars: text.length, source };
+  });
 }
 
 export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech {
@@ -428,9 +493,9 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
   const paragraphs = splitParagraphs(stripToSpeakableText(markdown));
   const heading = takeHeading(paragraphs);
 
-  const opening: string[] = [];
+  const opening: Packed[] = [];
   if (heading) {
-    const spoken = toSpokenText(heading, language);
+    const spoken = speak(heading, language);
     if (spoken) opening.push(spoken);
   }
 
@@ -447,7 +512,7 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
   // skipping past the sentinel to pick the fast start — would speak the answer
   // out of order, which is the one thing this stage must never do.
   while (paragraphs.length > 0 && SENTINEL_ONLY_RE.test(paragraphs[0])) {
-    const spoken = toSpokenText(paragraphs.shift() as string, language);
+    const spoken = speak(paragraphs.shift() as string, language);
     if (spoken) opening.push(spoken);
   }
 
@@ -459,22 +524,24 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
   const tldr = paragraphs.length > 0 && TLDR_PARAGRAPH_RE.test(paragraphs[0]) ? paragraphs[0] : null;
 
   let body = (tldr === null ? paragraphs : paragraphs.slice(1))
-    .map((paragraph) => toSpokenText(paragraph, language))
-    .filter((paragraph) => paragraph.length > 0);
+    .map((paragraph) => speak(paragraph, language))
+    .filter((paragraph): paragraph is Packed => paragraph !== null);
 
   if (tldr !== null) {
-    const spoken = toSpokenText(tldr, language);
+    const spoken = speak(tldr, language);
     if (spoken) opening.push(spoken);
   } else {
     // No TLDR: the fast-start unit is the body's first sentence, and what is
     // left of its paragraph goes back to the head of the packing queue.
     const [first, ...rest] = body;
-    const sentence = first ? firstSentence(first) : null;
+    const sentence = first ? firstSentence(first.text) : null;
 
     if (first && sentence) {
-      opening.push(sentence);
-      const remainder = first.slice(sentence.length).trim();
-      body = remainder ? [remainder, ...rest] : rest;
+      const remainder = first.text.slice(sentence.length).trim();
+      const [sentenceSource, remainderSource] = splitSourceLike(first.source, remainder.length > 0);
+
+      opening.push({ source: sentenceSource, text: sentence });
+      body = remainder ? [{ source: remainderSource, text: remainder }, ...rest] : rest;
     }
   }
 

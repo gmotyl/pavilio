@@ -139,7 +139,11 @@ class StubResizeObserver {
 }
 
 const units = (...chars: number[]): SpeechUnit[] =>
-  chars.map((count) => ({ text: "x".repeat(count), chars: count }));
+  chars.map((count) => {
+    const text = "x".repeat(count);
+
+    return { text, chars: count, source: text };
+  });
 
 const utterance = (id: string): Utterance => ({
   id,

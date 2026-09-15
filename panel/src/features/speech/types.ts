@@ -203,8 +203,16 @@ export interface Utterance {
  * awaits only the first unit — so a unit is sized to be spoken, not to be read.
  */
 export interface SpeechUnit {
+  /** Exactly what is handed to synthesis. */
   text: string;
+  /** `text.length`. */
   chars: number;
+  /**
+   * The same unit before markers, sentinels and pronunciation — what the
+   * answer pane matches against the rendered markdown. Packed from the same
+   * paragraphs as `text`, joined the same way.
+   */
+  source: string;
 }
 
 /**

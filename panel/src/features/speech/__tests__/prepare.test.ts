@@ -88,14 +88,23 @@ const noSentinelResponse = [
 ].join("\n");
 
 const NO_SENTINEL_UNITS = [
-  { text: "Co się zmieniło", chars: 15 },
-  { text: "Panel mówi ostatnią odpowiedź na głos.", chars: 38 },
+  { text: "Co się zmieniło", chars: 15, source: "# Co się zmieniło" },
+  {
+    text: "Panel mówi ostatnią odpowiedź na głos.",
+    chars: 38,
+    source: "Panel mówi ostatnią odpowiedź na głos.",
+  },
   {
     text:
       "Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko. " +
       "Druga część jest krótka i nie ma w niej niczego do usunięcia. " +
       "Trzecia część Ostatni akapit urywa się przecinkiem,",
     chars: 179,
+    // The same packing as `text`, with the mid-body heading's marker kept.
+    source:
+      "Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko. " +
+      "Druga część jest krótka i nie ma w niej niczego do usunięcia. " +
+      "## Trzecia część Ostatni akapit urywa się przecinkiem,",
   },
 ];
 
@@ -645,5 +654,54 @@ describe("prepare", () => {
         "pl",
       ),
     ).toBe("Digest hash tutaj.");
+  });
+  it("every unit carries the packed text it was spoken from", () => {
+    const { units } = prepare(packingResponse);
+
+    for (const unit of units) {
+      expect(unit.source.length).toBeGreaterThan(0);
+      expect(unit.chars).toBe(unit.text.length);
+    }
+
+    // Four short paragraphs pack into one unit; its source is the same four
+    // paragraphs, joined the same way the spoken text was.
+    const packed = [short(1), short(2), short(3), short(4)].join(" ");
+    expect(units[2].text).toBe(packed);
+    expect(units[2].source).toBe(packed);
+  });
+
+  it("source keeps the heading and TLDR markers the spoken text removes", () => {
+    const tldr = "**TLDR:** Responses are spoken. A second sentence rides along in the same TLDR paragraph.";
+    const { units } = prepare(["## What changed", "", tldr, "", "Body paragraph follows here.", ""].join("\n"));
+
+    expect(units[0].text).toBe("What changed");
+    expect(units[0].source).toBe("## What changed");
+    expect(units[1].text).not.toContain("**");
+    expect(units[1].source).toBe(tldr);
+    expect(units[2].source).toBe("Body paragraph follows here.");
+  });
+
+  it("source is untouched by the Polish pronunciation map", () => {
+    const polish = "Zrobiłem deploy na Cloudflare.";
+    const { units } = prepare(polish, { language: "pl" });
+
+    expect(units[0].text).toBe("Zrobiłem diploj na klałdfler.");
+    expect(units[0].source).toBe(polish);
+  });
+
+  it("source keeps the sentinel the spoken text words", () => {
+    const { units } = prepare("```ts\nconst x = 1;\n```\n\nZaczynamy od tego.\n", {
+      language: "pl",
+    });
+
+    expect(units[0].text).toBe("blok kodu.");
+    expect(units[0].source).toBe("⟦code⟧");
+
+    // A sentinel packed inside prose stays a sentinel in `source` too.
+    const worded = prepare(everySentinelResponse, { language: "pl" }).units.find((unit) =>
+      unit.text.includes("blok kodu"),
+    );
+    expect(worded?.source).toContain("⟦code⟧");
+    expect(worded?.source).not.toContain("blok kodu");
   });
 });
