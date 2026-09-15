@@ -13,6 +13,13 @@ describe("segmentStateFor", () => {
     }
   });
 
+  it("a run that has just started: index 0 is playing, and played once the playhead moves on", () => {
+    for (const cache of caches) {
+      expect(segmentStateFor({ index: 0, playingIndex: 0, cache })).toBe("playing");
+      expect(segmentStateFor({ index: 0, playingIndex: 1, cache })).toBe("played");
+    }
+  });
+
   it("ahead of the playhead the cache decides", () => {
     for (const cache of caches) {
       expect(segmentStateFor({ index: 4, playingIndex: 3, cache })).toBe(cache);
