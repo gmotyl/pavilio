@@ -23,7 +23,6 @@ import {
 } from "./TerminalPlacementOverlay";
 import { TerminalSeamHandles } from "./TerminalSeamHandles";
 import type { GridSpeech } from "../speech/types";
-import { utteranceUnderCursor } from "../speech/utteranceQueue";
 import type { LayoutCommitKind } from "./orderingReducer";
 import { GRID, expandPreset, getLayoutPresets, type TileLayout } from "./tileLayout";
 
@@ -582,9 +581,6 @@ function TerminalCell({
       <TerminalViewportModal
         sessionName={session.name}
         snapshot={snapshot}
-        // The reader shows the answer the transport is on — a read of the
-        // cell's queue, never a step of it. Without a host there is none.
-        answer={speech ? utteranceUnderCursor(speech.queueFor(session.id)) : null}
         onClose={() => setSnapshot(null)}
       />
     </div>
