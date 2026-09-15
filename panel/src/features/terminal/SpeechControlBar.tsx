@@ -162,10 +162,13 @@ function transportIntent(state: CellSpeechState): "speak" | "pause" | "resume" |
  * buttons. The position is still announced, because "unit 2 of 3" is the
  * information and the segments were only ever the affordance — but it is
  * announced from the eye, the button beside the strip that opens the answer
- * pane: its accessible name is "Show answer, unit 2 of 3". That name is the
- * ONLY place the position is spoken now; the `n/N` readout it replaced is
- * gone, so the wording is not decoration and a change to it is a change to
- * what a screen reader is told.
+ * pane: its accessible name is "Answer, unit 2 of 3". That name is the ONLY
+ * place the position is spoken now; the `n/N` readout it replaced is gone, so
+ * the wording is not decoration and a change to it is a change to what a
+ * screen reader is told. The name is STABLE across open and closed: the state
+ * rides in `aria-pressed`, per the WAI-ARIA toggle-button pattern. A name that
+ * flipped between "Show" and "Hide" on top of `aria-pressed` would announce
+ * the state twice, and could drift from it.
  */
 export function SpeechControlBar({
   sessionId,
@@ -210,7 +213,7 @@ export function SpeechControlBar({
   const hasPrevious = queue.previous !== null && queue.cursor === "current";
   const hasNext = queue.cursor === "previous" || queue.pending.length > 0;
 
-  const eyeLabel = `${answerOpen ? "Hide" : "Show"} answer, unit ${(progress?.unitIndex ?? 0) + 1} of ${units.length}`;
+  const eyeLabel = `Answer, unit ${(progress?.unitIndex ?? 0) + 1} of ${units.length}`;
 
   /** The segment a drag is in, while a drag is in progress. */
   const [dragging, setDragging] = useState<{ index: number; element: HTMLElement } | null>(null);

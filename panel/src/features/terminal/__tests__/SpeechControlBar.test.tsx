@@ -612,22 +612,26 @@ describe("SpeechControlBar", () => {
         expect(eye.closest("[aria-hidden='true']")).toBeNull();
       });
 
-      it("the eye's name says show or hide and carries the position", () => {
+      it("the eye's name is stable and carries the position", () => {
+        // WAI-ARIA toggle button: the name never changes, `aria-pressed` does.
+        // A name that said "Show" or "Hide" on top of it would announce the
+        // state twice.
         const closed = speaking(false);
-        expect(screen.getByRole("button", { name: "Show answer, unit 2 of 5" })).toBeInTheDocument();
-        expect(screen.getByTestId("speech-bar-eye-cell-a")).toHaveAttribute(
-          "title",
-          "Show answer, unit 2 of 5",
-        );
+        const shut = screen.getByRole("button", { name: "Answer, unit 2 of 5" });
+        expect(shut).toHaveAttribute("title", "Answer, unit 2 of 5");
+        expect(shut).toHaveAttribute("aria-pressed", "false");
         closed.unmount();
 
         const open = speaking(true);
-        expect(screen.getByRole("button", { name: "Hide answer, unit 2 of 5" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Answer, unit 2 of 5" })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
         open.unmount();
 
         // No run yet: the position is the first unit, as the readout said.
         speaking(false, noop, false);
-        expect(screen.getByRole("button", { name: "Show answer, unit 1 of 5" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Answer, unit 1 of 5" })).toBeInTheDocument();
       });
 
       it("the eye reports its pressed state", () => {
@@ -790,5 +794,8 @@ describe("SpeechControlBar", () => {
     // An empty scrubber: present, so the rail keeps its shape, with nothing in it.
     expect(screen.getByTestId("speech-bar-scrubber-cell-a")).toBeInTheDocument();
     expect(screen.queryAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(0);
+    // No eye either: the header toggle can force the bar onto an empty cell,
+    // and "unit 1 of 0" is not a position.
+    expect(screen.queryByTestId("speech-bar-eye-cell-a")).toBeNull();
   });
 });
