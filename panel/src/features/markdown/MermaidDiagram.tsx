@@ -349,9 +349,9 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
             // Marker arrowheads — only for non-sequence diagrams
             el.querySelectorAll<SVGElement>("marker path, marker circle").forEach((m) => {
               const s = m.getAttribute("stroke");
-              if (!s || s === "black" || s === "#000000") (m as HTMLElement).style.stroke = fallbackColor;
+              if (!s || s === "black" || s === "#000000") m.style.stroke = fallbackColor;
               const f = m.getAttribute("fill");
-              if (!f || f === "black" || f === "#000000") (m as HTMLElement).style.fill = fallbackColor;
+              if (!f || f === "black" || f === "#000000") m.style.fill = fallbackColor;
             });
           }
           setError(null);
