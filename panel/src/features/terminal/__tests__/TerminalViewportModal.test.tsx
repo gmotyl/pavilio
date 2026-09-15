@@ -1,8 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { TerminalViewportModal } from "../TerminalViewportModal";
 import { STORAGE_KEY } from "../cellReaderTab";
 import type { BufferSnapshot } from "../TerminalView";
+import type { Utterance } from "../../speech/types";
+
+// mermaid pulls in a browser-only rendering stack; what matters here is that
+// the fence reaches the diagram component, not what mermaid draws.
+vi.mock("../../markdown/MermaidDiagram", () => ({
+  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
+}));
 
 /**
  * Ten lines of scrollback, three rows per page, viewport on the last four
@@ -23,15 +31,44 @@ function makeSnapshot(overrides: Partial<BufferSnapshot> = {}): BufferSnapshot {
   };
 }
 
-function renderModal(props: Partial<React.ComponentProps<typeof TerminalViewportModal>> = {}) {
-  return render(
-    <TerminalViewportModal
-      sessionName="claude-pavilio"
-      snapshot={makeSnapshot()}
-      onClose={() => {}}
-      {...props}
-    />,
+function makeUtterance(text: string, overrides: Partial<Utterance> = {}): Utterance {
+  return { id: "u-1", sessionId: "cell-1", text, at: 1_000, ...overrides };
+}
+
+type ModalProps = React.ComponentProps<typeof TerminalViewportModal>;
+
+function modalElement(props: Partial<ModalProps> = {}) {
+  // MarkdownRenderer calls useNavigate, so the answer source needs a router.
+  return (
+    <MemoryRouter>
+      <TerminalViewportModal
+        sessionName="claude-pavilio"
+        snapshot={makeSnapshot()}
+        answer={null}
+        onClose={() => {}}
+        {...props}
+      />
+    </MemoryRouter>
   );
+}
+
+function renderModal(props: Partial<ModalProps> = {}) {
+  const result = render(modalElement(props));
+  return {
+    ...result,
+    rerender: (next: Partial<ModalProps> = {}) => result.rerender(modalElement(next)),
+  };
+}
+
+/**
+ * Stands in for the window `handlePrint` opens: a detached document the
+ * component writes into, so a test can inspect what would have been printed.
+ */
+function stubPrintWindow() {
+  const doc = document.implementation.createHTMLDocument("print");
+  const win = { document: doc, focus: vi.fn(), print: vi.fn() };
+  vi.stubGlobal("open", vi.fn(() => win));
+  return win;
 }
 
 describe("TerminalViewportModal", () => {
@@ -41,6 +78,7 @@ describe("TerminalViewportModal", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   // --- Characterization: the Screen source behaves as it did before tabs ---
@@ -117,13 +155,7 @@ describe("TerminalViewportModal", () => {
     // snapshot. A choice made in another cell must be picked up on open.
     const { rerender } = renderModal({ snapshot: null });
     localStorage.setItem(STORAGE_KEY, "answer");
-    rerender(
-      <TerminalViewportModal
-        sessionName="claude-pavilio"
-        snapshot={makeSnapshot()}
-        onClose={() => {}}
-      />,
-    );
+    rerender({ snapshot: makeSnapshot() });
     expect(screen.getByRole("tab", { name: "Answer" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Screen" })).toHaveAttribute("aria-selected", "false");
   });
@@ -144,5 +176,82 @@ describe("TerminalViewportModal", () => {
     expect(() => fireEvent.click(screen.getByRole("tab", { name: "Answer" }))).not.toThrow();
     expect(setItem).toHaveBeenCalled();
     expect(screen.getByRole("tab", { name: "Answer" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  // --- The Answer source ---
+
+  const answerDoc = ["# Deploy plan", "", "Roll out **gradually** to each store."].join("\n");
+
+  it("renders the answer as formatted markdown, not as terminal text", () => {
+    localStorage.setItem(STORAGE_KEY, "answer");
+    renderModal({ answer: makeUtterance(answerDoc) });
+    const panel = screen.getByTestId("cell-reader-panel-answer");
+    expect(screen.getByRole("heading", { level: 1, name: "Deploy plan" })).toBeInTheDocument();
+    expect(panel.querySelector("strong")).toHaveTextContent("gradually");
+    // The raw markdown markers are not shown as text.
+    expect(panel).not.toHaveTextContent("# Deploy plan");
+    expect(panel).not.toHaveTextContent("**gradually**");
+    // The Screen source's text and its line counter are not showing.
+    expect(screen.queryByLabelText("Terminal viewport text")).not.toBeInTheDocument();
+    expect(screen.queryByText("4 / 10 lines")).not.toBeInTheDocument();
+    expect(screen.getByTestId("viewport-modal-print")).toBeInTheDocument();
+  });
+
+  it("draws a mermaid fence in the answer as a diagram", async () => {
+    localStorage.setItem(STORAGE_KEY, "answer");
+    const fence = ["Flow:", "", "```mermaid", "flowchart TD", "  A --> B", "```", ""].join("\n");
+    renderModal({ answer: makeUtterance(fence) });
+    await waitFor(() => {
+      expect(screen.getByTestId("mermaid").textContent).toBe("flowchart TD\n  A --> B");
+    });
+    const panel = screen.getByTestId("cell-reader-panel-answer");
+    expect(panel.querySelector("pre code")).toBeNull();
+  });
+
+  it("says no answer was captured when the cell has none", () => {
+    localStorage.setItem(STORAGE_KEY, "answer");
+    renderModal({ answer: null });
+    const panel = screen.getByTestId("cell-reader-panel-answer");
+    expect(panel).toHaveTextContent("No answer was captured for this session.");
+    expect(panel.querySelector(".animate-pulse")).toBeNull();
+  });
+
+  it("shows the newer response when one arrives while open", () => {
+    localStorage.setItem(STORAGE_KEY, "answer");
+    const { rerender } = renderModal({ answer: makeUtterance("First response") });
+    expect(screen.getByTestId("cell-reader-panel-answer")).toHaveTextContent("First response");
+    rerender({ answer: makeUtterance("Second response", { id: "u-2", at: 2_000 }) });
+    const panel = screen.getByTestId("cell-reader-panel-answer");
+    expect(panel).toHaveTextContent("Second response");
+    expect(panel).not.toHaveTextContent("First response");
+  });
+
+  it("prints the rendered answer while the answer source is showing", () => {
+    localStorage.setItem(STORAGE_KEY, "answer");
+    const win = stubPrintWindow();
+    renderModal({ answer: makeUtterance(answerDoc) });
+    fireEvent.click(screen.getByTestId("viewport-modal-print"));
+    expect(window.open).toHaveBeenCalled();
+    const body = win.document.body;
+    // The rendered HTML went out, not markdown source or buffer text.
+    // (textContent, not toHaveTextContent: jest-dom rejects nodes that belong
+    // to the detached print document.)
+    expect(body.querySelector("strong")?.textContent).toBe("gradually");
+    expect(body.textContent).toContain("Deploy plan");
+    expect(body.textContent).not.toContain("**gradually**");
+    expect(body.textContent).not.toContain("line-6");
+    expect(win.focus).toHaveBeenCalled();
+  });
+
+  it("prints the buffer text while the screen source is showing", () => {
+    const win = stubPrintWindow();
+    renderModal({ answer: makeUtterance(answerDoc) });
+    expect(screen.getByRole("tab", { name: "Screen" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByTestId("viewport-modal-print"));
+    const pre = win.document.body.querySelector("pre");
+    expect(pre?.textContent).toContain("line-6");
+    expect(pre?.textContent).toContain("line-9");
+    expect(pre?.textContent).not.toContain("line-5");
+    expect(win.document.body.textContent).not.toContain("Deploy plan");
   });
 });

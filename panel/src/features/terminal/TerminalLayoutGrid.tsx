@@ -581,6 +581,7 @@ function TerminalCell({
       <TerminalViewportModal
         sessionName={session.name}
         snapshot={snapshot}
+        answer={null}
         onClose={() => setSnapshot(null)}
       />
     </div>

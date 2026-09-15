@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronUp, Printer, X } from "lucide-react";
 import type { BufferSnapshot, ColoredRun } from "./TerminalView";
+import type { Utterance } from "../speech/types";
+import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import {
   readCellReaderTab,
   writeCellReaderTab,
@@ -15,8 +17,17 @@ const TABS: { id: CellReaderTab; label: string }[] = [
 interface Props {
   sessionName: string | null;
   snapshot: BufferSnapshot | null;
+  /**
+   * The cell's current utterance, or `null` when nothing has been captured for
+   * it — a plain shell, no emitter installed, or a server restart since the
+   * last turn. The modal renders `utterance.text` as markdown; it never
+   * prepares, strips or stores it.
+   */
+  answer: Utterance | null;
   onClose: () => void;
 }
+
+const NO_ANSWER_TEXT = "No answer was captured for this session.";
 
 function runStyle(run: ColoredRun): React.CSSProperties {
   const s: React.CSSProperties = {};
@@ -91,13 +102,53 @@ function printSnapshot(text: string, title: string): void {
   setTimeout(() => w.print(), 100);
 }
 
+/**
+ * Print the Answer source as it is rendered: the panel's HTML goes out as-is,
+ * so headings, lists and drawn diagrams print the way they look on screen.
+ */
+function printAnswer(html: string, title: string): void {
+  const w = window.open("", "_blank");
+  if (!w) return;
+  const doc = w.document;
+  doc.title = title;
+  const style = doc.createElement("style");
+  style.textContent = `
+    body {
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 24px;
+      margin: 0;
+    }
+    h1.print-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0 0 16px 0;
+    }
+    pre { white-space: pre-wrap; }
+    svg { max-width: 100%; }
+  `;
+  doc.head.appendChild(style);
+  const h1 = doc.createElement("h1");
+  h1.className = "print-title";
+  h1.textContent = title;
+  doc.body.appendChild(h1);
+  const content = doc.createElement("div");
+  content.innerHTML = html;
+  doc.body.appendChild(content);
+  w.focus();
+  setTimeout(() => w.print(), 100);
+}
+
 export function TerminalViewportModal({
   sessionName,
   snapshot,
+  answer,
   onClose,
 }: Props) {
   const [topIndex, setTopIndex] = useState<number>(0);
   const [tab, setTab] = useState<CellReaderTab>(() => readCellReaderTab());
+  const answerPanelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -162,6 +213,12 @@ export function TerminalViewportModal({
   };
 
   const handlePrint = () => {
+    // Print follows the source: the Answer panel's rendered HTML, or the
+    // Screen source's buffer text exactly as before the tabs existed.
+    if (tab === "answer") {
+      printAnswer(answerPanelRef.current?.innerHTML ?? "", title);
+      return;
+    }
     const text = snapshotToPlainText(
       snapshot,
       topIndex,
@@ -239,12 +296,14 @@ export function TerminalViewportModal({
             className="flex items-center gap-1"
             style={{ color: "var(--text-secondary)" }}
           >
-            <span
-              className="text-[11px] mr-2 tabular-nums"
-              style={{ color: "var(--text-tertiary)" }}
-            >
-              {linesShown} / {totalLines} lines
-            </span>
+            {tab === "screen" && (
+              <span
+                className="text-[11px] mr-2 tabular-nums"
+                style={{ color: "var(--text-tertiary)" }}
+              >
+                {linesShown} / {totalLines} lines
+              </span>
+            )}
             <button
               type="button"
               data-testid="viewport-modal-print"
@@ -294,9 +353,20 @@ export function TerminalViewportModal({
             id="cell-reader-panel-answer"
             aria-labelledby="cell-reader-tab-answer"
             data-testid="cell-reader-panel-answer"
+            ref={answerPanelRef}
             className="flex-1 min-h-0 overflow-auto px-4 py-3"
             style={{ background: snapshot.defaultBg }}
-          />
+          >
+            {answer ? (
+              // Read from the prop on every render so a newer utterance
+              // replaces the previous one without any local copy.
+              <MarkdownRenderer content={answer.text} />
+            ) : (
+              <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>
+                {NO_ANSWER_TEXT}
+              </p>
+            )}
+          </div>
         ) : (
           <div
             role="tabpanel"
