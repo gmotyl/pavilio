@@ -22,7 +22,7 @@ vi.mock("../../git/GitHistory", () => ({ default: () => null }));
 
 const baseProps = {
   repo: { name: "pavilio", path: "/tmp/pavilio" },
-  viewMode: "unified" as const,
+  viewMode: "flat" as const,
   onViewModeChange: () => {},
   wideToggle: null,
   repoOpenFile: null,

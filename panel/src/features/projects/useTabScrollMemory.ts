@@ -15,7 +15,7 @@ const SKIP_SECTIONS = new Set<string>(["iterm"]);
 export function useTabScrollMemory(
   project: string | undefined,
   section: string | undefined,
-  containerRef: React.RefObject<HTMLElement>,
+  containerRef: React.RefObject<HTMLElement | null>,
 ): void {
   const lastKeyRef = useRef<string | null>(null);
 

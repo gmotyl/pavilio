@@ -50,7 +50,7 @@ export function injectHighlight(html: string, term: string): string {
   // Only highlight text outside HTML tags
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`(${escaped})`, "gi");
-  return html.replace(/(<[^>]*>)|([^<]+)/g, (match, tag, text) => {
+  return html.replace(/(<[^>]*>)|([^<]+)/g, (_match, tag, text) => {
     if (tag) return tag;
     return text.replace(re, '<mark style="background:#ca8a0460;color:var(--text-primary);border-radius:2px">$1</mark>');
   });

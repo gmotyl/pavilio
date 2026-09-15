@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { X } from "lucide-react";
-import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
+import type { SessionMeta } from "./useTerminalSessions";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { useProjectColors } from "./useProjectColors";
@@ -11,22 +11,19 @@ interface Props {
   focusedId: string | null;
   currentProject: string;
   onFocus: (sessionId: string, project: string) => void;
-  onCreate: (opts: CreateSessionOpts) => void;
   onClose: () => void;
 }
 
 /**
  * Option D companion — the drawer half. Slides in from the left over the
- * terminal and shows every session grouped by project, plus a "New" picker
- * for creating a shell in any project. Designed for mobile (also works fine
- * on narrow desktop if invoked there).
+ * terminal and shows every session grouped by project. Designed for mobile
+ * (also works fine on narrow desktop if invoked there).
  */
 export function TerminalSpineDrawer({
   sessions,
   focusedId,
   currentProject,
   onFocus,
-  onCreate,
   onClose,
 }: Props) {
   const { colorFor } = useProjectColors();
