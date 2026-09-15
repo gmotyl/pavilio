@@ -26,17 +26,21 @@ describe("cellReaderTab storage", () => {
   });
 
   it("survives a localStorage that throws on read", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    // Spy on the instance: in jsdom `localStorage` is a plain object with
+    // own methods, so a `Storage.prototype` spy would never be reached.
+    const getItem = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
       throw new Error("disabled");
     });
     expect(() => readCellReaderTab()).not.toThrow();
     expect(readCellReaderTab()).toBe("screen");
+    expect(getItem).toHaveBeenCalled();
   });
 
   it("survives a localStorage that throws on write", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
       throw new Error("quota");
     });
     expect(() => writeCellReaderTab("answer")).not.toThrow();
+    expect(setItem).toHaveBeenCalled();
   });
 });
