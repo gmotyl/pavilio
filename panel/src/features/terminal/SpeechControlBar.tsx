@@ -1,6 +1,7 @@
 import { Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
+import { segmentStateFor, type SegmentState } from "./segmentState";
 import { speechPulse } from "./CellSpeakButton";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../speech/types";
 import { getStoredVoice } from "../speech/voices";
@@ -10,20 +11,6 @@ export interface SpeechControlBarProps {
   /** The panel's one speech host. See {@link GridSpeech}. */
   speech: GridSpeech;
 }
-
-/**
- * A scrubber segment's state. Five, because `ready` had to split: the cache
- * stores the in-flight promise, so "is it cached" said yes the moment the
- * socket opened and `cascadeWarm`'s three concurrent slots flipped three
- * segments together — a ladder that read as a single step.
- *
- * `warming` is not a fifth colour either: it borrows the red the speak control
- * already uses for *blocked on synthesis*, which is the same fact at unit
- * granularity. And it is never terminal — a failed synthesis evicts the entry,
- * so the segment returns to `cold`, the honest state for a unit nothing is
- * fetching. Clicking either is still allowed.
- */
-type SegmentState = "played" | "playing" | "warming" | "ready" | "cold";
 
 /**
  * Characters per second to assume before anything has been measured. Only the
@@ -217,16 +204,20 @@ export function SpeechControlBar({ sessionId, speech }: SpeechControlBarProps) {
   const voice = getStoredVoice();
 
   const segmentStateAt = (index: number): SegmentState => {
-    if (progress && index === progress.unitIndex) return "playing";
-    if (progress && index < progress.unitIndex) return "played";
+    // Read from the cache rather than tracked, because the warming cascade
+    // fills it from two places (the host's arrival warm and the player's
+    // ladder) and neither reports to the bar. The playhead-vs-cache rule itself
+    // is shared with the answer pane's rail — see `segmentStateFor`.
+    const state = segmentStateFor({
+      index,
+      playingIndex: progress?.unitIndex ?? null,
+      cache: speechCacheState(units[index]?.text ?? "", { voice }),
+    });
     // A measured unit is one whose audio has been in the element: played, this
-    // run, whether or not a run is still going.
-    if (durations.has(index)) return "played";
-    // Absent, in flight, or in hand — the cache's own three answers, which are
-    // three of this type's five. Read from the cache rather than tracked,
-    // because the warming cascade fills it from two places (the host's arrival
-    // warm and the player's ladder) and neither reports to the bar.
-    return speechCacheState(units[index]?.text ?? "", { voice });
+    // run, whether or not a run is still going. Only the bar has `durations`,
+    // so this stays here; it never overrides the unit that is playing now.
+    if (state !== "playing" && durations.has(index)) return "played";
+    return state;
   };
 
   const seekAt = useCallback(
