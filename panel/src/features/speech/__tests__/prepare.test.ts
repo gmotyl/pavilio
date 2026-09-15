@@ -87,12 +87,16 @@ const noSentinelResponse = [
   "",
 ].join("\n");
 
+/** The first prose paragraph, whole: the fast-start sentence and its remainder are both spoken from it. */
+const NO_SENTINEL_FIRST_PARAGRAPH =
+  "Panel mówi ostatnią odpowiedź na głos. Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko.";
+
 const NO_SENTINEL_UNITS = [
   { text: "Co się zmieniło", chars: 15, source: "# Co się zmieniło" },
   {
     text: "Panel mówi ostatnią odpowiedź na głos.",
     chars: 38,
-    source: "Panel mówi ostatnią odpowiedź na głos.",
+    source: NO_SENTINEL_FIRST_PARAGRAPH,
   },
   {
     text:
@@ -100,9 +104,10 @@ const NO_SENTINEL_UNITS = [
       "Druga część jest krótka i nie ma w niej niczego do usunięcia. " +
       "Trzecia część Ostatni akapit urywa się przecinkiem,",
     chars: 179,
-    // The same packing as `text`, with the mid-body heading's marker kept.
+    // The same packing as `text`, with the mid-body heading's marker kept and
+    // the remainder standing in for its whole paragraph.
     source:
-      "Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko. " +
+      `${NO_SENTINEL_FIRST_PARAGRAPH} ` +
       "Druga część jest krótka i nie ma w niej niczego do usunięcia. " +
       "## Trzecia część Ostatni akapit urywa się przecinkiem,",
   },
@@ -703,5 +708,25 @@ describe("prepare", () => {
     );
     expect(worded?.source).toContain("⟦code⟧");
     expect(worded?.source).not.toContain("blok kodu");
+  });
+
+  it("pieces cut from one paragraph share the paragraph as their source", () => {
+    // The fast-start split: sentence and remainder are both spoken from the
+    // whole first paragraph.
+    const first = "Opening sentence here. The rest of the paragraph carries on for a while after it.";
+    const split = prepare(`${first}\n\nA second paragraph closes the answer.\n`).units;
+    expect(split[0].text).toBe("Opening sentence here.");
+    expect(split[0].source).toBe(first);
+    expect(split[1].text.startsWith("The rest of the paragraph")).toBe(true);
+    expect(split[1].source.startsWith(first)).toBe(true);
+
+    // A ceiling cut: an oversized paragraph falls into several pieces, each
+    // carrying the paragraph whole.
+    const sentence = "This sentence is long enough to matter when it is repeated many times over.";
+    const oversized = Array.from({ length: 12 }, () => sentence).join(" ");
+    const { units } = prepare(`**TLDR:** Short.\n\n${oversized}\n`);
+    const pieces = units.filter((unit) => unit.text.startsWith(sentence));
+    expect(pieces.length).toBeGreaterThan(1);
+    for (const piece of pieces) expect(piece.source).toBe(oversized);
   });
 });

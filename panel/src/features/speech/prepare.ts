@@ -331,18 +331,15 @@ function cutAtCeiling(text: string, max: number): string[] {
 
 /**
  * {@link cutAtCeiling} for a paragraph in both readings. The spoken text decides
- * the pieces. The source is cut the same way and paired up when it falls into
- * as many pieces — the usual case, since markers and sentinels move sentence
- * ends very little — and otherwise every piece carries the whole paragraph:
- * a piece is still spoken *from* that paragraph, and a wrong slice of it would
- * be a lie where the whole is merely coarse.
+ * the pieces; every piece carries the whole paragraph as its source. The
+ * consumer of `source` — `matchUnitsToBlocks` — works at the granularity of a
+ * rendered block, and a paragraph is one block, so a slice of it would map to
+ * exactly the block the whole does. Cutting the source too would only buy a
+ * second sentence splitter to keep aligned with the first, and a wrong slice
+ * would be a lie where the whole is merely coarse.
  */
 function cutPackedAtCeiling(paragraph: Packed, max: number): Packed[] {
-  const texts = cutAtCeiling(paragraph.text, max);
-  const sources = cutAtCeiling(paragraph.source, max);
-  const aligned = sources.length === texts.length;
-
-  return texts.map((text, i) => ({ source: aligned ? sources[i] : paragraph.source, text }));
+  return cutAtCeiling(paragraph.text, max).map((text) => ({ source: paragraph.source, text }));
 }
 
 /**
@@ -418,25 +415,6 @@ function packUnits(paragraphs: readonly Packed[]): Packed[] {
 /** The opening sentence, used as a small fast-start unit when there is no TLDR. */
 function firstSentence(text: string): string | null {
   return text.match(/^[\s\S]*?[.!?…]+(?=\s|$)/)?.[0].trim() ?? null;
-}
-
-/**
- * The source halves for a paragraph whose spoken text gave up its first
- * sentence as the fast-start unit. The source splits at its own first sentence
- * when that leaves the same shape — a remainder on both sides, or on neither —
- * so each half is spoken from the half it names. When markers or a sentinel
- * hide the sentence end, both halves point at the whole paragraph: a piece is
- * still spoken *from* it, and a wrong slice would be a lie where the whole is
- * merely coarse.
- */
-function splitSourceLike(source: string, hasRemainder: boolean): [string, string] {
-  const sentence = firstSentence(source);
-  if (sentence === null) return [source, source];
-
-  const remainder = source.slice(sentence.length).trim();
-  if (remainder.length > 0 !== hasRemainder) return [source, source];
-
-  return [sentence, remainder];
 }
 
 /**
@@ -532,16 +510,17 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
     if (spoken) opening.push(spoken);
   } else {
     // No TLDR: the fast-start unit is the body's first sentence, and what is
-    // left of its paragraph goes back to the head of the packing queue.
+    // left of its paragraph goes back to the head of the packing queue. Both
+    // halves keep the whole paragraph as their source — see
+    // `cutPackedAtCeiling` for why a piece is never sliced.
     const [first, ...rest] = body;
     const sentence = first ? firstSentence(first.text) : null;
 
     if (first && sentence) {
       const remainder = first.text.slice(sentence.length).trim();
-      const [sentenceSource, remainderSource] = splitSourceLike(first.source, remainder.length > 0);
 
-      opening.push({ source: sentenceSource, text: sentence });
-      body = remainder ? [{ source: remainderSource, text: remainder }, ...rest] : rest;
+      opening.push({ source: first.source, text: sentence });
+      body = remainder ? [{ source: first.source, text: remainder }, ...rest] : rest;
     }
   }
 

@@ -79,8 +79,11 @@ describe("matchUnitsToBlocks", () => {
 
   it("a paragraph split by the ceiling maps to both of its units", () => {
     // Units 2 and 3 are the two halves; unit 4 packs everything after them.
+    // Both halves carry the whole paragraph as their source — the match works
+    // at block granularity, and a paragraph is one block.
     expect(units).toHaveLength(5);
-    expect(units[2].source.length + units[3].source.length).toBeLessThan(longParagraph.length + 1);
+    expect(units[2].source).toBe(longParagraph);
+    expect(units[3].source).toBe(longParagraph);
     expect(map.unitToBlocks[2]).toEqual([LONG]);
     expect(map.unitToBlocks[3]).toEqual([LONG]);
     expect(map.blockToUnit[LONG]).toBe(2);
