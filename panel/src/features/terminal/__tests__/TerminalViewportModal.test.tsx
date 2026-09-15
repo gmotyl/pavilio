@@ -254,4 +254,25 @@ describe("TerminalViewportModal", () => {
     expect(pre?.textContent).not.toContain("line-5");
     expect(win.document.body.textContent).not.toContain("Deploy plan");
   });
+
+  it("disables print while the answer source has nothing to print", () => {
+    localStorage.setItem(STORAGE_KEY, "answer");
+    stubPrintWindow();
+    renderModal({ answer: null });
+    const print = screen.getByTestId("viewport-modal-print");
+    expect(print).toBeDisabled();
+    expect(print).toHaveAttribute("title", "Nothing to print — no answer was captured");
+    fireEvent.click(print);
+    expect(window.open).not.toHaveBeenCalled();
+  });
+
+  it("re-enables print once an answer arrives", () => {
+    localStorage.setItem(STORAGE_KEY, "answer");
+    const { rerender } = renderModal({ answer: null });
+    expect(screen.getByTestId("viewport-modal-print")).toBeDisabled();
+    rerender({ answer: makeUtterance(answerDoc) });
+    const print = screen.getByTestId("viewport-modal-print");
+    expect(print).toBeEnabled();
+    expect(print).toHaveAttribute("title", "Print");
+  });
 });

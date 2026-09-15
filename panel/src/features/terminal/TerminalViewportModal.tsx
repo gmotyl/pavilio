@@ -212,7 +212,14 @@ export function TerminalViewportModal({
     writeCellReaderTab(next);
   };
 
+  // The Answer source has nothing worth printing until an utterance arrives:
+  // printing the empty-state sentence alone would only open a blank page.
+  const nothingToPrint = tab === "answer" && answer === null;
+
   const handlePrint = () => {
+    // Guard here too, so a keyboard or programmatic trigger cannot open an
+    // empty print window while the button is disabled.
+    if (nothingToPrint) return;
     // Print follows the source: the Answer panel's rendered HTML, or the
     // Screen source's buffer text exactly as before the tabs existed.
     if (tab === "answer") {
@@ -308,7 +315,8 @@ export function TerminalViewportModal({
               type="button"
               data-testid="viewport-modal-print"
               onClick={handlePrint}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] transition-colors"
+              disabled={nothingToPrint}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 background: "var(--bg-base)",
                 color: "var(--text-secondary)",
@@ -320,7 +328,11 @@ export function TerminalViewportModal({
               onMouseLeave={(e) =>
                 (e.currentTarget.style.background = "var(--bg-base)")
               }
-              title="Print"
+              title={
+                nothingToPrint
+                  ? "Nothing to print — no answer was captured"
+                  : "Print"
+              }
             >
               <Printer size={12} />
               Print
