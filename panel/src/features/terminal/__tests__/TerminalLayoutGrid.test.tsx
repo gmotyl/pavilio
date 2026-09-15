@@ -12,6 +12,19 @@ import {
   rgb,
 } from "./projectColors.harness";
 import { INERT_SPEECH } from "./speech.harness";
+import { MemoryRouter } from "react-router-dom";
+import type { GridSpeech, Utterance } from "../../speech/types";
+import {
+  emptyUtteranceQueue,
+  utteranceQueueReducer,
+  type UtteranceQueue,
+} from "../../speech/utteranceQueue";
+
+// mermaid pulls in a browser-only rendering stack; the cell reader's Answer
+// source only needs markdown to render, not a diagram to be drawn.
+vi.mock("../../markdown/MermaidDiagram", () => ({
+  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
+}));
 
 // Connection state is per-browser and lives in the terminal instance pool.
 // Stub the two leaf reads the disconnected badge makes so a cell can be put
@@ -263,6 +276,136 @@ describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () 
 
     fireEvent.keyDown(window, { key: "u", metaKey: true });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("TerminalLayoutGrid — the cell reader's answer", () => {
+  beforeEach(() => {
+    // The reader remembers its last source; start every test on the default.
+    localStorage.clear();
+  });
+
+  function makeUtterance(sessionId: string, text: string): Utterance {
+    return { id: `u-${sessionId}`, sessionId, text, at: 1_000 };
+  }
+
+  /** A queue whose cursor sits on `utterance`, built the way the host builds it. */
+  function queueWith(utterance: Utterance): UtteranceQueue {
+    return utteranceQueueReducer(emptyUtteranceQueue, {
+      type: "arrived",
+      utterance,
+      speaking: false,
+    });
+  }
+
+  /**
+   * A speech host that answers `queueFor` per cell and spies on everything
+   * else, so a test can prove opening the reader touched nothing but the read.
+   */
+  function speechWith(queues: Record<string, UtteranceQueue>) {
+    return {
+      ...INERT_SPEECH,
+      queueFor: vi.fn((id: string) => queues[id] ?? emptyUtteranceQueue),
+      onSpeak: vi.fn(),
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onStop: vi.fn(),
+      onPrevious: vi.fn(),
+      onNext: vi.fn(),
+      onArm: vi.fn(),
+      onJumpToUnit: vi.fn(),
+      onSeekWithinUnit: vi.fn(),
+    } satisfies GridSpeech;
+  }
+
+  // MarkdownRenderer calls useNavigate, so the Answer source needs a router.
+  function renderGridInRouter(
+    overrides: Partial<Parameters<typeof TerminalLayoutGrid>[0]> = {},
+  ) {
+    const sessions = overrides.sessions ?? [makeSession()];
+    const props = {
+      sessions,
+      focusedId: sessions[0]?.id ?? null,
+      maximized: false,
+      onFocus: vi.fn(),
+      onExit: vi.fn(),
+      onReady: vi.fn(),
+      onPlace: vi.fn(),
+      speech: INERT_SPEECH,
+      ...overrides,
+    };
+    return render(
+      <MemoryRouter>
+        <TerminalLayoutGrid {...props} />
+      </MemoryRouter>,
+    );
+  }
+
+  function openReaderOnAnswer(sessionId: string) {
+    fireEvent.click(screen.getByTestId(`terminal-cell-eye-${sessionId}`));
+    fireEvent.click(screen.getByTestId("cell-reader-tab-answer"));
+    return screen.getByTestId("cell-reader-panel-answer");
+  }
+
+  it("hands the cell reader the utterance under that cell's cursor", () => {
+    const session = makeSession({ id: "s-answer" });
+    const speech = speechWith({
+      [session.id]: queueWith(makeUtterance(session.id, "Deployed **v2** to staging.")),
+    });
+    renderGridInRouter({ sessions: [session], speech });
+
+    const panel = openReaderOnAnswer(session.id);
+
+    expect(panel).toHaveTextContent("Deployed v2 to staging.");
+    expect(panel).not.toHaveTextContent("No answer was captured for this session.");
+
+    // Opening the reader is a read: nothing on the host beyond `queueFor`.
+    expect(speech.queueFor).toHaveBeenCalledWith(session.id);
+    for (const spy of [
+      speech.onSpeak,
+      speech.onPause,
+      speech.onResume,
+      speech.onStop,
+      speech.onPrevious,
+      speech.onNext,
+      speech.onArm,
+      speech.onJumpToUnit,
+      speech.onSeekWithinUnit,
+    ]) {
+      expect(spy).not.toHaveBeenCalled();
+    }
+  });
+
+  it("hands the cell reader null when there is no speech host", () => {
+    const session = makeSession({ id: "s-no-host" });
+    renderGridInRouter({
+      sessions: [session],
+      speech: undefined as unknown as GridSpeech,
+    });
+
+    const panel = openReaderOnAnswer(session.id);
+
+    expect(panel).toHaveTextContent("No answer was captured for this session.");
+  });
+
+  it("keeps each cell's answer to its own reader", () => {
+    const first = makeSession({ id: "s-first", name: "first" });
+    const second = makeSession({ id: "s-second", name: "second" });
+    const speech = speechWith({
+      [first.id]: queueWith(makeUtterance(first.id, "Answer for the first cell")),
+      [second.id]: queueWith(makeUtterance(second.id, "Answer for the second cell")),
+    });
+    renderGridInRouter({ sessions: [first, second], speech });
+
+    const firstPanel = openReaderOnAnswer(first.id);
+    expect(firstPanel).toHaveTextContent("Answer for the first cell");
+    expect(firstPanel).not.toHaveTextContent("Answer for the second cell");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    const secondPanel = openReaderOnAnswer(second.id);
+    expect(secondPanel).toHaveTextContent("Answer for the second cell");
+    expect(secondPanel).not.toHaveTextContent("Answer for the first cell");
   });
 });
 
