@@ -232,9 +232,6 @@ export function TerminalsSurface({
               }
               onSetDrawerOpen(false);
             }}
-            onCreate={(opts) => {
-              onCreateTerminal(opts);
-            }}
             onClose={() => onSetDrawerOpen(false)}
           />
         )}

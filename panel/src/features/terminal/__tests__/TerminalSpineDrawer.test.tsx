@@ -45,7 +45,6 @@ function renderDrawer() {
         focusedId="s1"
         currentProject="ch"
         onFocus={vi.fn()}
-        onCreate={vi.fn()}
         onClose={vi.fn()}
       />
     </MemoryRouter>,
