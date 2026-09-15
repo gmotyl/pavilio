@@ -535,6 +535,59 @@ describe("AnswerPane", () => {
     expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
   });
 
+  it("Escape inside the pane does not reach the cell", () => {
+    const h = harness(MARKDOWN, null);
+    const onClose = vi.fn();
+    const cell = { keyDown: vi.fn() };
+
+    // The cell's key handling is the terminal's: an Escape that leaked out of
+    // the pane would land in the shell as a keystroke.
+    render(
+      <MemoryRouter>
+        <div onKeyDown={cell.keyDown}>
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} />
+        </div>
+      </MemoryRouter>,
+    );
+
+    fireEvent.keyDown(h1(), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(cell.keyDown).not.toHaveBeenCalled();
+
+    // Only Escape is the pane's to keep: any other key still bubbles.
+    fireEvent.keyDown(h1(), { key: "a" });
+    expect(cell.keyDown).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Enter on a link inside a block follows the link, not the jump", () => {
+    const linked = [
+      "# Deploy plan",
+      "",
+      "The runbook lives in [the deploy guide](https://example.com/deploy) and explains the migration order before any traffic moves.",
+      "",
+    ].join("\n");
+    const h = harness(linked, null);
+    const speech = makeSpeech(h);
+    render(paneElement(speech));
+
+    const link = screen.getByRole("link", { name: "the deploy guide" });
+    const paragraph = link.closest("p");
+    // The paragraph is a matched block — the guard is what keeps the link out.
+    expect(paragraph).toHaveAttribute("data-unit", "1");
+    expect(paragraph).toHaveAttribute("role", "button");
+
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    fireEvent.keyDown(link, { key: "Enter" });
+    fireEvent.keyDown(link, { key: " " });
+    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
+
+    // Enter on the block itself is still the jump.
+    fireEvent.keyDown(paragraph!, { key: "Enter" });
+    expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
+  });
+
   it("a new utterance swaps the text in place", () => {
     const h = harness(MARKDOWN, { unitIndex: 1, unitTime: 0, unitDuration: null });
     const speech = makeSpeech(h);
