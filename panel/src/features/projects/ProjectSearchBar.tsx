@@ -10,7 +10,7 @@ interface Props {
   query: string;
   onQueryChange: (next: string) => void;
   onClose: () => void;
-  inputRef: RefObject<HTMLInputElement>;
+  inputRef: RefObject<HTMLInputElement | null>;
 
   // Mode
   isReposSearch: boolean;
