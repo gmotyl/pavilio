@@ -112,6 +112,22 @@ describe("TerminalViewportModal", () => {
     expect(screen.getByRole("tab", { name: "Screen" })).toHaveAttribute("aria-selected", "false");
   });
 
+  it("reopens on the source chosen last time for another cell", () => {
+    // TerminalLayoutGrid keeps one modal mounted per cell, closed with a null
+    // snapshot. A choice made in another cell must be picked up on open.
+    const { rerender } = renderModal({ snapshot: null });
+    localStorage.setItem(STORAGE_KEY, "answer");
+    rerender(
+      <TerminalViewportModal
+        sessionName="claude-pavilio"
+        snapshot={makeSnapshot()}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "Answer" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Screen" })).toHaveAttribute("aria-selected", "false");
+  });
+
   it("opens on the screen source when storage is unavailable", () => {
     const getItem = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
       throw new Error("disabled");

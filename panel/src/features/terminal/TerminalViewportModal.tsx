@@ -217,7 +217,6 @@ export function TerminalViewportModal({
                   role="tab"
                   id={`cell-reader-tab-${id}`}
                   aria-selected={selected}
-                  aria-controls={`cell-reader-panel-${id}`}
                   data-testid={`cell-reader-tab-${id}`}
                   onClick={() => selectTab(id)}
                   className="px-2.5 py-1 rounded-md text-[12px] transition-colors"
