@@ -166,11 +166,14 @@ function harness(markdown = MARKDOWN, progress: SpeechProgress | null = null): H
   };
 }
 
+/** The footer's switch, off and inert unless a test wires it. */
+const OFF = { autoOpen: false, onAutoOpenChange: () => {} };
+
 function paneElement(speech: GridSpeech, onClose: () => void = () => {}) {
   // MarkdownRenderer calls useNavigate, so the body needs a router.
   return (
     <MemoryRouter>
-      <AnswerPane sessionId="cell-a" speech={speech} onClose={onClose} />
+      <AnswerPane sessionId="cell-a" speech={speech} onClose={onClose} {...OFF} />
     </MemoryRouter>
   );
 }
@@ -485,6 +488,49 @@ describe("AnswerPane", () => {
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
+  it("the footer checkbox reflects the cell switch and writes nothing to storage", () => {
+    const h = harness();
+    const onAutoOpenChange = vi.fn();
+    const footer = (autoOpen: boolean) => (
+      <MemoryRouter>
+        <AnswerPane
+          sessionId="cell-a"
+          speech={makeSpeech(h)}
+          onClose={() => {}}
+          autoOpen={autoOpen}
+          onAutoOpenChange={onAutoOpenChange}
+        />
+      </MemoryRouter>
+    );
+    const setItem = vi.spyOn(localStorage, "setItem");
+    const removeItem = vi.spyOn(localStorage, "removeItem");
+
+    const view = render(footer(false));
+    const box = screen.getByTestId("answer-pane-auto-open-cell-a") as HTMLInputElement;
+    expect(box).toBe(screen.getByRole("checkbox", { name: "Open on new answer" }));
+    expect(box).not.toBeChecked();
+    // The footer is a row of the card, under the body — not inside the scroll container.
+    const root = screen.getByTestId("answer-pane-cell-a");
+    const body = screen.getByTestId("answer-pane-body-cell-a");
+    expect(box.closest(".answer-pane-footer")?.parentElement).toBe(root);
+    expect(body.contains(box)).toBe(false);
+
+    // A click reports the flipped value to the owner and touches no storage:
+    // the cell's switch is not the browser-wide default.
+    fireEvent.click(box);
+    expect(onAutoOpenChange).toHaveBeenCalledTimes(1);
+    expect(onAutoOpenChange).toHaveBeenCalledWith(true);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalled();
+
+    // Controlled: the box follows the prop, and flips the other way from on.
+    view.rerender(footer(true));
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    expect(onAutoOpenChange).toHaveBeenLastCalledWith(false);
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
   it("Escape closes", () => {
     const h = harness(MARKDOWN, null);
     const onClose = vi.fn();
@@ -514,7 +560,7 @@ describe("AnswerPane", () => {
     render(
       <MemoryRouter>
         <div onMouseDown={cell.mouseDown} onClick={cell.click} onDragStart={cell.dragStart}>
-          <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} />
+          <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} {...OFF} />
         </div>
       </MemoryRouter>,
     );
@@ -545,7 +591,7 @@ describe("AnswerPane", () => {
     render(
       <MemoryRouter>
         <div onKeyDown={cell.keyDown}>
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
         </div>
       </MemoryRouter>,
     );

@@ -12,6 +12,13 @@ export interface AnswerPaneProps {
   speech: GridSpeech;
   /** Escape was pressed inside the pane. `TerminalView` closes it and refocuses the terminal. */
   onClose: () => void;
+  /**
+   * The cell's own "Open on new answer" switch, shown in the footer. Owned by
+   * `TerminalView` — seeded from the browser-wide default at mount and never
+   * written back to it — so the pane only reflects it and reports a flip.
+   */
+  autoOpen: boolean;
+  onAutoOpenChange: (on: boolean) => void;
 }
 
 /**
@@ -159,7 +166,13 @@ function layoutRail(body: HTMLElement | null, rail: HTMLElement | null): void {
  * follow state: a reader who scrolls ahead is left alone until the next unit
  * starts — the one moment being pulled back is what the reader wants.
  */
-export function AnswerPane({ sessionId, speech, onClose }: AnswerPaneProps) {
+export function AnswerPane({
+  sessionId,
+  speech,
+  onClose,
+  autoOpen,
+  onAutoOpenChange,
+}: AnswerPaneProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
@@ -327,6 +340,21 @@ export function AnswerPane({ sessionId, speech, onClose }: AnswerPaneProps) {
         <div ref={textRef} className="answer-pane-text">
           {answer ? <MarkdownRenderer content={answer.text} /> : null}
         </div>
+      </div>
+      {/* One row under the body, inside the card and outside the scroll
+          container, so it stays put while the text scrolls. The pane's only
+          control besides the text. */}
+      <div className="answer-pane-footer">
+        <label className="answer-pane-footer-label" htmlFor={`answer-pane-auto-open-${sessionId}`}>
+          <input
+            id={`answer-pane-auto-open-${sessionId}`}
+            data-testid={`answer-pane-auto-open-${sessionId}`}
+            type="checkbox"
+            checked={autoOpen}
+            onChange={() => onAutoOpenChange(!autoOpen)}
+          />
+          Open on new answer
+        </label>
       </div>
     </div>
   );

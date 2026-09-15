@@ -3,6 +3,7 @@ import { ExternalLink, Copy, Check, FileText, ChevronDown, ChevronRight, Save, P
 import { copyToClipboard } from "../../lib/clipboard";
 import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 import { VoiceSelect } from "../speech/VoiceSelect";
+import { AutoOpenAnswerToggle } from "../speech/AutoOpenAnswerToggle";
 
 interface SettingsFile {
   name: string;
@@ -459,6 +460,9 @@ export default function AgentSettings() {
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Speech</h2>
         <VoiceSelect />
+        <div className="mt-4">
+          <AutoOpenAnswerToggle />
+        </div>
       </section>
 
       {/* Workspace actions */}

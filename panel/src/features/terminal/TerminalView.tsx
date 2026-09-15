@@ -10,7 +10,9 @@ import { captureBufferSnapshot } from "./bufferSnapshot";
 import { SpeechControlBar } from "./SpeechControlBar";
 import { useMobileReconnect } from "./useMobileReconnect";
 import { viewportLooksBlank } from "./viewportBlank";
+import { getStoredAutoOpenAnswer } from "../speech/autoOpenAnswer";
 import type { GridSpeech } from "../speech/types";
+import type { UtteranceQueue } from "../speech/utteranceQueue";
 
 interface TerminalViewProps {
   sessionId: string;
@@ -88,6 +90,55 @@ export function TerminalView({
   // starts closed. The bar's eye toggles it; the pane itself mounts here, as a
   // sibling of the observed container, exactly like the bar.
   const [answerOpen, setAnswerOpen] = useState(false);
+
+  // The cell's own "Open on new answer" switch. Seeded ONCE at mount from the
+  // browser-wide default Settings keeps, and never written back to it: a cell
+  // flipped mid-session keeps its choice, and the default changing later
+  // reaches only cells mounted afterwards.
+  const [autoOpen, setAutoOpen] = useState(getStoredAutoOpenAnswer);
+
+  // Hiding the bar CLOSES the pane rather than merely covering it — a pane
+  // without its bar has no eye to close it, and one that came back unasked
+  // when the bar returned would be a surprise.
+  useEffect(() => {
+    if (!speechBarVisible) setAnswerOpen(false);
+  }, [speechBarVisible]);
+
+  // Arrival detection. Every utterance id the queue has ever shown this cell;
+  // an id not in the set is a new answer. The first run seeds the set silently
+  // — the utterance the server hands a freshly mounted tab is old news, not an
+  // answer to the question just asked. Cursor moves (previous / next) and
+  // playback introduce no new ids and so open nothing.
+  const queue: UtteranceQueue | undefined = speech?.queueFor(sessionId);
+  const seenUtteranceIds = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!queue) return;
+    const ids = [queue.previous, queue.current, ...queue.pending]
+      .filter((u) => u !== null)
+      .map((u) => u.id);
+    const seen = seenUtteranceIds.current;
+    if (!seen) {
+      seenUtteranceIds.current = new Set(ids);
+      return;
+    }
+    let arrived = false;
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      arrived = true;
+    }
+    // The bar's visibility outranks the switch, as it outranks the eye. The
+    // arrival is still recorded above: it is not held back for the bar's return.
+    if (arrived && autoOpen && speechBarVisible) setAnswerOpen(true);
+  }, [queue, autoOpen, speechBarVisible]);
+
+  // Escape in the pane: close it and put the keyboard back in the terminal,
+  // so the next question can be typed at once. `LiveTerminal.terminal` is the
+  // xterm `Terminal`; its own `focus()` is what lands the caret in the PTY.
+  const closeAnswer = useCallback(() => {
+    setAnswerOpen(false);
+    instRef.current?.terminal.focus();
+  }, []);
 
   // Latest-refs so changing callbacks don't blow away the mount effect.
   // Parent re-renders (e.g. a session opened, killed or renamed anywhere in
@@ -216,7 +267,13 @@ export function TerminalView({
       {/* The bar's visibility outranks the eye: a pane without its bar has no
           eye to close it, so hiding the bar unmounts the pane too. */}
       {speech && speechBarVisible && answerOpen ? (
-        <AnswerPane sessionId={sessionId} speech={speech} onClose={() => setAnswerOpen(false)} />
+        <AnswerPane
+          sessionId={sessionId}
+          speech={speech}
+          onClose={closeAnswer}
+          autoOpen={autoOpen}
+          onAutoOpenChange={setAutoOpen}
+        />
       ) : null}
     </div>
   );

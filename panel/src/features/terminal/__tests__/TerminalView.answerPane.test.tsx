@@ -10,9 +10,14 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AUTO_OPEN_ANSWER_STORAGE_KEY } from "../../speech/autoOpenAnswer";
 import { prepare } from "../../speech/prepare";
 import type { GridSpeech, Utterance } from "../../speech/types";
-import { emptyUtteranceQueue, utteranceQueueReducer } from "../../speech/utteranceQueue";
+import {
+  emptyUtteranceQueue,
+  utteranceQueueReducer,
+  type UtteranceQueue,
+} from "../../speech/utteranceQueue";
 
 /**
  * The terminal instance stand-in: `fit()` refreshes AND sends a resize frame,
@@ -20,9 +25,10 @@ import { emptyUtteranceQueue, utteranceQueueReducer } from "../../speech/utteran
  */
 const term = vi.hoisted(() => {
   const fit = vi.fn();
+  const focus = vi.fn();
   const sent: string[] = [];
   const observed: Element[] = [];
-  return { fit, sent, observed };
+  return { fit, focus, sent, observed };
 });
 
 vi.mock("../terminalInstances", () => {
@@ -42,7 +48,8 @@ vi.mock("../terminalInstances", () => {
       };
       return {
         sessionId,
-        terminal: { cols: 80, rows: 24, refresh: () => {} },
+        // `focus` is the xterm Terminal's own — what Escape in the pane lands on.
+        terminal: { cols: 80, rows: 24, refresh: () => {}, focus: term.focus },
         fitAddon: {},
         holder,
         ws,
@@ -103,15 +110,39 @@ const utterance: Utterance = { id: "u-1", sessionId: "cell-a", text: MARKDOWN, a
 
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
-/** A host with one utterance under the cursor and nothing playing. */
-function makeSpeech(): GridSpeech {
-  const queue = utteranceQueueReducer(emptyUtteranceQueue, {
+/**
+ * A host with one utterance under the cursor and nothing playing. The queue is
+ * held in a box the tests can move: `arrive`, `previous` and `next` step it the
+ * way the real host's reducer does, and a `rerender` then hands the cell the
+ * new queue reference — which is all the cell ever sees of an arrival.
+ */
+type Host = GridSpeech & {
+  arrive: (id: string) => void;
+  previous: () => void;
+  next: () => void;
+};
+
+function makeSpeech(): Host {
+  let queue: UtteranceQueue = utteranceQueueReducer(emptyUtteranceQueue, {
     type: "arrived",
     utterance,
     speaking: false,
   });
   const units = prepare(MARKDOWN).units;
   return {
+    arrive: (id) => {
+      queue = utteranceQueueReducer(queue, {
+        type: "arrived",
+        utterance: { ...utterance, id, at: queue.pending.length + 2 },
+        speaking: false,
+      });
+    },
+    previous: () => {
+      queue = utteranceQueueReducer(queue, { type: "previous" });
+    },
+    next: () => {
+      queue = utteranceQueueReducer(queue, { type: "next" });
+    },
     stateFor: () => "ready",
     queueFor: () => queue,
     unitsFor: () => units,
@@ -128,7 +159,7 @@ function makeSpeech(): GridSpeech {
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
+  };
 }
 
 /** MarkdownRenderer calls useNavigate, so the cell needs a router. */
@@ -147,9 +178,18 @@ async function settleTerminal(): Promise<void> {
 
 const eye = (): HTMLElement => screen.getByTestId("speech-bar-eye-cell-a");
 const pane = (): HTMLElement | null => screen.queryByTestId("answer-pane-cell-a");
+const footerBox = (): HTMLInputElement =>
+  screen.getByTestId("answer-pane-auto-open-cell-a") as HTMLInputElement;
+
+/** The browser-wide default, as Settings would leave it. */
+const storeDefault = (on: boolean): void => {
+  if (on) localStorage.setItem(AUTO_OPEN_ANSWER_STORAGE_KEY, "1");
+  else localStorage.removeItem(AUTO_OPEN_ANSWER_STORAGE_KEY);
+};
 
 beforeEach(() => {
   term.fit.mockClear();
+  term.focus.mockClear();
   term.sent.length = 0;
   term.observed.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
@@ -202,12 +242,149 @@ describe("TerminalView and the answer pane", () => {
     expect(screen.queryByTestId("speech-bar-cell-a")).toBeNull();
   });
 
+  it("hiding the bar forgets the pane was open", async () => {
+    const speech = makeSpeech();
+    const view = render(cell(speech));
+    await settleTerminal();
+    fireEvent.click(eye());
+    expect(pane()).not.toBeNull();
+
+    view.rerender(cell(speech, false));
+    expect(pane()).toBeNull();
+
+    // The bar comes back closed: hiding it CLOSED the pane rather than merely
+    // covering it, so nothing reappears unasked.
+    view.rerender(cell(speech, true));
+    expect(screen.getByTestId("speech-bar-cell-a")).toBeInTheDocument();
+    expect(pane()).toBeNull();
+    expect(eye()).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("no speech host, no pane", async () => {
     render(cell(undefined));
     await settleTerminal();
 
     expect(screen.queryByTestId("speech-bar-cell-a")).toBeNull();
     expect(screen.queryByTestId("speech-bar-eye-cell-a")).toBeNull();
+    expect(pane()).toBeNull();
+  });
+
+  it("Escape puts focus back in the terminal", async () => {
+    const speech = makeSpeech();
+    render(cell(speech));
+    await settleTerminal();
+    fireEvent.click(eye());
+    const opened = pane();
+    expect(opened).not.toBeNull();
+    expect(term.focus).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(opened!, { key: "Escape" });
+    expect(pane()).toBeNull();
+    // The xterm Terminal's own focus — so the next question can be typed at once.
+    expect(term.focus).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TerminalView opens the pane on a new answer", () => {
+  it("a cell seeds its switch from the default at mount", async () => {
+    storeDefault(true);
+    const speech = makeSpeech();
+    render(cell(speech));
+    await settleTerminal();
+    fireEvent.click(eye());
+    expect(footerBox()).toBeChecked();
+
+    // The cell's switch is its own: flipping it writes nothing back to the
+    // default, and the default changing later does not reach a mounted cell.
+    fireEvent.click(footerBox());
+    expect(footerBox()).not.toBeChecked();
+    expect(localStorage.getItem(AUTO_OPEN_ANSWER_STORAGE_KEY)).toBe("1");
+    fireEvent.click(footerBox());
+    expect(footerBox()).toBeChecked();
+
+    storeDefault(false);
+    fireEvent.click(eye());
+    fireEvent.click(eye());
+    expect(footerBox()).toBeChecked();
+  });
+
+  it("a cell mounted with the default off starts off", async () => {
+    storeDefault(false);
+    const speech = makeSpeech();
+    render(cell(speech));
+    await settleTerminal();
+    fireEvent.click(eye());
+    expect(footerBox()).not.toBeChecked();
+  });
+
+  it("a new answer opens the pane and focuses it when the switch is on", async () => {
+    storeDefault(true);
+    const speech = makeSpeech();
+    const view = render(cell(speech));
+    await settleTerminal();
+    expect(pane()).toBeNull();
+
+    speech.arrive("u-2");
+    view.rerender(cell(speech));
+
+    const opened = pane();
+    expect(opened).not.toBeNull();
+    expect(eye()).toHaveAttribute("aria-pressed", "true");
+    // Focus lands on the pane so Escape works at once.
+    expect(document.activeElement).toBe(opened);
+  });
+
+  it("the utterance a fresh tab is handed does not open the pane", async () => {
+    storeDefault(true);
+    const speech = makeSpeech();
+    const view = render(cell(speech));
+    await settleTerminal();
+
+    // The stored utterance the server hands a fresh tab is old news, and so is
+    // any re-render that hands the same queue over again.
+    expect(pane()).toBeNull();
+    view.rerender(cell(speech));
+    expect(pane()).toBeNull();
+  });
+
+  it("previous and next open nothing", async () => {
+    storeDefault(true);
+    const speech = makeSpeech();
+    speech.arrive("u-2");
+    const view = render(cell(speech));
+    await settleTerminal();
+    expect(pane()).toBeNull();
+
+    speech.previous();
+    view.rerender(cell(speech));
+    expect(pane()).toBeNull();
+
+    speech.next();
+    view.rerender(cell(speech));
+    expect(pane()).toBeNull();
+  });
+
+  it("off, or a hidden bar, opens nothing", async () => {
+    // Off: an arrival is not an opening.
+    storeDefault(false);
+    const off = makeSpeech();
+    const offView = render(cell(off));
+    await settleTerminal();
+    off.arrive("u-2");
+    offView.rerender(cell(off));
+    expect(pane()).toBeNull();
+    offView.unmount();
+
+    // Hidden bar: the bar's visibility outranks the checkbox, and the arrival
+    // is not held back for when the bar returns either.
+    storeDefault(true);
+    const hidden = makeSpeech();
+    const hiddenView = render(cell(hidden, false));
+    await settleTerminal();
+    hidden.arrive("u-2");
+    hiddenView.rerender(cell(hidden, false));
+    expect(pane()).toBeNull();
+    hiddenView.rerender(cell(hidden, true));
     expect(pane()).toBeNull();
   });
 });

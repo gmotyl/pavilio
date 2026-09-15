@@ -707,6 +707,31 @@ input[type="checkbox"] {
   padding: 10px 12px 10px 6px;
 }
 
+/* One row under the body, inside the card: the cell's "Open on new answer"
+   switch. Outside the scroll container so it stays put while the text scrolls. */
+.answer-pane-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.answer-pane-footer-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.answer-pane-footer input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent, #7aa2f7);
+}
+
 /* The scrubber turned vertical: one segment per unit, top to bottom. A grid
    item stretched to the text column's height — as tall as the scroll content —
    with the segments placed absolutely inside it by `layoutRail`, each spanning
