@@ -12,7 +12,7 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { prepare } from "../../speech/prepare";
 import type { SpeechProgress } from "../../speech/useSpeechPlayer";
@@ -199,11 +199,140 @@ const speaking = (): HTMLElement[] => blocks().filter((block) => block.hasAttrib
 const segment = (index: number): HTMLElement =>
   screen.getByTestId(`answer-pane-seg-cell-a-${index}`);
 
+/**
+ * jsdom has no layout, and the follow step is nothing but layout: "does the
+ * body overflow", "where is the block". So this file installs the one layout
+ * the pane needs, as prototype getters, BEFORE the pane mounts — the mount-time
+ * scroll reads them in the same commit that creates the blocks, so stubbing
+ * the elements afterwards would be too late.
+ *
+ * The rule: the k-th direct child of `.prose` sits at `k * BLOCK_TOP` and is
+ * `BLOCK_HEIGHT` tall; everything else is at 0 with no height. The body's
+ * `scrollHeight` / `clientHeight` are whatever the test says in `layout`.
+ */
+const BLOCK_TOP = 100;
+const BLOCK_HEIGHT = 80;
+const layout = { scrollHeight: 0, clientHeight: 0 };
+const scrollTo = vi.fn();
+/** What the pane's ResizeObserver was asked to watch. */
+const observed: Element[] = [];
+
+class StubResizeObserver {
+  observe(element: Element): void {
+    observed.push(element);
+  }
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+const blockIndexOf = (element: Element): number | null => {
+  const parent = element.parentElement;
+  if (!parent?.classList.contains("prose")) return null;
+  return Array.prototype.indexOf.call(parent.children, element);
+};
+
+const isBody = (element: Element): boolean => element.classList.contains("answer-pane-body");
+
+type Descriptors = Record<string, PropertyDescriptor | undefined>;
+const saved: { element: Descriptors; html: Descriptors } = { element: {}, html: {} };
+
+function installLayout(): void {
+  for (const name of ["scrollHeight", "clientHeight", "scrollTo"]) {
+    saved.element[name] = Object.getOwnPropertyDescriptor(Element.prototype, name);
+  }
+  for (const name of ["offsetTop", "offsetHeight"]) {
+    saved.html[name] = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name);
+  }
+  Object.defineProperty(Element.prototype, "scrollHeight", {
+    configurable: true,
+    get(this: Element) {
+      return isBody(this) ? layout.scrollHeight : 0;
+    },
+  });
+  Object.defineProperty(Element.prototype, "clientHeight", {
+    configurable: true,
+    get(this: Element) {
+      return isBody(this) ? layout.clientHeight : 0;
+    },
+  });
+  Object.defineProperty(Element.prototype, "scrollTo", {
+    configurable: true,
+    writable: true,
+    value: scrollTo,
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+    configurable: true,
+    get(this: HTMLElement) {
+      const index = blockIndexOf(this);
+      return index === null ? 0 : index * BLOCK_TOP;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return blockIndexOf(this) === null ? 0 : BLOCK_HEIGHT;
+    },
+  });
+}
+
+function restoreLayout(): void {
+  const restore = (target: object, descriptors: Descriptors): void => {
+    for (const [name, descriptor] of Object.entries(descriptors)) {
+      if (descriptor) Object.defineProperty(target, name, descriptor);
+      else delete (target as Record<string, unknown>)[name];
+    }
+  };
+  restore(Element.prototype, saved.element);
+  restore(HTMLElement.prototype, saved.html);
+}
+
+/** The body overflows: three screens of text in one. */
+const overflowing = (): void => {
+  layout.scrollHeight = 2000;
+  layout.clientHeight = 300;
+};
+
+/** The body fits: nothing to scroll. */
+const fitting = (): void => {
+  layout.scrollHeight = 300;
+  layout.clientHeight = 300;
+};
+
+const body = (): HTMLElement => screen.getByTestId("answer-pane-body-cell-a");
+
+/** Every `scrollTo` the body received, as its `top`. */
+const scrolls = (): number[] =>
+  scrollTo.mock.calls
+    .filter((_, callIndex) => scrollTo.mock.contexts[callIndex] === body())
+    .map(([options]) => (options as ScrollToOptions).top ?? Number.NaN);
+
+/** A unit no block was rendered from — what a sentinel-only paragraph leaves behind. */
+const GHOST: SpeechUnit = {
+  text: "nothing on the screen was ever spoken like this",
+  chars: 47,
+  source: "nothing on the screen was ever spoken like this",
+};
+
+const box = (index: number): { top: number; height: number } => ({
+  top: Number.parseFloat(segment(index).style.top),
+  height: Number.parseFloat(segment(index).style.height),
+});
+
 beforeEach(() => {
   warm.clear();
   warming.clear();
   cacheListeners.clear();
   bodyRenders.count = 0;
+  scrollTo.mockClear();
+  observed.length = 0;
+  fitting();
+  installLayout();
+  vi.stubGlobal("ResizeObserver", StubResizeObserver);
+});
+
+afterEach(() => {
+  restoreLayout();
+  vi.unstubAllGlobals();
 });
 
 describe("AnswerPane", () => {
@@ -432,5 +561,93 @@ describe("AnswerPane", () => {
       "H1",
       "P",
     ]);
+  });
+
+  /**
+   * Following the voice. The pane moves at ONE moment — the unit boundary —
+   * and only when there is somewhere to move to. Inside a unit nothing moves,
+   * and a reader who scrolled ahead is left alone until the next unit starts.
+   */
+  describe("following", () => {
+    it("scrolls once to the new unit when the text overflows", () => {
+      overflowing();
+      const h = harness(MARKDOWN, null);
+      render(paneElement(makeSpeech(h)));
+      // Nothing is playing: nothing to follow.
+      expect(scrolls()).toEqual([]);
+
+      // Unit 0 is the heading, block 0 at the top: a third of a screen above
+      // it is off the top, so the target clamps at 0.
+      h.progress.set({ unitIndex: 0, unitTime: 0, unitDuration: null });
+      expect(scrolls()).toEqual([0]);
+
+      // Unit 2 starts at block 3 (h1, p, pre, p, p): 300 − 300 / 3.
+      h.progress.set({ unitIndex: 2, unitTime: 0, unitDuration: null });
+      expect(scrolls()).toEqual([0, 3 * BLOCK_TOP - layout.clientHeight / 3]);
+      expect(scrollTo).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not scroll when the answer fits", () => {
+      fitting();
+      const h = harness(MARKDOWN, { unitIndex: 0, unitTime: 0, unitDuration: null });
+      render(paneElement(makeSpeech(h)));
+
+      h.progress.set({ unitIndex: 1, unitTime: 0, unitDuration: null });
+      h.progress.set({ unitIndex: 2, unitTime: 0, unitDuration: null });
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("does not scroll again inside a unit", () => {
+      overflowing();
+      const h = harness(MARKDOWN, { unitIndex: 1, unitTime: 0, unitDuration: null });
+      render(paneElement(makeSpeech(h)));
+      expect(scrolls()).toEqual([BLOCK_TOP - layout.clientHeight / 3]);
+
+      // Four ticks inside the unit, and the reader scrolling by hand: neither
+      // is a reason to move.
+      h.progress.tick();
+      h.progress.tick();
+      fireEvent.scroll(body());
+      h.progress.tick();
+      h.progress.tick();
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+    });
+
+    it("opening mid-run lands on the spoken block", () => {
+      overflowing();
+      // Unit 2 is already playing when the eye opens the pane.
+      const h = harness(MARKDOWN, { unitIndex: 2, unitTime: 0, unitDuration: null });
+      render(paneElement(makeSpeech(h)));
+
+      expect(scrolls()).toEqual([3 * BLOCK_TOP - layout.clientHeight / 3]);
+      expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+    });
+
+    it("a unit without a block scrolls nothing and keeps a minimum segment", () => {
+      overflowing();
+      const h = harness(MARKDOWN, { unitIndex: 1, unitTime: 0, unitDuration: null });
+      // A ghost between the heading and the first paragraph: spoken, never drawn.
+      h.units = [h.units[0], GHOST, h.units[1], h.units[2]];
+      render(paneElement(makeSpeech(h)));
+
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(speaking()).toHaveLength(0);
+      expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(4);
+
+      // The rail is laid out from the blocks: the heading's segment spans the
+      // heading, the ghost gets 8px right after it, and the rest follow their
+      // blocks — unit 3 spanning its two paragraphs (blocks 3 and 4).
+      expect(box(0)).toEqual({ top: 0, height: BLOCK_HEIGHT });
+      expect(box(1).height).toBe(8);
+      expect(box(1).top).toBeGreaterThanOrEqual(box(0).top + box(0).height);
+      expect(box(2)).toEqual({ top: BLOCK_TOP, height: BLOCK_HEIGHT });
+      expect(box(3)).toEqual({ top: 3 * BLOCK_TOP, height: BLOCK_TOP + BLOCK_HEIGHT });
+      // The ghost's segment still says what it is.
+      expect(segment(1)).toHaveAttribute("data-segment", "playing");
+
+      // Re-laid when the body's box changes — the observer watches the body,
+      // never the xterm container.
+      expect(observed).toContain(body());
+    });
   });
 });

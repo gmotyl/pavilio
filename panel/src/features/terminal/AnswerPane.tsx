@@ -40,6 +40,51 @@ function readCacheVersion(): number {
 /** The three attributes a matched block carries, and the one the spoken block adds. */
 const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as const;
 
+/** The height of a segment whose unit has no block on screen. */
+const MIN_SEGMENT_HEIGHT = 8;
+/** The gap a blockless segment leaves after the one before it. */
+const SEGMENT_GAP = 2;
+
+/**
+ * Places the rail's segments over their units' blocks — see the note on the
+ * component. Reads the matched blocks (`[data-unit]`) of the body, and writes
+ * `top` / `height` onto the rail's children, one per unit, in rail coordinates
+ * (the body is the `offsetParent` of both, so the rail's own `offsetTop` is
+ * the only correction). A unit with no block gets {@link MIN_SEGMENT_HEIGHT}
+ * right after the previous segment's end.
+ */
+function layoutRail(body: HTMLElement | null, rail: HTMLElement | null): void {
+  if (!body || !rail) return;
+  const segments = Array.from(rail.children).filter(
+    (child): child is HTMLElement => child instanceof HTMLElement,
+  );
+  if (segments.length === 0) return;
+
+  const spans = new Map<number, { top: number; bottom: number }>();
+  for (const block of body.querySelectorAll<HTMLElement>("[data-unit]")) {
+    const unit = Number(block.dataset.unit);
+    const top = block.offsetTop;
+    const bottom = top + block.offsetHeight;
+    const span = spans.get(unit);
+    if (!span) spans.set(unit, { top, bottom });
+    else {
+      span.top = Math.min(span.top, top);
+      span.bottom = Math.max(span.bottom, bottom);
+    }
+  }
+
+  const origin = rail.offsetTop;
+  let previousEnd = 0;
+  segments.forEach((segment, index) => {
+    const span = spans.get(index);
+    const top = span ? span.top - origin : previousEnd + SEGMENT_GAP;
+    const height = span ? Math.max(span.bottom - span.top, MIN_SEGMENT_HEIGHT) : MIN_SEGMENT_HEIGHT;
+    segment.style.top = `${top}px`;
+    segment.style.height = `${height}px`;
+    previousEnd = top + height;
+  });
+}
+
 /**
  * The cell's answer pane: the utterance under the cursor rendered as markdown
  * in a card under the speech bar, with the spoken block marked and a rail of
@@ -89,10 +134,36 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * role, `aria-hidden`, with the same segment states from the same
  * `segmentStateFor`. Unmatched blocks — code, tables, diagrams, anything
  * speech turned into a sentinel — stay plain elements.
+ *
+ * ## Why the rail is laid out from the blocks, imperatively
+ *
+ * A segment spans its unit's blocks — from the top of the first to the bottom
+ * of the last — so that the rail IS the text's outline and a click on it lands
+ * where the eye expects. Those spans are `offsetTop` / `offsetHeight` of
+ * react-markdown's elements, known only after layout, so they are written
+ * onto the segments as `style.top` / `style.height` in the same layout effect
+ * that marks the blocks, and again whenever the body or the text column
+ * changes size (a lazy mermaid diagram arriving, the cell resizing). The rail
+ * column is a grid item beside the text, stretched to the text's height and
+ * scrolling with it, and the body is the `offsetParent` of both — so a block's
+ * `offsetTop` is at once its rail coordinate and its scroll target. A unit no
+ * block was rendered from (a sentinel-only paragraph) keeps a minimum 8px
+ * segment placed right after the previous one, so the rail never loses a unit.
+ *
+ * ## Why the pane scrolls once per unit, and never on a tick
+ *
+ * Following is a `useEffect` on the unit index alone. When the index changes
+ * (or the pane mounts mid-run, which is the same moment for a pane that was
+ * closed), and only when the body overflows, it scrolls the body so the
+ * unit's first block sits a third of the way down. No `scroll` listener, no
+ * follow state: a reader who scrolls ahead is left alone until the next unit
+ * starts — the one moment being pulled back is what the reader wants.
  */
 export function AnswerPane({ sessionId, speech, onClose }: AnswerPaneProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
 
   const answer = utteranceUnderCursor(speech.queueFor(sessionId));
   const units = speech.unitsFor(sessionId);
@@ -144,7 +215,32 @@ export function AnswerPane({ sessionId, speech, onClose }: AnswerPaneProps) {
       child.setAttribute("tabindex", "0");
       if (unit === unitIndex) child.setAttribute("data-speaking", "");
     });
+    // The marks moved or the text changed: the rail follows in the same commit.
+    layoutRail(bodyRef.current, railRef.current);
   }, [text, units, unitIndex]);
+
+  // Re-lay the rail when the body or the text column changes size — see the
+  // note on the component. The pane's own boxes, never the xterm container.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const observer = new ResizeObserver(() => layoutRail(body, railRef.current));
+    observer.observe(body);
+    if (textRef.current) observer.observe(textRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  // Follow the voice: once per unit, on the boundary or on a mid-run mount,
+  // and only when there is somewhere to scroll to. Never on a tick — the
+  // snapshot above does not change inside a unit, so this never runs then.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (unitIndex === null || !body) return;
+    if (body.scrollHeight <= body.clientHeight) return;
+    const block = body.querySelector<HTMLElement>(`[data-unit="${unitIndex}"]`);
+    if (!block) return;
+    body.scrollTo({ top: Math.max(0, block.offsetTop - body.clientHeight / 3) });
+  }, [unitIndex]);
 
   const jumpTo = useCallback(
     (unit: number): void => {
@@ -203,9 +299,9 @@ export function AnswerPane({ sessionId, speech, onClose }: AnswerPaneProps) {
         }}
       >
         {/* The scrubber turned vertical: a pointer affordance, not a row of
-            buttons — see the note on the component. Equal heights for now;
-            spanning each unit's blocks is the follow step. */}
-        <div className="answer-pane-rail" aria-hidden="true">
+            buttons — see the note on the component. Each segment is placed by
+            `layoutRail` to span its unit's blocks. */}
+        <div ref={railRef} className="answer-pane-rail" aria-hidden="true">
           {units.map((unit, index) => {
             const state = segmentStateFor({
               index,
@@ -228,7 +324,7 @@ export function AnswerPane({ sessionId, speech, onClose }: AnswerPaneProps) {
             );
           })}
         </div>
-        <div className="answer-pane-text">
+        <div ref={textRef} className="answer-pane-text">
           {answer ? <MarkdownRenderer content={answer.text} /> : null}
         </div>
       </div>

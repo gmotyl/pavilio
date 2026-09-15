@@ -693,8 +693,12 @@ input[type="checkbox"] {
 }
 
 /* The scroll container. The rail is INSIDE it, as a 22px grid column, so the
-   segments stay aligned with their blocks as the text scrolls. */
+   segments stay aligned with their blocks as the text scrolls. Positioned so
+   that it is the `offsetParent` of the blocks AND of the rail: a block's
+   `offsetTop` is then both its rail coordinate and its scroll target, which is
+   what `layoutRail` and the follow effect in `AnswerPane` rely on. */
 .answer-pane-body {
+  position: relative;
   display: grid;
   grid-template-columns: 22px 1fr;
   column-gap: 10px;
@@ -703,21 +707,21 @@ input[type="checkbox"] {
   padding: 10px 12px 10px 6px;
 }
 
-/* The scrubber turned vertical: one segment per unit, top to bottom. */
+/* The scrubber turned vertical: one segment per unit, top to bottom. A grid
+   item stretched to the text column's height — as tall as the scroll content —
+   with the segments placed absolutely inside it by `layoutRail`, each spanning
+   its unit's blocks. */
 .answer-pane-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  position: relative;
   align-self: stretch;
-  min-height: 100%;
 }
 
 .answer-pane-seg {
-  position: relative;
-  flex: 1 1 0;
-  min-height: 8px;
+  position: absolute;
+  left: 8px;
   width: 6px;
-  margin-left: 8px;
+  /* `top` and `height` come from `layoutRail`; this is the blockless minimum. */
+  min-height: 8px;
   border-radius: 3px;
   cursor: pointer;
 }

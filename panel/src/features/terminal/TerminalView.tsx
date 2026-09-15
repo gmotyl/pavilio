@@ -5,6 +5,7 @@ import {
   releaseTerminal,
   type LiveTerminal,
 } from "./terminalInstances";
+import { AnswerPane } from "./AnswerPane";
 import { captureBufferSnapshot } from "./bufferSnapshot";
 import { SpeechControlBar } from "./SpeechControlBar";
 import { useMobileReconnect } from "./useMobileReconnect";
@@ -186,12 +187,14 @@ export function TerminalView({
   useMobileReconnect({ ws, getDims, reopen, isViewportBlank });
 
   return (
-    // The bar is a SIBLING of the observed container, never a child of it and
-    // never in its flow. `resizeObserver.observe(container)` above watches the
-    // inner div only, and `inst.fit()` — which refreshes the terminal AND sends
-    // a PTY resize unconditionally — is the thing that must not be provoked by
-    // a control appearing. Absolute positioning over the xterm is what buys
-    // that: showing or hiding the bar changes no box that anything measures.
+    // The bar — and the answer pane under it — are SIBLINGS of the observed
+    // container, never children of it and never in its flow.
+    // `resizeObserver.observe(container)` above watches the inner div only,
+    // and `inst.fit()` — which refreshes the terminal AND sends a PTY resize
+    // unconditionally — is the thing that must not be provoked by a control
+    // appearing. Absolute positioning over the xterm is what buys that:
+    // showing or hiding the bar, opening or closing the pane, changes no box
+    // that anything measures.
     <div className="w-full h-full relative">
       <div
         ref={containerRef}
@@ -209,6 +212,11 @@ export function TerminalView({
           answerOpen={answerOpen}
           onToggleAnswer={() => setAnswerOpen((open) => !open)}
         />
+      ) : null}
+      {/* The bar's visibility outranks the eye: a pane without its bar has no
+          eye to close it, so hiding the bar unmounts the pane too. */}
+      {speech && speechBarVisible && answerOpen ? (
+        <AnswerPane sessionId={sessionId} speech={speech} onClose={() => setAnswerOpen(false)} />
       ) : null}
     </div>
   );
