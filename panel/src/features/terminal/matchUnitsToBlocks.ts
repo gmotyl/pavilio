@@ -31,7 +31,13 @@
  *   twelve or more characters echoed as its paragraph's opener
  *   (`## Installation steps` + "Installation steps are…") marks both blocks
  *   while the heading is spoken — adjacent, overlapping segments, not a wrong
- *   scroll.
+ *   scroll. Also accepted: a short heading in the middle of the body
+ *   (`## Notes`, 5 chars) is packed by `prepare` into its paragraph's unit, so
+ *   its own block is under the floor and stays unmarked while the paragraph
+ *   beside it is.
+ * - An empty unit (`source === ""`) claims nothing: without that guard the
+ *   equality rule would hand an `<hr>` — an empty `textContent` block — to it,
+ *   and an empty prefix would `startsWith` every block.
  * - `PREFIX_CHARS` (40): `cutAtCeiling` turns one 900-character paragraph into
  *   two units. The second is a substring of the block and `b.includes(u)`
  *   finds it; the first is too, but the general case — the block having been

@@ -174,4 +174,14 @@ describe("matchUnitsToBlocks", () => {
     expect(result.blockToUnit[1]).toBe(1);
     expect(result.unitToBlocks[0]).toEqual([0]);
   });
+
+  it("an empty unit claims no block", () => {
+    // An `<hr>` renders as a block with an empty `textContent`. Without the
+    // empty-unit guard `"" === ""` would mark it for an empty unit, and an
+    // empty prefix would `startsWith` every block.
+    const paragraph = "The rule separates the heading from what follows it.";
+    const result = matchUnitsToBlocks([{ source: "" }, { source: paragraph }], ["", paragraph]);
+    expect(result.unitToBlocks).toEqual([[], [1]]);
+    expect(result.blockToUnit).toEqual([null, 1]);
+  });
 });
