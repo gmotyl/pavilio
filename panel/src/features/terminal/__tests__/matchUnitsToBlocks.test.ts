@@ -128,6 +128,35 @@ describe("matchUnitsToBlocks", () => {
     expect(result.blockToUnit).toEqual([0, null, 2]);
   });
 
+  it("a paragraph with a long code span is still found", () => {
+    // The smoke test's real answer (2026-09-16). `strip` replaces the code span
+    // over the spoken limit with `⟦expr⟧`, so the second paragraph's source is
+    // neither a substring of its block nor the other way round — only its
+    // head and tail survive the sentinel. Unit 0 is the fast-start "Hi." whose
+    // source is the whole first paragraph; unit 1 packs everything.
+    const answer = [
+      "Hi. AGENTS.md loaded; no `.projects.local.md`, so no project registry yet.",
+      "",
+      "Branch `feat/in-cell-answer-pane`, clean tree, last commit `c75d42d refactor(terminal): the cell reader is screen-only again`.",
+      "",
+      "What next — `resume <project>`, or a specific task?",
+    ].join("\n");
+    const rendered = [
+      "Hi. AGENTS.md loaded; no .projects.local.md, so no project registry yet.",
+      "Branch feat/in-cell-answer-pane, clean tree, last commit c75d42d refactor(terminal): the cell reader is screen-only again.",
+      "What next — resume <project>, or a specific task?",
+    ];
+    const prepared = prepare(answer);
+    expect(prepared.units).toHaveLength(2);
+    expect(prepared.units[0].text).toBe("Hi.");
+    expect(prepared.units[1].source).toContain("last commit ⟦expr⟧.");
+    expect(prepared.units[1].source).toContain("Branch feat/in-cell-answer-pane, clean tree, last commit");
+
+    const result = matchUnitsToBlocks(prepared.units, rendered);
+    expect(result.unitToBlocks).toEqual([[0], [0, 1, 2]]);
+    expect(result.blockToUnit).toEqual([0, 1, 1]);
+  });
+
   it("a short heading is its own block", () => {
     // `## Result` normalizes to 6 characters — under the floor — yet `prepare`
     // speaks it as its own unit, so equality has to find it without a floor.

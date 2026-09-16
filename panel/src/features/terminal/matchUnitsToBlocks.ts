@@ -38,13 +38,22 @@
  * - An empty unit (`source === ""`) claims nothing: without that guard the
  *   equality rule would hand an `<hr>` — an empty `textContent` block — to it,
  *   and an empty prefix would `startsWith` every block.
- * - `PREFIX_CHARS` (40): `cutAtCeiling` turns one 900-character paragraph into
- *   two units. The second is a substring of the block and `b.includes(u)`
- *   finds it; the first is too, but the general case — the block having been
- *   *packed* into a unit alongside other paragraphs — is covered by comparing
- *   the opening 40 characters in either direction, which is long enough to be
- *   distinctive and short enough to survive a unit and a block that diverge
- *   only in their tails.
+ * - `WINDOW_CHARS` (24): a unit is not always a superstring of its block.
+ *   `strip` replaces a code span longer than the spoken limit, a bare URL or
+ *   an image *inside* a paragraph with an inline sentinel (`⟦expr⟧`,
+ *   `⟦link⟧`, `⟦image⟧`), so `u.includes(b)` fails on the sentinel and
+ *   `b.includes(u)` fails because the unit packs neighbouring paragraphs too
+ *   (smoke test, 2026-09-16: the second paragraph of a three-paragraph answer
+ *   went unmarked). The head and the tail of the block survive the sentinel
+ *   unless the paragraph both opens and closes with one, so the rule compares
+ *   the block's first and last 24 characters against the unit: long enough to
+ *   be distinctive, short enough to sit on one side of the sentinel. The
+ *   window subsumes the old opening-prefix comparison — a block packed whole
+ *   into a unit starts inside it, and a block under 24 characters compares
+ *   whole. `b.includes(u)` stays for the unit `cutAtCeiling` carves out of a
+ *   longer block. Accepted residue: a paragraph that opens AND closes with a
+ *   sentinel is not found; two paragraphs that share their last 24 characters
+ *   both mark for the unit that speaks one of them.
  */
 
 export interface UnitBlockMap {
@@ -56,12 +65,12 @@ export interface UnitBlockMap {
 
 /**
  * Below this length neither a normalized block nor a normalized unit takes part
- * in the substring and prefix rules; only equality does. See the module comment.
+ * in the substring and window rules; only equality does. See the module comment.
  */
 export const MIN_MATCH_CHARS = 12;
 
-/** How much of an opening is compared by the prefix rules; see the module comment. */
-export const PREFIX_CHARS = 40;
+/** How much of a block's head and tail is looked for in the unit; see the module comment. */
+export const WINDOW_CHARS = 24;
 
 /**
  * Markdown markers and punctuation that the renderer drops or that the voice
@@ -81,9 +90,9 @@ export function normalizeForMatch(text: string): string {
 
 /**
  * Whether a rendered block was spoken as (part of) a unit, both already
- * normalized. Empty text never matches — an empty `startsWith` prefix would
- * otherwise match everything. A block that is the unit matches outright; the
- * looser rules below need both sides at or above the floor.
+ * normalized. Empty text never matches — an empty window would otherwise be
+ * found in everything. A block that is the unit matches outright; the looser
+ * rules below need both sides at or above the floor.
  */
 function blockMatchesUnit(block: string, unit: string): boolean {
   if (unit.length === 0) return false;
@@ -91,10 +100,9 @@ function blockMatchesUnit(block: string, unit: string): boolean {
   if (block.length < MIN_MATCH_CHARS || unit.length < MIN_MATCH_CHARS) return false;
 
   return (
-    unit.includes(block) || // block packed whole into the unit
-    block.includes(unit) || // unit cut out of a longer block
-    block.startsWith(unit.slice(0, PREFIX_CHARS)) || // first of several units from one block
-    unit.startsWith(block.slice(0, PREFIX_CHARS)) // unit that begins with this block
+    unit.includes(block.slice(0, WINDOW_CHARS)) || // block packed into the unit, head intact
+    unit.includes(block.slice(-WINDOW_CHARS)) || // …or a sentinel ate the head, tail intact
+    block.includes(unit) // unit cut out of a longer block
   );
 }
 
