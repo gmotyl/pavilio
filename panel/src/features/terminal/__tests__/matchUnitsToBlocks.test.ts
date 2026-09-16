@@ -204,10 +204,24 @@ describe("matchUnitsToBlocks", () => {
     expect(result.unitToBlocks[0]).toEqual([0]);
   });
 
+  it("a block goes to the unit that holds it whole, not to a look-alike", () => {
+    // Both paragraphs open with the same 24+ normalized characters, so the
+    // head window matches each of them against BOTH units: the rail spans
+    // both, but a click on the second paragraph must land on its own unit,
+    // not one unit early.
+    const first = "The answer pane keeps the spoken block in view while the voice moves on.";
+    const second = "The answer pane keeps the terminal visible below a short answer, as the design asks.";
+    expect(normalizeForMatch(first).slice(0, 24)).toBe(normalizeForMatch(second).slice(0, 24));
+
+    const result = matchUnitsToBlocks([{ source: first }, { source: second }], [first, second]);
+    expect(result.unitToBlocks).toEqual([[0, 1], [0, 1]]);
+    expect(result.blockToUnit).toEqual([0, 1]);
+  });
+
   it("an empty unit claims no block", () => {
-    // An `<hr>` renders as a block with an empty `textContent`. Without the
-    // empty-unit guard `"" === ""` would mark it for an empty unit, and an
-    // empty prefix would `startsWith` every block.
+    // An `<hr>` renders as a block with an empty `textContent`. Equality is
+    // exempt from the floor, so without the empty-unit guard `"" === ""`
+    // would mark it for an empty unit.
     const paragraph = "The rule separates the heading from what follows it.";
     const result = matchUnitsToBlocks([{ source: "" }, { source: paragraph }], ["", paragraph]);
     expect(result.unitToBlocks).toEqual([[], [1]]);
