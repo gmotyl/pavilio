@@ -181,7 +181,7 @@ import type { SpeechUnit } from "../types";
 import { DEFAULT_SPEECH_VOICE, SPEECH_VOICE_STORAGE_KEY } from "../voices";
 
 function units(...texts: string[]): SpeechUnit[] {
-  return texts.map((text) => ({ text, chars: text.length }));
+  return texts.map((text) => ({ text, chars: text.length, source: text }));
 }
 
 /** `count` units named `unit-0` … `unit-<count-1>`, in playback order. */

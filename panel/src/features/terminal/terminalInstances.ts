@@ -15,6 +15,10 @@ import { WATCHDOG_STALE_MS } from "./watchdogConfig";
 // speech hook decides what a transport chord IS, and this module only decides
 // that such a chord never reaches the PTY.
 import { speechTransportKeyFor } from "../speech/useSpeechKeys";
+// The answer pane's per-session state outlives the view for the same reason
+// the xterm does (layout changes remount the cell); a destroyed session takes
+// its entry with it so the store does not leak.
+import { forgetAnswerPane } from "./answerPaneState";
 
 // Shared cache of live xterm instances, keyed by sessionId.
 // The Terminal (+ its DOM node) survive React unmounts so that scrollback
@@ -1076,6 +1080,7 @@ export function destroyTerminal(sessionId: string): void {
   // handlers see themselves as superseded and stay silent, and so a
   // getConnectionState() from inside a listener already reads "unattached".
   instances.delete(sessionId);
+  forgetAnswerPane(sessionId);
   try {
     // Detach handlers as reopen() does: a browser's close event lands on a
     // later tick, and nothing about a destroyed instance should still speak.

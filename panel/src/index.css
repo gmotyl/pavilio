@@ -509,8 +509,10 @@ input[type="checkbox"] {
   cursor: default;
 }
 
-/* Armed reads the same as the header toggle: the same green, the same fill. */
-.speech-bar-btn[data-armed="1"] {
+/* Armed reads the same as the header toggle: the same green, the same fill.
+   The eye, while the answer pane is open, wears the same pressed state. */
+.speech-bar-btn[data-armed="1"],
+.speech-bar-btn[data-open="1"] {
   color: #9ece6a;
   background: rgba(158, 206, 106, 0.16);
 }
@@ -653,15 +655,6 @@ input[type="checkbox"] {
   background: var(--text-primary);
 }
 
-.speech-bar-meta {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-
 /* How many answers are waiting behind this one. */
 .speech-bar-pill {
   font-family: "JetBrains Mono", monospace;
@@ -673,3 +666,153 @@ input[type="checkbox"] {
   white-space: nowrap;
   flex: 0 0 auto;
 }
+
+/* The answer pane: the card under the speech bar that renders the utterance
+   under the cursor as markdown. An overlay for the bar's reason — see the note
+   on `AnswerPane` — so it never sits in the cell's flow: `top` is the bar's
+   `top 6` + its 56px row + a 6px gap, the inset is the bar's own, and it stops
+   at the cell edge. Under the bar's z-index, over the xterm. Background,
+   border, radius and shadow are the bar's: one visual language. */
+.answer-pane {
+  position: absolute;
+  top: 68px;
+  left: 6px;
+  right: 6px;
+  max-height: calc(100% - 74px);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: rgba(26, 27, 38, 0.97);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 0, 0, 0.3);
+  outline: none;
+}
+
+/* The scroll container. The rail is INSIDE it, as a 22px grid column, so the
+   segments stay aligned with their blocks as the text scrolls. Positioned so
+   that it is the `offsetParent` of the blocks AND of the rail: a block's
+   `offsetTop` is then both its rail coordinate and its scroll target, which is
+   what `layoutRail` and the follow effect in `AnswerPane` rely on. */
+.answer-pane-body {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  column-gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 10px 6px;
+}
+
+/* One row under the body, inside the card: the cell's "Open on new answer"
+   switch. Outside the scroll container so it stays put while the text scrolls. */
+.answer-pane-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.answer-pane-footer-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.answer-pane-footer input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent, #7aa2f7);
+}
+
+/* The scrubber turned vertical: one segment per unit, top to bottom. A grid
+   item stretched to the text column's height — as tall as the scroll content —
+   with the segments placed absolutely inside it by `layoutRail`, each spanning
+   its unit's blocks. */
+.answer-pane-rail {
+  position: relative;
+  align-self: stretch;
+}
+
+.answer-pane-seg {
+  position: absolute;
+  left: 8px;
+  width: 6px;
+  /* `top` and `height` come from `layoutRail`; this is the blockless minimum. */
+  min-height: 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* The five states are the scrubber's, verbatim — one `segmentStateFor`, two
+   drawings. See the notes on `.speech-bar-seg[data-segment]`. */
+.answer-pane-seg[data-segment="played"] {
+  background: rgba(158, 206, 106, 0.32);
+}
+
+.answer-pane-seg[data-segment="ready"] {
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(158, 206, 106, 0.28);
+}
+
+.answer-pane-seg[data-segment="warming"] {
+  background: var(--red-dim);
+  box-shadow: inset 0 0 0 1px var(--red);
+}
+
+.answer-pane-seg[data-segment="cold"] {
+  background-color: rgba(0, 0, 0, 0.55);
+  background-image: repeating-linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0.05) 0 3px,
+    transparent 3px 7px
+  );
+}
+
+.answer-pane-seg[data-segment="playing"] {
+  background: rgba(158, 206, 106, 0.18);
+  box-shadow: inset 0 0 0 1px #9ece6a;
+}
+
+/* The playhead: a triangle beside the playing segment, pointing at the text. */
+.answer-pane-head {
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: translateY(-50%);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid #9ece6a;
+  pointer-events: none;
+}
+
+.answer-pane-text {
+  min-width: 0;
+}
+
+/* A matched block is a jump: hint at it on hover and focus. */
+.answer-pane-text .prose > [data-unit] {
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  transition: background-color 120ms ease;
+}
+
+.answer-pane-text .prose > [data-unit]:hover,
+.answer-pane-text .prose > [data-unit]:focus-visible {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* The spoken block carries `data-speaking` for tests and semantics, but draws
+   nothing of its own: the rail's playing segment and playhead beside it are
+   the mark, and a tinted block on top of them was too loud (smoke test,
+   2026-09-16). */

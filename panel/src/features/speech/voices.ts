@@ -75,9 +75,11 @@ export function resolveVoice(value: string | null | undefined): SpeechVoiceId {
 
 /**
  * Reading `window.localStorage` itself throws when site data is blocked, so the
- * accessor is guarded separately from the get/set calls.
+ * accessor is guarded separately from the get/set calls. Exported for the other
+ * per-browser speech preferences (`autoOpenAnswer.ts`) so every one of them
+ * reads storage through the same guard.
  */
-function getBrowserStorage(): Storage | null {
+export function getBrowserStorage(): Storage | null {
   if (typeof window === "undefined") return null;
 
   try {

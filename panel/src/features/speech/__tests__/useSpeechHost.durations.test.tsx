@@ -141,7 +141,9 @@ let host: GridSpeech;
 function Harness({ sessionId }: { sessionId: string }) {
   const speech = useSpeechHost();
   host = speech;
-  return <SpeechControlBar sessionId={sessionId} speech={speech} />;
+  return (
+    <SpeechControlBar sessionId={sessionId} speech={speech} answerOpen={false} onToggleAnswer={() => {}} />
+  );
 }
 
 async function drain(): Promise<void> {

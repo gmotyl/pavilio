@@ -323,7 +323,12 @@ vi.mock("../../terminal/TerminalView", async () => {
     }) => (
       <div data-testid={`terminal-view-${sessionId}`}>
         {speech && speechBarVisible ? (
-          <SpeechControlBar sessionId={sessionId} speech={speech} />
+          <SpeechControlBar
+            sessionId={sessionId}
+            speech={speech}
+            answerOpen={false}
+            onToggleAnswer={() => {}}
+          />
         ) : null}
       </div>
     ),
