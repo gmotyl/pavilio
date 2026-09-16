@@ -11,7 +11,8 @@ export interface AnswerPaneProps {
   sessionId: string;
   speech: GridSpeech;
   /**
-   * Escape was pressed — inside the pane or anywhere else but a terminal.
+   * Escape was pressed — inside the pane, anywhere outside a terminal, or in
+   * this cell's own terminal (another cell's terminal keeps its Escape).
    * `TerminalView` closes the pane and refocuses the terminal.
    */
   onClose: () => void;
@@ -229,20 +230,42 @@ export function AnswerPane({
     rootRef.current?.focus();
   }, []);
 
-  // Escape closes the pane from anywhere while it is open — switching browser
-  // tabs and coming back leaves focus on `document.body`, and a pane that then
-  // ignores Escape reads as stuck. Anywhere but a terminal: a TUI may use the
-  // key (Claude Code interrupts on it), so a key typed into an xterm is the
-  // terminal's. An Escape inside the pane never gets here: the root's own
-  // handler below stops propagation, so `onClose` runs once per keypress.
+  // Escape closes the pane from wherever focus is while it is open —
+  // switching browser tabs and coming back leaves it on `document.body`, a
+  // click leaves it on the bar or in the cell's own terminal — and a pane
+  // that then ignores Escape reads as stuck. Greg's rule (2026-09-16): if the
+  // terminal has focus and the pane is open, Escape closes the pane.
+  //
+  // Capture phase on `window`, not a bubble listener on `document`: xterm
+  // reads keys from its own textarea's `keydown` handler, at the target, and
+  // a key that reached it is already in the PTY by the time it bubbles.
+  // Capture on the window runs before the target phase, so `preventDefault` +
+  // `stopPropagation` here means the shell never sees the key. The accepted
+  // cost for a TUI that uses Escape (Claude Code interrupts on it): the first
+  // Escape closes the pane, the second interrupts — one deliberate keystroke
+  // more, in exchange for a pane that always answers the key it advertises.
+  //
+  // Only THIS cell's terminal, though. The pane is mounted by `TerminalView`
+  // as a sibling of the xterm container inside the cell's `relative`
+  // wrapper, so an xterm under the root's parent is the cell's own; an xterm
+  // anywhere else is another cell's TUI, and its Escape is left alone.
+  //
+  // An Escape inside the pane never gets here: it is the root's own handler's
+  // below, which stops propagation, so `onClose` runs once per keypress.
   useEffect(() => {
-    const onDocumentKeyDown = (e: KeyboardEvent): void => {
+    const onWindowKeyDown = (e: KeyboardEvent): void => {
       if (e.key !== "Escape") return;
-      if (e.target instanceof Element && e.target.closest(".xterm")) return;
+      const target = e.target instanceof Element ? e.target : null;
+      const root = rootRef.current;
+      if (root && target && root.contains(target)) return;
+      const xterm = target?.closest(".xterm") ?? null;
+      if (xterm && !root?.parentElement?.contains(xterm)) return;
+      e.preventDefault();
+      e.stopPropagation();
       onClose();
     };
-    document.addEventListener("keydown", onDocumentKeyDown);
-    return () => document.removeEventListener("keydown", onDocumentKeyDown);
+    window.addEventListener("keydown", onWindowKeyDown, true);
+    return () => window.removeEventListener("keydown", onWindowKeyDown, true);
   }, [onClose]);
 
   // Mark the blocks. Re-run when the text, the units or the spoken unit

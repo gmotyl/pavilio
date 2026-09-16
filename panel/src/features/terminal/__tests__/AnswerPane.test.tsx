@@ -617,7 +617,7 @@ describe("AnswerPane", () => {
 
   it("Escape closes the pane when focus is on the body", () => {
     // Switching browser tabs and coming back leaves focus on `document.body`:
-    // nothing in the pane sees the key, so a document-level listener has to.
+    // nothing in the pane sees the key, so a window-level listener has to.
     const h = harness(MARKDOWN, null);
     const onClose = vi.fn();
     const { unmount } = render(paneElement(makeSpeech(h), onClose));
@@ -637,27 +637,70 @@ describe("AnswerPane", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("Escape inside a terminal belongs to the terminal", () => {
-    // A TUI may use Escape (Claude Code interrupts on it), so a key typed into
-    // an xterm is the terminal's: the pane stays open and does not touch it.
+  it("Escape in the cell's terminal closes the pane", () => {
+    // Greg's rule: if the terminal has focus and the pane is open, Escape
+    // closes the pane. The pane is a sibling of the xterm container inside the
+    // cell's wrapper, and that is how it knows the terminal is its own. The
+    // key must not reach the shell either: the pane listens in the capture
+    // phase on `window`, so xterm's textarea never sees the keydown at all.
     const h = harness(MARKDOWN, null);
     const onClose = vi.fn();
     render(
       <MemoryRouter>
-        <div className="xterm">
-          <textarea aria-label="terminal input" />
+        <div className="relative">
+          <div className="xterm">
+            <textarea aria-label="terminal input" />
+          </div>
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
         </div>
-        <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
       </MemoryRouter>,
     );
     const input = screen.getByLabelText("terminal input");
+    const terminalSawKey = vi.fn();
+    input.addEventListener("keydown", terminalSawKey);
     input.focus();
     expect(document.activeElement).toBe(input);
 
     // `fireEvent` returns false when a listener called `preventDefault`.
     const notCancelled = fireEvent.keyDown(input, { key: "Escape" });
+    expect(notCancelled).toBe(false);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(terminalSawKey).not.toHaveBeenCalled();
+
+    // Any other key is the terminal's, untouched.
+    expect(fireEvent.keyDown(input, { key: "a" })).toBe(true);
+    expect(terminalSawKey).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape in another cell's terminal belongs to that terminal", () => {
+    // A TUI in a different cell may use Escape (Claude Code interrupts on
+    // it): its keystrokes are nobody else's, so this pane stays open and the
+    // key goes through to that terminal untouched.
+    const h = harness(MARKDOWN, null);
+    const onClose = vi.fn();
+    render(
+      <MemoryRouter>
+        <div className="relative">
+          <div className="xterm">
+            <textarea aria-label="other terminal input" />
+          </div>
+        </div>
+        <div className="relative">
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
+        </div>
+      </MemoryRouter>,
+    );
+    const input = screen.getByLabelText("other terminal input");
+    const terminalSawKey = vi.fn();
+    input.addEventListener("keydown", terminalSawKey);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    const notCancelled = fireEvent.keyDown(input, { key: "Escape" });
     expect(notCancelled).toBe(true);
     expect(onClose).not.toHaveBeenCalled();
+    expect(terminalSawKey).toHaveBeenCalledTimes(1);
   });
 
   it("Enter on a link inside a block follows the link, not the jump", () => {
