@@ -88,6 +88,7 @@ vi.mock("../../speech/synth", async (importOriginal) => ({
 
 // Imported after the mocks so it picks them up.
 const { TerminalView } = await import("../TerminalView");
+const { forgetAnswerPane } = await import("../answerPaneState");
 
 const resizeFrames = (): string[] => term.sent.filter((frame) => frame.includes('"resize"'));
 
@@ -193,6 +194,9 @@ beforeEach(() => {
   term.sent.length = 0;
   term.observed.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
+  // The pane's state outlives the view on purpose (see `answerPaneState.ts`),
+  // so every test starts the cell from a fresh entry.
+  forgetAnswerPane("cell-a");
 });
 
 describe("TerminalView and the answer pane", () => {
@@ -266,6 +270,57 @@ describe("TerminalView and the answer pane", () => {
 
     expect(screen.queryByTestId("speech-bar-cell-a")).toBeNull();
     expect(screen.queryByTestId("speech-bar-eye-cell-a")).toBeNull();
+    expect(pane()).toBeNull();
+  });
+
+  it("the pane survives a remount of the view", async () => {
+    // Maximize, grid presets, drag and seam resize all remount `TerminalView`
+    // (the grid swaps its body subtree). The xterm survives that through
+    // `terminalInstances`; the pane's state must survive the same way.
+    const speech = makeSpeech();
+    const first = render(cell(speech));
+    await settleTerminal();
+    fireEvent.click(eye());
+    expect(pane()).not.toBeNull();
+
+    first.unmount();
+    expect(pane()).toBeNull();
+
+    render(cell(speech));
+    await settleTerminal();
+    expect(pane()).not.toBeNull();
+    expect(eye()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("the footer switch survives a remount", async () => {
+    storeDefault(false);
+    const speech = makeSpeech();
+    const first = render(cell(speech));
+    await settleTerminal();
+    fireEvent.click(eye());
+    expect(footerBox()).not.toBeChecked();
+    fireEvent.click(footerBox());
+    expect(footerBox()).toBeChecked();
+
+    first.unmount();
+    render(cell(speech));
+    await settleTerminal();
+    // Still the cell's own choice, not a reseed from the browser default.
+    expect(footerBox()).toBeChecked();
+  });
+
+  it("a remount is not an arrival", async () => {
+    // The seen set outlives the view too: the queue the remounted view is
+    // handed holds nothing new, so a switch that is on opens nothing.
+    storeDefault(true);
+    const speech = makeSpeech();
+    const first = render(cell(speech));
+    await settleTerminal();
+    expect(pane()).toBeNull();
+
+    first.unmount();
+    render(cell(speech));
+    await settleTerminal();
     expect(pane()).toBeNull();
   });
 
