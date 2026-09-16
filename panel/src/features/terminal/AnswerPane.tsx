@@ -10,7 +10,10 @@ import { segmentStateFor } from "./segmentState";
 export interface AnswerPaneProps {
   sessionId: string;
   speech: GridSpeech;
-  /** Escape was pressed inside the pane. `TerminalView` closes it and refocuses the terminal. */
+  /**
+   * Escape was pressed — inside the pane or anywhere else but a terminal.
+   * `TerminalView` closes the pane and refocuses the terminal.
+   */
   onClose: () => void;
   /**
    * The cell's own "Open on new answer" switch, shown in the footer. Owned by
@@ -225,6 +228,22 @@ export function AnswerPane({
   useEffect(() => {
     rootRef.current?.focus();
   }, []);
+
+  // Escape closes the pane from anywhere while it is open — switching browser
+  // tabs and coming back leaves focus on `document.body`, and a pane that then
+  // ignores Escape reads as stuck. Anywhere but a terminal: a TUI may use the
+  // key (Claude Code interrupts on it), so a key typed into an xterm is the
+  // terminal's. An Escape inside the pane never gets here: the root's own
+  // handler below stops propagation, so `onClose` runs once per keypress.
+  useEffect(() => {
+    const onDocumentKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      if (e.target instanceof Element && e.target.closest(".xterm")) return;
+      onClose();
+    };
+    document.addEventListener("keydown", onDocumentKeyDown);
+    return () => document.removeEventListener("keydown", onDocumentKeyDown);
+  }, [onClose]);
 
   // Mark the blocks. Re-run when the text, the units or the spoken unit
   // change; a tick inside a unit never gets here because the snapshot above

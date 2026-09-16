@@ -615,6 +615,51 @@ describe("AnswerPane", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("Escape closes the pane when focus is on the body", () => {
+    // Switching browser tabs and coming back leaves focus on `document.body`:
+    // nothing in the pane sees the key, so a document-level listener has to.
+    const h = harness(MARKDOWN, null);
+    const onClose = vi.fn();
+    const { unmount } = render(paneElement(makeSpeech(h), onClose));
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // Other keys are still nobody's business.
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // Gone with the pane: a closed pane listens to nothing.
+    unmount();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape inside a terminal belongs to the terminal", () => {
+    // A TUI may use Escape (Claude Code interrupts on it), so a key typed into
+    // an xterm is the terminal's: the pane stays open and does not touch it.
+    const h = harness(MARKDOWN, null);
+    const onClose = vi.fn();
+    render(
+      <MemoryRouter>
+        <div className="xterm">
+          <textarea aria-label="terminal input" />
+        </div>
+        <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
+      </MemoryRouter>,
+    );
+    const input = screen.getByLabelText("terminal input");
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    // `fireEvent` returns false when a listener called `preventDefault`.
+    const notCancelled = fireEvent.keyDown(input, { key: "Escape" });
+    expect(notCancelled).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("Enter on a link inside a block follows the link, not the jump", () => {
     const linked = [
       "# Deploy plan",
