@@ -186,12 +186,15 @@ function layoutRail(
  *
  * ## Why the pane scrolls once per unit, and never on a tick
  *
- * Following is a `useEffect` on the unit index alone. When the index changes
- * (or the pane mounts mid-run, which is the same moment for a pane that was
- * closed), and only when the body overflows, it scrolls the body so the
- * unit's first block sits a third of the way down. No `scroll` listener, no
- * follow state: a reader who scrolls ahead is left alone until the next unit
- * starts — the one moment being pulled back is what the reader wants.
+ * Following is a `useLayoutEffect` on the unit index alone. When the index
+ * changes (or the pane mounts mid-run, which is the same moment for a pane
+ * that was closed), and only when the body overflows, it scrolls the body so
+ * the unit's first block sits a third of the way down — in the layout pass,
+ * after the marks, so the frame that paints the new unit is already scrolled
+ * to it and the reader never sees the old `scrollTop` for a frame. No
+ * `scroll` listener, no follow state: a reader who scrolls ahead is left
+ * alone until the next unit starts — the one moment being pulled back is
+ * what the reader wants.
  */
 export function AnswerPane({
   sessionId,
@@ -239,8 +242,11 @@ export function AnswerPane({
   // Capture phase on `window`, not a bubble listener on `document`: xterm
   // reads keys from its own textarea's `keydown` handler, at the target, and
   // a key that reached it is already in the PTY by the time it bubbles.
-  // Capture on the window runs before the target phase, so `preventDefault` +
-  // `stopPropagation` here means the shell never sees the key. The accepted
+  // Capture on the window runs before the target phase, and `stopPropagation`
+  // here ends the dispatch for every node still ahead in the path — the
+  // textarea's own target-phase listener included (only another listener on
+  // `window` itself would need `stopImmediatePropagation`) — so with
+  // `preventDefault` the shell never sees the key. The accepted
   // cost for a TUI that uses Escape (Claude Code interrupts on it): the first
   // Escape closes the pane, the second interrupts — one deliberate keystroke
   // more, in exchange for a pane that always answers the key it advertises.
@@ -250,8 +256,10 @@ export function AnswerPane({
   // wrapper, so an xterm under the root's parent is the cell's own; an xterm
   // anywhere else is another cell's TUI, and its Escape is left alone.
   //
-  // An Escape inside the pane never gets here: it is the root's own handler's
-  // below, which stops propagation, so `onClose` runs once per keypress.
+  // An Escape inside the pane never gets here: this listener bails out when
+  // the target is inside the root, so `onClose` runs once per keypress — from
+  // the root's own `onKeyDown` below, whose `stopPropagation` is what keeps
+  // the key from the cell, not what prevents a double close.
   useEffect(() => {
     const onWindowKeyDown = (e: KeyboardEvent): void => {
       if (e.key !== "Escape") return;
@@ -305,9 +313,13 @@ export function AnswerPane({
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
-    const observer = new ResizeObserver(() =>
-      layoutRail(body, railRef.current, unitToBlocksRef.current),
-    );
+    // Read the refs when the observer fires, not when it is created: the
+    // callback outlives this closure's snapshot of the boxes.
+    const observer = new ResizeObserver(() => {
+      const b = bodyRef.current;
+      const r = railRef.current;
+      if (b && r) layoutRail(b, r, unitToBlocksRef.current);
+    });
     observer.observe(body);
     if (textRef.current) observer.observe(textRef.current);
     return () => observer.disconnect();
@@ -316,7 +328,10 @@ export function AnswerPane({
   // Follow the voice: once per unit, on the boundary or on a mid-run mount,
   // and only when there is somewhere to scroll to. Never on a tick — the
   // snapshot above does not change inside a unit, so this never runs then.
-  useEffect(() => {
+  // A layout effect, declared after the marking one: the `data-unit` it looks
+  // up is set in the same pass, and the scroll lands before paint, so the
+  // boundary never shows a frame at the old `scrollTop` and then a snap.
+  useLayoutEffect(() => {
     const body = bodyRef.current;
     if (unitIndex === null || !body) return;
     if (body.scrollHeight <= body.clientHeight) return;
