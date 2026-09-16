@@ -80,6 +80,15 @@ const MARKDOWN = [
   "",
 ].join("\n");
 
+/** The smoke test's answer: a fast-start unit and a packed one share the first paragraph. */
+const SMOKE = [
+  "Hi. AGENTS.md loaded; no `.projects.local.md`, so no project registry yet.",
+  "",
+  "Branch `feat/in-cell-answer-pane`, clean tree, last commit `c75d42d refactor(terminal): the cell reader is screen-only again`.",
+  "",
+  "What next — `resume <project>`, or a specific task?",
+].join("\n");
+
 const OTHER_MARKDOWN = [
   "# Other",
   "",
@@ -720,6 +729,28 @@ describe("AnswerPane", () => {
 
       expect(scrolls()).toEqual([3 * BLOCK_TOP - layout.clientHeight / 3]);
       expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+    });
+
+    it("rail segments never overlap", () => {
+      // The smoke test's real answer (2026-09-16): `prepare` speaks "Hi." first
+      // with the whole opening paragraph as its source, then packs the rest of
+      // that paragraph and the two after it into unit 1 — so block 0 belongs to
+      // both units. Two segments over one block put the playhead beside the
+      // wrong place; the second must start after the first one's end.
+      const h = harness(SMOKE, { unitIndex: 1, unitTime: 0, unitDuration: null });
+      expect(h.units).toHaveLength(2);
+      expect(h.units[0].text).toBe("Hi.");
+      render(paneElement(makeSpeech(h)));
+
+      // The block itself is credited to its first unit — the jump target.
+      expect(blocks()[0].dataset.unit).toBe("0");
+      expect(box(0)).toEqual({ top: 0, height: BLOCK_HEIGHT });
+      // Unit 1's segment starts after unit 0's end, yet beside the shared
+      // block — not down at the second paragraph — and reaches the bottom of
+      // its last block.
+      expect(box(1).top).toBeGreaterThanOrEqual(box(0).top + box(0).height);
+      expect(box(1).top).toBeLessThan(BLOCK_TOP);
+      expect(box(1).top + box(1).height).toBe(2 * BLOCK_TOP + BLOCK_HEIGHT);
     });
 
     it("a unit without a block scrolls nothing and keeps a minimum segment", () => {
