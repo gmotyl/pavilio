@@ -812,8 +812,7 @@ input[type="checkbox"] {
   background: rgba(255, 255, 255, 0.05);
 }
 
-/* The spoken block: the playing segment's green, drawn as a left edge. */
-.answer-pane-text .prose > [data-speaking] {
-  background: rgba(158, 206, 106, 0.1);
-  box-shadow: -3px 0 0 0 #9ece6a;
-}
+/* The spoken block carries `data-speaking` for tests and semantics, but draws
+   nothing of its own: the rail's playing segment and playhead beside it are
+   the mark, and a tinted block on top of them was too loud (smoke test,
+   2026-09-16). */
