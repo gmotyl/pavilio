@@ -84,7 +84,11 @@ export function splitSharedSpans(
       continue;
     }
 
-    const groupWeights = weights.slice(index, end).map((w) => Math.max(0, w ?? 0));
+    // One weight per span in the group, padded: a caller with a short
+    // `weights` array gets zeros, never fewer spans back than it handed in.
+    const groupWeights = Array.from({ length: end - index }, (_unused, offset) =>
+      Math.max(0, weights[index + offset] ?? 0),
+    );
     const total = groupWeights.reduce((sum, w) => sum + w, 0);
     const shares = total > 0 ? groupWeights.map((w) => w / total) : groupWeights.map(() => 1 / groupWeights.length);
     const height = span.bottom - span.top;

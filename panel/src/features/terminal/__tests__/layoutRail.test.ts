@@ -94,6 +94,28 @@ describe("splitSharedSpans", () => {
     ]);
   });
 
+  it("a short weights array does not truncate the output", () => {
+    // The exported contract takes the two arrays separately, so a caller can
+    // hand over fewer weights than spans; the missing ones count as zero
+    // rather than dropping the units they belong to.
+    const shared: Span = { top: 0, bottom: 100 };
+    const group = [shared, { ...shared }, { ...shared }];
+
+    const partial = splitSharedSpans(group, [10]) as Span[];
+    expect(partial).toHaveLength(3);
+    expect(partial[0].top).toBe(0);
+    expect(partial[1].top).toBe(partial[0].bottom);
+    expect(partial[2].top).toBe(partial[1].bottom);
+    expect(partial[2].bottom).toBe(100);
+
+    // No weights at all is the all-zero case: an even split, not an empty result.
+    const none = splitSharedSpans(group, []) as Span[];
+    expect(none).toHaveLength(3);
+    for (const slice of none) expect(slice.bottom - slice.top).toBeCloseTo(100 / 3);
+    expect(none[0].top).toBe(0);
+    expect(none[2].bottom).toBe(100);
+  });
+
   it("zero weights split evenly", () => {
     const shared: Span = { top: 0, bottom: 90 };
     expect(splitSharedSpans([shared, { ...shared }, { ...shared }], [0, 0, 0])).toEqual([
