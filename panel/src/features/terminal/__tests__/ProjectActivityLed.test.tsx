@@ -14,17 +14,11 @@ const stub = vi.hoisted(() => ({
 }));
 
 vi.mock("../../speech/useSpeechHost", async () => {
-  const { INERT_SPEECH } = await import("./speech.harness");
+  const { INERT_SPEECH_HOST } = await import("./speech.harness");
   const host = {
-    ...INERT_SPEECH,
+    ...INERT_SPEECH_HOST,
     // Read through the holder so a test can swap the state before it renders.
     stateFor: (sessionId: string) => stub.stateFor(sessionId),
-    // `SpeechHost` is `GridSpeech` plus what the document-wide media-session
-    // transport reads; the provider mounts that transport, so it needs these.
-    speakingSessionId: null,
-    pausedSessionId: null,
-    onSeekBackward: () => {},
-    preparingSessionIds: new Set<string>(),
   };
   return { useSpeechHost: () => host, default: () => host };
 });

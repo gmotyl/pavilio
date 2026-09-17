@@ -8,17 +8,13 @@ import { MemoryRouter } from "react-router-dom";
  * is the project link, not speech.
  */
 vi.mock("../../speech/useSpeechHost", async () => {
-  const { INERT_SPEECH } = await import(
+  const { INERT_SPEECH_HOST } = await import(
     "../../terminal/__tests__/speech.harness"
   );
-  const host = {
-    ...INERT_SPEECH,
-    speakingSessionId: null,
-    pausedSessionId: null,
-    onSeekBackward: () => {},
-    preparingSessionIds: new Set<string>(),
+  return {
+    useSpeechHost: () => INERT_SPEECH_HOST,
+    default: () => INERT_SPEECH_HOST,
   };
-  return { useSpeechHost: () => host, default: () => host };
 });
 
 import LeftSidebar from "../LeftSidebar";

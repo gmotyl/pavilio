@@ -22,19 +22,13 @@ const speech = vi.hoisted(() => ({
 }));
 
 vi.mock("../../speech/useSpeechHost", async () => {
-  const { INERT_SPEECH } = await import(
+  const { INERT_SPEECH_HOST } = await import(
     "../../terminal/__tests__/speech.harness"
   );
   const host = {
-    ...INERT_SPEECH,
+    ...INERT_SPEECH_HOST,
     // Read through the holder so a test can swap the state before it renders.
     stateFor: (sessionId: string) => speech.stateFor(sessionId),
-    // `SpeechHost` is `GridSpeech` plus what the document-wide media-session
-    // transport reads; the provider mounts that transport, so it needs these.
-    speakingSessionId: null,
-    pausedSessionId: null,
-    onSeekBackward: () => {},
-    preparingSessionIds: new Set<string>(),
   };
   return { useSpeechHost: () => host, default: () => host };
 });
@@ -129,10 +123,22 @@ function expandAndClickSession() {
   fireEvent.click(screen.getByTestId("sidebar-session-s1"));
 }
 
+/**
+ * File-level, not per-describe: the activity channel and the stubbed speech
+ * state are module singletons, so a test that sets either leaks into every
+ * later test in the file. Resetting inside the speech describe alone was safe
+ * only because that block happens to be last — a describe added below it would
+ * have inherited a `speaking` session it never asked for.
+ */
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+  _resetForTests();
+  speech.stateFor = () => "empty";
+});
+
 describe("LeftSidebar terminal-session row navigation", () => {
   beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
     createTerminalSession.mockReset();
   });
 
@@ -187,10 +193,6 @@ describe("LeftSidebar terminal-session row navigation", () => {
 });
 
 describe("LeftSidebar terminal-session row highlight", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-  });
 
   it("keeps the clicked session highlighted when the bare-route redirect lands back on the same iterm view", async () => {
     // Already reading this project's terminals; the row click bounces through
@@ -244,12 +246,6 @@ const projectRow = () =>
   screen.getByTestId("sidebar-project-expand-vector").parentElement!;
 
 describe("LeftSidebar speech indicator", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-    _resetForTests();
-    speech.stateFor = () => "empty";
-  });
 
   it("a speaking session row shows the speaker", () => {
     setActivity("s1", "busy");

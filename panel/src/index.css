@@ -365,12 +365,28 @@ input[type="checkbox"] {
   height: 8px;
 }
 
-/* The sidebar speaker (`SessionIndicator`), shown in the LED's place while a
-   session's audio is playing. Its box is EXACTLY the LED's — the two swap in
-   and out of the same slot, and a row's text must not move when they do — so
-   the glyph inside it is drawn bigger and centred on that box, overflowing it
+/* The sidebar speaker (`SessionSpeaker`), shown while a session's audio is
+   playing. Two rows draw it, and they place it differently:
+     - the expanded session row (`SessionIndicator`) has one slot, so the
+       speaker REPLACES that session's LED there;
+     - the collapsed project row (`ProjectActivityLed`) shows every state at
+       once, so the speaker sits BESIDE the busy and attention dots. It only
+       takes the idle dot's place, and only when idle is all there would be.
+
+   WHY beside and not instead: speaking is a status like busy or attention, not
+   a summary of the project. Collapsing the group down to the speaker would hide
+   an attention signal belonging to a DIFFERENT session for as long as the audio
+   plays — the row would trade a request for your attention for the one thing
+   that needs none. Idle is the single exception: it says nothing the speaker
+   does not already imply.
+
+   Its box is EXACTLY the LED's, because in the single-slot row the two swap in
+   and out of the same place and the row's text must not move when they do. So
+   the glyph inside is drawn bigger and centred on that box, overflowing it
    symmetrically: a speaker rendered at 6px is a smudge, and the box, not the
-   icon, is what the row's layout is made of.
+   icon, is what the row's layout is made of. Keep this rule free of margin,
+   padding and border for the same reason — the box is measured against
+   `.terminal-led` in SessionIndicator.test.tsx.
 
    The attention green (#9ece6a), and deliberately NO animation: the pulse in
    this panel means "something is waiting for you", and audio that is already

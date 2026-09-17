@@ -1,5 +1,5 @@
 import { usePanelSpeech } from "../speech/SpeechHostProvider";
-import { SessionSpeaker } from "./SessionIndicator";
+import { SessionSpeaker } from "./SessionSpeaker";
 import { useAggregateActivityFlags } from "./useTerminalActivityChannel";
 import { useAttentionPulse } from "./useAttentionPulse";
 

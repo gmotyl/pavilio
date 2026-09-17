@@ -62,6 +62,39 @@ describe("MarkdownRenderer code block copy", () => {
     await waitFor(() => expect(first.querySelector(".lucide-check")).toBeTruthy());
   });
 
+  it("a CRLF document copies its own line endings, with no stray trailing CR", async () => {
+    // A note written on Windows reaches the panel with CRLF endings. The trim
+    // in the `pre` override strips ONE trailing "\n" — the newline
+    // `mdast-util-to-hast` appends — so the pasted text must keep its internal
+    // "\r\n" pairs and must not end in a widowed "\r": a copied command with a
+    // trailing CR is pasted into a shell as a broken line.
+    renderMd("```sh\r\ncd /tmp\r\nls -la\r\n```\r\n");
+
+    fireEvent.click(screen.getByLabelText("Copy code"));
+
+    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
+    const copied = copy.mock.calls[0]![0] as string;
+    expect(copied).toBe("cd /tmp\r\nls -la");
+    expect(copied.endsWith("\r")).toBe(false);
+    expect(copied.endsWith("\n")).toBe(false);
+  });
+
+  it("a fence with no language still gets a button and copies correctly", async () => {
+    // The override keys off the `pre`, not off a `language-*` class, so an
+    // unlabelled fence — the common case in a hand-written note — must behave
+    // exactly like a labelled one. It is also the one fence whose child carries
+    // no className at all, which is what the mermaid checks above read.
+    const { container } = renderMd(["```", "plain text", "```", ""].join("\n"));
+
+    expect(container.querySelectorAll(".code-block")).toHaveLength(1);
+    expect(container.querySelector("pre > code")).not.toHaveAttribute("class");
+
+    fireEvent.click(screen.getByLabelText("Copy code"));
+
+    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
+    expect(copy).toHaveBeenCalledWith("plain text");
+  });
+
   it("mermaid blocks have no copy button", async () => {
     renderMd(["```mermaid", "flowchart TD", "  A --> B", "```", ""].join("\n"));
 
