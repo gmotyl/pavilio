@@ -454,6 +454,12 @@ function takeFastStart(first: Packed, rest: readonly Packed[]): { unit: Packed; 
   const sentence = next ? firstSentence(next.text) : null;
   if (!next || !sentence) return null;
 
+  // This unit is built before packing runs, so nothing downstream would cut it:
+  // over the ceiling, the fast start would hand playback a unit larger than any
+  // {@link packUnits} would ever emit — the opposite of what it exists for. So
+  // it stands down and lets the normal packing path cut the sentence instead.
+  if (joinPacked(first.text, sentence).length > UNIT_MAX_CHARS) return null;
+
   const remainder = next.text.slice(sentence.length).trim();
 
   return {

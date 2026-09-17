@@ -162,6 +162,19 @@ describe("prepare", () => {
     );
   });
 
+  it("a lead-in whose next sentence exceeds the ceiling falls back to packing", () => {
+    // The cross-paragraph fast start builds unit 0 before packing runs, so
+    // nothing downstream would cut it: a lead-in with no sentence of its own
+    // followed by one enormous sentence used to hand playback a 2 000-character
+    // unit 0 — the very thing the fast start exists to prevent. Over the
+    // ceiling, the rule stands down and the normal packing path cuts it.
+    const huge = "word ".repeat(400) + "ends here.";
+    const { units } = prepare(["Here are the steps to follow", "", huge].join("\n"));
+
+    expect(units.every((unit) => unit.chars <= UNIT_MAX_CHARS)).toBe(true);
+    expect(units[0].chars).toBe(28);
+  });
+
   it("a list directly after an unterminated line still starts small", () => {
     const { units } = prepare(
       ["Steps to follow", "- do this thing first", "- then do the other thing", ""].join("\n"),
