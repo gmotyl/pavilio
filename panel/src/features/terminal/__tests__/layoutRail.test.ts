@@ -9,9 +9,46 @@ import {
   MIN_SEGMENT_HEIGHT,
   SEGMENT_GAP,
   layoutRail,
+  matchableBlocks,
   splitSharedSpans,
   type Span,
 } from "../layoutRail";
+
+describe("matchableBlocks", () => {
+  const proseWith = (html: string): HTMLElement => {
+    const prose = document.createElement("div");
+    prose.className = "prose";
+    prose.innerHTML = html;
+    return prose;
+  };
+
+  it("matchableBlocks flattens lists to their items", () => {
+    const prose = proseWith(
+      "<p id='intro'>one</p>" +
+        "<ul><li id='a'>first</li><li id='b'>second</li><li id='c'>third</li></ul>" +
+        "<p id='outro'>two</p>",
+    );
+    expect(matchableBlocks(prose).map((block) => block.id)).toEqual([
+      "intro",
+      "a",
+      "b",
+      "c",
+      "outro",
+    ]);
+  });
+
+  it("a nested list stays inside its parent item", () => {
+    const prose = proseWith(
+      "<ol><li id='a'>first<ul><li id='deep'>deeper</li></ul></li><li id='b'>second</li></ol>",
+    );
+    const result = matchableBlocks(prose);
+
+    // One level only: the outer items are the blocks, and the nested list is
+    // part of the item's own text rather than a block of its own.
+    expect(result.map((block) => block.id)).toEqual(["a", "b"]);
+    expect(result[0].querySelector("#deep")).not.toBeNull();
+  });
+});
 
 describe("splitSharedSpans", () => {
   it("splits an identical span by weight in unit order", () => {

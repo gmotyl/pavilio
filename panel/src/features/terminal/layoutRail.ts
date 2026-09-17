@@ -13,6 +13,32 @@ export const SEGMENT_GAP = 2;
 /** unit index → the blocks it was spoken from; see `matchUnitsToBlocks`. */
 export type UnitToBlocks = readonly (readonly number[])[];
 
+/**
+ * The blocks a unit can be matched to: the direct children of `.prose`, with
+ * each `ul` / `ol` replaced by its direct `li` children.
+ *
+ * Why: a list is ONE element to react-markdown but one paragraph per item to
+ * the voice — `stripToSpeakableText` emits every item on its own, so a unit
+ * packed from items 3 to 5 has no whole-list block to match. While the list
+ * was the block, every unit cut from it was handed that same block, and the
+ * rail stacked all but the first below it as stubs. One level only: a nested
+ * list stays inside its parent `li`, whose text already contains it.
+ */
+export function matchableBlocks(prose: HTMLElement): HTMLElement[] {
+  const blocks: HTMLElement[] = [];
+  for (const child of Array.from(prose.children)) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (child.tagName === "UL" || child.tagName === "OL") {
+      for (const item of Array.from(child.children)) {
+        if (item instanceof HTMLElement) blocks.push(item);
+      }
+      continue;
+    }
+    blocks.push(child);
+  }
+  return blocks;
+}
+
 /** A unit's vertical extent in rail coordinates. */
 export interface Span {
   top: number;
@@ -77,8 +103,8 @@ export function splitSharedSpans(
 
 /**
  * Places the rail's segments over their units' blocks — see the note on the
- * component. Reads the offsets of the rendered blocks (the direct children of
- * the body's `.prose`) and writes `top` / `height` onto the rail's children,
+ * component. Reads the offsets of the rendered blocks ({@link matchableBlocks}
+ * of the body's `.prose`) and writes `top` / `height` onto the rail's children,
  * one per unit, in rail coordinates (the body is the `offsetParent` of both,
  * so the rail's own `offsetTop` is the only correction).
  *
@@ -107,10 +133,10 @@ export function layoutRail(
   );
   if (segments.length === 0) return;
 
-  const prose = body.querySelector(".prose");
-  const blocks = prose
-    ? Array.from(prose.children).filter((child): child is HTMLElement => child instanceof HTMLElement)
-    : [];
+  // The same index space the pane marked from — {@link matchableBlocks}, not
+  // the raw children — or a unit's block numbers would point at other elements.
+  const prose = body.querySelector<HTMLElement>(".prose");
+  const blocks = prose ? matchableBlocks(prose) : [];
 
   const origin = rail.offsetTop;
   const rawSpans = segments.map((_segment, index) => {

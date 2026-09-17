@@ -800,15 +800,15 @@ input[type="checkbox"] {
 }
 
 /* A matched block is a jump: hint at it on hover and focus. */
-.answer-pane-text .prose > [data-unit] {
+.answer-pane-text .prose [data-unit] {
   border-radius: 6px;
   cursor: pointer;
   outline: none;
   transition: background-color 120ms ease;
 }
 
-.answer-pane-text .prose > [data-unit]:hover,
-.answer-pane-text .prose > [data-unit]:focus-visible {
+.answer-pane-text .prose [data-unit]:hover,
+.answer-pane-text .prose [data-unit]:focus-visible {
   background: rgba(255, 255, 255, 0.05);
 }
 

@@ -96,6 +96,25 @@ const OTHER_MARKDOWN = [
   "",
 ].join("\n");
 
+/**
+ * A six-item list. `strip` emits every item as its own paragraph, so packing
+ * cuts the list into three units — items 1-2, items 3-5, item 6 — and each
+ * item is a block the pane can match, mark and jump to.
+ */
+const LIST_MARKDOWN = [
+  "# Release checklist",
+  "",
+  "Before the deploy goes out the following items are checked by the person on duty, in the order they are written down here.",
+  "",
+  "- Confirm that the database migration has finished on every single replica before any traffic at all is moved across",
+  "- Check that the health endpoint answers correctly on each of the new pods for a full minute before anything else",
+  "- Warm the cache up front so that the very first requests do not time out",
+  "- Tell the release channel that the switch is about to happen right now",
+  "- Watch the error rate closely for ten minutes after the traffic moves",
+  "- Close the change ticket once every dashboard has been green and quiet for a while, and write the summary up for the team so nobody has to guess what happened during the window",
+  "",
+].join("\n");
+
 const utterance = (id: string, text: string): Utterance => ({
   id,
   sessionId: "cell-a",
@@ -193,7 +212,28 @@ const prose = (): HTMLElement => {
   return element;
 };
 
-const blocks = (): HTMLElement[] => Array.from(prose().children) as HTMLElement[];
+/**
+ * The blocks the pane matches: the direct children of `.prose`, with each list
+ * replaced by its items — a list is one element to react-markdown but one
+ * paragraph per item to the voice.
+ */
+const flatten = (parent: Element): HTMLElement[] =>
+  Array.from(parent.children).flatMap((child) =>
+    child.tagName === "UL" || child.tagName === "OL"
+      ? (Array.from(child.children) as HTMLElement[])
+      : [child as HTMLElement],
+  );
+
+const blocks = (): HTMLElement[] => flatten(prose());
+
+/** The list's items, in document order. */
+const items = (): HTMLElement[] => Array.from(prose().querySelectorAll("li"));
+
+const list = (): HTMLElement => {
+  const element = prose().querySelector("ul");
+  if (!(element instanceof HTMLElement)) throw new Error("no ul in the body");
+  return element;
+};
 
 /**
  * By tag, not by role: a matched heading carries `role="button"` (it is a
@@ -218,8 +258,9 @@ const segment = (index: number): HTMLElement =>
  * scroll reads them in the same commit that creates the blocks, so stubbing
  * the elements afterwards would be too late.
  *
- * The rule: the k-th direct child of `.prose` sits at `k * BLOCK_TOP` and is
- * `BLOCK_HEIGHT` tall; everything else is at 0 with no height. The body's
+ * The rule: the k-th matchable block of `.prose` — its direct children, lists
+ * flattened to their items — sits at `k * BLOCK_TOP` and is `BLOCK_HEIGHT`
+ * tall; everything else is at 0 with no height. The body's
  * `scrollHeight` / `clientHeight` are whatever the test says in `layout`.
  */
 const BLOCK_TOP = 100;
@@ -238,9 +279,10 @@ class StubResizeObserver {
 }
 
 const blockIndexOf = (element: Element): number | null => {
-  const parent = element.parentElement;
-  if (!parent?.classList.contains("prose")) return null;
-  return Array.prototype.indexOf.call(parent.children, element);
+  const prose = element.closest(".prose");
+  if (!prose) return null;
+  const index = flatten(prose).indexOf(element as HTMLElement);
+  return index === -1 ? null : index;
 };
 
 const isBody = (element: Element): boolean => element.classList.contains("answer-pane-body");
@@ -757,6 +799,68 @@ describe("AnswerPane", () => {
       "H1",
       "P",
     ]);
+  });
+
+  /**
+   * A list. The voice reads each item as its own paragraph, so the items are
+   * the blocks: a unit spans exactly the items it speaks, and the `ul` that
+   * holds them is nothing but a container.
+   */
+  describe("lists", () => {
+    it("list items carry the unit marks and the list does not", () => {
+      const h = harness(LIST_MARKDOWN, null);
+      render(paneElement(makeSpeech(h)));
+
+      // Heading, lead-in, items 1-2, items 3-5, item 6.
+      expect(h.units).toHaveLength(5);
+      expect(items()).toHaveLength(6);
+      expect(items().map((item) => item.dataset.unit)).toEqual(["2", "2", "3", "3", "3", "4"]);
+      for (const item of items()) {
+        expect(item).toHaveAttribute("role", "button");
+        expect(item).toHaveAttribute("tabindex", "0");
+      }
+
+      // The container is not a block: no mark, no role, no tab stop.
+      expect(list()).not.toHaveAttribute("data-unit");
+      expect(list()).not.toHaveAttribute("role");
+      expect(list()).not.toHaveAttribute("tabindex");
+      expect(list()).not.toHaveAttribute("data-speaking");
+    });
+
+    it("clicking a list item jumps to its unit", () => {
+      const h = harness(LIST_MARKDOWN, null);
+      const speech = makeSpeech(h);
+      render(paneElement(speech));
+
+      fireEvent.click(items()[3]);
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 3);
+
+      fireEvent.click(items()[0]);
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
+
+      fireEvent.click(items()[5]);
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 4);
+      expect(speech.onJumpToUnit).toHaveBeenCalledTimes(3);
+    });
+
+    it("clicking the list container jumps nowhere", () => {
+      const h = harness(LIST_MARKDOWN, null);
+      const speech = makeSpeech(h);
+      render(paneElement(speech));
+
+      // The padding beside the bullets belongs to the `ul`, which is no unit's.
+      fireEvent.click(list());
+      fireEvent.keyDown(list(), { key: "Enter" });
+      expect(speech.onJumpToUnit).not.toHaveBeenCalled();
+    });
+
+    it("the spoken items carry data-speaking", () => {
+      const h = harness(LIST_MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
+      render(paneElement(makeSpeech(h)));
+
+      // Unit 3 speaks items 3 to 5 — exactly those, and never the whole list.
+      expect(speaking()).toEqual(items().slice(2, 5));
+    });
   });
 
   /**

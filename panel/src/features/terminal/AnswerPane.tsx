@@ -4,7 +4,7 @@ import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
 import { getStoredVoice } from "../speech/voices";
-import { type UnitToBlocks, layoutRail } from "./layoutRail";
+import { type UnitToBlocks, layoutRail, matchableBlocks } from "./layoutRail";
 import { matchUnitsToBlocks } from "./matchUnitsToBlocks";
 import { segmentStateFor } from "./segmentState";
 
@@ -84,11 +84,15 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * blocks is by text match on what it rendered (`matchUnitsToBlocks`), so the
  * marks cannot be expressed as props before render: nothing knows which `p`
  * is unit 2 until it exists. A layout effect after each render reads the
- * direct children of the renderer's `.prose` root, matches their
+ * matchable blocks of the renderer's `.prose` root, matches their
  * `textContent` against the units' `source`, and sets `data-unit`, `role`,
  * `tabindex` and `data-speaking` on the elements themselves. It first strips
- * those attributes from every child, because react-markdown reuses elements
- * across a content change and React never touches attributes it did not set.
+ * those attributes from every marked element, because react-markdown reuses
+ * elements across a content change and React never touches attributes it did
+ * not set. Those blocks are not simply the `.prose` children: a list is one
+ * element to react-markdown but one paragraph per item to the voice, so
+ * `matchableBlocks` flattens each list to its items and the marks — and the
+ * jump — land on the `li`, never on the `ul` that only holds them.
  *
  * ## Why blocks are buttons and the rail segments are not
  *
@@ -116,6 +120,10 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * `offsetTop` is at once its rail coordinate and its scroll target. A unit no
  * block was rendered from (a sentinel-only paragraph) keeps a minimum 8px
  * segment placed right after the previous one, so the rail never loses a unit.
+ * The rail spans the same blocks the marks went on — list items included,
+ * because a list is one element to react-markdown but several paragraphs to
+ * the voice — so a unit that speaks items 3 to 5 spans exactly those items
+ * instead of being stacked under the whole list as a stub.
  *
  * ## Why the pane scrolls once per unit, and never on a tick
  *
@@ -216,15 +224,15 @@ export function AnswerPane({
   // change; a tick inside a unit never gets here because the snapshot above
   // did not change.
   useLayoutEffect(() => {
-    const prose = bodyRef.current?.querySelector(".prose");
+    const prose = bodyRef.current?.querySelector<HTMLElement>(".prose");
     if (!prose) return;
-    const children = Array.from(prose.children).filter(
-      (child): child is HTMLElement => child instanceof HTMLElement,
-    );
+    const children = matchableBlocks(prose);
     // Strip first: react-markdown reuses elements across a content change,
-    // and React leaves attributes it did not set exactly where they were.
-    for (const child of children) {
-      for (const attribute of BLOCK_ATTRIBUTES) child.removeAttribute(attribute);
+    // and React leaves attributes it did not set exactly where they were. The
+    // whole subtree, not just this answer's blocks: the marks sit on list items
+    // too, and the last answer's items are nowhere near this one's children.
+    for (const marked of Array.from(prose.querySelectorAll("[data-unit]"))) {
+      for (const attribute of BLOCK_ATTRIBUTES) marked.removeAttribute(attribute);
     }
 
     const { blockToUnit, unitToBlocks } = matchUnitsToBlocks(
