@@ -729,4 +729,39 @@ describe("prepare", () => {
     expect(pieces.length).toBeGreaterThan(1);
     for (const piece of pieces) expect(piece.source).toBe(oversized);
   });
+
+  it("packed list units carry only the items they speak as source", () => {
+    // Six items of about sixty characters: too short to stand alone, so the
+    // packer merges them up to the floor. Before items were paragraphs the
+    // whole list was one paragraph and every unit cut from it carried ALL six
+    // items as its source; the answer pane's rail then had nothing to tell
+    // units apart by. Now a unit's source is the items it speaks, joined by the
+    // same single space the packer uses on the spoken side, and nothing else.
+    const items = Array.from(
+      { length: 6 },
+      (_, i) => `Item ${i + 1} explains one more thing about the rail in sixty chars`,
+    );
+    for (const item of items) expect(item.length).toBeGreaterThanOrEqual(55);
+
+    const { units } = prepare(`# Rail\n\n${items.map((item) => `- ${item}`).join("\n")}\n`);
+    const spokenItems = items.map((item) => `${item}.`);
+    const body = units.slice(1);
+
+    expect(units[0].text).toBe("Rail");
+    expect(body.length).toBeGreaterThan(1);
+    // Every item is still spoken as a sentence of its own, in order.
+    expect(body.map((unit) => unit.text).join(" ")).toBe(spokenItems.join(" "));
+
+    for (const unit of body) {
+      expect(unit.chars).toBeLessThanOrEqual(UNIT_MAX_CHARS);
+      const spoken = spokenItems.filter((item) => unit.text.includes(item));
+      expect(spoken.length).toBeGreaterThan(0);
+      expect(unit.source).toBe(spoken.join(" "));
+    }
+
+    // Packing did happen (some unit speaks several items and reaches the
+    // floor), and no unit carries the whole list.
+    expect(body.some((unit) => unit.chars >= UNIT_MIN_CHARS)).toBe(true);
+    expect(body.some((unit) => unit.source === spokenItems.join(" "))).toBe(false);
+  });
 });

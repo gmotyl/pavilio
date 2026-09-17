@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SPOKEN_CODE_CHARS, stripToSpeakableText } from "../strip";
+import { MAX_SPOKEN_CODE_CHARS, SENTINEL_ONLY_RE, stripToSpeakableText } from "../strip";
 
 describe("stripToSpeakableText", () => {
   it("removes fenced code blocks without merging the surrounding paragraphs", () => {
@@ -140,11 +140,84 @@ describe("stripToSpeakableText", () => {
       "1) arming is exclusive",
     ].join("\n");
 
+    // Items are paragraphs now, so the join is a paragraph boundary — see the
+    // list tests below for why.
     expect(stripToSpeakableText(markdown)).toBe(
       ["the header shows the armed cell.", "replay is idempotent.", "arming is exclusive."].join(
-        "\n",
+        "\n\n",
       ),
     );
+  });
+
+  it("a tight list becomes one paragraph per item", () => {
+    // A tight list used to be ONE paragraph downstream, so a unit cut out of it
+    // carried the whole list as its source and the answer pane could not tell
+    // which items that unit actually speaks. Each item is its own paragraph
+    // now; the packer merges neighbours back together on the spoken side, so
+    // the source of a unit is exactly the items it speaks.
+    const markdown = ["- first item", "- second item", "* third item", "1. fourth item"].join("\n");
+
+    expect(stripToSpeakableText(markdown)).toBe(
+      "first item.\n\nsecond item.\n\nthird item.\n\nfourth item.",
+    );
+    expect(stripToSpeakableText(markdown).split(/\n{2,}/)).toHaveLength(4);
+  });
+
+  it("a list item directly under a prose line starts a new paragraph", () => {
+    // Markdown lets a list interrupt a paragraph with no blank line before it;
+    // the rendered `li` is still a block of its own, so the spoken side has to
+    // agree and give the item its own paragraph too.
+    const markdown = ["The cells are:", "- armed", "- idle", "And that is all."].join("\n");
+
+    expect(stripToSpeakableText(markdown)).toBe(
+      "The cells are:\n\narmed.\n\nidle.\nAnd that is all.",
+    );
+  });
+
+  it("prose without lists strips exactly as before", () => {
+    // The control: with no list marker in sight the paragraph rule must not
+    // fire, and the output is byte for byte what the filter produced before
+    // list items became paragraphs — inline reductions included.
+    const markdown = [
+      "First paragraph with `prepare` inside.",
+      "",
+      "Second paragraph, see [the plan](https://pavil.io/plan).",
+      "Continued on a second line.",
+      "",
+      "```ts",
+      "const x = 1;",
+      "```",
+      "",
+      "Closing line.",
+    ].join("\n");
+
+    expect(stripToSpeakableText(markdown)).toBe(
+      [
+        "First paragraph with prepare inside.",
+        "",
+        "Second paragraph, see the plan.",
+        "Continued on a second line.",
+        "",
+        "\u27E6code\u27E7",
+        "",
+        "Closing line.",
+      ].join("\n"),
+    );
+  });
+
+  it("a bulleted image stays a sentinel-only paragraph", () => {
+    // Becoming a paragraph must not cost the item its sentinel-only shape: the
+    // unit builder recognises such a paragraph with `SENTINEL_ONLY_RE` and
+    // treats it as an omission rather than prose, and a terminator or a stray
+    // marker on it would defeat that check.
+    const markdown = ["Intro line.", "- ![the grid](https://pavil.io/img/grid.png)", "- second"].join(
+      "\n",
+    );
+
+    const paragraphs = stripToSpeakableText(markdown).split(/\n{2,}/);
+
+    expect(paragraphs).toEqual(["Intro line.", "\u27E6image\u27E7", "second."]);
+    expect(SENTINEL_ONLY_RE.test(paragraphs[1])).toBe(true);
   });
 
   it("returns empty for a response that is only code", () => {

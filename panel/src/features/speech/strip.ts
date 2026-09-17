@@ -526,24 +526,43 @@ function tidySpacing(line: string): string {
 }
 
 /**
- * Turns a list item into a sentence: the marker is dropped (a voice reads it as
- * a stray "dash") and a terminator is appended when the item has none, so items
- * are spoken as separate sentences instead of one breathless clause.
+ * Turns a list item into a sentence *and a paragraph*: the marker is dropped (a
+ * voice reads it as a stray "dash"), a terminator is appended when the item has
+ * none, so items are spoken as separate sentences instead of one breathless
+ * clause, and a blank line is opened in front of it.
+ *
+ * The blank line is for the answer pane, not the voice. A tight list — items on
+ * consecutive lines, the way agents write them — used to be ONE paragraph for
+ * the unit builder, so every unit cut out of it carried the whole list as its
+ * `source`, and `matchUnitsToBlocks.ts` could not tell which items a unit
+ * speaks. With each item its own paragraph the packer merges neighbours back
+ * to the usual window on the spoken side (a space join, which is how items
+ * were already spoken), while a unit's `source` becomes exactly the items in
+ * it. Nested items are matched by the same rule and become paragraphs too;
+ * that is accepted, since a nested `li` is a block of its own as well. The
+ * `\n{3,}` collapse in {@link stripToSpeakableText} is what keeps the result
+ * well-formed when the item already had a blank line above it.
  *
  * An item that is nothing but sentinels gets no terminator, because the period
  * would be the only thing distinguishing it from a bare sentinel — and that is
  * exactly what {@link SENTINEL_ONLY_RE} looks for downstream. `- ![a](url)`
  * became `⟦image⟧.`, which no longer reads as sentinel-only, so a response that
- * was one bulleted image woke the cell up to say "obrazek".
+ * was one bulleted image woke the cell up to say "obrazek". It still opens a
+ * paragraph, so the sentinel stands alone the way a removed block's does.
+ *
+ * An item with nothing after its marker opens no paragraph: there is nothing to
+ * place in it, and a blank line for an empty bullet would only split the prose
+ * around it.
  */
 function listItemToSentence(line: string): string {
   const item = LIST_MARKER_RE.exec(line);
   if (!item) return line;
 
   const content = item[2].trim();
-  if (content === "" || SENTINEL_ONLY_RE.test(content)) return content;
+  if (content === "") return content;
+  if (SENTINEL_ONLY_RE.test(content)) return `\n${content}`;
 
-  return SENTENCE_TERMINATOR_RE.test(content) ? content : `${content}.`;
+  return SENTENCE_TERMINATOR_RE.test(content) ? `\n${content}` : `\n${content}.`;
 }
 
 export function stripToSpeakableText(markdown: string): string {
@@ -553,9 +572,10 @@ export function stripToSpeakableText(markdown: string): string {
     listItemToSentence(tidySpacing(elideLongPaths(reduceInlineCode(reduceAddresses(line))))),
   );
 
-  // Collapse the blank lines the removed blocks left behind to a single
-  // paragraph boundary, then trim — a response that was only code must be
-  // exactly "", not whitespace.
+  // Collapse the blank lines the removed blocks and the list items left behind
+  // to a single paragraph boundary, then trim — a response that was only code
+  // must be exactly "", not whitespace. An item under a blank line arrives with
+  // two boundaries in front of it; this is what makes them one.
   const text = spoken.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 
   // A sentinel names an omission *within* an answer; with no answer around it
