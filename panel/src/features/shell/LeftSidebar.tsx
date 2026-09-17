@@ -57,6 +57,16 @@ function SectionHeader({
   );
 }
 
+/** The project's remembered focused session, or null when nothing is stored. */
+function readStoredFocus(project: string | null): string | null {
+  if (!project) return null;
+  try {
+    return localStorage.getItem(`panel-terminal-focus-${project}`);
+  } catch {
+    return null;
+  }
+}
+
 export default function LeftSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -71,49 +81,29 @@ export default function LeftSidebar() {
 
   const currentProject =
     location.pathname.match(/^\/project\/([^/]+)/)?.[1] ?? null;
-  const currentSection =
-    location.pathname.match(/^\/project\/[^/]+\/([^/]+)/)?.[1] ?? null;
-  const inIterm = currentSection === "iterm";
-  // Bare `/project/<name>` is a transient stop: ProjectRedirect resolves the
-  // Last-open-view bookmark and navigates on. Treat it as "destination not
-  // known yet" so the highlight is neither cleared nor flashed off in transit.
-  const redirectPending = currentProject !== null && currentSection === null;
 
   // Focused session id (for highlighting individual terminals)
-  const [focusedId, setFocusedId] = useState<string | null>(() => {
-    if (!currentProject) return null;
-    try {
-      return localStorage.getItem(`panel-terminal-focus-${currentProject}`);
-    } catch {
-      return null;
-    }
-  });
+  const [focusedId, setFocusedId] = useState<string | null>(() =>
+    readStoredFocus(currentProject),
+  );
   useEffect(() => {
     const onFocus = (e: Event) => {
-      setFocusedId(
-        (e as CustomEvent<TerminalFocusEventDetail>).detail.sessionId,
-      );
+      const detail = (e as CustomEvent<TerminalFocusEventDetail>).detail;
+      // Every project keeps its own focused session, so a broadcast from
+      // another project's surface must not move this project's highlight.
+      if (detail.project !== currentProject) return;
+      setFocusedId(detail.sessionId);
     };
     window.addEventListener(TERMINAL_FOCUS_EVENT, onFocus);
     return () => window.removeEventListener(TERMINAL_FOCUS_EVENT, onFocus);
-  }, []);
-  // Re-derive the highlight from the route: nothing focused outside a
-  // terminals view, and on entering one the project's stored focus — which the
-  // sidebar row click and every other focus surface write before navigating.
+  }, [currentProject]);
+  // Follow the project, not the section: on switching projects adopt the new
+  // one's stored focus — which the sidebar row click and every other focus
+  // surface write before navigating. Moving within a project keeps whatever
+  // the last broadcast set, so the stored value never overwrites a fresher one.
   useEffect(() => {
-    if (redirectPending) return;
-    if (!inIterm || !currentProject) {
-      setFocusedId(null);
-      return;
-    }
-    try {
-      setFocusedId(
-        localStorage.getItem(`panel-terminal-focus-${currentProject}`),
-      );
-    } catch {
-      setFocusedId(null);
-    }
-  }, [inIterm, currentProject, redirectPending]);
+    setFocusedId(readStoredFocus(currentProject));
+  }, [currentProject]);
 
   // Per-project expand state — hydrated once from localStorage when projects load
   const [expanded, setExpandedState] = useState<Record<string, boolean>>(
@@ -331,8 +321,12 @@ export default function LeftSidebar() {
             style={{ borderColor: "var(--border-subtle)" }}
           >
             {projectSessions.map((s) => {
+              // The highlight tracks the project, not the route: a focused
+              // terminal can be on screen in the Cmd+B drawer, which renders
+              // only OUTSIDE the terminal section. The old route gate made the
+              // drawer's own session the one row that could never light up.
               const isFocused =
-                (inIterm || redirectPending) && s.id === focusedId;
+                currentProject === project.name && s.id === focusedId;
               return (
                 <li key={s.id}>
                   <button
