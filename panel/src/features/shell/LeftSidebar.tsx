@@ -26,8 +26,8 @@ import { useAutoSyncStatus } from "../auto-sync/useAutoSyncStatus";
 import { useArchivedProjects } from "../projects/useArchivedProjects";
 import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
-import { TerminalActivityLed } from "../terminal/TerminalActivityLed";
 import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
+import { SessionIndicator } from "../terminal/SessionIndicator";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import {
   TERMINAL_FOCUS_EVENT,
@@ -254,7 +254,14 @@ export default function LeftSidebar() {
           </button>
           {!expandedNow && (
             <span className="flex items-center">
-              <ProjectActivityLed sessionIds={projectSessionIds} />
+              {/* The sidebar is the one place a listener can see WHICH of
+                  several projects is talking, so a speaking session outranks
+                  the activity dots even on the collapsed row. Everything else
+                  still falls through to the aggregate LED. */}
+              <SessionIndicator
+                sessionIds={projectSessionIds}
+                fallback={<ProjectActivityLed sessionIds={projectSessionIds} />}
+              />
             </span>
           )}
           <NavLink
@@ -361,7 +368,7 @@ export default function LeftSidebar() {
                         : "var(--text-secondary)",
                     }}
                   >
-                    <TerminalActivityLed sessionId={s.id} />
+                    <SessionIndicator sessionId={s.id} />
                     <span className="font-mono text-[11px] truncate">
                       {s.name}
                     </span>

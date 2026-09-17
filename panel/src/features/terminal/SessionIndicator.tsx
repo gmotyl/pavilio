@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Volume2 } from "lucide-react";
 import { usePanelSpeech } from "../speech/SpeechHostProvider";
 import { TerminalActivityLed } from "./TerminalActivityLed";
@@ -6,6 +7,13 @@ type Props = {
   size?: "sm" | "lg";
   title?: string;
   hideWhenIdle?: boolean;
+  /**
+   * What the row shows while nothing is speaking. Defaults to the activity LED,
+   * which is right for a session row; a project row passes its own aggregate
+   * indicator, because `ProjectActivityLed` shows busy AND attention at once
+   * and the collapsed row must not lose that just because it gained a speaker.
+   */
+  fallback?: ReactNode;
 } & ({ sessionId: string } | { sessionIds: readonly string[] });
 
 /**
@@ -28,7 +36,7 @@ type Props = {
  * place.
  */
 export function SessionIndicator(props: Props) {
-  const { size = "sm", title } = props;
+  const { size = "sm", title, fallback } = props;
   const { stateFor } = usePanelSpeech();
   const ids: readonly string[] =
     "sessionId" in props ? [props.sessionId] : props.sessionIds;
@@ -36,7 +44,13 @@ export function SessionIndicator(props: Props) {
   // for the whole project, and only one cell can make sound at a time anyway.
   const speakingId = ids.find((id) => stateFor(id) === "speaking");
 
-  if (speakingId === undefined) return <TerminalActivityLed {...props} />;
+  if (speakingId === undefined) {
+    return fallback !== undefined ? (
+      <>{fallback}</>
+    ) : (
+      <TerminalActivityLed {...props} />
+    );
+  }
 
   return (
     <span
