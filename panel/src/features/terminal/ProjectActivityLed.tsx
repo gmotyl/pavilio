@@ -23,6 +23,9 @@ export function ProjectActivityLed({
     useAggregateActivityFlags(sessionIds);
   const pulsing = useAttentionPulse(attentionSinceAt, hasAttention);
   const { stateFor } = usePanelSpeech();
+
+  if (!hasAny) return null;
+
   // WHY the speaker is a flag in this group rather than a replacement for it:
   // the collapsed row is where a listener finds which project is talking, so
   // speaking has to be visible here — but it is a status like busy or
@@ -30,11 +33,7 @@ export function ProjectActivityLed({
   // speaker would hide an attention signal that belongs to a DIFFERENT session,
   // for as long as the audio plays. Only one cell can make sound at a time, so
   // the first speaking id names the icon.
-  const speakingId = hasAny
-    ? sessionIds.find((id) => stateFor(id) === "speaking")
-    : undefined;
-
-  if (!hasAny) return null;
+  const speakingId = sessionIds.find((id) => stateFor(id) === "speaking");
 
   const idleOnly = !hasBusy && !hasAttention;
 

@@ -39,6 +39,24 @@ describe("MarkdownRenderer mermaid fences", () => {
     });
   });
 
+  it("a mermaid fence keeps its pre wrapper", async () => {
+    // WHY the shape is pinned and not just the diagram: the `pre` override has
+    // a branch that returns a bare Fragment, and if react-markdown ever changed
+    // what it hands `pre`, that branch would fire and the diagram would lose its
+    // `pre` — and with it the `.prose pre` typography that gives the diagram its
+    // block. Every other mermaid test would stay green, because they only look
+    // for the diagram itself.
+    const { container } = renderMd({ content: doc });
+    await waitFor(() => expect(screen.getByTestId("mermaid")).toBeTruthy());
+
+    const pre = screen.getByTestId("mermaid").closest("pre");
+    expect(pre).not.toBeNull();
+    // A mermaid fence renders a diagram, so there is nothing to copy: it must
+    // not be wrapped in the `.code-block` context that positions the button.
+    expect(pre!.closest(".code-block")).toBeNull();
+    expect(container.querySelector(".code-block")).toBeNull();
+  });
+
   it("still renders non-mermaid fences as code, with or without a basePath", () => {
     const ts = ["```ts", "const a = 1;", "```", ""].join("\n");
     const { container, unmount } = renderMd({ content: ts });
