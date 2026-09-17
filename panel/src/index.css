@@ -227,10 +227,15 @@ code, pre, .font-mono {
 
 /* Fenced code block + its copy button.
    The button is a sibling of the `pre` and is positioned against this wrapper,
-   not against the `pre` itself: the `pre` is the horizontal scroll box, so a
-   button anchored inside it would scroll out of the corner as soon as wide code
-   is scrolled sideways. The wrapper never scrolls, so the button stays put and
-   the `pre` keeps its own overflow untouched. */
+   not against anything inside the fence, because nothing in there is a stable
+   anchor. In a highlighted fence the horizontal scroll box is the `code` inside
+   the `pre`: `pre code.hljs`, from the highlight.js theme imported at the top of
+   this file, is `display: block` + `overflow-x: auto`, so wide code scrolls
+   inside the `code` while the `pre` stays at its container width. An unlabelled
+   fence gets no `hljs` class, and then the `pre`'s own `overflow-x: auto` (from
+   `@tailwindcss/typography`; the `.prose pre` rule above only paints it) is the
+   scroll box. This wrapper never scrolls either way, so anchoring the button
+   here instead of inside the `pre` is what keeps it in the corner. */
 .code-block {
   position: relative;
 }

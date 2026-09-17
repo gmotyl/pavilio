@@ -85,9 +85,16 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
         // reader never wants pasted, the same trim mermaid does above.
         const text = extractText(children).replace(/\n$/, "");
         return (
-          // The button is a SIBLING of the `pre`, not a child of it: the `pre`
-          // is the horizontal scroll box, so a button inside it would slide out
-          // of the corner as soon as wide code is scrolled sideways.
+          // The button is a SIBLING of the `pre`, not a child of it, because
+          // nothing inside the fence is a stable anchor. In a highlighted fence
+          // the horizontal scroll box is the `code` INSIDE the `pre`: the
+          // highlight.js theme makes `pre code.hljs` `display: block` +
+          // `overflow-x: auto`, so wide code slides inside the `code` while the
+          // `pre` stays at its container width. An unlabelled fence gets no
+          // `hljs` class, and then the `pre`'s own `overflow-x: auto` (from
+          // `@tailwindcss/typography`) is what scrolls. This wrapper scrolls in
+          // neither case, so the button is positioned against it and stays in
+          // the corner.
           <div className="code-block">
             <pre {...props}>{children}</pre>
             <CopyIconButton value={text} label="Copy code" />
