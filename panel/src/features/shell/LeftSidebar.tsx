@@ -91,6 +91,19 @@ export default function LeftSidebar() {
       const detail = (e as CustomEvent<TerminalFocusEventDetail>).detail;
       // Every project keeps its own focused session, so a broadcast from
       // another project's surface must not move this project's highlight.
+      //
+      // WHY this filter is safe despite being keyed on [currentProject]: a
+      // broadcast for a project we are navigating *to*, fired in the same tick
+      // as the navigation, is still compared against the *old* currentProject
+      // (this effect has not re-subscribed yet) and is dropped. Nothing is lost
+      // only because every broadcaster writes
+      // `panel-terminal-focus-<project>` to localStorage *before* dispatching
+      // (useTerminalSessions.setFocusedId, createTerminalSession,
+      // QuickTerminalModal, and the sidebar row click below), and the
+      // [currentProject] effect underneath re-reads that storage immediately
+      // after the switch. A future broadcaster that dispatches without
+      // persisting first would have its event silently dropped across a
+      // project switch: persist, then dispatch.
       if (detail.project !== currentProject) return;
       setFocusedId(detail.sessionId);
     };
