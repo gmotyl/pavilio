@@ -211,6 +211,12 @@ export function SpeechControlBar({
   // button's `data-pulse` below for why the bar is capped and the header is
   // not. Keyed on the utterance under the cursor, so a newer answer is a new
   // arrival and gets its own window.
+  //
+  // The `&&` below leans on an invariant of `stateFor` in
+  // `features/speech/useUtteranceChannel.ts`: a session with nothing under the
+  // cursor is reported `empty`, never `ready`. So on the only path where this
+  // window decides anything — `state === "ready"` — there IS a cursor utterance
+  // and the key is never null; a null key means the window is inactive anyway.
   const withinReadyPulse = useReadyPulseWindow(
     state === "ready",
     utteranceUnderCursor(queue)?.id ?? null,

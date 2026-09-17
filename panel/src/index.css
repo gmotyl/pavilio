@@ -404,6 +404,12 @@ input[type="checkbox"] {
    its own declaration: a second copy is a second thing to keep in sync, and
    that includes whatever this rule grows later.
 
+   One thing is NOT shared any more: `SpeechControlBar.tsx` ANDs `speechPulse`
+   with a ten-second ready window (`useReadyPulseWindow`), so the two pulses
+   are the same pulse only for the first ten seconds of a ready answer; after
+   that the header keeps pulsing and the bar goes quiet. The animation stays
+   one rule regardless — what differs is which control still asks for it.
+
    Which is also the whole of the reduced-motion story: there is no
    `prefers-reduced-motion` query anywhere in this stylesheet — not on the
    activity LED, not on the speak control, not on the busy pulse — so the bar
