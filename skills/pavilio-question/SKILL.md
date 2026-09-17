@@ -18,7 +18,7 @@ Search project notes, understand project context, and answer questions based on 
 ## Process
 
 1. **Determine scope**: Ask user if the question is about a specific project or all projects
-2. **Load context**: Read the relevant `_index.json` and `PROJECT.md` files
+2. **Load context**: Read the relevant `_index.json`, `PROJECT.md` (stable card) and `STATUS.md` (current focus, open questions, active team) files
 3. **Search**: Use the index to find relevant notes
 4. **Deep dive**: Read specific notes if needed for detailed answers
 5. **Respond**: Provide answers with references to source notes
@@ -32,7 +32,7 @@ If user specifies a project (e.g., "in my-work project" or "for my-blog"):
 
 ```
 1. Read projects/projectname/_index.json
-2. Read projects/projectname/PROJECT.md
+2. Read projects/projectname/PROJECT.md and projects/projectname/STATUS.md (if present)
 3. Search index for relevant keywords
 4. If needed, read specific notes from projects/projectname/YYYY-MM-DD_*.md
 5. Provide answer with note references

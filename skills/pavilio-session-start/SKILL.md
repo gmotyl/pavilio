@@ -28,7 +28,8 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 
 1. Load most recent progress file from `<root>/projects/[project]/progress/`
 2. Read the project's default-discovery files:
-   - `PROJECT.md` — overview, repos, key context (always)
+   - `PROJECT.md` — the resume card: overview, repos + working rules, gotchas (always; it is capped at 60 lines for exactly this read)
+   - `STATUS.md` (if present) — **do not read at start.** It holds meeting-driven state (focus, open questions, team) and is for [[pavilio-question]] / [[pavilio-manager]]; the progress file already carries what this session needs. Read it only when the session turns out to be meeting prep or a status question.
    - `CONTEXT.md` (if present) — project-specific glossary (always; usually short)
    - `adr/` (if present) — **list filenames/titles only**, do not read bodies. You'll know which ADRs exist for later targeted reads.
 3. Derive **active work** from the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). There is no active-plan pointer file to read.

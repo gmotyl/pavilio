@@ -1,17 +1,18 @@
 ---
 name: pavilio-bootstrap
-description: Generate `PROJECT.md` and `_index.json` for a project from its existing meeting notes. Use when the user invokes `/pavilio-bootstrap`, when a project has notes but no index, or when rebuilding/migrating after manual edits. Accepts a single project name or "all".
+description: Generate `PROJECT.md` (stable resume card), `STATUS.md` (volatile state) and `_index.json` for a project from its existing meeting notes. Use when the user invokes `/pavilio-bootstrap`, when a project has notes but no index, or when rebuilding/migrating after manual edits. Accepts a single project name or "all".
 ---
 
 # Project Knowledge Bootstrap
 
-Analyze existing meeting notes in a project folder and generate the `PROJECT.md` and `_index.json` files from scratch.
+Analyze existing meeting notes in a project folder and generate the `PROJECT.md`, `STATUS.md` and `_index.json` files from scratch. The split and the caps are defined once, in [[pavilio-note]] → **PROJECT.md / STATUS.md / DECISIONS.md Update Rules**; this skill produces the same files from history instead of from one meeting.
 
 ## When to Use
 
 - When a project has notes but no PROJECT.md or _index.json
 - When rebuilding the index after manual edits
 - When migrating from old note format to new structured format
+- When splitting a legacy all-in-one `PROJECT.md` into card + `STATUS.md`
 
 ## Process
 
@@ -24,7 +25,7 @@ Analyze existing meeting notes in a project folder and generate the `PROJECT.md`
    - Action items
    - Key topics
 4. **Aggregate data** across all notes
-5. **Generate PROJECT.md** with accumulated knowledge
+5. **Generate PROJECT.md** (resume card — stable facts only) and **STATUS.md** (volatile state — from the most recent notes, within caps)
 6. **Generate _index.json** with structured search data
 7. **Commit changes**
 
@@ -58,9 +59,10 @@ When reading existing notes, look for:
 - Greg is always present as Lead/PM
 
 ### Decisions
-- Statements in Quick Recap about what was "decided", "agreed", "chosen"
-- Technology Tradeoffs section often contains implicit decisions
-- Look for phrases: "will use", "agreed to", "the team decided"
+- Notes written with the current template have a `## Decisions` section — take those as-is (they are already `decided` modality)
+- In older notes: statements in Quick Recap about what was "decided", "agreed", "chosen"; phrases like "will use", "agreed to", "the team decided"
+- **Technology Tradeoffs are observations, not decisions** — promote one only if the note also states it was decided
+- Proposals ("we could", "for now", "probably") are not decisions; skip them here
 
 ### Technologies
 - Mentioned in Technology Tradeoffs section
@@ -74,62 +76,25 @@ When reading existing notes, look for:
 
 ---
 
-## Output: PROJECT.md
+## Output: PROJECT.md (resume card)
 
-Generate a comprehensive PROJECT.md following this structure:
+Use the **PROJECT.md Template (resume card)** from [[pavilio-note]] verbatim. Only stable facts go in: overview, repositories + working rules, environment gotchas, stack, links. Header line: `> Last updated: [today] · bootstrap (from [N] notes)`.
 
-```markdown
-# [Project Name]
+- **No Team, no Focus, no Open Questions, no Key Decisions table** — those are `STATUS.md` / `DECISIONS.md`
+- Hard cap **60 lines**; anything longer belongs in `CONTEXT.md`, an ADR, or a memo
+- Working rules and gotchas come from notes *and* from `progress/` files — that is where "never push panel changes to X" and "MCP Y is blocked" get written down
 
-> Last updated: [today's date]
-> Bootstrapped from [N] existing notes
+## Output: STATUS.md (volatile)
 
-## Project Overview
+Use the **STATUS.md Template** from [[pavilio-note]] and apply its caps mechanically:
 
-[Synthesize project description from note contents - what is this project about?]
+- **Current Focus:** from the most recent 1–2 notes only — ≤ 5 bullets × ≤ 150 chars, nothing historical
+- **Open Questions:** only unresolved — ≤ 8 bullets × ≤ 200 chars, each with owner + date raised
+- **Recent Decisions:** last 5 `decided` items, newest first; the full list goes to `DECISIONS.md` (create/append)
+- **Team (active):** people seen in the last 60 days — ≤ 12 rows, role + ≤ 80 chars current focus, no dates, no absences. Everyone else only in `_index.json.team`
+- No notes index (`_index.json`), no ticket-specific sections
 
-## Team
-
-| Name | Role | Notes |
-|------|------|-------|
-| Greg | Lead/PM | Main point of contact |
-| [Name] | [Role] | [Aggregated context from meetings] |
-
-## Key Decisions
-
-| Date | Decision | Context |
-|------|----------|---------|
-| [date] | [decision] | [context] |
-[... last 5 only, most recent first. Full history goes in DECISIONS.md ...]
-
-See [DECISIONS.md](./DECISIONS.md) for full history.
-
-## Technology Stack
-
-- **[Tech 1]** — [aggregated context from mentions]
-- **[Tech 2]** — [context]
-
-## Current Focus Areas
-
-[Based on most recent notes only — max 7 items, no historical]
-
-Active plans: see [plans/CURRENT.md](./plans/CURRENT.md)
-
-## Open Questions / Blockers
-
-[Only truly unresolved items — max 10. No stale/resolved items.]
-
-See [_index.json](./_index.json) for full notes index.
-```
-
-**Compact rules for generated PROJECT.md:**
-- **Team notes:** Max 1 short sentence per person
-- **Key Decisions:** Last 5 only; rest in DECISIONS.md
-- **Current Focus:** From most recent notes only — max 7 items, NO historical
-- **Open Questions:** Only truly unresolved — max 10
-- **No Notes Index** — use `_index.json`
-- **No task-specific sections** — those belong in individual notes
-- **No ephemeral data** (team availability, holidays)
+When bootstrapping a project that already has a legacy all-in-one `PROJECT.md`, **move** its Team / Focus / Open Questions / Key Decisions into `STATUS.md` (pruned to caps) rather than regenerating them from scratch, then rewrite `PROJECT.md` as the card. Nothing gets lost: the pruned rows still exist in `_index.json` and the notes.
 
 ---
 
@@ -204,7 +169,9 @@ After bootstrapping, report:
 Bootstrap complete for [project]!
 
 Created:
-- PROJECT.md with [N] team members, [N] decisions, [N] technologies
+- PROJECT.md (resume card, [N] lines)
+- STATUS.md with [N] focus items, [N] open questions, [N] active team members
+- DECISIONS.md with [N] decisions
 - _index.json with [N] notes indexed
 
 Team members found: [list]

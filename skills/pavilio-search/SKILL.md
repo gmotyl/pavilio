@@ -76,7 +76,7 @@ and source files nobody wrote about do not belong in a ticket.
 
 Sections, in this order, omitting any that is empty:
 
-**Decisions** — hits from `DECISIONS.md` and `PROJECT.md`. First, because a decision
+**Decisions** — hits from `DECISIONS.md` and `STATUS.md` → Recent Decisions (legacy: `PROJECT.md` → Key Decisions). First, because a decision
 outranks narrative. A decision dated after a memo supersedes it.
 
 **What's established** — one claim per line, each tagged `path · date`.
