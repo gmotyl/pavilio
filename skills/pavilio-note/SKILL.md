@@ -245,12 +245,12 @@ Project knowledge is split by **volatility**, because `PROJECT.md` is read in fu
 **STATUS.md** — rewrite from scratch every meeting: read the previous `STATUS.md`, carry forward only what is still true, then apply the **caps**:
 
 - **Current Focus:** ≤ 5 bullets, ≤ 150 chars each. Items from THIS meeting first; a carried-over item survives only if the transcript touched it or it has a future date.
-- **Open Questions:** ≤ 8 bullets, ≤ 200 chars each, every one with **owner** (or `nikt`) and **date raised** (`dd.mm`). Drop anything resolved, anything older than 30 days with no owner, anything about absences/holidays.
+- **Open Questions:** ≤ 8 bullets, ≤ 200 chars each, every one with **owner** (or `nikt`) and **date raised** (`dd.mm`). Drop anything resolved, anything older than 30 days with no owner (an ownerless question nobody repeated in a month is dead), anything about absences/holidays.
 - **Recent Decisions:** last 5 `decided` items, newest first, one line each with date + note ref. Older ones live in `DECISIONS.md`.
-- **Team (active):** ≤ 12 people — those seen in the last 60 days per `_index.json.team[*].last_seen`. Role + ≤ 80 chars of *current* focus. **No dates, no diary lines, no absences.** Everyone else stays in `_index.json` only.
+- **Team (active):** ≤ 12 people — those seen in the last 60 days per `_index.json.team[*].last_seen` (two months covers a holiday gap in a recurring series). Role + ≤ 80 chars of *current* focus. **No dates, no diary lines, no absences.** Everyone else stays in `_index.json` only.
 - No task-specific sections (ticket IDs and their details belong in notes), no notes index (that is `_index.json`).
 
-**Caps are checked mechanically in the post-write step** — count bullets and rows. Over cap in `-yolo`/batch mode = `status: error`.
+**Caps are checked in the post-write step by counting, not by reading** — e.g. `awk '/^## Open Questions/{p=1;next}/^## /{p=0}p&&/^- /' STATUS.md | wc -l` per section, `grep -c '^|' ` minus 2 for the Team table. Over cap in `-yolo`/batch mode = `status: error`.
 
 **DECISIONS.md** — append every `decided` item: `- YYYY-MM-DD — decision — context · [note](notes/<file>.md)`. Create the file with a `# Decisions` header if missing. Never rewrite past entries; a reversed decision gets a new line saying so.
 
@@ -303,7 +303,7 @@ Omit `Environment & gotchas` when empty. Omit any `See also` link whose target d
 
 ## Open Questions / Blockers
 
-- [ ] **[question]** — [owner | nikt] · [dd.mm] · [what unblocks it]
+- [ ] **[question]** — [owner, or `nikt` when nobody owns it] · [dd.mm] · [what unblocks it]
 
 ## Recent Decisions
 
