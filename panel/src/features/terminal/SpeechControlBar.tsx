@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { segmentStateFor, type SegmentState } from "./segmentState";
 import { speechPulse } from "./CellSpeakButton";
+import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
+import { utteranceUnderCursor } from "../speech/utteranceQueue";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../speech/types";
 import { getStoredVoice } from "../speech/voices";
 
@@ -205,6 +207,15 @@ export function SpeechControlBar({
   // the point, and the states are read below.
   useSyncExternalStore(subscribeCacheVersion, readCacheVersion);
 
+  // Ten seconds from the moment this answer became ready — see the play
+  // button's `data-pulse` below for why the bar is capped and the header is
+  // not. Keyed on the utterance under the cursor, so a newer answer is a new
+  // arrival and gets its own window.
+  const withinReadyPulse = useReadyPulseWindow(
+    state === "ready",
+    utteranceUnderCursor(queue)?.id ?? null,
+  );
+
   const armed = speech.armedSessionId === sessionId;
   const intent = transportIntent(state);
   const weights = segmentWeights(units, durations);
@@ -332,8 +343,16 @@ export function SpeechControlBar({
           // sits over the top of the cell, so without this a user watching the
           // transport has to look back at the header to learn that something is
           // waiting. `index.css` styles both selectors in one rule, which is
-          // what keeps the two pulses the same pulse.
-          data-pulse={speechPulse(state)}
+          // what keeps the two the same pulse — for the first ten seconds.
+          //
+          // Then this one stops. The bar is a 56px rail lying across the top of
+          // the terminal, and a pulse that size that never ends reads as a nag
+          // over the work rather than a notice about it. The header control is
+          // small, at rest, and off to the side, so it keeps pulsing for as
+          // long as the answer goes unheard: it stays the place that says
+          // something is still waiting. The cap narrows where the shared
+          // derivation is read, never what it means.
+          data-pulse={speechPulse(state) === "1" && withinReadyPulse ? "1" : "0"}
           className="speech-bar-btn speech-bar-primary"
           disabled={state === "empty"}
           aria-disabled={intent === "none" || undefined}
