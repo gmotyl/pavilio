@@ -113,6 +113,9 @@ const NO_SENTINEL_UNITS = [
   },
 ];
 
+/** Ordinals for the intro-colon list fixture, so its items can be built and checked from one list. */
+const NUMBERED = ["one", "two", "three", "four", "five", "six"];
+
 /** Everything the voice will say, in order — the only thing these tests judge. */
 const spoken = (markdown: string, language: "pl" | "en"): string =>
   prepare(markdown, { language })
@@ -135,6 +138,37 @@ describe("prepare", () => {
 
     expect(units[0].text).toBe("The panel now speaks the last response.");
     expect(units[1].text).toBe("It chunks it first so playback starts fast.");
+  });
+
+  it("an intro line ending in a colon still yields a short fast-start unit", () => {
+    // The shape an agent answer takes constantly: a lead-in ending in a colon,
+    // then a tight list. Every item is a paragraph of its own now, so the
+    // lead-in stands alone as a sentence fragment — unit 0 stays short only if
+    // the fast start may finish that sentence in the paragraph behind it.
+    const item = (n: string): string => `item ${n} is long enough to matter here`;
+    const { units } = prepare(
+      ["Here are the steps:", ...NUMBERED.map((n) => `- ${item(n)}`), ""].join("\n"),
+    );
+
+    const fastStart = `Here are the steps: ${item("one")}.`;
+
+    expect(units[0].text).toBe(fastStart);
+    expect(units[0].chars).toBeLessThan(UNIT_MIN_CHARS);
+    // Both blocks are spoken in it, so both name it — see `matchUnitsToBlocks`.
+    expect(units[0].source).toBe(fastStart);
+    // The items behind the fast start are still spoken, in order and once each.
+    expect(units.map((unit) => unit.text).join(" ")).toBe(
+      [fastStart, ...NUMBERED.slice(1).map((n) => `${item(n)}.`)].join(" "),
+    );
+  });
+
+  it("a list directly after an unterminated line still starts small", () => {
+    const { units } = prepare(
+      ["Steps to follow", "- do this thing first", "- then do the other thing", ""].join("\n"),
+    );
+
+    expect(units[0].text).toBe("Steps to follow do this thing first.");
+    expect(units[1].text).toBe("then do the other thing.");
   });
 
   it("a leading removed block does not cost the response its fast start", () => {
