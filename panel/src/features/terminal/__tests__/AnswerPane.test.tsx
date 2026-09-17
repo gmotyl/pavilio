@@ -540,16 +540,19 @@ describe("AnswerPane", () => {
     const speech = makeSpeech(h);
     render(paneElement(speech));
 
-    const pre = blocks().find((block) => block.tagName === "PRE");
-    expect(pre).toBeDefined();
-    expect(pre).not.toHaveAttribute("data-unit");
-    expect(pre).not.toHaveAttribute("role");
-    expect(pre).not.toHaveAttribute("tabindex");
+    // The renderer wraps a fenced block in a `.code-block` div so the copy button
+    // can sit beside the `pre`, so the matchable block is that wrapper and the
+    // `pre` itself is a child of it.
+    const codeBlock = blocks().find((block) => block.classList.contains("code-block"));
+    expect(codeBlock).toBeDefined();
+    expect(codeBlock).not.toHaveAttribute("data-unit");
+    expect(codeBlock).not.toHaveAttribute("role");
+    expect(codeBlock).not.toHaveAttribute("tabindex");
     // Unit 2 was packed from the two paragraphs after the fence, not the fence.
-    expect(pre).not.toHaveAttribute("data-speaking");
+    expect(codeBlock).not.toHaveAttribute("data-speaking");
 
-    fireEvent.click(pre!);
-    fireEvent.keyDown(pre!, { key: "Enter" });
+    fireEvent.click(codeBlock!);
+    fireEvent.keyDown(codeBlock!, { key: "Enter" });
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
