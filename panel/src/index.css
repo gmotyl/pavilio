@@ -225,6 +225,41 @@ code, pre, .font-mono {
   border-radius: 0 8px 8px 0;
 }
 
+/* Fenced code block + its copy button.
+   The button is a sibling of the `pre` and is positioned against this wrapper,
+   not against the `pre` itself: the `pre` is the horizontal scroll box, so a
+   button anchored inside it would scroll out of the corner as soon as wide code
+   is scrolled sideways. The wrapper never scrolls, so the button stays put and
+   the `pre` keeps its own overflow untouched. */
+.code-block {
+  position: relative;
+}
+
+.code-block > button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.25rem;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  opacity: 0;
+  transition: opacity 0.12s ease-in-out;
+}
+
+/* Revealed by the pointer, and by the keyboard: `:focus-within` is what keeps
+   the button usable when it is tabbed to, where no hover ever happens. */
+.code-block:hover > button,
+.code-block:focus-within > button {
+  opacity: 1;
+}
+
+/* Touch devices have no hover state, so the button would never appear there. */
+@media (hover: none) {
+  .code-block > button {
+    opacity: 1;
+  }
+}
+
 /* Markdown tables: zebra rows + visible column lines */
 .prose table {
   border-collapse: collapse;

@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
+import CopyIconButton from "../shell/CopyIconButton";
 
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
@@ -67,7 +68,27 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
         if (child?.props?.className === "mermaid-block") {
           return <>{children}</>;
         }
-        return <pre {...props}>{children}</pre>;
+        // A mermaid fence renders as a diagram, so there is no text to copy.
+        // Match on the language class, not on the `mermaid-block` span above:
+        // react-markdown hands `pre` the *unrendered* element for the `code`
+        // node, so what is visible here is the fence's own `language-mermaid`
+        // class, never the markup the `code` override will return from it.
+        if (/language-mermaid/.test(child?.props?.className ?? "")) {
+          return <pre {...props}>{children}</pre>;
+        }
+        // `extractText` walks `props.children` only, so the language class is
+        // not in the result; the fence contributes one trailing newline that a
+        // reader never wants pasted, the same trim mermaid does above.
+        const text = extractText(children).replace(/\n$/, "");
+        return (
+          // The button is a SIBLING of the `pre`, not a child of it: the `pre`
+          // is the horizontal scroll box, so a button inside it would slide out
+          // of the corner as soon as wide code is scrolled sideways.
+          <div className="code-block">
+            <pre {...props}>{children}</pre>
+            <CopyIconButton value={text} label="Copy code" />
+          </div>
+        );
       },
     };
 
