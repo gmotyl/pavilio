@@ -1,0 +1,258 @@
+/**
+ * The rail's geometry, without React: `splitSharedSpans` is pure, and
+ * `layoutRail` reads only `offsetTop` / `offsetHeight`, which jsdom leaves at
+ * zero — so the blocks carry their boxes as data attributes and the getters
+ * are stubbed to read them back, the same trick `AnswerPane.test.tsx` uses.
+ */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  MIN_SEGMENT_HEIGHT,
+  SEGMENT_GAP,
+  layoutRail,
+  matchableBlocks,
+  splitSharedSpans,
+  type Span,
+} from "../layoutRail";
+
+describe("matchableBlocks", () => {
+  const proseWith = (html: string): HTMLElement => {
+    const prose = document.createElement("div");
+    prose.className = "prose";
+    prose.innerHTML = html;
+    return prose;
+  };
+
+  it("matchableBlocks flattens lists to their items", () => {
+    const prose = proseWith(
+      "<p id='intro'>one</p>" +
+        "<ul><li id='a'>first</li><li id='b'>second</li><li id='c'>third</li></ul>" +
+        "<p id='outro'>two</p>",
+    );
+    expect(matchableBlocks(prose).map((block) => block.id)).toEqual([
+      "intro",
+      "a",
+      "b",
+      "c",
+      "outro",
+    ]);
+  });
+
+  it("a nested list stays inside its parent item", () => {
+    const prose = proseWith(
+      "<ol><li id='a'>first<ul><li id='deep'>deeper</li></ul></li><li id='b'>second</li></ol>",
+    );
+    const result = matchableBlocks(prose);
+
+    // One level only: the outer items are the blocks, and the nested list is
+    // part of the item's own text rather than a block of its own.
+    expect(result.map((block) => block.id)).toEqual(["a", "b"]);
+    expect(result[0].querySelector("#deep")).not.toBeNull();
+  });
+});
+
+describe("splitSharedSpans", () => {
+  it("splits an identical span by weight in unit order", () => {
+    const shared: Span = { top: 0, bottom: 100 };
+    expect(splitSharedSpans([shared, { ...shared }], [60, 40])).toEqual([
+      { top: 0, bottom: 60 },
+      { top: 60, bottom: 100 },
+    ]);
+  });
+
+  it("three sharers produce contiguous slices summing to the original", () => {
+    const shared: Span = { top: 20, bottom: 120 };
+    const result = splitSharedSpans([shared, { ...shared }, { ...shared }], [1, 2, 3]);
+    expect(result).toHaveLength(3);
+    const slices = result as Span[];
+    expect(slices[0].top).toBe(20);
+    expect(slices[2].bottom).toBe(120);
+    expect(slices[1].top).toBe(slices[0].bottom);
+    expect(slices[2].top).toBe(slices[1].bottom);
+    const total = slices.reduce((sum, s) => sum + (s.bottom - s.top), 0);
+    expect(total).toBeCloseTo(100);
+    // Proportional: 1/6, 2/6, 3/6 of 100.
+    expect(slices[0].bottom - slices[0].top).toBeCloseTo(100 / 6);
+    expect(slices[1].bottom - slices[1].top).toBeCloseTo(200 / 6);
+    expect(slices[2].bottom - slices[2].top).toBeCloseTo(300 / 6);
+  });
+
+  it("distinct overlapping spans pass through unchanged", () => {
+    const spans: Span[] = [
+      { top: 0, bottom: 40 },
+      { top: 0, bottom: 140 },
+      { top: 100, bottom: 180 },
+    ];
+    expect(splitSharedSpans(spans, [3, 20, 8])).toEqual(spans);
+  });
+
+  it("a null span breaks a group and stays null", () => {
+    const shared: Span = { top: 0, bottom: 100 };
+    expect(splitSharedSpans([shared, null, { ...shared }], [1, 1, 1])).toEqual([
+      shared,
+      null,
+      shared,
+    ]);
+  });
+
+  it("a short weights array does not truncate the output", () => {
+    // The exported contract takes the two arrays separately, so a caller can
+    // hand over fewer weights than spans; the missing ones count as zero
+    // rather than dropping the units they belong to.
+    const shared: Span = { top: 0, bottom: 100 };
+    const group = [shared, { ...shared }, { ...shared }];
+
+    const partial = splitSharedSpans(group, [10]) as Span[];
+    expect(partial).toHaveLength(3);
+    expect(partial[0].top).toBe(0);
+    expect(partial[1].top).toBe(partial[0].bottom);
+    expect(partial[2].top).toBe(partial[1].bottom);
+    expect(partial[2].bottom).toBe(100);
+
+    // No weights at all is the all-zero case: an even split, not an empty result.
+    const none = splitSharedSpans(group, []) as Span[];
+    expect(none).toHaveLength(3);
+    for (const slice of none) expect(slice.bottom - slice.top).toBeCloseTo(100 / 3);
+    expect(none[0].top).toBe(0);
+    expect(none[2].bottom).toBe(100);
+  });
+
+  it("zero weights split evenly", () => {
+    const shared: Span = { top: 0, bottom: 90 };
+    expect(splitSharedSpans([shared, { ...shared }, { ...shared }], [0, 0, 0])).toEqual([
+      { top: 0, bottom: 30 },
+      { top: 30, bottom: 60 },
+      { top: 60, bottom: 90 },
+    ]);
+  });
+});
+
+describe("layoutRail", () => {
+  const saved: Record<string, PropertyDescriptor | undefined> = {};
+
+  beforeEach(() => {
+    for (const name of ["offsetTop", "offsetHeight"]) {
+      saved[name] = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name);
+    }
+    Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return Number(this.dataset.top ?? 0);
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return Number(this.dataset.height ?? 0);
+      },
+    });
+  });
+
+  afterEach(() => {
+    for (const [name, descriptor] of Object.entries(saved)) {
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+    }
+    document.body.innerHTML = "";
+  });
+
+  function build(blocks: { top: number; height: number }[], units: number) {
+    const body = document.createElement("div");
+    const prose = document.createElement("div");
+    prose.className = "prose";
+    for (const b of blocks) {
+      const block = document.createElement("p");
+      block.dataset.top = String(b.top);
+      block.dataset.height = String(b.height);
+      prose.appendChild(block);
+    }
+    const rail = document.createElement("div");
+    rail.dataset.top = "0";
+    for (let i = 0; i < units; i++) rail.appendChild(document.createElement("button"));
+    body.append(prose, rail);
+    document.body.appendChild(body);
+    const box = (i: number) => {
+      const seg = rail.children[i] as HTMLElement;
+      return { top: parseFloat(seg.style.top), height: parseFloat(seg.style.height) };
+    };
+    return { body, rail, box };
+  }
+
+  it("layoutRail places a second sharer inside the block instead of a stub below it", () => {
+    // Blocks 0..3 stacked 100px apart, 80px tall. Units 3 and 4 both own block 3
+    // (a long paragraph cut in two at the ceiling), 60/40 by chars.
+    const { body, rail, box } = build(
+      [
+        { top: 0, height: 80 },
+        { top: 100, height: 80 },
+        { top: 200, height: 80 },
+        { top: 300, height: 80 },
+      ],
+      5,
+    );
+    layoutRail(
+      body,
+      rail,
+      [[0], [1], [2], [3], [3]],
+      [{ chars: 10 }, { chars: 10 }, { chars: 10 }, { chars: 60 }, { chars: 40 }],
+    );
+
+    expect(box(2)).toEqual({ top: 200, height: 80 });
+    // Unit 3 takes the top 60% of block 3, unit 4 the remaining 40% — inside
+    // the block, not an 8px stub hanging below its bottom edge. The monotonic
+    // rule still runs after the split, so the two slices keep the usual gap.
+    expect(box(3)).toEqual({ top: 300, height: 48 });
+    expect(box(4).top).toBe(348 + SEGMENT_GAP);
+    expect(box(4).top + box(4).height).toBe(380);
+    expect(box(4).height).toBeGreaterThan(MIN_SEGMENT_HEIGHT);
+  });
+
+  it("a segment spans the list items its unit speaks", () => {
+    // `p / ul(li, li, li) / p` — the same stub layout, blocks 100px apart and
+    // 80px tall. The block indices are `matchableBlocks`' own, because
+    // `layoutRail` calls it: 0 the lead-in, 1-3 the items, 4 the closing
+    // paragraph. That shared index space is the whole point of the change —
+    // the marking effect and the rail number the blocks the same way — and
+    // nothing asserted it over a list until here.
+    const boxes = [0, 100, 200, 300, 400].map((top) => ({ top, height: 80 }));
+    const stub = (element: HTMLElement, index: number): HTMLElement => {
+      element.dataset.top = String(boxes[index].top);
+      element.dataset.height = String(boxes[index].height);
+      return element;
+    };
+    const body = document.createElement("div");
+    const prose = document.createElement("div");
+    prose.className = "prose";
+    prose.appendChild(stub(document.createElement("p"), 0));
+    const ul = document.createElement("ul");
+    for (let i = 1; i <= 3; i++) ul.appendChild(stub(document.createElement("li"), i));
+    prose.append(ul, stub(document.createElement("p"), 4));
+    const rail = document.createElement("div");
+    rail.dataset.top = "0";
+    for (let i = 0; i < 3; i++) rail.appendChild(document.createElement("button"));
+    body.append(prose, rail);
+    document.body.appendChild(body);
+    const box = (i: number) => {
+      const segment = rail.children[i] as HTMLElement;
+      return { top: parseFloat(segment.style.top), height: parseFloat(segment.style.height) };
+    };
+
+    // Unit 0 speaks the lead-in, unit 1 items 1-2, unit 2 item 3 and the
+    // closing paragraph.
+    layoutRail(body, rail, [[0], [1, 2], [3, 4]], [{ chars: 60 }, { chars: 120 }, { chars: 90 }]);
+
+    expect(box(0)).toEqual({ top: 0, height: 80 });
+    // From the first item's top to the second item's bottom: beside the two
+    // items the unit speaks, not beside the whole list.
+    expect(box(1)).toEqual({ top: 100, height: 180 });
+    expect(box(2)).toEqual({ top: 300, height: 180 });
+
+    // And no segment is stacked over the container: the list's own extent —
+    // its first item's top to its last item's bottom — is nobody's span.
+    const listTop = boxes[1].top;
+    const listBottom = boxes[3].top + boxes[3].height;
+    for (const index of [0, 1, 2]) {
+      const segment = box(index);
+      expect([segment.top, segment.top + segment.height]).not.toEqual([listTop, listBottom]);
+    }
+  });
+});

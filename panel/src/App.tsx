@@ -40,6 +40,15 @@ function AppShell() {
           <BreadcrumbActionsProvider>
             <FloatingActionProvider>
             <TerminalDrawerProvider>
+            {/* These two sit OUTSIDE the speech host below, so neither may
+                render anything that reads it: `usePanelSpeech` throws without a
+                provider above, so a `SessionIndicator` or `ProjectActivityLed`
+                in here would crash the panel at mount rather than degrade.
+                Both currently draw the provider-free `TerminalActivityLed`;
+                keep it that way, or move the surface inside
+                `SpeechHostProvider` first. The provider is not hoisted over
+                them because exactly one host may exist for the whole panel —
+                see its comment just below. */}
             <QuickFinder />
             <QuickTerminalModal />
             <FaviconUpdater />

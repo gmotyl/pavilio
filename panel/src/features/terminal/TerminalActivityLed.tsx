@@ -3,7 +3,17 @@ import { ATTENTION_PULSE_MS, useAttentionPulse } from "./useAttentionPulse";
 
 export { ATTENTION_PULSE_MS };
 
-type Props = {
+/**
+ * The props of a row's activity indicator, in either form: one session, or an
+ * aggregate over several.
+ *
+ * Exported because `SessionIndicator` forwards every one of these to the LED
+ * verbatim and must therefore accept exactly them. Two hand-kept copies of this
+ * shape would drift silently — the same prop name with a different type, or one
+ * side gaining a prop the other swallows — so the two share the declaration and
+ * a divergence becomes a compile error.
+ */
+export type ActivityIndicatorProps = {
   size?: "sm" | "lg";
   title?: string;
   hideWhenIdle?: boolean;
@@ -20,7 +30,7 @@ const LABEL: Record<string, string> = {
  * `sessionIds` for an aggregate (busy > attention > idle).
  * See index.css for the per-state colors and pulse animations.
  */
-export function TerminalActivityLed(props: Props) {
+export function TerminalActivityLed(props: ActivityIndicatorProps) {
   const { size = "sm", title, hideWhenIdle } = props;
   const ids: readonly string[] =
     "sessionId" in props ? [props.sessionId] : props.sessionIds;

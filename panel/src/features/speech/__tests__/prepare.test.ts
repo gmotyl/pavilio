@@ -113,6 +113,9 @@ const NO_SENTINEL_UNITS = [
   },
 ];
 
+/** Ordinals for the intro-colon list fixture, so its items can be built and checked from one list. */
+const NUMBERED = ["one", "two", "three", "four", "five", "six"];
+
 /** Everything the voice will say, in order — the only thing these tests judge. */
 const spoken = (markdown: string, language: "pl" | "en"): string =>
   prepare(markdown, { language })
@@ -135,6 +138,50 @@ describe("prepare", () => {
 
     expect(units[0].text).toBe("The panel now speaks the last response.");
     expect(units[1].text).toBe("It chunks it first so playback starts fast.");
+  });
+
+  it("an intro line ending in a colon still yields a short fast-start unit", () => {
+    // The shape an agent answer takes constantly: a lead-in ending in a colon,
+    // then a tight list. Every item is a paragraph of its own now, so the
+    // lead-in stands alone as a sentence fragment — unit 0 stays short only if
+    // the fast start may finish that sentence in the paragraph behind it.
+    const item = (n: string): string => `item ${n} is long enough to matter here`;
+    const { units } = prepare(
+      ["Here are the steps:", ...NUMBERED.map((n) => `- ${item(n)}`), ""].join("\n"),
+    );
+
+    const fastStart = `Here are the steps: ${item("one")}.`;
+
+    expect(units[0].text).toBe(fastStart);
+    expect(units[0].chars).toBeLessThan(UNIT_MIN_CHARS);
+    // Both blocks are spoken in it, so both name it — see `matchUnitsToBlocks`.
+    expect(units[0].source).toBe(fastStart);
+    // The items behind the fast start are still spoken, in order and once each.
+    expect(units.map((unit) => unit.text).join(" ")).toBe(
+      [fastStart, ...NUMBERED.slice(1).map((n) => `${item(n)}.`)].join(" "),
+    );
+  });
+
+  it("a lead-in whose next sentence exceeds the ceiling falls back to packing", () => {
+    // The cross-paragraph fast start builds unit 0 before packing runs, so
+    // nothing downstream would cut it: a lead-in with no sentence of its own
+    // followed by one enormous sentence used to hand playback a 2 000-character
+    // unit 0 — the very thing the fast start exists to prevent. Over the
+    // ceiling, the rule stands down and the normal packing path cuts it.
+    const huge = "word ".repeat(400) + "ends here.";
+    const { units } = prepare(["Here are the steps to follow", "", huge].join("\n"));
+
+    expect(units.every((unit) => unit.chars <= UNIT_MAX_CHARS)).toBe(true);
+    expect(units[0].chars).toBe(28);
+  });
+
+  it("a list directly after an unterminated line still starts small", () => {
+    const { units } = prepare(
+      ["Steps to follow", "- do this thing first", "- then do the other thing", ""].join("\n"),
+    );
+
+    expect(units[0].text).toBe("Steps to follow do this thing first.");
+    expect(units[1].text).toBe("then do the other thing.");
   });
 
   it("a leading removed block does not cost the response its fast start", () => {
@@ -728,5 +775,40 @@ describe("prepare", () => {
     const pieces = units.filter((unit) => unit.text.startsWith(sentence));
     expect(pieces.length).toBeGreaterThan(1);
     for (const piece of pieces) expect(piece.source).toBe(oversized);
+  });
+
+  it("packed list units carry only the items they speak as source", () => {
+    // Six items of about sixty characters: too short to stand alone, so the
+    // packer merges them up to the floor. Before items were paragraphs the
+    // whole list was one paragraph and every unit cut from it carried ALL six
+    // items as its source; the answer pane's rail then had nothing to tell
+    // units apart by. Now a unit's source is the items it speaks, joined by the
+    // same single space the packer uses on the spoken side, and nothing else.
+    const items = Array.from(
+      { length: 6 },
+      (_, i) => `Item ${i + 1} explains one more thing about the rail in sixty chars`,
+    );
+    for (const item of items) expect(item.length).toBeGreaterThanOrEqual(55);
+
+    const { units } = prepare(`# Rail\n\n${items.map((item) => `- ${item}`).join("\n")}\n`);
+    const spokenItems = items.map((item) => `${item}.`);
+    const body = units.slice(1);
+
+    expect(units[0].text).toBe("Rail");
+    expect(body.length).toBeGreaterThan(1);
+    // Every item is still spoken as a sentence of its own, in order.
+    expect(body.map((unit) => unit.text).join(" ")).toBe(spokenItems.join(" "));
+
+    for (const unit of body) {
+      expect(unit.chars).toBeLessThanOrEqual(UNIT_MAX_CHARS);
+      const spoken = spokenItems.filter((item) => unit.text.includes(item));
+      expect(spoken.length).toBeGreaterThan(0);
+      expect(unit.source).toBe(spoken.join(" "));
+    }
+
+    // Packing did happen (some unit speaks several items and reaches the
+    // floor), and no unit carries the whole list.
+    expect(body.some((unit) => unit.chars >= UNIT_MIN_CHARS)).toBe(true);
+    expect(body.some((unit) => unit.source === spokenItems.join(" "))).toBe(false);
   });
 });

@@ -12,6 +12,7 @@ import {
 } from "../voices";
 import AgentSettings from "../../agents/AgentSettings";
 import LeftSidebar from "../../shell/LeftSidebar";
+import { SpeechHostProvider } from "../SpeechHostProvider";
 import { Breadcrumbs as ShellBreadcrumbs } from "../../shell/Breadcrumbs";
 import LegacyBreadcrumbs from "../../../components/Breadcrumbs";
 
@@ -45,6 +46,24 @@ vi.mock("../../auto-sync/useAutoSyncStatus", () => ({
 vi.mock("../../git/useGitStatus", () => ({
   useGitStatus: () => ({ files: [], suggestion: "", refetch: () => {} }),
 }));
+
+/**
+ * The sidebar's project rows read the speech host through `ProjectActivityLed`,
+ * which throws without a `SpeechHostProvider` above it. This suite's
+ * `useProjects` mock happens to return no projects, so no such row mounts and
+ * an unwrapped render used to pass — a trap: adding one project here would have
+ * made an unrelated suite throw. So the provider is mounted for real, with only
+ * the HOST stubbed inert, the same way the LeftSidebar suites do it.
+ */
+vi.mock("../useSpeechHost", async () => {
+  const { INERT_SPEECH_HOST } = await import(
+    "../../terminal/__tests__/speech.harness"
+  );
+  return {
+    useSpeechHost: () => INERT_SPEECH_HOST,
+    default: () => INERT_SPEECH_HOST,
+  };
+});
 
 const VOICE_LABEL = "Speech voice";
 
@@ -142,7 +161,9 @@ describe("VoiceSelect", () => {
 
     const sidebar = render(
       <MemoryRouter initialEntries={["/settings"]}>
-        <LeftSidebar />
+        <SpeechHostProvider>
+          <LeftSidebar />
+        </SpeechHostProvider>
       </MemoryRouter>,
     );
     // The test id is part of the contract and must survive the relabelling.

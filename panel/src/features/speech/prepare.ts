@@ -418,6 +418,57 @@ function firstSentence(text: string): string | null {
 }
 
 /**
+ * The fast-start unit taken off the front of the body, paired with what is left
+ * to pack. `null` when there is no sentence to open with at all, which leaves
+ * the first unit to {@link packUnits} exactly as it was before this rule existed.
+ *
+ * The second branch is the one that needs arguing for, because it is the only
+ * place a unit is built from two paragraphs before packing. A lead-in ending in
+ * a colon — "Here are the steps:" — is not a sentence but a sentence
+ * *fragment*, and the sentence it opens finishes in the paragraph behind it.
+ * That used to be invisible, because a tight list was one paragraph with its
+ * intro; now `strip.ts` gives every item its own paragraph so a unit's `source`
+ * names exactly the items it speaks. Read one paragraph at a time, the lead-in
+ * has no terminator, `firstSentence` finds nothing, the rule is skipped, and
+ * the intro packs together with five of its items — unit 0, the one playback
+ * waits on, grows four times over. So the fast start is allowed to cross one
+ * paragraph boundary, and one only: it takes the lead-in plus the first
+ * sentence behind it, which is the unit this shape produced all along.
+ *
+ * `source` is then both blocks, because both are spoken in it — `matchUnitsToBlocks`
+ * reads a unit's source as the concatenation of the paragraphs it says.
+ */
+function takeFastStart(first: Packed, rest: readonly Packed[]): { unit: Packed; body: Packed[] } | null {
+  const own = firstSentence(first.text);
+
+  if (own) {
+    const remainder = first.text.slice(own.length).trim();
+
+    return {
+      unit: { source: first.source, text: own },
+      body: remainder ? [{ source: first.source, text: remainder }, ...rest] : [...rest],
+    };
+  }
+
+  const [next, ...tail] = rest;
+  const sentence = next ? firstSentence(next.text) : null;
+  if (!next || !sentence) return null;
+
+  // This unit is built before packing runs, so nothing downstream would cut it:
+  // over the ceiling, the fast start would hand playback a unit larger than any
+  // {@link packUnits} would ever emit — the opposite of what it exists for. So
+  // it stands down and lets the normal packing path cut the sentence instead.
+  if (joinPacked(first.text, sentence).length > UNIT_MAX_CHARS) return null;
+
+  const remainder = next.text.slice(sentence.length).trim();
+
+  return {
+    unit: { source: `${first.source} ${next.source}`, text: joinPacked(first.text, sentence) },
+    body: remainder ? [{ source: next.source, text: remainder }, ...tail] : [...tail],
+  };
+}
+
+/**
  * Pulls the response's opening heading off the front, if it has one. Only a
  * heading that *opens* the response is a title: a heading further down is a
  * section marker inside the body, and hoisting it to unit 0 would speak the
@@ -510,17 +561,15 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
     if (spoken) opening.push(spoken);
   } else {
     // No TLDR: the fast-start unit is the body's first sentence, and what is
-    // left of its paragraph goes back to the head of the packing queue. Both
-    // halves keep the whole paragraph as their source — see
+    // left of the paragraph it came from goes back to the head of the packing
+    // queue. Both halves keep the whole paragraph as their source — see
     // `cutPackedAtCeiling` for why a piece is never sliced.
     const [first, ...rest] = body;
-    const sentence = first ? firstSentence(first.text) : null;
+    const fastStart = first ? takeFastStart(first, rest) : null;
 
-    if (first && sentence) {
-      const remainder = first.text.slice(sentence.length).trim();
-
-      opening.push({ source: first.source, text: sentence });
-      body = remainder ? [{ source: first.source, text: remainder }, ...rest] : rest;
+    if (fastStart) {
+      opening.push(fastStart.unit);
+      body = fastStart.body;
     }
   }
 

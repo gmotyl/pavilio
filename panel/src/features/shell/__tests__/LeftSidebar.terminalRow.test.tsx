@@ -1,9 +1,45 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
+import type { SessionMeta } from "../../terminal/useTerminalSessions";
+import type { CellSpeechState } from "../../speech/types";
+
+/**
+ * The sidebar now reads the speech host, so every render here needs a real
+ * `SpeechHostProvider` above it. The HOST is stubbed rather than
+ * `usePanelSpeech`: mounting the real provider is what keeps these tests honest
+ * about the sidebar being inside one, which is the guarantee `SessionIndicator`
+ * leans on when it throws instead of reporting silence.
+ */
+const speech = vi.hoisted(() => ({
+  stateFor: (_sessionId: string) => "empty" as CellSpeechState,
+}));
+
+vi.mock("../../speech/useSpeechHost", async () => {
+  const { INERT_SPEECH_HOST } = await import(
+    "../../terminal/__tests__/speech.harness"
+  );
+  const host = {
+    ...INERT_SPEECH_HOST,
+    // Read through the holder so a test can swap the state before it renders.
+    stateFor: (sessionId: string) => speech.stateFor(sessionId),
+  };
+  return { useSpeechHost: () => host, default: () => host };
+});
+
 import LeftSidebar from "../LeftSidebar";
 import ProjectRedirect from "../../projects/ProjectRedirect";
-import type { SessionMeta } from "../../terminal/useTerminalSessions";
+import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import {
+  _applyEventForTests,
+  _resetForTests,
+} from "../../terminal/useTerminalActivityChannel";
 
 // One terminal session for project "vector", matching the sibling
 // LeftSidebar.lastTab.test.tsx's mocked project.
@@ -64,7 +100,9 @@ function LocationProbe() {
 function setup(initialPath = "/") {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
-      <LeftSidebar />
+      <SpeechHostProvider>
+        <LeftSidebar />
+      </SpeechHostProvider>
       {/* Mount the real ProjectRedirect at the bare project route, the same
           way App.tsx does, so a navigate to the bare route resolves through
           the Last-open-view bookmark exactly as it does in the real app. */}
@@ -85,10 +123,22 @@ function expandAndClickSession() {
   fireEvent.click(screen.getByTestId("sidebar-session-s1"));
 }
 
+/**
+ * File-level, not per-describe: the activity channel and the stubbed speech
+ * state are module singletons, so a test that sets either leaks into every
+ * later test in the file. Resetting inside the speech describe alone was safe
+ * only because that block happens to be last — a describe added below it would
+ * have inherited a `speaking` session it never asked for.
+ */
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+  _resetForTests();
+  speech.stateFor = () => "empty";
+});
+
 describe("LeftSidebar terminal-session row navigation", () => {
   beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
     createTerminalSession.mockReset();
   });
 
@@ -143,10 +193,6 @@ describe("LeftSidebar terminal-session row navigation", () => {
 });
 
 describe("LeftSidebar terminal-session row highlight", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-  });
 
   it("keeps the clicked session highlighted when the bare-route redirect lands back on the same iterm view", async () => {
     // Already reading this project's terminals; the row click bounces through
@@ -180,5 +226,73 @@ describe("LeftSidebar terminal-session row highlight", () => {
     expect(screen.getByTestId("sidebar-session-s1").style.background).toBe(
       "transparent",
     );
+  });
+});
+
+/** Publishes a terminal-activity event the way the server's stream would. */
+const setActivity = (
+  sessionId: string,
+  state: "idle" | "busy" | "attention",
+) =>
+  _applyEventForTests({
+    sessionId,
+    state,
+    at: 1,
+    attentionSinceAt: state === "attention" ? 1 : undefined,
+  });
+
+/** The project row is the flex box the expand chevron sits in. */
+const projectRow = () =>
+  screen.getByTestId("sidebar-project-expand-vector").parentElement!;
+
+describe("LeftSidebar speech indicator", () => {
+
+  it("a speaking session row shows the speaker", () => {
+    setActivity("s1", "busy");
+    speech.stateFor = (id) => (id === "s1" ? "speaking" : "empty");
+
+    setup();
+    fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
+
+    const row = screen.getByTestId("sidebar-session-s1");
+    expect(within(row).getByTestId("session-speaker-s1")).toBeInTheDocument();
+    expect(row.querySelector(".terminal-led")).toBeNull();
+  });
+
+  it("quiet rows keep the activity LED", () => {
+    setActivity("s1", "busy");
+
+    setup();
+
+    // Collapsed project row: the aggregate dot, unchanged.
+    expect(
+      projectRow().querySelector('.terminal-led[data-state="busy"]'),
+    ).not.toBeNull();
+    expect(screen.queryByTestId("session-speaker-s1")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
+
+    const row = screen.getByTestId("sidebar-session-s1");
+    expect(
+      row.querySelector('.terminal-led[data-state="busy"]'),
+    ).not.toBeNull();
+    expect(within(row).queryByTestId("session-speaker-s1")).toBeNull();
+  });
+
+  it("the collapsed row keeps its dots while a session speaks", () => {
+    setActivity("s1", "busy");
+    speech.stateFor = (id) => (id === "s1" ? "speaking" : "empty");
+
+    setup();
+
+    // The speaker joins the aggregate group as one more status; the busy dot
+    // (and, for another session, the attention dot) stays put, so the row
+    // never trades a pending signal for the audio it is playing.
+    expect(
+      within(projectRow()).getByTestId("session-speaker-s1"),
+    ).toBeInTheDocument();
+    expect(
+      projectRow().querySelector('.terminal-led[data-state="busy"]'),
+    ).not.toBeNull();
   });
 });

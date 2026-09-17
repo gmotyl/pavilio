@@ -225,6 +225,64 @@ code, pre, .font-mono {
   border-radius: 0 8px 8px 0;
 }
 
+/* Fenced code block + its copy button.
+   The button is a sibling of the `pre` and is positioned against this wrapper,
+   not against anything inside the fence, because nothing in there is a stable
+   anchor. In a highlighted fence the horizontal scroll box is the `code` inside
+   the `pre`: `pre code.hljs`, from the highlight.js theme imported at the top of
+   this file, is `display: block` + `overflow-x: auto`, so wide code scrolls
+   inside the `code` while the `pre` stays at its container width. An unlabelled
+   fence gets no `hljs` class, and then the `pre`'s own `overflow-x: auto` (from
+   `@tailwindcss/typography`; the `.prose pre` rule above only paints it) is the
+   scroll box. This wrapper never scrolls either way, so anchoring the button
+   here instead of inside the `pre` is what keeps it in the corner. */
+.code-block {
+  position: relative;
+}
+
+.code-block > button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.25rem;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  opacity: 0;
+  /* Longhand, not the `transition` shorthand: the shorthand resets
+     `transition-property`, which would drop `CopyIconButton`'s own
+     `transition-colors` and make its hover colour change instant. */
+  transition-property: opacity, color;
+  transition-duration: 0.12s;
+  transition-timing-function: ease-in-out;
+}
+
+/* Revealed by the pointer, and by the keyboard: `:focus-within` is what keeps
+   the button usable when it is tabbed to, where no hover ever happens. */
+.code-block:hover > button,
+.code-block:focus-within > button {
+  opacity: 1;
+}
+
+/* Touch devices have no hover state, so the button would never appear there. */
+@media (hover: none) {
+  .code-block > button {
+    opacity: 1;
+  }
+}
+
+/* `@tailwindcss/typography` zeroes the outer margins of `.prose`'s first and
+   last child, but those selectors now match this wrapper, which has no margin
+   of its own. The `pre`'s own margin then collapses THROUGH the wrapper
+   (`position: relative` creates no block formatting context), so a document
+   that opens or closes with a fence gained ~20px of leading/trailing space.
+   Zero it where it actually lives: on the `pre`. */
+.prose > .code-block:first-child > pre {
+  margin-top: 0;
+}
+.prose > .code-block:last-child > pre {
+  margin-bottom: 0;
+}
+
 /* Markdown tables: zebra rows + visible column lines */
 .prose table {
   border-collapse: collapse;
@@ -312,6 +370,52 @@ input[type="checkbox"] {
   height: 8px;
 }
 
+/* The sidebar speaker (`SessionSpeaker`), shown while a session's audio is
+   playing. Two rows draw it, and they place it differently:
+     - the expanded session row (`SessionIndicator`) has one slot, so the
+       speaker REPLACES that session's LED there;
+     - the collapsed project row (`ProjectActivityLed`) shows every state at
+       once, so the speaker sits BESIDE the busy and attention dots. It only
+       takes the idle dot's place, and only when idle is all there would be.
+
+   WHY beside and not instead: speaking is a status like busy or attention, not
+   a summary of the project. Collapsing the group down to the speaker would hide
+   an attention signal belonging to a DIFFERENT session for as long as the audio
+   plays — the row would trade a request for your attention for the one thing
+   that needs none. Idle is the single exception: it says nothing the speaker
+   does not already imply.
+
+   Its box is EXACTLY the LED's, because in the single-slot row the two swap in
+   and out of the same place and the row's text must not move when they do. So
+   the glyph inside is drawn bigger and centred on that box, overflowing it
+   symmetrically: a speaker rendered at 6px is a smudge, and the box, not the
+   icon, is what the row's layout is made of. Keep this rule free of margin,
+   padding and border for the same reason — the box is measured against
+   `.terminal-led` in SessionIndicator.test.tsx.
+
+   The attention green (#9ece6a), and deliberately NO animation: the pulse in
+   this panel means "something is waiting for you", and audio that is already
+   playing is not waiting. */
+.session-speaker {
+  display: inline-block;
+  position: relative;
+  width: 6px;
+  height: 6px;
+  color: #9ece6a;
+}
+
+.session-speaker > svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.session-speaker-lg {
+  width: 8px;
+  height: 8px;
+}
+
 /* Cell-header speak control and autoplay toggle. Both borrow the activity
    LED's vocabulary above rather than inventing a second one: the same green
    (#9ece6a), the same `terminal-led-pulse-attention` keyframes, and the same
@@ -373,6 +477,12 @@ input[type="checkbox"] {
    `CellSpeakButton.tsx`, and both are animated here rather than each carrying
    its own declaration: a second copy is a second thing to keep in sync, and
    that includes whatever this rule grows later.
+
+   One thing is NOT shared any more: `SpeechControlBar.tsx` ANDs `speechPulse`
+   with a ten-second ready window (`useReadyPulseWindow`), so the two pulses
+   are the same pulse only for the first ten seconds of a ready answer; after
+   that the header keeps pulsing and the bar goes quiet. The animation stays
+   one rule regardless — what differs is which control still asks for it.
 
    Which is also the whole of the reduced-motion story: there is no
    `prefers-reduced-motion` query anywhere in this stylesheet — not on the
@@ -800,15 +910,15 @@ input[type="checkbox"] {
 }
 
 /* A matched block is a jump: hint at it on hover and focus. */
-.answer-pane-text .prose > [data-unit] {
+.answer-pane-text .prose [data-unit] {
   border-radius: 6px;
   cursor: pointer;
   outline: none;
   transition: background-color 120ms ease;
 }
 
-.answer-pane-text .prose > [data-unit]:hover,
-.answer-pane-text .prose > [data-unit]:focus-visible {
+.answer-pane-text .prose [data-unit]:hover,
+.answer-pane-text .prose [data-unit]:focus-visible {
   background: rgba(255, 255, 255, 0.05);
 }
 

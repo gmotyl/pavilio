@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
+import CopyIconButton from "../shell/CopyIconButton";
 
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
@@ -64,10 +65,41 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
       },
       pre: ({ children, ...props }) => {
         const child = (Array.isArray(children) ? children[0] : children) as any;
+        // DEAD BRANCH — this is NOT the mermaid path. react-markdown hands
+        // `pre` the *unrendered* element for the `code` node, so `child` here
+        // carries the fence's own `language-mermaid` class; the
+        // `mermaid-block` span is what the `code` override below returns
+        // later, and it is never visible from here. Kept only because
+        // deleting it is an unrelated cleanup — the live mermaid path is the
+        // language-class check underneath.
         if (child?.props?.className === "mermaid-block") {
           return <>{children}</>;
         }
-        return <pre {...props}>{children}</pre>;
+        // A mermaid fence renders as a diagram, so there is no text to copy.
+        // This is the check that actually fires, for the reason above.
+        if (/language-mermaid/.test(child?.props?.className ?? "")) {
+          return <pre {...props}>{children}</pre>;
+        }
+        // `extractText` walks `props.children` only, so the language class is
+        // not in the result; the fence contributes one trailing newline that a
+        // reader never wants pasted, the same trim mermaid does above.
+        const text = extractText(children).replace(/\n$/, "");
+        return (
+          // The button is a SIBLING of the `pre`, not a child of it, because
+          // nothing inside the fence is a stable anchor. In a highlighted fence
+          // the horizontal scroll box is the `code` INSIDE the `pre`: the
+          // highlight.js theme makes `pre code.hljs` `display: block` +
+          // `overflow-x: auto`, so wide code slides inside the `code` while the
+          // `pre` stays at its container width. An unlabelled fence gets no
+          // `hljs` class, and then the `pre`'s own `overflow-x: auto` (from
+          // `@tailwindcss/typography`) is what scrolls. This wrapper scrolls in
+          // neither case, so the button is positioned against it and stays in
+          // the corner.
+          <div className="code-block">
+            <pre {...props}>{children}</pre>
+            <CopyIconButton value={text} label="Copy code" />
+          </div>
+        );
       },
     };
 

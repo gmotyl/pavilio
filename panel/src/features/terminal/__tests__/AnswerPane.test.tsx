@@ -96,6 +96,46 @@ const OTHER_MARKDOWN = [
   "",
 ].join("\n");
 
+/**
+ * A six-item list. `strip` emits every item as its own paragraph, so packing
+ * cuts the list into three units — items 1-2, items 3-5, item 6 — and each
+ * item is a block the pane can match, mark and jump to.
+ */
+const LIST_MARKDOWN = [
+  "# Release checklist",
+  "",
+  "Before the deploy goes out the following items are checked by the person on duty, in the order they are written down here.",
+  "",
+  "- Confirm that the database migration has finished on every single replica before any traffic at all is moved across",
+  "- Check that the health endpoint answers correctly on each of the new pods for a full minute before anything else",
+  "- Warm the cache up front so that the very first requests do not time out",
+  "- Tell the release channel that the switch is about to happen right now",
+  "- Watch the error rate closely for ten minutes after the traffic moves",
+  "- Close the change ticket once every dashboard has been green and quiet for a while, and write the summary up for the team so nobody has to guess what happened during the window",
+  "",
+].join("\n");
+
+/**
+ * A list item that holds a fenced block. The item is one of the voice's
+ * paragraphs, so it is a matched block — and the fence inside it now carries a
+ * real copy `button`, which is exactly the nesting the click path has to
+ * survive.
+ */
+const FENCE_IN_LIST_MARKDOWN = [
+  "# Deploy plan",
+  "",
+  "The runbook below explains the migration order that has to be followed before any traffic at all is moved across.",
+  "",
+  "- Run the migration on every single replica first, with exactly the command that is written out here:",
+  "",
+  "  ```sh",
+  "  pnpm migrate --all",
+  "  ```",
+  "",
+  "- Then watch the error rate closely for ten whole minutes after the traffic has moved across to the new pods.",
+  "",
+].join("\n");
+
 const utterance = (id: string, text: string): Utterance => ({
   id,
   sessionId: "cell-a",
@@ -193,7 +233,42 @@ const prose = (): HTMLElement => {
   return element;
 };
 
-const blocks = (): HTMLElement[] => Array.from(prose().children) as HTMLElement[];
+/**
+ * The blocks the pane matches: the direct children of `.prose`, with each list
+ * replaced by its items — a list is one element to react-markdown but one
+ * paragraph per item to the voice.
+ */
+const flatten = (parent: Element): HTMLElement[] =>
+  Array.from(parent.children).flatMap((child) =>
+    child.tagName === "UL" || child.tagName === "OL"
+      ? (Array.from(child.children) as HTMLElement[])
+      : [child as HTMLElement],
+  );
+
+const blocks = (): HTMLElement[] => flatten(prose());
+
+/** The list's items, in document order. */
+const items = (): HTMLElement[] => Array.from(prose().querySelectorAll("li"));
+
+/**
+ * Which unit an item's text was packed into, read off the harness's OWN units.
+ *
+ * Why not the literal indices: how many items fit in a unit is `prepare`'s
+ * packing, not the pane's contract. Hard-coded expectations turn a change to
+ * `UNIT_MIN_CHARS` / `UNIT_MAX_CHARS` into three failures that point at the
+ * pane. This is not circular — it asks the unit's `source`, not
+ * `matchUnitsToBlocks`, which is the mapping under test.
+ */
+const expectedUnitIn =
+  (h: Harness) =>
+  (item: HTMLElement): number =>
+    h.units.findIndex((unit) => unit.source.includes(item.textContent ?? ""));
+
+const list = (): HTMLElement => {
+  const element = prose().querySelector("ul");
+  if (!(element instanceof HTMLElement)) throw new Error("no ul in the body");
+  return element;
+};
 
 /**
  * By tag, not by role: a matched heading carries `role="button"` (it is a
@@ -218,8 +293,9 @@ const segment = (index: number): HTMLElement =>
  * scroll reads them in the same commit that creates the blocks, so stubbing
  * the elements afterwards would be too late.
  *
- * The rule: the k-th direct child of `.prose` sits at `k * BLOCK_TOP` and is
- * `BLOCK_HEIGHT` tall; everything else is at 0 with no height. The body's
+ * The rule: the k-th matchable block of `.prose` — its direct children, lists
+ * flattened to their items — sits at `k * BLOCK_TOP` and is `BLOCK_HEIGHT`
+ * tall; everything else is at 0 with no height. The body's
  * `scrollHeight` / `clientHeight` are whatever the test says in `layout`.
  */
 const BLOCK_TOP = 100;
@@ -238,9 +314,10 @@ class StubResizeObserver {
 }
 
 const blockIndexOf = (element: Element): number | null => {
-  const parent = element.parentElement;
-  if (!parent?.classList.contains("prose")) return null;
-  return Array.prototype.indexOf.call(parent.children, element);
+  const prose = element.closest(".prose");
+  if (!prose) return null;
+  const index = flatten(prose).indexOf(element as HTMLElement);
+  return index === -1 ? null : index;
 };
 
 const isBody = (element: Element): boolean => element.classList.contains("answer-pane-body");
@@ -484,16 +561,37 @@ describe("AnswerPane", () => {
     const speech = makeSpeech(h);
     render(paneElement(speech));
 
-    const pre = blocks().find((block) => block.tagName === "PRE");
-    expect(pre).toBeDefined();
-    expect(pre).not.toHaveAttribute("data-unit");
-    expect(pre).not.toHaveAttribute("role");
-    expect(pre).not.toHaveAttribute("tabindex");
+    // The renderer wraps a fenced block in a `.code-block` div so the copy button
+    // can sit beside the `pre`, so the matchable block is that wrapper and the
+    // `pre` itself is a child of it.
+    const codeBlock = blocks().find((block) => block.classList.contains("code-block"));
+    expect(codeBlock).toBeDefined();
+    expect(codeBlock).not.toHaveAttribute("data-unit");
+    expect(codeBlock).not.toHaveAttribute("role");
+    expect(codeBlock).not.toHaveAttribute("tabindex");
     // Unit 2 was packed from the two paragraphs after the fence, not the fence.
-    expect(pre).not.toHaveAttribute("data-speaking");
+    expect(codeBlock).not.toHaveAttribute("data-speaking");
 
-    fireEvent.click(pre!);
-    fireEvent.keyDown(pre!, { key: "Enter" });
+    fireEvent.click(codeBlock!);
+    fireEvent.keyDown(codeBlock!, { key: "Enter" });
+    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
+  });
+
+  it("copying a fence inside a spoken block does not jump the voice", () => {
+    const h = harness(FENCE_IN_LIST_MARKDOWN, null);
+    const speech = makeSpeech(h);
+    render(paneElement(speech));
+
+    const button = screen.getByLabelText("Copy code");
+    // The precondition the regression needs: the fence sits INSIDE a matched
+    // block, so the pane's delegated handler would resolve a click on this
+    // button to that block's unit if the click were allowed to bubble.
+    const block = button.closest("[data-unit]");
+    expect(block).not.toBeNull();
+    expect(block!.tagName).toBe("LI");
+
+    fireEvent.click(button);
+    // Copying is not a request to be read to from here.
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
@@ -757,6 +855,99 @@ describe("AnswerPane", () => {
       "H1",
       "P",
     ]);
+  });
+
+  /**
+   * A list. The voice reads each item as its own paragraph, so the items are
+   * the blocks: a unit spans exactly the items it speaks, and the `ul` that
+   * holds them is nothing but a container.
+   */
+  describe("lists", () => {
+    it("list items carry the unit marks and the list does not", () => {
+      const h = harness(LIST_MARKDOWN, null);
+      const expectedUnit = expectedUnitIn(h);
+      render(paneElement(makeSpeech(h)));
+
+      // Heading, lead-in, and three units cut out of the list. The counts are
+      // canaries: if packing changes shape entirely, they say so here.
+      expect(h.units).toHaveLength(5);
+      expect(items()).toHaveLength(6);
+      expect(items().map((item) => item.dataset.unit)).toEqual(
+        items().map((item) => String(expectedUnit(item))),
+      );
+
+      // The property the feature promises, whatever the packing constants are:
+      // the six items fall into exactly three units, in reading order, with no
+      // unit skipped between them.
+      const marks = items().map((item) => Number(item.dataset.unit));
+      expect(marks).toEqual([...marks].sort((a, b) => a - b));
+      const distinct = [...new Set(marks)];
+      expect(distinct).toEqual([distinct[0], distinct[0] + 1, distinct[0] + 2]);
+
+      for (const item of items()) {
+        expect(item).toHaveAttribute("role", "button");
+        expect(item).toHaveAttribute("tabindex", "0");
+      }
+
+      // The container is not a block: no mark, no role, no tab stop.
+      expect(list()).not.toHaveAttribute("data-unit");
+      expect(list()).not.toHaveAttribute("role");
+      expect(list()).not.toHaveAttribute("tabindex");
+      expect(list()).not.toHaveAttribute("data-speaking");
+    });
+
+    it("clicking a list item jumps to its unit", () => {
+      const h = harness(LIST_MARKDOWN, null);
+      const expectedUnit = expectedUnitIn(h);
+      const speech = makeSpeech(h);
+      render(paneElement(speech));
+
+      for (const index of [3, 0, 5]) {
+        const item = items()[index];
+        fireEvent.click(item);
+        expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", expectedUnit(item));
+      }
+      expect(speech.onJumpToUnit).toHaveBeenCalledTimes(3);
+    });
+
+    it("clicking the list container jumps nowhere", () => {
+      const h = harness(LIST_MARKDOWN, null);
+      const speech = makeSpeech(h);
+      render(paneElement(speech));
+
+      // The padding beside the bullets belongs to the `ul`, which is no unit's.
+      fireEvent.click(list());
+      fireEvent.keyDown(list(), { key: "Enter" });
+      expect(speech.onJumpToUnit).not.toHaveBeenCalled();
+    });
+
+    it("the spoken items carry data-speaking", () => {
+      const h = harness(LIST_MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
+      const expectedUnit = expectedUnitIn(h);
+      render(paneElement(makeSpeech(h)));
+
+      // Unit 3 speaks a run of items — exactly those, and never the whole list.
+      const spoken = items().filter((item) => expectedUnit(item) === 3);
+      expect(spoken.length).toBeGreaterThan(1);
+      expect(speaking()).toEqual(spoken);
+    });
+
+    it("the previous unit's items stop speaking", () => {
+      const h = harness(LIST_MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
+      const expectedUnit = expectedUnitIn(h);
+      render(paneElement(makeSpeech(h)));
+      expect(speaking()).toEqual(items().filter((item) => expectedUnit(item) === 3));
+
+      h.progress.set({ unitIndex: 4, unitTime: 0, unitDuration: null });
+      // The strip covers the whole [data-unit] subtree, not this answer's direct
+      // children: without that, the items unit 3 spoke keep the mark the voice
+      // has left behind, and by the end of the list every item read so far is
+      // still highlighted.
+      const nowSpeaking = items().filter((item) => expectedUnit(item) === 4);
+      expect(nowSpeaking.length).toBeGreaterThan(0);
+      expect(prose().querySelectorAll("[data-speaking]")).toHaveLength(nowSpeaking.length);
+      expect(speaking()).toEqual(nowSpeaking);
+    });
   });
 
   /**

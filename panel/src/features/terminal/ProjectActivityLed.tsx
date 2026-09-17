@@ -1,3 +1,5 @@
+import { usePanelSpeech } from "../speech/SpeechHostProvider";
+import { SessionSpeaker } from "./SessionSpeaker";
 import { useAggregateActivityFlags } from "./useTerminalActivityChannel";
 import { useAttentionPulse } from "./useAttentionPulse";
 
@@ -6,8 +8,9 @@ import { useAttentionPulse } from "./useAttentionPulse";
  * LED, this shows every state present at once:
  *  - a busy dot when any session is working,
  *  - a green "needs attention" dot when any session is waiting (even if another
- *    session is busy), and
- *  - a dim idle dot when sessions are open but none are busy or waiting — so the
+ *    session is busy),
+ *  - a speaker when any session is being spoken, and
+ *  - a dim idle dot when sessions are open but none of the above holds — so the
  *    row still signals "something is open here".
  * Renders nothing when the project has no open terminals.
  */
@@ -19,8 +22,18 @@ export function ProjectActivityLed({
   const { hasBusy, hasAttention, hasAny, attentionSinceAt } =
     useAggregateActivityFlags(sessionIds);
   const pulsing = useAttentionPulse(attentionSinceAt, hasAttention);
+  const { stateFor } = usePanelSpeech();
 
   if (!hasAny) return null;
+
+  // WHY the speaker is a flag in this group rather than a replacement for it:
+  // the collapsed row is where a listener finds which project is talking, so
+  // speaking has to be visible here — but it is a status like busy or
+  // attention, not a summary of the project. Collapsing the group down to the
+  // speaker would hide an attention signal that belongs to a DIFFERENT session,
+  // for as long as the audio plays. Only one cell can make sound at a time, so
+  // the first speaking id names the icon.
+  const speakingId = sessionIds.find((id) => stateFor(id) === "speaking");
 
   const idleOnly = !hasBusy && !hasAttention;
 
@@ -38,13 +51,19 @@ export function ProjectActivityLed({
           aria-label="Needs attention"
         />
       )}
-      {idleOnly && (
-        <span
-          className="terminal-led"
-          data-state="idle"
-          title="Idle (terminal open)"
-          aria-label="Idle"
-        />
+      {/* The speaker takes the idle dot's slot: "idle" says nothing the speaker
+          does not already imply, while busy and attention do. */}
+      {speakingId !== undefined ? (
+        <SessionSpeaker sessionId={speakingId} />
+      ) : (
+        idleOnly && (
+          <span
+            className="terminal-led"
+            data-state="idle"
+            title="Idle (terminal open)"
+            aria-label="Idle"
+          />
+        )
       )}
     </span>
   );
