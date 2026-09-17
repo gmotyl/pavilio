@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
-import type { GridSpeech } from "../speech/types";
+import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
 import { getStoredVoice } from "../speech/voices";
+import { type UnitToBlocks, layoutRail } from "./layoutRail";
 import { matchUnitsToBlocks } from "./matchUnitsToBlocks";
 import { segmentStateFor } from "./segmentState";
 
@@ -50,74 +51,6 @@ function readCacheVersion(): number {
 
 /** The three attributes a matched block carries, and the one the spoken block adds. */
 const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as const;
-
-/** The height of a segment whose unit has no block on screen. */
-const MIN_SEGMENT_HEIGHT = 8;
-/** The gap a segment leaves after the one before it when the two would touch or overlap. */
-const SEGMENT_GAP = 2;
-
-/** unit index → the blocks it was spoken from; see `matchUnitsToBlocks`. */
-type UnitToBlocks = readonly (readonly number[])[];
-
-/**
- * Places the rail's segments over their units' blocks — see the note on the
- * component. Reads the offsets of the rendered blocks (the direct children of
- * the body's `.prose`) and writes `top` / `height` onto the rail's children,
- * one per unit, in rail coordinates (the body is the `offsetParent` of both,
- * so the rail's own `offsetTop` is the only correction).
- *
- * A unit's span runs from the top of its first block to the bottom of its
- * last — over EVERY block it owns, not only the ones credited to it by
- * `data-unit`, because a block can belong to several units: a fast-start
- * "Hi." unit whose source is the whole first paragraph, and the next unit
- * that packs the rest of that paragraph. Spans therefore overlap, and the rail
- * resolves that monotonically: a segment never starts above the previous
- * one's end, `top = max(span.top, previousEnd + gap)`, so the second unit's
- * segment sits beside the remainder of the shared paragraph rather than on
- * top of the first unit's (smoke test, 2026-09-16). A unit with no block gets
- * {@link MIN_SEGMENT_HEIGHT} right after the previous segment's end.
- */
-function layoutRail(
-  body: HTMLElement | null,
-  rail: HTMLElement | null,
-  unitToBlocks: UnitToBlocks,
-): void {
-  if (!body || !rail) return;
-  const segments = Array.from(rail.children).filter(
-    (child): child is HTMLElement => child instanceof HTMLElement,
-  );
-  if (segments.length === 0) return;
-
-  const prose = body.querySelector(".prose");
-  const blocks = prose
-    ? Array.from(prose.children).filter((child): child is HTMLElement => child instanceof HTMLElement)
-    : [];
-
-  const origin = rail.offsetTop;
-  // The first segment pays no gap.
-  let previousEnd = -SEGMENT_GAP;
-  segments.forEach((segment, index) => {
-    let span: { top: number; bottom: number } | null = null;
-    for (const blockIndex of unitToBlocks[index] ?? []) {
-      const block = blocks[blockIndex];
-      if (!block) continue;
-      const top = block.offsetTop - origin;
-      const bottom = top + block.offsetHeight;
-      if (!span) span = { top, bottom };
-      else {
-        span.top = Math.min(span.top, top);
-        span.bottom = Math.max(span.bottom, bottom);
-      }
-    }
-
-    const floor = previousEnd + SEGMENT_GAP;
-    const top = span ? Math.max(span.top, floor) : floor;
-    const height = span ? Math.max(span.bottom - top, MIN_SEGMENT_HEIGHT) : MIN_SEGMENT_HEIGHT;
-    segment.style.top = `${top}px`;
-    segment.style.height = `${height}px`;
-    previousEnd = top + height;
-  });
-}
 
 /**
  * The cell's answer pane: the utterance under the cursor rendered as markdown
@@ -209,6 +142,9 @@ export function AnswerPane({
   const textRef = useRef<HTMLDivElement>(null);
   /** The last mapping the marks were drawn from, for a re-layout the observer asks for. */
   const unitToBlocksRef = useRef<UnitToBlocks>([]);
+  // The observer callback outlives its closure and needs the current units
+  // for the weight of a shared block; mirrored next to the block map.
+  const unitsRef = useRef<readonly SpeechUnit[]>([]);
 
   const answer = utteranceUnderCursor(speech.queueFor(sessionId));
   const units = speech.unitsFor(sessionId);
@@ -296,6 +232,7 @@ export function AnswerPane({
       children.map((child) => child.textContent ?? ""),
     );
     unitToBlocksRef.current = unitToBlocks;
+    unitsRef.current = units;
     children.forEach((child, blockIndex) => {
       const unit = blockToUnit[blockIndex];
       if (unit === null) return;
@@ -305,7 +242,7 @@ export function AnswerPane({
       if (unit === unitIndex) child.setAttribute("data-speaking", "");
     });
     // The marks moved or the text changed: the rail follows in the same commit.
-    layoutRail(bodyRef.current, railRef.current, unitToBlocks);
+    layoutRail(bodyRef.current, railRef.current, unitToBlocks, units);
   }, [text, units, unitIndex]);
 
   // Re-lay the rail when the body or the text column changes size — see the
@@ -318,7 +255,7 @@ export function AnswerPane({
     const observer = new ResizeObserver(() => {
       const b = bodyRef.current;
       const r = railRef.current;
-      if (b && r) layoutRail(b, r, unitToBlocksRef.current);
+      if (b && r) layoutRail(b, r, unitToBlocksRef.current, unitsRef.current);
     });
     observer.observe(body);
     if (textRef.current) observer.observe(textRef.current);
