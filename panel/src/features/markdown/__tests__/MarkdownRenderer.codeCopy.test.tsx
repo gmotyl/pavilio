@@ -109,8 +109,12 @@ describe("MarkdownRenderer code block copy", () => {
   });
 
   it("the button is a sibling of the pre, not inside it", () => {
-    // A button inside the `pre` would scroll out of the corner as soon as wide
-    // code is scrolled sideways; it has to sit outside that scroll box.
+    // Nothing inside the fence is a stable anchor: a highlighted fence scrolls
+    // wide code inside the `code` (`pre code.hljs` is `display: block` +
+    // `overflow-x: auto`), and an unlabelled one scrolls the `pre` itself
+    // (`overflow-x: auto` from `@tailwindcss/typography`). The button is
+    // anchored to the `.code-block` wrapper, which scrolls in neither case —
+    // that is the structure this test pins down.
     const { container } = renderMd(["```ts", "const a = 1;", "```", ""].join("\n"));
 
     const button = screen.getByLabelText("Copy code");
