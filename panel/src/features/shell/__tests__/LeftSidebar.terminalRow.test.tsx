@@ -283,15 +283,20 @@ describe("LeftSidebar speech indicator", () => {
     expect(within(row).queryByTestId("session-speaker-s1")).toBeNull();
   });
 
-  it("a collapsed project with a speaking session shows the speaker", () => {
+  it("the collapsed row keeps its dots while a session speaks", () => {
     setActivity("s1", "busy");
     speech.stateFor = (id) => (id === "s1" ? "speaking" : "empty");
 
     setup();
 
+    // The speaker joins the aggregate group as one more status; the busy dot
+    // (and, for another session, the attention dot) stays put, so the row
+    // never trades a pending signal for the audio it is playing.
     expect(
       within(projectRow()).getByTestId("session-speaker-s1"),
     ).toBeInTheDocument();
-    expect(projectRow().querySelector(".terminal-led")).toBeNull();
+    expect(
+      projectRow().querySelector('.terminal-led[data-state="busy"]'),
+    ).not.toBeNull();
   });
 });

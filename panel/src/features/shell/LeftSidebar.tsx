@@ -254,14 +254,10 @@ export default function LeftSidebar() {
           </button>
           {!expandedNow && (
             <span className="flex items-center">
-              {/* The sidebar is the one place a listener can see WHICH of
-                  several projects is talking, so a speaking session outranks
-                  the activity dots even on the collapsed row. Everything else
-                  still falls through to the aggregate LED. */}
-              <SessionIndicator
-                sessionIds={projectSessionIds}
-                fallback={<ProjectActivityLed sessionIds={projectSessionIds} />}
-              />
+              {/* The aggregate group shows every status this project has at
+                  once — busy, attention, and the speaker when one of its
+                  sessions is talking. */}
+              <ProjectActivityLed sessionIds={projectSessionIds} />
             </span>
           )}
           <NavLink
