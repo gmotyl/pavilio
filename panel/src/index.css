@@ -312,6 +312,36 @@ input[type="checkbox"] {
   height: 8px;
 }
 
+/* The sidebar speaker (`SessionIndicator`), shown in the LED's place while a
+   session's audio is playing. Its box is EXACTLY the LED's — the two swap in
+   and out of the same slot, and a row's text must not move when they do — so
+   the glyph inside it is drawn bigger and centred on that box, overflowing it
+   symmetrically: a speaker rendered at 6px is a smudge, and the box, not the
+   icon, is what the row's layout is made of.
+
+   The attention green (#9ece6a), and deliberately NO animation: the pulse in
+   this panel means "something is waiting for you", and audio that is already
+   playing is not waiting. */
+.session-speaker {
+  display: inline-block;
+  position: relative;
+  width: 6px;
+  height: 6px;
+  color: #9ece6a;
+}
+
+.session-speaker > svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.session-speaker-lg {
+  width: 8px;
+  height: 8px;
+}
+
 /* Cell-header speak control and autoplay toggle. Both borrow the activity
    LED's vocabulary above rather than inventing a second one: the same green
    (#9ece6a), the same `terminal-led-pulse-attention` keyframes, and the same
