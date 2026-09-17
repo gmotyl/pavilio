@@ -243,7 +243,12 @@ code, pre, .font-mono {
   border-radius: 6px;
   background: var(--bg-surface);
   opacity: 0;
-  transition: opacity 0.12s ease-in-out;
+  /* Longhand, not the `transition` shorthand: the shorthand resets
+     `transition-property`, which would drop `CopyIconButton`'s own
+     `transition-colors` and make its hover colour change instant. */
+  transition-property: opacity, color;
+  transition-duration: 0.12s;
+  transition-timing-function: ease-in-out;
 }
 
 /* Revealed by the pointer, and by the keyboard: `:focus-within` is what keeps
@@ -258,6 +263,19 @@ code, pre, .font-mono {
   .code-block > button {
     opacity: 1;
   }
+}
+
+/* `@tailwindcss/typography` zeroes the outer margins of `.prose`'s first and
+   last child, but those selectors now match this wrapper, which has no margin
+   of its own. The `pre`'s own margin then collapses THROUGH the wrapper
+   (`position: relative` creates no block formatting context), so a document
+   that opens or closes with a fence gained ~20px of leading/trailing space.
+   Zero it where it actually lives: on the `pre`. */
+.prose > .code-block:first-child > pre {
+  margin-top: 0;
+}
+.prose > .code-block:last-child > pre {
+  margin-bottom: 0;
 }
 
 /* Markdown tables: zebra rows + visible column lines */

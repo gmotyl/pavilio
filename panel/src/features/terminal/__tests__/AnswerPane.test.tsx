@@ -115,6 +115,27 @@ const LIST_MARKDOWN = [
   "",
 ].join("\n");
 
+/**
+ * A list item that holds a fenced block. The item is one of the voice's
+ * paragraphs, so it is a matched block — and the fence inside it now carries a
+ * real copy `button`, which is exactly the nesting the click path has to
+ * survive.
+ */
+const FENCE_IN_LIST_MARKDOWN = [
+  "# Deploy plan",
+  "",
+  "The runbook below explains the migration order that has to be followed before any traffic at all is moved across.",
+  "",
+  "- Run the migration on every single replica first, with exactly the command that is written out here:",
+  "",
+  "  ```sh",
+  "  pnpm migrate --all",
+  "  ```",
+  "",
+  "- Then watch the error rate closely for ten whole minutes after the traffic has moved across to the new pods.",
+  "",
+].join("\n");
+
 const utterance = (id: string, text: string): Utterance => ({
   id,
   sessionId: "cell-a",
@@ -553,6 +574,24 @@ describe("AnswerPane", () => {
 
     fireEvent.click(codeBlock!);
     fireEvent.keyDown(codeBlock!, { key: "Enter" });
+    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
+  });
+
+  it("copying a fence inside a spoken block does not jump the voice", () => {
+    const h = harness(FENCE_IN_LIST_MARKDOWN, null);
+    const speech = makeSpeech(h);
+    render(paneElement(speech));
+
+    const button = screen.getByLabelText("Copy code");
+    // The precondition the regression needs: the fence sits INSIDE a matched
+    // block, so the pane's delegated handler would resolve a click on this
+    // button to that block's unit if the click were allowed to bubble.
+    const block = button.closest("[data-unit]");
+    expect(block).not.toBeNull();
+    expect(block!.tagName).toBe("LI");
+
+    fireEvent.click(button);
+    // Copying is not a request to be read to from here.
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 

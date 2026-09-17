@@ -65,14 +65,18 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
       },
       pre: ({ children, ...props }) => {
         const child = (Array.isArray(children) ? children[0] : children) as any;
+        // DEAD BRANCH — this is NOT the mermaid path. react-markdown hands
+        // `pre` the *unrendered* element for the `code` node, so `child` here
+        // carries the fence's own `language-mermaid` class; the
+        // `mermaid-block` span is what the `code` override below returns
+        // later, and it is never visible from here. Kept only because
+        // deleting it is an unrelated cleanup — the live mermaid path is the
+        // language-class check underneath.
         if (child?.props?.className === "mermaid-block") {
           return <>{children}</>;
         }
         // A mermaid fence renders as a diagram, so there is no text to copy.
-        // Match on the language class, not on the `mermaid-block` span above:
-        // react-markdown hands `pre` the *unrendered* element for the `code`
-        // node, so what is visible here is the fence's own `language-mermaid`
-        // class, never the markup the `code` override will return from it.
+        // This is the check that actually fires, for the reason above.
         if (/language-mermaid/.test(child?.props?.className ?? "")) {
           return <pre {...props}>{children}</pre>;
         }

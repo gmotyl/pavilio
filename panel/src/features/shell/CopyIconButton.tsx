@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from "react";
+import { useState, type ComponentType, type MouseEvent } from "react";
 import { Copy, Check } from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
 
@@ -25,7 +25,14 @@ export function CopyIconButton({
 }: Props) {
   const [copied, setCopied] = useState(false);
 
-  const onClick = async () => {
+  const onClick = async (event: MouseEvent<HTMLButtonElement>) => {
+    // Copying is never also a request to whatever the button happens to sit
+    // inside. The answer pane resolves clicks with a delegated handler that
+    // maps the closest `[data-unit]` ancestor to a speech unit, so a copy
+    // button rendered inside a spoken block — a fenced block nested in a list
+    // item or a blockquote — would otherwise restart the voice at that unit.
+    // Synchronous and first: after an `await` the event is no longer dispatching.
+    event.stopPropagation();
     if (!(await copyToClipboard(value))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
