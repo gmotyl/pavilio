@@ -229,6 +229,20 @@ const blocks = (): HTMLElement[] => flatten(prose());
 /** The list's items, in document order. */
 const items = (): HTMLElement[] => Array.from(prose().querySelectorAll("li"));
 
+/**
+ * Which unit an item's text was packed into, read off the harness's OWN units.
+ *
+ * Why not the literal indices: how many items fit in a unit is `prepare`'s
+ * packing, not the pane's contract. Hard-coded expectations turn a change to
+ * `UNIT_MIN_CHARS` / `UNIT_MAX_CHARS` into three failures that point at the
+ * pane. This is not circular — it asks the unit's `source`, not
+ * `matchUnitsToBlocks`, which is the mapping under test.
+ */
+const expectedUnitIn =
+  (h: Harness) =>
+  (item: HTMLElement): number =>
+    h.units.findIndex((unit) => unit.source.includes(item.textContent ?? ""));
+
 const list = (): HTMLElement => {
   const element = prose().querySelector("ul");
   if (!(element instanceof HTMLElement)) throw new Error("no ul in the body");
@@ -809,12 +823,25 @@ describe("AnswerPane", () => {
   describe("lists", () => {
     it("list items carry the unit marks and the list does not", () => {
       const h = harness(LIST_MARKDOWN, null);
+      const expectedUnit = expectedUnitIn(h);
       render(paneElement(makeSpeech(h)));
 
-      // Heading, lead-in, items 1-2, items 3-5, item 6.
+      // Heading, lead-in, and three units cut out of the list. The counts are
+      // canaries: if packing changes shape entirely, they say so here.
       expect(h.units).toHaveLength(5);
       expect(items()).toHaveLength(6);
-      expect(items().map((item) => item.dataset.unit)).toEqual(["2", "2", "3", "3", "3", "4"]);
+      expect(items().map((item) => item.dataset.unit)).toEqual(
+        items().map((item) => String(expectedUnit(item))),
+      );
+
+      // The property the feature promises, whatever the packing constants are:
+      // the six items fall into exactly three units, in reading order, with no
+      // unit skipped between them.
+      const marks = items().map((item) => Number(item.dataset.unit));
+      expect(marks).toEqual([...marks].sort((a, b) => a - b));
+      const distinct = [...new Set(marks)];
+      expect(distinct).toEqual([distinct[0], distinct[0] + 1, distinct[0] + 2]);
+
       for (const item of items()) {
         expect(item).toHaveAttribute("role", "button");
         expect(item).toHaveAttribute("tabindex", "0");
@@ -829,17 +856,15 @@ describe("AnswerPane", () => {
 
     it("clicking a list item jumps to its unit", () => {
       const h = harness(LIST_MARKDOWN, null);
+      const expectedUnit = expectedUnitIn(h);
       const speech = makeSpeech(h);
       render(paneElement(speech));
 
-      fireEvent.click(items()[3]);
-      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 3);
-
-      fireEvent.click(items()[0]);
-      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
-
-      fireEvent.click(items()[5]);
-      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 4);
+      for (const index of [3, 0, 5]) {
+        const item = items()[index];
+        fireEvent.click(item);
+        expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", expectedUnit(item));
+      }
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(3);
     });
 
@@ -856,10 +881,30 @@ describe("AnswerPane", () => {
 
     it("the spoken items carry data-speaking", () => {
       const h = harness(LIST_MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
+      const expectedUnit = expectedUnitIn(h);
       render(paneElement(makeSpeech(h)));
 
-      // Unit 3 speaks items 3 to 5 — exactly those, and never the whole list.
-      expect(speaking()).toEqual(items().slice(2, 5));
+      // Unit 3 speaks a run of items — exactly those, and never the whole list.
+      const spoken = items().filter((item) => expectedUnit(item) === 3);
+      expect(spoken.length).toBeGreaterThan(1);
+      expect(speaking()).toEqual(spoken);
+    });
+
+    it("the previous unit's items stop speaking", () => {
+      const h = harness(LIST_MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
+      const expectedUnit = expectedUnitIn(h);
+      render(paneElement(makeSpeech(h)));
+      expect(speaking()).toEqual(items().filter((item) => expectedUnit(item) === 3));
+
+      h.progress.set({ unitIndex: 4, unitTime: 0, unitDuration: null });
+      // The strip covers the whole [data-unit] subtree, not this answer's direct
+      // children: without that, the items unit 3 spoke keep the mark the voice
+      // has left behind, and by the end of the list every item read so far is
+      // still highlighted.
+      const nowSpeaking = items().filter((item) => expectedUnit(item) === 4);
+      expect(nowSpeaking.length).toBeGreaterThan(0);
+      expect(prose().querySelectorAll("[data-speaking]")).toHaveLength(nowSpeaking.length);
+      expect(speaking()).toEqual(nowSpeaking);
     });
   });
 

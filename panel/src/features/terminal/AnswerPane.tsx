@@ -104,7 +104,11 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * The rail beside it mirrors the scrubber exactly: a pointer affordance, no
  * role, `aria-hidden`, with the same segment states from the same
  * `segmentStateFor`. Unmatched blocks — code, tables, diagrams, anything
- * speech turned into a sentinel — stay plain elements.
+ * speech turned into a sentinel — stay plain elements. Accepted residue: a
+ * matched `li` carries `role="button"`, which overrides its `listitem` role and
+ * so takes the `ul`'s list semantics — the count, the position — away from
+ * assistive tech; the pane's block-as-button pattern costs a container its
+ * meaning here for the first time, and the jump is judged worth it.
  *
  * ## Why the rail is laid out from the blocks, imperatively
  *
@@ -231,6 +235,10 @@ export function AnswerPane({
     // and React leaves attributes it did not set exactly where they were. The
     // whole subtree, not just this answer's blocks: the marks sit on list items
     // too, and the last answer's items are nowhere near this one's children.
+    // Do NOT narrow this to `.prose`'s direct children — an `li` is not one, so
+    // a narrow strip never clears `data-speaking` from an item, and by the end
+    // of a list every item the voice has already read is still marked as
+    // speaking (regression: "the previous unit's items stop speaking").
     for (const marked of Array.from(prose.querySelectorAll("[data-unit]"))) {
       for (const attribute of BLOCK_ATTRIBUTES) marked.removeAttribute(attribute);
     }

@@ -205,4 +205,54 @@ describe("layoutRail", () => {
     expect(box(4).top + box(4).height).toBe(380);
     expect(box(4).height).toBeGreaterThan(MIN_SEGMENT_HEIGHT);
   });
+
+  it("a segment spans the list items its unit speaks", () => {
+    // `p / ul(li, li, li) / p` — the same stub layout, blocks 100px apart and
+    // 80px tall. The block indices are `matchableBlocks`' own, because
+    // `layoutRail` calls it: 0 the lead-in, 1-3 the items, 4 the closing
+    // paragraph. That shared index space is the whole point of the change —
+    // the marking effect and the rail number the blocks the same way — and
+    // nothing asserted it over a list until here.
+    const boxes = [0, 100, 200, 300, 400].map((top) => ({ top, height: 80 }));
+    const stub = (element: HTMLElement, index: number): HTMLElement => {
+      element.dataset.top = String(boxes[index].top);
+      element.dataset.height = String(boxes[index].height);
+      return element;
+    };
+    const body = document.createElement("div");
+    const prose = document.createElement("div");
+    prose.className = "prose";
+    prose.appendChild(stub(document.createElement("p"), 0));
+    const ul = document.createElement("ul");
+    for (let i = 1; i <= 3; i++) ul.appendChild(stub(document.createElement("li"), i));
+    prose.append(ul, stub(document.createElement("p"), 4));
+    const rail = document.createElement("div");
+    rail.dataset.top = "0";
+    for (let i = 0; i < 3; i++) rail.appendChild(document.createElement("button"));
+    body.append(prose, rail);
+    document.body.appendChild(body);
+    const box = (i: number) => {
+      const segment = rail.children[i] as HTMLElement;
+      return { top: parseFloat(segment.style.top), height: parseFloat(segment.style.height) };
+    };
+
+    // Unit 0 speaks the lead-in, unit 1 items 1-2, unit 2 item 3 and the
+    // closing paragraph.
+    layoutRail(body, rail, [[0], [1, 2], [3, 4]], [{ chars: 60 }, { chars: 120 }, { chars: 90 }]);
+
+    expect(box(0)).toEqual({ top: 0, height: 80 });
+    // From the first item's top to the second item's bottom: beside the two
+    // items the unit speaks, not beside the whole list.
+    expect(box(1)).toEqual({ top: 100, height: 180 });
+    expect(box(2)).toEqual({ top: 300, height: 180 });
+
+    // And no segment is stacked over the container: the list's own extent —
+    // its first item's top to its last item's bottom — is nobody's span.
+    const listTop = boxes[1].top;
+    const listBottom = boxes[3].top + boxes[3].height;
+    for (const index of [0, 1, 2]) {
+      const segment = box(index);
+      expect([segment.top, segment.top + segment.height]).not.toEqual([listTop, listBottom]);
+    }
+  });
 });

@@ -22,7 +22,13 @@ export type UnitToBlocks = readonly (readonly number[])[];
  * packed from items 3 to 5 has no whole-list block to match. While the list
  * was the block, every unit cut from it was handed that same block, and the
  * rail stacked all but the first below it as stubs. One level only: a nested
- * list stays inside its parent `li`, whose text already contains it.
+ * list stays inside its parent `li`, whose text already contains it. The voice
+ * does NOT stop at one level — `strip`'s list-marker regex matches at any
+ * indentation, so a nested item is read as its own paragraph and can be packed
+ * into its own unit — and that is still correct here: the parent `li`'s text
+ * contains the nested item, so `matchUnitsToBlocks`' "the block holds the unit"
+ * rule lands that unit on the parent `li`, which is where a click and the rail
+ * want it anyway.
  */
 export function matchableBlocks(prose: HTMLElement): HTMLElement[] {
   const blocks: HTMLElement[] = [];
@@ -30,7 +36,10 @@ export function matchableBlocks(prose: HTMLElement): HTMLElement[] {
     if (!(child instanceof HTMLElement)) continue;
     if (child.tagName === "UL" || child.tagName === "OL") {
       for (const item of Array.from(child.children)) {
-        if (item instanceof HTMLElement) blocks.push(item);
+        // Items only: whatever else a renderer or a plugin drops into a list
+        // (a stray `script`, a wrapper) is not a paragraph to the voice, and a
+        // non-`li` block here would shift every block index after it.
+        if (item instanceof HTMLElement && item.tagName === "LI") blocks.push(item);
       }
       continue;
     }
