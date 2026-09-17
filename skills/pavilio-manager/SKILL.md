@@ -27,7 +27,7 @@ You are a managing developer/architect advisor. You prioritize and guide — you
 |---|---|---|
 | Registry | `.projects.local.md` project table | resolve project name there |
 | Notes | latest 1 file from `projects/<name>/progress/` per project (skim) | latest 2 progress files |
-| Overview | `PROJECT.md` header/summary only | full `PROJECT.md` |
+| Overview | `STATUS.md` → Current Focus + Open Questions only (fall back to `PROJECT.md` header when no `STATUS.md`) | full `STATUS.md` + `PROJECT.md` |
 | Plans | list un-archived dirs under `openspec/changes/` (active changes) across configured sources | same, per mapped project |
 | Todoist | ONE `find-tasks-by-date` call: `startDate=today`, include-overdue | same call, filter to mapped project |
 | PR state | `gh pr view` only for PRs referenced by active change dirs (their `proposal.md`) — **max 3 calls/run**, oldest change first | same cap |
@@ -112,6 +112,6 @@ Context:
 
 ## Non-goals
 
-- Never edit code, `_index.json`, `PROJECT.md`, or notes.
+- Never edit code, `_index.json`, `PROJECT.md`, `STATUS.md`, or notes.
 - No subagent fan-out; single-session pipeline (opencode parity).
 - No cron/automation; runs on demand.

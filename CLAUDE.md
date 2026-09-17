@@ -66,8 +66,9 @@ notes/
     /notes - session notes, decisions
     /progress - session tracking files
       [date]-slug.md
-    PROJECT.md - project overview
-    DECISIONS.md - key architectural decisions
+    PROJECT.md - stable resume card (overview, repos, working rules, gotchas; ≤ 60 lines)
+    STATUS.md - volatile state (focus, open questions, recent decisions, active team) — rewritten by pavilio-note
+    DECISIONS.md - append-only decision log
 .agent/
   config.json - provider configuration
 ```

@@ -227,7 +227,8 @@ my-workspace/
 ├── panel/               # Local web dashboard (Vite + React + Express)
 ├── projects/            # Your project data (auto-discovered)
 │   └── my-project/
-│       ├── PROJECT.md   # Project overview (required for discovery)
+│       ├── PROJECT.md   # Stable resume card (required for discovery)
+│       ├── STATUS.md    # Volatile state, rewritten per meeting (optional)
 │       ├── _index.json  # Machine-readable index
 │       ├── notes/       # Meeting notes
 │       │   └── log/     # Raw transcripts
