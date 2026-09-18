@@ -3,12 +3,13 @@ import multer from "multer";
 import { readFileSync } from "fs";
 import { promises as fs } from "fs";
 import { join, resolve } from "path";
-import { homedir, tmpdir } from "os";
+import { homedir, tmpdir, userInfo } from "os";
 import {
   createSession,
   listSessions,
   destroySession,
   updateSession,
+  getSessionOwner,
 } from "../lib/terminal-manager.js";
 import { appendReconnectMetric } from "../lib/reconnect-log.js";
 import { getConfig } from "../config.js";
@@ -143,6 +144,11 @@ const EXT_BY_MIME: Record<string, string> = {
 
 const PASTE_DIR = join(tmpdir(), "pavilio-pastes");
 const PASTE_TTL_MS = 24 * 60 * 60 * 1000;
+// Traversal-only (--x--x on top of the panel's own rwx): a `runAsUser`
+// session can reach the random filename it was handed, but cannot list the
+// directory to discover anyone else's pastes. 0700 would keep the whole tree
+// out of that account's reach; 0755 would let it enumerate them.
+const PASTE_DIR_MODE = 0o711;
 
 // Nothing else ever deletes these files, so each upload sweeps expired ones.
 async function sweepOldPastes() {
@@ -176,19 +182,43 @@ router.post("/paste-image", (req, res) => {
     const ext = EXT_BY_MIME[file.mimetype];
     if (!ext) return res.status(400).json({ error: "Not an image" });
 
+    // The saved file is private to one account, so the upload has to name the
+    // session it belongs to before anything is written.
+    const sessionId = req.body?.sessionId;
+    if (typeof sessionId !== "string" || !sessionId)
+      return res.status(400).json({ error: "Missing sessionId" });
+    if (!listSessions().some((s) => s.id === sessionId))
+      return res.status(404).json({ error: "Session not found" });
+
+    // A known session with no owner means a host without POSIX uids, not an
+    // unknown id — the file simply stays with the panel process identity.
+    const owner = getSessionOwner(sessionId);
+    const panel = userInfo();
+    const handover =
+      owner && (owner.uid !== panel.uid || owner.gid !== panel.gid)
+        ? owner
+        : undefined;
+
+    const path = join(
+      PASTE_DIR,
+      `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`,
+    );
     try {
-      // Screenshots often contain secrets — keep them out of reach of other
-      // local users on shared-/tmp machines.
-      await fs.mkdir(PASTE_DIR, { recursive: true, mode: 0o700 });
+      await fs.mkdir(PASTE_DIR, { recursive: true });
+      // `mkdir` only applies a mode when it creates; normalise a directory an
+      // older panel left behind as 0700.
+      await fs.chmod(PASTE_DIR, PASTE_DIR_MODE);
       // Fire-and-forget: don't delay this upload's response on the sweep.
       sweepOldPastes().catch(() => {});
-      const path = join(
-        PASTE_DIR,
-        `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`,
-      );
+      // Screenshots often contain secrets — the file is readable by its owner
+      // alone, and that owner is the account the session's pty runs as.
       await fs.writeFile(path, file.buffer, { mode: 0o600 });
+      if (handover) await fs.chown(path, handover.uid, handover.gid);
       res.json({ path });
     } catch {
+      // A file the session could never read is worse than no file: drop any
+      // partial write rather than leaving it to the sweep 24 hours later.
+      await fs.rm(path, { force: true }).catch(() => {});
       res.status(500).json({ error: "Upload failed" });
     }
   });
