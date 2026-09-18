@@ -35,10 +35,24 @@ export interface TerminalSession {
    * running the PTY (see `terminal-identity.ts`'s header comment).
    */
   identityHomeDir: string;
+  /**
+   * Numeric POSIX identity the PTY actually runs as — the `runAsUser`
+   * target's for a wrapped session, the panel process's own otherwise.
+   * Server-private: `toMeta` strips it, so it never reaches a client. It
+   * exists so a file the server writes on a session's behalf (a pasted
+   * image, say) can be chown'd to the account that has to read it.
+   * `undefined` where the host has no POSIX uids at all (win32).
+   */
+  owner?: TerminalOwner;
   _suppressRecordUntil?: number;
 }
 
-export type TerminalSessionMeta = Omit<TerminalSession, "pty">;
+export interface TerminalOwner {
+  uid: number;
+  gid: number;
+}
+
+export type TerminalSessionMeta = Omit<TerminalSession, "pty" | "owner">;
 
 const sessions = new Map<string, TerminalSession>();
 
@@ -80,8 +94,23 @@ function defaultShell(): string {
 }
 
 function toMeta(session: TerminalSession): TerminalSessionMeta {
-  const { pty: _pty, ...meta } = session;
+  const { pty: _pty, owner: _owner, ...meta } = session;
   return meta;
+}
+
+/**
+ * The POSIX identity a session's PTY runs as, for server-side use only —
+ * never routed through `toMeta`. `undefined` for an unknown session id, and
+ * on a host without POSIX uids.
+ */
+export function getSessionOwner(id: string): TerminalOwner | undefined {
+  return sessions.get(id)?.owner;
+}
+
+/** The panel process's own identity; `uid` is -1 on win32, where there is none. */
+function panelOwner(): TerminalOwner | undefined {
+  const { uid, gid } = userInfo();
+  return uid < 0 ? undefined : { uid, gid };
 }
 
 export function createSession(opts: {
@@ -174,6 +203,10 @@ export function createSession(opts: {
     pty: ptyProcess,
     modeState: createModeState(),
     identityHomeDir,
+    // A wrapped session runs as the target account; every other path (no
+    // runAsUser, an unknown one, or the owner's own username) spawns
+    // directly and therefore runs as the panel process itself.
+    owner: targetUser ? { uid: targetUser.uid, gid: targetUser.gid } : panelOwner(),
   };
 
   sessions.set(id, session);

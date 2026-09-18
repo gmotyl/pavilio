@@ -902,7 +902,7 @@ function createInstance(sessionId: string): InternalInstance {
           // Empty text — the clipboard may hold an image (screenshot).
           const image = await readClipboardImage();
           if (!image) return;
-          const path = await uploadPastedImage(image);
+          const path = await uploadPastedImage(image, sessionId);
           if (path) terminal.paste(path + " ");
         }).catch(() => {});
       }
@@ -929,7 +929,7 @@ function createInstance(sessionId: string): InternalInstance {
       if (!image) return; // nothing usable — let xterm handle it
       e.preventDefault();
       e.stopPropagation();
-      uploadPastedImage(image).then((path) => {
+      uploadPastedImage(image, sessionId).then((path) => {
         if (path) terminal.paste(path + " ");
       });
     },

@@ -1,14 +1,16 @@
 import { Router } from "express";
 import multer from "multer";
+import { randomBytes } from "crypto";
 import { readFileSync } from "fs";
 import { promises as fs } from "fs";
 import { join, resolve } from "path";
-import { homedir, tmpdir } from "os";
+import { homedir, tmpdir, userInfo } from "os";
 import {
   createSession,
   listSessions,
   destroySession,
   updateSession,
+  getSessionOwner,
 } from "../lib/terminal-manager.js";
 import { appendReconnectMetric } from "../lib/reconnect-log.js";
 import { getConfig } from "../config.js";
@@ -143,6 +145,11 @@ const EXT_BY_MIME: Record<string, string> = {
 
 const PASTE_DIR = join(tmpdir(), "pavilio-pastes");
 const PASTE_TTL_MS = 24 * 60 * 60 * 1000;
+// Traversal-only (--x--x on top of the panel's own rwx): a `runAsUser`
+// session can reach the random filename it was handed, but cannot list the
+// directory to discover anyone else's pastes. 0700 would keep the whole tree
+// out of that account's reach; 0755 would let it enumerate them.
+const PASTE_DIR_MODE = 0o711;
 
 // Nothing else ever deletes these files, so each upload sweeps expired ones.
 async function sweepOldPastes() {
@@ -176,19 +183,65 @@ router.post("/paste-image", (req, res) => {
     const ext = EXT_BY_MIME[file.mimetype];
     if (!ext) return res.status(400).json({ error: "Not an image" });
 
+    // The saved file is private to one account, so the upload has to name the
+    // session it belongs to before anything is written.
+    const sessionId = req.body?.sessionId;
+    if (typeof sessionId !== "string" || !sessionId)
+      return res.status(400).json({ error: "Missing sessionId" });
+    if (!listSessions().some((s) => s.id === sessionId))
+      return res.status(404).json({ error: "Session not found" });
+
+    // A known session with no owner means a host without POSIX uids, not an
+    // unknown id — the file simply stays with the panel process identity.
+    const owner = getSessionOwner(sessionId);
+    const panel = userInfo();
+    const handover =
+      owner && (owner.uid !== panel.uid || owner.gid !== panel.gid)
+        ? owner
+        : undefined;
+
+    // Under a traversal-only directory the name is the only thing keeping a
+    // paste from other local accounts for its whole 24 hours — a terminal
+    // user is handed its own names, which is enough to reconstruct a
+    // `Math.random` stream and predict everyone else's.
+    const path = join(
+      PASTE_DIR,
+      `paste-${Date.now()}-${randomBytes(12).toString("hex")}.${ext}`,
+    );
     try {
-      // Screenshots often contain secrets — keep them out of reach of other
-      // local users on shared-/tmp machines.
-      await fs.mkdir(PASTE_DIR, { recursive: true, mode: 0o700 });
+      await fs.mkdir(PASTE_DIR, { recursive: true, mode: PASTE_DIR_MODE });
+      // /tmp is world-writable, so the path may have been pre-planted: mkdir
+      // accepts an existing directory and follows a symlink. Anything but a
+      // real directory owned by this process fails the paste rather than
+      // being chmod'ed and written into while its owner keeps rwx.
+      const dir = await fs.lstat(PASTE_DIR);
+      if (!dir.isDirectory() || dir.uid !== panel.uid)
+        throw new Error("paste directory is not the panel's own");
+      // `mkdir` only applies a mode when it creates; normalise a directory an
+      // older panel left behind as 0700.
+      await fs.chmod(PASTE_DIR, PASTE_DIR_MODE);
       // Fire-and-forget: don't delay this upload's response on the sweep.
       sweepOldPastes().catch(() => {});
-      const path = join(
-        PASTE_DIR,
-        `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`,
-      );
-      await fs.writeFile(path, file.buffer, { mode: 0o600 });
+      // Screenshots often contain secrets — the file is readable by its owner
+      // alone, and that owner is the account the session's pty runs as. `wx`
+      // fails on a pre-planted name or symlink instead of reusing it, which
+      // `writeFile` would do while silently ignoring its own `mode`.
+      const handle = await fs.open(path, "wx", 0o600);
+      try {
+        await handle.writeFile(file.buffer);
+      } finally {
+        await handle.close();
+      }
+      if (handover) await fs.chown(path, handover.uid, handover.gid);
       res.json({ path });
-    } catch {
+    } catch (err) {
+      // The client is told no more than "Upload failed", so a hostile paste
+      // directory would otherwise look exactly like a full disk — the reason
+      // only ever reaches the operator through this line.
+      console.warn("[terminal] paste-image save failed:", err);
+      // A file the session could never read is worse than no file: drop any
+      // partial write rather than leaving it to the sweep 24 hours later.
+      await fs.rm(path, { force: true }).catch(() => {});
       res.status(500).json({ error: "Upload failed" });
     }
   });

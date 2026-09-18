@@ -30,14 +30,23 @@ export async function readClipboardImage(): Promise<Blob | null> {
   return null;
 }
 
-/** Upload a pasted image; returns the absolute path it was saved to. */
+/**
+ * Upload a pasted image; returns the absolute path it was saved to.
+ *
+ * The upload names the terminal session it is destined for: the panel server
+ * may run as root while the session's pty runs as another OS user, so the
+ * server has to know whose file this is before it can chown the saved image
+ * to the account that will actually read it.
+ */
 export async function uploadPastedImage(
   image: Blob,
+  sessionId: string,
   fetchFn: typeof fetch = fetch,
 ): Promise<string | null> {
   const form = new FormData();
   const name = image instanceof File && image.name ? image.name : "paste.png";
   form.append("image", image, name);
+  form.append("sessionId", sessionId);
   try {
     const res = await fetchFn("/api/terminal/paste-image", {
       method: "POST",

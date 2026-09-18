@@ -38,6 +38,8 @@ describe("buildRunAsSpawnCommand", () => {
     username: "greg-ip",
     homeDir: "/home/greg-ip",
     shell: "/bin/zsh",
+    uid: 1001,
+    gid: 1001,
   };
 
   it("buildRunAsSpawnCommand always returns the su form", () => {

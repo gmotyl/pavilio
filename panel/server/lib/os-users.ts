@@ -12,6 +12,13 @@ export interface OsUser {
   username: string;
   homeDir: string;
   shell: string;
+  /**
+   * Numeric POSIX ownership, retained alongside the username because a
+   * username can't be handed to `chown` — a file the server writes on behalf
+   * of a `runAsUser` session has to be attributed by uid/gid.
+   */
+  uid: number;
+  gid: number;
 }
 
 const NON_LOGIN_SHELLS = new Set([
@@ -31,9 +38,10 @@ export function parsePasswd(content: string): OsUser[] {
     const fields = line.split(":");
     if (fields.length < 7) continue;
 
-    const [username, , uidField, , , homeDir, shell] = fields;
+    const [username, , uidField, gidField, , homeDir, shell] = fields;
     const uid = Number(uidField);
-    if (!Number.isFinite(uid)) continue;
+    const gid = Number(gidField);
+    if (!Number.isFinite(uid) || !Number.isFinite(gid)) continue;
     // uid 0 (root) is the one exception below the 1000 floor: it's the
     // panel-owner account on most setups, and offering it lets
     // terminal-manager.ts's owner-equality check match a real discovered
@@ -42,7 +50,7 @@ export function parsePasswd(content: string): OsUser[] {
     if (uid !== 0 && uid < 1000) continue;
     if (NON_LOGIN_SHELLS.has(shell)) continue;
 
-    users.push({ username, homeDir, shell });
+    users.push({ username, homeDir, shell, uid, gid });
   }
   return users;
 }
