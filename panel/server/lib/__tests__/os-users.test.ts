@@ -43,8 +43,29 @@ describe("os-users", () => {
     it("parsePasswd includes a uid>=1000 entry with a real shell", () => {
       const content = "greg:x:1000:1000:Greg:/home/greg:/bin/zsh\n";
       expect(parsePasswd(content)).toEqual([
-        { username: "greg", homeDir: "/home/greg", shell: "/bin/zsh" },
+        { username: "greg", homeDir: "/home/greg", shell: "/bin/zsh", uid: 1000, gid: 1000 },
       ]);
+    });
+
+    it("parsePasswd retains uid and gid", () => {
+      // A `runAsUser` session's files have to be chown'd to the account that
+      // actually runs the PTY, so the numeric ownership has to survive the
+      // parse — the username alone can't be handed to `fchown`.
+      const content = "greg-ip:x:1001:1002:Greg IP:/home/greg-ip:/bin/bash\n";
+      expect(parsePasswd(content)).toEqual([
+        {
+          username: "greg-ip",
+          homeDir: "/home/greg-ip",
+          shell: "/bin/bash",
+          uid: 1001,
+          gid: 1002,
+        },
+      ]);
+    });
+
+    it("parsePasswd skips an entry whose gid is not numeric", () => {
+      const content = "broken:x:1000:not-a-gid:Broken:/home/broken:/bin/zsh\n";
+      expect(parsePasswd(content)).toEqual([]);
     });
 
     it("parsePasswd excludes a system entry with uid below 1000", () => {
@@ -60,7 +81,7 @@ describe("os-users", () => {
       // instead of silently falling back to an unknown-user direct spawn.
       const content = "root:x:0:0:root:/root:/bin/bash\n";
       expect(parsePasswd(content)).toEqual([
-        { username: "root", homeDir: "/root", shell: "/bin/bash" },
+        { username: "root", homeDir: "/root", shell: "/bin/bash", uid: 0, gid: 0 },
       ]);
     });
 
@@ -88,7 +109,7 @@ describe("os-users", () => {
       ].join("\n");
       expect(() => parsePasswd(content)).not.toThrow();
       expect(parsePasswd(content)).toEqual([
-        { username: "greg", homeDir: "/home/greg", shell: "/bin/zsh" },
+        { username: "greg", homeDir: "/home/greg", shell: "/bin/zsh", uid: 1000, gid: 1000 },
       ]);
     });
   });

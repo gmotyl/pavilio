@@ -6,6 +6,7 @@ import {
   _resetAssignedNamesForTests,
   createSession,
   destroySession,
+  getSessionOwner,
   listSessions,
   nudgeSession,
   shouldSuppressRecord,
@@ -28,7 +29,9 @@ import { buildRunAsSpawnCommand } from "../terminal-run-as"
 // the normal translated-path behavior regardless of what the machine running
 // the suite actually has under `/home/greg-ip`.
 const mockOsUsers = vi.hoisted(() => ({
-  users: [{ username: "greg-ip", homeDir: "/home/greg-ip", shell: "/bin/bash" }],
+  users: [
+    { username: "greg-ip", homeDir: "/home/greg-ip", shell: "/bin/bash", uid: 1001, gid: 1002 },
+  ],
   hasGitBindMount: true,
 }))
 
@@ -408,7 +411,13 @@ describe("identity file lifecycle", () => {
 
 describe("createSession with runAsUser", () => {
   const RUN_AS_USER = "greg-ip"
-  const DEFAULT_TARGET_USER = { username: RUN_AS_USER, homeDir: "/home/greg-ip", shell: "/bin/bash" }
+  const DEFAULT_TARGET_USER = {
+    username: RUN_AS_USER,
+    homeDir: "/home/greg-ip",
+    shell: "/bin/bash",
+    uid: 1001,
+    gid: 1002,
+  }
 
   afterEach(() => {
     // Restore the default mocked user list/bind-mount flag so a test that
@@ -612,7 +621,13 @@ describe("createSession with runAsUser", () => {
     const ownerHome = homedir()
     mockOsUsers.users = [
       DEFAULT_TARGET_USER,
-      { username: userInfo().username, homeDir: ownerHome, shell: "/bin/zsh" },
+      {
+        username: userInfo().username,
+        homeDir: ownerHome,
+        shell: "/bin/zsh",
+        uid: userInfo().uid,
+        gid: userInfo().gid,
+      },
     ]
 
     const meta = createSession({
@@ -649,7 +664,13 @@ describe("createSession with runAsUser", () => {
         DEFAULT_TARGET_USER,
         // Same account that's actually running this process, but with the
         // passwd-recorded home (not the drifted $HOME).
-        { username: userInfo().username, homeDir: realHome, shell: "/bin/zsh" },
+        {
+          username: userInfo().username,
+          homeDir: realHome,
+          shell: "/bin/zsh",
+          uid: userInfo().uid,
+          gid: userInfo().gid,
+        },
       ]
 
       const meta = createSession({
@@ -677,7 +698,9 @@ describe("createSession with runAsUser", () => {
     const previousStateDirInTest = process.env.PANEL_AUTH_STATE_DIR
     delete process.env.PANEL_AUTH_STATE_DIR
     const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
-    mockOsUsers.users = [{ username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash" }]
+    mockOsUsers.users = [
+      { username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash", uid: 1001, gid: 1002 },
+    ]
     try {
       const meta = createSession({
         cwd: process.cwd(),
@@ -706,7 +729,9 @@ describe("createSession with runAsUser", () => {
     const previousStateDirInTest = process.env.PANEL_AUTH_STATE_DIR
     delete process.env.PANEL_AUTH_STATE_DIR
     const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
-    mockOsUsers.users = [{ username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash" }]
+    mockOsUsers.users = [
+      { username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash", uid: 1001, gid: 1002 },
+    ]
     try {
       const meta = createSession({
         cwd: process.cwd(),
@@ -733,7 +758,9 @@ describe("createSession with runAsUser", () => {
     const previousStateDirInTest = process.env.PANEL_AUTH_STATE_DIR
     delete process.env.PANEL_AUTH_STATE_DIR
     const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
-    mockOsUsers.users = [{ username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash" }]
+    mockOsUsers.users = [
+      { username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash", uid: 1001, gid: 1002 },
+    ]
     try {
       const meta = createSession({
         cwd: process.cwd(),
@@ -757,5 +784,53 @@ describe("createSession with runAsUser", () => {
         process.env.PANEL_AUTH_STATE_DIR = previousStateDirInTest
       }
     }
+  })
+})
+
+describe("getSessionOwner", () => {
+  it("getSessionOwner returns effective identities privately or undefined", () => {
+    // A direct-spawn session runs as the panel process itself.
+    const direct = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    expect(getSessionOwner(direct.id)).toEqual({ uid: userInfo().uid, gid: userInfo().gid })
+
+    // A runAsUser session runs as the target account, so the owner is the
+    // numeric identity /etc/passwd recorded for it — not the panel's.
+    const runAs = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      runAsUser: "greg-ip",
+    })
+    expect(getSessionOwner(runAs.id)).toEqual({ uid: 1001, gid: 1002 })
+
+    // An unknown runAsUser falls back to the direct-spawn path, so its owner
+    // is the panel process's identity, same as a session with no runAsUser.
+    const unknownUser = createSession({
+      cwd: process.cwd(),
+      cols: 80,
+      rows: 24,
+      project: "alokai",
+      runAsUser: "no-such-user",
+    })
+    expect(getSessionOwner(unknownUser.id)).toEqual({ uid: userInfo().uid, gid: userInfo().gid })
+
+    // An unknown session id has no owner to report.
+    expect(getSessionOwner("00000000-0000-4000-8000-000000000000")).toBeUndefined()
+
+    // Ownership is server-private: it must never ride out on session metadata.
+    for (const meta of [direct, runAs, unknownUser]) {
+      expect(Object.hasOwn(meta, "uid")).toBe(false)
+      expect(Object.hasOwn(meta, "gid")).toBe(false)
+      expect(Object.hasOwn(meta, "owner")).toBe(false)
+      const listed = listSessions().find((s) => s.id === meta.id)!
+      expect(Object.hasOwn(listed, "uid")).toBe(false)
+      expect(Object.hasOwn(listed, "gid")).toBe(false)
+      expect(Object.hasOwn(listed, "owner")).toBe(false)
+    }
+
+    destroySession(direct.id)
+    destroySession(runAs.id)
+    destroySession(unknownUser.id)
   })
 })
