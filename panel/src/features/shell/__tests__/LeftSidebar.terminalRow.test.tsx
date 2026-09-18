@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  act,
   render,
   screen,
   fireEvent,
@@ -8,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
+import { dispatchTerminalFocus } from "../../terminal/useTerminalSessions";
 import type { CellSpeechState } from "../../speech/types";
 
 /**
@@ -41,8 +43,10 @@ import {
   _resetForTests,
 } from "../../terminal/useTerminalActivityChannel";
 
-// One terminal session for project "vector", matching the sibling
-// LeftSidebar.lastTab.test.tsx's mocked project.
+// "vector" is the current project in most of these tests, matching the sibling
+// LeftSidebar.lastTab.test.tsx's mocked project. "atlas" is a second project
+// with its own session, so the highlight tests can prove that another
+// project's remembered focus never bleeds into the current one.
 const sessions: SessionMeta[] = [
   {
     id: "s1",
@@ -52,10 +56,29 @@ const sessions: SessionMeta[] = [
     pid: 4242,
     createdAt: "2026-01-01T00:00:00.000Z",
   },
+  {
+    id: "s2",
+    project: "vector",
+    name: "shell-2",
+    cwd: "/repo/vector",
+    pid: 4243,
+    createdAt: "2026-01-01T00:00:01.000Z",
+  },
+  {
+    id: "a1",
+    project: "atlas",
+    name: "atlas-1",
+    cwd: "/repo/atlas",
+    pid: 4244,
+    createdAt: "2026-01-01T00:00:02.000Z",
+  },
 ];
 
 vi.mock("../../projects/useProjects", () => ({
-  useProjects: () => [{ name: "vector", repos: [] }],
+  useProjects: () => [
+    { name: "vector", repos: [] },
+    { name: "atlas", repos: [] },
+  ],
 }));
 vi.mock("../../projects/useArchivedProjects", () => ({
   useArchivedProjects: () => ({ archive: [], archivedNames: new Set() }),
@@ -122,6 +145,17 @@ function expandAndClickSession() {
   fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
   fireEvent.click(screen.getByTestId("sidebar-session-s1"));
 }
+
+/** Reveals a project's session rows. */
+const expand = (project: string) =>
+  fireEvent.click(screen.getByTestId(`sidebar-project-expand-${project}`));
+
+/** The inline background of a session row — the highlight under test. */
+const rowBackground = (sessionId: string) =>
+  screen.getByTestId(`sidebar-session-${sessionId}`).style.background;
+
+const HIGHLIGHTED = "var(--bg-active)";
+const PLAIN = "transparent";
 
 /**
  * File-level, not per-describe: the activity channel and the stubbed speech
@@ -219,13 +253,82 @@ describe("LeftSidebar terminal-session row highlight", () => {
     );
   });
 
-  it("highlights nothing while a non-terminal section of the project is open", () => {
+  it("highlights the focused session while a non-terminal section of the project is open", () => {
+    // Inverted from the old rule: the Cmd+B drawer renders precisely here, so
+    // the section the drawer lives on must show the highlight, not hide it.
+    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    setup("/project/vector/memo");
+    expand("vector");
+    expect(rowBackground("s2")).toBe(HIGHLIGHTED);
+    expect(rowBackground("s1")).toBe(PLAIN);
+  });
+
+  it("still highlights the focused session on the terminal route", () => {
+    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    setup("/project/vector/iterm");
+    expand("vector");
+    expect(rowBackground("s2")).toBe(HIGHLIGHTED);
+    expect(rowBackground("s1")).toBe(PLAIN);
+  });
+
+  it("highlights the focused session on the bare project route", () => {
+    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    setup("/project/vector");
+    expand("vector");
+    expect(rowBackground("s2")).toBe(HIGHLIGHTED);
+  });
+
+  it("a focus broadcast for the current project moves the highlight without navigating", () => {
     localStorage.setItem("panel-terminal-focus-vector", "s1");
     setup("/project/vector/memo");
-    fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
-    expect(screen.getByTestId("sidebar-session-s1").style.background).toBe(
-      "transparent",
+    expand("vector");
+    expect(rowBackground("s1")).toBe(HIGHLIGHTED);
+
+    act(() => dispatchTerminalFocus("vector", "s2"));
+
+    expect(rowBackground("s2")).toBe(HIGHLIGHTED);
+    expect(rowBackground("s1")).toBe(PLAIN);
+    expect(screen.getByTestId("location").textContent).toBe(
+      "/project/vector/memo",
     );
+  });
+
+  it("does not highlight rows of a project that is not the current one", () => {
+    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    localStorage.setItem("panel-terminal-focus-atlas", "a1");
+    setup("/project/vector/memo");
+    expand("vector");
+    expand("atlas");
+    expect(rowBackground("s2")).toBe(HIGHLIGHTED);
+    expect(rowBackground("a1")).toBe(PLAIN);
+  });
+
+  it("a focus broadcast for another project leaves the highlight alone", () => {
+    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    setup("/project/vector/memo");
+    expand("vector");
+    expand("atlas");
+
+    act(() => dispatchTerminalFocus("atlas", "a1"));
+
+    expect(rowBackground("s2")).toBe(HIGHLIGHTED);
+    expect(rowBackground("a1")).toBe(PLAIN);
+  });
+
+  it("highlights nothing when the route names no project", () => {
+    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    setup("/terminals");
+    expand("vector");
+    expect(rowBackground("s1")).toBe(PLAIN);
+    expect(rowBackground("s2")).toBe(PLAIN);
+  });
+
+  it("a remembered id that names no live session highlights nothing", () => {
+    localStorage.setItem("panel-terminal-focus-vector", "ghost");
+    setup("/project/vector/iterm");
+    expand("vector");
+    expect(rowBackground("s1")).toBe(PLAIN);
+    expect(rowBackground("s2")).toBe(PLAIN);
   });
 });
 
