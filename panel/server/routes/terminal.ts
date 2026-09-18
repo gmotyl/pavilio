@@ -1,5 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
+import { randomBytes } from "crypto";
 import { readFileSync } from "fs";
 import { promises as fs } from "fs";
 import { join, resolve } from "path";
@@ -199,20 +200,38 @@ router.post("/paste-image", (req, res) => {
         ? owner
         : undefined;
 
+    // Under a traversal-only directory the name is the only thing keeping a
+    // paste from other local accounts for its whole 24 hours — a terminal
+    // user is handed its own names, which is enough to reconstruct a
+    // `Math.random` stream and predict everyone else's.
     const path = join(
       PASTE_DIR,
-      `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`,
+      `paste-${Date.now()}-${randomBytes(12).toString("hex")}.${ext}`,
     );
     try {
-      await fs.mkdir(PASTE_DIR, { recursive: true });
+      await fs.mkdir(PASTE_DIR, { recursive: true, mode: PASTE_DIR_MODE });
+      // /tmp is world-writable, so the path may have been pre-planted: mkdir
+      // accepts an existing directory and follows a symlink. Anything but a
+      // real directory owned by this process fails the paste rather than
+      // being chmod'ed and written into while its owner keeps rwx.
+      const dir = await fs.lstat(PASTE_DIR);
+      if (!dir.isDirectory() || dir.uid !== panel.uid)
+        throw new Error("paste directory is not the panel's own");
       // `mkdir` only applies a mode when it creates; normalise a directory an
       // older panel left behind as 0700.
       await fs.chmod(PASTE_DIR, PASTE_DIR_MODE);
       // Fire-and-forget: don't delay this upload's response on the sweep.
       sweepOldPastes().catch(() => {});
       // Screenshots often contain secrets — the file is readable by its owner
-      // alone, and that owner is the account the session's pty runs as.
-      await fs.writeFile(path, file.buffer, { mode: 0o600 });
+      // alone, and that owner is the account the session's pty runs as. `wx`
+      // fails on a pre-planted name or symlink instead of reusing it, which
+      // `writeFile` would do while silently ignoring its own `mode`.
+      const handle = await fs.open(path, "wx", 0o600);
+      try {
+        await handle.writeFile(file.buffer);
+      } finally {
+        await handle.close();
+      }
       if (handover) await fs.chown(path, handover.uid, handover.gid);
       res.json({ path });
     } catch {

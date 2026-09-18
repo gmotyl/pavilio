@@ -3,18 +3,22 @@ import express from "express";
 import request from "supertest";
 import {
   chmodSync,
+  chownSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   promises as fsp,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "fs";
 import { tmpdir, userInfo } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 
 const state = vi.hoisted(() => ({
   ids: [] as string[],
@@ -56,6 +60,25 @@ const panel = userInfo();
 
 function pasteNames(): string[] {
   return existsSync(PASTE_DIR) ? readdirSync(PASTE_DIR).sort() : [];
+}
+
+// The paste directory is a fixed absolute path, so a test that replaces it
+// with a hostile one puts the real directory back afterwards.
+const PASTE_DIR_STASH = `${PASTE_DIR}.test-stash`;
+function pasteDirExists(): boolean {
+  try {
+    lstatSync(PASTE_DIR);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function stashPasteDir() {
+  if (pasteDirExists()) renameSync(PASTE_DIR, PASTE_DIR_STASH);
+}
+function restorePasteDir() {
+  rmSync(PASTE_DIR, { recursive: true, force: true });
+  if (existsSync(PASTE_DIR_STASH)) renameSync(PASTE_DIR_STASH, PASTE_DIR);
 }
 
 const created: string[] = [];
@@ -184,5 +207,113 @@ describe("POST /api/terminal/paste-image", () => {
     created.push(res.body.path);
     expect(existsSync(stale)).toBe(false);
     expect(existsSync(res.body.path)).toBe(true);
+  });
+
+
+  it("names the paste with cryptographic entropy", async () => {
+    vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
+
+    const res = await request(makeApp())
+      .post("/api/terminal/paste-image")
+      .field("sessionId", "sess-1")
+      .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
+
+    expect(res.status).toBe(200);
+    created.push(res.body.path);
+    // Under a traversal-only directory the unguessable name is the only
+    // thing keeping a paste from other local accounts for its whole life,
+    // so it has to be fixed-length CSPRNG output — never `Math.random`,
+    // whose state a terminal user can reconstruct from its own pastes.
+    expect(basename(res.body.path)).toMatch(/^paste-\d+-[0-9a-f]{24}\.png$/);
+  });
+
+  it("creates the paste exclusively and private from birth", async () => {
+    vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
+    const mkdir = vi.spyOn(fsp, "mkdir");
+    const open = vi.spyOn(fsp, "open");
+    const chmod = vi.spyOn(fsp, "chmod");
+
+    const res = await request(makeApp())
+      .post("/api/terminal/paste-image")
+      .field("sessionId", "sess-1")
+      .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
+
+    expect(res.status).toBe(200);
+    created.push(res.body.path);
+    // `mkdir` carries the mode itself: a first creation is never briefly
+    // world-listable before the normalising chmod lands.
+    expect(mkdir).toHaveBeenCalledWith(PASTE_DIR, {
+      recursive: true,
+      mode: 0o711,
+    });
+    // `wx` refuses a pre-planted name or symlink instead of reusing it, and
+    // the mode makes the file private from birth.
+    expect(open).toHaveBeenCalledWith(res.body.path, "wx", 0o600);
+    // No widen-then-narrow window: nothing re-modes the file afterwards.
+    expect(chmod.mock.calls.filter((c) => c[0] === res.body.path)).toEqual([]);
+  });
+
+  it("refuses a paste directory that is a symlink", async () => {
+    stashPasteDir();
+    const decoy = join(tmpdir(), "pavilio-pastes-decoy");
+    mkdirSync(decoy, { recursive: true });
+    symlinkSync(decoy, PASTE_DIR);
+    try {
+      const res = await request(makeApp())
+        .post("/api/terminal/paste-image")
+        .field("sessionId", "sess-1")
+        .attach("image", PNG, {
+          filename: "paste.png",
+          contentType: "image/png",
+        });
+
+      // /tmp is world-writable: a local user can pre-plant the path. Writing
+      // into it would hand every paste to whoever owns the target.
+      expect(res.status).toBe(500);
+      expect(readdirSync(decoy)).toEqual([]);
+    } finally {
+      restorePasteDir();
+      rmSync(decoy, { recursive: true, force: true });
+    }
+  });
+
+  // Only root can hand a directory to another account.
+  it.skipIf(panel.uid !== 0)(
+    "refuses a paste directory owned by another account",
+    async () => {
+      stashPasteDir();
+      mkdirSync(PASTE_DIR, { recursive: true });
+      chownSync(PASTE_DIR, panel.uid + 1, panel.gid + 1);
+      try {
+        const res = await request(makeApp())
+          .post("/api/terminal/paste-image")
+          .field("sessionId", "sess-1")
+          .attach("image", PNG, {
+            filename: "paste.png",
+            contentType: "image/png",
+          });
+
+        // The owner keeps rwx through any chmod the panel applies — it could
+        // list every paste name and replace entries.
+        expect(res.status).toBe(500);
+        expect(readdirSync(PASTE_DIR)).toEqual([]);
+      } finally {
+        restorePasteDir();
+      }
+    },
+  );
+
+  it("accepts the client ordering of image before sessionId", async () => {
+    vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
+
+    // imagePaste.ts appends the file first and the session id second.
+    const res = await request(makeApp())
+      .post("/api/terminal/paste-image")
+      .attach("image", PNG, { filename: "paste.png", contentType: "image/png" })
+      .field("sessionId", "sess-1");
+
+    expect(res.status).toBe(200);
+    created.push(res.body.path);
+    expect(statSync(res.body.path).mode & 0o777).toBe(0o600);
   });
 });
