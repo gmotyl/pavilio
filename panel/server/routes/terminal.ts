@@ -234,7 +234,11 @@ router.post("/paste-image", (req, res) => {
       }
       if (handover) await fs.chown(path, handover.uid, handover.gid);
       res.json({ path });
-    } catch {
+    } catch (err) {
+      // The client is told no more than "Upload failed", so a hostile paste
+      // directory would otherwise look exactly like a full disk — the reason
+      // only ever reaches the operator through this line.
+      console.warn("[terminal] paste-image save failed:", err);
       // A file the session could never read is worse than no file: drop any
       // partial write rather than leaving it to the sweep 24 hours later.
       await fs.rm(path, { force: true }).catch(() => {});

@@ -194,6 +194,9 @@ describe("POST /api/terminal/paste-image", () => {
     mkdirSync(PASTE_DIR, { recursive: true });
     const stale = join(PASTE_DIR, "paste-0-stale.png");
     writeFileSync(stale, PNG);
+    // Swept by this request, but registered anyway: a failing sweep must not
+    // leave the fixture behind in the real paste directory.
+    created.push(stale);
     const old = (Date.now() - 25 * 60 * 60 * 1000) / 1000; // 25h ago
     utimesSync(stale, old, old);
     vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
@@ -254,11 +257,13 @@ describe("POST /api/terminal/paste-image", () => {
   });
 
   it("refuses a paste directory that is a symlink", async () => {
-    stashPasteDir();
     const decoy = join(tmpdir(), "pavilio-pastes-decoy");
-    mkdirSync(decoy, { recursive: true });
-    symlinkSync(decoy, PASTE_DIR);
+    // Inside the `try`: a setup that throws half-way must still put the real
+    // paste directory back, or the next restore rm -rf's the live one.
     try {
+      stashPasteDir();
+      mkdirSync(decoy, { recursive: true });
+      symlinkSync(decoy, PASTE_DIR);
       const res = await request(makeApp())
         .post("/api/terminal/paste-image")
         .field("sessionId", "sess-1")
@@ -281,10 +286,11 @@ describe("POST /api/terminal/paste-image", () => {
   it.skipIf(panel.uid !== 0)(
     "refuses a paste directory owned by another account",
     async () => {
-      stashPasteDir();
-      mkdirSync(PASTE_DIR, { recursive: true });
-      chownSync(PASTE_DIR, panel.uid + 1, panel.gid + 1);
       try {
+        stashPasteDir();
+        mkdirSync(PASTE_DIR, { recursive: true });
+        chmodSync(PASTE_DIR, 0o700);
+        chownSync(PASTE_DIR, panel.uid + 1, panel.gid + 1);
         const res = await request(makeApp())
           .post("/api/terminal/paste-image")
           .field("sessionId", "sess-1")
@@ -297,6 +303,10 @@ describe("POST /api/terminal/paste-image", () => {
         // list every paste name and replace entries.
         expect(res.status).toBe(500);
         expect(readdirSync(PASTE_DIR)).toEqual([]);
+        // Untouched: the ownership check has to run *before* the normalising
+        // chmod. A panel that re-modes first has already opened a directory
+        // it does not own to everyone the 0711 lets in.
+        expect(statSync(PASTE_DIR).mode & 0o777).toBe(0o700);
       } finally {
         restorePasteDir();
       }
