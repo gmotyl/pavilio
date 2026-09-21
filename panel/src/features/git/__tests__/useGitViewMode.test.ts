@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useGitViewMode } from "../useGitViewMode";
+import { preferences } from "../../../preferences/declarations";
+import { storageKey } from "../../../preferences/types";
 
 describe("useGitViewMode", () => {
   it("defaults to flat", () => {
@@ -24,7 +26,11 @@ describe("useGitViewMode", () => {
   });
 
   it("falls back to flat for invalid stored value", () => {
-    localStorage.setItem("panel-git-view-mode", "garbage");
+    // The stored value now lives in the injected preferences document, not in
+    // `localStorage`, but the fallback it triggers is the same one.
+    (
+      globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }
+    ).__PAVILIO_PREFS__![storageKey(preferences.gitViewMode)] = "garbage";
     const { result } = renderHook(() => useGitViewMode());
     expect(result.current[0]).toBe("flat");
   });

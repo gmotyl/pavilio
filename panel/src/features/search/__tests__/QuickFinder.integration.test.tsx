@@ -3,6 +3,12 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import QuickFinder from "../QuickFinder";
 import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
+import { preferences } from "../../../preferences/declarations";
+import {
+  PREFERENCE_PATCH_DEBOUNCE_MS,
+  readPreference,
+  writePreference,
+} from "../../../preferences/store";
 
 const mockFiles = [
   {
@@ -164,9 +170,39 @@ describe("QuickFinder archived toggle", () => {
       ).not.toBeInTheDocument();
     });
     expect(screen.getByText("alpha/notes/a.md")).toBeInTheDocument();
-    expect(localStorage.getItem("panel-search-include-archived")).toBe(
-      "false",
+    expect(readPreference(preferences.searchIncludeArchived)).toBe(false);
+  });
+
+  /**
+   * A migration that turns a page load into a burst of PATCHes is a regression
+   * even when every value is correct, so the cold render is pinned at zero
+   * writes: the injected document is still the empty one the page booted with.
+   */
+  it("writes nothing when the finder mounts and opens", async () => {
+    const mockFetch = mockFetchResponses({
+      "/api/files/index": archiveFiles,
+    });
+    const user = userEvent.setup();
+    renderWithRouter(<QuickFinder />);
+    await user.keyboard("{Meta>}p{/Meta}");
+    await waitFor(() => {
+      expect(screen.getByText("alpha/notes/a.md")).toBeInTheDocument();
+    });
+    await new Promise((resolve) =>
+      setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS * 2),
     );
+
+    expect(
+      Object.keys(
+        (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
+          .__PAVILIO_PREFS__!,
+      ),
+    ).toEqual(["version"]);
+    expect(
+      mockFetch.mock.calls
+        .map(([input]) => String(input))
+        .filter((url) => url.startsWith("/api/preferences")),
+    ).toEqual([]);
   });
 
   it("defaults to including archived files", async () => {
@@ -186,7 +222,7 @@ describe("QuickFinder archived toggle", () => {
   });
 
   it("passes includeArchived to grep fetch", async () => {
-    localStorage.setItem("panel-search-include-archived", "false");
+    writePreference(preferences.searchIncludeArchived, false);
     const mockFetch = mockFetchResponses({
       "/api/files/index": archiveFiles,
       "/api/search/grep": [],

@@ -3,6 +3,8 @@ import { ChevronDown, ChevronRight, GitFork } from "lucide-react";
 import GitChanges from "./GitChanges";
 import GitBranchDiff from "./GitBranchDiff";
 import { type GitViewMode } from "./useGitViewMode";
+import { preferences } from "../../preferences/declarations";
+import { readPreference, writePreference } from "../../preferences/store";
 
 interface Worktree {
   path: string;
@@ -38,21 +40,17 @@ export default function GitWorktrees({
         if (!cancelled && wtRes.ok) {
           const data: Worktree[] = await wtRes.json();
           setWorktrees(data);
+          // A worktree path is the SCOPE, never part of the key, so
+          // `~/git/prv/pavilio` and the absolute path `git worktree list`
+          // prints normalize onto one entry. A path that came back blank is
+          // not a scope — the store would refuse it — so it stays collapsed.
+          const stored = data
+            .filter((wt) => wt.path.trim() !== "")
+            .filter((wt) => readPreference(preferences.worktreeExpanded, wt.path))
+            .map((wt) => wt.path);
           setExpanded((prev) => {
             const next = new Set(prev);
-            for (const wt of data) {
-              try {
-                if (
-                  localStorage.getItem(
-                    `panel-worktree-expanded-${wt.path}`,
-                  ) === "true"
-                ) {
-                  next.add(wt.path);
-                }
-              } catch {
-                // ignore
-              }
-            }
+            for (const path of stored) next.add(path);
             return next;
           });
         }
@@ -70,21 +68,18 @@ export default function GitWorktrees({
   }, [qs]);
 
   const toggle = (path: string) => {
+    const open = !expanded.has(path);
     setExpanded((prev) => {
       const next = new Set(prev);
-      const open = !prev.has(path);
       if (open) next.add(path);
       else next.delete(path);
-      try {
-        localStorage.setItem(
-          `panel-worktree-expanded-${path}`,
-          String(open),
-        );
-      } catch {
-        // ignore
-      }
       return next;
     });
+    // Outside the updater: a state updater must stay pure, and a write is now
+    // a PATCH rather than a `setItem`.
+    if (path.trim() !== "") {
+      writePreference(preferences.worktreeExpanded, open, path);
+    }
   };
 
   if (worktrees.length <= 1) return null;

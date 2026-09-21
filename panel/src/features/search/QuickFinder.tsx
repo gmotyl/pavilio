@@ -5,6 +5,8 @@ import { Search, FileText } from "lucide-react";
 import { useFileIndex } from "../explorer/useFileIndex";
 import type { GrepResult } from "./grep";
 import GrepResultRow from "./GrepResultRow";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 
 const PROJECT_COLORS = [
   { bg: "rgba(96,165,250,0.15)", fg: "#60a5fa" },
@@ -35,23 +37,14 @@ export default function QuickFinder() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const [includeArchived, setIncludeArchived] = useState(() => {
-    try {
-      return localStorage.getItem("panel-search-include-archived") !== "false";
-    } catch {
-      return true;
-    }
-  });
+  const [includeArchived, setIncludeArchived] = usePreference(
+    preferences.searchIncludeArchived,
+  );
+  // The updater form, so two toggles in one tick compose — and so the flip is
+  // computed from the latest value rather than one captured in this render.
   const toggleArchived = useCallback(() => {
-    setIncludeArchived((v) => {
-      try {
-        localStorage.setItem("panel-search-include-archived", String(!v));
-      } catch {
-        // persistence unavailable (private mode / quota) — toggle still works for the session
-      }
-      return !v;
-    });
-  }, []);
+    setIncludeArchived((v) => !v);
+  }, [setIncludeArchived]);
   const allFiles = useFileIndex();
   const files = useMemo(
     () => (includeArchived ? allFiles : allFiles.filter((f) => !f.archived)),

@@ -42,9 +42,6 @@ const PENDING_MIGRATIONS = [
   // (useTerminalSessions, createTerminalSession, QuickTerminalModal,
   // TerminalsSurface) is Task 8's, and they have to move together.
   { marker: "panel-terminal-focus-", task: "Task 8 — terminal" },
-  // The repo-search "branch-diff" scope reads the base GitBranchDiff writes;
-  // GitBranchDiff is Task 7's.
-  { marker: "panel-branch-diff-base-", task: "Task 7 — git" },
 ];
 
 function sourceFiles(dir: string): string[] {
@@ -152,8 +149,8 @@ describe("the exemption window", () => {
 
   it("still excuses a call whose own statement wraps onto the marker line", () => {
     const source = [
-      "const base = localStorage.getItem(",
-      "  `panel-branch-diff-base-${repo.path}`,",
+      "const focused = localStorage.getItem(",
+      "  `panel-terminal-focus-${project}`,",
       ");",
     ].join("\n");
 
@@ -182,13 +179,19 @@ describe("the enumeration the guard rests on", () => {
   it("finds every source file in both trees, nested ones included", () => {
     const shell = sourceFiles("features/shell");
     const projects = sourceFiles("features/projects");
+    const git = sourceFiles("features/git");
+    const search = sourceFiles("features/search");
 
     expect(shell.length).toBe(countSourceFiles("features/shell"));
     expect(projects.length).toBe(countSourceFiles("features/projects"));
+    expect(git.length).toBe(countSourceFiles("features/git"));
+    expect(search.length).toBe(countSourceFiles("features/search"));
     // Not merely non-empty: the trees are large, and a walk that stopped at
     // the first directory would still clear a floor.
     expect(shell.length).toBeGreaterThanOrEqual(21);
     expect(projects.length).toBeGreaterThanOrEqual(35);
+    expect(git.length).toBeGreaterThanOrEqual(12);
+    expect(search.length).toBeGreaterThanOrEqual(3);
     // `features/shell` has subdirectories (Layout, Breadcrumbs); a walk that
     // did not descend would miss them and this is what says so.
     expect(shell.some((file) => file.split("/").length > 3)).toBe(true);
@@ -201,6 +204,20 @@ describe("preferences replace raw browser storage", () => {
     const projects = rawStorageUses("features/projects", /\blocalStorage\b/);
 
     expect(report([...shell.offences, ...projects.offences])).toEqual([]);
+  });
+
+  it("no module under features/git or features/search references localStorage directly", () => {
+    const git = rawStorageUses("features/git", /\blocalStorage\b/);
+    const search = rawStorageUses("features/search", /\blocalStorage\b/);
+
+    expect(report([...git.offences, ...search.offences])).toEqual([]);
+  });
+
+  it("no module under features/git or features/search references sessionStorage directly", () => {
+    const git = rawStorageUses("features/git", /\bsessionStorage\b/);
+    const search = rawStorageUses("features/search", /\bsessionStorage\b/);
+
+    expect(report([...git.offences, ...search.offences])).toEqual([]);
   });
 
   it("no module under features/shell or features/projects references sessionStorage directly", () => {
@@ -227,15 +244,19 @@ describe("the pending call sites are declared, not forgotten", () => {
     const offenders = [
       ...rawStorageUses("features/shell", /\blocalStorage\b/).files,
       ...rawStorageUses("features/projects", /\blocalStorage\b/).files,
+      ...rawStorageUses("features/git", /\blocalStorage\b/).files,
+      ...rawStorageUses("features/search", /\blocalStorage\b/).files,
     ].filter((file) => {
       const source = withoutComments(readFileSync(join(SRC, file), "utf8")).join("\n");
       return PENDING_MIGRATIONS.some((pending) => source.includes(pending.marker));
     });
 
-    // Both of them, and nothing else: a third file appearing here means a raw
-    // key was waved through under a marker that was never meant to cover it.
+    // That one, and nothing else: a second file appearing here means a raw key
+    // was waved through under a marker that was never meant to cover it.
+    // `useRepoSearch` used to sit here too — Task 7 owns the writer of the
+    // branch-diff base now, so reader and writer moved together and the
+    // exemption went with them.
     expect(offenders.map((file) => relative("features", file)).sort()).toEqual([
-      "projects/useRepoSearch.ts",
       "shell/LeftSidebar.tsx",
     ]);
   });

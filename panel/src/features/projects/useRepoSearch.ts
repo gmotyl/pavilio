@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { preferences } from "../../preferences/declarations";
+import { readPreference } from "../../preferences/store";
 import { usePreference } from "../../preferences/usePreference";
 import type { GrepResult } from "../search/grep";
 
@@ -59,12 +60,13 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
             }
           }
           if (scope === "branch-diff") {
-            // Still the raw key: GitBranchDiff writes it and moves to
-            // `git.branchDiff.base` in Task 7, and a reader must not change key
-            // ahead of its writer.
-            const base = localStorage.getItem(
-              `panel-branch-diff-base-${repo.path}`,
-            );
+            // The base GitBranchDiff writes, read through the same
+            // declaration — so both sides normalize the repo path the same
+            // way. A repo with no path is not a scope; the store refuses one.
+            const base =
+              repo.path.trim() === ""
+                ? ""
+                : readPreference(preferences.branchDiffBase, repo.path);
             if (base) {
               try {
                 const res = await fetch(

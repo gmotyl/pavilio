@@ -11,6 +11,8 @@ import DiffView, { type DiffMode } from "./DiffView";
 import BranchPicker from "./BranchPicker";
 import FileChangeList from "./FileChangeList";
 import { useWebSocket } from "../realtime/useWebSocket";
+import { preferences } from "../../preferences/declarations";
+import { readPreference, writePreference } from "../../preferences/store";
 
 interface DiffFile {
   status: string;
@@ -35,12 +37,29 @@ interface GitBranchDiffProps {
   showListSidebar?: boolean;
 }
 
-function lsKey(repo: string) {
-  return `panel-branch-diff-base-${repo}`;
+/**
+ * The repo path this component's two preferences are scoped by, or `undefined`
+ * when there is none yet.
+ *
+ * The path is the SCOPE ARGUMENT, never part of the key: that is what runs it
+ * through `normalizeRepoScope`, so the tilde-spelled paths `repos.json` ships
+ * and the absolute ones `git worktree list` prints reach ONE key. The old
+ * `panel-branch-diff-open-${repo}` could not — and the storage dump duly found
+ * the same repository stored twice, under opposite values.
+ *
+ * `undefined` is returned rather than the blank path, because `storageKey`
+ * throws on a blank scope by design: an unresolved repo must read the declared
+ * default and write nothing, not put every repository on one shared key.
+ */
+function repoScope(repo: string): string | undefined {
+  return repo.trim() === "" ? undefined : repo;
 }
 
-function openKey(repo: string) {
-  return `panel-branch-diff-open-${repo}`;
+function readBase(repo: string): string {
+  const scope = repoScope(repo);
+  return scope === undefined
+    ? preferences.branchDiffBase.default
+    : readPreference(preferences.branchDiffBase, scope);
 }
 
 export default function GitBranchDiff({
@@ -56,22 +75,21 @@ export default function GitBranchDiff({
 }: GitBranchDiffProps) {
   const [currentBranch, setCurrentBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
-  const [baseBranch, setBaseBranch] = useState<string>(() => {
-    try {
-      return localStorage.getItem(lsKey(repo)) || "";
-    } catch {
-      return "";
-    }
-  });
+  // Local state, not `usePreference`: the auto-select below picks
+  // main/master/develop when nothing is stored, and that pick has never been
+  // persisted. Bound to the preference it would write on mount — one PATCH per
+  // repository on every page load.
+  const [baseBranch, setBaseBranch] = useState<string>(() => readBase(repo));
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [commitsAhead, setCommitsAhead] = useState(0);
   const [loading, setLoading] = useState(false);
+  // Local state for the same reason: `openFile` and the controlled `activeFile`
+  // both force the section open, and neither has ever been a stored choice.
   const [sectionOpen, setSectionOpen] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(openKey(repo)) !== "false";
-    } catch {
-      return true;
-    }
+    const scope = repoScope(repo);
+    return scope === undefined
+      ? preferences.branchDiffOpen.default
+      : readPreference(preferences.branchDiffOpen, scope);
   });
 
   const [activeDiff, setActiveDiff] = useState<{ file: string } | null>(null);
@@ -99,7 +117,7 @@ export default function GitBranchDiff({
       setBranches(data.branches.filter((b: string) => b !== data.current));
       // Auto-select stored or first reasonable default (only when none chosen yet)
       if (!baseBranchRef.current) {
-        const stored = localStorage.getItem(lsKey(repo));
+        const stored = readBase(repo);
         if (stored && data.branches.includes(stored)) {
           setBaseBranch(stored);
         } else {
@@ -167,20 +185,23 @@ export default function GitBranchDiff({
     fetchDiffFiles(baseBranchRef.current);
   }, [lastMessage, fetchBranches, fetchDiffFiles]);
 
-  // Persist base branch selection
+  // Persist base branch selection — only the user's own pick, never the
+  // auto-selected fallback.
   const handleBaseBranchChange = (branch: string) => {
     setBaseBranch(branch);
-    try {
-      localStorage.setItem(lsKey(repo), branch);
-    } catch {}
+    const scope = repoScope(repo);
+    if (scope !== undefined) {
+      writePreference(preferences.branchDiffBase, branch, scope);
+    }
   };
 
   const handleSectionToggle = () => {
     const next = !sectionOpen;
     setSectionOpen(next);
-    try {
-      localStorage.setItem(openKey(repo), String(next));
-    } catch {}
+    const scope = repoScope(repo);
+    if (scope !== undefined) {
+      writePreference(preferences.branchDiffOpen, next, scope);
+    }
   };
 
   const openDiff = useCallback(
