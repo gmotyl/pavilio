@@ -26,7 +26,18 @@ const branchDiffOpen = definePreference({
   portable: true,
 });
 
+type HomeGlobals = typeof globalThis & {
+  __PAVILIO_HOME__?: string;
+  process?: unknown;
+};
+
+const globals = globalThis as HomeGlobals;
+const realProcess = globals.process;
+
 afterEach(() => {
+  // Restore a deleted `process` BEFORE unstubbing envs, which reads `process.env`.
+  if (globals.process !== realProcess) globals.process = realProcess;
+  delete globals.__PAVILIO_HOME__;
   vi.unstubAllEnvs();
 });
 
@@ -44,6 +55,14 @@ describe("storageKey", () => {
     expect(() => storageKey(branchDiffOpen)).toThrow();
   });
 
+  it("an empty or blank scope argument counts as missing and throws", () => {
+    // `usePreference(def, name ?? "")` is the live idiom: an unresolved route
+    // param must not collapse every project onto one shared key.
+    expect(() => storageKey(projectLastView, "")).toThrow();
+    expect(() => storageKey(projectLastView, "   ")).toThrow();
+    expect(() => storageKey(branchDiffOpen, "")).toThrow();
+  });
+
   it("a tilde path and its expanded form produce one repo key", () => {
     // The real storage dump held `~/git/prv/pavilio` and `/root/git/prv/pavilio`
     // as two keys with opposite values — the collision this canonicalization exists to stop.
@@ -53,6 +72,39 @@ describe("storageKey", () => {
     );
     expect(storageKey(branchDiffOpen, "~/git/prv/pavilio")).toBe(
       "repos.branchDiff.open@/root/git/prv/pavilio",
+    );
+  });
+
+  it("the injected home global expands a tilde and beats process.env.HOME", () => {
+    // In the browser bundle `process` is not defined, so the server injects its
+    // home directory as `window.__PAVILIO_HOME__`. It is the authority when both
+    // are present — the two values differ here so the precedence is real.
+    globals.__PAVILIO_HOME__ = "/home/greg";
+    vi.stubEnv("HOME", "/root");
+    expect(storageKey(branchDiffOpen, "~/git/prv/pavilio")).toBe(
+      "repos.branchDiff.open@/home/greg/git/prv/pavilio",
+    );
+    expect(storageKey(branchDiffOpen, "~")).toBe("repos.branchDiff.open@/home/greg");
+  });
+
+  it("process.env.HOME still expands a tilde when the global is absent", () => {
+    expect(globals.__PAVILIO_HOME__).toBeUndefined();
+    vi.stubEnv("HOME", "/root");
+    expect(storageKey(branchDiffOpen, "~/git/prv/pavilio")).toBe(
+      "repos.branchDiff.open@/root/git/prv/pavilio",
+    );
+  });
+
+  it("with neither the global nor process, a tilde is left unexpanded", () => {
+    // The honest pre-Task-4 browser behavior: with no home to expand against,
+    // a `~` path stays a `~` path rather than being silently mangled. Acceptable
+    // only because Task 4's `GET /api/preferences.js` supplies `__PAVILIO_HOME__`;
+    // until then a tilde repo and its absolute form remain two keys.
+    // `Reflect.deleteProperty`, not `delete`: node's ambient types make
+    // `globalThis.process` non-optional, which `delete` refuses.
+    Reflect.deleteProperty(globals, "process");
+    expect(storageKey(branchDiffOpen, "~/git/prv/pavilio")).toBe(
+      "repos.branchDiff.open@~/git/prv/pavilio",
     );
   });
 
