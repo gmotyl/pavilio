@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Login } from "../../features/auth/Login";
+import { MobileAuthBootstrap } from "../../features/mobile-auth/MobileAuthBootstrap";
 
 /**
  * The other half of the write interlock, and the reason it can be temporary.
@@ -19,12 +20,30 @@ import { Login } from "../../features/auth/Login";
 const locationDescriptor = Object.getOwnPropertyDescriptor(window, "location")!;
 let reload: ReturnType<typeof vi.fn>;
 
-beforeEach(() => {
-  reload = vi.fn();
+/**
+ * A stand-in `window.location` whose `reload` can be observed. The fields are
+ * spelt out rather than spread off the real one: jsdom keeps them on the
+ * prototype, so a spread hands back an object with no `hostname` at all and
+ * `MobileAuthBootstrap` would read every host as a non-local one.
+ */
+function stubLocation(extra: Record<string, unknown> = {}): void {
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { ...window.location, reload },
+    value: {
+      href: "http://localhost/",
+      hostname: "localhost",
+      pathname: "/",
+      search: "",
+      hash: "",
+      reload,
+      ...extra,
+    },
   });
+}
+
+beforeEach(() => {
+  reload = vi.fn();
+  stubLocation();
 });
 
 afterEach(() => {
@@ -32,8 +51,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function signIn(ok: boolean): Promise<() => void> {
-  const onSuccess = vi.fn();
+async function signIn(ok: boolean, onSuccess = vi.fn()): Promise<() => void> {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => new Response("{}", { status: ok ? 200 : 401 })),
@@ -58,5 +76,89 @@ describe("signing in", () => {
 
     await screen.findByText("Invalid token");
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("a throwing onSuccess does not cost the reload", async () => {
+    // `onSuccess` is the shell's `recheck` — an async probe of `/api/auth/status`
+    // that can reject. Called inside the same `try` as the reload, its throw is
+    // swallowed as "Network error" and the reload never runs, leaving exactly
+    // the write-suppressed session the reload exists to prevent.
+    const onSuccess = vi.fn(() => {
+      throw new Error("recheck blew up");
+    });
+
+    await signIn(true, onSuccess);
+
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Network error")).toBeNull();
+  });
+});
+
+/**
+ * The same interlock at the entry point a phone actually uses.
+ *
+ * `server/middleware/mobile-auth.ts` 401s every non-loopback `/api/*` without a
+ * session cookie, so a phone opening `https://<host>.ts.net/#mt=<token>` loads a
+ * document whose blocking `/api/preferences.js` 401'd. Exchanging the pairing
+ * token in place then mounts the whole app on that unauthenticated document:
+ * both globals stay undefined, every portable read answers the declared default
+ * and every portable write is dropped, for the rest of the session. Only a
+ * reload re-runs the parser-blocking script, this time with the cookie.
+ */
+describe("mobile pairing", () => {
+  function renderBootstrap() {
+    return render(
+      <MobileAuthBootstrap>
+        <div>app</div>
+      </MobileAuthBootstrap>,
+    );
+  }
+
+  it("a successful pairing exchange reloads instead of mounting the app", async () => {
+    stubLocation({ hostname: "mac.tail.ts.net", hash: "#mt=ABC123" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 200 })),
+    );
+
+    renderBootstrap();
+
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    // And the app is NOT mounted on the document that 401'd: every hook in it
+    // would read its preference through a global that is still undefined.
+    expect(screen.queryByText("app")).toBeNull();
+  });
+
+  it("a rejected pairing token does not reload", async () => {
+    stubLocation({ hostname: "mac.tail.ts.net", hash: "#mt=NOPE" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url === "/api/auth/mobile-login"
+          ? new Response("{}", { status: 401 })
+          : new Response(JSON.stringify({ authenticated: false }), { status: 200 }),
+      ),
+    );
+
+    renderBootstrap();
+
+    await screen.findByText(/scan a fresh QR/i);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("retrying from the pairing gate reloads rather than re-probing in place", async () => {
+    // The gate is only ever shown on a document that already 401'd, so the
+    // session it is waiting for cannot be adopted without a fresh page load.
+    stubLocation({ hostname: "mac.tail.ts.net" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ authenticated: false }), { status: 200 })),
+    );
+
+    renderBootstrap();
+
+    fireEvent.click(await screen.findByTestId("pairing-gate-retry"));
+
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
   });
 });

@@ -5,6 +5,18 @@ export interface PreferenceCodec<T> {
   /** Throws on malformed input, so the caller can fall back to the declared default. */
   parse(raw: string): T;
   serialize(value: T): string;
+  /**
+   * True when `serialize` emits the stored text itself rather than JSON — `str`
+   * and `oneOf`, today. The store's portable tier needs to know: a text codec's
+   * output is stored verbatim, so a `str` preference holding "true" stays a
+   * string, while every other codec's output is JSON and is stored in its own
+   * shape so the workspace file stays hand-readable.
+   *
+   * It is declared on the CODEC rather than inferred from the declared default,
+   * which is only a proxy for it: a `json<string | null>` codec with a
+   * non-string default is the counter-example, and a proxy would lose its data.
+   */
+  storesText?: boolean;
 }
 
 interface PreferenceDefBase<T> {

@@ -36,10 +36,13 @@ declare global {
 }
 
 /**
- * How long writes accumulate before one PATCH carries them. Long enough to
- * collapse a drag gesture into a single request, short enough that a tab closed
- * right after a click still lands the click. The server debounces the *file*
- * write again on top of this.
+ * How long writes accumulate before one PATCH carries them.
+ *
+ * A fixed ceiling, not a resetting debounce: the timer starts at the first
+ * write of a burst and later writes join it rather than pushing it back. So a
+ * sustained drag lands one PATCH per window instead of nothing at all until the
+ * pointer stops, and a tab closed shortly after a click never had to wait
+ * longer than this. The server debounces the *file* write again on top of it.
  */
 export const PREFERENCE_PATCH_DEBOUNCE_MS = 200;
 
@@ -57,8 +60,20 @@ type Listener = () => void;
 
 /** Subscribers by storage key, so a frame wakes only the hooks that care. */
 const listeners = new Map<string, Set<Listener>>();
-/** Keys written since the last PATCH. `null` means "delete", as on the wire. */
-let pending: Record<string, unknown> | null = null;
+/**
+ * Keys written since the last flush, waiting on the debounce. Keys, not
+ * key/value pairs: the body is built from the document at flush time, so a key
+ * re-sent after a failed PATCH carries what it holds *then* and can never
+ * resurrect a value the user has since changed.
+ */
+const pendingKeys = new Set<string>();
+/**
+ * Keys whose PATCH has left but has not been acknowledged. They are no longer
+ * pending and not yet confirmed by the server, so for the length of the
+ * round-trip only this set records that the document in hand is ahead of the
+ * server's. A refetch landing in that window must not overwrite them.
+ */
+const inFlightKeys = new Set<string>();
 let patchTimer: ReturnType<typeof setTimeout> | null = null;
 let channelUnsubscribe: (() => void) | null = null;
 
@@ -105,17 +120,32 @@ function toRaw(stored: unknown): string {
 /** The inverse of `toRaw`: the JSON shape a value is stored in. */
 function toStored<T>(def: PreferenceDef<T>, value: T): unknown {
   const raw = def.codec.serialize(value);
-  // A string-valued preference is its own text, so it is stored verbatim.
+  // A text codec's output IS the stored text, so it is stored verbatim.
   // Re-parsing it would turn a `str` preference holding "true" into a boolean
   // and a remembered query of "240" into a number.
-  if (typeof def.default === "string") return raw;
+  //
+  // This asks the CODEC, not `typeof def.default`. The default was only ever a
+  // proxy for the codec's shape, and it is a lossy one: a portable declaration
+  // with a `json<string | null>` codec and a non-string default would take the
+  // JSON branch below, store `hello` unquoted, and read back as `null` when
+  // `JSON.parse("hello")` throws — a silent data loss with nothing to warn on.
+  if (def.codec.storesText === true) return raw;
+
+  let parsed: unknown;
   try {
-    return JSON.parse(raw) as unknown;
+    parsed = JSON.parse(raw) as unknown;
   } catch {
-    // A codec whose output is not JSON. None ships today; storing the text is
-    // the honest fallback, and `toRaw` reads it straight back.
+    // A codec whose output is neither JSON nor declared as text. None ships
+    // today; storing the text is the honest fallback, and `toRaw` reads it
+    // straight back.
     return raw;
   }
+  // A JSON codec whose payload happens to be a bare string. Stored unquoted it
+  // would come back through `toRaw` as that text and throw on the way in; the
+  // JSON text round-trips instead, at the cost of one pair of quotes in a file
+  // where this shape does not currently occur.
+  if (typeof parsed === "string") return raw;
+  return parsed;
 }
 
 function notify(key: string): void {
@@ -157,12 +187,17 @@ export function readPreference<T>(def: PreferenceDef<T>, scopeArg?: string): T {
 export function writePreference<T>(def: PreferenceDef<T>, value: T, scopeArg?: string): void {
   const key = storageKey(def, scopeArg);
 
+  // NaN and the infinities have no JSON form, so `toStored` would fall back to
+  // storing the literal text "NaN" in the hand-readable workspace file under a
+  // `num` key — where `num.parse` rejects it and every later read answers the
+  // declared default anyway. Refusing is the same outcome without the litter.
+  if (typeof value === "number" && !Number.isFinite(value)) return;
+
   if (def.portable) {
     const doc = portableDoc();
     if (!doc) return;
-    const stored = toStored(def, value);
-    doc[key] = stored;
-    queuePatch(key, stored);
+    doc[key] = toStored(def, value);
+    queuePatch(key);
   } else {
     try {
       browserStorage(def)?.setItem(key, def.codec.serialize(value));
@@ -183,8 +218,9 @@ export function clearPreference(def: PreferenceDef<unknown>, scopeArg?: string):
     const doc = portableDoc();
     if (!doc) return;
     delete doc[key];
-    // `null` is the server store's delete.
-    queuePatch(key, null);
+    // The flush turns a key the document no longer holds into a `null` — the
+    // server store's delete.
+    queuePatch(key);
   } else {
     try {
       browserStorage(def)?.removeItem(key);
@@ -216,9 +252,16 @@ export function subscribePreference(
   forKey.add(listener);
   if (!channelUnsubscribe) channelUnsubscribe = subscribeRealtime(onFrame);
 
+  // Two tokens rather than one: `released` makes a second call a no-op, and the
+  // identity check makes a *stale* one harmless. Without them, unsubscribing
+  // twice across a key that emptied and was subscribed to again in between
+  // deletes the new subscriber's set from the map and leaves it deaf.
+  let released = false;
   return () => {
+    if (released) return;
+    released = true;
     forKey.delete(listener);
-    if (forKey.size === 0) listeners.delete(key);
+    if (forKey.size === 0 && listeners.get(key) === forKey) listeners.delete(key);
     // Detaching rather than latching: a store left permanently "attached" past
     // a channel teardown would be deaf for the rest of the tab.
     if (listeners.size === 0 && channelUnsubscribe) {
@@ -228,18 +271,32 @@ export function subscribePreference(
   };
 }
 
-function queuePatch(key: string, value: unknown): void {
-  pending ??= {};
-  pending[key] = value;
+function queuePatch(key: string): void {
+  pendingKeys.add(key);
   if (patchTimer) return;
   patchTimer = setTimeout(flushPatch, PREFERENCE_PATCH_DEBOUNCE_MS);
 }
 
 function flushPatch(): void {
   patchTimer = null;
-  const body = pending;
-  pending = null;
-  if (!body) return;
+  if (pendingKeys.size === 0) return;
+  const doc = portableDoc();
+  if (!doc) {
+    pendingKeys.clear();
+    return;
+  }
+
+  const keys = [...pendingKeys];
+  pendingKeys.clear();
+  for (const key of keys) inFlightKeys.add(key);
+
+  // The body is read off the document NOW rather than accumulated as the writes
+  // came in. That is what makes the retry below safe: a key re-sent after a
+  // failure carries the value it holds at this flush, so a re-send can never
+  // resurrect one the user has since changed. A key the document no longer
+  // holds is a `null` — the server store's delete.
+  const body: Record<string, unknown> = {};
+  for (const key of keys) body[key] = key in doc ? doc[key] : null;
 
   void fetch(PATCH_URL, {
     method: "PATCH",
@@ -248,18 +305,32 @@ function flushPatch(): void {
   })
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      for (const key of keys) inFlightKeys.delete(key);
     })
     .catch((err: unknown) => {
-      // No rollback and no retry, deliberately. The in-memory value is what the
-      // user asked for, so the session stays coherent and the next write of any
-      // key still carries the latest state; yanking a pane back to its old
-      // width seconds after the drag would be worse than a lost write. A retry
-      // queue would be worse again — it can race a newer write and resurrect a
-      // value the user has since changed. Durability here is best-effort by
-      // design (design.md, "Writing"), and a reload re-reads the server's doc.
+      // No rollback: the in-memory value is what the user asked for, and
+      // yanking a pane back to its old width seconds after the drag would be
+      // worse than a lost write. But the key stays dirty, so the next flush
+      // re-sends it — the same shape as the server store's own `dirty` retry.
+      // Without that, a lost PATCH leaves the key divergent for the whole
+      // session and silently reverts on the next reload. No timer is armed
+      // here: an offline tab must not turn one failure into a retry loop, and
+      // the value is already correct everywhere the user can see it.
+      for (const key of keys) {
+        inFlightKeys.delete(key);
+        pendingKeys.add(key);
+      }
       console.warn("[preferences] patch failed; keeping the local value:", err);
     });
 }
+
+/**
+ * Refetch sequencing. Every refetch takes the next generation; only the answer
+ * to the newest one is applied, and the keys a superseded refetch was going to
+ * wake ride along in `pendingNotifications` so nothing is silently dropped.
+ */
+let refreshGeneration = 0;
+const pendingNotifications = new Set<string>();
 
 function onFrame(frame: RealtimeFrame): void {
   if (frame.type !== "preferences-change") return;
@@ -283,17 +354,32 @@ async function refresh(keys: string[]): Promise<void> {
   // inventing one from a frame it happens to overhear.
   if (!portableDoc()) return;
 
+  for (const key of keys) pendingNotifications.add(key);
+  // Sequencing, not merely de-duplication. Two frames start two fetches and the
+  // server may answer them in either order; without this the *older* document
+  // can land last and walk the store backwards. Only the newest request's
+  // answer is applied, and it carries every key the superseded ones named.
+  const generation = ++refreshGeneration;
   const doc = await fetchDocument();
+  if (generation !== refreshGeneration) return;
   if (doc === undefined) return;
 
-  // Writes made while the refetch was in flight win: they are newer than what
-  // the server answered with, and their own PATCH is still queued.
-  (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__ = {
-    ...doc,
-    ...(pending ?? {}),
-  };
+  // This page's own unconfirmed writes win over what the server answered with.
+  // `pendingKeys` have not been sent at all; `inFlightKeys` are racing this
+  // very refetch, so the document that came back predates them either way.
+  // Overlaying only the first is the gap that let a flushed-but-unacked write
+  // be reverted in memory while a mounted hook still rendered the new value.
+  const local = portableDoc() ?? {};
+  const merged: Record<string, unknown> = { ...doc };
+  for (const key of [...pendingKeys, ...inFlightKeys]) {
+    if (key in local) merged[key] = local[key];
+    else delete merged[key];
+  }
+  (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__ = merged;
 
-  for (const key of keys) notify(key);
+  const woken = [...pendingNotifications];
+  pendingNotifications.clear();
+  for (const key of woken) notify(key);
 }
 
 async function fetchDocument(): Promise<Record<string, unknown> | undefined> {
@@ -313,13 +399,19 @@ async function fetchDocument(): Promise<Record<string, unknown> | undefined> {
 }
 
 /**
- * Test-only teardown: drops every subscriber, the channel attachment and any
- * write still waiting on the debounce. The store is a tab-scoped singleton, so
- * without this a suite leaks its pending PATCH into the next one.
+ * Test-only teardown: drops every subscriber, the channel attachment, any write
+ * still waiting on the debounce or on an unacknowledged PATCH, and any refetch
+ * in flight. The store is a tab-scoped singleton, so without this a suite leaks
+ * its pending PATCH into the next one.
  */
 export function __resetPreferenceStoreForTests(): void {
   listeners.clear();
-  pending = null;
+  pendingKeys.clear();
+  inFlightKeys.clear();
+  pendingNotifications.clear();
+  // Bumping the generation discards any refetch still in flight, so a response
+  // arriving after the reset cannot write into the next suite's document.
+  refreshGeneration += 1;
   if (patchTimer) clearTimeout(patchTimer);
   patchTimer = null;
   channelUnsubscribe?.();

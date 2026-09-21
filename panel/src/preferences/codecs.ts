@@ -31,6 +31,7 @@ export const str: PreferenceCodec<string> = {
   serialize(value) {
     return value;
   },
+  storesText: true,
 };
 
 /** A function, not a constant: each declaration gets its own instance typed to its own payload. */
@@ -59,5 +60,6 @@ export function oneOf<T extends string>(values: readonly T[]): PreferenceCodec<T
     serialize(value) {
       return value;
     },
+    storesText: true,
   };
 }

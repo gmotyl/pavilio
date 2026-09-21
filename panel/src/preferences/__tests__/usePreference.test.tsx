@@ -13,12 +13,18 @@ import { usePreference } from "../usePreference";
  * The realtime channel is stubbed rather than driven through a WebSocket —
  * jsdom has none, and the store only cares that frames arrive.
  */
-const { frameListeners } = vi.hoisted(() => ({
+const { frameListeners, attachments } = vi.hoisted(() => ({
   frameListeners: new Set<(frame: { type: string; [key: string]: unknown }) => void>(),
+  // Every `subscribeRealtime` call, not just the distinct listeners: the real
+  // channel keeps a `Set` keyed by function identity, so a store that attached
+  // once per subscriber would be invisible in `frameListeners.size` while
+  // leaking an unsubscribe handle for every hook that ever mounted.
+  attachments: { count: 0 },
 }));
 
 vi.mock("../../features/realtime/channel", () => ({
   subscribeRealtime: (listener: (frame: { type: string; [key: string]: unknown }) => void) => {
+    attachments.count += 1;
     frameListeners.add(listener);
     return () => frameListeners.delete(listener);
   },
@@ -70,6 +76,7 @@ async function deliverFrame(keys: string[]): Promise<void> {
 
 beforeEach(() => {
   globals.__PAVILIO_PREFS__ = { version: 1 };
+  attachments.count = 0;
 });
 
 afterEach(() => {
@@ -122,7 +129,14 @@ describe("usePreference", () => {
 
   it("a change frame for an unsubscribed key does not re-render", async () => {
     globals.__PAVILIO_PREFS__ = { version: 1, "test.watched": true };
-    serveDoc({ version: 1, "test.watched": true, [other.key]: false });
+    // The refetched document moves BOTH keys, while the frame names only the
+    // unsubscribed one. That is what makes this test discriminate: if the
+    // watched key stayed put in the served document, React's `Object.is`
+    // bail-out would suppress the re-render whether or not the store filters
+    // its notifications by key, and a store that woke every subscriber on
+    // every frame would pass. Here it cannot — waking the watched hook makes
+    // it re-read the merged document and render `false`.
+    serveDoc({ version: 1, "test.watched": false, [other.key]: false });
     const seen: boolean[] = [];
 
     function Probe() {
@@ -137,8 +151,11 @@ describe("usePreference", () => {
     await deliverFrame([other.key]);
 
     expect(seen.length).toBe(rendersBefore);
-    // The frame did land — the store's copy of the other key moved.
+    // ...and the hook still shows what it was last told, not the new document.
+    expect(seen.at(-1)).toBe(true);
+    // The frame did land — the store's copy of both keys moved.
     expect(globals.__PAVILIO_PREFS__?.[other.key]).toBe(false);
+    expect(globals.__PAVILIO_PREFS__?.["test.watched"]).toBe(false);
   });
 
   it("the setter updates the value and the store together", async () => {
@@ -190,6 +207,14 @@ describe("usePreference", () => {
       </>,
     );
     expect(mirror.at(-1)).toBe(true);
+    // Exactly one channel listener for the two hooks, from exactly one attach.
+    // The store attaches to the realtime channel once and fans out internally.
+    // Dropping the `if (!channelUnsubscribe)` guard leaves the listener count
+    // at 1 — the channel's `Set` is keyed by function identity — while leaking
+    // one unsubscribe handle per subscriber, so the count of attaches is the
+    // assertion that actually bites.
+    expect(frameListeners.size).toBe(1);
+    expect(attachments.count).toBe(1);
 
     act(() => set?.(false));
 

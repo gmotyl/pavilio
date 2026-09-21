@@ -62,6 +62,20 @@ const portableSort = definePreference<{ by: string; dir: string }>({
   portable: true,
 });
 
+/**
+ * A portable declaration whose codec speaks JSON but whose payload can be a
+ * bare string. Nothing in the registry has this shape today — `terminal.focus`
+ * and the three `nav.*` do, and they are non-portable — but flipping any of
+ * them portable must not silently lose data.
+ */
+const portableNote = definePreference<string | null>({
+  key: "test.note",
+  scope: "global",
+  default: null,
+  codec: json<string | null>(),
+  portable: true,
+});
+
 const localFlag = definePreference({
   key: "test.localFlag",
   scope: "global",
@@ -256,6 +270,34 @@ describe("writing", () => {
     });
     // And it round-trips: a `str` preference holding "true" is still a string.
     expect(readPreference(portableQuery)).toBe("true");
+  });
+
+  it("a portable json preference round-trips a bare string", () => {
+    // The value shape the document stores has to be decided by the CODEC, not
+    // by the declared default. Keying off the default instead loses this
+    // exactly: `"hello"` stored unquoted, then `JSON.parse("hello")` throwing
+    // on the way back and the read answering `null` — a silent data loss with
+    // no warning anywhere.
+    stubFetch();
+
+    writePreference(portableNote, "hello");
+
+    expect(readPreference(portableNote)).toBe("hello");
+  });
+
+  it("a non-finite number is refused rather than written as text", async () => {
+    // `String(NaN)` is not JSON, so the fallback would put the literal text
+    // "NaN" into the hand-readable workspace file under a `num` key — where it
+    // reads back as the default anyway, having displaced nothing but clarity.
+    const fetchMock = stubFetch();
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.width": 320 };
+
+    writePreference(portableWidth, Number.NaN);
+    writePreference(portableWidth, Number.POSITIVE_INFINITY);
+
+    expect(globals.__PAVILIO_PREFS__["test.width"]).toBe(320);
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("a session with no injected global never PATCHes", async () => {
