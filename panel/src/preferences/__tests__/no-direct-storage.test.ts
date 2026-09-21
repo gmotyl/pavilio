@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { writeLastPath, writeLastSectionFile } from "../../features/shell/lastPath";
@@ -207,6 +207,16 @@ describe("the exemption window", () => {
     expect(offendingLines(source, /\blocalStorage\b/, FIXTURE_PENDING)).toEqual([]);
   });
 
+  /**
+   * The only assertion left that the SHIPPED list is empty.
+   *
+   * "names the task that owns every raw key still allowed" used to say it too,
+   * and was removed here: with `PENDING_MIGRATIONS` empty both of its sides
+   * reduced to `expect([]).toEqual([])`, so it could not fail. Everything it
+   * covered is covered twice over — the emptiness by this test, the marker
+   * machinery by the two `FIXTURE_PENDING` tests above, and "a raw key is an
+   * offence" by every tree test below.
+   */
   it("excuses nothing at all now that the shipped list is empty", () => {
     const source = ["const focused = localStorage.getItem(", '  "anything",', ");"].join("\n");
 
@@ -358,34 +368,5 @@ describe("preferences replace raw browser storage", () => {
 
     expect(sessionStorage.length).toBeGreaterThan(0);
     expect(localStorage.length).toBe(0);
-  });
-});
-
-describe("the pending call sites are declared, not forgotten", () => {
-  /**
-   * There are none left in the guarded trees. `shell/LeftSidebar.tsx` was the
-   * last, and it moved with Task 8 — the task that owned every writer of
-   * `panel-terminal-focus-`, which is why the reader could not go earlier.
-   *
-   * The assertion is kept rather than deleted with its last subject: it is what
-   * turns "the list is empty" from a claim in a comment into something the
-   * suite checks, and it is the test that fails the moment a new raw key is
-   * waved through under a marker.
-   */
-  it("names the task that owns every raw key still allowed", () => {
-    const offenders = [
-      ...rawStorageUses("features/shell", /\blocalStorage\b/).files,
-      ...rawStorageUses("features/projects", /\blocalStorage\b/).files,
-      ...rawStorageUses("features/git", /\blocalStorage\b/).files,
-      ...rawStorageUses("features/search", /\blocalStorage\b/).files,
-      ...rawStorageUses("features/terminal", /\blocalStorage\b/).files,
-      ...rawStorageUses("features/speech", /\blocalStorage\b/).files,
-    ].filter((file) => {
-      const source = withoutComments(readFileSync(join(SRC, file), "utf8")).join("\n");
-      return PENDING_MIGRATIONS.some((pending) => source.includes(pending.marker));
-    });
-
-    expect(PENDING_MIGRATIONS.map((pending) => pending.task)).toEqual([]);
-    expect(offenders.map((file) => relative("features", file)).sort()).toEqual([]);
   });
 });

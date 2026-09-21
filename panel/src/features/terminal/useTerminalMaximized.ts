@@ -21,7 +21,10 @@ import { readPreference, writePreference } from "../../preferences/store";
  * effect would only queue the swap, one render too late.
  */
 function readMaximized(project: string): boolean {
-  if (project.trim() === "") return preferences.terminalMaximized.default;
+  // Not a bare `.trim()`: see the note on `writeTerminalFocus`. A blank scope
+  // and an absent one are the same thing here — the declared default.
+  if (typeof project !== "string" || project.trim() === "")
+    return preferences.terminalMaximized.default;
   return readPreference(preferences.terminalMaximized, project);
 }
 
@@ -40,7 +43,7 @@ export function useTerminalMaximized(
       setValueState(next);
       // An unresolved project is not a scope: the store rejects one rather than
       // letting every project share a key, so nothing is written for it.
-      if (project.trim() === "") return;
+      if (typeof project !== "string" || project.trim() === "") return;
       writePreference(preferences.terminalMaximized, next, project);
     },
     [project],

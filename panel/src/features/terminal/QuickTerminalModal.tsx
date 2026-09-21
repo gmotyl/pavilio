@@ -24,7 +24,9 @@ import { readPreference } from "../../preferences/store";
  * declared default instead.
  */
 function readProjectOrder(project: string): string[] {
-  if (project.trim() === "") return preferences.terminalOrder.default;
+  // Not a bare `.trim()`: see the note on `writeTerminalFocus`.
+  if (typeof project !== "string" || project.trim() === "")
+    return preferences.terminalOrder.default;
   return readPreference(preferences.terminalOrder, project);
 }
 

@@ -24,7 +24,7 @@ import type { SessionMeta } from "./useTerminalSessions";
  * writes nothing.
  */
 function resolved(scopeKey: string): boolean {
-  return scopeKey.trim() !== "";
+  return typeof scopeKey === "string" && scopeKey.trim() !== "";
 }
 
 export interface TerminalOrdering {

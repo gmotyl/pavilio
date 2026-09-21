@@ -31,7 +31,13 @@ export function readTerminalFocus(project: string | null | undefined): string | 
 }
 
 export function writeTerminalFocus(project: string, sessionId: string | null): void {
-  if (project.trim() === "") return;
+  // `typeof x === "string" && x.trim() !== ""`, not a bare `.trim()`: the
+  // parameter is typed `string`, but a route param reaches these call sites
+  // through a `name ?? ""` idiom that TypeScript cannot see past, and the bare
+  // form has already thrown twice in this change — once during render. This is
+  // the shape `features/git`, `features/projects` and `features/time` settled
+  // on, and `readTerminalFocus` above already tolerates an absent project.
+  if (typeof project !== "string" || project.trim() === "") return;
   // Unfocusing CLEARS rather than storing `null`, mirroring the `removeItem`
   // this replaces: "nothing focused" is the absence of a value, not a value.
   if (sessionId) writePreference(preferences.terminalFocus, sessionId, project);
