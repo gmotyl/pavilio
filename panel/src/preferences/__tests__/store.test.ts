@@ -6,6 +6,7 @@ import {
   __resetPreferenceStoreForTests,
   clearPreference,
   readPreference,
+  subscribePreference,
   writePreference,
 } from "../store";
 
@@ -209,6 +210,59 @@ describe("clearing", () => {
   });
 });
 
+describe("the session tier under a browser that refuses storage", () => {
+  /**
+   * `lastPath.ts` no longer carries its own try/catch: the protection was
+   * relocated here, into `readPreference`/`writePreference`. These are the
+   * tests that actually exercise it.
+   *
+   * The spy goes on the `sessionStorage` INSTANCE, never on
+   * `Storage.prototype`: `test-setup.ts` installs a plain object literal as
+   * `sessionStorage`, which does not inherit from `Storage.prototype`, so a
+   * prototype spy is never reached and the test passes vacuously. Each case
+   * asserts the spy WAS called, so that trap cannot come back unnoticed.
+   */
+  it("a write that throws is swallowed and stores nothing", () => {
+    const setItem = vi
+      .spyOn(globalThis.sessionStorage, "setItem")
+      .mockImplementation(() => {
+        throw new Error("quota");
+      });
+
+    expect(() => writePreference(sessionPath, "/project/pavilio/notes")).not.toThrow();
+
+    expect(setItem).toHaveBeenCalledTimes(1);
+    setItem.mockRestore();
+    expect(globalThis.sessionStorage.getItem(sessionPath.key)).toBeNull();
+  });
+
+  it("a read that throws answers the declared default", () => {
+    const getItem = vi
+      .spyOn(globalThis.sessionStorage, "getItem")
+      .mockImplementation(() => {
+        throw new Error("disabled");
+      });
+
+    expect(readPreference(sessionPath)).toBeNull();
+
+    expect(getItem).toHaveBeenCalledTimes(1);
+    getItem.mockRestore();
+  });
+
+  it("a clear that throws is swallowed", () => {
+    const removeItem = vi
+      .spyOn(globalThis.sessionStorage, "removeItem")
+      .mockImplementation(() => {
+        throw new Error("disabled");
+      });
+
+    expect(() => clearPreference(sessionPath)).not.toThrow();
+
+    expect(removeItem).toHaveBeenCalledTimes(1);
+    removeItem.mockRestore();
+  });
+});
+
 describe("writing", () => {
   it("a write is visible to the next read before the network resolves", () => {
     // A fetch that never settles: whatever the next read returns cannot have
@@ -327,6 +381,102 @@ describe("writing", () => {
 
     await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("writing the value already stored is a no-op — no PATCH, no notify", async () => {
+    // The migration turned every write into a network PATCH, so a caller that
+    // re-asserts what is already there (a mount effect, a controlled input
+    // echoing its own value) now costs a round trip and a file write. The
+    // comparison is on the STORED representation, so a structurally equal
+    // object does not count as a change either.
+    const fetchMock = stubFetch();
+    globals.__PAVILIO_PREFS__ = {
+      version: 1,
+      "test.width": 320,
+      "test.sort": { by: "name", dir: "asc" },
+    };
+    const heard: string[] = [];
+    subscribePreference(portableWidth, undefined, () => heard.push("width"));
+    subscribePreference(portableSort, undefined, () => heard.push("sort"));
+
+    writePreference(portableWidth, 320);
+    writePreference(portableSort, { by: "name", dir: "asc" });
+
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(heard).toEqual([]);
+  });
+
+  it("a genuine change still PATCHes exactly once", async () => {
+    const fetchMock = stubFetch();
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.width": 320 };
+
+    writePreference(portableWidth, 320);
+    writePreference(portableWidth, 512);
+
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ "test.width": 512 });
+  });
+
+  it("re-writing the same value after clearPreference still PATCHes", async () => {
+    // The unchanged-value skip compares against what the DOCUMENT holds, not
+    // against the declared default: a cleared key is absent, so putting the
+    // same value back is a real change the server has to hear about.
+    const fetchMock = stubFetch();
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.width": 320 };
+
+    clearPreference(portableWidth);
+    writePreference(portableWidth, 320);
+
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toEqual({
+      "test.width": 320,
+    });
+  });
+
+  it("the unchanged-value skip does not swallow a failed PATCH's retry", async () => {
+    // A failed PATCH puts its keys back in `pendingKeys`, so the document is
+    // already ahead of the server. A later write of that same value must not
+    // clear the debt — the retry has to still go out.
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError("Failed to fetch");
+      return new Response("{}");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    writePreference(portableWidth, 512);
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Same value again: skipped as a write, but the key is still dirty.
+    writePreference(portableWidth, 512);
+    writePreference(portableSide, "right");
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body))).toEqual({
+      "test.width": 512,
+      "test.side": "right",
+    });
+  });
+
+  it("a non-portable write of the value already stored touches no storage", () => {
+    const setItem = vi.spyOn(globalThis.localStorage, "setItem");
+    writePreference(localFlag, true);
+    expect(setItem).toHaveBeenCalledTimes(1);
+
+    setItem.mockClear();
+    writePreference(localFlag, true);
+    expect(setItem).not.toHaveBeenCalled();
   });
 
   it("a failed PATCH keeps the value the user chose", async () => {

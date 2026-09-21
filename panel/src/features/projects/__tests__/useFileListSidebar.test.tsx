@@ -71,7 +71,6 @@ const seed = (collapsed: boolean) => {
 const stored = () => doc()[KEY] ?? null;
 
 describe("useFileListSidebar", () => {
-
   it("defaults to expanded on desktop", () => {
     installMatchMedia(false);
     render(<Probe />);

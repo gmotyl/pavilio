@@ -148,6 +148,30 @@ function toStored<T>(def: PreferenceDef<T>, value: T): unknown {
   return parsed;
 }
 
+/**
+ * Structural equality on the STORED representation — the shape `toStored`
+ * produces and the document holds, never the caller's object.
+ *
+ * Reference equality is not enough: a `json` preference is re-serialized from a
+ * fresh object on every write, and a value that came back from the server was
+ * re-parsed, so two structurally identical objects are never `Object.is`-equal
+ * and key order can differ between the two. Both would read as a change and
+ * cost a PATCH.
+ */
+function sameStored(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, i) => sameStored(item, b[i]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every((key) => key in right && sameStored(left[key], right[key]));
+}
+
 function notify(key: string): void {
   // Copy first: a listener may unsubscribe while being notified.
   for (const listener of [...(listeners.get(key) ?? [])]) listener();
@@ -183,6 +207,16 @@ export function readPreference<T>(def: PreferenceDef<T>, scopeArg?: string): T {
  * Remember `value`. Visible to the next `readPreference` immediately; persisted
  * on a debounce. A portable write from a page that never received the injected
  * document is dropped — see `portableDoc`.
+ *
+ * Writing what is already stored does nothing at all: no document mutation, no
+ * PATCH, no notify. That guard is here rather than only at the call sites
+ * because the migration changed what a write COSTS — it used to be a
+ * `localStorage.setItem` and is now a network round trip and a write to a
+ * committed file — so a mount effect or a controlled input echoing its own
+ * value now puts the declared default into the workspace file under a key
+ * nobody chose. The comparison is against what the STORE holds, never against
+ * the declared default: a key the document no longer has (`clearPreference`)
+ * is absent, not equal, so putting the same value back is still a real change.
  */
 export function writePreference<T>(def: PreferenceDef<T>, value: T, scopeArg?: string): void {
   const key = storageKey(def, scopeArg);
@@ -196,14 +230,29 @@ export function writePreference<T>(def: PreferenceDef<T>, value: T, scopeArg?: s
   if (def.portable) {
     const doc = portableDoc();
     if (!doc) return;
-    doc[key] = toStored(def, value);
+    const next = toStored(def, value);
+    // `key in doc`, not `doc[key] === undefined`: a cleared key is gone from
+    // the document, and re-writing its old value has to reach the server as
+    // the un-delete it is.
+    if (key in doc && sameStored(doc[key], next)) return;
+    doc[key] = next;
+    // Skipping `queuePatch` here cannot strand a retry: a key a failed PATCH
+    // put back into `pendingKeys` is still pending, and the next flush re-reads
+    // the document — which already holds this very value.
     queuePatch(key);
   } else {
+    const raw = def.codec.serialize(value);
     try {
-      browserStorage(def)?.setItem(key, def.codec.serialize(value));
+      const store = browserStorage(def);
+      if (store === undefined) return;
+      if (store.getItem(key) === raw) return;
+      store.setItem(key, raw);
     } catch {
       // A full quota or a private-mode refusal. A preference is a choice, not
-      // data: losing it makes the next session worse, not broken.
+      // data: losing it makes the next session worse, not broken. The read
+      // above can throw for the same reasons, and lands here too — writing
+      // blind would be no better.
+      return;
     }
   }
 

@@ -10,6 +10,16 @@
  * Defaults reproduce today's behavior exactly, with one deliberate exception
  * noted at `view.wide`.
  *
+ * NO MIGRATION SHIPS, AND THAT IS THE DESIGN. design.md's Migration section is
+ * explicit: "Existing `localStorage` values are not migrated by code. No
+ * migration path ships." So after deploy every migrated setting reads its
+ * declared default, and the old raw keys each `// was:` names are ORPHANED —
+ * left in the browser, read by nothing, including the stored `false` entries
+ * inside the old `panel-commits-open` blob. They are not lost by oversight;
+ * they are not carried over. The workspace file is seeded by hand instead,
+ * from this table's `// was:` map — that is Task 11, and it is the reason the
+ * old key is written down next to every declaration rather than deleted.
+ *
  * Every import here is type-only on purpose. The registry sits underneath the
  * features, so pulling a feature module in at runtime would invert that — and
  * would close a cycle the moment those features start reading the registry.

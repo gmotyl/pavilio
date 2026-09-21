@@ -34,6 +34,11 @@ export function useCommitsOpenMap() {
     // An unresolved path is not a scope: the store rejects one rather than
     // letting every repository share a key, and this is the render path.
     if (repoPath.trim() === "") return preferences.commitsOpen.default;
+    // A ref mutated during render, and deliberately so: which repositories are
+    // on screen is knowable only from the render that asks. It is benign under
+    // StrictMode's double invoke — `Set.add` is idempotent, and the effect
+    // below subscribes each path once — but it is impure, so nothing may be
+    // derived from `watched.current` during a render.
     watched.current.add(repoPath);
     return readPreference(preferences.commitsOpen, repoPath);
   }, []);
@@ -56,6 +61,12 @@ export function useCommitsOpenMap() {
     }
   });
 
+  // Subscriptions are released only on unmount, never when a repository leaves
+  // the list: a repo scrolled out of the project keeps a live handle for the
+  // life of the hook. Bounded by the number of repositories a session ever
+  // looks at and each handle is a Set entry, so this is a few dozen closures at
+  // worst — pruning would mean diffing `watched` against the last render, which
+  // costs more than it saves.
   const live = subscriptions.current;
   useEffect(
     () => () => {

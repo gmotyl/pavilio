@@ -120,7 +120,8 @@ export default function LeftSidebar() {
     setFocusedId(readStoredFocus(currentProject));
   }, [currentProject]);
 
-  // Per-project expand state — hydrated once from localStorage when projects load
+  // Per-project expand state — hydrated once from the stored preference when
+  // projects load
   const [expanded, setExpandedState] = useState<Record<string, boolean>>(
     () => ({}),
   );
@@ -133,9 +134,16 @@ export default function LeftSidebar() {
     setExpandedState((prev) => {
       const patch: Record<string, boolean> = {};
       for (const p of projects) {
-        if (prev[p.name] === undefined) {
-          patch[p.name] = readPreference(preferences.projectExpanded, p.name);
-        }
+        if (prev[p.name] !== undefined) continue;
+        // An unresolved name is not a scope: `storageKey` throws on a blank
+        // one rather than letting every project share `key@`, and this runs
+        // inside a state updater during an effect, where that throw is an
+        // unhandled render error. Declared default, and nothing written —
+        // the same rule every other Task 6 call site follows.
+        patch[p.name] =
+          p.name.trim() === ""
+            ? preferences.projectExpanded.default
+            : readPreference(preferences.projectExpanded, p.name);
       }
       return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
     });
@@ -146,6 +154,8 @@ export default function LeftSidebar() {
   );
   const setExpanded = useCallback((name: string, value: boolean) => {
     setExpandedState((prev) => ({ ...prev, [name]: value }));
+    // Same rule on the way out: an unresolved name writes nothing.
+    if (name.trim() === "") return;
     writePreference(preferences.projectExpanded, value, name);
   }, []);
 

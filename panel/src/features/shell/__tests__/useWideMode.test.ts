@@ -18,6 +18,16 @@ describe("useWideMode", () => {
     expect(result.current[0]).toBe(true);
   });
 
+  it("composes two toggles in one tick", () => {
+    // A closure read loses one toggle's worth: both calls see the same `wide`.
+    const { result } = renderHook(() => useWideMode("viewer"));
+    act(() => {
+      result.current[1]();
+      result.current[1]();
+    });
+    expect(result.current[0]).toBe(true);
+  });
+
   it("persists per key", () => {
     const { result, unmount } = renderHook(() => useWideMode("repos"));
     act(() => result.current[1]());

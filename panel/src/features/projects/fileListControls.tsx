@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Search, X, ArrowDown, ArrowUp } from "lucide-react";
 import { preferences, type FileListSort } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
@@ -79,8 +79,17 @@ export function useFileListControls(): FileListControls {
     return () => clearTimeout(id);
   }, [query]);
 
+  // Write on an actual change, never on mount. A write is a PATCH to the
+  // committed workspace file now, not a `localStorage.setItem`, and
+  // `FileListSidebar` is mounted by several tabs — so a mount-write put the
+  // DECLARED DEFAULT into that file on a cold load and repeated it on ordinary
+  // navigation. The ref carries what was last persisted (the value the
+  // initializer read), so the first run has nothing to say.
+  const persisted = useRef<FileListSort>(initial);
   useEffect(() => {
-    writeSort({ sortKey, sortDir });
+    if (persisted.current.sortKey === sortKey && persisted.current.sortDir === sortDir) return;
+    persisted.current = { sortKey, sortDir };
+    writeSort(persisted.current);
   }, [sortKey, sortDir]);
 
   const toggleDir = useCallback(

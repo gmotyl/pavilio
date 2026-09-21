@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import CollapsibleSection from "../CollapsibleSection";
@@ -6,10 +6,6 @@ import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
 
 describe("CollapsibleSection", () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
   it("renders children expanded by default", () => {
     render(
       <CollapsibleSection storageKey="test.section.a" title="Explorer">

@@ -14,13 +14,19 @@ export function useFavorites() {
     [stored],
   );
 
+  // The updater rebuilds the Set from the LATEST stored list, not from the
+  // `favorites` this render captured. Toggling two different names in one tick
+  // used to have both calls branch off the same captured Set, so the second
+  // write dropped the first name entirely.
   const toggle = useCallback(
     (name: string) => {
-      const next = new Set(favorites);
-      next.has(name) ? next.delete(name) : next.add(name);
-      setStored([...next]);
+      setStored((previous) => {
+        const next = new Set<string>(Array.isArray(previous) ? previous : []);
+        next.has(name) ? next.delete(name) : next.add(name);
+        return [...next];
+      });
     },
-    [favorites, setStored],
+    [setStored],
   );
 
   const isFavorite = useCallback((name: string) => favorites.has(name), [favorites]);

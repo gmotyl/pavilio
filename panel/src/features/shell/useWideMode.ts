@@ -13,9 +13,11 @@ import { usePreference } from "../../preferences/usePreference";
 export function useWideMode(key: string) {
   const [wide, setWide] = usePreference(preferences.wideMode, key);
 
+  // An updater, so two toggles in one tick compose instead of collapsing into
+  // one flip.
   const toggle = useCallback(() => {
-    setWide(!wide);
-  }, [setWide, wide]);
+    setWide((previous) => !previous);
+  }, [setWide]);
 
   return [wide, toggle] as const;
 }

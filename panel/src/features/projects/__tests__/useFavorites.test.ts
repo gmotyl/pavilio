@@ -16,6 +16,29 @@ describe("useFavorites", () => {
     expect(result.current.isFavorite("my-work")).toBe(false);
   });
 
+  /**
+   * Two different names in one tick. Both calls built their next Set from the
+   * SAME captured `favorites`, so the second write overwrote the first and
+   * "a" was dropped entirely.
+   */
+  it("composes two toggles of different names in one tick", () => {
+    const { result } = renderHook(() => useFavorites());
+    act(() => {
+      result.current.toggle("a");
+      result.current.toggle("b");
+    });
+    expect([...result.current.favorites].sort()).toEqual(["a", "b"]);
+  });
+
+  it("composes two toggles of the SAME name in one tick", () => {
+    const { result } = renderHook(() => useFavorites());
+    act(() => {
+      result.current.toggle("a");
+      result.current.toggle("a");
+    });
+    expect(result.current.isFavorite("a")).toBe(false);
+  });
+
   it("persists to localStorage", () => {
     const { result, unmount } = renderHook(() => useFavorites());
     act(() => result.current.toggle("my-blog"));

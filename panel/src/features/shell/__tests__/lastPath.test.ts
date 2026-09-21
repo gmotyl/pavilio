@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   readLastPath,
   writeLastPath,
@@ -7,6 +7,21 @@ import {
   clearLastReposQuery,
 } from "../lastPath";
 import { preferences } from "../../../preferences/declarations";
+
+/**
+ * A browser that refuses storage — quota, private mode, blocked site data — is
+ * no longer this module's concern: the migration removed `lastPath.ts`'s own
+ * try/catch and relocated that protection into `readPreference` /
+ * `writePreference`. The four tests that used to sit here have moved with it,
+ * to `preferences/__tests__/store.test.ts` ("the session tier under a browser
+ * that refuses storage"), where the code they exercise actually lives.
+ *
+ * They were also vacuous where they stood. They spied on `Storage.prototype`,
+ * but `test-setup.ts` installs a plain object literal as `sessionStorage`,
+ * which does not inherit from it — so the spy was never reached, the value was
+ * still stored, and both tests passed without exercising anything. The
+ * relocated versions spy on the storage INSTANCE and assert the spy was called.
+ */
 
 describe("lastPath helpers", () => {
   beforeEach(() => {
@@ -31,21 +46,6 @@ describe("lastPath helpers", () => {
     expect(readLastPath("missing")).toBeNull();
   });
 
-  it("silently no-ops when sessionStorage throws on write", () => {
-    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
-    });
-    expect(() => writeLastPath("pavilio", "/foo")).not.toThrow();
-    spy.mockRestore();
-  });
-
-  it("returns null when sessionStorage throws on read", () => {
-    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("disabled");
-    });
-    expect(readLastPath("pavilio")).toBeNull();
-    spy.mockRestore();
-  });
 });
 
 describe("lastReposQuery helpers", () => {
@@ -71,21 +71,5 @@ describe("lastReposQuery helpers", () => {
     writeLastReposQuery("pavilio", "repo=abc");
     clearLastReposQuery("pavilio");
     expect(readLastReposQuery("pavilio")).toBeNull();
-  });
-
-  it("silently no-ops on write when sessionStorage throws", () => {
-    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
-    });
-    expect(() => writeLastReposQuery("pavilio", "x=1")).not.toThrow();
-    spy.mockRestore();
-  });
-
-  it("returns null on read when sessionStorage throws", () => {
-    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("disabled");
-    });
-    expect(readLastReposQuery("pavilio")).toBeNull();
-    spy.mockRestore();
   });
 });
