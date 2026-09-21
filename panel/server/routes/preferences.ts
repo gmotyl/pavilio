@@ -85,6 +85,12 @@ preferencesRouter.patch("/preferences", (req, res) => {
   // `version` is the document's own field, not a preference — the store
   // ignores it, so it must not be reported as changed either.
   const keys = Object.keys(body as Record<string, unknown>).filter((k) => k !== "version");
+  // Nothing to apply. The store would still mark the document dirty and
+  // schedule a write of a byte-identical file, and the frame below would wake
+  // every open tab to re-read an empty list of keys. Still a 200: the caller
+  // asked for nothing and nothing is what it got.
+  if (keys.length === 0) return res.json({ ok: true });
+
   patchPreferences(body as Record<string, unknown>);
 
   // Every other open panel tab holds the same document in memory; this is how
