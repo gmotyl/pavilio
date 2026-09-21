@@ -7,13 +7,23 @@
 // Writes are debounced (a UI toggle usually arrives as a burst) and committed
 // by renaming a sibling temp file over the target, so a concurrent reader
 // never observes a half-written document.
+//
+// Three things the file is protected from, because it is shared state that
+// outlives the process and travels between machines:
+//   - a value JSON cannot represent (`undefined`, a function, a symbol, a
+//     circular object) never reaches it — it would emit a bare `undefined`
+//     token and the whole document would fail to parse on the next boot;
+//   - a failed write is remembered, not swallowed, so the next flush retries;
+//   - a document written by a newer panel is never rewritten in an older
+//     panel's format.
 
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export interface PreferencesDoc {
-  version: 1;
+  /** Format marker. This panel writes — and only writes — `CURRENT_VERSION`. */
+  version: number;
   [key: string]: unknown;
 }
 
@@ -22,7 +32,10 @@ export interface PreferencesDoc {
  *  most a quarter second of intent. Shutdown always calls flushPreferences(). */
 const WRITE_DEBOUNCE_MS = 250;
 
-const emptyDoc = (): PreferencesDoc => ({ version: 1 });
+/** The only format this panel knows how to write. */
+const CURRENT_VERSION = 1;
+
+const emptyDoc = (): PreferencesDoc => ({ version: CURRENT_VERSION });
 
 let doc: PreferencesDoc = emptyDoc();
 let targetPath = "";
@@ -30,20 +43,27 @@ let timer: NodeJS.Timeout | null = null;
 let inFlight: Promise<void> | null = null;
 let dirty = false;
 let tmpSeq = 0;
+let refusalLogged = false;
 
 /**
  * Read the document at `path` into memory. Boot-time and synchronous; never
- * throws — a missing, empty or malformed file simply yields `{ version: 1 }`,
- * because a broken preferences file must not keep the panel from starting.
+ * throws — a missing, empty or malformed file simply yields
+ * `{ version: CURRENT_VERSION }`, because a broken preferences file must not
+ * keep the panel from starting.
+ *
+ * A `version` this panel does not know (any integer above `CURRENT_VERSION`)
+ * is kept exactly as found and makes the store read-only — see `canWrite`.
  */
 export function loadPreferences(path: string): PreferencesDoc {
   targetPath = path;
   doc = emptyDoc();
+  refusalLogged = false;
   try {
     if (existsSync(path)) {
       const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        doc = { ...(parsed as Record<string, unknown>), version: 1 };
+        const record = parsed as Record<string, unknown>;
+        doc = { ...record, version: normalizeVersion(record.version) };
       }
     }
   } catch {
@@ -59,14 +79,20 @@ export function getPreferences(): PreferencesDoc {
 
 /**
  * Shallow-merge `patch` into the in-memory document and schedule a write.
- * A `null` value deletes its key. `version` is not patchable. The merged doc
- * is returned and readable immediately, long before the write lands.
+ * A `null` value deletes its key, and so does any value JSON cannot represent
+ * (`undefined`, a function, a symbol, a circular object) — see `asJson`.
+ * `version` is not patchable. The merged doc is returned and readable
+ * immediately, long before the write lands.
  */
 export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc {
-  const next: PreferencesDoc = { ...doc, version: 1 };
+  const next: PreferencesDoc = { ...doc, version: doc.version };
   for (const [key, value] of Object.entries(patch)) {
     if (key === "version") continue;
-    if (value === null) delete next[key];
+    // `undefined` is what `{ theme: maybeUndefined }` produces in ordinary TS,
+    // and a function or symbol has the same fate in JSON: there is no value to
+    // store, so the honest merge result is "this key is gone", exactly as for
+    // an explicit null.
+    if (value === null || asJson(value) === undefined) delete next[key];
     else next[key] = value;
   }
   doc = next;
@@ -78,7 +104,8 @@ export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc
  * Write any pending change now. Resolves once the document on disk matches the
  * one in memory. A no-op when nothing is pending, so calling it on top of an
  * already-fired debounce does not write twice. Never rejects: a failed write
- * is logged, not thrown, so shutdown is not blocked by a full disk.
+ * is logged, not thrown, so shutdown is not blocked by a full disk — but it
+ * stays pending, so a later flush retries it.
  */
 export async function flushPreferences(): Promise<void> {
   if (timer) {
@@ -88,9 +115,19 @@ export async function flushPreferences(): Promise<void> {
   // Let a write that is already running finish before deciding what is left.
   while (inFlight) await inFlight;
   if (!dirty || !targetPath) return;
+  if (!canWrite()) {
+    dirty = false;
+    return;
+  }
   dirty = false;
   const write = writeNow(targetPath, serialize(doc))
-    .catch((err) => console.error("[preferences] write failed:", err))
+    .catch((err) => {
+      // The change exists only in memory. Forgetting it here is how a single
+      // transient EPERM/ENOSPC turns into permanent data loss, so put it back
+      // on the pending pile: the next flush — shutdown's included — retries.
+      dirty = true;
+      console.error("[preferences] write failed:", err);
+    })
     .finally(() => {
       inFlight = null;
     });
@@ -106,9 +143,42 @@ export function _resetPreferencesForTests(): void {
   dirty = false;
   doc = emptyDoc();
   targetPath = "";
+  refusalLogged = false;
+}
+
+/**
+ * A `version` this panel wrote or can safely adopt. Anything newer is left
+ * alone; anything else — missing, a string, a fraction, zero — is the
+ * empty/legacy case and normalizes to the current version.
+ */
+function normalizeVersion(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value > CURRENT_VERSION
+    ? value
+    : CURRENT_VERSION;
+}
+
+/**
+ * Whether this panel may rewrite the loaded document. A file stamped with a
+ * newer version was written by a newer panel and is shared — through the data
+ * repo — with the machine running it; rewriting it in this panel's format
+ * would hand that machine back a v1-labelled file full of v2-shaped data.
+ * Refusing costs this session's changes; coercing costs the other panel's.
+ */
+function canWrite(): boolean {
+  if (doc.version === CURRENT_VERSION) return true;
+  if (!refusalLogged) {
+    refusalLogged = true;
+    console.warn(
+      `[preferences] ${targetPath} declares version ${String(doc.version)}, which is newer than ` +
+        `this panel understands (version ${CURRENT_VERSION}): it was written by a newer panel and ` +
+        `will not be modified. Preference changes apply to this session only.`,
+    );
+  }
+  return false;
 }
 
 function scheduleWrite(): void {
+  if (!canWrite()) return;
   dirty = true;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
@@ -117,11 +187,33 @@ function scheduleWrite(): void {
   }, WRITE_DEBOUNCE_MS);
 }
 
+/**
+ * `value` as JSON text, or `undefined` when JSON has no representation for it.
+ * That covers `undefined`, functions and symbols — for which `JSON.stringify`
+ * *returns* `undefined` — and circular structures and BigInts, for which it
+ * throws. All of them are one class of value: unstorable.
+ */
+function asJson(value: unknown): string | undefined {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
 /** `version` first, then every other key sorted — one key per line. */
 function serialize(d: PreferencesDoc): string {
   const lines = [`  "version": ${JSON.stringify(d.version)}`];
-  for (const key of Object.keys(d).filter((k) => k !== "version").sort()) {
-    lines.push(`  ${JSON.stringify(key)}: ${JSON.stringify(d[key])}`);
+  for (const key of Object.keys(d)
+    .filter((k) => k !== "version")
+    .sort()) {
+    // Belt and braces: `patchPreferences` already drops unstorable values, so
+    // this only fires for a doc assembled some other way. Emitting the line
+    // anyway would put a bare `undefined` token in the file and make the whole
+    // document unparseable on the next boot.
+    const json = asJson(d[key]);
+    if (json === undefined) continue;
+    lines.push(`  ${JSON.stringify(key)}: ${json}`);
   }
   return `{\n${lines.join(",\n")}\n}\n`;
 }
@@ -131,6 +223,13 @@ function serialize(d: PreferencesDoc): string {
 async function writeNow(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.tmp.${process.pid}.${++tmpSeq}`;
-  await writeFile(tmp, text, "utf8");
-  await rename(tmp, path);
+  try {
+    await writeFile(tmp, text, "utf8");
+    await rename(tmp, path);
+  } catch (err) {
+    // A failed commit must not leave a half-document next to the real one —
+    // this directory is a git working tree that auto-sync commits wholesale.
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
 }

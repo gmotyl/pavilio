@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   mkdtempSync,
+  mkdirSync,
   rmSync,
   readFileSync,
   writeFileSync,
@@ -10,28 +11,7 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
-
-// Record what the store does to the filesystem without stubbing it: the
-// debounce contract ("several patches → one write") is only observable as the
-// number of commits to the target path, and "atomic" is only observable as
-// *where* the bytes were written before the target started pointing at them.
-const spy = vi.hoisted(() => ({ renames: 0, written: [] as string[] }));
-vi.mock("node:fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return {
-    ...actual,
-    default: actual,
-    writeFile: async (path: string, data: string, enc: BufferEncoding) => {
-      spy.written.push(path);
-      return actual.writeFile(path, data, enc);
-    },
-    rename: async (from: string, to: string) => {
-      spy.renames++;
-      return actual.rename(from, to);
-    },
-  };
-});
+import { join } from "node:path";
 
 import {
   loadPreferences,
@@ -45,11 +25,40 @@ let dir = "";
 const file = () => join(dir, "preferences.json");
 const freshDir = (): string => (dir = mkdtempSync(join(tmpdir(), "pavilio-prefs-")));
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Both durability contracts are observed on the target file itself, never on a
+// particular fs call: which module the store imports, whether it writes sync
+// or async, and how it spells its temp path are implementation details, and a
+// test that pins them reddens correct rewrites while proving nothing extra.
+//
+// A *commit* is a change in the target's identity — absent → present, or one
+// (inode, mtime, size) to another. `null` means "not there yet".
+const commitId = (): string | null => {
+  try {
+    const s = statSync(file());
+    return `${s.ino}:${s.mtimeMs}:${s.size}`;
+  } catch {
+    return null;
+  }
+};
+
+/** Every file under `dir`, recursively, relative to it. Directories are not
+ *  listed: a store that stages its temp file in a sibling `.tmp/` directory is
+ *  as correct as one that stages it next to the target. */
+const filesUnder = (root: string, prefix = ""): string[] =>
+  readdirSync(root, { withFileTypes: true })
+    .flatMap((e) =>
+      e.isDirectory()
+        ? filesUnder(join(root, e.name), `${prefix}${e.name}/`)
+        : [`${prefix}${e.name}`],
+    )
+    .sort();
+
 afterEach(() => {
   _resetPreferencesForTests();
   vi.useRealTimers();
-  spy.renames = 0;
-  spy.written = [];
+  vi.restoreAllMocks();
   if (dir) rmSync(dir, { recursive: true, force: true });
   dir = "";
 });
@@ -170,7 +179,6 @@ describe("durability", () => {
     await flushPreferences();
     const before = readFileSync(file(), "utf8");
     const inoBefore = statSync(file()).ino;
-    spy.written = [];
 
     // Big enough that a non-atomic writeFile needs many syscalls and yields to
     // the event loop between them — that is the window this test polls.
@@ -205,41 +213,55 @@ describe("durability", () => {
 
     expect(reads).toBeGreaterThan(0);
 
-    // The polling reader above can only ever *catch* a non-atomic write; these
-    // three assertions prove the write could not have been one. No byte was
-    // written to the target path itself — every write went to a sibling in the
-    // same directory (same filesystem, so the rename that follows is atomic),
-    // and the target's inode changed, which an in-place truncate-and-write
-    // cannot do. The temp sibling is gone afterwards.
-    expect(spy.written.length).toBeGreaterThan(0);
-    for (const p of spy.written) {
-      expect(p).not.toBe(file());
-      expect(dirname(p)).toBe(dir);
-    }
+    // The polling reader above can only ever *catch* a non-atomic write; the
+    // inode is what proves the write could not have been one. The target the
+    // readers hold open is a different file from the one the new bytes went
+    // into, which is precisely what "committed by rename" means and what an
+    // in-place truncate-and-write cannot do, however it is spelled.
     expect(statSync(file()).ino).not.toBe(inoBefore);
-    expect(readdirSync(dir)).toEqual(["preferences.json"]);
+    // Nothing staged is left behind — wherever it was staged.
+    expect(filesUnder(dir)).toEqual(["preferences.json"]);
     expect(Object.keys(JSON.parse(readFileSync(file(), "utf8")))).toHaveLength(66);
   }, 30_000);
 
   it("patches within the debounce window collapse into one write", async () => {
     freshDir();
     loadPreferences(file());
-    vi.useFakeTimers();
+
+    // Real timers on purpose. AC 8 is a timing contract, and the only honest
+    // way to count writes is to watch the target while real time passes:
+    // under fake timers the store's fs work has not landed yet when the timer
+    // returns, so every sample looks the same and the test proves nothing.
+    const seen: (string | null)[] = [];
+    let stop = false;
+    const watch = (async () => {
+      while (!stop) {
+        const id = commitId();
+        if (seen.length === 0 || seen[seen.length - 1] !== id) seen.push(id);
+        await sleep(2);
+      }
+    })();
 
     patchPreferences({ a: 1 });
-    await vi.advanceTimersByTimeAsync(20);
+    await sleep(60);
     patchPreferences({ b: 2 });
-    await vi.advanceTimersByTimeAsync(20);
+    await sleep(60);
     patchPreferences({ c: 3 });
     expect(existsSync(file())).toBe(false); // nothing written yet
 
-    await vi.advanceTimersByTimeAsync(5_000); // well past the debounce window
+    await sleep(1_000); // well past the debounce window
     // an explicit flush on top of an already-fired debounce must not re-write
     await flushPreferences();
+    await sleep(20);
+    stop = true;
+    await watch;
 
-    expect(spy.renames).toBe(1);
+    // absent, then committed exactly once — three patches, one write
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBeNull();
+    expect(seen[1]).not.toBeNull();
     expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({ version: 1, a: 1, b: 2, c: 3 });
-  });
+  }, 30_000);
 
   it("a missing parent directory is created on first write", async () => {
     freshDir();
@@ -248,5 +270,148 @@ describe("durability", () => {
     patchPreferences({ theme: "dark" });
     await flushPreferences();
     expect(JSON.parse(readFileSync(nested, "utf8"))).toEqual({ version: 1, theme: "dark" });
+  });
+});
+
+describe("non-serializable values", () => {
+  it("an undefined value never reaches the file", async () => {
+    freshDir();
+    loadPreferences(file());
+
+    patchPreferences({ good: 1, bad: undefined });
+    await flushPreferences();
+
+    const text = readFileSync(file(), "utf8");
+    expect(text).not.toContain("undefined");
+    expect(() => JSON.parse(text)).not.toThrow();
+    expect(JSON.parse(text)).toEqual({ version: 1, good: 1 });
+
+    // and the document survives a reload — the whole point of the bug
+    _resetPreferencesForTests();
+    expect(loadPreferences(file())).toEqual({ version: 1, good: 1 });
+  });
+
+  it("an undefined value deletes an existing key, like null", async () => {
+    freshDir();
+    loadPreferences(file());
+    patchPreferences({ theme: "dark", locale: "pl" });
+    await flushPreferences();
+
+    patchPreferences({ theme: undefined });
+    await flushPreferences();
+
+    expect(getPreferences()).toEqual({ version: 1, locale: "pl" });
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({ version: 1, locale: "pl" });
+  });
+
+  it("a function or a symbol value never reaches the file", async () => {
+    freshDir();
+    loadPreferences(file());
+
+    patchPreferences({ good: 1, fn: () => 42, sym: Symbol("nope") });
+    await flushPreferences();
+
+    const text = readFileSync(file(), "utf8");
+    expect(() => JSON.parse(text)).not.toThrow();
+    expect(JSON.parse(text)).toEqual({ version: 1, good: 1 });
+    expect(getPreferences()).toEqual({ version: 1, good: 1 });
+  });
+});
+
+describe("a failed write", () => {
+  it("is logged, does not reject, and is retried by the next flush", async () => {
+    freshDir();
+    loadPreferences(file());
+    // The target path is a directory, so the commit (whatever syscall performs
+    // it) cannot replace it. Unlike chmod this also holds when the tests run
+    // as root.
+    mkdirSync(file());
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    patchPreferences({ theme: "dark" });
+    await expect(flushPreferences()).resolves.toBeUndefined();
+
+    expect(errors).toHaveBeenCalled();
+    expect(statSync(file()).isDirectory()).toBe(true); // nothing was committed
+    expect(getPreferences()).toEqual({ version: 1, theme: "dark" }); // memory intact
+
+    // The change must not be forgotten: once the target is writable again, a
+    // later flush — the shutdown one, with no new patch behind it — retries.
+    rmSync(file(), { recursive: true, force: true });
+    await flushPreferences();
+
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({ version: 1, theme: "dark" });
+
+    // and nothing is left behind from the failed attempt
+    expect(filesUnder(dir)).toEqual(["preferences.json"]);
+  });
+});
+
+describe("document version", () => {
+  it("a v1 file loads and is rewritten as v1", async () => {
+    freshDir();
+    writeFileSync(file(), JSON.stringify({ version: 1, theme: "dark" }), "utf8");
+    expect(loadPreferences(file()).version).toBe(1);
+
+    patchPreferences({ locale: "pl" });
+    await flushPreferences();
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({
+      version: 1,
+      theme: "dark",
+      locale: "pl",
+    });
+  });
+
+  it("a missing or malformed version normalizes to 1 and still writes", async () => {
+    for (const bad of [undefined, null, 0, -1, 1.5, "1", "2", true, {}] as unknown[]) {
+      freshDir();
+      const raw: Record<string, unknown> = { theme: "dark" };
+      if (bad !== undefined) raw.version = bad;
+      writeFileSync(file(), JSON.stringify(raw), "utf8");
+
+      expect(loadPreferences(file())).toEqual({ version: 1, theme: "dark" });
+
+      patchPreferences({ locale: "pl" });
+      await flushPreferences();
+      expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({
+        version: 1,
+        theme: "dark",
+        locale: "pl",
+      });
+      _resetPreferencesForTests();
+      rmSync(dir, { recursive: true, force: true });
+      dir = "";
+    }
+  });
+
+  it("a newer version is kept in memory and the file is never rewritten", async () => {
+    freshDir();
+    const raw = JSON.stringify({ version: 2, newShape: { left: 240 } });
+    writeFileSync(file(), raw, "utf8");
+
+    expect(loadPreferences(file())).toEqual({ version: 2, newShape: { left: 240 } });
+    expect(getPreferences().version).toBe(2);
+
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const inoBefore = statSync(file()).ino;
+
+    patchPreferences({ theme: "dark" });
+    await flushPreferences();
+
+    // byte-for-byte untouched
+    expect(readFileSync(file(), "utf8")).toBe(raw);
+    expect(statSync(file()).ino).toBe(inoBefore);
+    expect(filesUnder(dir)).toEqual(["preferences.json"]);
+
+    // and the store said why, once
+    const said = warnings.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(said).toMatch(/newer/i);
+    expect(said).toMatch(/version/i);
+    expect(warnings).toHaveBeenCalledTimes(1);
+
+    patchPreferences({ locale: "pl" });
+    await flushPreferences();
+    expect(readFileSync(file(), "utf8")).toBe(raw);
+    expect(warnings).toHaveBeenCalledTimes(1); // logged once, not per write
   });
 });
