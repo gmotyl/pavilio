@@ -3,17 +3,19 @@ import { renderHook, act } from "@testing-library/react";
 import { useWideMode } from "../useWideMode";
 
 describe("useWideMode", () => {
-  it("defaults to false (compact)", () => {
+  // The one deliberate behavior change of the preferences migration: a view
+  // with nothing stored used to open compact.
+  it("defaults to wide", () => {
     const { result } = renderHook(() => useWideMode("viewer"));
-    expect(result.current[0]).toBe(false);
+    expect(result.current[0]).toBe(true);
   });
 
   it("toggles wide mode", () => {
     const { result } = renderHook(() => useWideMode("viewer"));
     act(() => result.current[1]());
-    expect(result.current[0]).toBe(true);
-    act(() => result.current[1]());
     expect(result.current[0]).toBe(false);
+    act(() => result.current[1]());
+    expect(result.current[0]).toBe(true);
   });
 
   it("persists per key", () => {
@@ -22,9 +24,9 @@ describe("useWideMode", () => {
     unmount();
 
     const { result: r2 } = renderHook(() => useWideMode("repos"));
-    expect(r2.current[0]).toBe(true);
+    expect(r2.current[0]).toBe(false);
 
     const { result: r3 } = renderHook(() => useWideMode("notes"));
-    expect(r3.current[0]).toBe(false);
+    expect(r3.current[0]).toBe(true);
   });
 });

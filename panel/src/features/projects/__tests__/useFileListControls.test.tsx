@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { useFileListControls } from "../fileListControls";
-import { SORT_STORAGE_KEY } from "../fileListControls";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference, writePreference } from "../../../preferences/store";
 
 function Probe() {
   const { debouncedQuery, sortKey, sortDir, controlsBar } = useFileListControls();
@@ -42,17 +43,14 @@ describe("useFileListControls", () => {
     fireEvent.click(screen.getByTestId("file-list-sort-dir"));
     expect(screen.getByTestId("key").textContent).toBe("name");
     expect(screen.getByTestId("dir").textContent).toBe("asc");
-    expect(JSON.parse(localStorage.getItem(SORT_STORAGE_KEY)!)).toEqual({
+    expect(readPreference(preferences.fileListSort)).toEqual({
       sortKey: "name",
       sortDir: "asc",
     });
   });
 
   it("restores a persisted sort on mount", () => {
-    localStorage.setItem(
-      SORT_STORAGE_KEY,
-      JSON.stringify({ sortKey: "name", sortDir: "asc" }),
-    );
+    writePreference(preferences.fileListSort, { sortKey: "name", sortDir: "asc" });
     render(<Probe />);
     expect(screen.getByTestId("key").textContent).toBe("name");
     expect(screen.getByTestId("dir").textContent).toBe("asc");

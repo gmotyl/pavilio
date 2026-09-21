@@ -13,6 +13,7 @@ vi.mock("../../realtime/useWebSocket", () => ({
 }));
 
 import PlansTab from "../PlansTab";
+import { readLastSectionFile } from "../../shell/lastPath";
 
 // Legacy (flat) plan sources — files, not OpenSpec changes.
 const TREE = {
@@ -304,7 +305,7 @@ describe("PlansTab", () => {
     renderWithRouter(<PlansTab projectName="alokai" />);
     await screen.findByTestId("plans-tab-file-workspace-woo.md");
     await waitFor(() =>
-      expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+      expect(readLastSectionFile("alokai", "plans")).toBe(
         "/p/projects/alokai/plans/2026-01-01-foo.md",
       ),
     );
@@ -313,7 +314,7 @@ describe("PlansTab", () => {
     expect(screen.getByTestId("file-viewer-vscode")).toBeTruthy();
     expect(screen.getByTestId("file-viewer-copy-path")).toBeTruthy();
     await waitFor(() =>
-      expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+      expect(readLastSectionFile("alokai", "plans")).toBe(
         "/p/.kilo/plans/woo.md",
       ),
     );
@@ -817,7 +818,7 @@ describe("PlansTab archived toggle", () => {
       expect(activeRow().style.background).toBe("var(--bg-active)"),
     );
     await waitFor(() =>
-      expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+      expect(readLastSectionFile("alokai", "plans")).toBe(
         ACTIVE_ARTIFACT_PATH,
       ),
     );
@@ -838,7 +839,7 @@ describe("PlansTab archived toggle", () => {
         `plans-tab-file-project:archived-${NEWEST_ARCHIVED_LEGACY_FILE}`,
       ).style.background,
     ).toBe("transparent");
-    expect(sessionStorage.getItem("panel:lastFile:alokai:plans")).toBe(
+    expect(readLastSectionFile("alokai", "plans")).toBe(
       ACTIVE_ARTIFACT_PATH,
     );
   });

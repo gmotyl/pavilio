@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 import type { GrepResult } from "../search/grep";
 
 export type RepoSearchScope = "changed" | "branch-diff" | "commits";
-
-const SCOPE_KEY = "panel-repo-search-scope";
 
 export interface RepoFile {
   status: string;
@@ -20,17 +20,7 @@ export interface UseRepoSearchOptions {
 }
 
 export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
-  const [scope, setScopeState] = useState<RepoSearchScope>(
-    () => (localStorage.getItem(SCOPE_KEY) as RepoSearchScope) || "changed",
-  );
-  const setScope = (next: RepoSearchScope) => {
-    setScopeState(next);
-    try {
-      localStorage.setItem(SCOPE_KEY, next);
-    } catch {
-      // ignore
-    }
-  };
+  const [scope, setScope] = usePreference(preferences.repoSearchScope);
 
   const [files, setFiles] = useState<RepoFile[]>([]);
   const [grepResults, setGrepResults] = useState<GrepResult[]>([]);
@@ -69,6 +59,9 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
             }
           }
           if (scope === "branch-diff") {
+            // Still the raw key: GitBranchDiff writes it and moves to
+            // `git.branchDiff.base` in Task 7, and a reader must not change key
+            // ahead of its writer.
             const base = localStorage.getItem(
               `panel-branch-diff-base-${repo.path}`,
             );

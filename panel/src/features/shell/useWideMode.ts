@@ -1,23 +1,21 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 
 /**
  * Persisted wide/compact mode per view key.
  * Key examples: "viewer", "repos", "notes"
+ *
+ * The declared default is `true`: the old hook read `=== "true"`, so a fresh
+ * browser opened every view compact. Wide is the better starting point, and the
+ * registry is where that flip is made.
  */
 export function useWideMode(key: string) {
-  const storageKey = `panel-wide-${key}`;
-
-  const [wide, setWide] = useState(() => {
-    try { return localStorage.getItem(storageKey) === "true"; } catch { return false; }
-  });
+  const [wide, setWide] = usePreference(preferences.wideMode, key);
 
   const toggle = useCallback(() => {
-    setWide((prev) => {
-      const next = !prev;
-      try { localStorage.setItem(storageKey, String(next)); } catch {}
-      return next;
-    });
-  }, [storageKey]);
+    setWide(!wide);
+  }, [setWide, wide]);
 
   return [wide, toggle] as const;
 }

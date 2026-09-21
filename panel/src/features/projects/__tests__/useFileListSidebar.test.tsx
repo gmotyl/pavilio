@@ -1,10 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import {
-  useFileListSidebar,
-  FILE_LIST_SIDEBAR_KEY,
-  MOBILE_QUERY,
-} from "../useFileListSidebar";
+import { useFileListSidebar, MOBILE_QUERY } from "../useFileListSidebar";
+import { preferences } from "../../../preferences/declarations";
 
 /** Controllable matchMedia stub — jsdom has none. */
 function installMatchMedia(mobile: boolean) {
@@ -61,11 +58,19 @@ function Probe() {
 
 const collapsed = () => screen.getByTestId("collapsed").textContent;
 const peeking = () => screen.getByTestId("peeking").textContent;
-const stored = () => localStorage.getItem(FILE_LIST_SIDEBAR_KEY);
+/**
+ * The preference as the injected document holds it: `null` when nothing has
+ * been written, which is what the "without writing storage" cases assert.
+ */
+const KEY = preferences.fileListSidebarCollapsed.key;
+const doc = () =>
+  (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__!;
+const seed = (collapsed: boolean) => {
+  doc()[KEY] = collapsed;
+};
+const stored = () => doc()[KEY] ?? null;
 
 describe("useFileListSidebar", () => {
-  beforeEach(() => localStorage.clear());
-  afterEach(() => localStorage.clear());
 
   it("defaults to expanded on desktop", () => {
     installMatchMedia(false);
@@ -79,12 +84,12 @@ describe("useFileListSidebar", () => {
     render(<Probe />);
     fireEvent.click(screen.getByTestId("toggle"));
     expect(collapsed()).toBe("true");
-    expect(stored()).toBe("true");
+    expect(stored()).toBe(true);
   });
 
   it("reads the stored value on mount", () => {
     installMatchMedia(false);
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "true");
+    seed(true);
     render(<Probe />);
     expect(collapsed()).toBe("true");
   });
@@ -99,34 +104,34 @@ describe("useFileListSidebar", () => {
 
   it("starts collapsed on mobile even when storage says expanded", () => {
     installMatchMedia(true);
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "false");
+    seed(false);
     render(<Probe />);
     expect(collapsed()).toBe("true");
   });
 
   it("toggling on mobile never writes storage", () => {
     installMatchMedia(true);
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "false");
+    seed(false);
     render(<Probe />);
     fireEvent.click(screen.getByTestId("toggle"));
     expect(collapsed()).toBe("false");
-    expect(stored()).toBe("false");
+    expect(stored()).toBe(false);
   });
 
   it("collapseTransient re-collapses on mobile without writing storage", () => {
     installMatchMedia(true);
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "false");
+    seed(false);
     render(<Probe />);
     fireEvent.click(screen.getByTestId("toggle"));
     expect(collapsed()).toBe("false");
     fireEvent.click(screen.getByTestId("select"));
     expect(collapsed()).toBe("true");
-    expect(stored()).toBe("false");
+    expect(stored()).toBe(false);
   });
 
   it("returning to desktop restores the stored preference", () => {
     const mm = installMatchMedia(true);
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "false");
+    seed(false);
     render(<Probe />);
     expect(collapsed()).toBe("true");
     mm.setMobile(false);
@@ -135,30 +140,30 @@ describe("useFileListSidebar", () => {
 
   it("startPeek expands a stored-collapsed sidebar without writing storage", () => {
     installMatchMedia(false);
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "true");
+    seed(true);
     render(<Probe />);
     expect(collapsed()).toBe("true");
     fireEvent.click(screen.getByTestId("start-peek"));
     expect(collapsed()).toBe("false");
     expect(peeking()).toBe("true");
-    expect(stored()).toBe("true");
+    expect(stored()).toBe(true);
   });
 
   it("endPeek re-collapses the peek without writing storage", () => {
     installMatchMedia(false);
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "true");
+    seed(true);
     render(<Probe />);
     fireEvent.click(screen.getByTestId("start-peek"));
     expect(collapsed()).toBe("false");
     fireEvent.click(screen.getByTestId("end-peek"));
     expect(collapsed()).toBe("true");
     expect(peeking()).toBe("false");
-    expect(stored()).toBe("true");
+    expect(stored()).toBe(true);
   });
 
   it("toggle pins the sidebar open and clears an active peek", () => {
     installMatchMedia(false);
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "true");
+    seed(true);
     render(<Probe />);
     fireEvent.click(screen.getByTestId("start-peek"));
     expect(peeking()).toBe("true");
@@ -166,7 +171,7 @@ describe("useFileListSidebar", () => {
     // stored pref flips to expanded (pinned) and peek is cleared
     expect(collapsed()).toBe("false");
     expect(peeking()).toBe("false");
-    expect(stored()).toBe("false");
+    expect(stored()).toBe(false);
   });
 
   it("while pinned open, peeking does not toggle the stored pref", () => {
@@ -183,7 +188,7 @@ describe("useFileListSidebar", () => {
   it("startPeek is a no-op when the sidebar is pinned open", () => {
     installMatchMedia(false);
     // stored expanded (pinned open) on desktop
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "false");
+    seed(false);
     render(<Probe />);
     expect(collapsed()).toBe("false");
     fireEvent.click(screen.getByTestId("start-peek"));

@@ -1,25 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 
-/** One key for every tab and project — browsing vs reading is a mode, not a per-tab pref. */
-export const FILE_LIST_SIDEBAR_KEY = "panel:fileListSidebar.collapsed";
 /** Same breakpoint as TerminalLayoutGrid. */
 export const MOBILE_QUERY = "(max-width: 767px)";
-
-function readStored(): boolean {
-  try {
-    return localStorage.getItem(FILE_LIST_SIDEBAR_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function writeStored(value: boolean) {
-  try {
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, String(value));
-  } catch {
-    // ignore quota / private-mode errors
-  }
-}
 
 function matchesMobile(): boolean {
   return window.matchMedia?.(MOBILE_QUERY).matches ?? false;
@@ -45,7 +29,11 @@ export interface FileListSidebarState {
 }
 
 export function useFileListSidebar(): FileListSidebarState {
-  const [storedCollapsed, setStoredCollapsed] = useState(readStored);
+  // One preference for every tab and project — browsing vs reading is a mode,
+  // not a per-tab choice.
+  const [storedCollapsed, setStoredCollapsed] = usePreference(
+    preferences.fileListSidebarCollapsed,
+  );
   const [isMobile, setIsMobile] = useState(matchesMobile);
   // null = follow the stored preference. Only ever set while mobile.
   const [transient, setTransient] = useState<boolean | null>(() =>
@@ -86,8 +74,7 @@ export function useFileListSidebar(): FileListSidebarState {
     setPeeking(false);
     setTransient(null);
     setStoredCollapsed(next);
-    writeStored(next);
-  }, [collapsed, isMobile, storedCollapsed]);
+  }, [collapsed, isMobile, setStoredCollapsed, storedCollapsed]);
 
   const collapseTransient = useCallback(() => {
     if (isMobile) setTransient(true);

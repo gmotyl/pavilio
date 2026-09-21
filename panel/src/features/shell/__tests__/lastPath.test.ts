@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   readLastPath,
   writeLastPath,
-  STORAGE_PREFIX,
   readLastReposQuery,
   writeLastReposQuery,
   clearLastReposQuery,
 } from "../lastPath";
+import { preferences } from "../../../preferences/declarations";
 
 describe("lastPath helpers", () => {
   beforeEach(() => {
@@ -15,8 +15,10 @@ describe("lastPath helpers", () => {
 
   it("writes the path under the project-scoped key", () => {
     writeLastPath("pavilio", "/project/pavilio/repos?file=a.ts");
-    expect(sessionStorage.getItem(`${STORAGE_PREFIX}pavilio`)).toBe(
-      "/project/pavilio/repos?file=a.ts",
+    // Still sessionStorage, still one key per project — the declaration's key
+    // now, and JSON as every stored preference is.
+    expect(sessionStorage.getItem(`${preferences.lastPath.key}@pavilio`)).toBe(
+      JSON.stringify("/project/pavilio/repos?file=a.ts"),
     );
   });
 

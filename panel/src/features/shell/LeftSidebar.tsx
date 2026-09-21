@@ -16,6 +16,8 @@ import {
   Terminal as TerminalIcon,
   Wifi,
 } from "lucide-react";
+import { preferences } from "../../preferences/declarations";
+import { readPreference, writePreference } from "../../preferences/store";
 import GitSummary from "../git/GitSummary";
 import { MobileAccessModal } from "../mobile-access/MobileAccessModal";
 import { LanAccessModal } from "../lan-access/LanAccessModal";
@@ -122,19 +124,17 @@ export default function LeftSidebar() {
   const [expanded, setExpandedState] = useState<Record<string, boolean>>(
     () => ({}),
   );
-  // Hydrate expand state from localStorage for any projects not yet in state
+  // Hydrate expand state from the stored preference for any projects not yet
+  // in state. One preference per project, read directly rather than through
+  // `usePreference`: the project list is dynamic, so a hook per project would
+  // change in number between renders.
   useEffect(() => {
     if (projects.length === 0) return;
     setExpandedState((prev) => {
       const patch: Record<string, boolean> = {};
       for (const p of projects) {
         if (prev[p.name] === undefined) {
-          try {
-            patch[p.name] =
-              localStorage.getItem(`panel-project-expanded-${p.name}`) === "true";
-          } catch {
-            patch[p.name] = false;
-          }
+          patch[p.name] = readPreference(preferences.projectExpanded, p.name);
         }
       }
       return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
@@ -146,11 +146,7 @@ export default function LeftSidebar() {
   );
   const setExpanded = useCallback((name: string, value: boolean) => {
     setExpandedState((prev) => ({ ...prev, [name]: value }));
-    try {
-      localStorage.setItem(`panel-project-expanded-${name}`, String(value));
-    } catch {
-      // ignore
-    }
+    writePreference(preferences.projectExpanded, value, name);
   }, []);
 
   const handleCreateTerminal = useCallback(

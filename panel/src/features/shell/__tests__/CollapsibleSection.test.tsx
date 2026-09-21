@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import CollapsibleSection from "../CollapsibleSection";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference } from "../../../preferences/store";
 
 describe("CollapsibleSection", () => {
   beforeEach(() => {
@@ -32,7 +34,7 @@ describe("CollapsibleSection", () => {
     expect(screen.queryByTestId("child")).not.toBeInTheDocument();
   });
 
-  it("persists collapsed state to localStorage and restores it on remount", async () => {
+  it("persists collapsed state and restores it on remount", async () => {
     const user = userEvent.setup();
     const { unmount } = render(
       <CollapsibleSection storageKey="test.section.c" title="Commands">
@@ -40,7 +42,9 @@ describe("CollapsibleSection", () => {
       </CollapsibleSection>
     );
     await user.click(screen.getByRole("button", { name: /commands/i }));
-    expect(localStorage.getItem("rightSidebar.test.section.c.expanded")).toBe("false");
+    expect(
+      readPreference(preferences.rightSidebarSectionExpanded, "test.section.c"),
+    ).toBe(false);
 
     unmount();
 

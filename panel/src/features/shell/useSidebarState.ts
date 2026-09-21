@@ -1,44 +1,30 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 
 type SidebarKey = "leftSidebar" | "rightSidebar";
 
-function readStorage(key: SidebarKey): boolean {
-  try {
-    const val = localStorage.getItem(`panel:${key}`);
-    return val === null ? true : val === "true";
-  } catch {
-    return true;
-  }
-}
-
-function writeStorage(key: SidebarKey, value: boolean) {
-  try {
-    localStorage.setItem(`panel:${key}`, String(value));
-  } catch {
-    // ignore
-  }
-}
+/** Two declarations rather than one scoped preference: the sides are not a list. */
+const DECLARATIONS = {
+  leftSidebar: preferences.leftSidebarExpanded,
+  rightSidebar: preferences.rightSidebarExpanded,
+} as const;
 
 export function useSidebarState(key: SidebarKey) {
-  const [expanded, setExpandedState] = useState(() => readStorage(key));
+  const [expanded, setStored] = usePreference(DECLARATIONS[key]);
 
   const toggle = useCallback(() => {
-    setExpandedState((prev) => {
-      const next = !prev;
-      writeStorage(key, next);
-      return next;
-    });
-  }, [key]);
+    setStored(!expanded);
+  }, [expanded, setStored]);
 
   const setExpanded = useCallback(
     (value: boolean) => {
-      setExpandedState((prev) => {
-        if (prev === value) return prev;
-        writeStorage(key, value);
-        return value;
-      });
+      // Still guarded: an idempotent set skipped its write before, and now it
+      // also skips a PATCH.
+      if (expanded === value) return;
+      setStored(value);
     },
-    [key],
+    [expanded, setStored],
   );
 
   return { expanded, toggle, setExpanded };

@@ -36,6 +36,7 @@ vi.mock("../../speech/useSpeechHost", async () => {
 });
 
 import LeftSidebar from "../LeftSidebar";
+import { writeLastPath } from "../lastPath";
 import ProjectRedirect from "../../projects/ProjectRedirect";
 import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
 import {
@@ -177,10 +178,7 @@ describe("LeftSidebar terminal-session row navigation", () => {
   });
 
   it("clicking a terminal-session row navigates to the project's last-open path instead of forcing iterm", () => {
-    sessionStorage.setItem(
-      "panel:lastPath:vector",
-      "/project/vector/memo?file=x",
-    );
+    writeLastPath("vector", "/project/vector/memo?file=x");
     setup();
     expandAndClickSession();
     // Exact-match on textContent — toHaveTextContent does a substring match,
@@ -231,7 +229,7 @@ describe("LeftSidebar terminal-session row highlight", () => {
   it("keeps the clicked session highlighted when the bare-route redirect lands back on the same iterm view", async () => {
     // Already reading this project's terminals; the row click bounces through
     // the bare project route and comes straight back here.
-    sessionStorage.setItem("panel:lastPath:vector", "/project/vector/iterm");
+    writeLastPath("vector", "/project/vector/iterm");
     setup("/project/vector/iterm");
     expandAndClickSession();
     await waitFor(() => {
