@@ -1,5 +1,6 @@
 import {
   nextProjectName,
+  writeTerminalFocus,
   type SessionMeta,
   type CreateSessionOpts,
 } from "./useTerminalSessions";
@@ -23,11 +24,11 @@ export async function createTerminalSession(
     });
     if (!res.ok) return null;
     const created: SessionMeta = await res.json();
-    try {
-      localStorage.setItem(`panel-terminal-focus-${project}`, created.id);
-    } catch {
-      // ignore
-    }
+    // Persist BEFORE the caller dispatches the focus broadcast: LeftSidebar
+    // drops a broadcast whose project does not match the one it is showing and
+    // re-reads the stored focus after the switch, so a writer that dispatched
+    // first would lose the focus across a project navigation.
+    writeTerminalFocus(project, created.id);
     return created;
   } catch {
     return null;

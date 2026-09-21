@@ -3,6 +3,21 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TerminalDrawerProvider } from "../useTerminalDrawer";
 import TerminalDrawer from "../TerminalDrawer";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference, writePreference } from "../../../preferences/store";
+
+/**
+ * The drawer's open intent, width and side are PORTABLE: the shape of the
+ * panel is a choice, not a fact about this machine, so all three live in the
+ * workspace document rather than in browser storage.
+ */
+const setOpenPref = (v: boolean) => writePreference(preferences.terminalDrawerOpen, v);
+const setWidthPref = (v: number) => writePreference(preferences.terminalDrawerWidth, v);
+const setSidePref = (v: "left" | "right") =>
+  writePreference(preferences.terminalDrawerSide, v);
+const widthPref = () => readPreference(preferences.terminalDrawerWidth);
+const sidePref = () => readPreference(preferences.terminalDrawerSide);
+
 
 vi.mock("../ProjectTerminalsSurface", () => ({
   __esModule: true,
@@ -17,9 +32,9 @@ function renderAt(
   width = 480,
   side: "left" | "right" = "right",
 ) {
-  if (open) localStorage.setItem("panel:terminalDrawer:open", "true");
-  localStorage.setItem("panel:terminalDrawer:width", String(width));
-  localStorage.setItem("panel:terminalDrawer:side", side);
+  if (open) setOpenPref(true);
+  setWidthPref(width);
+  setSidePref(side);
   return render(
     <MemoryRouter initialEntries={[path]}>
       <TerminalDrawerProvider>
@@ -128,7 +143,7 @@ describe("TerminalDrawer", () => {
     handle.focus();
     fireEvent.keyDown(handle, { key: "ArrowLeft" });
     expect(screen.getByTestId("terminal-drawer")).toHaveStyle({ width: "496px" });
-    expect(localStorage.getItem("panel:terminalDrawer:width")).toBe("496");
+    expect(widthPref()).toBe(496);
   });
 
   it("grows on ArrowRight when docked left", () => {
@@ -226,7 +241,7 @@ describe("TerminalDrawer", () => {
       "data-side",
       "left",
     );
-    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("left");
+    expect(sidePref()).toBe("left");
     expect(
       screen.queryByTestId("terminal-drawer-dropzone"),
     ).not.toBeInTheDocument();
@@ -319,7 +334,7 @@ describe("TerminalDrawer", () => {
       "data-side",
       "right",
     );
-    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("right");
+    expect(sidePref()).toBe("right");
   });
 
   it("drops the pending side when the drag returns inside the guard", () => {
@@ -344,7 +359,7 @@ describe("TerminalDrawer", () => {
       "data-side",
       "right",
     );
-    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("right");
+    expect(sidePref()).toBe("right");
   });
 
   it("disarms the drag on pointercancel instead of leaving it primed", () => {
@@ -372,7 +387,7 @@ describe("TerminalDrawer", () => {
       "data-side",
       "right",
     );
-    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("right");
+    expect(sidePref()).toBe("right");
   });
 
   it("disarms the drag when pointer capture is lost", () => {
@@ -391,7 +406,7 @@ describe("TerminalDrawer", () => {
       "data-side",
       "right",
     );
-    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("right");
+    expect(sidePref()).toBe("right");
   });
 
   it("does not start a side drag from the close button", () => {

@@ -27,10 +27,12 @@ function setup(
   side: "left" | "right" = "right",
   opts: { width?: number; leftExpanded?: boolean; rightExpanded?: boolean } = {},
 ) {
-  if (open) localStorage.setItem("panel:terminalDrawer:open", "true");
-  localStorage.setItem("panel:terminalDrawer:side", side);
+  // The drawer's open intent, side and width are portable preferences now,
+  // not raw localStorage keys.
+  if (open) writePreference(preferences.terminalDrawerOpen, true);
+  writePreference(preferences.terminalDrawerSide, side);
   if (opts.width) {
-    localStorage.setItem("panel:terminalDrawer:width", String(opts.width));
+    writePreference(preferences.terminalDrawerWidth, opts.width);
   }
   if (opts.leftExpanded === false) {
     writePreference(preferences.leftSidebarExpanded, false);

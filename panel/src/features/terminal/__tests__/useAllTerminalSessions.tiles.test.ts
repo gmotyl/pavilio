@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAllTerminalSessions } from "../useAllTerminalSessions";
 import { __resetSessionStoreForTests } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
+import { storageKey } from "../../../preferences/types";
 import { GRID, getLayoutPresets, readingOrder, type TileLayout } from "../tileLayout";
 
 // The session list now arrives from the tab-wide store, so the realtime dependency
@@ -62,7 +65,10 @@ const idsOf = (layout: TileLayout) => readingOrder(layout).map((t) => t.sessionI
 const presetFor = (count: number, label: string) =>
   getLayoutPresets(count).find((p) => p.label === label)!;
 
-const GRID_KEY = "panel-terminal-grid-__all__";
+/** `terminal.grid` under the cross-project `__all__` scope; `portable: false`. */
+const GRID_KEY = storageKey(preferences.terminalGrid, "__all__");
+const storeTiles = (layout: unknown) =>
+  writePreference(preferences.terminalGrid, layout as never, "__all__");
 
 describe("useAllTerminalSessions tiling", () => {
   beforeEach(() => {
@@ -79,12 +85,12 @@ describe("useAllTerminalSessions tiling", () => {
     vi.restoreAllMocks();
   });
 
-  it("initialises the tiling from panel-terminal-grid-__all__", async () => {
+  it("initialises the tiling from the stored grid preference", async () => {
     const stored: TileLayout = [
       { sessionId: "a", x: 0, y: 0, w: 48, h: 32 },
       { sessionId: "b", x: 0, y: 32, w: 48, h: 16 },
     ];
-    localStorage.setItem(GRID_KEY, JSON.stringify(stored));
+    storeTiles(stored);
     mockFetchSessions([session("a", "vector"), session("b", "metro")]);
 
     const { result } = await setup();

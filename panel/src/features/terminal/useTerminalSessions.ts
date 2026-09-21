@@ -1,8 +1,42 @@
 import { useState, useEffect, useCallback } from "react";
+import { preferences } from "../../preferences/declarations";
+import { clearPreference, readPreference, writePreference } from "../../preferences/store";
 import { destroyTerminal } from "./terminalInstances";
 import { useTerminalOrdering } from "./useTerminalOrdering";
 
 export const TERMINAL_FOCUS_EVENT = "panel-terminal-focus";
+
+/**
+ * The project's remembered focused session, and the one way to change it.
+ *
+ * `terminal.focus` is `portable: false` on purpose: the value is a LIVE SESSION
+ * ID, which means nothing on another machine and must never reach a file that
+ * gets committed and carried to one. It stays in `localStorage`, exactly where
+ * it was — only the key and the codec moved.
+ *
+ * Both helpers live here, and every writer of the focused session imports
+ * them: this hook, `createTerminalSession`, `QuickTerminalModal`,
+ * `TerminalsSurface`, and `LeftSidebar`. That is not tidiness — `LeftSidebar`
+ * READS this key and drops a focus broadcast whose project does not match, so a
+ * reader on a different key from its writers highlights nothing. One pair of
+ * functions is what keeps them from drifting apart again.
+ *
+ * A blank project is not a scope: `storageKey` throws on one rather than
+ * letting every project share a single key, so an unresolved project reads the
+ * declared default and writes nothing.
+ */
+export function readTerminalFocus(project: string | null | undefined): string | null {
+  if (!project || project.trim() === "") return preferences.terminalFocus.default;
+  return readPreference(preferences.terminalFocus, project);
+}
+
+export function writeTerminalFocus(project: string, sessionId: string | null): void {
+  if (project.trim() === "") return;
+  // Unfocusing CLEARS rather than storing `null`, mirroring the `removeItem`
+  // this replaces: "nothing focused" is the absence of a value, not a value.
+  if (sessionId) writePreference(preferences.terminalFocus, sessionId, project);
+  else clearPreference(preferences.terminalFocus, project);
+}
 
 export interface TerminalFocusEventDetail {
   project: string;
@@ -56,29 +90,17 @@ export function nextProjectName(
 
 export function useTerminalSessions(project: string) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
-  const [focusedId, setFocusedIdState] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(`panel-terminal-focus-${project}`);
-    } catch (err) {
-      console.warn(`[terminal] read focus from localStorage failed:`, err);
-      return null;
-    }
-  });
+  const [focusedId, setFocusedIdState] = useState<string | null>(() =>
+    readTerminalFocus(project),
+  );
 
   const setFocusedId = useCallback(
     (id: string | null) => {
       setFocusedIdState(id);
-      try {
-        if (id) {
-          localStorage.setItem(`panel-terminal-focus-${project}`, id);
-        } else {
-          localStorage.removeItem(`panel-terminal-focus-${project}`);
-        }
-      } catch (err) {
-        console.warn(`[terminal] write focus to localStorage failed:`, err);
-      }
+      writeTerminalFocus(project, id);
       // Broadcast so other surfaces (sidebar, mobile rail) stay in sync
-      // when focus changes from the iTerm grid/spine.
+      // when focus changes from the iTerm grid/spine. Persist first, then
+      // dispatch — see LeftSidebar's note on why that order is load-bearing.
       if (id) dispatchTerminalFocus(project, id);
     },
     [project],
@@ -135,17 +157,12 @@ export function useTerminalSessions(project: string) {
   // same project string.
   useEffect(() => {
     setSessions([]);
-    try {
-      const storedFocus = localStorage.getItem(`panel-terminal-focus-${project}`);
-      setFocusedIdState(storedFocus);
-    } catch {
-      setFocusedIdState(null);
-    }
+    setFocusedIdState(readTerminalFocus(project));
   }, [project]);
 
   // Listen for "focus this session" broadcasts (e.g. left sidebar click
   // while user is already on this project's iTerm tab, so no remount
-  // happens to re-read localStorage). Also refetch sessions: when the
+  // happens to re-read the stored focus). Also refetch sessions: when the
   // sidebar's "+" button creates a session via direct fetch, our local
   // `sessions` state is stale until we refetch — without this, the new
   // session id is set as focusedId but no terminal renders for it.
@@ -153,19 +170,12 @@ export function useTerminalSessions(project: string) {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<TerminalFocusEventDetail>).detail;
       if (!detail || detail.project !== project) return;
-      // Use the bare state setter and write localStorage directly — calling
-      // setFocusedId here would re-dispatch the event and recurse infinitely.
+      // Use the bare state setter and persist directly — calling setFocusedId
+      // here would re-dispatch the event and recurse infinitely.
       setFocusedIdState((current) =>
         current === detail.sessionId ? current : detail.sessionId,
       );
-      try {
-        localStorage.setItem(
-          `panel-terminal-focus-${project}`,
-          detail.sessionId,
-        );
-      } catch {
-        // ignore
-      }
+      writeTerminalFocus(project, detail.sessionId);
       // Only refetch if the session isn't already in our list — covers
       // sidebar "+" creates that haven't propagated to our local sessions yet.
       setSessions((prev) => {
@@ -239,18 +249,7 @@ export function useTerminalSessions(project: string) {
       removeId(id);
       setFocusedIdState((prev) => {
         const next = prev === id ? null : prev;
-        try {
-          if (next) {
-            localStorage.setItem(`panel-terminal-focus-${project}`, next);
-          } else {
-            localStorage.removeItem(`panel-terminal-focus-${project}`);
-          }
-        } catch (err) {
-          console.warn(
-            `[terminal] persist focus after delete failed:`,
-            err,
-          );
-        }
+        writeTerminalFocus(project, next);
         return next;
       });
     } catch (err) {

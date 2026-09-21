@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAllTerminalSessions } from "../useAllTerminalSessions";
 import { __resetSessionStoreForTests, sessionSubscriberCount } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
 import { getLayoutPresets, readingOrder, type TileLayout } from "../tileLayout";
 
 // The store's realtime dependency, stubbed so nothing opens a socket.
@@ -40,7 +42,9 @@ const fetchMock = vi.fn(() =>
 const settle = () => act(async () => void (await vi.advanceTimersByTimeAsync(0)));
 
 const POLL_MS = 8000;
-const ORDER_KEY = "panel-terminal-order-__all__";
+/** `terminal.order` under the cross-project `__all__` scope; `portable: false`. */
+const storeOrder = (order: string[]) =>
+  writePreference(preferences.terminalOrder, order, "__all__");
 
 type Hook = ReturnType<typeof useAllTerminalSessions>;
 
@@ -119,7 +123,7 @@ describe("useAllTerminalSessions over the shared session store", () => {
   it("a changed list flows through to ordered sessions", async () => {
     // A stored order the server's order disagrees with, so "ordered by the hook's
     // own useTerminalOrdering" is distinguishable from "as the server sent it".
-    localStorage.setItem(ORDER_KEY, JSON.stringify(["c", "b", "a"]));
+    storeOrder(["c", "b", "a"]);
     respond(["a", "b", "c"]);
 
     const consumer = mountConsumer();

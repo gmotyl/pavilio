@@ -9,7 +9,11 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
-import { dispatchTerminalFocus } from "../../terminal/useTerminalSessions";
+import {
+  dispatchTerminalFocus,
+  readTerminalFocus,
+  writeTerminalFocus,
+} from "../../terminal/useTerminalSessions";
 import type { CellSpeechState } from "../../speech/types";
 
 /**
@@ -197,10 +201,10 @@ describe("LeftSidebar terminal-session row navigation", () => {
     );
   });
 
-  it("clicking a terminal-session row still marks that session focused in localStorage", () => {
+  it("clicking a terminal-session row still marks that session focused", () => {
     setup();
     expandAndClickSession();
-    expect(localStorage.getItem("panel-terminal-focus-vector")).toBe("s1");
+    expect(readTerminalFocus("vector")).toBe("s1");
   });
 
   it("the + new-terminal button still navigates straight to iterm (unchanged)", async () => {
@@ -243,7 +247,7 @@ describe("LeftSidebar terminal-session row highlight", () => {
   });
 
   it("highlights the stored session when arriving on an iterm view without a focus broadcast", async () => {
-    localStorage.setItem("panel-terminal-focus-vector", "s1");
+    writeTerminalFocus("vector", "s1");
     setup("/project/vector/iterm");
     fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
     expect(screen.getByTestId("sidebar-session-s1").style.background).toBe(
@@ -254,7 +258,7 @@ describe("LeftSidebar terminal-session row highlight", () => {
   it("highlights the focused session while a non-terminal section of the project is open", () => {
     // Inverted from the old rule: the Cmd+B drawer renders precisely here, so
     // the section the drawer lives on must show the highlight, not hide it.
-    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    writeTerminalFocus("vector", "s2");
     setup("/project/vector/memo");
     expand("vector");
     expect(rowBackground("s2")).toBe(HIGHLIGHTED);
@@ -262,7 +266,7 @@ describe("LeftSidebar terminal-session row highlight", () => {
   });
 
   it("still highlights the focused session on the terminal route", () => {
-    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    writeTerminalFocus("vector", "s2");
     setup("/project/vector/iterm");
     expand("vector");
     expect(rowBackground("s2")).toBe(HIGHLIGHTED);
@@ -270,14 +274,14 @@ describe("LeftSidebar terminal-session row highlight", () => {
   });
 
   it("highlights the focused session on the bare project route", () => {
-    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    writeTerminalFocus("vector", "s2");
     setup("/project/vector");
     expand("vector");
     expect(rowBackground("s2")).toBe(HIGHLIGHTED);
   });
 
   it("a focus broadcast for the current project moves the highlight without navigating", () => {
-    localStorage.setItem("panel-terminal-focus-vector", "s1");
+    writeTerminalFocus("vector", "s1");
     setup("/project/vector/memo");
     expand("vector");
     expect(rowBackground("s1")).toBe(HIGHLIGHTED);
@@ -292,8 +296,8 @@ describe("LeftSidebar terminal-session row highlight", () => {
   });
 
   it("does not highlight rows of a project that is not the current one", () => {
-    localStorage.setItem("panel-terminal-focus-vector", "s2");
-    localStorage.setItem("panel-terminal-focus-atlas", "a1");
+    writeTerminalFocus("vector", "s2");
+    writeTerminalFocus("atlas", "a1");
     setup("/project/vector/memo");
     expand("vector");
     expand("atlas");
@@ -302,7 +306,7 @@ describe("LeftSidebar terminal-session row highlight", () => {
   });
 
   it("a focus broadcast for another project leaves the highlight alone", () => {
-    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    writeTerminalFocus("vector", "s2");
     setup("/project/vector/memo");
     expand("vector");
     expand("atlas");
@@ -314,7 +318,7 @@ describe("LeftSidebar terminal-session row highlight", () => {
   });
 
   it("highlights nothing when the route names no project", () => {
-    localStorage.setItem("panel-terminal-focus-vector", "s2");
+    writeTerminalFocus("vector", "s2");
     setup("/terminals");
     expand("vector");
     expect(rowBackground("s1")).toBe(PLAIN);
@@ -322,7 +326,7 @@ describe("LeftSidebar terminal-session row highlight", () => {
   });
 
   it("a remembered id that names no live session highlights nothing", () => {
-    localStorage.setItem("panel-terminal-focus-vector", "ghost");
+    writeTerminalFocus("vector", "ghost");
     setup("/project/vector/iterm");
     expand("vector");
     expect(rowBackground("s1")).toBe(PLAIN);

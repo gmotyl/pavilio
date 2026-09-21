@@ -10,7 +10,20 @@ import {
   TerminalDrawerProvider,
   useTerminalDrawer,
 } from "../useTerminalDrawer";
-import type { SessionMeta } from "../useTerminalSessions";
+import {
+  readTerminalFocus,
+  writeTerminalFocus,
+  type SessionMeta,
+} from "../useTerminalSessions";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference, writePreference } from "../../../preferences/store";
+
+/** Session-keyed, so `portable: false` — localStorage, never the workspace file. */
+const storeOrder = (project: string, order: string[]) =>
+  writePreference(preferences.terminalOrder, order, project);
+/** The drawer's open intent is portable: the workspace document holds it. */
+const setOpenPref = (v: boolean) => writePreference(preferences.terminalDrawerOpen, v);
+const openPref = () => readPreference(preferences.terminalDrawerOpen);
 
 vi.mock("../TerminalView", () => ({
   default: ({ sessionId }: { sessionId: string }) => (
@@ -89,13 +102,10 @@ describe("pickFirstSessionId / orderProjectSessions", () => {
     expect(pickFirstSessionId([a, b], "pavilio")).toBe("a");
   });
 
-  it("honors persisted order in localStorage", () => {
+  it("honors the persisted session order", () => {
     const a = makeSession({ id: "a" });
     const b = makeSession({ id: "b" });
-    localStorage.setItem(
-      "panel-terminal-order-pavilio",
-      JSON.stringify(["b", "a"]),
-    );
+    storeOrder("pavilio", ["b", "a"]);
     expect(pickFirstSessionId([a, b], "pavilio")).toBe("b");
     const ordered = orderProjectSessions([a, b], "pavilio");
     expect(ordered.map((s) => s.id)).toEqual(["b", "a"]);
@@ -106,20 +116,20 @@ describe("pickInitialSessionId", () => {
   it("prefers the last-focused session when still alive", () => {
     const a = makeSession({ id: "a" });
     const b = makeSession({ id: "b" });
-    localStorage.setItem("panel-terminal-focus-pavilio", "b");
+    writeTerminalFocus("pavilio", "b");
     expect(pickInitialSessionId([a, b], "pavilio")).toBe("b");
   });
 
   it("falls back to first when the last-focused session is gone", () => {
     const a = makeSession({ id: "a" });
-    localStorage.setItem("panel-terminal-focus-pavilio", "zombie");
+    writeTerminalFocus("pavilio", "zombie");
     expect(pickInitialSessionId([a], "pavilio")).toBe("a");
   });
 
   it("ignores a last-focused id from a different project", () => {
     const a = makeSession({ id: "a", project: "pavilio" });
     const b = makeSession({ id: "b", project: "other" });
-    localStorage.setItem("panel-terminal-focus-pavilio", "b");
+    writeTerminalFocus("pavilio", "b");
     expect(pickInitialSessionId([a, b], "pavilio")).toBe("a");
   });
 });
@@ -133,7 +143,7 @@ describe("QuickTerminalModal", () => {
   });
 
   it("opens on cmd+O and renders the last-focused terminal", async () => {
-    localStorage.setItem("panel-terminal-focus-pavilio", "t2");
+    writeTerminalFocus("pavilio", "t2");
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => [
@@ -293,7 +303,7 @@ describe("QuickTerminalModal", () => {
     await waitFor(() =>
       expect(screen.getByTestId("terminal-view-t2")).toBeInTheDocument(),
     );
-    expect(localStorage.getItem("panel-terminal-focus-pavilio")).toBe("t2");
+    expect(readTerminalFocus("pavilio")).toBe("t2");
   });
 
   it("global dots render for terminals from every project", async () => {
@@ -370,7 +380,7 @@ describe("QuickTerminalModal", () => {
       expect(screen.queryByTestId("quick-terminal-modal")).not.toBeInTheDocument(),
     );
     expect(currentPath).toBe("/project/metro/iterm");
-    expect(localStorage.getItem("panel-terminal-focus-metro")).toBe("x1");
+    expect(readTerminalFocus("metro")).toBe("x1");
   });
 });
 
@@ -413,7 +423,7 @@ describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
       ok: true,
       json: async () => [],
     }) as unknown as typeof fetch;
-    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setOpenPref(true);
 
     renderWithDrawer("/project/vector/memo");
     expect(screen.getByTestId("drawer-surface")).toBeInTheDocument();
@@ -427,7 +437,7 @@ describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
     expect(screen.getByTestId("drawer-visible")).toHaveTextContent("false");
     // the user's intent survives — only visibility was suppressed
     expect(screen.getByTestId("drawer-open")).toHaveTextContent("true");
-    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+    expect(openPref()).toBe(true);
     expect(bothShowing()).toBe(false);
   });
 
@@ -436,7 +446,7 @@ describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
       ok: true,
       json: async () => [],
     }) as unknown as typeof fetch;
-    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setOpenPref(true);
 
     renderWithDrawer("/project/vector/memo");
     fireEvent.keyDown(window, { key: "o", metaKey: true });
@@ -453,7 +463,7 @@ describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
     expect(
       screen.queryByTestId("quick-terminal-modal"),
     ).not.toBeInTheDocument();
-    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+    expect(openPref()).toBe(true);
   });
 
   it("keeps mutual exclusion across a full open/close cycle", async () => {
@@ -461,7 +471,7 @@ describe("QuickTerminalModal ⇄ drawer mutual exclusion", () => {
       ok: true,
       json: async () => [],
     }) as unknown as typeof fetch;
-    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setOpenPref(true);
 
     renderWithDrawer("/project/vector/memo");
     expect(bothShowing()).toBe(false);

@@ -6,7 +6,7 @@
  * alive; it is in-memory only, so a reload still starts closed.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AUTO_OPEN_ANSWER_STORAGE_KEY } from "../../speech/autoOpenAnswer";
+import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import {
   forgetAnswerPane,
   getAnswerPaneState,
@@ -17,8 +17,7 @@ import {
 } from "../answerPaneState";
 
 const storeDefault = (on: boolean): void => {
-  if (on) localStorage.setItem(AUTO_OPEN_ANSWER_STORAGE_KEY, "1");
-  else localStorage.removeItem(AUTO_OPEN_ANSWER_STORAGE_KEY);
+  setStoredAutoOpenAnswer(on);
 };
 
 beforeEach(() => {

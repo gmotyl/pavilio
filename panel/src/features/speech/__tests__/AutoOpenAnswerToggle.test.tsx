@@ -3,8 +3,16 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AutoOpenAnswerToggle } from "../AutoOpenAnswerToggle";
-import { AUTO_OPEN_ANSWER_STORAGE_KEY, getStoredAutoOpenAnswer } from "../autoOpenAnswer";
+import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "../autoOpenAnswer";
 import AgentSettings from "../../agents/AgentSettings";
+import { preferences } from "../../../preferences/declarations";
+import { storageKey } from "../../../preferences/types";
+
+type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
+const globals = globalThis as unknown as PrefGlobals;
+
+/** Portable: the workspace document holds it, never browser storage. */
+const KEY = storageKey(preferences.answerPaneAutoOpen);
 
 const LABEL = "Open the answer pane on a new answer";
 
@@ -24,21 +32,22 @@ describe("AutoOpenAnswerToggle", () => {
     const user = userEvent.setup();
 
     // Reads: the stored value is what the box shows.
-    localStorage.setItem(AUTO_OPEN_ANSWER_STORAGE_KEY, "1");
+    setStoredAutoOpenAnswer(true);
     const stored = render(<AutoOpenAnswerToggle />);
     expect(toggle()).toBeChecked();
     expect(toggle()).toHaveAttribute("id", "speech-auto-open-answer");
     expect(screen.getByTestId("speech-auto-open-answer")).toBe(toggle());
     stored.unmount();
-    localStorage.clear();
+    setStoredAutoOpenAnswer(false);
 
-    // Writes: a click stores "1"; a second click removes it.
+    // Writes: a click stores the choice; a second click puts it back.
     render(<AutoOpenAnswerToggle />);
     expect(toggle()).not.toBeChecked();
 
     await user.click(toggle());
     expect(toggle()).toBeChecked();
-    expect(localStorage.getItem(AUTO_OPEN_ANSWER_STORAGE_KEY)).toBe("1");
+    expect(globals.__PAVILIO_PREFS__![KEY]).toBe(true);
+    expect(localStorage.length).toBe(0);
     expect(getStoredAutoOpenAnswer()).toBe(true);
 
     await user.click(toggle());
@@ -46,16 +55,16 @@ describe("AutoOpenAnswerToggle", () => {
     expect(getStoredAutoOpenAnswer()).toBe(false);
   });
 
-  it("keeps the choice for this page view when storage throws", async () => {
+  it("keeps the choice for this page view when the document never arrived", async () => {
     const user = userEvent.setup();
-    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("site data blocked");
-    });
+    // The auth interlock, which replaces the old "site data blocked" case:
+    // this page received no preferences document, so the store refuses the
+    // write rather than PATCHing a default over the user's real value.
+    delete globals.__PAVILIO_PREFS__;
 
     render(<AutoOpenAnswerToggle />);
     await user.click(toggle());
 
-    expect(setItem).toHaveBeenCalled();
     expect(toggle()).toBeChecked();
     expect(getStoredAutoOpenAnswer()).toBe(false);
   });

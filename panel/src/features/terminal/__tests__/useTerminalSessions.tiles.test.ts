@@ -1,6 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTerminalSessions, type SessionMeta } from "../useTerminalSessions";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
+import { storageKey } from "../../../preferences/types";
 import {
   expandPreset,
   getLayoutPresets,
@@ -37,8 +40,13 @@ async function setup(project: string) {
   return hook;
 }
 
-const GRID_KEY = "panel-terminal-grid-vector";
+/** `terminal.grid` is `portable: false`: a tiling is a list of live session ids. */
+const GRID_KEY = storageKey(preferences.terminalGrid, "vector");
+/** The superseded column model's key: undeclared, unread, and left alone. */
 const LEGACY_KEY = "panel-terminal-layout-vector";
+
+const storeTiles = (layout: unknown) =>
+  writePreference(preferences.terminalGrid, layout as never, "vector");
 
 const idsOf = (layout: TileLayout) => readingOrder(layout).map((t) => t.sessionId);
 
@@ -58,12 +66,12 @@ describe("useTerminalSessions tiling", () => {
     vi.restoreAllMocks();
   });
 
-  it("initialises the tiling from panel-terminal-grid-<project>", async () => {
+  it("initialises the tiling from the stored grid preference", async () => {
     const stored: TileLayout = [
       { sessionId: "a", x: 0, y: 0, w: 48, h: 32 },
       { sessionId: "b", x: 0, y: 32, w: 48, h: 16 },
     ];
-    localStorage.setItem(GRID_KEY, JSON.stringify(stored));
+    storeTiles(stored);
     mockFetchSessions([session("a"), session("b")]);
 
     const { result } = await setup("vector");
@@ -71,7 +79,7 @@ describe("useTerminalSessions tiling", () => {
     expect(result.current.tiles).toEqual(stored);
   });
 
-  it("resolves the default preset when localStorage has no entry", async () => {
+  it("resolves the default preset when nothing is stored", async () => {
     mockFetchSessions([session("a"), session("b")]);
 
     const { result } = await setup("vector");
@@ -81,30 +89,29 @@ describe("useTerminalSessions tiling", () => {
     expect(localStorage.getItem(GRID_KEY)).toBeNull();
   });
 
-  it("removes the superseded column-model keys on init", async () => {
-    localStorage.setItem("panel-terminal-columns-vector", JSON.stringify([1, 2]));
-    localStorage.setItem(
-      LEGACY_KEY,
-      JSON.stringify([[{ sessionId: "a", weight: 1 }]]),
-    );
+  it("leaves the superseded column-model keys alone rather than sweeping them", async () => {
+    const columns = JSON.stringify([1, 2]);
+    const legacy = JSON.stringify([[{ sessionId: "a", weight: 1 }]]);
+    localStorage.setItem("panel-terminal-columns-vector", columns);
+    localStorage.setItem(LEGACY_KEY, legacy);
     mockFetchSessions([session("a")]);
 
     await setup("vector");
 
-    expect(localStorage.getItem("panel-terminal-columns-vector")).toBeNull();
-    expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
+    // The two `removeItem` sweeps went with the migration. `panel-terminal-grid-`
+    // is orphaned now too, along with every other `// was:` key in
+    // `declarations.ts`, and sweeping exactly two of them was never the policy.
+    expect(localStorage.getItem("panel-terminal-columns-vector")).toBe(columns);
+    expect(localStorage.getItem(LEGACY_KEY)).toBe(legacy);
   });
 
   it("reconciles a stored tiling against the sessions the server reports", async () => {
     // Stored shape covers three sessions; the server now reports two (A closed).
-    localStorage.setItem(
-      GRID_KEY,
-      JSON.stringify([
+    storeTiles([
         { sessionId: "A", x: 0, y: 0, w: 48, h: 16 },
         { sessionId: "B", x: 0, y: 16, w: 48, h: 16 },
         { sessionId: "C", x: 0, y: 32, w: 48, h: 16 },
-      ]),
-    );
+    ]);
     mockFetchSessions([session("B"), session("C")]);
 
     const { result } = await setup("vector");
@@ -118,13 +125,10 @@ describe("useTerminalSessions tiling", () => {
     // Regression from the column model: createSession appended only to the order,
     // leaving the layout stale, so the new session was missing from the grid until
     // the next poll caught up.
-    localStorage.setItem(
-      GRID_KEY,
-      JSON.stringify([
+    storeTiles([
         { sessionId: "A", x: 0, y: 0, w: 24, h: 48 },
         { sessionId: "B", x: 24, y: 0, w: 24, h: 48 },
-      ]),
-    );
+    ]);
     const existing = [session("A"), session("B")];
     (global.fetch as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ok: true, json: async () => existing })
@@ -167,13 +171,10 @@ describe("useTerminalSessions tiling", () => {
   it("deleteSession hands the closed terminal's space back to the survivors", async () => {
     // A close used to touch only the sessions list: the tile stayed in the layout as
     // an invisible hole, and the per-project surface has no poll to heal it.
-    localStorage.setItem(
-      GRID_KEY,
-      JSON.stringify([
+    storeTiles([
         { sessionId: "A", x: 0, y: 0, w: 24, h: 48 },
         { sessionId: "B", x: 24, y: 0, w: 24, h: 48 },
-      ]),
-    );
+    ]);
     mockFetchSessions([session("A"), session("B")]);
     const { result } = await setup("vector");
 
@@ -190,15 +191,12 @@ describe("useTerminalSessions tiling", () => {
   it("a terminal opened after closing every other one gets the whole grid", async () => {
     // Greg's report: resize a few, close them all, open a new one -> it appeared as a
     // sliver because the dead tiles still held the rest of the grid.
-    localStorage.setItem(
-      GRID_KEY,
-      JSON.stringify([
+    storeTiles([
         { sessionId: "A", x: 0, y: 0, w: 30, h: 20 },
         { sessionId: "B", x: 30, y: 0, w: 18, h: 20 },
         { sessionId: "C", x: 0, y: 20, w: 16, h: 28 },
         { sessionId: "D", x: 16, y: 20, w: 32, h: 28 },
-      ]),
-    );
+    ]);
     mockFetchSessions([session("A"), session("B"), session("C"), session("D")]);
     const { result } = await setup("vector");
 

@@ -7,9 +7,11 @@ import { VoiceSelect } from "../VoiceSelect";
 import {
   DEFAULT_SPEECH_VOICE,
   SPEECH_VOICES,
-  SPEECH_VOICE_STORAGE_KEY,
   getStoredVoice,
+  setStoredVoice,
 } from "../voices";
+import { preferences } from "../../../preferences/declarations";
+import { storageKey } from "../../../preferences/types";
 import AgentSettings from "../../agents/AgentSettings";
 import LeftSidebar from "../../shell/LeftSidebar";
 import { SpeechHostProvider } from "../SpeechHostProvider";
@@ -81,7 +83,7 @@ function voiceSelect(): HTMLSelectElement {
 
 describe("VoiceSelect", () => {
   it("lists the multilingual voices and marks the stored one selected", () => {
-    localStorage.setItem(SPEECH_VOICE_STORAGE_KEY, "de-DE-SeraphinaMultilingualNeural");
+    setStoredVoice("de-DE-SeraphinaMultilingualNeural");
 
     render(<VoiceSelect />);
 
@@ -111,7 +113,7 @@ describe("VoiceSelect", () => {
     expect(select).toHaveValue("de-DE-SeraphinaMultilingualNeural");
   });
 
-  it("persists the selection under panel-speech-voice", async () => {
+  it("persists the selection as a portable preference", async () => {
     const user = userEvent.setup();
 
     render(<VoiceSelect />);
@@ -121,19 +123,23 @@ describe("VoiceSelect", () => {
 
     await user.selectOptions(select, "fr-FR-VivienneMultilingualNeural");
 
-    expect(localStorage.getItem(SPEECH_VOICE_STORAGE_KEY)).toBe(
-      "fr-FR-VivienneMultilingualNeural",
-    );
+    expect(
+      (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__![
+        storageKey(preferences.speechVoice)
+      ],
+    ).toBe("fr-FR-VivienneMultilingualNeural");
+    // The voice is a choice about the panel, not about this machine, so it
+    // travels in the workspace file and touches no browser storage.
+    expect(localStorage.length).toBe(0);
     // What the player reads on every play() — the pick is live for synthesis.
     expect(getStoredVoice()).toBe("fr-FR-VivienneMultilingualNeural");
     expect(select).toHaveValue("fr-FR-VivienneMultilingualNeural");
   });
 
-  it("keeps the pick for this page view when storage throws", async () => {
+  it("keeps the pick for this page view when the document never arrived", async () => {
     const user = userEvent.setup();
-    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("site data blocked");
-    });
+    // The auth interlock stands in for the old blocked-site-data case.
+    delete (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__;
 
     render(<VoiceSelect />);
 

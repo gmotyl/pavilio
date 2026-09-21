@@ -34,6 +34,8 @@ import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import {
   TERMINAL_FOCUS_EVENT,
   dispatchTerminalFocus,
+  readTerminalFocus,
+  writeTerminalFocus,
   type SessionMeta,
   type TerminalFocusEventDetail,
 } from "../terminal/useTerminalSessions";
@@ -59,14 +61,17 @@ function SectionHeader({
   );
 }
 
-/** The project's remembered focused session, or null when nothing is stored. */
+/**
+ * The project's remembered focused session, or null when nothing is stored.
+ *
+ * The read and the writers below now share ONE pair of functions, exported by
+ * `useTerminalSessions` — which is why this could not move before Task 8: a
+ * reader that changed key ahead of its writers would highlight nothing. A null
+ * or blank project is not a scope, and `readTerminalFocus` answers the declared
+ * default for one rather than letting every project share a key.
+ */
 function readStoredFocus(project: string | null): string | null {
-  if (!project) return null;
-  try {
-    return localStorage.getItem(`panel-terminal-focus-${project}`);
-  } catch {
-    return null;
-  }
+  return readTerminalFocus(project);
 }
 
 export default function LeftSidebar() {
@@ -98,10 +103,10 @@ export default function LeftSidebar() {
       // broadcast for a project we are navigating *to*, fired in the same tick
       // as the navigation, is still compared against the *old* currentProject
       // (this effect has not re-subscribed yet) and is dropped. Nothing is lost
-      // only because every broadcaster writes
-      // `panel-terminal-focus-<project>` to localStorage *before* dispatching
-      // (useTerminalSessions.setFocusedId, createTerminalSession,
-      // QuickTerminalModal, and the sidebar row click below), and the
+      // only because every broadcaster calls `writeTerminalFocus` *before*
+      // dispatching (useTerminalSessions.setFocusedId, createTerminalSession,
+      // QuickTerminalModal, TerminalsSurface, and the sidebar row click
+      // below), and the
       // [currentProject] effect underneath re-reads that storage immediately
       // after the switch. A future broadcaster that dispatches without
       // persisting first would have its event silently dropped across a
@@ -352,14 +357,9 @@ export default function LeftSidebar() {
                     type="button"
                     data-testid={`sidebar-session-${s.id}`}
                     onClick={() => {
-                      try {
-                        localStorage.setItem(
-                          `panel-terminal-focus-${s.project}`,
-                          s.id,
-                        );
-                      } catch {
-                        // ignore
-                      }
+                      // Persist, then dispatch — see the note on the focus
+                      // listener above for why that order is load-bearing.
+                      writeTerminalFocus(s.project, s.id);
                       dispatchTerminalFocus(s.project, s.id);
                       // Bare project route — same as the project-name link.
                       // ProjectRedirect resolves the destination via the

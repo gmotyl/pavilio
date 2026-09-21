@@ -2,6 +2,8 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useTerminalSessions,
+  readTerminalFocus,
+  writeTerminalFocus,
   TERMINAL_FOCUS_EVENT,
   type TerminalFocusEventDetail,
 } from "../useTerminalSessions";
@@ -24,7 +26,13 @@ function mockSessions(list = SESSIONS) {
   );
 }
 
-const focusKey = "panel-terminal-focus-pavilio";
+/**
+ * The focused session names a LIVE SESSION, so `terminal.focus` is
+ * `portable: false` and stays in `localStorage` — read and written through the
+ * registry rather than a hand-built key.
+ */
+const readFocus = () => readTerminalFocus("pavilio");
+const storeFocus = (id: string | null) => writeTerminalFocus("pavilio", id);
 
 beforeEach(() => {
   localStorage.clear();
@@ -40,23 +48,23 @@ describe("useTerminalSessions — focus the session actually on screen", () => {
   it("adopts the first session when nothing is stored", async () => {
     const { result } = renderHook(() => useTerminalSessions("pavilio"));
     await waitFor(() => expect(result.current.focusedId).toBe("a1"));
-    expect(localStorage.getItem(focusKey)).toBe("a1");
+    expect(readFocus()).toBe("a1");
   });
 
   it("adopts a session when the stored id names one that is gone", async () => {
     // A closed terminal, or a panel restart that handed out new ids.
-    localStorage.setItem(focusKey, "stale-id-from-a-previous-run");
+    storeFocus("stale-id-from-a-previous-run");
     const { result } = renderHook(() => useTerminalSessions("pavilio"));
     await waitFor(() => expect(result.current.focusedId).toBe("a1"));
-    expect(localStorage.getItem(focusKey)).toBe("a1");
+    expect(readFocus()).toBe("a1");
   });
 
   it("leaves a stored focus alone when it still names a live session", async () => {
-    localStorage.setItem(focusKey, "b2");
+    storeFocus("b2");
     const { result } = renderHook(() => useTerminalSessions("pavilio"));
     await waitFor(() => expect(result.current.sessions).toHaveLength(2));
     expect(result.current.focusedId).toBe("b2");
-    expect(localStorage.getItem(focusKey)).toBe("b2");
+    expect(readFocus()).toBe("b2");
   });
 
   it("broadcasts the adopted focus so the sidebar can follow", async () => {
@@ -77,6 +85,6 @@ describe("useTerminalSessions — focus the session actually on screen", () => {
     const { result } = renderHook(() => useTerminalSessions("pavilio"));
     await act(async () => { await Promise.resolve(); });
     expect(result.current.focusedId).toBeNull();
-    expect(localStorage.getItem(focusKey)).toBeNull();
+    expect(readFocus()).toBeNull();
   });
 });

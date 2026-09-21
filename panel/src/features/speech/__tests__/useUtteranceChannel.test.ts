@@ -25,7 +25,16 @@ let waiting = false;
 let preparing: ReadonlySet<string> = new Set<string>();
 
 const { useUtteranceChannel } = await import("../useUtteranceChannel");
-const { SPEECH_ARMED_STORAGE_KEY } = await import("../voices");
+const { setStoredArmedSession } = await import("../voices");
+const { preferences } = await import("../../../preferences/declarations");
+const { storageKey } = await import("../../../preferences/types");
+
+/**
+ * The armed cell names a LIVE SESSION, so it is `portable: false` and stays in
+ * `localStorage` — never in the workspace file, which is committed and carried
+ * to a machine where that session does not exist.
+ */
+const ARMED_KEY = storageKey(preferences.speechArmedCell);
 
 const utterance = (sessionId: string, id: string, at = 1_000): Utterance => ({
   id,
@@ -256,25 +265,24 @@ describe("useUtteranceChannel", () => {
       result.current.setArmed("cell-a");
     });
     expect(result.current.armedSessionId).toBe("cell-a");
-    expect(SPEECH_ARMED_STORAGE_KEY).toBe("panel-speech-armed");
-    expect(localStorage.getItem(SPEECH_ARMED_STORAGE_KEY)).toBe("cell-a");
+    expect(localStorage.getItem(ARMED_KEY)).toBe('"cell-a"');
 
     // DECISION 12: one armed cell, so arming another IS disarming the first.
     await act(async () => {
       result.current.setArmed("cell-b");
     });
     expect(result.current.armedSessionId).toBe("cell-b");
-    expect(localStorage.getItem(SPEECH_ARMED_STORAGE_KEY)).toBe("cell-b");
+    expect(localStorage.getItem(ARMED_KEY)).toBe('"cell-b"');
 
     await act(async () => {
       result.current.setArmed(null);
     });
     expect(result.current.armedSessionId).toBeNull();
-    expect(localStorage.getItem(SPEECH_ARMED_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(ARMED_KEY)).toBeNull();
   });
 
   it("restores the armed session from storage", async () => {
-    localStorage.setItem(SPEECH_ARMED_STORAGE_KEY, "cell-b");
+    setStoredArmedSession("cell-b");
 
     const { result, unmount } = await renderChannel();
     expect(result.current.armedSessionId).toBe("cell-b");

@@ -31,18 +31,35 @@ import { writeLastPath, writeLastSectionFile } from "../../features/shell/lastPa
  */
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
+interface PendingMigration {
+  /** The OLD raw key the exempt call site names. */
+  marker: string;
+  /** The task that owns moving it. */
+  task: string;
+}
+
 /**
  * Call sites inside these trees whose declaration belongs to a later task, kept
  * raw on purpose so this commit does not desync a reader from writers it does
  * not own. Matched on the OLD key each one names, not on the file, so anything
  * else in the same module is still guarded.
+ *
+ * EMPTY, AND DELIBERATELY STILL HERE. The last entry —
+ * `panel-terminal-focus-`, which held `LeftSidebar`'s read and write open while
+ * Task 8 owned every other writer of the focused session — went with Task 8.
+ * The mechanism is kept rather than deleted along with its last entry: the
+ * migration is not finished (the time call sites are Task 8b's), and the next
+ * task to split a reader from its writers needs exactly this window. Keeping it
+ * costs one empty array; re-deriving it under time pressure costs the review
+ * that found the two-line-lookahead bug below.
+ *
+ * `offendingLines` therefore takes the list as a PARAMETER, defaulting to this
+ * one. That is what lets "the exemption window" go on proving the window's
+ * shape against its own fixture list while the shipped list is empty — the
+ * alternative was deleting the tests that cover the machinery, which is how a
+ * latent bug gets re-introduced the first time an entry comes back.
  */
-const PENDING_MIGRATIONS = [
-  // LeftSidebar reads and writes the focused session; every other writer of it
-  // (useTerminalSessions, createTerminalSession, QuickTerminalModal,
-  // TerminalsSurface) is Task 8's, and they have to move together.
-  { marker: "panel-terminal-focus-", task: "Task 8 — terminal" },
-];
+const PENDING_MIGRATIONS: readonly PendingMigration[] = [];
 
 function sourceFiles(dir: string): string[] {
   const found: string[] = [];
@@ -79,13 +96,16 @@ interface Offence {
  * marker excuses. Exported shape rather than inlined into the walk so the
  * exemption window itself can be probed — see "the exemption window".
  */
-export function offendingLines(source: string, pattern: RegExp): number[] {
+export function offendingLines(
+  source: string,
+  pattern: RegExp,
+  pending: readonly PendingMigration[] = PENDING_MIGRATIONS,
+): number[] {
   const lines = withoutComments(source);
   const found: number[] = [];
   lines.forEach((line, index) => {
     if (!pattern.test(line)) return;
-    if (PENDING_MIGRATIONS.some((pending) => statementAt(lines, index).includes(pending.marker)))
-      return;
+    if (pending.some((entry) => statementAt(lines, index).includes(entry.marker))) return;
     found.push(index + 1);
   });
   return found;
@@ -130,6 +150,16 @@ function report(offences: Offence[]): string[] {
   return offences.map((o) => `${o.file}:${o.line} ${o.text}`);
 }
 
+/**
+ * A stand-in for a real entry, so the window keeps being proved while the
+ * shipped list is empty. Deleting these tests along with the last entry would
+ * retire the only cover the machinery has — and the bug the second one catches
+ * was a live one, not a hypothetical.
+ */
+const FIXTURE_PENDING: readonly PendingMigration[] = [
+  { marker: "panel-example-pending-", task: "a hypothetical later task" },
+];
+
 describe("the exemption window", () => {
   /**
    * The window must not reach past the statement the identifier sits in. A
@@ -141,20 +171,27 @@ describe("the exemption window", () => {
     const source = [
       'localStorage.setItem("panel-brand-new-key", value);',
       "doSomethingElse();",
-      "readFocus(`panel-terminal-focus-${project}`);",
+      "readFocus(`panel-example-pending-${project}`);",
     ].join("\n");
 
-    expect(offendingLines(source, /\blocalStorage\b/)).toEqual([1]);
+    expect(offendingLines(source, /\blocalStorage\b/, FIXTURE_PENDING)).toEqual([1]);
   });
 
   it("still excuses a call whose own statement wraps onto the marker line", () => {
     const source = [
       "const focused = localStorage.getItem(",
-      "  `panel-terminal-focus-${project}`,",
+      "  `panel-example-pending-${project}`,",
       ");",
     ].join("\n");
 
-    expect(offendingLines(source, /\blocalStorage\b/)).toEqual([]);
+    expect(offendingLines(source, /\blocalStorage\b/, FIXTURE_PENDING)).toEqual([]);
+  });
+
+  it("excuses nothing at all now that the shipped list is empty", () => {
+    const source = ["const focused = localStorage.getItem(", '  "anything",', ");"].join("\n");
+
+    expect(PENDING_MIGRATIONS).toEqual([]);
+    expect(offendingLines(source, /\blocalStorage\b/)).toEqual([1]);
   });
 });
 
@@ -181,17 +218,23 @@ describe("the enumeration the guard rests on", () => {
     const projects = sourceFiles("features/projects");
     const git = sourceFiles("features/git");
     const search = sourceFiles("features/search");
+    const terminal = sourceFiles("features/terminal");
+    const speech = sourceFiles("features/speech");
 
     expect(shell.length).toBe(countSourceFiles("features/shell"));
     expect(projects.length).toBe(countSourceFiles("features/projects"));
     expect(git.length).toBe(countSourceFiles("features/git"));
     expect(search.length).toBe(countSourceFiles("features/search"));
+    expect(terminal.length).toBe(countSourceFiles("features/terminal"));
+    expect(speech.length).toBe(countSourceFiles("features/speech"));
     // Not merely non-empty: the trees are large, and a walk that stopped at
     // the first directory would still clear a floor.
     expect(shell.length).toBeGreaterThanOrEqual(21);
     expect(projects.length).toBeGreaterThanOrEqual(35);
     expect(git.length).toBeGreaterThanOrEqual(12);
     expect(search.length).toBeGreaterThanOrEqual(3);
+    expect(terminal.length).toBeGreaterThanOrEqual(50);
+    expect(speech.length).toBeGreaterThanOrEqual(16);
     // `features/shell` has subdirectories (Layout, Breadcrumbs); a walk that
     // did not descend would miss them and this is what says so.
     expect(shell.some((file) => file.split("/").length > 3)).toBe(true);
@@ -230,6 +273,35 @@ describe("preferences replace raw browser storage", () => {
     expect(report([...shell.offences, ...projects.offences])).toEqual([]);
   });
 
+  it("no module under features/terminal or features/speech references localStorage directly", () => {
+    const terminal = rawStorageUses("features/terminal", /\blocalStorage\b/);
+    const speech = rawStorageUses("features/speech", /\blocalStorage\b/);
+
+    expect(report([...terminal.offences, ...speech.offences])).toEqual([]);
+  });
+
+  it("no module under features/terminal or features/speech references sessionStorage directly", () => {
+    const terminal = rawStorageUses("features/terminal", /\bsessionStorage\b/);
+    const speech = rawStorageUses("features/speech", /\bsessionStorage\b/);
+
+    expect(report([...terminal.offences, ...speech.offences])).toEqual([]);
+  });
+
+  /**
+   * The evasion the guard's own preamble names: a helper module that wraps
+   * storage. `features/speech/voices.ts` exported exactly that —
+   * `getBrowserStorage()` — and `autoOpenAnswer.ts` imported it, so a plain
+   * `localStorage` grep counted two modules short. The helper is gone rather
+   * than re-pointed at the registry, and this is what says so: the identifier
+   * must not appear ANYWHERE under `src`, definition included, because a
+   * surviving definition is an invitation to import it again.
+   */
+  it("no module reaches storage through getBrowserStorage once the migration lands", () => {
+    const { offences } = rawStorageUses(".", /\bgetBrowserStorage\b/);
+
+    expect(report(offences)).toEqual([]);
+  });
+
   it("a navigation bookmark does not survive into localStorage", () => {
     writeLastPath("pavilio", "/project/pavilio/notes?note=a.md");
     writeLastSectionFile("pavilio", "plans", "/abs/plan.md");
@@ -240,24 +312,30 @@ describe("preferences replace raw browser storage", () => {
 });
 
 describe("the pending call sites are declared, not forgotten", () => {
+  /**
+   * There are none left in the guarded trees. `shell/LeftSidebar.tsx` was the
+   * last, and it moved with Task 8 — the task that owned every writer of
+   * `panel-terminal-focus-`, which is why the reader could not go earlier.
+   *
+   * The assertion is kept rather than deleted with its last subject: it is what
+   * turns "the list is empty" from a claim in a comment into something the
+   * suite checks, and it is the test that fails the moment a new raw key is
+   * waved through under a marker.
+   */
   it("names the task that owns every raw key still allowed", () => {
     const offenders = [
       ...rawStorageUses("features/shell", /\blocalStorage\b/).files,
       ...rawStorageUses("features/projects", /\blocalStorage\b/).files,
       ...rawStorageUses("features/git", /\blocalStorage\b/).files,
       ...rawStorageUses("features/search", /\blocalStorage\b/).files,
+      ...rawStorageUses("features/terminal", /\blocalStorage\b/).files,
+      ...rawStorageUses("features/speech", /\blocalStorage\b/).files,
     ].filter((file) => {
       const source = withoutComments(readFileSync(join(SRC, file), "utf8")).join("\n");
       return PENDING_MIGRATIONS.some((pending) => source.includes(pending.marker));
     });
 
-    // That one, and nothing else: a second file appearing here means a raw key
-    // was waved through under a marker that was never meant to cover it.
-    // `useRepoSearch` used to sit here too — Task 7 owns the writer of the
-    // branch-diff base now, so reader and writer moved together and the
-    // exemption went with them.
-    expect(offenders.map((file) => relative("features", file)).sort()).toEqual([
-      "shell/LeftSidebar.tsx",
-    ]);
+    expect(PENDING_MIGRATIONS.map((pending) => pending.task)).toEqual([]);
+    expect(offenders.map((file) => relative("features", file)).sort()).toEqual([]);
   });
 });

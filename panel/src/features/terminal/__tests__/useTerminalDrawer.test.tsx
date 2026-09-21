@@ -5,6 +5,29 @@ import {
   TerminalDrawerProvider,
   useTerminalDrawer,
 } from "../useTerminalDrawer";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference, writePreference } from "../../../preferences/store";
+import { storageKey } from "../../../preferences/types";
+
+/**
+ * The drawer's open intent, width and side are PORTABLE: the shape of the
+ * panel is a choice, not a fact about this machine, so all three live in the
+ * workspace document rather than in browser storage.
+ */
+const setOpenPref = (v: boolean) => writePreference(preferences.terminalDrawerOpen, v);
+const setWidthPref = (v: number) => writePreference(preferences.terminalDrawerWidth, v);
+const setSidePref = (v: "left" | "right") =>
+  writePreference(preferences.terminalDrawerSide, v);
+const openPref = () => readPreference(preferences.terminalDrawerOpen);
+const widthPref = () => readPreference(preferences.terminalDrawerWidth);
+const sidePref = () => readPreference(preferences.terminalDrawerSide);
+/** A value no codec accepts, written straight into the document. */
+const setRawSide = (raw: string) => {
+  (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__![
+    storageKey(preferences.terminalDrawerSide)
+  ] = raw;
+};
+
 
 function Probe() {
   const {
@@ -108,15 +131,15 @@ describe("useTerminalDrawer", () => {
   });
 
   it("restores persisted open + width state", () => {
-    localStorage.setItem("panel:terminalDrawer:open", "true");
-    localStorage.setItem("panel:terminalDrawer:width", "540");
+    setOpenPref(true);
+    setWidthPref(540);
     setup("/project/vector/memo");
     expect(screen.getByTestId("open")).toHaveTextContent("true");
     expect(screen.getByTestId("width")).toHaveTextContent("540");
   });
 
   it("keeps the open intent when navigating to the iterm tab, and restores it on the way back", () => {
-    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setOpenPref(true);
     setup("/project/vector/memo");
     expect(screen.getByTestId("visible")).toHaveTextContent("true");
 
@@ -126,7 +149,7 @@ describe("useTerminalDrawer", () => {
     expect(screen.getByTestId("suppressed")).toHaveTextContent("true");
     expect(screen.getByTestId("visible")).toHaveTextContent("false");
     expect(screen.getByTestId("open")).toHaveTextContent("true");
-    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+    expect(openPref()).toBe(true);
 
     act(() => {
       fireEvent.click(screen.getByTestId("to-memo"));
@@ -135,7 +158,7 @@ describe("useTerminalDrawer", () => {
   });
 
   it("keeps the open intent when navigating to a non-project route", () => {
-    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setOpenPref(true);
     setup("/project/vector/memo");
 
     act(() => {
@@ -143,7 +166,7 @@ describe("useTerminalDrawer", () => {
     });
     expect(screen.getByTestId("suppressed")).toHaveTextContent("true");
     expect(screen.getByTestId("visible")).toHaveTextContent("false");
-    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+    expect(openPref()).toBe(true);
 
     act(() => {
       fireEvent.click(screen.getByTestId("to-memo"));
@@ -152,17 +175,17 @@ describe("useTerminalDrawer", () => {
   });
 
   it("makes Cmd+B a no-op while suppressed, leaving the stored intent alone", () => {
-    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setOpenPref(true);
     setup("/project/vector/iterm");
     act(() => {
       fireEvent.keyDown(window, { key: "b", metaKey: true });
     });
     expect(screen.getByTestId("open")).toHaveTextContent("true");
-    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+    expect(openPref()).toBe(true);
   });
 
   it("lets an overlay suppress visibility without touching the stored open intent", () => {
-    localStorage.setItem("panel:terminalDrawer:open", "true");
+    setOpenPref(true);
     setup("/project/vector/memo");
     expect(screen.getByTestId("visible")).toHaveTextContent("true");
     expect(screen.getByTestId("overlay-active")).toHaveTextContent("false");
@@ -174,7 +197,7 @@ describe("useTerminalDrawer", () => {
     expect(screen.getByTestId("visible")).toHaveTextContent("false");
     // intent untouched, in memory and on disk
     expect(screen.getByTestId("open")).toHaveTextContent("true");
-    expect(localStorage.getItem("panel:terminalDrawer:open")).toBe("true");
+    expect(openPref()).toBe(true);
 
     act(() => {
       fireEvent.click(screen.getByTestId("overlay-off"));
@@ -187,8 +210,12 @@ describe("useTerminalDrawer", () => {
     act(() => {
       fireEvent.click(screen.getByTestId("overlay-on"));
     });
-    const keys = Object.keys(localStorage);
-    expect(keys.some((k) => k.toLowerCase().includes("overlay"))).toBe(false);
+    // Nowhere at all: not in the workspace document, and not in browser
+    // storage either — the drawer writes nothing to the latter any more.
+    const doc = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
+      .__PAVILIO_PREFS__!;
+    expect(Object.keys(doc).some((k) => k.toLowerCase().includes("overlay"))).toBe(false);
+    expect(localStorage.length).toBe(0);
     // and a fresh mount starts with no overlay
     cleanup();
     setup("/project/vector/memo");
@@ -203,11 +230,11 @@ describe("useTerminalDrawer", () => {
       fireEvent.click(screen.getByTestId("grow"));
     });
     expect(screen.getByTestId("width")).toHaveTextContent("664");
-    expect(localStorage.getItem("panel:terminalDrawer:width")).toBe("664");
+    expect(widthPref()).toBe(664);
   });
 
   it("re-clamps the effective width when the window shrinks, without rewriting the stored value", () => {
-    localStorage.setItem("panel:terminalDrawer:width", "640");
+    setWidthPref(640);
     setup("/project/vector/memo");
     expect(screen.getByTestId("width")).toHaveTextContent("640");
 
@@ -219,7 +246,7 @@ describe("useTerminalDrawer", () => {
     // 800 - 360 = 440
     expect(screen.getByTestId("width")).toHaveTextContent("440");
     expect(screen.getByTestId("max")).toHaveTextContent("440");
-    expect(localStorage.getItem("panel:terminalDrawer:width")).toBe("640");
+    expect(widthPref()).toBe(640);
 
     // regrowing the viewport restores the full stored preference
     act(() => {
@@ -238,7 +265,7 @@ describe("useTerminalDrawer", () => {
     // A stored value is only ever written by an explicit drag, so a browser
     // that already docks right keeps docking right — the default flip must
     // not override a choice the user made.
-    localStorage.setItem("panel:terminalDrawer:side", "right");
+    setSidePref("right");
     setup("/project/vector/memo");
     expect(screen.getByTestId("side")).toHaveTextContent("right");
   });
@@ -249,11 +276,11 @@ describe("useTerminalDrawer", () => {
       fireEvent.click(screen.getByTestId("dock-left"));
     });
     expect(screen.getByTestId("side")).toHaveTextContent("left");
-    expect(localStorage.getItem("panel:terminalDrawer:side")).toBe("left");
+    expect(sidePref()).toBe("left");
   });
 
   it("falls back to the default for an unrecognised stored side", () => {
-    localStorage.setItem("panel:terminalDrawer:side", "top");
+    setRawSide("top");
     setup("/project/vector/memo");
     expect(screen.getByTestId("side")).toHaveTextContent("left");
   });

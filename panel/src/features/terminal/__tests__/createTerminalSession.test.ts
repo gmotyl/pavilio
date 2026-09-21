@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createTerminalSession } from "../createTerminalSession";
+import { readTerminalFocus } from "../useTerminalSessions";
 
 describe("createTerminalSession", () => {
   beforeEach(() => localStorage.clear());
@@ -9,7 +10,7 @@ describe("createTerminalSession", () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => created });
     const result = await createTerminalSession("vector", []);
     expect(result).toEqual(created);
-    expect(localStorage.getItem("panel-terminal-focus-vector")).toBe("s9");
+    expect(readTerminalFocus("vector")).toBe("s9");
     const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
     expect(body.project).toBe("vector");
     expect(typeof body.name).toBe("string");
@@ -19,7 +20,7 @@ describe("createTerminalSession", () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false });
     const result = await createTerminalSession("vector", []);
     expect(result).toBeNull();
-    expect(localStorage.getItem("panel-terminal-focus-vector")).toBeNull();
+    expect(readTerminalFocus("vector")).toBeNull();
   });
 
   it("returns null when fetch throws", async () => {
