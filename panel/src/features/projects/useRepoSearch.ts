@@ -63,10 +63,23 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
             // The base GitBranchDiff writes, read through the same
             // declaration — so both sides normalize the repo path the same
             // way. A repo with no path is not a scope; the store refuses one.
-            const base =
-              repo.path.trim() === ""
-                ? ""
-                : readPreference(preferences.branchDiffBase, repo.path);
+            //
+            // `typeof` first, and the read inside a `try`. `server/lib/
+            // discovery.ts` does no runtime validation, so a `repos.json` entry
+            // without a `path` arrives here as `undefined` — and the guard
+            // `repo.path.trim()` sits in the same un-wrapped position the old
+            // `localStorage.getItem` did: a TypeError here rejects the whole
+            // `Promise.all`, `setFiles(all)` never runs, and ONE malformed
+            // entry blanks the search for every healthy repository beside it.
+            let base = "";
+            try {
+              if (typeof repo.path === "string" && repo.path.trim() !== "") {
+                base = readPreference(preferences.branchDiffBase, repo.path);
+              }
+            } catch {
+              // No usable scope: search this repo without a base rather than
+              // taking the whole batch down.
+            }
             if (base) {
               try {
                 const res = await fetch(

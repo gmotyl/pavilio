@@ -15,8 +15,8 @@ function Probe({ repos }: { repos: string[] }) {
   const { isOpen, setOpen } = useCommitsOpenMap();
   return (
     <ul>
-      {repos.map((repo) => (
-        <li key={repo}>
+      {repos.map((repo, index) => (
+        <li key={repo ?? `missing-${index}`}>
           <span data-testid={`open-${repo}`}>{String(isOpen(repo))}</span>
           <button data-testid={`close-${repo}`} onClick={() => setOpen(repo, false)}>
             close
@@ -71,6 +71,24 @@ describe("useCommitsOpenMap", () => {
     rerender(<Probe repos={["/git/a", "/git/b", "/git/c"]} />);
     expect(open("/git/a")).toBe("false");
     expect(open("/git/c")).toBe("true");
+  });
+
+  it("tolerates a repo path that never arrived", () => {
+    // `server/lib/discovery.ts` validates nothing, so a `repos.json` entry with
+    // no `path` reaches the render as `undefined`. The blank-scope guard added
+    // to keep every repository off one shared key must not itself throw on it —
+    // this runs during render, and a throw here takes the project view down.
+    const missing = undefined as unknown as string;
+    expect(() => render(<Probe repos={[missing, "/git/a"]} />)).not.toThrow();
+
+    expect(open(missing)).toBe("true");
+    expect(open("/git/a")).toBe("true");
+
+    fireEvent.click(screen.getByTestId(`close-${missing}`));
+    // Nothing was written: there is no scope to write under.
+    const doc = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
+      .__PAVILIO_PREFS__!;
+    expect(Object.keys(doc)).toEqual(["version"]);
   });
 
   it("treats a tilde path and its absolute form as one repository", () => {

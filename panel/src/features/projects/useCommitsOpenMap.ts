@@ -24,6 +24,20 @@ import {
  * repository with no entry has always read as OPEN. `{}` was the map's initial
  * value, not a closed default.
  */
+/**
+ * Whether a repo path can be a preference SCOPE at all.
+ *
+ * The `typeof` half is the whole point. Every blank-scope guard added to
+ * satisfy `storageKey`'s throw became a NEW throw site for `undefined`:
+ * `server/lib/discovery.ts` does no runtime validation, so a `repos.json` entry
+ * with no `path` reaches the client as `undefined`, and `repoPath.trim()` then
+ * throws a TypeError — here, during render, taking the repo list with it.
+ * `typeof x === "string" && x.trim() !== ""` is the shape that actually holds.
+ */
+function isRepoScope(repoPath: string): boolean {
+  return typeof repoPath === "string" && repoPath.trim() !== "";
+}
+
 export function useCommitsOpenMap() {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   /** Every repo path read this session, subscribed or not yet. */
@@ -33,7 +47,7 @@ export function useCommitsOpenMap() {
   const isOpen = useCallback((repoPath: string) => {
     // An unresolved path is not a scope: the store rejects one rather than
     // letting every repository share a key, and this is the render path.
-    if (repoPath.trim() === "") return preferences.commitsOpen.default;
+    if (!isRepoScope(repoPath)) return preferences.commitsOpen.default;
     // A ref mutated during render, and deliberately so: which repositories are
     // on screen is knowable only from the render that asks. It is benign under
     // StrictMode's double invoke — `Set.add` is idempotent, and the effect
@@ -44,7 +58,7 @@ export function useCommitsOpenMap() {
   }, []);
 
   const setOpen = useCallback((repoPath: string, open: boolean) => {
-    if (repoPath.trim() === "") return;
+    if (!isRepoScope(repoPath)) return;
     writePreference(preferences.commitsOpen, open, repoPath);
     rerender();
   }, []);

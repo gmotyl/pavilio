@@ -12,7 +12,11 @@ import BranchPicker from "./BranchPicker";
 import FileChangeList from "./FileChangeList";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { preferences } from "../../preferences/declarations";
-import { readPreference, writePreference } from "../../preferences/store";
+import {
+  usePreference,
+  type PreferenceSetter,
+} from "../../preferences/usePreference";
+import type { PreferenceDef } from "../../preferences/types";
 
 interface DiffFile {
   status: string;
@@ -50,16 +54,44 @@ interface GitBranchDiffProps {
  * `undefined` is returned rather than the blank path, because `storageKey`
  * throws on a blank scope by design: an unresolved repo must read the declared
  * default and write nothing, not put every repository on one shared key.
+ *
+ * The `typeof` half is not decoration. Every blank-scope guard added to satisfy
+ * that throw became a NEW throw site for `undefined`, because `server/lib/
+ * discovery.ts` validates nothing and a `repos.json` entry with no `path` ships
+ * straight through to the client. `repo.trim() === ""` then throws a TypeError
+ * *during render* and takes the whole RepoBlock subtree down, where the raw key
+ * it replaced merely produced a `…-undefined` key and rendered fine.
+ * `typeof x === "string" && x.trim() !== ""` is the shape that actually holds.
  */
-function repoScope(repo: string): string | undefined {
-  return repo.trim() === "" ? undefined : repo;
+export function repoScope(repo: string | undefined): string | undefined {
+  return typeof repo === "string" && repo.trim() !== "" ? repo : undefined;
 }
 
-function readBase(repo: string): string {
-  const scope = repoScope(repo);
-  return scope === undefined
-    ? preferences.branchDiffBase.default
-    : readPreference(preferences.branchDiffBase, scope);
+/** Distinguishes the placeholder scopes below from one another. */
+let unscopedInstances = 0;
+
+/**
+ * `usePreference` for a repo-scoped preference whose repo may not have
+ * resolved.
+ *
+ * With no scope there is nothing to address, so the value lives in local state
+ * seeded from the declared default: it renders and toggles, and nothing is read
+ * or written. The bound hook is still called — hook order cannot depend on a
+ * prop — under a placeholder scope unique to this component instance, so two
+ * path-less repos can never meet on one key even if something later did write.
+ */
+function useOptionalScopePreference<T>(
+  def: PreferenceDef<T>,
+  scope: string | undefined,
+): [T, PreferenceSetter<T>] {
+  const placeholder = useRef("");
+  if (placeholder.current === "") {
+    // A NUL prefix: no filesystem path can collide with it.
+    placeholder.current = `\u0000unscoped-${(unscopedInstances += 1)}`;
+  }
+  const bound = usePreference(def, scope ?? placeholder.current);
+  const local = useState<T>(def.default);
+  return scope === undefined ? local : bound;
 }
 
 export default function GitBranchDiff({
@@ -75,22 +107,44 @@ export default function GitBranchDiff({
 }: GitBranchDiffProps) {
   const [currentBranch, setCurrentBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
-  // Local state, not `usePreference`: the auto-select below picks
-  // main/master/develop when nothing is stored, and that pick has never been
-  // persisted. Bound to the preference it would write on mount — one PATCH per
-  // repository on every page load.
-  const [baseBranch, setBaseBranch] = useState<string>(() => readBase(repo));
+  /**
+   * The repo scope. `RepoBlock` renders this component for the tilde-spelled
+   * path `repos.json` ships, and `GitWorktrees` renders another for the main
+   * worktree's absolute path — ONE scope, so the two panes address one stored
+   * value and must therefore SHARE it. Local state seeded once by
+   * `readPreference` shared the key but not the value: closing one left the
+   * other rendering open, and that other pane's next click re-asserted the
+   * value instead of inverting it. `usePreference` subscribes, which fixes the
+   * same-tab incoherence and the cross-tab one together — and it still reads in
+   * the `useState` initializer, so nothing flashes a default, and it writes
+   * only through its setter, so a mount still writes nothing.
+   */
+  const scope = repoScope(repo);
+  const [storedBase, setStoredBase] = useOptionalScopePreference(
+    preferences.branchDiffBase,
+    scope,
+  );
+  /**
+   * The main/master/develop fallback, deliberately NOT bound: that pick has
+   * never been persisted, and binding it would PATCH one key per repository on
+   * every page load. It only stands in while nothing is stored.
+   */
+  const [autoBase, setAutoBase] = useState("");
+  const baseBranch = storedBase || autoBase;
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [commitsAhead, setCommitsAhead] = useState(0);
   const [loading, setLoading] = useState(false);
-  // Local state for the same reason: `openFile` and the controlled `activeFile`
-  // both force the section open, and neither has ever been a stored choice.
-  const [sectionOpen, setSectionOpen] = useState<boolean>(() => {
-    const scope = repoScope(repo);
-    return scope === undefined
-      ? preferences.branchDiffOpen.default
-      : readPreference(preferences.branchDiffOpen, scope);
-  });
+  const [storedOpen, setStoredOpen] = useOptionalScopePreference(
+    preferences.branchDiffOpen,
+    scope,
+  );
+  /**
+   * `openFile` and the controlled `activeFile` force the section open, and that
+   * has never been a stored choice either — so it overlays the stored value
+   * rather than writing to it.
+   */
+  const [forcedOpen, setForcedOpen] = useState(false);
+  const sectionOpen = forcedOpen || storedOpen;
 
   const [activeDiff, setActiveDiff] = useState<{ file: string } | null>(null);
   const [diffContent, setDiffContent] = useState("");
@@ -115,23 +169,19 @@ export default function GitBranchDiff({
       const data = await res.json();
       setCurrentBranch(data.current);
       setBranches(data.branches.filter((b: string) => b !== data.current));
-      // Auto-select stored or first reasonable default (only when none chosen yet)
+      // Auto-select a reasonable default, and only when nothing is chosen yet —
+      // a stored pick is already `storedBase`, so there is nothing to re-read.
       if (!baseBranchRef.current) {
-        const stored = readBase(repo);
-        if (stored && data.branches.includes(stored)) {
-          setBaseBranch(stored);
-        } else {
-          const defaults = ["main", "master", "develop"];
-          const found = defaults.find(
-            (d) => data.branches.includes(d) && d !== data.current,
-          );
-          if (found) setBaseBranch(found);
-        }
+        const defaults = ["main", "master", "develop"];
+        const found = defaults.find(
+          (d) => data.branches.includes(d) && d !== data.current,
+        );
+        if (found) setAutoBase(found);
       }
     } catch {
       // Keep the current branch state; a later refresh retries.
     }
-  }, [qs, repo]);
+  }, [qs]);
 
   const fetchDiffFiles = useCallback(
     async (base: string) => {
@@ -186,22 +236,24 @@ export default function GitBranchDiff({
   }, [lastMessage, fetchBranches, fetchDiffFiles]);
 
   // Persist base branch selection — only the user's own pick, never the
-  // auto-selected fallback.
+  // auto-selected fallback, which lives in `autoBase` and is never written.
   const handleBaseBranchChange = (branch: string) => {
-    setBaseBranch(branch);
-    const scope = repoScope(repo);
-    if (scope !== undefined) {
-      writePreference(preferences.branchDiffBase, branch, scope);
-    }
+    setStoredBase(branch);
   };
 
   const handleSectionToggle = () => {
-    const next = !sectionOpen;
-    setSectionOpen(next);
-    const scope = repoScope(repo);
-    if (scope !== undefined) {
-      writePreference(preferences.branchDiffOpen, next, scope);
+    // While something has forced the section open there is no stored `true` to
+    // invert: what the user sees is the overlay, so the click drops it and
+    // stores the closed state it produced.
+    if (forcedOpen) {
+      setForcedOpen(false);
+      setStoredOpen(false);
+      return;
     }
+    // The updater form, not `!sectionOpen` out of the closure: two toggles in
+    // one tick have to compose, and the setter resolves an updater against the
+    // latest value rather than the rendered one.
+    setStoredOpen((previous) => !previous);
   };
 
   const openDiff = useCallback(
@@ -230,7 +282,7 @@ export default function GitBranchDiff({
   // External trigger to open a specific file diff
   useEffect(() => {
     if (openFile && baseBranch && files.some((f) => f.path === openFile)) {
-      if (!sectionOpen) setSectionOpen(true);
+      if (!sectionOpen) setForcedOpen(true);
       openDiff(openFile);
     }
   }, [openFile, baseBranch, files, sectionOpen, openDiff]);
@@ -245,7 +297,7 @@ export default function GitBranchDiff({
       baseBranch &&
       files.some((f) => f.path === activeFile)
     ) {
-      if (!sectionOpen) setSectionOpen(true);
+      if (!sectionOpen) setForcedOpen(true);
       openDiff(activeFile);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

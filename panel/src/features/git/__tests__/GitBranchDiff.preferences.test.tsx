@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { renderHook, screen, waitFor } from "@testing-library/react";
+import { act, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import GitBranchDiff from "../GitBranchDiff";
 import GitWorktrees from "../GitWorktrees";
@@ -34,6 +34,28 @@ vi.mock("../../realtime/useWebSocket", () => ({
   useWebSocket: () => ({ lastMessage: null }),
 }));
 
+/**
+ * The cold-render assertion has to be STRUCTURAL, not a fetch count. The store
+ * skips a write whose stored value already matches, so a mount-write of the
+ * declared default reaches no PATCH and leaves no document key — it stays
+ * invisible until the day the stored value differs from the default, and then
+ * shows up as a choice silently reverting on load. Spying on `writePreference`
+ * itself is the only way to see the call the store swallowed.
+ */
+const { writeSpy } = vi.hoisted(() => ({ writeSpy: vi.fn() }));
+
+vi.mock("../../../preferences/store", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../preferences/store")>();
+  return {
+    ...actual,
+    writePreference: (...args: Parameters<typeof actual.writePreference>) => {
+      writeSpy(...args);
+      return actual.writePreference(...args);
+    },
+  };
+});
+
 const BRANCHES = {
   current: "feature/search",
   branches: ["main", "feature/search", "develop"],
@@ -56,6 +78,7 @@ async function pickBase(
 
 describe("git branch-diff preferences", () => {
   beforeEach(() => {
+    writeSpy.mockClear();
     mockFetchResponses({ "/api/git/branches": BRANCHES });
   });
 
@@ -107,6 +130,10 @@ describe("git branch-diff preferences", () => {
           "/home/greg/git/prv/pavilio",
         ),
       ).toBe(false);
+      // Positive control for the two cold-render tests below: the spy really is
+      // the `writePreference` these components reach, so "never called" there
+      // means no write was attempted rather than no spy being wired.
+      expect(writeSpy).toHaveBeenCalled();
 
       tilde.unmount();
       // The spelling `git worktree list` prints, as GitWorktrees passes it on.
@@ -191,8 +218,58 @@ describe("git branch-diff preferences", () => {
 
     // The document is untouched: a mount that only READS leaves it as booted.
     expect(Object.keys(doc())).toEqual(["version"]);
+    // Structurally, not by its effect: no write was even attempted.
+    expect(writeSpy).not.toHaveBeenCalled();
     // And the store never reached the preferences route at all — the flush
     // window has passed, so a queued PATCH would have left by now.
+    expect(
+      mockFetch.mock.calls
+        .map(([input]) => String(input))
+        .filter((url) => url.startsWith("/api/preferences")),
+    ).toEqual([]);
+  });
+
+  it("writes nothing on a cold render over a document that already holds values", async () => {
+    // The seeded values DIFFER from the declared defaults, so a mount-write
+    // would be a real change the store could not swallow — and would revert the
+    // user's choices on every page load.
+    doc()[storageKey(preferences.branchDiffOpen, "/git/alpha")] = false;
+    doc()[storageKey(preferences.branchDiffBase, "/git/alpha")] = "develop";
+    doc()[storageKey(preferences.worktreeExpanded, "/git/alpha/wt")] = true;
+    const before = { ...doc() };
+
+    const mockFetch = mockFetchResponses({
+      "/api/git/branch-diff-files": { files: [], commitsAhead: 0 },
+      "/api/git/branches": BRANCHES,
+      "/api/git/worktrees": [
+        { path: "/git/alpha", head: "a", branch: "main" },
+        { path: "/git/alpha/wt", head: "b", branch: "feat" },
+      ],
+      "/api/git/branch": { branch: "main" },
+    });
+    renderWithRouter(
+      <>
+        <GitBranchDiff repo="/git/alpha" />
+        <GitWorktrees repo="/git/alpha" />
+      </>,
+    );
+    // The stored worktree flag was honored, so the render really did read.
+    await screen.findByTestId("git-worktree-toggle-/git/alpha/wt");
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("git-worktree-toggle-/git/alpha/wt"),
+      ).toHaveAttribute("aria-label", "Collapse worktree");
+    });
+    // Inside `act`: the expanded worktree's nested GitBranchDiff is still
+    // settling its own fetches while the debounce window passes.
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS * 2),
+      );
+    });
+
+    expect(writeSpy).not.toHaveBeenCalled();
+    expect(doc()).toEqual(before);
     expect(
       mockFetch.mock.calls
         .map(([input]) => String(input))
