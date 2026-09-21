@@ -11,8 +11,10 @@
 // Three things the file is protected from, because it is shared state that
 // outlives the process and travels between machines:
 //   - a value JSON cannot represent (`undefined`, a function, a symbol, a
-//     circular object) never reaches it — it would emit a bare `undefined`
-//     token and the whole document would fail to parse on the next boot;
+//     BigInt, a circular object) never reaches it — it would emit a bare
+//     `undefined` token and the whole document would fail to parse on the
+//     next boot. Such a key is ignored with a warning, never stored and never
+//     deleted: `null` is the delete verb, and it is the only one;
 //   - a failed write is remembered, not swallowed, so the next flush retries;
 //   - a document written by a newer panel is never rewritten in an older
 //     panel's format.
@@ -44,6 +46,7 @@ let inFlight: Promise<void> | null = null;
 let dirty = false;
 let tmpSeq = 0;
 let refusalLogged = false;
+const unstorableWarned = new Set<string>();
 
 /**
  * Read the document at `path` into memory. Boot-time and synchronous; never
@@ -58,6 +61,7 @@ export function loadPreferences(path: string): PreferencesDoc {
   targetPath = path;
   doc = emptyDoc();
   refusalLogged = false;
+  unstorableWarned.clear();
   try {
     if (existsSync(path)) {
       const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
@@ -79,21 +83,31 @@ export function getPreferences(): PreferencesDoc {
 
 /**
  * Shallow-merge `patch` into the in-memory document and schedule a write.
- * A `null` value deletes its key, and so does any value JSON cannot represent
- * (`undefined`, a function, a symbol, a circular object) — see `asJson`.
- * `version` is not patchable. The merged doc is returned and readable
- * immediately, long before the write lands.
+ * A `null` value deletes its key — the one delete verb, and the only one a
+ * caller can reach over HTTP. A value JSON cannot represent (`undefined`, a
+ * function, a symbol, a BigInt, a circular object — see `asJson`) is ignored
+ * with a warning: the stored value stays as it was. `version` is not
+ * patchable. The merged doc is returned and readable immediately, long before
+ * the write lands.
  */
 export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc {
   const next: PreferencesDoc = { ...doc, version: doc.version };
   for (const [key, value] of Object.entries(patch)) {
     if (key === "version") continue;
-    // `undefined` is what `{ theme: maybeUndefined }` produces in ordinary TS,
-    // and a function or symbol has the same fate in JSON: there is no value to
-    // store, so the honest merge result is "this key is gone", exactly as for
-    // an explicit null.
-    if (value === null || asJson(value) === undefined) delete next[key];
-    else next[key] = value;
+    if (value === null) {
+      delete next[key];
+      continue;
+    }
+    // `undefined` is what `{ theme: getTheme() }` produces in ordinary TS when
+    // the getter returns nothing, and `JSON.parse` never yields it — so this
+    // branch is unreachable from HTTP and means an in-process slip, not an
+    // intent to delete. Honouring it as a delete would turn that slip into
+    // silent data loss; ignoring it turns it into a visible warning.
+    if (asJson(value) === undefined) {
+      warnUnstorable(key, value);
+      continue;
+    }
+    next[key] = value;
   }
   doc = next;
   scheduleWrite();
@@ -144,6 +158,7 @@ export function _resetPreferencesForTests(): void {
   doc = emptyDoc();
   targetPath = "";
   refusalLogged = false;
+  unstorableWarned.clear();
 }
 
 /**
@@ -201,13 +216,35 @@ function asJson(value: unknown): string | undefined {
   }
 }
 
+/** Name the unstorable value's shape, so the warning says *why* the key was
+ *  skipped and not merely that it was. */
+function describeUnstorable(value: unknown): string {
+  if (value === undefined) return "an undefined value";
+  if (typeof value === "function") return "a function";
+  if (typeof value === "symbol") return "a symbol";
+  if (typeof value === "bigint") return "a BigInt";
+  return "a circular structure";
+}
+
+/** Once per offending key, not once per patch: a control bound to an
+ *  undefined piece of state would otherwise log a line per keystroke. */
+function warnUnstorable(key: string, value: unknown): void {
+  if (unstorableWarned.has(key)) return;
+  unstorableWarned.add(key);
+  console.warn(
+    `[preferences] ignoring ${JSON.stringify(key)}: ${describeUnstorable(value)} has no JSON ` +
+      `representation and cannot be stored. Any value already stored under that key is kept — ` +
+      `patch null to delete it.`,
+  );
+}
+
 /** `version` first, then every other key sorted — one key per line. */
 function serialize(d: PreferencesDoc): string {
   const lines = [`  "version": ${JSON.stringify(d.version)}`];
   for (const key of Object.keys(d)
     .filter((k) => k !== "version")
     .sort()) {
-    // Belt and braces: `patchPreferences` already drops unstorable values, so
+    // Belt and braces: `patchPreferences` already ignores unstorable values, so
     // this only fires for a doc assembled some other way. Emitting the line
     // anyway would put a bare `undefined` token in the file and make the whole
     // document unparseable on the next boot.

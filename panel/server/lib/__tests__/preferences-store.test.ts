@@ -27,6 +27,33 @@ const freshDir = (): string => (dir = mkdtempSync(join(tmpdir(), "pavilio-prefs-
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A writable directory on a filesystem that is *not* the one `os.tmpdir()`
+ *  lives on, or "" when this machine has only one.
+ *
+ *  Every other target in this file is created under `os.tmpdir()`, so a store
+ *  that staged its temp file in `os.tmpdir()` instead of beside the target
+ *  would still commit — same device, `rename` never raises EXDEV — and the
+ *  suite would stay green while every real write failed forever, the data
+ *  repo being on another mount than /tmp on plenty of machines. A target over
+ *  here is the only thing in the suite that can tell the two apart. */
+const CROSS_DEVICE_ROOT: string = (() => {
+  const tmpDev = statSync(tmpdir()).dev;
+  for (const candidate of ["/dev/shm", "/run/shm", "/var/tmp"]) {
+    try {
+      if (statSync(candidate).dev === tmpDev) continue;
+      // writable too, or the test would go red for the wrong reason
+      rmSync(mkdtempSync(join(candidate, "pavilio-prefs-probe-")), {
+        recursive: true,
+        force: true,
+      });
+      return candidate;
+    } catch {
+      /* absent, same device, or not writable */
+    }
+  }
+  return "";
+})();
+
 // Both durability contracts are observed on the target file itself, never on a
 // particular fs call: which module the store imports, whether it writes sync
 // or async, and how it spells its temp path are implementation details, and a
@@ -66,16 +93,16 @@ afterEach(() => {
 describe("loadPreferences", () => {
   it("a missing file yields an empty versioned doc", () => {
     freshDir();
-    expect(loadPreferences(join(dir, "nope", "preferences.json"))).toEqual({ version: 1 });
-    expect(getPreferences()).toEqual({ version: 1 });
+    expect(loadPreferences(join(dir, "nope", "preferences.json"))).toStrictEqual({ version: 1 });
+    expect(getPreferences()).toStrictEqual({ version: 1 });
   });
 
   it("a malformed file yields an empty versioned doc", () => {
     freshDir();
     for (const junk of ["", "   ", "{ not json", "[1,2,3]", "null", '"a string"']) {
       writeFileSync(file(), junk, "utf8");
-      expect(loadPreferences(file())).toEqual({ version: 1 });
-      expect(getPreferences()).toEqual({ version: 1 });
+      expect(loadPreferences(file())).toStrictEqual({ version: 1 });
+      expect(getPreferences()).toStrictEqual({ version: 1 });
       _resetPreferencesForTests();
     }
   });
@@ -87,8 +114,8 @@ describe("loadPreferences", () => {
       JSON.stringify({ version: 1, theme: "dark", panes: { left: 240 } }),
       "utf8",
     );
-    expect(loadPreferences(file())).toEqual({ version: 1, theme: "dark", panes: { left: 240 } });
-    expect(getPreferences()).toEqual({ version: 1, theme: "dark", panes: { left: 240 } });
+    expect(loadPreferences(file())).toStrictEqual({ version: 1, theme: "dark", panes: { left: 240 } });
+    expect(getPreferences()).toStrictEqual({ version: 1, theme: "dark", panes: { left: 240 } });
   });
 });
 
@@ -101,8 +128,8 @@ describe("patchPreferences", () => {
     const merged = patchPreferences({ theme: "light", density: "compact" });
 
     // readable immediately, before any write has landed
-    expect(merged).toEqual({ version: 1, theme: "light", locale: "pl", density: "compact" });
-    expect(getPreferences()).toEqual(merged);
+    expect(merged).toStrictEqual({ version: 1, theme: "light", locale: "pl", density: "compact" });
+    expect(getPreferences()).toStrictEqual(merged);
 
     await flushPreferences();
     expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({
@@ -130,7 +157,10 @@ describe("patchPreferences", () => {
     const text = readFileSync(file(), "utf8");
     expect(text).not.toContain("theme");
     expect(JSON.parse(text)).toEqual({ version: 1, locale: "pl" });
-    expect(getPreferences()).toEqual({ version: 1, locale: "pl" });
+    // toStrictEqual, not toEqual: toEqual ignores undefined-valued properties,
+    // so it cannot tell a deleted key from one still present holding undefined.
+    expect(getPreferences()).toStrictEqual({ version: 1, locale: "pl" });
+    expect(Object.keys(getPreferences()).sort()).toEqual(["locale", "version"]);
   });
 });
 
@@ -263,6 +293,30 @@ describe("durability", () => {
     expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({ version: 1, a: 1, b: 2, c: 3 });
   }, 30_000);
 
+  it.skipIf(CROSS_DEVICE_ROOT === "")(
+    "commits a target that is not on the temp filesystem",
+    async () => {
+      dir = mkdtempSync(join(CROSS_DEVICE_ROOT, "pavilio-prefs-"));
+      // the premise, asserted rather than assumed
+      expect(statSync(dir).dev).not.toBe(statSync(tmpdir()).dev);
+
+      loadPreferences(file());
+      patchPreferences({ theme: "dark" });
+      await flushPreferences();
+
+      expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({ version: 1, theme: "dark" });
+      expect(filesUnder(dir)).toEqual(["preferences.json"]);
+    },
+  );
+
+  // Guards the guard. A `skipIf` is invisible in a green run, so on a machine
+  // that plainly has a second filesystem the skip must not engage — otherwise
+  // the contract above could quietly decay into "always skipped".
+  it("does not skip the cross-device commit on a machine that has two filesystems", () => {
+    if (process.platform !== "linux" || !existsSync("/dev/shm")) return;
+    expect(CROSS_DEVICE_ROOT).not.toBe("");
+  });
+
   it("a missing parent directory is created on first write", async () => {
     freshDir();
     const nested = join(dir, "deep", ".pavilio", "preferences.json");
@@ -278,6 +332,7 @@ describe("non-serializable values", () => {
     freshDir();
     loadPreferences(file());
 
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     patchPreferences({ good: 1, bad: undefined });
     await flushPreferences();
 
@@ -288,25 +343,53 @@ describe("non-serializable values", () => {
 
     // and the document survives a reload — the whole point of the bug
     _resetPreferencesForTests();
-    expect(loadPreferences(file())).toEqual({ version: 1, good: 1 });
+    expect(loadPreferences(file())).toStrictEqual({ version: 1, good: 1 });
   });
 
-  it("an undefined value deletes an existing key, like null", async () => {
+  it("an undefined value leaves an existing key alone, unlike null", async () => {
     freshDir();
     loadPreferences(file());
     patchPreferences({ theme: "dark", locale: "pl" });
     await flushPreferences();
 
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
     patchPreferences({ theme: undefined });
     await flushPreferences();
 
-    expect(getPreferences()).toEqual({ version: 1, locale: "pl" });
-    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({ version: 1, locale: "pl" });
+    // `undefined` cannot arrive over HTTP — `JSON.parse` never yields it — so
+    // this branch is reachable only from an in-process caller, i.e. exactly
+    // the accidental `patchPreferences({ theme: getTheme() })`. `null` is the
+    // documented delete verb and stays the only one: dropping the stored
+    // value here would turn a programmer's slip into silent data loss.
+    //
+    // toStrictEqual, not toEqual: toEqual ignores undefined-valued properties
+    // and so cannot tell "key gone" from "key present holding undefined".
+    expect(getPreferences()).toStrictEqual({ version: 1, theme: "dark", locale: "pl" });
+    expect(Object.keys(getPreferences()).sort()).toEqual(["locale", "theme", "version"]);
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({
+      version: 1,
+      theme: "dark",
+      locale: "pl",
+    });
+
+    // and it said so out loud, naming the key and the reason
+    const said = warnings.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(said).toContain("theme");
+    expect(said).toMatch(/undefined/i);
+    expect(warnings).toHaveBeenCalledTimes(1);
+
+    // once per offending key — not once per patch, and not once ever
+    patchPreferences({ theme: undefined });
+    expect(warnings).toHaveBeenCalledTimes(1);
+    patchPreferences({ density: undefined });
+    expect(warnings).toHaveBeenCalledTimes(2);
+    expect(warnings.mock.calls[1].join(" ")).toContain("density");
   });
 
   it("a function or a symbol value never reaches the file", async () => {
     freshDir();
     loadPreferences(file());
+    vi.spyOn(console, "warn").mockImplementation(() => {});
 
     patchPreferences({ good: 1, fn: () => 42, sym: Symbol("nope") });
     await flushPreferences();
@@ -314,7 +397,59 @@ describe("non-serializable values", () => {
     const text = readFileSync(file(), "utf8");
     expect(() => JSON.parse(text)).not.toThrow();
     expect(JSON.parse(text)).toEqual({ version: 1, good: 1 });
-    expect(getPreferences()).toEqual({ version: 1, good: 1 });
+    expect(getPreferences()).toStrictEqual({ version: 1, good: 1 });
+  });
+
+  it("a BigInt or a circular object is ignored, never thrown", async () => {
+    freshDir();
+    loadPreferences(file());
+    patchPreferences({ theme: "dark" });
+    await flushPreferences();
+
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const loop: Record<string, unknown> = {};
+    loop.self = loop;
+
+    // `JSON.stringify` *throws* on these two, where for a function or a symbol
+    // it merely returns `undefined`. A caller patching preferences must not
+    // have to know the difference — and must not lose the rest of the patch.
+    expect(() => patchPreferences({ big: 10n, loop, theme: "light" })).not.toThrow();
+    await flushPreferences();
+
+    expect(getPreferences()).toStrictEqual({ version: 1, theme: "light" });
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({ version: 1, theme: "light" });
+
+    const said = warnings.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(said).toContain("big");
+    expect(said).toContain("loop");
+  });
+
+  it("an unstorable value planted on the live document never reaches the file", async () => {
+    freshDir();
+    loadPreferences(file());
+    patchPreferences({ good: 1 });
+    await flushPreferences();
+
+    // `getPreferences()` hands out the live document, so a value can enter it
+    // without ever passing through `patchPreferences`. The serializer is the
+    // last line of defence: writing the key anyway would put a bare
+    // `undefined` token in the file and make the whole document unparseable
+    // on the next boot — the exact failure this store exists to prevent.
+    const live = getPreferences() as Record<string, unknown>;
+    live.planted = undefined;
+    live.fn = () => 42;
+
+    patchPreferences({ good: 2 });
+    await flushPreferences();
+
+    const text = readFileSync(file(), "utf8");
+    expect(text).not.toContain("undefined");
+    expect(text).not.toContain("planted");
+    expect(() => JSON.parse(text)).not.toThrow();
+    expect(JSON.parse(text)).toEqual({ version: 1, good: 2 });
+
+    _resetPreferencesForTests();
+    expect(loadPreferences(file())).toStrictEqual({ version: 1, good: 2 });
   });
 });
 
@@ -333,7 +468,7 @@ describe("a failed write", () => {
 
     expect(errors).toHaveBeenCalled();
     expect(statSync(file()).isDirectory()).toBe(true); // nothing was committed
-    expect(getPreferences()).toEqual({ version: 1, theme: "dark" }); // memory intact
+    expect(getPreferences()).toStrictEqual({ version: 1, theme: "dark" }); // memory intact
 
     // The change must not be forgotten: once the target is writable again, a
     // later flush — the shutdown one, with no new patch behind it — retries.
@@ -369,7 +504,7 @@ describe("document version", () => {
       if (bad !== undefined) raw.version = bad;
       writeFileSync(file(), JSON.stringify(raw), "utf8");
 
-      expect(loadPreferences(file())).toEqual({ version: 1, theme: "dark" });
+      expect(loadPreferences(file())).toStrictEqual({ version: 1, theme: "dark" });
 
       patchPreferences({ locale: "pl" });
       await flushPreferences();
@@ -389,7 +524,7 @@ describe("document version", () => {
     const raw = JSON.stringify({ version: 2, newShape: { left: 240 } });
     writeFileSync(file(), raw, "utf8");
 
-    expect(loadPreferences(file())).toEqual({ version: 2, newShape: { left: 240 } });
+    expect(loadPreferences(file())).toStrictEqual({ version: 2, newShape: { left: 240 } });
     expect(getPreferences().version).toBe(2);
 
     const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -413,5 +548,36 @@ describe("document version", () => {
     await flushPreferences();
     expect(readFileSync(file(), "utf8")).toBe(raw);
     expect(warnings).toHaveBeenCalledTimes(1); // logged once, not per write
+  });
+
+  it("a newer version still merges patches in memory for the session", async () => {
+    freshDir();
+    writeFileSync(file(), JSON.stringify({ version: 2, newShape: { left: 240 } }), "utf8");
+    loadPreferences(file());
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Read-only means the *file* is read-only, not the session. A panel that
+    // refused the merge too would leave the UI showing stale preferences with
+    // no way to change them for as long as the process lives.
+    expect(patchPreferences({ theme: "dark" })).toStrictEqual({
+      version: 2,
+      newShape: { left: 240 },
+      theme: "dark",
+    });
+    expect(getPreferences()).toStrictEqual({
+      version: 2,
+      newShape: { left: 240 },
+      theme: "dark",
+    });
+
+    // deletes too, not just sets
+    patchPreferences({ theme: null });
+    expect(getPreferences()).toStrictEqual({ version: 2, newShape: { left: 240 } });
+
+    await flushPreferences();
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({
+      version: 2,
+      newShape: { left: 240 },
+    });
   });
 });
