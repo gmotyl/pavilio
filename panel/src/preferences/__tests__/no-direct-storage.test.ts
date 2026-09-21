@@ -61,6 +61,26 @@ interface PendingMigration {
  */
 const PENDING_MIGRATIONS: readonly PendingMigration[] = [];
 
+/**
+ * The one narrow exemption in `features/time`, named file by file rather than
+ * by key or by directory.
+ *
+ * `pavilio.time.<project>` is the busy ACCUMULATOR: minutes worked today, data
+ * rather than a preference, deliberately undeclared and deliberately raw. It
+ * is per-machine, rewritten every minute, and has no business in a committed
+ * workspace file. `useBusyAccumulator` reads and writes it, and
+ * `TimeTrackingProvider` scans the same prefix to discover which projects have
+ * state from earlier in the day.
+ *
+ * Everything else under `features/time` is guarded, which is what keeps this
+ * an exemption rather than a hole: `ReportBlock` and `ManualEntryForm` live in
+ * the same tree, and a raw call reintroduced in either one is an offence here.
+ */
+const ACCUMULATOR_FILES: readonly string[] = [
+  "features/time/useBusyAccumulator.ts",
+  "features/time/TimeTrackingProvider.tsx",
+];
+
 function sourceFiles(dir: string): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(join(SRC, dir), { withFileTypes: true })) {
@@ -220,6 +240,7 @@ describe("the enumeration the guard rests on", () => {
     const search = sourceFiles("features/search");
     const terminal = sourceFiles("features/terminal");
     const speech = sourceFiles("features/speech");
+    const time = sourceFiles("features/time");
 
     expect(shell.length).toBe(countSourceFiles("features/shell"));
     expect(projects.length).toBe(countSourceFiles("features/projects"));
@@ -227,6 +248,7 @@ describe("the enumeration the guard rests on", () => {
     expect(search.length).toBe(countSourceFiles("features/search"));
     expect(terminal.length).toBe(countSourceFiles("features/terminal"));
     expect(speech.length).toBe(countSourceFiles("features/speech"));
+    expect(time.length).toBe(countSourceFiles("features/time"));
     // Not merely non-empty: the trees are large, and a walk that stopped at
     // the first directory would still clear a floor.
     expect(shell.length).toBeGreaterThanOrEqual(21);
@@ -235,6 +257,7 @@ describe("the enumeration the guard rests on", () => {
     expect(search.length).toBeGreaterThanOrEqual(3);
     expect(terminal.length).toBeGreaterThanOrEqual(50);
     expect(speech.length).toBeGreaterThanOrEqual(16);
+    expect(time.length).toBeGreaterThanOrEqual(12);
     // `features/shell` has subdirectories (Layout, Breadcrumbs); a walk that
     // did not descend would miss them and this is what says so.
     expect(shell.some((file) => file.split("/").length > 3)).toBe(true);
@@ -285,6 +308,33 @@ describe("preferences replace raw browser storage", () => {
     const speech = rawStorageUses("features/speech", /\bsessionStorage\b/);
 
     expect(report([...terminal.offences, ...speech.offences])).toEqual([]);
+  });
+
+  it("no module under features/time references localStorage except the busy accumulator", () => {
+    const time = rawStorageUses("features/time", /\blocalStorage\b/);
+    const exempt = (offence: Offence): boolean =>
+      ACCUMULATOR_FILES.includes(offence.file);
+
+    expect(report(time.offences.filter((offence) => !exempt(offence)))).toEqual(
+      [],
+    );
+    // The exemption is narrow because it is also REAL: both named files do
+    // reach `localStorage`, so an empty offence list here would mean the walk
+    // found nothing rather than that the guard held.
+    expect(
+      ACCUMULATOR_FILES.filter((file) =>
+        time.offences.some((offence) => offence.file === file),
+      ),
+    ).toEqual(ACCUMULATOR_FILES);
+  });
+
+  it("no module under features/time references sessionStorage directly", () => {
+    // Nothing on the Time tab is session-scoped; the accumulator is not
+    // exempt here, because it uses the local tier and nothing else should
+    // reach for the narrower one unnoticed.
+    const time = rawStorageUses("features/time", /\bsessionStorage\b/);
+
+    expect(report(time.offences)).toEqual([]);
   });
 
   /**

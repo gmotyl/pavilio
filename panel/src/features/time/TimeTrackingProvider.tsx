@@ -21,10 +21,19 @@ const TimeTrackingContext = createContext<TimeTrackingContextValue | null>(
 );
 
 // localStorage keys written by useBusyAccumulator look like
-// `pavilio.time.<project>`. ReportBlock writes `pavilio.time.report.<project>`;
-// those are pref blobs, not accumulator state, so we exclude them here.
+// `pavilio.time.<project>`. Two settings used to share that prefix —
+// `pavilio.time.report.<project>` and
+// `pavilio.time.form.<project>.resetAutoOnSave`. Both are preferences now and
+// this panel writes neither, but the migration deliberately ORPHANS old raw
+// keys rather than deleting them, so both still sit in every browser that ran
+// an earlier build. The scan therefore stays defensive rather than being
+// simplified away: an unskipped orphan is discovered as a phantom project, and
+// the tracker slot that mounts for it stamps accumulator JSON over the key —
+// which is how the real storage dump came to hold an accumulator object under
+// a boolean flag. `form.` was never skipped, so that phantom is live today;
+// this is where it stops.
 const LS_PREFIX = "pavilio.time.";
-const REPORT_INFIX = "report.";
+const PREFERENCE_INFIXES = ["report.", "form."];
 
 function scanStorageProjects(): string[] {
   if (typeof window === "undefined" || !window.localStorage) return [];
@@ -36,7 +45,7 @@ function scanStorageProjects(): string[] {
       const k = window.localStorage.key(i);
       if (!k || !k.startsWith(LS_PREFIX)) continue;
       const rest = k.slice(LS_PREFIX.length);
-      if (rest.startsWith(REPORT_INFIX)) continue;
+      if (PREFERENCE_INFIXES.some((infix) => rest.startsWith(infix))) continue;
       if (rest) out.push(rest);
     }
     return out;

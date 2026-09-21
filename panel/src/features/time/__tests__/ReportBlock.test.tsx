@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { ReportBlock } from "../ReportBlock";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference } from "../../../preferences/store";
+
+/** The report options, as the preference store now holds them. */
+const storedPrefs = (project: string) =>
+  readPreference(preferences.timeReport, project);
 
 const FIXTURE_ENTRIES = [
   { date: "2026-05-19", minutes: 75, note: "alpha" },
@@ -75,7 +81,7 @@ describe("ReportBlock", () => {
     expect(screen.getByText(/2:15/)).toBeInTheDocument();
   });
 
-  it("persists prefs to localStorage", async () => {
+  it("persists prefs to the project's preferences", async () => {
     render(<ReportBlock project="metro" projectLabel="Metro" />);
     await flushFetch();
 
@@ -83,10 +89,7 @@ describe("ReportBlock", () => {
     fireEvent.change(periodSelect, { target: { value: "last-week" } });
 
     await waitFor(() => {
-      const raw = localStorage.getItem("pavilio.time.report.metro");
-      expect(raw).not.toBeNull();
-      const parsed = JSON.parse(raw!);
-      expect(parsed.period).toBe("last-week");
+      expect(storedPrefs("metro").period).toBe("last-week");
     });
   });
 
@@ -189,8 +192,10 @@ describe("ReportBlock", () => {
     const select = screen.getByTestId("time-report-period") as HTMLSelectElement;
     expect(select.value).toBe("custom");
 
-    const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
-    expect(parsed.period).toEqual({ from: "2026-01-10", to: expect.any(String) });
+    expect(storedPrefs("metro").period).toEqual({
+      from: "2026-01-10",
+      to: expect.any(String),
+    });
   });
 
   it("editing From past To pulls To up to keep from <= to", async () => {
@@ -203,8 +208,10 @@ describe("ReportBlock", () => {
     fireEvent.change(fromInput, { target: { value: "2026-05-01" } });
 
     await waitFor(() => {
-      const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
-      expect(parsed.period).toEqual({ from: "2026-05-01", to: "2026-05-01" });
+      expect(storedPrefs("metro").period).toEqual({
+        from: "2026-05-01",
+        to: "2026-05-01",
+      });
     });
   });
 
@@ -218,8 +225,10 @@ describe("ReportBlock", () => {
     fireEvent.change(toInput, { target: { value: "2026-02-01" } });
 
     await waitFor(() => {
-      const parsed = JSON.parse(localStorage.getItem("pavilio.time.report.metro") as string);
-      expect(parsed.period).toEqual({ from: "2026-02-01", to: "2026-02-01" });
+      expect(storedPrefs("metro").period).toEqual({
+        from: "2026-02-01",
+        to: "2026-02-01",
+      });
     });
   });
 

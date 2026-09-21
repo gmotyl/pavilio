@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ManualEntryForm } from "../ManualEntryForm";
 import { localISODate } from "../dateLocal";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference } from "../../../preferences/store";
+import { storageKey } from "../../../preferences/types";
 
 describe("ManualEntryForm", () => {
   const originalFetch = global.fetch;
@@ -164,15 +167,17 @@ describe("ManualEntryForm", () => {
       expect(cb.checked).toBe(false);
     });
 
-    it("persists checkbox state per project in localStorage", () => {
+    it("persists checkbox state per project in the preferences", () => {
       render(<ManualEntryForm project="metro" onSaved={vi.fn()} />);
       const cb = screen.getByTestId("time-reset-auto-on-save") as HTMLInputElement;
       fireEvent.click(cb);
-      expect(localStorage.getItem("pavilio.time.form.metro.resetAutoOnSave")).toBe("true");
+      expect(readPreference(preferences.timeFormResetAutoOnSave, "metro")).toBe(true);
     });
 
-    it("rehydrates checkbox state from localStorage on mount", () => {
-      localStorage.setItem("pavilio.time.form.metro.resetAutoOnSave", "true");
+    it("rehydrates checkbox state from the preferences on mount", () => {
+      (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__![
+        storageKey(preferences.timeFormResetAutoOnSave, "metro")
+      ] = true;
       render(<ManualEntryForm project="metro" onSaved={vi.fn()} />);
       const cb = screen.getByTestId("time-reset-auto-on-save") as HTMLInputElement;
       expect(cb.checked).toBe(true);

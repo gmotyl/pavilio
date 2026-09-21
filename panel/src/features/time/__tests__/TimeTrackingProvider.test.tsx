@@ -111,6 +111,47 @@ describe("TimeTrackingProvider", () => {
     expect(seen.at(-1)).toBe(30);
   });
 
+  /**
+   * The scan discovers projects by the accumulator's own `pavilio.time.`
+   * prefix, and two migrated preferences used to be written under it. The
+   * migration deliberately ORPHANS old raw keys rather than deleting them, so
+   * both still sit in every browser that ran an earlier build — an unskipped
+   * one is scanned as a project, and the slot that mounts for it writes
+   * accumulator JSON straight over the key. That is not hypothetical: it is
+   * how the real storage dump came to hold an accumulator object under
+   * `…resetAutoOnSave`, a boolean flag.
+   */
+  it("discovers real accumulator projects and no phantoms, leaving orphaned preference keys intact", () => {
+    localStorage.setItem(
+      "pavilio.time.ch",
+      JSON.stringify({ date: "2026-05-26", closedMinutes: 30, open: null }),
+    );
+    localStorage.setItem(
+      "pavilio.time.report.ch",
+      JSON.stringify({ period: "last-week" }),
+    );
+    localStorage.setItem("pavilio.time.form.ch.resetAutoOnSave", "true");
+    setSessions([]);
+
+    const seen: number[] = [];
+
+    render(
+      <TimeTrackingProvider>
+        <Probe project="ch" onValue={(m) => seen.push(m)} />
+      </TimeTrackingProvider>,
+    );
+
+    // The real accumulator project is still found.
+    expect(seen.at(-1)).toBe(30);
+    // And neither orphan was adopted as a project and overwritten.
+    expect(localStorage.getItem("pavilio.time.form.ch.resetAutoOnSave")).toBe(
+      "true",
+    );
+    expect(
+      JSON.parse(localStorage.getItem("pavilio.time.report.ch") as string),
+    ).toEqual({ period: "last-week" });
+  });
+
   it("ignores pavilio.time.report.* pref blobs when scanning", () => {
     localStorage.setItem(
       "pavilio.time.report.ch",

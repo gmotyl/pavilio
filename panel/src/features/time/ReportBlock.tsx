@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   formatReport,
   formatHHMM,
@@ -7,41 +7,35 @@ import {
   ReportDetail,
 } from "./reportFormatters";
 import { rangeForPeriod, Period, DateRange } from "./periodRange";
+import { useProjectScopePreference } from "./useProjectScopePreference";
 import { copyToClipboard } from "../../lib/clipboard";
+import { preferences } from "../../preferences/declarations";
+
+import type { TimeReportPrefs } from "../../preferences/declarations";
 
 type NamedPeriod = Exclude<Period, object>;
 
-type Prefs = {
-  period: Period;
-  format: ReportFormat;
-  detail: ReportDetail;
-};
+type Prefs = TimeReportPrefs;
 
-const lsKey = (project: string) => `pavilio.time.report.${project}`;
+/** The declared default, so there is one copy of it and it is that one. */
+const DEFAULT_PREFS: Prefs = preferences.timeReport.default;
 
-const DEFAULT_PREFS: Prefs = {
-  period: "this-week",
-  format: "text",
-  detail: "detailed",
-};
-
-function loadPrefs(project: string): Prefs {
-  try {
-    const raw = localStorage.getItem(lsKey(project));
-    if (!raw) return DEFAULT_PREFS;
-    const parsed = JSON.parse(raw) as Partial<Prefs>;
-    return { ...DEFAULT_PREFS, ...parsed };
-  } catch {
-    return DEFAULT_PREFS;
-  }
-}
-
-function savePrefs(project: string, p: Prefs): void {
-  try {
-    localStorage.setItem(lsKey(project), JSON.stringify(p));
-  } catch {
-    // localStorage unavailable; ignore
-  }
+/**
+ * A stored blob, filled in from the declared default.
+ *
+ * `loadPrefs` used to do `{ ...DEFAULT_PREFS, ...parsed }`, so a blob missing
+ * a field still rendered — and the workspace file is hand-seeded, which is
+ * exactly where a partial blob comes from now. The `json` codec hands back
+ * whatever parsed, so the fill-in has to happen here or a missing `format`
+ * would flip a controlled `<select>` to uncontrolled mid-render.
+ *
+ * Spreading survives a stored value that is not an object at all — `null`,
+ * `true`, a number — because `{ ...DEFAULT_PREFS, ...null }` is just the
+ * default. A stored value the codec cannot parse never reaches here: the store
+ * answers with the declared default instead.
+ */
+function withDefaults(stored: Prefs): Prefs {
+  return { ...DEFAULT_PREFS, ...stored };
 }
 
 function periodLabel(period: Period, range: DateRange): string {
@@ -78,13 +72,30 @@ export function ReportBlock({
   projectLabel: string;
   refreshKey?: number;
 }) {
-  const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs(project));
+  const [storedPrefs, setPrefs] = useProjectScopePreference(
+    preferences.timeReport,
+    project,
+  );
+  const prefs = useMemo(() => withDefaults(storedPrefs), [storedPrefs]);
   const [entries, setEntries] = useState<ReportEntry[]>([]);
   const range = useMemo(() => rangeForPeriod(prefs.period, new Date()), [prefs.period]);
 
-  useEffect(() => {
-    savePrefs(project, prefs);
-  }, [project, prefs]);
+  /**
+   * Change one field. The updater form, not the value form: two changes in one
+   * tick must compose, and a value read out of this render's closure is the one
+   * the first change already replaced. The previous value is filled in the same
+   * way the render is, so editing one field of a partial blob does not persist
+   * the other two as missing.
+   *
+   * There is no mount effect writing this back. Persisting from an effect used
+   * to cost a `localStorage.setItem`; against the workspace file it is a PATCH
+   * and a commit-worthy write on every page load.
+   */
+  const updatePrefs = useCallback(
+    (patch: Partial<Prefs>) =>
+      setPrefs((previous) => ({ ...withDefaults(previous), ...patch })),
+    [setPrefs],
+  );
 
   useEffect(() => {
     const url = `/api/time/range?project=${encodeURIComponent(project)}&from=${range.from}&to=${range.to}`;
@@ -157,9 +168,9 @@ export function ReportBlock({
             onChange={(e) => {
               const v = e.target.value;
               if (v === "custom") {
-                setPrefs((p) => ({ ...p, period: { from: range.from, to: range.to } }));
+                updatePrefs({ period: { from: range.from, to: range.to } });
               } else {
-                setPrefs((p) => ({ ...p, period: v as NamedPeriod }));
+                updatePrefs({ period: v as NamedPeriod });
               }
             }}
             className={underlineSelectClass}
@@ -188,10 +199,9 @@ export function ReportBlock({
             onChange={(e) => {
               const from = e.target.value;
               // ISO YYYY-MM-DD compares lexicographically; keep from <= to.
-              setPrefs((p) => ({
-                ...p,
+              updatePrefs({
                 period: { from, to: range.to < from ? from : range.to },
-              }));
+              });
             }}
             className={underlineSelectClass}
             style={dateInputStyle}
@@ -209,10 +219,9 @@ export function ReportBlock({
             onChange={(e) => {
               const to = e.target.value;
               // ISO YYYY-MM-DD compares lexicographically; keep from <= to.
-              setPrefs((p) => ({
-                ...p,
+              updatePrefs({
                 period: { from: range.from > to ? to : range.from, to },
-              }));
+              });
             }}
             className={underlineSelectClass}
             style={dateInputStyle}
@@ -227,7 +236,7 @@ export function ReportBlock({
             data-testid="time-report-format"
             value={prefs.format}
             onChange={(e) =>
-              setPrefs((p) => ({ ...p, format: e.target.value as ReportFormat }))
+              updatePrefs({ format: e.target.value as ReportFormat })
             }
             className={underlineSelectClass}
             style={underlineSelectStyle}
@@ -246,7 +255,7 @@ export function ReportBlock({
             data-testid="time-report-detail"
             value={prefs.detail}
             onChange={(e) =>
-              setPrefs((p) => ({ ...p, detail: e.target.value as ReportDetail }))
+              updatePrefs({ detail: e.target.value as ReportDetail })
             }
             className={underlineSelectClass}
             style={underlineSelectStyle}
