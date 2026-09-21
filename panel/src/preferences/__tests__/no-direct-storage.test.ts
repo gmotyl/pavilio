@@ -16,26 +16,52 @@ import { writeLastPath, writeLastSectionFile } from "../../features/shell/lastPa
  * asserted against an independent count for the same reason — a walk that
  * silently matched nothing would turn this into a test that can only pass.
  *
- * WHAT THIS GUARD CANNOT SEE. It is a grep, and two evasions are out of its
+ * WHAT THIS GUARD CANNOT SEE. It is a grep, and three evasions are out of its
  * reach on purpose rather than by oversight:
  *
  * - a computed access — `const LS = "local" + "Storage"; globalThis[LS]` — has
  *   no `localStorage` token to match;
  * - a helper module that wraps storage and is imported. The call site then
  *   names the helper, not the store, and only the helper's own module (which
- *   may live outside these two trees) would be flagged.
+ *   may live outside these two trees) would be flagged;
+ * - the exemption window is a BOUNDED line scan, not a parse. `statementAt`
+ *   takes the offending line plus at most `STATEMENT_LOOKAHEAD - 1` more,
+ *   stopping at the first `;`. A statement needs no semicolon (ASI), so a raw
+ *   call written without one still drags the next few lines into its window
+ *   and is excused by a marker sitting in them — it merely can no longer be
+ *   excused by a marker anywhere later in the FILE, which is what an unbounded
+ *   scan allowed. In the other direction, a genuine call whose statement wraps
+ *   past the window loses its exemption and reads as an offence; that failure
+ *   is loud, and the fix is to shorten the statement.
  *
- * Catching either needs a type-aware pass over the module graph, not a line
- * scan. Read a green here as "no module under these trees says `localStorage`
- * out loud", not as "no module under these trees reaches browser storage".
+ * Catching any of them needs a type-aware pass over the module graph, not a
+ * line scan. Read a green here as "no module under these trees says
+ * `localStorage` out loud", not as "no module under these trees reaches
+ * browser storage".
  */
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-interface PendingMigration {
+/**
+ * Anything that excuses a raw storage statement does so by naming a token the
+ * statement must contain. Both exemption lists below are of this shape, and
+ * `offendingLines` takes either.
+ */
+interface StatementMarker {
+  marker: string;
+}
+
+interface PendingMigration extends StatementMarker {
   /** The OLD raw key the exempt call site names. */
   marker: string;
   /** The task that owns moving it. */
   task: string;
+}
+
+interface StatementExemption extends StatementMarker {
+  /** The identifier the exempt statement must name. */
+  marker: string;
+  /** Why this statement is allowed to stay raw, forever rather than for a task. */
+  why: string;
 }
 
 /**
@@ -62,8 +88,8 @@ interface PendingMigration {
 const PENDING_MIGRATIONS: readonly PendingMigration[] = [];
 
 /**
- * The one narrow exemption in `features/time`, named file by file rather than
- * by key or by directory.
+ * The one narrow exemption in `features/time`, matched on the STATEMENT, the
+ * same way `PENDING_MIGRATIONS` is.
  *
  * `pavilio.time.<project>` is the busy ACCUMULATOR: minutes worked today, data
  * rather than a preference, deliberately undeclared and deliberately raw. It
@@ -72,13 +98,30 @@ const PENDING_MIGRATIONS: readonly PendingMigration[] = [];
  * `TimeTrackingProvider` scans the same prefix to discover which projects have
  * state from earlier in the day.
  *
- * Everything else under `features/time` is guarded, which is what keeps this
- * an exemption rather than a hole: `ReportBlock` and `ManualEntryForm` live in
- * the same tree, and a raw call reintroduced in either one is an offence here.
+ * IT USED TO EXEMPT THE TWO FILES WHOLE, AND THAT WAS A HOLE. A reviewer added
+ * `localStorage.setItem("pavilio.pref.sneaky", v)` to EITHER of them and the
+ * guard stayed green — and those are precisely the two files a time-tracking
+ * change touches. Matching the statement instead means the exemption covers
+ * the accumulator's own two accessors and nothing else: a raw call anywhere
+ * else in either file, under any key, is an offence. The markers are the
+ * identifiers the accumulator's own code uses for its key and its store, so
+ * renaming either turns this red rather than quietly widening it.
  */
+const ACCUMULATOR_EXEMPTIONS: readonly StatementExemption[] = [
+  {
+    marker: "accumulatorKey(",
+    why: "useBusyAccumulator's own `pavilio.time.<project>` key helper",
+  },
+  {
+    marker: "accumulatorStorage",
+    why: "TimeTrackingProvider's alias for the store it scans for `pavilio.time.` keys",
+  },
+];
+
+/** The two files the accumulator exemption is expected to (and may only) cover. */
 const ACCUMULATOR_FILES: readonly string[] = [
-  "features/time/useBusyAccumulator.ts",
   "features/time/TimeTrackingProvider.tsx",
+  "features/time/useBusyAccumulator.ts",
 ];
 
 function sourceFiles(dir: string): string[] {
@@ -119,7 +162,7 @@ interface Offence {
 export function offendingLines(
   source: string,
   pattern: RegExp,
-  pending: readonly PendingMigration[] = PENDING_MIGRATIONS,
+  pending: readonly StatementMarker[] = PENDING_MIGRATIONS,
 ): number[] {
   const lines = withoutComments(source);
   const found: number[] = [];
@@ -132,33 +175,52 @@ export function offendingLines(
 }
 
 /**
+ * The hard ceiling on the exemption window: the offending line plus three
+ * more. The longest real wrapped call in either tree is three lines
+ * (`useRepoSearch`'s `localStorage.getItem(` / key / `);`), so this clears
+ * every genuine one with a line to spare.
+ */
+const STATEMENT_LOOKAHEAD = 4;
+
+/**
  * The statement the identifier at `index` sits in: that line, plus following
- * lines up to and including the first one that closes a statement.
+ * lines up to and including the first one that closes a statement — and never
+ * more than `STATEMENT_LOOKAHEAD` lines in total.
  *
  * A call can wrap across lines, so the pending marker has to be looked for
  * past the identifier's own line — `localStorage.getItem(` and the key it
- * reads are two lines apart in `useRepoSearch`. But the window has to STOP at
- * the statement boundary: a fixed three-line lookahead also swallowed the two
- * lines above any marker, so a brand-new raw call placed just before one was
- * waved through, inside exactly the two files a maintainer will touch next.
+ * reads are two lines apart in `useRepoSearch`. But the window has to STOP:
+ *
+ * - at the statement boundary, because a fixed lookahead also swallowed the
+ *   lines above any marker, so a brand-new raw call placed just before one was
+ *   waved through, inside exactly the two files a maintainer will touch next;
+ * - and at a fixed ceiling anyway, because the `;` may never come. A statement
+ *   needs no semicolon, and the scan ran to EOF looking for one — so a raw
+ *   call written without a `;` was excused by ANY marker anywhere later in the
+ *   file. Demonstrated at forty lines' distance; the test is below.
  */
 function statementAt(lines: string[], index: number): string {
   const parts: string[] = [];
-  for (let i = index; i < lines.length; i += 1) {
+  const end = Math.min(lines.length, index + STATEMENT_LOOKAHEAD);
+  for (let i = index; i < end; i += 1) {
     parts.push(lines[i]);
     if (lines[i].includes(";")) break;
   }
   return parts.join(" ");
 }
 
-function rawStorageUses(dir: string, pattern: RegExp): { files: string[]; offences: Offence[] } {
+function rawStorageUses(
+  dir: string,
+  pattern: RegExp,
+  exemptions: readonly StatementMarker[] = PENDING_MIGRATIONS,
+): { files: string[]; offences: Offence[] } {
   const files = sourceFiles(dir);
   const offences: Offence[] = [];
 
   for (const file of files) {
     const source = readFileSync(join(SRC, file), "utf8");
     const lines = withoutComments(source);
-    for (const line of offendingLines(source, pattern)) {
+    for (const line of offendingLines(source, pattern, exemptions)) {
       offences.push({ file, line, text: lines[line - 1].trim() });
     }
   }
@@ -197,6 +259,21 @@ describe("the exemption window", () => {
     expect(offendingLines(source, /\blocalStorage\b/, FIXTURE_PENDING)).toEqual([1]);
   });
 
+  /**
+   * ASI. A statement needs no semicolon, and the scan looked for one all the
+   * way to EOF — so a raw call written without one was excused by ANY pending
+   * marker anywhere later in the file, however far away.
+   */
+  it("does not excuse a semicolonless raw call by a marker 40 lines later", () => {
+    const source = [
+      'localStorage.setItem("panel-brand-new-key", value)',
+      ...Array.from({ length: 40 }, () => "// filler"),
+      "readFocus(`panel-example-pending-${project}`);",
+    ].join("\n");
+
+    expect(offendingLines(source, /\blocalStorage\b/, FIXTURE_PENDING)).toEqual([1]);
+  });
+
   it("still excuses a call whose own statement wraps onto the marker line", () => {
     const source = [
       "const focused = localStorage.getItem(",
@@ -226,20 +303,28 @@ describe("the exemption window", () => {
 });
 
 /**
- * An independent count of the `.tsx?` files under `dir`, walked here rather
- * than by `sourceFiles`, so the enumeration is checked against something other
- * than itself. A floor alone is decorative: every file under
+ * A genuinely independent count of the `.tsx?` files under `dir`.
+ *
+ * It used to be a hand-rolled recursion — the same `readdirSync`, the same
+ * `__tests__` skip, the same regex, the same shape as `sourceFiles` — so its
+ * comment's claim that the enumeration was "checked against something other
+ * than itself" was false: a bug in the walk was reproduced faithfully in its
+ * own check, and both sides moved together.
+ *
+ * `recursive: true` hands the descent to node. There is no loop, no recursion
+ * and no directory handling here to get wrong, so the two now disagree about
+ * anything `sourceFiles` mis-walks — which is the whole point of the
+ * assertion. A floor alone would not do it: every file under
  * `features/projects` is top-level, so no plausible way for the walk to break
- * lands between a floor of 25 and the real 35 — it would drop to zero.
+ * lands between a floor of 35 and the real count — it would drop to zero.
  */
 function countSourceFiles(dir: string): number {
-  let total = 0;
-  for (const entry of readdirSync(join(SRC, dir), { withFileTypes: true })) {
-    if (entry.name === "__tests__") continue;
-    if (entry.isDirectory()) total += countSourceFiles(`${dir}/${entry.name}`);
-    else if (/\.tsx?$/.test(entry.name)) total += 1;
-  }
-  return total;
+  return readdirSync(join(SRC, dir), { recursive: true, encoding: "utf8" }).filter(
+    (entry) =>
+      /\.tsx?$/.test(entry) &&
+      // node joins with the platform separator; posix everywhere this runs.
+      !entry.split(/[\\/]/).includes("__tests__"),
+  ).length;
 }
 
 describe("the enumeration the guard rests on", () => {
@@ -320,22 +405,25 @@ describe("preferences replace raw browser storage", () => {
     expect(report([...terminal.offences, ...speech.offences])).toEqual([]);
   });
 
-  it("no module under features/time references localStorage except the busy accumulator", () => {
-    const time = rawStorageUses("features/time", /\blocalStorage\b/);
-    const exempt = (offence: Offence): boolean =>
-      ACCUMULATOR_FILES.includes(offence.file);
+  it("no module under features/time references localStorage except the busy accumulator's own statements", () => {
+    // Matched on the STATEMENT, not on the file: a raw call added anywhere in
+    // either accumulator file under any other name is an offence here.
+    const time = rawStorageUses("features/time", /\blocalStorage\b/, ACCUMULATOR_EXEMPTIONS);
 
-    expect(report(time.offences.filter((offence) => !exempt(offence)))).toEqual(
-      [],
+    expect(report(time.offences)).toEqual([]);
+  });
+
+  it("the accumulator exemption is real, and covers only the two files it claims", () => {
+    // Without the markers the tree does offend — so the green above means the
+    // exemption held, not that the walk found nothing. And the offences are
+    // confined to the two accumulator files: a third file reaching raw
+    // storage would show up here even before its statement is judged.
+    const unexempt = rawStorageUses("features/time", /\blocalStorage\b/, []);
+
+    expect(unexempt.offences.length).toBeGreaterThan(0);
+    expect([...new Set(unexempt.offences.map((offence) => offence.file))].sort()).toEqual(
+      [...ACCUMULATOR_FILES].sort(),
     );
-    // The exemption is narrow because it is also REAL: both named files do
-    // reach `localStorage`, so an empty offence list here would mean the walk
-    // found nothing rather than that the guard held.
-    expect(
-      ACCUMULATOR_FILES.filter((file) =>
-        time.offences.some((offence) => offence.file === file),
-      ),
-    ).toEqual(ACCUMULATOR_FILES);
   });
 
   it("no module under features/time references sessionStorage directly", () => {
@@ -360,6 +448,31 @@ describe("preferences replace raw browser storage", () => {
     const { offences } = rawStorageUses(".", /\bgetBrowserStorage\b/);
 
     expect(report(offences)).toEqual([]);
+  });
+
+  /**
+   * The server half of the same structural rule, which had no guard at all.
+   *
+   * Browser storage is fenced off above; the preferences ROUTE was not. A
+   * feature that fetches `/api/preferences` directly bypasses the whole store
+   * — the injected document, the unchanged-value skip, the debounce, the
+   * in-flight/pending overlay a refetch merges against — and writes a key with
+   * no declaration into the committed workspace file. Exactly the failure the
+   * `localStorage` guard exists to prevent, one tier down.
+   *
+   * Scoped to `src`, and `preferences/` is the only tree allowed to say it:
+   * `store.ts` owns both the PATCH and the script URL.
+   */
+  it("nothing outside preferences/ references the /api/preferences route", () => {
+    const { offences } = rawStorageUses(".", /\/api\/preferences/);
+    // `sourceFiles(".")` spells its paths `./preferences/store.ts`.
+    const inStore = (offence: Offence): boolean =>
+      offence.file.replace(/^\.\//, "").startsWith("preferences/");
+
+    expect(report(offences.filter((offence) => !inStore(offence)))).toEqual([]);
+    // Not vacuous: `preferences/` itself must still name the route, or the
+    // walk matched nothing and this proves only that the grep is broken.
+    expect(offences.filter(inStore).length).toBeGreaterThan(0);
   });
 
   it("a navigation bookmark does not survive into localStorage", () => {

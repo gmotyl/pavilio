@@ -12,13 +12,23 @@ import { localISODate } from "./dateLocal";
 // A busy state shorter than this is treated as a screen-refresh flicker and not counted.
 const BUSY_DEBOUNCE_MS = 10_000;
 
-const lsKey = (project: string) => `pavilio.time.${project}`;
+/**
+ * The busy ACCUMULATOR's own raw key — minutes worked today, data rather than
+ * a preference, deliberately undeclared and deliberately per-machine.
+ *
+ * Named, not inlined, because `no-direct-storage.test.ts` exempts the two raw
+ * `localStorage` statements below by MARKER: a statement must name
+ * `accumulatorKey(` to be excused. Any other raw call in this file — under any
+ * key at all — is an offence there. Rename this and the guard turns red rather
+ * than quietly widening.
+ */
+const accumulatorKey = (project: string) => `pavilio.time.${project}`;
 // Local-time bucket: a block started at 23:30 should count as today, not tomorrow.
 const todayStr = () => localISODate();
 
 function load(project: string): AccumulatorState {
   try {
-    const raw = localStorage.getItem(lsKey(project));
+    const raw = localStorage.getItem(accumulatorKey(project));
     if (!raw) return { date: todayStr(), closedMinutes: 0, open: null };
     const s = JSON.parse(raw) as AccumulatorState;
     if (s.date !== todayStr())
@@ -31,7 +41,7 @@ function load(project: string): AccumulatorState {
 
 function save(project: string, s: AccumulatorState): void {
   try {
-    localStorage.setItem(lsKey(project), JSON.stringify(s));
+    localStorage.setItem(accumulatorKey(project), JSON.stringify(s));
   } catch {
     // ignore quota / disabled-storage errors
   }

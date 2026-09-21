@@ -72,6 +72,30 @@ export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
  * is a one-line move in the portability table rather than a spurious red.
  */
 
+/**
+ * ===========================================================================
+ *  ADDING A DECLARATION WHOSE VALUE NAMES A LIVE SESSION?
+ *
+ *  Set `portable: false` — AND add its key to `SESSION_NAMING` in
+ *  `preferences/__tests__/portability-guard.test.ts`.
+ *
+ *  A session id, a session ORDER, a tiling keyed by session, an armed speech
+ *  cell, a bookmark into a live pane: each names something that exists on
+ *  THIS machine, in THIS browser, right now. `.pavilio/preferences.json` is
+ *  committed to a notes repo and carried to another machine, where every one
+ *  of them is a dangling reference.
+ *
+ *  `SESSION_NAMING` is a hand list and nothing forces it to grow with this
+ *  table. That gap is known and deliberate. Deriving it from a marker on the
+ *  declaration (`sessionBearing: true`) would MOVE the gap rather than close
+ *  it: an author who forgets the list forgets the marker just as easily, and
+ *  a forgotten marker makes the declaration vanish from the guard SILENTLY,
+ *  while a stale hand list fails loudly the moment a key is renamed or
+ *  dropped. The list is also the one assertion in that file that does not
+ *  read `portable` off the declaration — which is exactly what lets it catch
+ *  a flag flipped on one of these.
+ * ===========================================================================
+ */
 export const preferences = {
   // ── Shell ────────────────────────────────────────────────────────────────
   leftSidebarExpanded: definePreference({

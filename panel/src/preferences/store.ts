@@ -105,6 +105,40 @@ function browserStorage(def: PreferenceDef<unknown>): Storage | undefined {
 }
 
 /**
+ * Whether the machine-local tier has already said out loud that it cannot
+ * reach browser storage. One warning per tab, not one per call.
+ */
+let warnedBrowserStorage = false;
+
+/**
+ * The non-portable tier's ONLY diagnostic.
+ *
+ * Before the migration each hook carried its own `console.warn` around its own
+ * try/catch — seven of them across `useTerminalOrdering`, `useTerminalMaximized`
+ * and `useTerminalSessions`. Centralising storage into this module removed all
+ * seven and replaced none, so a private-mode browser dropped every terminal
+ * preference write in total silence: the panel looked like it had forgotten
+ * nothing, and there was not one line in the console to say otherwise. (The
+ * portable tier already had `flushPatch`'s warning; only this tier was mute.)
+ *
+ * Restored ONCE here rather than seven times at the call sites, and latched
+ * rather than per-call: `readPreference` runs on every mount of every consumer,
+ * so an un-latched warning in a browser that refuses storage would be a flood
+ * that buries whatever the developer opened the console for. One honest line
+ * naming the first casualty, and an explicit note that the rest are silent, is
+ * the whole budget.
+ */
+function warnBrowserStorageUnavailable(action: string, key: string, err?: unknown): void {
+  if (warnedBrowserStorage) return;
+  warnedBrowserStorage = true;
+  console.warn(
+    `[preferences] browser storage is unavailable; the machine-local tier could not ${action} "${key}". ` +
+      "Further machine-local failures this session are silent.",
+    err,
+  );
+}
+
+/**
  * The text a codec parses, from whatever the document holds.
  *
  * The file is hand-readable and hand-seeded, so a boolean is stored as `true`
@@ -185,10 +219,16 @@ export function readPreference<T>(def: PreferenceDef<T>, scopeArg?: string): T {
   if (def.portable) {
     stored = portableDoc()?.[key];
   } else {
+    const store = browserStorage(def);
+    if (store === undefined) {
+      warnBrowserStorageUnavailable("read", key);
+      return def.default;
+    }
     try {
-      stored = browserStorage(def)?.getItem(key) ?? undefined;
-    } catch {
+      stored = store.getItem(key) ?? undefined;
+    } catch (err) {
       // Private-mode browsers throw on access rather than answering null.
+      warnBrowserStorageUnavailable("read", key, err);
       return def.default;
     }
   }
@@ -217,6 +257,17 @@ export function readPreference<T>(def: PreferenceDef<T>, scopeArg?: string): T {
  * nobody chose. The comparison is against what the STORE holds, never against
  * the declared default: a key the document no longer has (`clearPreference`)
  * is absent, not equal, so putting the same value back is still a real change.
+ *
+ * WHAT THE SKIP COSTS ON THE PORTABLE TIER. It returns before `queuePatch`, so
+ * it arms no debounce timer — and `flushPatch`'s `.catch` deliberately arms
+ * none either. A key a failed PATCH put back into `pendingKeys` therefore sits
+ * there until the NEXT `queuePatch` call, and an identical re-write is not one:
+ * six more writes of the same value leave the failed request un-retried. What
+ * rescues a stranded key is a CHANGED value of that key, or any write of a
+ * DIFFERENT key — not "any write". That is acceptable (the value the user sees
+ * is already correct, and a reload re-reads the server's), but it is a real
+ * narrowing and the comment here used to deny it. Pinned by store.test.ts,
+ * "identical re-writes after a failed PATCH strand the retry".
  */
 export function writePreference<T>(def: PreferenceDef<T>, value: T, scopeArg?: string): void {
   const key = storageKey(def, scopeArg);
@@ -236,22 +287,37 @@ export function writePreference<T>(def: PreferenceDef<T>, value: T, scopeArg?: s
     // the un-delete it is.
     if (key in doc && sameStored(doc[key], next)) return;
     doc[key] = next;
-    // Skipping `queuePatch` here cannot strand a retry: a key a failed PATCH
-    // put back into `pendingKeys` is still pending, and the next flush re-reads
-    // the document — which already holds this very value.
     queuePatch(key);
   } else {
     const raw = def.codec.serialize(value);
     try {
       const store = browserStorage(def);
-      if (store === undefined) return;
+      if (store === undefined) {
+        warnBrowserStorageUnavailable("write", key);
+        return;
+      }
       if (store.getItem(key) === raw) return;
       store.setItem(key, raw);
-    } catch {
+    } catch (err) {
       // A full quota or a private-mode refusal. A preference is a choice, not
       // data: losing it makes the next session worse, not broken. The read
       // above can throw for the same reasons, and lands here too — writing
       // blind would be no better.
+      //
+      // RETURNING HERE SKIPS THE `notify` BELOW, AND THAT DIVERGES THE HOOKS.
+      // Deliberate, but not free. `usePreference`'s setter calls `adopt(next)`
+      // *before* `writePreference`, so the hook that wrote keeps the new value
+      // in its own React state while every OTHER hook mounted on the same key
+      // goes on rendering the old one — the notify that would have re-read
+      // them never fires. Notifying instead would be worse: the others would
+      // re-read storage, find the old value there, and the writing pane would
+      // be the only one showing the change anyway, now with a re-render each
+      // to prove it.
+      //
+      // It self-corrects on the next notify for that key — any later
+      // successful write, or a `preferences-change` frame — and on reload,
+      // where nothing was stored so everyone reads the same old value.
+      warnBrowserStorageUnavailable("write", key, err);
       return;
     }
   }
@@ -273,8 +339,12 @@ export function clearPreference(def: PreferenceDef<unknown>, scopeArg?: string):
   } else {
     try {
       browserStorage(def)?.removeItem(key);
-    } catch {
-      /* nothing was stored to begin with */
+    } catch (err) {
+      // Nothing was stored to begin with — but a store that throws on
+      // `removeItem` is the same broken tier as one that throws on `setItem`,
+      // so it goes through the same latched warning rather than adding a
+      // second silent path.
+      warnBrowserStorageUnavailable("clear", key, err);
     }
   }
 
@@ -458,6 +528,10 @@ export function __resetPreferenceStoreForTests(): void {
   pendingKeys.clear();
   inFlightKeys.clear();
   pendingNotifications.clear();
+  // The machine-local warning is latched for the life of the tab, so without
+  // this the first suite to hit a refusing store would silence every later
+  // one's assertion that the tier still says something.
+  warnedBrowserStorage = false;
   // Bumping the generation discards any refetch still in flight, so a response
   // arriving after the reset cannot write into the next suite's document.
   refreshGeneration += 1;

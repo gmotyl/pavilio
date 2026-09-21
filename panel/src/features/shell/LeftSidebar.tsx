@@ -74,6 +74,23 @@ function readStoredFocus(project: string | null): string | null {
   return readTerminalFocus(project);
 }
 
+/**
+ * Whether a project name is a usable scope argument.
+ *
+ * `typeof x === "string" && x.trim() !== ""`, never a bare `.trim()`. The
+ * `typeof` half is not decoration: `useProjects` types every `name` as
+ * `string`, but `server/lib/discovery.ts` validates nothing, so an entry with
+ * no name ships straight through to the client. A bare `.trim()` on it throws
+ * a TypeError — here, inside a state updater during an effect, that is an
+ * unhandled render error that takes the whole sidebar down, where the raw key
+ * this replaced merely produced a `…-undefined` key and rendered fine. The
+ * same shape `GitBranchDiff`, `useCommitsOpenMap` and the terminal hooks use,
+ * for the same reason: this class has cost two real regressions already.
+ */
+function resolvedScope(name: string): boolean {
+  return typeof name === "string" && name.trim() !== "";
+}
+
 export default function LeftSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -145,10 +162,9 @@ export default function LeftSidebar() {
         // inside a state updater during an effect, where that throw is an
         // unhandled render error. Declared default, and nothing written —
         // the same rule every other Task 6 call site follows.
-        patch[p.name] =
-          p.name.trim() === ""
-            ? preferences.projectExpanded.default
-            : readPreference(preferences.projectExpanded, p.name);
+        patch[p.name] = resolvedScope(p.name)
+          ? readPreference(preferences.projectExpanded, p.name)
+          : preferences.projectExpanded.default;
       }
       return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
     });
@@ -160,7 +176,7 @@ export default function LeftSidebar() {
   const setExpanded = useCallback((name: string, value: boolean) => {
     setExpandedState((prev) => ({ ...prev, [name]: value }));
     // Same rule on the way out: an unresolved name writes nothing.
-    if (name.trim() === "") return;
+    if (!resolvedScope(name)) return;
     writePreference(preferences.projectExpanded, value, name);
   }, []);
 

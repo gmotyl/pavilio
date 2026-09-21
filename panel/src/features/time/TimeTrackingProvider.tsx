@@ -35,14 +35,37 @@ const TimeTrackingContext = createContext<TimeTrackingContextValue | null>(
 const LS_PREFIX = "pavilio.time.";
 const PREFERENCE_INFIXES = ["report.", "form."];
 
+/**
+ * The raw store the `pavilio.time.<project>` accumulator keys live in, or
+ * `undefined` when the browser refuses one.
+ *
+ * ONE statement in this file names `localStorage`, and it is the binding of
+ * `accumulatorStorage` below. `no-direct-storage.test.ts` exempts the
+ * accumulator by MARKER rather than by file — a statement must name
+ * `accumulatorStorage` to be excused — so a raw call added anywhere else
+ * here, under any key, is an offence there. It used to exempt this whole
+ * file, and a reviewer walked a
+ * `localStorage.setItem("pavilio.pref.sneaky", …)` straight through it.
+ */
+function accumulatorStore(): Storage | undefined {
+  // Access itself can throw SecurityError when storage is disabled (private
+  // mode, strict cookie policies). Degrade gracefully.
+  try {
+    if (typeof window === "undefined") return undefined;
+    const accumulatorStorage: Storage | undefined = window.localStorage ?? undefined;
+    return accumulatorStorage;
+  } catch {
+    return undefined;
+  }
+}
+
 function scanStorageProjects(): string[] {
-  if (typeof window === "undefined" || !window.localStorage) return [];
-  // localStorage access can throw SecurityError when storage is disabled
-  // (private mode, strict cookie policies). Degrade gracefully.
+  const store = accumulatorStore();
+  if (!store) return [];
   try {
     const out: string[] = [];
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const k = window.localStorage.key(i);
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
       if (!k || !k.startsWith(LS_PREFIX)) continue;
       const rest = k.slice(LS_PREFIX.length);
       if (PREFERENCE_INFIXES.some((infix) => rest.startsWith(infix))) continue;
@@ -50,7 +73,7 @@ function scanStorageProjects(): string[] {
     }
     return out;
   } catch (err) {
-    console.warn("[time] localStorage scan failed", err);
+    console.warn("[time] accumulator scan failed", err);
     return [];
   }
 }

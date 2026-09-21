@@ -22,12 +22,27 @@ import { clearPreference, readPreference, writePreference } from "../../preferen
  * practice, since the key they wrote under was never read back by anything.
  */
 function projectScope(project: string): string | null {
-  return project.trim() === "" ? null : project;
+  return resolved(project) ? project : null;
+}
+
+/**
+ * Whether `value` is a usable scope argument.
+ *
+ * `typeof x === "string" && x.trim() !== ""`, never a bare `.trim()`, and the
+ * `typeof` half is not decoration: every parameter here is typed `string`, but
+ * a route param reaches these helpers through a `name ?? ""` / `projectName`
+ * chain that TypeScript believes and the runtime does not. A bare `.trim()` on
+ * `undefined` throws a TypeError — that crashed `GitBranchDiff`'s render once
+ * and silently emptied `useRepoSearch` once. This is the shape every other
+ * blank-scope guard in the change uses.
+ */
+function resolved(value: string): boolean {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 /** `<project>:<section>`, mirroring the old `panel:lastFile:` key exactly. */
 function sectionScope(project: string, section: string): string | null {
-  if (projectScope(project) === null || section.trim() === "") return null;
+  if (projectScope(project) === null || !resolved(section)) return null;
   return `${project}:${section}`;
 }
 

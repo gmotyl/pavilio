@@ -5,6 +5,9 @@ import {
   readLastReposQuery,
   writeLastReposQuery,
   clearLastReposQuery,
+  readLastSectionFile,
+  writeLastSectionFile,
+  clearLastSectionFile,
 } from "../lastPath";
 import { preferences } from "../../../preferences/declarations";
 
@@ -22,6 +25,45 @@ import { preferences } from "../../../preferences/declarations";
  * still stored, and both tests passed without exercising anything. The
  * relocated versions spy on the storage INSTANCE and assert the spy was called.
  */
+
+/** A scope that is `string` to the compiler and `undefined` at runtime. */
+const UNRESOLVED = undefined as unknown as string;
+
+describe("an unresolved scope does not throw", () => {
+  /**
+   * `projectScope` and `sectionScope` were two of the last four blank-scope
+   * guards in this change still spelt as a bare `.trim()`. Every parameter is
+   * typed `string`, so on paper none of this can happen — and it has happened
+   * twice already, both times from a `name ?? ""` / `projectName` chain that
+   * TypeScript sees as `string` while the runtime value is `undefined`. Once
+   * it crashed a render (`GitBranchDiff`), once it silently emptied a result
+   * list (`useRepoSearch`).
+   *
+   * No live bug at these sites: every caller guards with `!project` first.
+   * These pin the shape anyway — a third regression costs more than two tests.
+   */
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it("projectScope: an undefined project reads the default and writes nothing", () => {
+    expect(() => writeLastPath(UNRESOLVED, "/project/x/notes")).not.toThrow();
+    expect(() => readLastPath(UNRESOLVED)).not.toThrow();
+    expect(readLastPath(UNRESOLVED)).toBeNull();
+    expect(() => writeLastReposQuery(UNRESOLVED, "q")).not.toThrow();
+    expect(() => readLastReposQuery(UNRESOLVED)).not.toThrow();
+    // Dropped, not misfiled under a blank key.
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it("sectionScope: an undefined section reads the default and writes nothing", () => {
+    expect(() => writeLastSectionFile("pavilio", UNRESOLVED, "/abs/a.md")).not.toThrow();
+    expect(() => readLastSectionFile("pavilio", UNRESOLVED)).not.toThrow();
+    expect(readLastSectionFile("pavilio", UNRESOLVED)).toBeNull();
+    expect(() => clearLastSectionFile("pavilio", UNRESOLVED)).not.toThrow();
+    expect(sessionStorage.length).toBe(0);
+  });
+});
 
 describe("lastPath helpers", () => {
   beforeEach(() => {

@@ -36,6 +36,16 @@ import { preferences } from "../../../preferences/declarations";
 /** A scope that is `string` to the compiler and `undefined` at runtime. */
 const UNRESOLVED = undefined as unknown as string;
 
+type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
+
+/**
+ * The injected workspace document. A guard on a PORTABLE declaration has to be
+ * checked HERE and not in `localStorage`, which such a write never touches.
+ */
+function prefsDoc(): Record<string, unknown> {
+  return (globalThis as unknown as PrefGlobals).__PAVILIO_PREFS__ ?? {};
+}
+
 function session(id: string, project: string): SessionMeta {
   return { id, name: id, project, cwd: "/tmp", pid: 1, createdAt: "2026-01-01T00:00:00.000Z" };
 }
@@ -43,6 +53,7 @@ function session(id: string, project: string): SessionMeta {
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
+  (globalThis as unknown as PrefGlobals).__PAVILIO_PREFS__ = { version: 1 };
 });
 
 describe("an unresolved scope does not throw", () => {
@@ -59,7 +70,16 @@ describe("an unresolved scope does not throw", () => {
     expect(result.current[0]).toBe(preferences.terminalMaximized.default);
     // The setter is the second guard in that file, on the write side.
     expect(() => result.current[2](true)).not.toThrow();
-    expect(localStorage.length).toBe(0);
+    // Asserted on the DOCUMENT, not on `localStorage`.
+    // `terminal.maximized` is `portable: true`, so a leaked write lands in
+    // `window.__PAVILIO_PREFS__` and never on this machine — the
+    // `localStorage.length` assertion that used to stand here could not fail,
+    // and the test bit only through `.not.toThrow()`. Removing the write-side
+    // guard outright left all four cases in this file green.
+    //
+    // The other three cases are `portable: false` and correctly targeted at
+    // `localStorage`; only this one was pointed at the wrong store.
+    expect(Object.keys(prefsDoc())).toEqual(["version"]);
   });
 
   it("useTerminalOrdering reads the declared defaults and writes nothing", () => {

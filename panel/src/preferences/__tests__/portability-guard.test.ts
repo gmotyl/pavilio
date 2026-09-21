@@ -4,6 +4,7 @@ import { ALL_PREFERENCES } from "../declarations";
 import {
   PREFERENCE_PATCH_DEBOUNCE_MS,
   __resetPreferenceStoreForTests,
+  clearPreference,
   readPreference,
   writePreference,
 } from "../store";
@@ -32,6 +33,14 @@ import { definePreference, storageKey, type PreferenceDef } from "../types";
  * passes. So does one over a registry that has accidentally become all one
  * tier. The count, and the floor on each of the three tiers, are what stop
  * this from being a test that can only pass.
+ *
+ * WHY `clearPreference` IS IN EVERY LOOP. It was outside this file entirely,
+ * and that halved the guard: making `clearPreference` always take the portable
+ * branch left all eight tests green, while a `terminal.focus` delete went
+ * straight into the workspace file. It is a live path, not a corner —
+ * `useTerminalOrdering.ts` calls it from a MOUNT effect whenever a scope has no
+ * tiling, which is every first visit to a project. So each tier loop writes,
+ * asserts, then clears and asserts again.
  */
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
@@ -248,6 +257,18 @@ describe("the machine-local guard", () => {
       // And the document is byte-for-byte what it booted as: no key added, and
       // none of its existing ones touched.
       expect(globals.__PAVILIO_PREFS__).toEqual(BOOT_DOC);
+
+      // The DELETE half of the write surface. A `clearPreference` that took
+      // the portable branch would PATCH a `null` for this key into the
+      // workspace file — naming, in the file, the very session key the tier
+      // exists to keep out of it.
+      clearPreference(def, scopeArg);
+      vi.advanceTimersByTime(PREFERENCE_PATCH_DEBOUNCE_MS * 10);
+
+      expect({ key, raw: expectedStore(def).getItem(key) }).toEqual({ key, raw: null });
+      expect(readPreference(def, scopeArg)).toEqual(def.default);
+      expect(requestedUrls()).toEqual([]);
+      expect(globals.__PAVILIO_PREFS__).toEqual(BOOT_DOC);
     }
   });
 
@@ -279,6 +300,21 @@ describe("the machine-local guard", () => {
       // under any key at all is still a value that will not travel.
       expect(localStorage.length).toBe(0);
       expect(sessionStorage.length).toBe(0);
+
+      // And the delete travels the same way: out of the document, and onto
+      // the wire as the `null` the server store reads as a delete. A
+      // `clearPreference` that took the browser branch would leave the key in
+      // the file forever, un-deletable from this machine.
+      clearPreference(def, scopeArg);
+      vi.advanceTimersByTime(PREFERENCE_PATCH_DEBOUNCE_MS * 10);
+
+      expect(Object.keys(globals.__PAVILIO_PREFS__ ?? {})).toEqual(["version"]);
+      expect(readPreference(def, scopeArg)).toEqual(def.default);
+      expect(requestedUrls()).toEqual(["/api/preferences", "/api/preferences"]);
+      const clearInit = fetchMock.mock.calls[1][1] as RequestInit;
+      expect(JSON.parse(String(clearInit.body))).toEqual({ [key]: null });
+      expect(localStorage.length).toBe(0);
+      expect(sessionStorage.length).toBe(0);
     }
   });
 
@@ -305,6 +341,14 @@ describe("the machine-local guard", () => {
       expect(localStorage.length).toBe(0);
       expect(requestedUrls()).toEqual([]);
       expect(globals.__PAVILIO_PREFS__).toEqual(BOOT_DOC);
+
+      clearPreference(def, scopeArg);
+      vi.advanceTimersByTime(PREFERENCE_PATCH_DEBOUNCE_MS * 10);
+
+      expect(sessionStorage.length).toBe(0);
+      expect(localStorage.length).toBe(0);
+      expect(requestedUrls()).toEqual([]);
+      expect(globals.__PAVILIO_PREFS__).toEqual(BOOT_DOC);
     }
   });
 
@@ -319,6 +363,18 @@ describe("the machine-local guard", () => {
     // to protect. They are named by KEY, not read off `portable`, so a flag
     // flipped on any of them fails here with the real symptom — a session id
     // on the wire to a file that gets committed.
+    //
+    // ⚠ A HAND LIST, AND NOTHING FORCES IT TO GROW. A session-bearing
+    // declaration added later is caught by no assertion that asks "does this
+    // name a session?" — it simply is not in this array. The counterweight is
+    // a matching banner at the top of `declarations.ts`'s table, where the
+    // author of that declaration is actually looking, telling them to add the
+    // key here. Deriving the list from a `sessionBearing: true` marker on the
+    // declaration was considered and rejected: a forgotten marker drops a key
+    // out of this guard SILENTLY, where a stale hand list fails loudly on the
+    // `found` assertion below the moment a key is renamed or removed — and a
+    // derived list would read off the declaration, which is the one thing
+    // this test deliberately does not do.
     const SESSION_NAMING = [
       "terminal.focus",
       "terminal.order",
