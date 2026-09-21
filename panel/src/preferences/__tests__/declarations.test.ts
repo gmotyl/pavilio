@@ -43,6 +43,64 @@ const MACHINE_LOCAL = [
   "terminal.order",
 ];
 
+/**
+ * Rows the design's portability table names that nothing declares yet: no
+ * code persists or resizes them today. The two sidebar widths arrive with
+ * `2026-09-21-panel-ui-polish` Task 4 (defaults 240 and 264); the two pane
+ * widths have no writer at all. Listed here so declaring them is a one-line
+ * move into PORTABLE rather than a spurious red.
+ */
+const NOT_YET_DECLARED = [
+  "shell.leftSidebar.width",
+  "shell.rightSidebar.width",
+  "fileList.paneWidth",
+  "git.history.paneWidth",
+];
+
+/**
+ * `[key, default, scope]`, transcribed by hand from `declarations.ts` with
+ * every value re-derived from the hook it replaces. A second copy on purpose:
+ * derived from the registry it would assert nothing, which is exactly how nine
+ * mutated defaults once passed green.
+ *
+ * The one row that deliberately does NOT reproduce today's behavior is
+ * `view.wide` — `useWideMode` reads `=== "true"` and so opens compact; this
+ * change flips it.
+ */
+const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
+  ["fileList.sidebarCollapsed", false, "global"],
+  ["fileList.sort", { sortKey: "date", sortDir: "desc" }, "global"],
+  ["git.branchDiff.base", "", "repo"],
+  ["git.branchDiff.open", true, "repo"],
+  // `isOpen` reads `map[repoPath] !== false`, so an absent entry is OPEN.
+  ["git.commitsOpen", true, "repo"],
+  ["git.viewMode", "flat", "global"],
+  ["git.worktree.expanded", false, "repo"],
+  ["nav.lastFile", null, "project"],
+  ["nav.lastPath", null, "project"],
+  ["nav.lastReposQuery", null, "project"],
+  ["projects.favorites", [], "global"],
+  ["repos.searchScope", "changed", "global"],
+  ["search.includeArchived", true, "global"],
+  ["shell.leftSidebar.expanded", true, "global"],
+  ["shell.project.expanded", false, "project"],
+  ["shell.rightSidebar.expanded", true, "global"],
+  ["shell.rightSidebar.section.expanded", true, "project"],
+  ["speech.answerPane.autoOpen", false, "global"],
+  ["speech.armedCell", null, "global"],
+  ["speech.voice", "en-US-AndrewMultilingualNeural", "global"],
+  ["terminal.drawer.open", false, "global"],
+  ["terminal.drawer.side", "left", "global"],
+  ["terminal.drawer.width", 480, "global"],
+  ["terminal.focus", null, "project"],
+  ["terminal.grid", [], "project"],
+  ["terminal.maximized", false, "project"],
+  ["terminal.order", [], "project"],
+  ["time.form.resetAutoOnSave", false, "project"],
+  ["time.report", { period: "this-week", format: "text", detail: "detailed" }, "project"],
+  ["view.wide", true, "project"],
+];
+
 function keyOf(key: string) {
   const def = ALL_PREFERENCES.find((d) => d.key === key);
   if (!def) throw new Error(`no declaration for "${key}"`);
@@ -81,10 +139,61 @@ describe("the declaration table", () => {
     const portable = ALL_PREFERENCES.filter((d) => d.portable).map((d) => d.key);
     const local = ALL_PREFERENCES.filter((d) => !d.portable).map((d) => d.key);
 
-    expect(portable.sort()).toEqual([...PORTABLE].sort());
+    // Everything the table names is declared...
+    expect(portable.sort()).toEqual(
+      [...PORTABLE].filter((k) => !NOT_YET_DECLARED.includes(k)).sort(),
+    );
     expect(local.sort()).toEqual([...MACHINE_LOCAL].sort());
-    // Nothing is declared that the table does not name.
-    expect(ALL_PREFERENCES).toHaveLength(PORTABLE.length + MACHINE_LOCAL.length);
+    // ...and nothing is declared that the table does not name. Stated as a
+    // subset rather than a length, so that moving a key out of
+    // NOT_YET_DECLARED is the whole diff when its feature lands.
+    for (const key of portable) expect(PORTABLE).toContain(key);
+    for (const key of local) expect(MACHINE_LOCAL).toContain(key);
+  });
+
+  it("the rows the design names but nothing persists yet are undeclared", () => {
+    // Guards the tolerance above from rotting into a blanket exemption: a key
+    // listed as not-yet-declared must actually be absent.
+    const keys = ALL_PREFERENCES.map((d) => d.key);
+    for (const key of NOT_YET_DECLARED) expect(keys).not.toContain(key);
+  });
+
+  it("session-backed navigation preferences declare browserStore: session", () => {
+    // `lastPath.ts` uses sessionStorage, so routing these to localStorage
+    // would break panel-shell spec.md's "a second browser tab keeps its own
+    // independent bookmark, and a fully closed browser starts fresh".
+    for (const key of ["nav.lastPath", "nav.lastFile", "nav.lastReposQuery"]) {
+      expect(keyOf(key).browserStore, key).toBe("session");
+    }
+
+    // The tier stays narrow: nothing else opts in, and every opt-in is
+    // machine-local (a portable value has no browser store to choose).
+    const session = ALL_PREFERENCES.filter((d) => d.browserStore !== undefined);
+    expect(session.map((d) => d.key).sort()).toEqual([
+      "nav.lastFile",
+      "nav.lastPath",
+      "nav.lastReposQuery",
+    ]);
+    expect(session.filter((d) => d.portable)).toEqual([]);
+  });
+
+  it("every declaration's default and scope match a hand-written table", () => {
+    // AC 4, and the only test that bites it: nine mutated defaults — the
+    // wide-mode flip among them — once passed green because every other
+    // assertion here reads the registry and compares it against itself.
+    // Transcribed by hand from the declarations, each value re-derived from
+    // the hook it replaces. Do NOT generate this from `ALL_PREFERENCES`.
+    for (const [key, value, scope] of DEFAULTS) {
+      const def = keyOf(key);
+      expect(def.default, `${key} default`).toEqual(value);
+      expect(def.scope, `${key} scope`).toBe(scope);
+    }
+    // Deliberately strict, unlike the portability list: a new declaration is
+    // exactly the moment its default is worth pinning, so landing one without
+    // a row here should fail.
+    expect(ALL_PREFERENCES.map((d) => d.key).sort()).toEqual(
+      DEFAULTS.map(([key]) => key).sort(),
+    );
   });
 
   it("keys of removed features are not declared", () => {

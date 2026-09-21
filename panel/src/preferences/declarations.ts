@@ -14,8 +14,8 @@
  * features, so pulling a feature module in at runtime would invert that — and
  * would close a cycle the moment those features start reading the registry.
  */
-import { bool, json, num, str } from "./codecs";
-import { definePreference, type PreferenceCodec, type PreferenceDef } from "./types";
+import { bool, json, num, oneOf, str } from "./codecs";
+import { definePreference, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
 import type { RepoSearchScope } from "../features/projects/useRepoSearch";
@@ -24,23 +24,6 @@ import type { DrawerSide } from "../features/terminal/useTerminalDrawer";
 import type { TileLayout } from "../features/terminal/tileLayout";
 import type { Period } from "../features/time/periodRange";
 import type { ReportDetail, ReportFormat } from "../features/time/reportFormatters";
-
-/**
- * A string codec narrowed to a small union. `str` accepts anything, so an
- * unknown stored value would be handed back typed as a member it is not;
- * throwing instead lets the store fall back to the declared default.
- */
-function oneOf<T extends string>(values: readonly T[]): PreferenceCodec<T> {
-  return {
-    parse(raw) {
-      if ((values as readonly string[]).includes(raw)) return raw as T;
-      throw new Error(`not one of ${values.join("|")}: ${raw}`);
-    },
-    serialize(value) {
-      return value;
-    },
-  };
-}
 
 /** The file list's one sort, shared across every tab and project. */
 export interface FileListSort {
@@ -54,6 +37,30 @@ export interface TimeReportPrefs {
   format: ReportFormat;
   detail: ReportDetail;
 }
+
+/**
+ * The voice the panel speaks with when nothing is stored. It lives here, not
+ * in `features/speech/voices.ts`, because the registry is the lower layer:
+ * voices.ts imports it from here, and a future `usePreference` call in
+ * voices.ts then adds no cycle.
+ */
+export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
+
+/**
+ * Three rows of design.md's portability table are deliberately NOT declared
+ * below, because nothing persists or resizes them today and a declaration
+ * with no writer is dead weight:
+ *
+ * - "Sidebar expanded / width, both sides" — only the two `expanded` flags
+ *   exist. The widths arrive with the `2026-09-21-panel-ui-polish` change,
+ *   whose Task 4 declares `shell.leftSidebar.width` (default 240) and
+ *   `shell.rightSidebar.width` (default 264) alongside the resize handles.
+ * - "Pane widths — file list, git history" — neither pane is resizable, so
+ *   there is no width to remember yet.
+ *
+ * `declarations.test.ts` lists them as not-yet-declared so that adding them
+ * is a one-line move in the portability table rather than a spurious red.
+ */
 
 export const preferences = {
   // ── Shell ────────────────────────────────────────────────────────────────
@@ -146,12 +153,22 @@ export const preferences = {
     codec: oneOf<GitViewMode>(["flat", "tree"]),
     portable: true,
   }),
-  /** One global map keyed by repo path, exactly as the hook stores it today. */
-  commitsOpen: definePreference<Record<string, boolean>>({
-    key: "git.commitsOpen", // was: panel-commits-open
-    scope: "global",
-    default: {},
-    codec: json<Record<string, boolean>>(),
+  /**
+   * One key per repository, not the hook's single JSON blob. A blob's inner
+   * keys can never run through `normalizeRepoScope`, so `~/git/prv/pavilio`
+   * and `/root/git/prv/pavilio` would stay two entries with opposite values —
+   * the exact collision repo scope exists to close, and the reason this is
+   * symmetric with `git.branchDiff.open` rather than shaped like the hook.
+   *
+   * Default `true`: `useCommitsOpenMap.isOpen` reads `map[repoPath] !== false`,
+   * so a repo with no entry is OPEN today. (Absent ≠ closed — the map merely
+   * starts `{}`.)
+   */
+  commitsOpen: definePreference({
+    key: "git.commitsOpen", // was: panel-commits-open (one blob keyed by repo path)
+    scope: "repo",
+    default: true,
+    codec: bool,
     portable: true,
   }),
   /** Empty means "nothing chosen yet" — the view then picks main/master/develop. */
@@ -237,14 +254,15 @@ export const preferences = {
   /**
    * Typed `string`, not `SpeechVoiceId`: the voice list is long enough that a
    * codec would have to duplicate it, and `resolveVoice()` already drops an
-   * unknown id at the boundary. The default is voices.ts's
-   * DEFAULT_SPEECH_VOICE, duplicated rather than imported — a value import
-   * would close a cycle once voices.ts reads the registry.
+   * unknown id at the boundary. The default lives here and `voices.ts`
+   * imports it — upward, from the lower layer — so there is one copy. The
+   * other direction is what would close a cycle once voices.ts reads the
+   * registry.
    */
   speechVoice: definePreference({
     key: "speech.voice", // was: panel-speech-voice
     scope: "global",
-    default: "en-US-AndrewMultilingualNeural",
+    default: DEFAULT_SPEECH_VOICE,
     codec: str,
     portable: true,
   }),
@@ -265,16 +283,21 @@ export const preferences = {
   }),
 
   // ── Navigation memory ────────────────────────────────────────────────────
-  // Stored in sessionStorage today, and machine local for the same reason: it
-  // is where this browser was, not a choice the user made. `null` — not "" —
-  // is the default, because the readers distinguish "nothing remembered" from
-  // a remembered empty query.
+  // Machine local, and narrower still: `sessionStorage`, not `localStorage`.
+  // `features/shell/lastPath.ts` uses the session store on purpose, and
+  // panel-shell's spec makes it normative — "a second browser tab keeps its
+  // own independent bookmark, and a fully closed browser starts fresh".
+  // Routing these to `localStorage` because they are merely non-portable
+  // would break both clauses, so they declare the session tier explicitly.
+  // `null` — not "" — is the default, because the readers distinguish
+  // "nothing remembered" from a remembered empty query.
   lastPath: definePreference<string | null>({
     key: "nav.lastPath", // was: panel:lastPath:<project>
     scope: "project",
     default: null,
     codec: json<string | null>(),
     portable: false,
+    browserStore: "session",
   }),
   /** Scope argument: "<project>:<section>", mirroring the old key exactly. */
   lastSectionFile: definePreference<string | null>({
@@ -283,6 +306,7 @@ export const preferences = {
     default: null,
     codec: json<string | null>(),
     portable: false,
+    browserStore: "session",
   }),
   lastReposQuery: definePreference<string | null>({
     key: "nav.lastReposQuery", // was: panel:lastReposQuery:<project>
@@ -290,6 +314,7 @@ export const preferences = {
     default: null,
     codec: json<string | null>(),
     portable: false,
+    browserStore: "session",
   }),
 
   // ── Time ─────────────────────────────────────────────────────────────────

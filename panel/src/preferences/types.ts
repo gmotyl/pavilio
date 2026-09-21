@@ -7,15 +7,37 @@ export interface PreferenceCodec<T> {
   serialize(value: T): string;
 }
 
-export interface PreferenceDef<T> {
+interface PreferenceDefBase<T> {
   /** Dotted path, e.g. "shell.leftSidebar.expanded". No scope suffix here. */
   key: string;
   scope: PreferenceScope;
   default: T;
   codec: PreferenceCodec<T>;
-  /** true → workspace preferences file; false → localStorage. */
-  portable: boolean;
 }
+
+/**
+ * `portable` stays a boolean rather than becoming a three-way enum: the
+ * workspace-file guard is binary, and a boolean keeps it so. The browser tier
+ * is a second, narrower axis that only a non-portable value can have — spelt
+ * as a two-arm union, with `browserStore?: never` on the portable arm, so
+ * "portable + session" is a type error rather than a convention. Both arms
+ * carry the property, so `def.browserStore` still reads off an unnarrowed
+ * `PreferenceDef<unknown>` without a cast.
+ */
+export type PreferenceDef<T> = PreferenceDefBase<T> &
+  (
+    | {
+        /** true → workspace preferences file. */
+        portable: true;
+        browserStore?: never;
+      }
+    | {
+        /** false → browser storage on this machine only. */
+        portable: false;
+        /** Which browser store backs a non-portable value. Default "local". */
+        browserStore?: "local" | "session";
+      }
+  );
 
 /** Identity — it exists so a declaration infers `T` from its own default and codec. */
 export function definePreference<T>(def: PreferenceDef<T>): PreferenceDef<T> {

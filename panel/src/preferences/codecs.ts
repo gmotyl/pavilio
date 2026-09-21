@@ -44,3 +44,20 @@ export function json<T>(): PreferenceCodec<T> {
     },
   };
 }
+
+/**
+ * A string codec narrowed to a small union. `str` accepts anything, so an
+ * unknown stored value would be handed back typed as a member it is not;
+ * throwing instead lets the store fall back to the declared default.
+ */
+export function oneOf<T extends string>(values: readonly T[]): PreferenceCodec<T> {
+  return {
+    parse(raw) {
+      if ((values as readonly string[]).includes(raw)) return raw as T;
+      throw new Error(`not one of ${values.join("|")}: ${raw}`);
+    },
+    serialize(value) {
+      return value;
+    },
+  };
+}

@@ -12,8 +12,12 @@ import { normalizeRepoScope } from "../types";
  * A separate file from `codecs.test.ts` on purpose: that one covers the
  * well-formed injection, this one only the malformed cases.
  */
-type HomeGlobals = typeof globalThis & { __PAVILIO_HOME__?: unknown };
-const globals = globalThis as HomeGlobals;
+// `unknown`, not an intersection with `typeof globalThis`: types.ts declares
+// the global as `string | undefined`, and intersecting narrows it back so the
+// junk assignments below will not typecheck. Widening through `unknown` is
+// the point of this file — it pins what happens when the value is NOT a string.
+type HomeGlobals = { __PAVILIO_HOME__?: unknown };
+const globals = globalThis as unknown as HomeGlobals;
 
 afterEach(() => {
   delete globals.__PAVILIO_HOME__;

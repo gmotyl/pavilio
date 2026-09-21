@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { bool, json, num, str } from "../codecs";
+import { bool, json, num, oneOf, str } from "../codecs";
 import { definePreference, storageKey } from "../types";
 
 const leftSidebarExpanded = definePreference({
@@ -149,5 +149,39 @@ describe("codecs", () => {
     const commitsOpen = { pavilio: ["abc123", "def456"], vector: [] };
     const codec = json<typeof commitsOpen>();
     expect(codec.parse(codec.serialize(commitsOpen))).toEqual(commitsOpen);
+  });
+});
+
+describe("oneOf", () => {
+  // The whole reason `oneOf` exists rather than `str`: `str` hands back an
+  // unknown stored value typed as a union member it is not, and the store has
+  // no way to notice. Throwing is what lets the declared default win.
+  const side = oneOf(["left", "right"] as const);
+
+  it("accepts a listed member and hands it back unchanged", () => {
+    expect(side.parse("left")).toBe("left");
+    expect(side.parse("right")).toBe("right");
+  });
+
+  it("throws on a value that is not in the list", () => {
+    expect(() => side.parse("top")).toThrow();
+    expect(() => side.parse("")).toThrow();
+    expect(() => side.parse("Left")).toThrow();
+    expect(() => side.parse("left ")).toThrow();
+  });
+
+  it("names the accepted values in the error, so a bad stored value is diagnosable", () => {
+    expect(() => side.parse("top")).toThrow(/left\|right/);
+  });
+
+  it("round-trips every member", () => {
+    for (const value of ["left", "right"] as const) {
+      expect(side.parse(side.serialize(value))).toBe(value);
+    }
+  });
+
+  it("an empty value list rejects everything", () => {
+    const nothing = oneOf([]);
+    expect(() => nothing.parse("anything")).toThrow();
   });
 });

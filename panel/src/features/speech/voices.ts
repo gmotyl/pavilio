@@ -12,7 +12,13 @@
  * single-language voice to this list.
  */
 
-export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
+// One source of truth, in the lower layer: the preference registry declares
+// this value as `speech.voice`'s default. Re-exported so this module's
+// existing importers are untouched. The import points DOWN — registry →
+// feature would be the direction that closes a cycle.
+import { DEFAULT_SPEECH_VOICE } from "../../preferences/declarations";
+
+export { DEFAULT_SPEECH_VOICE };
 
 /** Per-browser preference: the panel has one user and no server-side profile. */
 export const SPEECH_VOICE_STORAGE_KEY = "panel-speech-voice";
