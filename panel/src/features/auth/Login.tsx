@@ -17,6 +17,12 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
       });
       if (res.ok) {
         onSuccess();
+        // `GET /api/preferences.js` sits behind the same auth, so the blocking
+        // script in index.html already 401'd on this page load and both
+        // injected globals are undefined — which makes the preference store
+        // suppress every portable write for the rest of the session. Only a
+        // reload re-runs a parser-blocking script, this time with the cookie.
+        window.location.reload();
       } else {
         setError("Invalid token");
       }

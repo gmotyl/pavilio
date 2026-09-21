@@ -1,0 +1,304 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bool, json, num, oneOf, str } from "../codecs";
+import { definePreference } from "../types";
+import {
+  PREFERENCE_PATCH_DEBOUNCE_MS,
+  __resetPreferenceStoreForTests,
+  clearPreference,
+  readPreference,
+  writePreference,
+} from "../store";
+
+/**
+ * The store's own behavior, with no React in the picture: the read fallbacks,
+ * the two browser tiers, the write interlock and the PATCH debounce.
+ * `usePreference.test.tsx` covers the rendering half.
+ *
+ * Every fixture below is declared here rather than pulled from
+ * `declarations.ts`: these tests pin the *store*, and a default changing in the
+ * registry must not turn one of them red.
+ */
+
+type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
+const globals = globalThis as unknown as PrefGlobals;
+
+const portableFlag = definePreference({
+  key: "test.flag",
+  scope: "global",
+  default: true,
+  codec: bool,
+  portable: true,
+});
+
+const portableWidth = definePreference({
+  key: "test.width",
+  scope: "global",
+  default: 240,
+  codec: num,
+  portable: true,
+});
+
+const portableSide = definePreference({
+  key: "test.side",
+  scope: "global",
+  default: "left" as "left" | "right",
+  codec: oneOf(["left", "right"] as const),
+  portable: true,
+});
+
+const portableQuery = definePreference({
+  key: "test.query",
+  scope: "global",
+  default: "",
+  codec: str,
+  portable: true,
+});
+
+const portableSort = definePreference<{ by: string; dir: string }>({
+  key: "test.sort",
+  scope: "global",
+  default: { by: "date", dir: "desc" },
+  codec: json<{ by: string; dir: string }>(),
+  portable: true,
+});
+
+const localFlag = definePreference({
+  key: "test.localFlag",
+  scope: "global",
+  default: false,
+  codec: bool,
+  portable: false,
+});
+
+const sessionPath = definePreference<string | null>({
+  key: "test.lastPath",
+  scope: "global",
+  default: null,
+  codec: json<string | null>(),
+  portable: false,
+  browserStore: "session",
+});
+
+/** A fetch spy that never resolves unless a test makes it. */
+function stubFetch(): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+beforeEach(() => {
+  globals.__PAVILIO_PREFS__ = { version: 1 };
+});
+
+afterEach(() => {
+  delete globals.__PAVILIO_PREFS__;
+  __resetPreferenceStoreForTests();
+  vi.unstubAllGlobals();
+});
+
+describe("reading", () => {
+  it("a portable value is read from the injected global", () => {
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.flag": false, "test.width": 320 };
+
+    expect(readPreference(portableFlag)).toBe(false);
+    expect(readPreference(portableWidth)).toBe(320);
+  });
+
+  it("an absent global falls back to the declared default", () => {
+    delete globals.__PAVILIO_PREFS__;
+
+    expect(() => readPreference(portableFlag)).not.toThrow();
+    expect(readPreference(portableFlag)).toBe(true);
+    expect(readPreference(portableWidth)).toBe(240);
+    expect(readPreference(portableSort)).toEqual({ by: "date", dir: "desc" });
+  });
+
+  it("a value failing its codec falls back to the declared default", () => {
+    globals.__PAVILIO_PREFS__ = {
+      version: 1,
+      "test.width": "not a number",
+      "test.side": "sideways",
+    };
+
+    expect(readPreference(portableWidth)).toBe(240);
+    expect(readPreference(portableSide)).toBe("left");
+  });
+
+  it("a boolean preference holding an accumulator object reads as its default", () => {
+    // The shape `pavilio.time.form.<project>.resetAutoOnSave` was found in: a
+    // busy-accumulator object under a key whose declaration says boolean.
+    globals.__PAVILIO_PREFS__ = {
+      version: 1,
+      "test.flag": { running: false, elapsedMs: 1234, startedAt: null },
+    };
+
+    expect(readPreference(portableFlag)).toBe(true);
+  });
+
+  it("a non-portable value is read from localStorage without a network call", () => {
+    const fetchMock = stubFetch();
+    const getItem = vi.spyOn(localStorage, "getItem");
+    localStorage.setItem("test.localFlag", "true");
+
+    expect(readPreference(localFlag)).toBe(true);
+    expect(getItem).toHaveBeenCalledWith("test.localFlag");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("a session-backed preference never touches localStorage", () => {
+    const localGet = vi.spyOn(localStorage, "getItem");
+    const localSet = vi.spyOn(localStorage, "setItem");
+    const sessionGet = vi.spyOn(sessionStorage, "getItem");
+    const sessionSet = vi.spyOn(sessionStorage, "setItem");
+
+    writePreference(sessionPath, "/notes/today.md");
+    expect(readPreference(sessionPath)).toBe("/notes/today.md");
+
+    expect(sessionSet).toHaveBeenCalledWith("test.lastPath", '"/notes/today.md"');
+    expect(sessionGet).toHaveBeenCalledWith("test.lastPath");
+    expect(localSet).not.toHaveBeenCalled();
+    expect(localGet).not.toHaveBeenCalled();
+  });
+
+  it("a throwing localStorage falls back to the declared default", () => {
+    // Private-mode Safari throws on access rather than returning null. Spy on
+    // the instance, not `Storage.prototype` — test-setup.ts replaces the
+    // instance outright, so a prototype spy is never reached.
+    const getItem = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    });
+
+    expect(readPreference(localFlag)).toBe(false);
+    expect(getItem).toHaveBeenCalledWith("test.localFlag");
+  });
+});
+
+describe("clearing", () => {
+  it("clearPreference restores the declared default", async () => {
+    const fetchMock = stubFetch();
+
+    writePreference(sessionPath, "/notes/today.md");
+    writePreference(portableWidth, 320);
+    expect(readPreference(sessionPath)).toBe("/notes/today.md");
+    expect(readPreference(portableWidth)).toBe(320);
+
+    clearPreference(sessionPath);
+    clearPreference(portableWidth);
+
+    expect(readPreference(sessionPath)).toBeNull();
+    expect(readPreference(portableWidth)).toBe(240);
+
+    // A cleared portable key is a null in the patch — the server's delete.
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ "test.width": null });
+  });
+});
+
+describe("writing", () => {
+  it("a write is visible to the next read before the network resolves", () => {
+    // A fetch that never settles: whatever the next read returns cannot have
+    // come from the server.
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    writePreference(portableWidth, 512);
+    writePreference(portableSort, { by: "name", dir: "asc" });
+
+    expect(readPreference(portableWidth)).toBe(512);
+    expect(readPreference(portableSort)).toEqual({ by: "name", dir: "asc" });
+  });
+
+  it("writes inside the debounce window collapse into one PATCH", async () => {
+    // Real timers on purpose. Under fake timers the debounce can never fire
+    // unless a test advances them, so "not sent yet" holds for *any* debounce
+    // length and the assertion below proves nothing.
+    const fetchMock = stubFetch();
+
+    writePreference(portableFlag, false);
+    writePreference(portableWidth, 320);
+    writePreference(portableSide, "right");
+
+    // One macrotask: long enough for a zero-length debounce to have fired,
+    // far short of the real window.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/preferences");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(String(init.body))).toEqual({
+      "test.flag": false,
+      "test.width": 320,
+      "test.side": "right",
+    });
+  });
+
+  it("a portable write stores the value in its JSON shape, not as text", async () => {
+    // The file is hand-readable and hand-seeded: `"shell.leftSidebar.width":
+    // 240`, never `"240"`. A string-valued preference stays a string.
+    const fetchMock = stubFetch();
+
+    writePreference(portableWidth, 320);
+    writePreference(portableSort, { by: "name", dir: "asc" });
+    writePreference(portableQuery, "true");
+
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      "test.width": 320,
+      "test.sort": { by: "name", dir: "asc" },
+      "test.query": "true",
+    });
+    // And it round-trips: a `str` preference holding "true" is still a string.
+    expect(readPreference(portableQuery)).toBe("true");
+  });
+
+  it("a session with no injected global never PATCHes", async () => {
+    // The blocking script 401'd, so nothing is known about the stored file.
+    // Writing defaults over it would be data loss, not degradation.
+    delete globals.__PAVILIO_PREFS__;
+    const fetchMock = stubFetch();
+
+    writePreference(portableFlag, false);
+    writePreference(portableWidth, 320);
+    clearPreference(portableSide);
+
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    // And the read still answers with the declared default, not the write.
+    expect(readPreference(portableFlag)).toBe(true);
+  });
+
+  it("an empty document is a document — writes work normally", async () => {
+    // `{ version: 1 }` is a legitimately empty file, not an absent global.
+    globals.__PAVILIO_PREFS__ = { version: 1 };
+    const fetchMock = stubFetch();
+
+    writePreference(portableFlag, false);
+    expect(readPreference(portableFlag)).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed PATCH keeps the value the user chose", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    writePreference(portableWidth, 512);
+    await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(readPreference(portableWidth)).toBe(512);
+    expect(warn).toHaveBeenCalled();
+  });
+});

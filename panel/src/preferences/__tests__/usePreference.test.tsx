@@ -1,0 +1,243 @@
+import { useEffect } from "react";
+import { act, render, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bool } from "../codecs";
+import { definePreference } from "../types";
+import { __resetPreferenceStoreForTests } from "../store";
+import { usePreference } from "../usePreference";
+
+/**
+ * The rendering half of the store: the first-render guarantee that makes the
+ * blocking script worth having, and the realtime fan-out.
+ *
+ * The realtime channel is stubbed rather than driven through a WebSocket —
+ * jsdom has none, and the store only cares that frames arrive.
+ */
+const { frameListeners } = vi.hoisted(() => ({
+  frameListeners: new Set<(frame: { type: string; [key: string]: unknown }) => void>(),
+}));
+
+vi.mock("../../features/realtime/channel", () => ({
+  subscribeRealtime: (listener: (frame: { type: string; [key: string]: unknown }) => void) => {
+    frameListeners.add(listener);
+    return () => frameListeners.delete(listener);
+  },
+  __resetRealtimeChannelForTests: () => frameListeners.clear(),
+}));
+
+type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
+const globals = globalThis as unknown as PrefGlobals;
+
+const watched = definePreference({
+  key: "test.watched",
+  scope: "global",
+  default: true,
+  codec: bool,
+  portable: true,
+});
+
+const other = definePreference({
+  key: "test.other",
+  scope: "global",
+  default: true,
+  codec: bool,
+  portable: true,
+});
+
+/** The body `GET /api/preferences.js` serves for `doc`. */
+function scriptBody(doc: Record<string, unknown>): string {
+  return (
+    `window.__PAVILIO_PREFS__ = ${JSON.stringify(doc)};\n` +
+    `window.__PAVILIO_HOME__ = "/root";\n`
+  );
+}
+
+function serveDoc(doc: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(async () => new Response(scriptBody(doc), { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+async function deliverFrame(keys: string[]): Promise<void> {
+  await act(async () => {
+    for (const listener of [...frameListeners]) {
+      listener({ type: "preferences-change", keys });
+    }
+    // Let the refetch and its listener notifications land.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+beforeEach(() => {
+  globals.__PAVILIO_PREFS__ = { version: 1 };
+});
+
+afterEach(() => {
+  delete globals.__PAVILIO_PREFS__;
+  __resetPreferenceStoreForTests();
+  frameListeners.clear();
+  vi.unstubAllGlobals();
+});
+
+describe("usePreference", () => {
+  it("the value is correct on first render with no effects run", () => {
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.watched": false };
+    const renders: Array<{ value: boolean; effectsSoFar: number }> = [];
+    let effects = 0;
+
+    function Probe() {
+      const [value] = usePreference(watched);
+      renders.push({ value, effectsSoFar: effects });
+      useEffect(() => {
+        effects += 1;
+      });
+      return null;
+    }
+
+    render(<Probe />);
+
+    // The first render already holds the stored value, and it got there
+    // without an effect — the whole point of the blocking script.
+    expect(renders[0]).toEqual({ value: false, effectsSoFar: 0 });
+  });
+
+  it("a change frame for a subscribed key re-renders the hook", async () => {
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.watched": true };
+    serveDoc({ version: 1, "test.watched": false });
+    const seen: boolean[] = [];
+
+    function Probe() {
+      const [value] = usePreference(watched);
+      seen.push(value);
+      return null;
+    }
+
+    render(<Probe />);
+    expect(seen.at(-1)).toBe(true);
+
+    await deliverFrame(["test.watched"]);
+
+    await waitFor(() => expect(seen.at(-1)).toBe(false));
+  });
+
+  it("a change frame for an unsubscribed key does not re-render", async () => {
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.watched": true };
+    serveDoc({ version: 1, "test.watched": true, [other.key]: false });
+    const seen: boolean[] = [];
+
+    function Probe() {
+      const [value] = usePreference(watched);
+      seen.push(value);
+      return null;
+    }
+
+    render(<Probe />);
+    const rendersBefore = seen.length;
+
+    await deliverFrame([other.key]);
+
+    expect(seen.length).toBe(rendersBefore);
+    // The frame did land — the store's copy of the other key moved.
+    expect(globals.__PAVILIO_PREFS__?.[other.key]).toBe(false);
+  });
+
+  it("the setter updates the value and the store together", async () => {
+    const fetchMock = vi.fn(async () => new Response('{"ok":true}', { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    let set: ((value: boolean) => void) | null = null;
+    const seen: boolean[] = [];
+
+    function Probe() {
+      const [value, setValue] = usePreference(watched);
+      set = setValue;
+      seen.push(value);
+      return null;
+    }
+
+    render(<Probe />);
+    expect(seen.at(-1)).toBe(true);
+
+    act(() => set?.(false));
+
+    expect(seen.at(-1)).toBe(false);
+    expect(globals.__PAVILIO_PREFS__?.["test.watched"]).toBe(false);
+  });
+
+  it("two hooks on the same key stay in step", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response('{"ok":true}', { status: 200 })),
+    );
+    let set: ((value: boolean) => void) | null = null;
+    const mirror: boolean[] = [];
+
+    function Writer() {
+      const [, setValue] = usePreference(watched);
+      set = setValue;
+      return null;
+    }
+
+    function Mirror() {
+      const [value] = usePreference(watched);
+      mirror.push(value);
+      return null;
+    }
+
+    render(
+      <>
+        <Writer />
+        <Mirror />
+      </>,
+    );
+    expect(mirror.at(-1)).toBe(true);
+
+    act(() => set?.(false));
+
+    expect(mirror.at(-1)).toBe(false);
+  });
+
+  it("unmounting the last hook releases the realtime subscription", () => {
+    function Probe() {
+      usePreference(watched);
+      return null;
+    }
+
+    const view = render(<Probe />);
+    expect(frameListeners.size).toBe(1);
+
+    view.unmount();
+    expect(frameListeners.size).toBe(0);
+  });
+
+  it("an unused preference never subscribes", () => {
+    expect(frameListeners.size).toBe(0);
+  });
+
+  it("changing the scope argument re-reads under the new key", () => {
+    const scoped = definePreference({
+      key: "test.scoped",
+      scope: "project",
+      default: true,
+      codec: bool,
+      portable: true,
+    });
+    globals.__PAVILIO_PREFS__ = {
+      version: 1,
+      "test.scoped@alpha": false,
+      "test.scoped@beta": true,
+    };
+    const seen: boolean[] = [];
+
+    function Probe({ project }: { project: string }) {
+      const [value] = usePreference(scoped, project);
+      seen.push(value);
+      return null;
+    }
+
+    const view = render(<Probe project="alpha" />);
+    expect(seen.at(-1)).toBe(false);
+
+    view.rerender(<Probe project="beta" />);
+    expect(seen.at(-1)).toBe(true);
+  });
+});
