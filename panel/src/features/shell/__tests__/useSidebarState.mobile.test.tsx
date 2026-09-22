@@ -109,7 +109,12 @@ describe("useSidebarState on a mobile viewport", () => {
 
   it("toggling on mobile writes no preference", () => {
     installMatchMedia(true);
-    seed(preferences.leftSidebarExpanded, true);
+    // COLLAPSED, and the seed is load-bearing. `setExpanded` below asks for
+    // `true`, and the store's desktop path is an idempotent updater: seeded
+    // `true` it would return its own argument and write nothing, so a leaked
+    // desktop write would look exactly like the mobile no-op this asserts.
+    // Seeded `false`, the leak has something to change and the spy sees it.
+    seed(preferences.leftSidebarExpanded, false);
     const written = spyPreferenceWrites();
     const { result } = renderHook(() => useSidebarState("leftSidebar"));
 
@@ -139,6 +144,56 @@ describe("useSidebarState on a mobile viewport", () => {
 
     mm.setMobile(false);
     expect(result.current.expanded).toBe(false);
+  });
+
+  it("returning to mobile starts closed again", () => {
+    // The cross RESETS the fold, and desktop is the only leg that hides a
+    // stale one: there `expanded` is the stored value and ignores the fold
+    // entirely. So the reset is observable only on the way BACK, and a suite
+    // that crosses once can never see it.
+    const mm = installMatchMedia(true);
+    // The desktop chose EXPANDED, so the middle leg is unambiguously the
+    // stored value and the last leg is unambiguously the reset.
+    seed(preferences.leftSidebarExpanded, true);
+    const { result } = renderHook(() => useSidebarState("leftSidebar"));
+    expect(result.current.expanded).toBe(false);
+
+    act(() => result.current.toggle());
+    expect(result.current.expanded).toBe(true);
+
+    mm.setMobile(false);
+    expect(result.current.expanded).toBe(true);
+
+    // Back on the phone: the fold the user opened before the rotation is gone,
+    // not carried over as an overlay they never asked for twice.
+    mm.setMobile(true);
+    expect(result.current.expanded).toBe(false);
+  });
+
+  it("two consumers of the same sidebar share the mobile fold", () => {
+    // Why the fold is module state and not `useState`, pinned. `Layout` and
+    // `TerminalDrawer` both hold the LEFT sidebar: one renders it, the other
+    // decides how much room to leave for it. Per-hook state lets those two
+    // disagree, and the sidebar is then open for one and closed for the other.
+    installMatchMedia(true);
+    const layout = renderHook(() => useSidebarState("leftSidebar"));
+    const drawer = renderHook(() => useSidebarState("leftSidebar"));
+    expect(drawer.result.current.expanded).toBe(false);
+
+    act(() => layout.result.current.toggle());
+
+    expect(layout.result.current.expanded).toBe(true);
+    expect(drawer.result.current.expanded).toBe(true);
+
+    // Shared per SIDE, though — the store is keyed, not global.
+    const right = renderHook(() => useSidebarState("rightSidebar"));
+    expect(right.result.current.expanded).toBe(false);
+
+    // And it still closes for both, so the sharing is the live value rather
+    // than a one-off read at mount.
+    act(() => drawer.result.current.toggle());
+    expect(layout.result.current.expanded).toBe(false);
+    expect(drawer.result.current.expanded).toBe(false);
   });
 
   it("toggling on desktop still persists", () => {

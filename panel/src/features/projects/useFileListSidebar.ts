@@ -26,6 +26,17 @@ export interface FileListSidebarState {
   endPeek: () => void;
 }
 
+/**
+ * Per-hook `useState` here, and a module-level store in the sibling
+ * `useSidebarState` — a deliberate difference, not an inconsistency.
+ *
+ * The transient fold below has ONE consumer: `FileListSidebar` renders the list
+ * and owns the state that hides it, so there is no second reader to disagree
+ * with. `useSidebarState` has two — `Layout` and `TerminalDrawer` both hold the
+ * left sidebar — and two readers of one sidebar need one value. Copy this shape
+ * while a fold has a single consumer; copy that one the moment it gains a
+ * second.
+ */
 export function useFileListSidebar(): FileListSidebarState {
   // One preference for every tab and project — browsing vs reading is a mode,
   // not a per-tab choice.

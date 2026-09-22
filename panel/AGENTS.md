@@ -45,7 +45,7 @@ Agent guidance for the `panel/` app. Read this before making panel-specific chan
 
 ## Persistence / State Notes
 
-- Several panel preferences are persisted in `localStorage` (`useWideMode`, `useSidebarState`, `useGitViewMode`, branch diff base branch selection).
+- Several panel preferences are persisted through the declared registry in `src/preferences/` (`useWideMode`, `useSidebarState`, `useGitViewMode`, branch diff base branch selection). These four are `portable`, so they live in the workspace preferences file and follow the workspace between machines — not in `localStorage`, which now backs only the declarations that opt out of portability.
 - When refactoring these features, preserve storage keys unless the user explicitly asks for a migration.
 - Frontend tests assume browser-like `localStorage` behavior; check `src/test-setup.ts` before changing persistence code.
 

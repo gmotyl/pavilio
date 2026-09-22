@@ -28,6 +28,13 @@ const DECLARATIONS = {
  * and closed for the one deciding whether to make room for it. The preference
  * store is what kept those two in step before; this is the same job for the
  * value that is deliberately not going to the store.
+ *
+ * The sibling `useFileListSidebar` holds the same kind of fold in plain
+ * `useState`, and that is still right THERE: it has one consumer. The shape to
+ * copy is decided by the consumer count, not by which file you read first.
+ * Today `TerminalDrawer` also happens to guard its use behind `!isMobile`,
+ * which would hide a divergence — but that is a condition in a different file,
+ * and a shared fold does not depend on it staying true.
  */
 const fold: Record<SidebarKey, boolean | null> = {
   leftSidebar: null,
