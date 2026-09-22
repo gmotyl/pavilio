@@ -69,7 +69,16 @@ const paneWidth = definePreference({
 
 const BOUNDS: PaneBounds = { min: 200, max: 600, step: 16 };
 
+/**
+ * Renders of the pane, counted in the component body. A re-render that settles
+ * on the width already shown changes nothing any other assertion in this file
+ * can see, so the clamp that prevents it has to be measured rather than
+ * observed.
+ */
+let renders = 0;
+
 function Probe({ edge = "right" }: { edge?: "left" | "right" }) {
+  renders++;
   const { width, isMobile, handleProps } = useResizablePane(paneWidth, BOUNDS);
   const { isMobile: hideOnMobile, ...rail } = handleProps;
   return (
@@ -78,6 +87,23 @@ function Probe({ edge = "right" }: { edge?: "left" | "right" }) {
       <span data-testid="mobile">{String(isMobile)}</span>
       <span data-testid="handle-mobile">{String(hideOnMobile)}</span>
       <div data-testid="handle" data-edge={edge} {...rail} />
+    </div>
+  );
+}
+
+/**
+ * The same pane with its bounds supplied by the caller, so a test can narrow
+ * them mid-drag. `bounds` is an argument, and `endDrag`'s dep array says as
+ * much — a pane whose bounds depend on the viewport, or on a sibling that has
+ * just been collapsed, can and does get narrower while the pointer is down.
+ */
+function BoundsProbe({ bounds }: { bounds: PaneBounds }) {
+  const { width, handleProps } = useResizablePane(paneWidth, bounds);
+  const { isMobile: _hideOnMobile, ...rail } = handleProps;
+  return (
+    <div>
+      <span data-testid="width">{width}</span>
+      <div data-testid="handle" data-edge="right" {...rail} />
     </div>
   );
 }
@@ -93,6 +119,7 @@ const paneWrites = () => writes.filter((w) => w.key === WIDTH_KEY);
 describe("useResizablePane", () => {
   beforeEach(() => {
     writes.length = 0;
+    renders = 0;
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
@@ -274,6 +301,49 @@ describe("useResizablePane", () => {
     fireEvent.pointerMove(cancelled, { pointerId: 2, clientX: 600 });
     expect(width()).toBe("350");
     expect(paneWrites()).toEqual([{ key: WIDTH_KEY, value: 350 }]);
+  });
+
+  it("a move further past a bound re-renders nothing", () => {
+    // The clamp in `onPointerMove` is what makes the draft IDEMPOTENT: every
+    // move past `max` proposes the same 600, and `useState` bails out on a
+    // value it already holds. Unclamped, each move proposes a different number
+    // — 620, 640, 660 — and every one of them re-renders the pane to show the
+    // same clamped 600. That is the stutter the draft exists to avoid, so it
+    // is counted here rather than argued about in a comment.
+    render(<Probe />);
+    const handle = screen.getByTestId("handle");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 900 });
+    expect(width()).toBe("600");
+
+    const settled = renders;
+    for (const clientX of [920, 940, 960, 980, 1000, 1020]) {
+      fireEvent.pointerMove(handle, { pointerId: 1, clientX });
+    }
+
+    // At most one: React may re-render once before it notices the bail-out.
+    expect(renders - settled).toBeLessThanOrEqual(1);
+    expect(width()).toBe("600");
+  });
+
+  it("the release clamps against the bounds in force when the pointer lifts", () => {
+    // `draftRef` was clamped against the bounds of the MOVE. If the pane got
+    // narrower since — the bounds are a parameter, and `endDrag` lists them as
+    // dependencies — that draft is now out of range, and the clamp at the
+    // write is the only one that still sees the new ceiling. Without it a 600
+    // lands in the workspace file for a pane that may never be wider than 300.
+    const view = render(<BoundsProbe bounds={BOUNDS} />);
+    const handle = screen.getByTestId("handle");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 900 });
+    expect(width()).toBe("600");
+
+    view.rerender(<BoundsProbe bounds={{ min: 200, max: 300, step: 16 }} />);
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 900 });
+
+    expect(paneWrites()).toEqual([{ key: WIDTH_KEY, value: 300 }]);
   });
 
   it("reports the mobile viewport and follows the media query", () => {

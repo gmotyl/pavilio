@@ -81,6 +81,10 @@ describe("resizing the file-list sidebar", () => {
     // `md:w-72` is gone: the width is the declared default, applied by the hook.
     expect(aside()).toHaveStyle({ width: "288px" });
     expect(aside().className).not.toMatch(/w-72/);
+    // And `shrink-0` stays, which is the other half of the same guarantee: the
+    // flex row must not squeeze the pane below the width the hook reports, or
+    // the rail jumps back to that reported width on the next press.
+    expect(aside().className).toMatch(/\bshrink-0\b/);
   });
 
   it("dragging the handle changes and persists the width", () => {
@@ -89,6 +93,21 @@ describe("resizing the file-list sidebar", () => {
 
     expect(aside()).toHaveStyle({ width: "348px" });
     expect(readPreference(preferences.fileListPaneWidth)).toBe(348);
+  });
+
+  it("the drag stops at the widths this pane was given", () => {
+    // The primitive's own tests pin the primitive's own bounds. Nothing yet
+    // pinned THESE, so `PANE_BOUNDS` could be widened to anything and the
+    // suite would stay green — including to a floor that leaves a column of
+    // ellipses, or a ceiling that takes the detail pane's larger half.
+    renderSidebar();
+    dragBy(600);
+    expect(aside()).toHaveStyle({ width: "560px" });
+    expect(readPreference(preferences.fileListPaneWidth)).toBe(560);
+
+    dragBy(-600);
+    expect(aside()).toHaveStyle({ width: "200px" });
+    expect(readPreference(preferences.fileListPaneWidth)).toBe(200);
   });
 
   it("collapsing and expanding restores the chosen width", () => {
@@ -135,5 +154,9 @@ describe("resizing the file-list sidebar", () => {
     fireEvent.click(screen.getByTestId("file-list-sidebar-toggle"));
     expect(screen.getByText("rows")).toBeTruthy();
     expect(screen.queryByTestId("pane-resize-file-list")).toBeNull();
+    // And no width either: the row stacks on mobile and the aside is
+    // full-bleed, so a px width here would pin it to a desktop habit on a
+    // phone — with no rail to undo it.
+    expect(aside().style.width).toBe("");
   });
 });

@@ -87,6 +87,9 @@ export function useResizablePane(
   // a drag needs the last move's width before React has re-rendered.
   const draftRef = useRef<number | null>(null);
 
+  // The only defence against an out-of-range STORED value — and this one is
+  // portable, so the number may have been written on another machine whose
+  // build drew these bounds somewhere else entirely.
   const width = clamp(draft ?? stored, min, max);
 
   useEffect(() => {
@@ -99,9 +102,16 @@ export function useResizablePane(
   }, []);
 
   /**
-   * Disarm, and persist what the drag reached. Guarded on a live drag because
-   * every end arrives twice in a real browser: pointerup releases the capture,
-   * which then fires lostPointerCapture behind it.
+   * Disarm, and persist what the drag reached.
+   *
+   * Every end arrives twice in a real browser: pointerup releases the capture,
+   * which then fires lostPointerCapture behind it. What stops the second
+   * arrival writing a second time is `final !== null` below — the first end
+   * emptied `draftRef`, so the second finds nothing to persist. The
+   * `!drag.current` guard is belt and braces over that: it turns the second
+   * arrival back at the door rather than letting it fall through a body that
+   * would do nothing anyway. Removing it changes no behavior this hook has,
+   * which is why no test can pin it.
    */
   const endDrag = useCallback(() => {
     if (!drag.current) return;
@@ -110,6 +120,11 @@ export function useResizablePane(
     draftRef.current = null;
     setDraft(null);
     // A press with no move asked for nothing.
+    //
+    // The only clamp on the WRITE, and the only one evaluated against the
+    // bounds in force at release: `draftRef` was clamped during the move, and
+    // `bounds` is a parameter that may have narrowed since — which is why it
+    // is in this callback's dependencies.
     if (final !== null) setStored(clamp(final, min, max));
   }, [max, min, setStored]);
 
@@ -138,6 +153,10 @@ export function useResizablePane(
     (e: React.PointerEvent) => {
       const active = drag.current;
       if (!active) return;
+      // What makes the DRAFT idempotent past a bound, and so what lets
+      // `useState` bail out: every further move proposes the same clamped
+      // number rather than a fresh one that would re-render the pane to show
+      // the width it already shows.
       const next = clamp(
         active.startWidth + (e.clientX - active.originX) * active.direction,
         min,
