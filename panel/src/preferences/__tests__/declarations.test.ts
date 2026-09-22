@@ -13,6 +13,7 @@ const PORTABLE = [
   "git.branchDiff.base",
   "git.branchDiff.open",
   "git.commitsOpen",
+  "git.history.paneWidth",
   "git.viewMode",
   "git.worktree.expanded",
   "projects.favorites",
@@ -47,16 +48,12 @@ const MACHINE_LOCAL = [
 /**
  * Rows the design's portability table names that nothing declares yet: no
  * code persists or resizes them today. The two sidebar widths arrive with
- * `2026-09-21-panel-ui-polish` Task 4 (defaults 240 and 264); the git-history
- * tree's width arrives with its Task 3. Listed here so declaring them is a
- * one-line move into PORTABLE rather than a spurious red — which is exactly
- * what `fileList.paneWidth` has just been.
+ * `2026-09-21-panel-ui-polish` Task 4 (defaults 240 and 264). Listed here so
+ * declaring them is a one-line move into PORTABLE rather than a spurious red
+ * — which is exactly what `fileList.paneWidth` and, now, the git-history
+ * tree's `git.history.paneWidth` have each been in turn.
  */
-const NOT_YET_DECLARED = [
-  "shell.leftSidebar.width",
-  "shell.rightSidebar.width",
-  "git.history.paneWidth",
-];
+const NOT_YET_DECLARED = ["shell.leftSidebar.width", "shell.rightSidebar.width"];
 
 /**
  * `[key, default, scope]`, transcribed by hand from `declarations.ts` with
@@ -76,6 +73,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["git.branchDiff.open", true, "repo"],
   // `isOpen` reads `map[repoPath] !== false`, so an absent entry is OPEN.
   ["git.commitsOpen", true, "repo"],
+  ["git.history.paneWidth", 280, "global"],
   ["git.viewMode", "flat", "global"],
   ["git.worktree.expanded", false, "repo"],
   ["nav.lastFile", null, "project"],

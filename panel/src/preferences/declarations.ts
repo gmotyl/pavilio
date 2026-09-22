@@ -65,12 +65,12 @@ export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
  *   exist. The widths arrive with the `2026-09-21-panel-ui-polish` change,
  *   whose Task 4 declares `shell.leftSidebar.width` (default 240) and
  *   `shell.rightSidebar.width` (default 264) alongside the resize handles.
- * - "Pane widths — git history" — that tree is not resizable yet; its
- *   `git.history.paneWidth` (default 280) arrives with the same change's
- *   Task 3. The file list's half of that row is declared below.
  *
- * `declarations.test.ts` lists them as not-yet-declared so that adding them
- * is a one-line move in the portability table rather than a spurious red.
+ * The "Pane widths" row used to be listed here too. It no longer is: both of
+ * its halves — the file list and the git-history tree — are declared below.
+ *
+ * `declarations.test.ts` lists what remains as not-yet-declared so that adding
+ * it is a one-line move in the portability table rather than a spurious red.
  */
 
 /**
@@ -219,6 +219,25 @@ export const preferences = {
     scope: "repo",
     default: true,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The git-history commit tree's width. No `// was:` line, for the same
+   * reason as `fileList.paneWidth`: nothing stored it before, because the pane
+   * was the fixed `w-[280px]` — so 280, and a workspace with no entry opens
+   * exactly as it always has.
+   *
+   * Global, not `repo`, even though the tree only ever appears beside a repo's
+   * diff. How wide you like to read a list of changed paths is a habit; it
+   * does not become a different preference because you switched repository.
+   * The scope is also load-bearing for the key: a `repo` scope would append
+   * `@<repo>` to the storage key, and this one is read under the bare key.
+   */
+  gitHistoryPaneWidth: definePreference({
+    key: "git.history.paneWidth", // was: nothing — the tree had a fixed width
+    scope: "global",
+    default: 280,
+    codec: num,
     portable: true,
   }),
   /** Empty means "nothing chosen yet" — the view then picks main/master/develop. */

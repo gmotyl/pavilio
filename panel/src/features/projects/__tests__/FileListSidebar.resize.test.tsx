@@ -2,24 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import FileListSidebar from "../FileListSidebar";
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
-import { num } from "../../../preferences/codecs";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
-import { definePreference } from "../../../preferences/types";
-
-/**
- * The key Task 3 gives the git-history tree. Declared here rather than imported
- * because it does not exist yet — and that is the point of the independence
- * test: the file list must persist under a key of its own, so that the tree
- * landing later cannot start moving it.
- */
-const historyPaneWidth = definePreference({
-  key: "git.history.paneWidth",
-  scope: "global",
-  default: 280,
-  codec: num,
-  portable: true,
-});
 
 function stubMatchMedia(mobile: boolean) {
   Object.defineProperty(window, "matchMedia", {
@@ -127,7 +111,7 @@ describe("resizing the file-list sidebar", () => {
 
   it("the file list width is independent of the history tree width", () => {
     // A stored history-tree width must not reach the file list...
-    doc()["git.history.paneWidth"] = 420;
+    doc()[preferences.gitHistoryPaneWidth.key] = 420;
     renderSidebar();
     expect(aside()).toHaveStyle({ width: "288px" });
 
@@ -135,7 +119,7 @@ describe("resizing the file-list sidebar", () => {
     // one declaration would fail one of these two whichever key it borrowed.
     dragBy(-50);
     expect(aside()).toHaveStyle({ width: "238px" });
-    expect(readPreference(historyPaneWidth)).toBe(420);
+    expect(readPreference(preferences.gitHistoryPaneWidth)).toBe(420);
     expect(readPreference(preferences.fileListPaneWidth)).toBe(238);
   });
 
