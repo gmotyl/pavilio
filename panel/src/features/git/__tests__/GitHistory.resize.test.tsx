@@ -69,6 +69,21 @@ async function renderTree() {
 const tree = () => screen.getByTestId("git-history-tree");
 const rail = () => screen.getByTestId("pane-resize-git-history");
 
+/**
+ * The one box in the tree that scrolls — found by its `overflow-y-auto`
+ * wherever it currently sits, deliberately NOT by a test id. A test id would
+ * have to be attached to whichever element the implementation chose, and the
+ * thing worth pinning is exactly that choice.
+ */
+function scroller(): HTMLElement {
+  const box = tree();
+  const found = [box, ...box.querySelectorAll<HTMLElement>("*")].filter((el) =>
+    el.classList.contains("overflow-y-auto"),
+  );
+  expect(found).toHaveLength(1);
+  return found[0];
+}
+
 /** Drag the rail by `dx` pixels and let go. */
 function dragBy(dx: number) {
   const handle = rail();
@@ -151,12 +166,17 @@ describe("resizing the git-history tree", () => {
     expect(tree().style.width).toBe("");
   });
 
-  it("resizing does not disturb the sticky positioning", async () => {
+  it("resizing leaves the sticky positioning's preconditions intact", async () => {
     await renderTree();
 
-    // No stylesheet is loaded in jsdom, so `position: sticky` cannot be read
-    // back off the box. What can be pinned is everything the sticky DEPENDS
-    // on, each of which swapping a width class for an inline width could
+    // PRECONDITIONS, and the name says so: no stylesheet is loaded in jsdom, so
+    // `position: sticky` is asserted nowhere in this repo — not here, not
+    // anywhere. This is a class-list snapshot, and its reach ends there. It
+    // bites `sticky`→`relative`, a dropped `self-start`, and an `overflow`
+    // introduced on the IMMEDIATE parent. It is blind to every ancestor above
+    // that one, to anything `index.css` says, and to the computed value the
+    // browser would actually resolve. What it does pin is everything the sticky
+    // DEPENDS on that swapping a width class for an inline width could
     // plausibly have taken away.
     expect(tree().className).toMatch(/\bsticky\b/);
     expect(tree().className).toMatch(/\btop-4\b/);
@@ -180,5 +200,28 @@ describe("resizing the git-history tree", () => {
     expect(tree().className).toMatch(/\bsticky\b/);
     expect(tree().className).toMatch(/\bself-start\b/);
     expect(tree().style.position).toBe("");
+  });
+
+  it("the tree scrolls inside the sticky box, under a cap", async () => {
+    await renderTree();
+    const box = scroller();
+
+    // The rail is absolutely positioned, and an absolute child of a SCROLL
+    // container scrolls away with the content. Putting the cap and the
+    // `overflow-y-auto` back on the aside — the tidy-looking simplification —
+    // makes the rail vanish the moment you scroll the tree, and nothing else
+    // in this file notices. These two say the scroller is a descendant of the
+    // sticky box rather than the sticky box itself.
+    expect(box).not.toBe(tree());
+    expect(tree().contains(box)).toBe(true);
+    expect(tree().className).not.toMatch(/overflow/);
+
+    // And the cap is still there, at the number that keeps the pane the height
+    // it was before the scrolling moved inward: the aside capped its BORDER
+    // box, whose content area was 18px shorter (`p-2` twice, plus a 1px border
+    // twice). Deleting the cap outright lets the tree grow unbounded, which is
+    // likewise invisible to every other assertion here.
+    expect(box.className).toMatch(/\bmax-h-\[calc\(100vh-138px\)\]/);
+    expect(tree().className).not.toMatch(/\bmax-h-/);
   });
 });

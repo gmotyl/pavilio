@@ -323,6 +323,17 @@ export default function GitHistory({
             that disappears when you scroll the tree is no rail at all. The
             aside's own overflow never affected its own stickiness anyway —
             only an ANCESTOR's would — so nothing about the sticky changes.
+
+            The CAP moved in with the scrolling, and its number had to change to
+            keep the box the size it was. Preflight sets `box-sizing:
+            border-box`, so `max-h-[calc(100vh-120px)]` on the aside capped the
+            BORDER box, and the content it left room for was that minus the
+            aside's own `p-2` (8px twice) and its 1px border (twice) — 18px. The
+            inner div has neither padding nor border, so carrying the same
+            expression across would have handed those 18px back and shown ~18px
+            more of the tree before it scrolled. A move sold as structural
+            should not quietly grow the box, so the cap reads
+            `calc(100vh-138px)` here and the tree scrolls exactly where it did.
           */}
           <aside
             data-testid="git-history-tree"
@@ -333,7 +344,7 @@ export default function GitHistory({
               ...(tree.isMobile ? null : { width: `${tree.width}px` }),
             }}
           >
-            <div className="max-h-[calc(100vh-120px)] overflow-y-auto">
+            <div className="max-h-[calc(100vh-138px)] overflow-y-auto">
               {renderSidebarList()}
             </div>
             {/* The inner edge: the seam with the diff. */}
