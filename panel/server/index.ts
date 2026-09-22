@@ -5,10 +5,15 @@ import {
   mountStaticFrontend,
 } from "./lib/static-frontend.js";
 import { startPanel } from "./panel-server.js";
+import { installPreferenceFlush } from "./lib/shutdown.js";
 
 // Resolved against this module, not the cwd — the panel gets started from the
 // repo root as often as from panel/.
 const DIST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../dist");
+
+// Before startPanel, not after: the store debounces writes by 250 ms, and a
+// panel killed during startup should still commit whatever it had.
+installPreferenceFlush();
 
 startPanel((app) => {
   mountStaticFrontend(app, DIST_DIR);

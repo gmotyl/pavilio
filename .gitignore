@@ -45,6 +45,11 @@ projects/*/config.local.json
 # Private workspace config
 .projects.local.md
 
+# Workspace preferences written by the panel — pane geometry, project names
+# and absolute repo paths. The FILE only, never the directory: the shipped
+# .pavilio/preferences.example.json sits beside it and must stay tracked.
+.pavilio/preferences.json
+
 # Panel
 panel/node_modules/
 panel/dist/

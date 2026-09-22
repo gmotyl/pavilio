@@ -1,12 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { INITIAL_LANGUAGE_STATE, nextLanguageState, voteLanguage } from "../pronunciation";
 import {
   DEFAULT_SPEECH_VOICE,
   SPEECH_VOICES,
-  SPEECH_VOICE_STORAGE_KEY,
   getStoredVoice,
   setStoredVoice,
 } from "../voices";
+import { preferences } from "../../../preferences/declarations";
+import { storageKey } from "../../../preferences/types";
+
+type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
+const globals = globalThis as unknown as PrefGlobals;
+
+/** The picked voice is a PORTABLE preference: the document, never localStorage. */
+const VOICE_KEY = storageKey(preferences.speechVoice);
 
 const voiceIds = (): string[] => SPEECH_VOICES.map((voice) => voice.id);
 
@@ -31,24 +38,27 @@ describe("getStoredVoice", () => {
 
     expect(setStoredVoice("en-US-EmmaMultilingualNeural")).toBe("en-US-EmmaMultilingualNeural");
     expect(getStoredVoice()).toBe("en-US-EmmaMultilingualNeural");
+    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toBe("en-US-EmmaMultilingualNeural");
+    expect(localStorage.length).toBe(0);
   });
 
-  it("falls back to Andrew when storage throws or holds an unknown id", () => {
-    localStorage.setItem(SPEECH_VOICE_STORAGE_KEY, "pl-PL-MarekNeural");
+  it("falls back to Andrew for a dropped voice, an unknown id, and no document", () => {
+    // `resolveVoice` is still the boundary: the declaration's codec is `str`,
+    // so a dropped Polish voice and a plain nonsense id both arrive intact and
+    // are mapped onto a real voice here.
+    globals.__PAVILIO_PREFS__![VOICE_KEY] = "pl-PL-MarekNeural";
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
 
-    localStorage.setItem(SPEECH_VOICE_STORAGE_KEY, "not-a-voice");
+    globals.__PAVILIO_PREFS__![VOICE_KEY] = "not-a-voice";
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
 
-    vi.spyOn(localStorage, "getItem").mockImplementation(() => {
-      throw new Error("site data blocked");
-    });
+    // The auth interlock stands in for the old "site data blocked" case: this
+    // page received no document, so the read answers the default and the write
+    // is dropped without throwing.
+    delete globals.__PAVILIO_PREFS__;
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
-
-    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("site data blocked");
-    });
     expect(() => setStoredVoice("en-US-EmmaMultilingualNeural")).not.toThrow();
+    expect(setStoredVoice("en-US-EmmaMultilingualNeural")).toBe("en-US-EmmaMultilingualNeural");
   });
 });
 

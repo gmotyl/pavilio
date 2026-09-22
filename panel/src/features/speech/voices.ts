@@ -12,10 +12,14 @@
  * single-language voice to this list.
  */
 
-export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
+// One source of truth, in the lower layer: the preference registry declares
+// this value as `speech.voice`'s default. Re-exported so this module's
+// existing importers are untouched. The import points DOWN — registry →
+// feature would be the direction that closes a cycle.
+import { DEFAULT_SPEECH_VOICE, preferences } from "../../preferences/declarations";
+import { clearPreference, readPreference, writePreference } from "../../preferences/store";
 
-/** Per-browser preference: the panel has one user and no server-side profile. */
-export const SPEECH_VOICE_STORAGE_KEY = "panel-speech-voice";
+export { DEFAULT_SPEECH_VOICE };
 
 export const SPEECH_VOICES = [
   {
@@ -74,64 +78,51 @@ export function resolveVoice(value: string | null | undefined): SpeechVoiceId {
 }
 
 /**
- * Reading `window.localStorage` itself throws when site data is blocked, so the
- * accessor is guarded separately from the get/set calls. Exported for the other
- * per-browser speech preferences (`autoOpenAnswer.ts`) so every one of them
- * reads storage through the same guard.
+ * The voice, now a PORTABLE preference: which voice reads an answer is a choice
+ * about the panel, not a fact about this machine, so it travels in the
+ * workspace file. The guarded `getBrowserStorage()` accessor this module used
+ * to export is gone with it — the store owns every try/catch around browser
+ * storage now, and a wrapper the guard cannot see is exactly the evasion
+ * `no-direct-storage.test.ts` documents.
+ *
+ * `resolveVoice` still sits on the way out. The declaration's codec is `str`
+ * (the voice list is long enough that a codec would have to duplicate it), so
+ * a stale or hand-edited id reaches here intact and is mapped onto a real voice
+ * at this boundary, exactly as before.
  */
-export function getBrowserStorage(): Storage | null {
-  if (typeof window === "undefined") return null;
-
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
 export function getStoredVoice(): SpeechVoiceId {
-  const storage = getBrowserStorage();
-  if (!storage) return DEFAULT_SPEECH_VOICE;
-
-  try {
-    return resolveVoice(storage.getItem(SPEECH_VOICE_STORAGE_KEY));
-  } catch {
-    return DEFAULT_SPEECH_VOICE;
-  }
+  return resolveVoice(readPreference(preferences.speechVoice));
 }
 
-/** Stores `id` and returns the voice now in effect; an unknown id is ignored. */
+/**
+ * Stores `id` and returns the voice now in effect; an unknown id is ignored.
+ *
+ * The return value is still what the caller should hold: a page whose portable
+ * document never arrived has its write dropped by the store, and the choice
+ * then applies to this page only — the same contract the old
+ * "storage unavailable" branch offered.
+ */
 export function setStoredVoice(id: string): SpeechVoiceId {
   if (!isSpeechVoice(id)) return getStoredVoice();
-
-  try {
-    getBrowserStorage()?.setItem(SPEECH_VOICE_STORAGE_KEY, id);
-  } catch {
-    // The preference stays usable for this page when storage is unavailable.
-  }
-
+  writePreference(preferences.speechVoice, id);
   return id;
 }
 
 /**
- * The armed cell — the one session allowed to speak on its own. Per browser and
- * exclusive: at most one id is ever stored, so two windows each keep their own
- * armed cell, which is the documented consequence of storing it here rather
- * than on the server. Kept beside the voice because it is the same concern: a
- * per-browser speech preference with no server-side profile to hold it.
+ * The armed cell — the one session allowed to speak on its own. Exclusive: at
+ * most one id is ever stored, so two windows each keep their own armed cell.
+ *
+ * `portable: false`, and this is the declaration where that matters most: the
+ * value is a LIVE SESSION ID. Carried to another machine in the workspace file
+ * it would arm a cell that does not exist there, and it would put a fact about
+ * one browser window into a file every window reads. It stays in
+ * `localStorage`, which is where it already was.
  */
-export const SPEECH_ARMED_STORAGE_KEY = "panel-speech-armed";
-
 export function getStoredArmedSession(): string | null {
-  const storage = getBrowserStorage();
-  if (!storage) return null;
-
-  try {
-    const stored = storage.getItem(SPEECH_ARMED_STORAGE_KEY);
-    return stored && stored.trim() !== "" ? stored : null;
-  } catch {
-    return null;
-  }
+  const stored = readPreference(preferences.speechArmedCell);
+  // A blank id is not an armed cell. Kept from the raw implementation: the
+  // codec round-trips `""` faithfully, so the normalization has to stay.
+  return stored && stored.trim() !== "" ? stored : null;
 }
 
 /**
@@ -141,14 +132,9 @@ export function getStoredArmedSession(): string | null {
  */
 export function setStoredArmedSession(sessionId: string | null): string | null {
   const armed = sessionId && sessionId.trim() !== "" ? sessionId : null;
-
-  try {
-    const storage = getBrowserStorage();
-    if (armed) storage?.setItem(SPEECH_ARMED_STORAGE_KEY, armed);
-    else storage?.removeItem(SPEECH_ARMED_STORAGE_KEY);
-  } catch {
-    // Arming stays in effect for this page when storage is unavailable.
-  }
-
+  // Disarming CLEARS rather than storing `null`, mirroring the `removeItem`
+  // this replaces: "no armed cell" is the absence of a value, not a value.
+  if (armed) writePreference(preferences.speechArmedCell, armed);
+  else clearPreference(preferences.speechArmedCell);
   return armed;
 }

@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { preferences } from "../../preferences/declarations";
+import { readPreference } from "../../preferences/store";
+import { usePreference } from "../../preferences/usePreference";
+import { isPreferenceScope } from "../../preferences/types";
 import type { GrepResult } from "../search/grep";
 
 export type RepoSearchScope = "changed" | "branch-diff" | "commits";
-
-const SCOPE_KEY = "panel-repo-search-scope";
 
 export interface RepoFile {
   status: string;
@@ -20,17 +22,7 @@ export interface UseRepoSearchOptions {
 }
 
 export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
-  const [scope, setScopeState] = useState<RepoSearchScope>(
-    () => (localStorage.getItem(SCOPE_KEY) as RepoSearchScope) || "changed",
-  );
-  const setScope = (next: RepoSearchScope) => {
-    setScopeState(next);
-    try {
-      localStorage.setItem(SCOPE_KEY, next);
-    } catch {
-      // ignore
-    }
-  };
+  const [scope, setScope] = usePreference(preferences.repoSearchScope);
 
   const [files, setFiles] = useState<RepoFile[]>([]);
   const [grepResults, setGrepResults] = useState<GrepResult[]>([]);
@@ -69,9 +61,27 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
             }
           }
           if (scope === "branch-diff") {
-            const base = localStorage.getItem(
-              `panel-branch-diff-base-${repo.path}`,
-            );
+            // The base GitBranchDiff writes, read through the same
+            // declaration — so both sides normalize the repo path the same
+            // way. A repo with no path is not a scope; the store refuses one.
+            //
+            // The guard first, and the read inside a `try`. `server/lib/
+            // discovery.ts` does no runtime validation, so a `repos.json` entry
+            // without a `path` arrives here as `undefined` — and a bare
+            // `repo.path.trim()` would sit in the same un-wrapped position the
+            // old `localStorage.getItem` did: a TypeError here rejects the
+            // whole `Promise.all`, `setFiles(all)` never runs, and ONE
+            // malformed entry blanks the search for every healthy repository
+            // beside it.
+            let base = "";
+            try {
+              if (isPreferenceScope(repo.path)) {
+                base = readPreference(preferences.branchDiffBase, repo.path);
+              }
+            } catch {
+              // No usable scope: search this repo without a base rather than
+              // taking the whole batch down.
+            }
             if (base) {
               try {
                 const res = await fetch(

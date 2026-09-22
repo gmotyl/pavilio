@@ -1,5 +1,12 @@
 import { createServer as createViteServer } from "vite";
 import { findFreePort, startPanel } from "./panel-server.js";
+import { installPreferenceFlush } from "./lib/shutdown.js";
+
+// Same reason as in index.ts, and the dev session is where Ctrl-C is routine:
+// the store debounces writes by 250 ms, so a toggle flipped just before the
+// interrupt reaches disk only because this handler is installed. Installed at
+// module load, before the first await, so the window is never open.
+installPreferenceFlush();
 
 async function startDev(): Promise<void> {
   const hmrPort = await findFreePort(24678);

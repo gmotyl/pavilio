@@ -1,13 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import CollapsibleSection from "../CollapsibleSection";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference } from "../../../preferences/store";
 
 describe("CollapsibleSection", () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
   it("renders children expanded by default", () => {
     render(
       <CollapsibleSection storageKey="test.section.a" title="Explorer">
@@ -32,7 +30,38 @@ describe("CollapsibleSection", () => {
     expect(screen.queryByTestId("child")).not.toBeInTheDocument();
   });
 
-  it("persists collapsed state to localStorage and restores it on remount", async () => {
+  /**
+   * Two clicks in ONE tick. React batches both handlers before it re-renders,
+   * so the second one runs against the same render closure as the first: a
+   * setter called as `setExpanded(!expanded)` sees the pre-batch value twice,
+   * both calls compute the same flip, and the pair collapses into one instead
+   * of cancelling. Only an updater — `setExpanded((v) => !v)` — resolves the
+   * second call against the first one's result.
+   *
+   * The same property `useSidebarState`, `useWideMode` and `QuickFinder` each
+   * assert; this section was the one place in the migration that lost it.
+   */
+  it("composes two toggles in one tick", async () => {
+    render(
+      <CollapsibleSection storageKey="test.section.d" title="Explorer">
+        <div data-testid="child">tree</div>
+      </CollapsibleSection>
+    );
+    const button = screen.getByRole("button", { name: /explorer/i });
+
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("child")).toBeVisible();
+    expect(
+      readPreference(preferences.rightSidebarSectionExpanded, "test.section.d"),
+    ).toBe(true);
+  });
+
+  it("persists collapsed state and restores it on remount", async () => {
     const user = userEvent.setup();
     const { unmount } = render(
       <CollapsibleSection storageKey="test.section.c" title="Commands">
@@ -40,7 +69,9 @@ describe("CollapsibleSection", () => {
       </CollapsibleSection>
     );
     await user.click(screen.getByRole("button", { name: /commands/i }));
-    expect(localStorage.getItem("rightSidebar.test.section.c.expanded")).toBe("false");
+    expect(
+      readPreference(preferences.rightSidebarSectionExpanded, "test.section.c"),
+    ).toBe(false);
 
     unmount();
 

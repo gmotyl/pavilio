@@ -12,6 +12,8 @@ export interface PanelConfig {
   port: number;
   /** Path to agent registry file */
   agentRegistryPath: string;
+  /** Path to the workspace preferences document (read once at boot) */
+  preferencesPath: string;
   /** File watching debounce in ms */
   watchDebounceMs: number;
   /** Glob patterns to ignore in file tree */
@@ -40,6 +42,9 @@ const defaults: PanelConfig = {
   projectsDir: resolve(__dirname, "../projects"),
   port: 3010,
   agentRegistryPath: resolve(process.env.HOME || "~", ".agent-registry.json"),
+  // One level above panel/ — the repo root in a source clone, the workspace
+  // root in the rsync mirror where panel/ is itself a synced copy.
+  preferencesPath: resolve(__dirname, "../.pavilio/preferences.json"),
   watchDebounceMs: 300,
   ignorePatterns: [
     "**/node_modules/**",

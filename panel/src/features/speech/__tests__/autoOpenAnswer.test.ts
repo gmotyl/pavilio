@@ -1,44 +1,45 @@
-import { describe, expect, it, vi } from "vitest";
-import {
-  AUTO_OPEN_ANSWER_STORAGE_KEY,
-  getStoredAutoOpenAnswer,
-  setStoredAutoOpenAnswer,
-} from "../autoOpenAnswer";
+import { describe, expect, it } from "vitest";
+import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "../autoOpenAnswer";
+import { preferences } from "../../../preferences/declarations";
+import { storageKey } from "../../../preferences/types";
+
+type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
+const globals = globalThis as unknown as PrefGlobals;
+
+const KEY = storageKey(preferences.answerPaneAutoOpen);
 
 describe("the auto-open default", () => {
-  it("the default is off until chosen and off when storage throws", () => {
-    expect(AUTO_OPEN_ANSWER_STORAGE_KEY).toBe("panel-answer-pane-auto-open");
+  it("the default is off until chosen, and off again when unchosen", () => {
     // Nothing stored: off.
     expect(getStoredAutoOpenAnswer()).toBe(false);
 
-    // Chosen: on, stored as "1", and read back as on.
+    // Chosen: on, and read back as on. It is PORTABLE, so it lands in the
+    // workspace document and never in browser storage.
     expect(setStoredAutoOpenAnswer(true)).toBe(true);
-    expect(localStorage.getItem(AUTO_OPEN_ANSWER_STORAGE_KEY)).toBe("1");
+    expect(globals.__PAVILIO_PREFS__![KEY]).toBe(true);
+    expect(localStorage.length).toBe(0);
     expect(getStoredAutoOpenAnswer()).toBe(true);
 
-    // Unchosen again: the key goes, the read is off.
+    // Unchosen again: the read is off.
     expect(setStoredAutoOpenAnswer(false)).toBe(false);
-    expect(localStorage.getItem(AUTO_OPEN_ANSWER_STORAGE_KEY)).toBeNull();
     expect(getStoredAutoOpenAnswer()).toBe(false);
+  });
 
-    // Any other stored value is not "on".
-    localStorage.setItem(AUTO_OPEN_ANSWER_STORAGE_KEY, "true");
+  it("a malformed stored value reads as off", () => {
+    globals.__PAVILIO_PREFS__![KEY] = "yes please";
     expect(getStoredAutoOpenAnswer()).toBe(false);
+  });
 
-    // Storage that throws reads as off — spied on the INSTANCE, and asserted
-    // reached, so the guard is what is under test rather than a bypass of it.
-    localStorage.setItem(AUTO_OPEN_ANSWER_STORAGE_KEY, "1");
-    const getItem = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
-      throw new Error("site data blocked");
-    });
+  it("a page with no document of its own reads off and still applies the choice", () => {
+    // The auth interlock: `GET /api/preferences.js` was refused, so this page
+    // knows nothing about the stored file and the store drops portable writes
+    // rather than PATCHing defaults over the user's real values. The choice
+    // still takes effect for this page, which is what the return value is for
+    // — the same contract the old "storage unavailable" branch offered.
+    delete globals.__PAVILIO_PREFS__;
+
     expect(getStoredAutoOpenAnswer()).toBe(false);
-    expect(getItem).toHaveBeenCalled();
-
-    // A write that throws neither crashes nor loses the value for this page.
-    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("site data blocked");
-    });
     expect(setStoredAutoOpenAnswer(true)).toBe(true);
-    expect(setItem).toHaveBeenCalled();
+    expect(getStoredAutoOpenAnswer()).toBe(false);
   });
 });

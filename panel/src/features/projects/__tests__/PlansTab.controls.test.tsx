@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
 import PlansTab from "../PlansTab";
-import { SORT_STORAGE_KEY } from "../fileListControls";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference } from "../../../preferences/store";
 
 const tree = {
   project: "demo",
@@ -266,7 +267,7 @@ describe("PlansTab sort control over change groups", () => {
     fireEvent.click(screen.getByTestId("file-list-sort-name"));
     expect(fileOrder()).toEqual(["2026-02-02-new.md", "2026-01-01-old.md"]);
     await waitFor(() =>
-      expect(JSON.parse(localStorage.getItem(SORT_STORAGE_KEY)!)).toEqual({
+      expect(readPreference(preferences.fileListSort)).toEqual({
         sortKey: "name",
         sortDir: "desc",
       }),
@@ -275,7 +276,7 @@ describe("PlansTab sort control over change groups", () => {
     fireEvent.click(screen.getByTestId("file-list-sort-dir"));
     expect(fileOrder()).toEqual(["2026-01-01-old.md", "2026-02-02-new.md"]);
     await waitFor(() =>
-      expect(JSON.parse(localStorage.getItem(SORT_STORAGE_KEY)!)).toEqual({
+      expect(readPreference(preferences.fileListSort)).toEqual({
         sortKey: "name",
         sortDir: "asc",
       }),

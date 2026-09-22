@@ -1,23 +1,16 @@
-import { useState, useCallback } from "react";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 
 export type GitViewMode = "flat" | "tree";
 
-const STORAGE_KEY = "panel-git-view-mode";
-
+/**
+ * How the git file lists are laid out, remembered across sessions.
+ *
+ * The mode used to be read as `stored === "tree" ? "tree" : "flat"`, which
+ * quietly folded "nothing stored" and "something unreadable" into `flat`. The
+ * declaration says the same thing out loud: `oneOf(["flat", "tree"])` rejects
+ * anything else and the store falls back to the declared default, `flat`.
+ */
 export function useGitViewMode(): [GitViewMode, (mode: GitViewMode) => void] {
-  const [mode, setModeState] = useState<GitViewMode>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored === "tree" ? "tree" : "flat";
-    } catch {
-      return "flat";
-    }
-  });
-
-  const setMode = useCallback((newMode: GitViewMode) => {
-    setModeState(newMode);
-    try { localStorage.setItem(STORAGE_KEY, newMode); } catch {}
-  }, []);
-
-  return [mode, setMode];
+  return usePreference(preferences.gitViewMode);
 }

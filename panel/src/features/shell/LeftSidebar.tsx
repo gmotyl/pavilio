@@ -16,6 +16,9 @@ import {
   Terminal as TerminalIcon,
   Wifi,
 } from "lucide-react";
+import { preferences } from "../../preferences/declarations";
+import { readPreference, writePreference } from "../../preferences/store";
+import { isPreferenceScope } from "../../preferences/types";
 import GitSummary from "../git/GitSummary";
 import { MobileAccessModal } from "../mobile-access/MobileAccessModal";
 import { LanAccessModal } from "../lan-access/LanAccessModal";
@@ -32,6 +35,8 @@ import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import {
   TERMINAL_FOCUS_EVENT,
   dispatchTerminalFocus,
+  readTerminalFocus,
+  writeTerminalFocus,
   type SessionMeta,
   type TerminalFocusEventDetail,
 } from "../terminal/useTerminalSessions";
@@ -57,14 +62,17 @@ function SectionHeader({
   );
 }
 
-/** The project's remembered focused session, or null when nothing is stored. */
+/**
+ * The project's remembered focused session, or null when nothing is stored.
+ *
+ * The read and the writers below now share ONE pair of functions, exported by
+ * `useTerminalSessions` — which is why this could not move before Task 8: a
+ * reader that changed key ahead of its writers would highlight nothing. A null
+ * or blank project is not a scope, and `readTerminalFocus` answers the declared
+ * default for one rather than letting every project share a key.
+ */
 function readStoredFocus(project: string | null): string | null {
-  if (!project) return null;
-  try {
-    return localStorage.getItem(`panel-terminal-focus-${project}`);
-  } catch {
-    return null;
-  }
+  return readTerminalFocus(project);
 }
 
 export default function LeftSidebar() {
@@ -96,10 +104,10 @@ export default function LeftSidebar() {
       // broadcast for a project we are navigating *to*, fired in the same tick
       // as the navigation, is still compared against the *old* currentProject
       // (this effect has not re-subscribed yet) and is dropped. Nothing is lost
-      // only because every broadcaster writes
-      // `panel-terminal-focus-<project>` to localStorage *before* dispatching
-      // (useTerminalSessions.setFocusedId, createTerminalSession,
-      // QuickTerminalModal, and the sidebar row click below), and the
+      // only because every broadcaster calls `writeTerminalFocus` *before*
+      // dispatching (useTerminalSessions.setFocusedId, createTerminalSession,
+      // QuickTerminalModal, TerminalsSurface, and the sidebar row click
+      // below), and the
       // [currentProject] effect underneath re-reads that storage immediately
       // after the switch. A future broadcaster that dispatches without
       // persisting first would have its event silently dropped across a
@@ -118,24 +126,29 @@ export default function LeftSidebar() {
     setFocusedId(readStoredFocus(currentProject));
   }, [currentProject]);
 
-  // Per-project expand state — hydrated once from localStorage when projects load
+  // Per-project expand state — hydrated once from the stored preference when
+  // projects load
   const [expanded, setExpandedState] = useState<Record<string, boolean>>(
     () => ({}),
   );
-  // Hydrate expand state from localStorage for any projects not yet in state
+  // Hydrate expand state from the stored preference for any projects not yet
+  // in state. One preference per project, read directly rather than through
+  // `usePreference`: the project list is dynamic, so a hook per project would
+  // change in number between renders.
   useEffect(() => {
     if (projects.length === 0) return;
     setExpandedState((prev) => {
       const patch: Record<string, boolean> = {};
       for (const p of projects) {
-        if (prev[p.name] === undefined) {
-          try {
-            patch[p.name] =
-              localStorage.getItem(`panel-project-expanded-${p.name}`) === "true";
-          } catch {
-            patch[p.name] = false;
-          }
-        }
+        if (prev[p.name] !== undefined) continue;
+        // An unresolved name is not a scope: `storageKey` throws on a blank
+        // one rather than letting every project share `key@`, and this runs
+        // inside a state updater during an effect, where that throw is an
+        // unhandled render error. Declared default, and nothing written —
+        // the same rule every other Task 6 call site follows.
+        patch[p.name] = isPreferenceScope(p.name)
+          ? readPreference(preferences.projectExpanded, p.name)
+          : preferences.projectExpanded.default;
       }
       return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
     });
@@ -146,11 +159,9 @@ export default function LeftSidebar() {
   );
   const setExpanded = useCallback((name: string, value: boolean) => {
     setExpandedState((prev) => ({ ...prev, [name]: value }));
-    try {
-      localStorage.setItem(`panel-project-expanded-${name}`, String(value));
-    } catch {
-      // ignore
-    }
+    // Same rule on the way out: an unresolved name writes nothing.
+    if (!isPreferenceScope(name)) return;
+    writePreference(preferences.projectExpanded, value, name);
   }, []);
 
   const handleCreateTerminal = useCallback(
@@ -346,14 +357,9 @@ export default function LeftSidebar() {
                     type="button"
                     data-testid={`sidebar-session-${s.id}`}
                     onClick={() => {
-                      try {
-                        localStorage.setItem(
-                          `panel-terminal-focus-${s.project}`,
-                          s.id,
-                        );
-                      } catch {
-                        // ignore
-                      }
+                      // Persist, then dispatch — see the note on the focus
+                      // listener above for why that order is load-bearing.
+                      writeTerminalFocus(s.project, s.id);
                       dispatchTerminalFocus(s.project, s.id);
                       // Bare project route — same as the project-name link.
                       // ProjectRedirect resolves the destination via the

@@ -21,27 +21,59 @@ const TimeTrackingContext = createContext<TimeTrackingContextValue | null>(
 );
 
 // localStorage keys written by useBusyAccumulator look like
-// `pavilio.time.<project>`. ReportBlock writes `pavilio.time.report.<project>`;
-// those are pref blobs, not accumulator state, so we exclude them here.
+// `pavilio.time.<project>`. Two settings used to share that prefix —
+// `pavilio.time.report.<project>` and
+// `pavilio.time.form.<project>.resetAutoOnSave`. Both are preferences now and
+// this panel writes neither, but the migration deliberately ORPHANS old raw
+// keys rather than deleting them, so both still sit in every browser that ran
+// an earlier build. The scan therefore stays defensive rather than being
+// simplified away: an unskipped orphan is discovered as a phantom project, and
+// the tracker slot that mounts for it stamps accumulator JSON over the key —
+// which is how the real storage dump came to hold an accumulator object under
+// a boolean flag. `form.` was never skipped, so that phantom is live today;
+// this is where it stops.
 const LS_PREFIX = "pavilio.time.";
-const REPORT_INFIX = "report.";
+const PREFERENCE_INFIXES = ["report.", "form."];
+
+/**
+ * The raw store the `pavilio.time.<project>` accumulator keys live in, or
+ * `undefined` when the browser refuses one.
+ *
+ * ONE statement in this file names `localStorage`, and it is the binding of
+ * `accumulatorStorage` below. `no-direct-storage.test.ts` exempts the
+ * accumulator by MARKER rather than by file — a statement must name
+ * `accumulatorStorage` to be excused — so a raw call added anywhere else
+ * here, under any key, is an offence there. It used to exempt this whole
+ * file, and a reviewer walked a
+ * `localStorage.setItem("pavilio.pref.sneaky", …)` straight through it.
+ */
+function accumulatorStore(): Storage | undefined {
+  // Access itself can throw SecurityError when storage is disabled (private
+  // mode, strict cookie policies). Degrade gracefully.
+  try {
+    if (typeof window === "undefined") return undefined;
+    const accumulatorStorage: Storage | undefined = window.localStorage ?? undefined;
+    return accumulatorStorage;
+  } catch {
+    return undefined;
+  }
+}
 
 function scanStorageProjects(): string[] {
-  if (typeof window === "undefined" || !window.localStorage) return [];
-  // localStorage access can throw SecurityError when storage is disabled
-  // (private mode, strict cookie policies). Degrade gracefully.
+  const store = accumulatorStore();
+  if (!store) return [];
   try {
     const out: string[] = [];
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const k = window.localStorage.key(i);
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
       if (!k || !k.startsWith(LS_PREFIX)) continue;
       const rest = k.slice(LS_PREFIX.length);
-      if (rest.startsWith(REPORT_INFIX)) continue;
+      if (PREFERENCE_INFIXES.some((infix) => rest.startsWith(infix))) continue;
       if (rest) out.push(rest);
     }
     return out;
   } catch (err) {
-    console.warn("[time] localStorage scan failed", err);
+    console.warn("[time] accumulator scan failed", err);
     return [];
   }
 }

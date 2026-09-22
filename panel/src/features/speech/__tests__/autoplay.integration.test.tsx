@@ -401,7 +401,9 @@ import TerminalsPage from "../../../pages/TerminalsPage";
 import { SpeechHostProvider } from "../SpeechHostProvider";
 import { dismissToast, getToastSnapshot } from "../../../lib/toast";
 import { prepare } from "../prepare";
-import { SPEECH_VOICE_STORAGE_KEY, setStoredArmedSession } from "../voices";
+import { setStoredArmedSession, setStoredVoice } from "../voices";
+import { preferences } from "../../../preferences/declarations";
+import { clearPreference } from "../../../preferences/store";
 
 /** Every `<audio>` element the panel drove — criterion 7 is that there is one. */
 const elements: HTMLMediaElement[] = [];
@@ -637,9 +639,9 @@ beforeAll(() => {
 
 beforeEach(() => {
   synth.reset();
-  // The picked voice is a per-browser preference in localStorage, so one test's
-  // choice would otherwise still be in force in the next.
-  localStorage.removeItem(SPEECH_VOICE_STORAGE_KEY);
+  // The picked voice is a portable preference in the workspace document, so
+  // one test's choice would otherwise still be in force in the next.
+  clearPreference(preferences.speechVoice);
   hosts.reset();
   // The toast store is a module singleton, so a toast raised by one test would
   // otherwise still be standing in the next one.
@@ -1404,7 +1406,7 @@ describe("warming the first unit on arrival", () => {
     // The cache keys on voice + text. Warming with the module's own default —
     // or with anything but the stored voice — is a synthesis nobody plays and
     // a click that still waits, with every state looking exactly right.
-    localStorage.setItem(SPEECH_VOICE_STORAGE_KEY, "en-US-EmmaMultilingualNeural");
+    setStoredVoice("en-US-EmmaMultilingualNeural");
 
     await renderProjectSurface();
     await emitUtterance("cell-b", "b1", "The picked voice warms it.");

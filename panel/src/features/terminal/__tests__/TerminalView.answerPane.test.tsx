@@ -10,7 +10,10 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AUTO_OPEN_ANSWER_STORAGE_KEY } from "../../speech/autoOpenAnswer";
+import {
+  getStoredAutoOpenAnswer,
+  setStoredAutoOpenAnswer,
+} from "../../speech/autoOpenAnswer";
 import { prepare } from "../../speech/prepare";
 import type { GridSpeech, Utterance } from "../../speech/types";
 import {
@@ -184,8 +187,7 @@ const footerBox = (): HTMLInputElement =>
 
 /** The browser-wide default, as Settings would leave it. */
 const storeDefault = (on: boolean): void => {
-  if (on) localStorage.setItem(AUTO_OPEN_ANSWER_STORAGE_KEY, "1");
-  else localStorage.removeItem(AUTO_OPEN_ANSWER_STORAGE_KEY);
+  setStoredAutoOpenAnswer(on);
 };
 
 beforeEach(() => {
@@ -353,7 +355,7 @@ describe("TerminalView opens the pane on a new answer", () => {
     // default, and the default changing later does not reach a mounted cell.
     fireEvent.click(footerBox());
     expect(footerBox()).not.toBeChecked();
-    expect(localStorage.getItem(AUTO_OPEN_ANSWER_STORAGE_KEY)).toBe("1");
+    expect(getStoredAutoOpenAnswer()).toBe(true);
     fireEvent.click(footerBox());
     expect(footerBox()).toBeChecked();
 

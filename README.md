@@ -260,6 +260,12 @@ export default {
 
 `panel.config.local.ts` is in `.gitignore` — your paths never leak into the repo.
 
+### Workspace preferences
+
+`.pavilio/preferences.json` — one level above `panel/`, at your workspace root — is where the panel remembers the choices that are worth carrying between machines: sidebar and pane state, sort orders, favorites, the speech voice, per-project and per-repo toggles. It belongs to the workspace, not to the browser, so it travels with your private repo and a second machine opens the panel the way you left it. Anything that names a live session — a focused terminal, a grid layout — stays in browser storage instead and never lands here.
+
+The file is gitignored in this repository (it would carry your project names and absolute repo paths); `.pavilio/preferences.example.json` is shipped in its place, so you can see the format. The panel reads it **once at boot** — after pulling a change to it, restart the panel.
+
 ## Agent Tracking
 
 The `scripts/cc` and `scripts/oc` wrapper scripts launch Claude Code and OpenCode while registering the session in a shared registry file.

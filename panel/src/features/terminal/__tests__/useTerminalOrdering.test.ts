@@ -2,6 +2,9 @@ import { StrictMode } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useTerminalOrdering } from "../useTerminalOrdering";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
+import { storageKey } from "../../../preferences/types";
 import type { SessionMeta } from "../useTerminalSessions";
 import {
   expandPreset,
@@ -22,9 +25,20 @@ function session(id: string, project = "vector"): SessionMeta {
   };
 }
 
-const GRID_KEY = (scope: string) => `panel-terminal-grid-${scope}`;
-const ORDER_KEY = (scope: string) => `panel-terminal-order-${scope}`;
+/**
+ * Both halves of the ordering model are `portable: false` — an order and a
+ * tiling are lists of LIVE SESSION IDS, which mean nothing on another machine —
+ * so they stay in `localStorage`, under the registry's keys rather than the raw
+ * `panel-terminal-*` ones.
+ */
+const GRID_KEY = (scope: string) => storageKey(preferences.terminalGrid, scope);
+/** The count-only column model's key: undeclared, unread, and left alone. */
 const LEGACY_KEY = (scope: string) => `panel-terminal-layout-${scope}`;
+
+const storeTiles = (scope: string, layout: TileLayout) =>
+  writePreference(preferences.terminalGrid, layout, scope);
+const storeOrder = (scope: string, order: string[]) =>
+  writePreference(preferences.terminalOrder, order, scope);
 
 const defaultFor = (ids: string[]): TileLayout =>
   expandPreset(ids, getLayoutPresets(ids.length)[0]);
@@ -41,7 +55,7 @@ describe("useTerminalOrdering", () => {
       { sessionId: "b", x: 0, y: 0, w: 48, h: 24 },
       { sessionId: "a", x: 0, y: 24, w: 48, h: 24 },
     ];
-    localStorage.setItem(GRID_KEY("vector"), JSON.stringify(stored));
+    storeTiles("vector", stored);
 
     const { result } = renderHook(() =>
       useTerminalOrdering("vector", [session("a"), session("b")]),
@@ -53,11 +67,8 @@ describe("useTerminalOrdering", () => {
   });
 
   it("falls back to the default preset when stored tiles are invalid", () => {
-    localStorage.setItem(
-      GRID_KEY("vector"),
-      // Leaves the bottom half of the grid uncovered.
-      JSON.stringify([{ sessionId: "a", x: 0, y: 0, w: 48, h: 24 }]),
-    );
+    // Leaves the bottom half of the grid uncovered.
+    storeTiles("vector", [{ sessionId: "a", x: 0, y: 0, w: 48, h: 24 }]);
 
     const { result } = renderHook(() =>
       useTerminalOrdering("vector", [session("a"), session("b")]),
@@ -67,18 +78,24 @@ describe("useTerminalOrdering", () => {
     expect(result.current.tiles).toEqual(defaultFor(["a", "b"]));
   });
 
-  it("discards a layout written by the column model and starts from the default", () => {
-    localStorage.setItem(
-      LEGACY_KEY("vector"),
-      JSON.stringify([[{ sessionId: "a", weight: 1 }], [{ sessionId: "b", weight: 2 }]]),
-    );
+  it("ignores a layout written by the column model, and leaves the orphan alone", () => {
+    const legacy = JSON.stringify([
+      [{ sessionId: "a", weight: 1 }],
+      [{ sessionId: "b", weight: 2 }],
+    ]);
+    localStorage.setItem(LEGACY_KEY("vector"), legacy);
 
     const { result } = renderHook(() =>
       useTerminalOrdering("vector", [session("a"), session("b")]),
     );
 
     expect(result.current.tiles).toEqual(defaultFor(["a", "b"]));
-    expect(localStorage.getItem(LEGACY_KEY("vector"))).toBeNull();
+    // The two `removeItem` sweeps of the superseded column-model keys are GONE
+    // with the migration, not re-pointed: they were this module's only raw
+    // storage, and sweeping two orphans while `panel-terminal-grid-` and every
+    // other `// was:` key in `declarations.ts` is left in the browser was never
+    // a policy. The registry's is — the old keys are orphaned, read by nothing.
+    expect(localStorage.getItem(LEGACY_KEY("vector"))).toBe(legacy);
   });
 
   it("persists tiles under the grid key after a placement", () => {
@@ -113,7 +130,7 @@ describe("useTerminalOrdering", () => {
       { sessionId: "a", x: 0, y: 0, w: 48, h: 16 },
       { sessionId: "b", x: 0, y: 16, w: 48, h: 32 },
     ];
-    localStorage.setItem(GRID_KEY("metro"), JSON.stringify(other));
+    storeTiles("metro", other);
 
     const { result, rerender } = renderHook(
       ({ scope }: { scope: string }) =>
@@ -126,8 +143,11 @@ describe("useTerminalOrdering", () => {
     expect(result.current.tiles).toEqual(other);
   });
 
-  it("renders the default preset when localStorage is unavailable", () => {
-    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+  it("renders the default preset when browser storage is unavailable", () => {
+    // Spied on the INSTANCE, and asserted reached: the suite replaces
+    // `localStorage` with a plain object, so a `Storage.prototype` spy is inert
+    // and this test used to pass without the throw ever happening.
+    const getItem = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
       throw new Error("denied");
     });
 
@@ -135,6 +155,7 @@ describe("useTerminalOrdering", () => {
       const { result } = renderHook(() =>
         useTerminalOrdering("vector", [session("a"), session("b")]),
       );
+      expect(getItem).toHaveBeenCalled();
       expect(result.current.tiles).toEqual(defaultFor(["a", "b"]));
     } finally {
       getItem.mockRestore();
@@ -144,13 +165,10 @@ describe("useTerminalOrdering", () => {
   it("keeps one tile per live session under StrictMode's double invoke", () => {
     // A custom shape is stored first: without one the scope sits on the empty-layout
     // sentinel and simply re-defaults, which would not exercise reconciliation.
-    localStorage.setItem(
-      GRID_KEY("vector"),
-      JSON.stringify([
-        { sessionId: "a", x: 0, y: 0, w: 48, h: 32 },
-        { sessionId: "b", x: 0, y: 32, w: 48, h: 16 },
-      ]),
-    );
+    storeTiles("vector", [
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 32 },
+      { sessionId: "b", x: 0, y: 32, w: 48, h: 16 },
+    ]);
 
     const { result, rerender } = renderHook(
       ({ list }: { list: SessionMeta[] }) => useTerminalOrdering("vector", list),
@@ -184,8 +202,8 @@ describe("useTerminalOrdering", () => {
   it("keeps a stored order that names exactly the layout's sessions", () => {
     // `postDrag` reads as a, c, d, b — the stored order is the pre-drag one a seam
     // resize promised not to renumber, and it must survive the reload.
-    localStorage.setItem(GRID_KEY("vector"), JSON.stringify(postDrag));
-    localStorage.setItem(ORDER_KEY("vector"), JSON.stringify(["a", "c", "b", "d"]));
+    storeTiles("vector", (postDrag));
+    storeOrder("vector", ["a", "c", "b", "d"]);
 
     const { result } = renderHook(() => useTerminalOrdering("vector", quad()));
 
@@ -196,8 +214,8 @@ describe("useTerminalOrdering", () => {
   });
 
   it("ignores a stored order that is missing one of the layout's sessions", () => {
-    localStorage.setItem(GRID_KEY("vector"), JSON.stringify(postDrag));
-    localStorage.setItem(ORDER_KEY("vector"), JSON.stringify(["a", "c", "b"]));
+    storeTiles("vector", (postDrag));
+    storeOrder("vector", ["a", "c", "b"]);
 
     const { result } = renderHook(() => useTerminalOrdering("vector", quad()));
 
@@ -205,8 +223,8 @@ describe("useTerminalOrdering", () => {
   });
 
   it("ignores a stored order carrying an id the layout does not name", () => {
-    localStorage.setItem(GRID_KEY("vector"), JSON.stringify(postDrag));
-    localStorage.setItem(ORDER_KEY("vector"), JSON.stringify(["a", "c", "b", "z"]));
+    storeTiles("vector", (postDrag));
+    storeOrder("vector", ["a", "c", "b", "z"]);
 
     const { result } = renderHook(() => useTerminalOrdering("vector", quad()));
 
@@ -214,7 +232,7 @@ describe("useTerminalOrdering", () => {
   });
 
   it("derives the order from the tiling when no order is stored", () => {
-    localStorage.setItem(GRID_KEY("vector"), JSON.stringify(postDrag));
+    storeTiles("vector", (postDrag));
 
     const { result } = renderHook(() => useTerminalOrdering("vector", quad()));
 
@@ -222,7 +240,7 @@ describe("useTerminalOrdering", () => {
   });
 
   it("carries a seam resize's order across a remount", () => {
-    localStorage.setItem(GRID_KEY("vector"), JSON.stringify(preDrag));
+    storeTiles("vector", (preDrag));
 
     const first = renderHook(() => useTerminalOrdering("vector", quad()));
     expect(first.result.current.sessionOrder).toEqual(["a", "c", "b", "d"]);

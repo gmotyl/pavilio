@@ -12,6 +12,9 @@ import {
   type LayoutCommitKind,
   type OrderingState,
 } from "./orderingReducer";
+import { preferences } from "../../preferences/declarations";
+import { clearPreference, readPreference, writePreference } from "../../preferences/store";
+import { isPreferenceScope } from "../../preferences/types";
 import type { SessionMeta } from "./useTerminalSessions";
 
 export interface TerminalOrdering {
@@ -36,40 +39,33 @@ export interface TerminalOrdering {
 }
 
 function readOrder(scopeKey: string): string[] {
-  try {
-    const stored = localStorage.getItem(`panel-terminal-order-${scopeKey}`);
-    return stored ? (JSON.parse(stored) as string[]) : [];
-  } catch {
-    return [];
-  }
+  if (!isPreferenceScope(scopeKey)) return preferences.terminalOrder.default;
+  return readPreference(preferences.terminalOrder, scopeKey);
 }
 
+/**
+ * Three superseded shapes are discarded rather than migrated: the count-only
+ * `panel-terminal-columns-` key, the weighted column `panel-terminal-layout-`
+ * key, and now the raw `panel-terminal-grid-` key this declaration replaces.
+ * Mapping arbitrary column counts and weights onto 48 zones rounds, so a
+ * migration would hand back a layout that is *almost* the one the user had —
+ * and those layouts were built with the merge tool this model replaced.
+ *
+ * The two `removeItem` calls that used to sweep the first two keys are GONE,
+ * not re-pointed. They were the only raw storage left here, and sweeping two
+ * orphans while `panel-terminal-grid-` and every other `// was:` key in
+ * `declarations.ts` is left in place was never a policy — the registry's is:
+ * "the old raw keys each `// was:` names are ORPHANED — left in the browser,
+ * read by nothing". These two join them.
+ */
 function readTiles(scopeKey: string): TileLayout {
-  // Two superseded shapes are discarded rather than migrated: the count-only
-  // `panel-terminal-columns-` key and the weighted column `panel-terminal-layout-`
-  // key. Mapping arbitrary column counts and weights onto 48 zones rounds, so a
-  // migration would hand back a layout that is *almost* the one the user had — and
-  // those layouts were built with the merge tool this model replaced.
-  try {
-    localStorage.removeItem(`panel-terminal-columns-${scopeKey}`);
-    localStorage.removeItem(`panel-terminal-layout-${scopeKey}`);
-  } catch {
-    // ignore
-  }
-
-  try {
-    const stored = localStorage.getItem(`panel-terminal-grid-${scopeKey}`);
-    if (!stored) return [];
-    const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed)) return [];
-    // A layout that does not tile the grid is not rendered at all: the caller falls
-    // back to the default preset, which is always well-formed. Repairing tile-by-tile
-    // (as the column model did) cannot restore a covering, only guess at one.
-    return isValidLayout(parsed as TileLayout) ? (parsed as TileLayout) : [];
-  } catch (err) {
-    console.warn(`[terminal] read tiles from localStorage failed:`, err);
-    return [];
-  }
+  if (!isPreferenceScope(scopeKey)) return preferences.terminalGrid.default;
+  const parsed: unknown = readPreference(preferences.terminalGrid, scopeKey);
+  if (!Array.isArray(parsed)) return [];
+  // A layout that does not tile the grid is not rendered at all: the caller falls
+  // back to the default preset, which is always well-formed. Repairing tile-by-tile
+  // (as the column model did) cannot restore a covering, only guess at one.
+  return isValidLayout(parsed as TileLayout) ? (parsed as TileLayout) : [];
 }
 
 /** True when `order` is a permutation of exactly the sessions `layout` seats. */
@@ -116,9 +112,6 @@ export function useTerminalOrdering(
   scopeKey: string,
   sessions: SessionMeta[],
 ): TerminalOrdering {
-  const ORDER_KEY = `panel-terminal-order-${scopeKey}`;
-  const GRID_KEY = `panel-terminal-grid-${scopeKey}`;
-
   const [{ order: sessionOrder, layout: storedTiles }, dispatch] = useReducer(
     orderingReducer,
     scopeKey,
@@ -139,25 +132,24 @@ export function useTerminalOrdering(
     dispatch({ type: "reset", state: readScope(scopeKey) });
   }
 
+  // Both persist effects are unchanged in shape — they still run on mount — and
+  // that costs nothing on the server: these two are `portable: false`, so the
+  // write lands in `localStorage` and never in a PATCH. The store also skips a
+  // write whose stored representation is unchanged, so a mount that re-asserts
+  // what is already there does not even notify.
   useEffect(() => {
-    try {
-      localStorage.setItem(ORDER_KEY, JSON.stringify(sessionOrder));
-    } catch {
-      // ignore
-    }
-  }, [ORDER_KEY, sessionOrder]);
+    if (!isPreferenceScope(scopeKey)) return;
+    writePreference(preferences.terminalOrder, sessionOrder, scopeKey);
+  }, [scopeKey, sessionOrder]);
 
   useEffect(() => {
-    try {
-      if (storedTiles.length === 0) {
-        localStorage.removeItem(GRID_KEY);
-      } else {
-        localStorage.setItem(GRID_KEY, JSON.stringify(storedTiles));
-      }
-    } catch (err) {
-      console.warn(`[terminal] write tiles to localStorage failed:`, err);
-    }
-  }, [GRID_KEY, storedTiles]);
+    if (!isPreferenceScope(scopeKey)) return;
+    // Empty is CLEARED rather than stored as `[]`, mirroring the `removeItem`
+    // this replaces: an empty tiling means "nothing stored for this scope", and
+    // the caller falls back to the default preset either way.
+    if (storedTiles.length === 0) clearPreference(preferences.terminalGrid, scopeKey);
+    else writePreference(preferences.terminalGrid, storedTiles, scopeKey);
+  }, [scopeKey, storedTiles]);
 
   const orderIndex = useMemo(
     () => new Map(sessionOrder.map((id, i) => [id, i])),

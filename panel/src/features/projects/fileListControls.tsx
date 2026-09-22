@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Search, X, ArrowDown, ArrowUp } from "lucide-react";
+import { preferences, type FileListSort } from "../../preferences/declarations";
+import { readPreference, writePreference } from "../../preferences/store";
 
 export type SortKey = "date" | "name";
 export type SortDir = "asc" | "desc";
-
-/** Global, shared across every tab and project — sort is a mode, not a per-list pref. */
-export const SORT_STORAGE_KEY = "panel:fileList.sort";
 
 export interface FilterSortOpts<T> {
   getName: (item: T) => string;
@@ -37,35 +36,28 @@ export function filterAndSortFiles<T>(items: T[], opts: FilterSortOpts<T>): T[] 
 
 const DEBOUNCE_MS = 200;
 
-interface StoredSort {
-  sortKey: SortKey;
-  sortDir: SortDir;
+/**
+ * The shape is checked here as well as parsed by the codec. `json` accepts any
+ * well-formed JSON, so a hand-edited `{"sortKey":"size"}` — or a bare `null` —
+ * would otherwise reach the pills as a sort nothing matches; the raw helper
+ * validated the same two fields for the same reason.
+ */
+function isFileListSort(value: unknown): value is FileListSort {
+  if (value === null || typeof value !== "object") return false;
+  const { sortKey, sortDir } = value as Partial<FileListSort>;
+  return (
+    (sortKey === "date" || sortKey === "name") &&
+    (sortDir === "asc" || sortDir === "desc")
+  );
 }
 
-function readSort(): StoredSort {
-  try {
-    const raw = localStorage.getItem(SORT_STORAGE_KEY);
-    if (raw) {
-      const p = JSON.parse(raw) as StoredSort;
-      if (
-        (p.sortKey === "date" || p.sortKey === "name") &&
-        (p.sortDir === "asc" || p.sortDir === "desc")
-      ) {
-        return p;
-      }
-    }
-  } catch {
-    // ignore parse / private-mode errors
-  }
-  return { sortKey: "date", sortDir: "desc" };
+function readSort(): FileListSort {
+  const stored = readPreference(preferences.fileListSort);
+  return isFileListSort(stored) ? stored : preferences.fileListSort.default;
 }
 
-function writeSort(s: StoredSort) {
-  try {
-    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(s));
-  } catch {
-    // ignore quota / private-mode errors
-  }
+function writeSort(s: FileListSort) {
+  writePreference(preferences.fileListSort, s);
 }
 
 export interface FileListControls {
@@ -87,8 +79,17 @@ export function useFileListControls(): FileListControls {
     return () => clearTimeout(id);
   }, [query]);
 
+  // Write on an actual change, never on mount. A write is a PATCH to the
+  // committed workspace file now, not a `localStorage.setItem`, and
+  // `FileListSidebar` is mounted by several tabs — so a mount-write put the
+  // DECLARED DEFAULT into that file on a cold load and repeated it on ordinary
+  // navigation. The ref carries what was last persisted (the value the
+  // initializer read), so the first run has nothing to say.
+  const persisted = useRef<FileListSort>(initial);
   useEffect(() => {
-    writeSort({ sortKey, sortDir });
+    if (persisted.current.sortKey === sortKey && persisted.current.sortDir === sortDir) return;
+    persisted.current = { sortKey, sortDir };
+    writeSort(persisted.current);
   }, [sortKey, sortDir]);
 
   const toggleDir = useCallback(

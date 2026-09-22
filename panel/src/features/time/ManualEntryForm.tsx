@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { parseHHMM } from "./parseHHMM";
 import { localISODate } from "./dateLocal";
+import { useProjectScopePreference } from "./useProjectScopePreference";
+import { preferences } from "../../preferences/declarations";
 
 type ManualEntryFormProps = {
   project: string;
@@ -19,25 +21,6 @@ const toHHMM = (n: number): string => {
   const h = Math.floor(n / 60);
   const m = n % 60;
   return `${h}:${String(m).padStart(2, "0")}`;
-};
-
-const resetAutoLsKey = (project: string): string =>
-  `pavilio.time.form.${project}.resetAutoOnSave`;
-
-const loadResetAuto = (project: string): boolean => {
-  try {
-    return localStorage.getItem(resetAutoLsKey(project)) === "true";
-  } catch {
-    return false;
-  }
-};
-
-const saveResetAuto = (project: string, on: boolean): void => {
-  try {
-    localStorage.setItem(resetAutoLsKey(project), String(on));
-  } catch {
-    // ignore
-  }
 };
 
 const fieldLabelClass =
@@ -65,19 +48,15 @@ export const ManualEntryForm = ({
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [resetAutoOnSave, setResetAutoOnSave] = useState<boolean>(() =>
-    loadResetAuto(project),
+  /**
+   * Per project, and read in the hook's own initializer — so no mount effect
+   * persists it back, and none reloads it when the project changes either:
+   * `usePreference` re-reads on a changed scope itself.
+   */
+  const [resetAutoOnSave, setResetAutoOnSave] = useProjectScopePreference(
+    preferences.timeFormResetAutoOnSave,
+    project,
   );
-
-  // Persist the checkbox preference per project.
-  useEffect(() => {
-    saveResetAuto(project, resetAutoOnSave);
-  }, [project, resetAutoOnSave]);
-
-  // Reload preference when switching between projects.
-  useEffect(() => {
-    setResetAutoOnSave(loadResetAuto(project));
-  }, [project]);
 
   // Sync the duration field with the live Auto-tracked value — but only
   // while the user hasn't touched the field. They can clear it (the

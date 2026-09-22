@@ -4,34 +4,29 @@ import { ChevronDown, X } from "lucide-react";
 import TerminalView from "./TerminalView";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import type { SessionMeta } from "./useTerminalSessions";
-import { dispatchTerminalFocus } from "./useTerminalSessions";
+import {
+  dispatchTerminalFocus,
+  readTerminalFocus,
+  writeTerminalFocus,
+} from "./useTerminalSessions";
 import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 import { useTerminalDrawer } from "./useTerminalDrawer";
+import { preferences } from "../../preferences/declarations";
+import { readPreference } from "../../preferences/store";
+import { isPreferenceScope } from "../../preferences/types";
 
+/**
+ * The project's stored session order, read straight from the store rather than
+ * through `usePreference`: this runs inside `useMemo` over an arbitrary number
+ * of projects (the cross-project dot row orders every one of them), so a hook
+ * per project would change in number between renders.
+ *
+ * A blank project is not a scope — `storageKey` throws on one — so it reads the
+ * declared default instead.
+ */
 function readProjectOrder(project: string): string[] {
-  try {
-    const raw = localStorage.getItem(`panel-terminal-order-${project}`);
-    if (raw) return JSON.parse(raw) as string[];
-  } catch {
-    // ignore
-  }
-  return [];
-}
-
-function readLastFocus(project: string): string | null {
-  try {
-    return localStorage.getItem(`panel-terminal-focus-${project}`);
-  } catch {
-    return null;
-  }
-}
-
-function writeLastFocus(project: string, id: string): void {
-  try {
-    localStorage.setItem(`panel-terminal-focus-${project}`, id);
-  } catch {
-    // ignore
-  }
+  if (!isPreferenceScope(project)) return preferences.terminalOrder.default;
+  return readPreference(preferences.terminalOrder, project);
 }
 
 /** Order the subset of `sessions` belonging to `project` using the saved order. */
@@ -65,7 +60,7 @@ export function pickInitialSessionId(
 ): string | null {
   const mine = sessions.filter((s) => s.project === project);
   if (mine.length === 0) return null;
-  const last = readLastFocus(project);
+  const last = readTerminalFocus(project);
   if (last && mine.some((s) => s.id === last)) return last;
   return pickFirstSessionId(sessions, project);
 }
@@ -188,7 +183,7 @@ export default function QuickTerminalModal() {
     (id: string) => {
       if (!project) return;
       setSelectedId(id);
-      writeLastFocus(project, id);
+      writeTerminalFocus(project, id);
       setMenuOpen(false);
     },
     [project],
@@ -204,7 +199,10 @@ export default function QuickTerminalModal() {
       // Different project → bring the user to that project's iTerm tab,
       // with the clicked session focused. Close the modal so the
       // underlying TerminalView can claim the xterm DOM holder.
-      writeLastFocus(s.project, s.id);
+      // Persist before navigating and dispatching: LeftSidebar drops a focus
+      // broadcast for a project it is not showing yet and re-reads the stored
+      // value after the switch.
+      writeTerminalFocus(s.project, s.id);
       setOpen(false);
       navigate(`/project/${encodeURIComponent(s.project)}/iterm`);
       // Dispatch after navigation; the listener is mounted on window.

@@ -11,6 +11,7 @@ import {
   reconnectAllDisconnected,
   reconnectOnActivate,
 } from "./terminalInstances";
+import { writeTerminalFocus } from "./useTerminalSessions";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
 import type { RepoEntry } from "../projects/useProjects";
@@ -217,14 +218,9 @@ export function TerminalsSurface({
             focusedId={focusedId}
             currentProject={currentProject}
             onFocus={(sessionId, sessionProject) => {
-              try {
-                localStorage.setItem(
-                  `panel-terminal-focus-${sessionProject}`,
-                  sessionId,
-                );
-              } catch {
-                // ignore
-              }
+              // Persist first, then navigate or focus — LeftSidebar re-reads
+              // the stored focus across a project switch.
+              writeTerminalFocus(sessionProject, sessionId);
               if (sessionProject === currentProject) {
                 handleFocus(sessionId);
               } else {

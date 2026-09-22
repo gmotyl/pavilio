@@ -4,7 +4,7 @@ import "../test-setup.node.js";
 
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 
 /**
  * Imported lazily, from inside the hook: a static import at the top of this file
@@ -25,6 +25,7 @@ async function resetTabScopedSingletons(): Promise<void> {
   // never the reverse. Order is not load-bearing while both run in the same hook
   // — whichever goes second re-clears — but it keeps this reading the same way
   // round as the teardown a suite would write by hand.
+  await reset("./preferences/store", "__resetPreferenceStoreForTests");
   await reset("./features/terminal/sessionStore", "__resetSessionStoreForTests");
   await reset("./features/realtime/channel", "__resetRealtimeChannelForTests");
 }
@@ -83,6 +84,21 @@ Object.defineProperty(window, "sessionStorage", {
 // jsdom does not implement scrollIntoView
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
 
+/**
+ * The document `GET /api/preferences.js` injects into a real page, empty.
+ *
+ * Every suite gets one because that is the normal case: without it the store
+ * treats the page as one whose request for the script failed and refuses every
+ * portable write (see `store.ts`, `portableDoc`), so a migrated hook would read
+ * its default forever and no suite could test persistence. A suite that wants
+ * the *absent* document — the auth interlock — deletes it itself.
+ */
+beforeEach(() => {
+  (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__ = {
+    version: 1,
+  };
+});
+
 afterEach(async () => {
   cleanup();
   // The channel and the session store are tab-scoped singletons that start on
@@ -93,5 +109,9 @@ afterEach(async () => {
   await resetTabScopedSingletons();
   localStorage.clear();
   sessionStorage.clear();
+  // The injected document is state too: a test leaving a value in it — or a
+  // pending PATCH the store reset has just dropped — would otherwise be read
+  // back by the next test in the same file, which shares the module graph.
+  delete (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__;
   vi.restoreAllMocks();
 });

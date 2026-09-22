@@ -9,21 +9,42 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    let signedIn = false;
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       });
-      if (res.ok) {
-        onSuccess();
-      } else {
-        setError("Invalid token");
-      }
+      signedIn = res.ok;
+      if (!signedIn) setError("Invalid token");
     } catch {
       setError("Network error");
     } finally {
       setSubmitting(false);
+    }
+    if (!signedIn) return;
+
+    // Outside the `try` on purpose, and before `onSuccess`. `GET
+    // /api/preferences.js` sits behind the same auth, so the blocking script in
+    // index.html already 401'd on this page load and both injected globals are
+    // undefined — which makes the preference store suppress every portable
+    // write for the rest of the session. Only a reload re-runs a
+    // parser-blocking script, this time with the cookie. `onSuccess` is the
+    // shell's async `recheck`: a throw from it inside the `try` above used to
+    // be reported as "Network error" *instead of* reloading, leaving exactly
+    // the write-suppressed session the reload exists to prevent.
+    window.location.reload();
+    try {
+      // `onSuccess` is the shell's ASYNC `recheck`, so a rejection would sail
+      // straight past this synchronous `catch` as an unhandled rejection.
+      // Silenced rather than awaited: awaiting would put the check back in
+      // front of nothing — the reload is already on its way, and nothing this
+      // page does now survives it, so the fresh document re-runs the check for
+      // itself either way.
+      void Promise.resolve(onSuccess()).catch(() => {});
+    } catch {
+      // A SYNCHRONOUS throw from `onSuccess`, for the same reason.
     }
   };
 

@@ -10,6 +10,7 @@ import { createServer as createHttpsServer } from "https";
 import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
 import { loadConfig, getConfig } from "./config.js";
+import { loadPreferences } from "./lib/preferences-store.js";
 import {
   authMiddleware,
   loginHandler,
@@ -35,6 +36,7 @@ import autoSyncRouter from "./routes/auto-sync.js";
 import systemRouter from "./routes/system.js";
 import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
 import archiveRouter from "./routes/archive.js";
+import preferencesRouter from "./routes/preferences.js";
 import { machineHostname } from "./lib/hostname.js";
 import { startScheduler } from "./lib/autoSyncScheduler.js";
 import { isEnabled } from "./lib/autoSyncState.js";
@@ -81,6 +83,11 @@ export async function startPanel(
 ): Promise<void> {
   await loadConfig();
   await loadAuthState();
+  // Read once, here, and held in memory for the rest of the process: every
+  // later read is synchronous, and `GET /api/preferences.js` — which the page
+  // blocks on — never touches the disk. Deliberately before `listen()`, so no
+  // request can observe an unloaded document.
+  loadPreferences(getConfig().preferencesPath);
   rebuildIndex();
   const { port: configuredPort, tlsCert, tlsKey } = getConfig();
   const port = await findFreePort(configuredPort);
@@ -162,6 +169,7 @@ export async function startPanel(
   app.use("/api/auto-sync", autoSyncRouter);
   app.use("/api/archive", archiveRouter);
   app.use("/api/system", systemRouter);
+  app.use("/api", preferencesRouter);
   app.use("/api/speech", speechRouter);
   app.use("/api", scriptsRouter);
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });

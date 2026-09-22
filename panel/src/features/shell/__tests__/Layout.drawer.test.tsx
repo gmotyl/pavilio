@@ -4,6 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 import { Layout, FloatingActionProvider } from "../Layout";
 import { LAYOUT_ORDER } from "../Layout/order";
 import { TerminalDrawerProvider } from "../../terminal/useTerminalDrawer";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
 
 vi.mock("../LeftSidebar", () => ({ __esModule: true, default: () => <div /> }));
 vi.mock("../RightSidebar", () => ({ __esModule: true, default: () => <div /> }));
@@ -25,13 +27,19 @@ function setup(
   side: "left" | "right" = "right",
   opts: { width?: number; leftExpanded?: boolean; rightExpanded?: boolean } = {},
 ) {
-  if (open) localStorage.setItem("panel:terminalDrawer:open", "true");
-  localStorage.setItem("panel:terminalDrawer:side", side);
+  // The drawer's open intent, side and width are portable preferences now,
+  // not raw localStorage keys.
+  if (open) writePreference(preferences.terminalDrawerOpen, true);
+  writePreference(preferences.terminalDrawerSide, side);
   if (opts.width) {
-    localStorage.setItem("panel:terminalDrawer:width", String(opts.width));
+    writePreference(preferences.terminalDrawerWidth, opts.width);
   }
-  if (opts.leftExpanded === false) localStorage.setItem("panel:leftSidebar", "false");
-  if (opts.rightExpanded === false) localStorage.setItem("panel:rightSidebar", "false");
+  if (opts.leftExpanded === false) {
+    writePreference(preferences.leftSidebarExpanded, false);
+  }
+  if (opts.rightExpanded === false) {
+    writePreference(preferences.rightSidebarExpanded, false);
+  }
   return render(
     <MemoryRouter initialEntries={["/project/vector/memo"]}>
       <FloatingActionProvider>

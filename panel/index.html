@@ -7,6 +7,16 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Classic, not a module, and before the app: a classic script blocks the
+      parser, so `window.__PAVILIO_PREFS__` and `window.__PAVILIO_HOME__` are
+      assigned before any React code runs and every `useState` initializer can
+      read its preference synchronously. A module script would be deferred and
+      the panel would flash its defaults first. The panel still boots if this
+      404s or 401s — the store falls back to the declared defaults and
+      suppresses portable writes.
+    -->
+    <script src="/api/preferences.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -6,6 +6,8 @@ import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession } from "../terminalInstances";
 import { useTerminalOrdering } from "../useTerminalOrdering";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
 import {
   TEST_PROJECT_COLORS,
   installProjectColors,
@@ -1118,7 +1120,7 @@ describe("TerminalLayoutGrid — seam resize", () => {
       { sessionId: "c", x: 24, y: 0, w: 24, h: 24 },
       { sessionId: "d", x: 24, y: 24, w: 24, h: 24 },
     ];
-    localStorage.setItem("panel-terminal-grid-seams", JSON.stringify(stored));
+    writePreference(preferences.terminalGrid, stored, "seams");
 
     function Harness() {
       const { tiles, sessionOrder, placeTiles } = useTerminalOrdering("seams", sessions);

@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ClipboardList } from "lucide-react";
 import FileListSidebar from "../FileListSidebar";
-import { FILE_LIST_SIDEBAR_KEY, MOBILE_QUERY } from "../useFileListSidebar";
+import { MOBILE_QUERY } from "../useFileListSidebar";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
 import { usePeekTriggerProps } from "../peekTrigger";
 
 /** Stand-in for the open-file name inside `detail` — the real peek trigger. */
@@ -137,7 +139,7 @@ describe("FileListSidebar", () => {
 
   it("starts collapsed on mobile", () => {
     stubMatchMedia(true);
-    localStorage.setItem(FILE_LIST_SIDEBAR_KEY, "false");
+    writePreference(preferences.fileListSidebarCollapsed, false);
     render(
       <FileListSidebar testId="plans-tab" title="Plans" sources={single} detail={null} />,
     );

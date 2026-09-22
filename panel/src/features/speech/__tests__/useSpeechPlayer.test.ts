@@ -178,7 +178,7 @@ vi.mock("../synth", () => ({
 import type { SpeechPlaybackError, SpeechPlayer } from "../useSpeechPlayer";
 import { SYNTHESIS_CONCURRENCY, useSpeechPlayer } from "../useSpeechPlayer";
 import type { SpeechUnit } from "../types";
-import { DEFAULT_SPEECH_VOICE, SPEECH_VOICE_STORAGE_KEY } from "../voices";
+import { DEFAULT_SPEECH_VOICE, setStoredVoice } from "../voices";
 
 function units(...texts: string[]): SpeechUnit[] {
   return texts.map((text) => ({ text, chars: text.length, source: text }));
@@ -804,7 +804,7 @@ describe("useSpeechPlayer", () => {
   });
 
   it("resumes at fromUnit", async () => {
-    localStorage.setItem(SPEECH_VOICE_STORAGE_KEY, "en-US-EmmaMultilingualNeural");
+    setStoredVoice("en-US-EmmaMultilingualNeural");
     const onError = vi.fn();
     const { result } = renderHook(() => useSpeechPlayer({ onError }));
 

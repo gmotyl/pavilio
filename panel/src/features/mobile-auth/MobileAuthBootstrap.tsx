@@ -50,7 +50,16 @@ export function MobileAuthBootstrap({ children }: { children: ReactNode }) {
       const exchanged = await tryExchangeFragment();
       if (cancelled) return;
       if (exchanged) {
-        setPhase("paired");
+        // Reload rather than `setPhase("paired")`. This document was fetched
+        // *before* the cookie existed, and `server/middleware/mobile-auth.ts`
+        // 401s every non-loopback `/api/*` without one — so the blocking
+        // `GET /api/preferences.js` in index.html 401'd and both injected
+        // globals are undefined. Mounting the app on it would leave the
+        // preference store reading every portable value as its declared
+        // default and silently dropping every portable write, for the whole
+        // session. Only a reload re-runs a parser-blocking script, this time
+        // with the cookie. The phase stays "checking" until it lands.
+        window.location.reload();
         return;
       }
       const ok = await probeSession();
@@ -63,6 +72,9 @@ export function MobileAuthBootstrap({ children }: { children: ReactNode }) {
   }, [phase]);
 
   if (phase === "paired") return <>{children}</>;
-  if (phase === "gate") return <PairingGate onRetry={() => setPhase("checking")} />;
+  // Retry by reloading, for the same reason the exchange does: the gate is only
+  // ever shown on a document whose preferences script already 401'd, so any
+  // session adopted from here has to come with a fresh page load.
+  if (phase === "gate") return <PairingGate onRetry={() => window.location.reload()} />;
   return <div className="min-h-screen flex items-center justify-center">Checking pairing…</div>;
 }

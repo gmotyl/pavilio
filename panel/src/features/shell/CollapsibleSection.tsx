@@ -1,5 +1,7 @@
-import { useState, useEffect, ReactNode } from "react";
+import { ReactNode } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 
 interface Props {
   storageKey: string;
@@ -8,30 +10,19 @@ interface Props {
   children: ReactNode;
 }
 
-function storageId(key: string) {
-  return `rightSidebar.${key}.expanded`;
-}
-
-function readInitial(key: string): boolean {
-  try {
-    const v = localStorage.getItem(storageId(key));
-    if (v === null) return true; // default expanded
-    return v === "true";
-  } catch {
-    return true;
-  }
-}
-
 export default function CollapsibleSection({ storageKey, title, icon, children }: Props) {
-  const [expanded, setExpanded] = useState<boolean>(() => readInitial(storageKey));
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(storageId(storageKey), String(expanded));
-    } catch {
-      // ignore quota / private-mode errors
-    }
-  }, [expanded, storageKey]);
+  // The section key is the scope. Every caller passes a literal ("explorer",
+  // "skills", "commands"), so there is no unresolved-scope case to guard.
+  //
+  // Toggled through an UPDATER below, never `setExpanded(!expanded)`: two
+  // clicks in one tick are batched against a single render closure, so a
+  // closure read makes both compute the same flip and the pair collapses into
+  // one instead of cancelling. Same rule as `useSidebarState`, `useWideMode`
+  // and `QuickFinder`.
+  const [expanded, setExpanded] = usePreference(
+    preferences.rightSidebarSectionExpanded,
+    storageKey,
+  );
 
   return (
     <section>
