@@ -35,8 +35,19 @@ const RIGHT_BOUNDS: PaneBounds = { min: 200, max: 440, step: 16 };
 
 /** Toggle offsets from the viewport edge, per sidebar state. */
 const TOGGLE_BASE_LEFT_EXPANDED = 228;
-const TOGGLE_BASE_RIGHT_EXPANDED = 252;
 const TOGGLE_BASE_COLLAPSED = 8;
+
+/**
+ * How far INSIDE an expanded sidebar's inner edge its toggle sits, so the
+ * button straddles the seam rather than floating over the pane.
+ *
+ * Applied against the sidebar's LIVE width, not frozen into a constant: the
+ * right sidebar used to be a fixed 264px and this offset was written down as
+ * the 252 that produced. Its width is the user's now (200–440), and a frozen
+ * 252 drifts off the seam by exactly `width - 264` — up to 176px, far enough
+ * to leave the button floating over the file tree.
+ */
+const TOGGLE_SEAM_INSET = 12;
 
 /**
  * What a sidebar's `width` style should be, which is not always a number.
@@ -125,9 +136,14 @@ export function Layout({ children }: LayoutProps) {
         It is safe on mobile too: the `@media (max-width: 767px)` block in
         `index.css` comes after Tailwind's utilities and wins with `fixed`.
 
-        The width is an inline pixel value from the hook. `--sidebar-width` is
-        no longer applied anywhere — it stays in `index.css` as the written-down
-        default, which is `shell.leftSidebar.width`'s declared 240.
+        The width is an inline pixel value from the hook; the default it starts
+        at is `shell.leftSidebar.width`'s declared 240 and lives only there.
+
+        `transition` is inline rather than a `transition-none` class on purpose.
+        `index.css` declares no `@layer`, so its `.sidebar` rule is UNLAYERED
+        while Tailwind v4's utilities sit in `@layer utilities` — unlayered
+        author rules beat layered ones outright, so the utility would lose to
+        the very rule it is meant to cancel.
       */}
       <aside
         data-testid="layout-sidebar-left"
@@ -141,6 +157,11 @@ export function Layout({ children }: LayoutProps) {
           // stamped onto a box that does not use it — and with no rail on
           // mobile, nothing to undo it with.
           width: sidebarWidth(leftPane, left.expanded),
+          // `.sidebar` eases `width` over 250ms for the COLLAPSE, and that is
+          // this same node. During a drag the ease restarts every pointermove,
+          // so the aside lags the rail being held; outside one it is the
+          // stylesheet's job again and collapsing still animates.
+          transition: leftPane.isDragging ? "none" : undefined,
           borderRight: left.expanded
             ? "1px solid var(--border-subtle)"
             : "none",
@@ -187,7 +208,7 @@ export function Layout({ children }: LayoutProps) {
           style={{
             right:
               (right.expanded
-                ? TOGGLE_BASE_RIGHT_EXPANDED
+                ? rightPane.width - TOGGLE_SEAM_INSET
                 : TOGGLE_BASE_COLLAPSED) + drawerOffset("right"),
           }}
           title={right.expanded ? "Collapse file tree" : "Expand file tree"}
@@ -203,6 +224,8 @@ export function Layout({ children }: LayoutProps) {
         style={{
           order: LAYOUT_ORDER.sidebarRight,
           width: sidebarWidth(rightPane, right.expanded),
+          // Same reason as the left aside above.
+          transition: rightPane.isDragging ? "none" : undefined,
           borderLeft: right.expanded
             ? "1px solid var(--border-subtle)"
             : "none",

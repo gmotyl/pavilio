@@ -79,11 +79,12 @@ let renders = 0;
 
 function Probe({ edge = "right" }: { edge?: "left" | "right" }) {
   renders++;
-  const { width, isMobile, handleProps } = useResizablePane(paneWidth, BOUNDS);
+  const { width, isMobile, isDragging, handleProps } = useResizablePane(paneWidth, BOUNDS);
   const { isMobile: hideOnMobile, ...rail } = handleProps;
   return (
     <div>
       <span data-testid="width">{width}</span>
+      <span data-testid="dragging">{String(isDragging)}</span>
       <span data-testid="mobile">{String(isMobile)}</span>
       <span data-testid="handle-mobile">{String(hideOnMobile)}</span>
       <div data-testid="handle" data-edge={edge} {...rail} />
@@ -109,6 +110,7 @@ function BoundsProbe({ bounds }: { bounds: PaneBounds }) {
 }
 
 const width = () => screen.getByTestId("width").textContent;
+const dragging = () => screen.getByTestId("dragging").textContent;
 const doc = () =>
   (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__!;
 const seed = (value: number) => {
@@ -344,6 +346,44 @@ describe("useResizablePane", () => {
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 900 });
 
     expect(paneWrites()).toEqual([{ key: WIDTH_KEY, value: 300 }]);
+  });
+
+  it("reports that a drag is in flight, and that it is over", () => {
+    // What the pane needs in order to suppress its own width TRANSITION for
+    // the duration of the gesture: an eased width animates each pointermove
+    // over 250ms and restarts the next frame, so the pane trails the pointer
+    // and overshoots the release. `draft !== null` is the one fact that says
+    // "the pointer is proposing this width right now", and it lives here.
+    render(<Probe />);
+    const handle = screen.getByTestId("handle");
+
+    expect(dragging()).toBe("false");
+
+    // The press alone proposes nothing — nothing has moved, so nothing would
+    // animate. The draft, and with it the drag, begins at the first move.
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 540 });
+    expect(dragging()).toBe("true");
+    expect(width()).toBe("360");
+
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 540 });
+    expect(dragging()).toBe("false");
+    expect(width()).toBe("360");
+  });
+
+  it("a cancelled drag is over too", () => {
+    // pointercancel and lostpointercapture both land on `endDrag`. If either
+    // left the flag set, the pane would keep its transition suppressed for the
+    // rest of the session and never animate a collapse again.
+    render(<Probe />);
+    const handle = screen.getByTestId("handle");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 540 });
+    expect(dragging()).toBe("true");
+
+    fireEvent.pointerCancel(handle, { pointerId: 1 });
+    expect(dragging()).toBe("false");
   });
 
   it("reports the mobile viewport and follows the media query", () => {

@@ -33,6 +33,17 @@ export interface ResizablePane {
   /** Always inside `bounds`, whatever the stored value says. */
   width: number;
   isMobile: boolean;
+  /**
+   * True while the pointer is proposing a width — from the first move of a
+   * gesture until it ends, however it ends.
+   *
+   * A pane with a CSS `transition` on `width` needs this: the transition is
+   * there for the collapse, but it applies to every width change, so each
+   * pointermove would ease over its duration and restart the next frame. The
+   * pane would trail the pointer and overshoot the release. The pane spends
+   * this by suppressing its own transition inline for the length of the drag.
+   */
+  isDragging: boolean;
   handleProps: PaneResizerProps;
 }
 
@@ -195,6 +206,9 @@ export function useResizablePane(
   return {
     width,
     isMobile,
+    // A draft IS a drag in flight: it is set on every move and emptied by
+    // `endDrag`, whichever of the three ends arrives first.
+    isDragging: draft !== null,
     handleProps: {
       isMobile,
       "aria-valuenow": width,

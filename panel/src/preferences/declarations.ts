@@ -112,10 +112,9 @@ export const preferences = {
   }),
   /**
    * The left sidebar's width. No `// was:` line: nothing stored it before,
-   * because the pane took `var(--sidebar-width)` — 240px, so a workspace with
-   * no entry opens exactly as it always has. That variable survives in
-   * `index.css` as the written-down default and is applied nowhere; the live
-   * width comes from here.
+   * because the pane took a fixed 240px from the stylesheet — so a workspace
+   * with no entry opens exactly as it always has. This default is now that
+   * number's only home; `index.css` keeps no copy of it.
    *
    * Global, like the `expanded` flag above it: how wide you like your
    * navigation column is a habit, not a fact about one project.

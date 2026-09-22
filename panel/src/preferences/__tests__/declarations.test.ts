@@ -89,7 +89,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["repos.searchScope", "changed", "global"],
   ["search.includeArchived", true, "global"],
   ["shell.leftSidebar.expanded", true, "global"],
-  // `var(--sidebar-width)`, and the inline 264px beside it, as numbers.
+  // The two fixed sidebar widths the stylesheet used to carry, as numbers.
   ["shell.leftSidebar.width", 240, "global"],
   ["shell.project.expanded", false, "project"],
   ["shell.rightSidebar.expanded", true, "global"],
@@ -164,6 +164,11 @@ describe("the declaration table", () => {
     // Guards the tolerance above from rotting into a blanket exemption: a key
     // listed as not-yet-declared must actually be absent.
     const keys = ALL_PREFERENCES.map((d) => d.key);
+    // Stated, not just looped over: the list is empty today, so the loop below
+    // runs zero times and on its own this test would assert nothing at all.
+    // Every row the design names is declared — that is the fact, and it is the
+    // one that breaks if a key is parked here instead of built.
+    expect(NOT_YET_DECLARED).toEqual([]);
     for (const key of NOT_YET_DECLARED) expect(keys).not.toContain(key);
   });
 
