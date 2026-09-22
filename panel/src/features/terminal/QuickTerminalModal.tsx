@@ -13,6 +13,7 @@ import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 import { useTerminalDrawer } from "./useTerminalDrawer";
 import { preferences } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
+import { isPreferenceScope } from "../../preferences/types";
 
 /**
  * The project's stored session order, read straight from the store rather than
@@ -24,9 +25,7 @@ import { readPreference } from "../../preferences/store";
  * declared default instead.
  */
 function readProjectOrder(project: string): string[] {
-  // Not a bare `.trim()`: see the note on `writeTerminalFocus`.
-  if (typeof project !== "string" || project.trim() === "")
-    return preferences.terminalOrder.default;
+  if (!isPreferenceScope(project)) return preferences.terminalOrder.default;
   return readPreference(preferences.terminalOrder, project);
 }
 

@@ -5,16 +5,25 @@ import { describe, expect, it } from "vitest";
 import { writeLastPath, writeLastSectionFile } from "../../features/shell/lastPath";
 
 /**
- * The migration's one structural guard: a feature must not reach browser
+ * The migration's one structural guard: nothing under `src` may reach browser
  * storage behind the registry's back, because a key written raw has no
  * declaration, no default and no portability decision — and so cannot be
  * seeded, synced or kept out of the committed file.
  *
- * It walks the real directory tree rather than a list of modules: a list only
- * guards the files someone remembered to add to it, and a new hook reaching
- * for `localStorage` is exactly the case this has to catch. The enumeration is
- * asserted against an independent count for the same reason — a walk that
- * silently matched nothing would turn this into a test that can only pass.
+ * It walks the real directory tree rather than a list of modules, and it
+ * DISCOVERS the trees it walks rather than naming them. Both for the same
+ * reason: a list only guards what someone remembered to add to it. The
+ * hand-written version covered seven feature directories in arbitrary pairs,
+ * which left `src/components`, `src/pages`, `src/hooks`, `src/lib` and half of
+ * `features/` unguarded — clean at the time, and silently open to the next raw
+ * call. Coverage now falls out of `readdirSync`, so a directory added tomorrow
+ * is guarded the moment it exists. The enumeration is asserted against an
+ * independent count for the matching reason — a walk that silently matched
+ * nothing would turn this into a test that can only pass.
+ *
+ * `preferences/` itself is the one tree left out: it IS the storage tier, and
+ * `store.ts` is the single module allowed to say `localStorage` out loud and
+ * the single one allowed to name the `/api/preferences` route.
  *
  * WHAT THIS GUARD CANNOT SEE. It is a grep, and three evasions are out of its
  * reach on purpose rather than by oversight:
@@ -22,8 +31,9 @@ import { writeLastPath, writeLastSectionFile } from "../../features/shell/lastPa
  * - a computed access — `const LS = "local" + "Storage"; globalThis[LS]` — has
  *   no `localStorage` token to match;
  * - a helper module that wraps storage and is imported. The call site then
- *   names the helper, not the store, and only the helper's own module (which
- *   may live outside these two trees) would be flagged;
+ *   names the helper, not the store — though now that the walk covers all of
+ *   `src`, the helper's own module is at least always flagged wherever it
+ *   lives;
  * - the exemption window is a BOUNDED line scan, not a parse. `statementAt`
  *   takes the offending line plus at most `STATEMENT_LOOKAHEAD - 1` more,
  *   stopping at the first `;`. A statement needs no semicolon (ASI), so a raw
@@ -35,9 +45,8 @@ import { writeLastPath, writeLastSectionFile } from "../../features/shell/lastPa
  *   is loud, and the fix is to shorten the statement.
  *
  * Catching any of them needs a type-aware pass over the module graph, not a
- * line scan. Read a green here as "no module under these trees says
- * `localStorage` out loud", not as "no module under these trees reaches
- * browser storage".
+ * line scan. Read a green here as "no module under `src` says `localStorage`
+ * out loud", not as "no module under `src` reaches browser storage".
  */
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -65,10 +74,10 @@ interface StatementExemption extends StatementMarker {
 }
 
 /**
- * Call sites inside these trees whose declaration belongs to a later task, kept
- * raw on purpose so this commit does not desync a reader from writers it does
- * not own. Matched on the OLD key each one names, not on the file, so anything
- * else in the same module is still guarded.
+ * Call sites whose declaration belongs to a later task, kept raw on purpose so
+ * this commit does not desync a reader from writers it does not own. Matched on
+ * the OLD key each one names, not on the file, so anything else in the same
+ * module is still guarded.
  *
  * EMPTY, AND DELIBERATELY STILL HERE. The last entry —
  * `panel-terminal-focus-`, which held `LeftSidebar`'s read and write open while
@@ -106,6 +115,11 @@ const PENDING_MIGRATIONS: readonly PendingMigration[] = [];
  * else in either file, under any key, is an offence. The markers are the
  * identifiers the accumulator's own code uses for its key and its store, so
  * renaming either turns this red rather than quietly widening it.
+ *
+ * It applies to ONE tree and ONE tier — `features/time`, `localStorage` — and
+ * `exemptionsFor` is what keeps it there. The accumulator lives in the local
+ * tier, so nothing on the Time tab may reach the narrower session tier
+ * unnoticed either.
  */
 const ACCUMULATOR_EXEMPTIONS: readonly StatementExemption[] = [
   {
@@ -124,21 +138,75 @@ const ACCUMULATOR_FILES: readonly string[] = [
   "features/time/useBusyAccumulator.ts",
 ];
 
-function sourceFiles(dir: string): string[] {
+/**
+ * The storage tier itself — the one tree the sweep skips, because it is what
+ * every other tree is required to go through.
+ */
+const STORAGE_TIER_DIR = "preferences";
+
+/**
+ * Not app code, and named here because it does not fall out of the `__tests__`
+ * skip: `test-setup.ts` sits directly under `src` and INSTALLS the in-memory
+ * `localStorage` / `sessionStorage` the whole suite runs against, so it names
+ * both by definition.
+ */
+const HARNESS_MODULES: ReadonlySet<string> = new Set(["test-setup.ts"]);
+
+/** Label for the loose `.ts`/`.tsx` files sitting directly under `src`. */
+const ROOT_TREE = "src/*";
+
+function sourceFiles(dir: string, recurse = true): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(join(SRC, dir), { withFileTypes: true })) {
     if (entry.name === "__tests__") continue;
-    const child = `${dir}/${entry.name}`;
-    if (entry.isDirectory()) found.push(...sourceFiles(child));
-    else if (/\.tsx?$/.test(entry.name)) found.push(child);
+    const child = dir === "." ? entry.name : `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      if (recurse) found.push(...sourceFiles(child));
+      continue;
+    }
+    if (!/\.tsx?$/.test(entry.name)) continue;
+    if (HARNESS_MODULES.has(child)) continue;
+    found.push(child);
   }
   return found;
 }
 
 /**
+ * Every tree the storage sweep covers, discovered rather than listed.
+ *
+ * `features/` is expanded one level, so each feature is its own case and a
+ * failure names the feature rather than the whole tree. Everything else under
+ * `src` is a tree in its own right, plus `ROOT_TREE` for the loose files beside
+ * them — `App.tsx` and `main.tsx` are app code and were guarded by nothing.
+ */
+function guardedTrees(): string[] {
+  const trees: string[] = [ROOT_TREE];
+  for (const entry of readdirSync(SRC, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name === "__tests__" || entry.name === STORAGE_TIER_DIR) continue;
+    if (entry.name !== "features") {
+      trees.push(entry.name);
+      continue;
+    }
+    for (const feature of readdirSync(join(SRC, "features"), { withFileTypes: true })) {
+      if (feature.isDirectory() && feature.name !== "__tests__") {
+        trees.push(`features/${feature.name}`);
+      }
+    }
+  }
+  return trees;
+}
+
+/** The source files a guarded tree owns. `ROOT_TREE` owns only `src`'s loose files. */
+function filesIn(tree: string): string[] {
+  return tree === ROOT_TREE ? sourceFiles(".", false) : sourceFiles(tree);
+}
+
+/**
  * Comment lines removed, so prose about `localStorage` — of which the shell has
  * plenty — is not mistaken for a call. Line-based on purpose: stripping block
- * comments by regex would eat any code that merely contains `/*` in a string.
+ * comments by regex would eat any code that merely contains a comment opener in
+ * a string.
  */
 function withoutComments(source: string): string[] {
   return source.split("\n").map((line) => {
@@ -176,9 +244,9 @@ export function offendingLines(
 
 /**
  * The hard ceiling on the exemption window: the offending line plus three
- * more. The longest real wrapped call in either tree is three lines
- * (`useRepoSearch`'s `localStorage.getItem(` / key / `);`), so this clears
- * every genuine one with a line to spare.
+ * more. The longest real wrapped call in any tree is three lines
+ * (`localStorage.getItem(` / key / `);`), so this clears every genuine one with
+ * a line to spare.
  */
 const STATEMENT_LOOKAHEAD = 4;
 
@@ -189,7 +257,7 @@ const STATEMENT_LOOKAHEAD = 4;
  *
  * A call can wrap across lines, so the pending marker has to be looked for
  * past the identifier's own line — `localStorage.getItem(` and the key it
- * reads are two lines apart in `useRepoSearch`. But the window has to STOP:
+ * reads can be two lines apart. But the window has to STOP:
  *
  * - at the statement boundary, because a fixed lookahead also swallowed the
  *   lines above any marker, so a brand-new raw call placed just before one was
@@ -210,11 +278,10 @@ function statementAt(lines: string[], index: number): string {
 }
 
 function rawStorageUses(
-  dir: string,
+  files: readonly string[],
   pattern: RegExp,
   exemptions: readonly StatementMarker[] = PENDING_MIGRATIONS,
-): { files: string[]; offences: Offence[] } {
-  const files = sourceFiles(dir);
+): Offence[] {
   const offences: Offence[] = [];
 
   for (const file of files) {
@@ -225,7 +292,7 @@ function rawStorageUses(
     }
   }
 
-  return { files, offences };
+  return offences;
 }
 
 function report(offences: Offence[]): string[] {
@@ -292,7 +359,7 @@ describe("the exemption window", () => {
    * reduced to `expect([]).toEqual([])`, so it could not fail. Everything it
    * covered is covered twice over — the emptiness by this test, the marker
    * machinery by the two `FIXTURE_PENDING` tests above, and "a raw key is an
-   * offence" by every tree test below.
+   * offence" by every tree case below.
    */
   it("excuses nothing at all now that the shipped list is empty", () => {
     const source = ["const focused = localStorage.getItem(", '  "anything",', ");"].join("\n");
@@ -314,103 +381,109 @@ describe("the exemption window", () => {
  * `recursive: true` hands the descent to node. There is no loop, no recursion
  * and no directory handling here to get wrong, so the two now disagree about
  * anything `sourceFiles` mis-walks — which is the whole point of the
- * assertion. A floor alone would not do it: every file under
- * `features/projects` is top-level, so no plausible way for the walk to break
- * lands between a floor of 35 and the real count — it would drop to zero.
+ * assertion.
  */
 function countSourceFiles(dir: string): number {
-  return readdirSync(join(SRC, dir), { recursive: true, encoding: "utf8" }).filter(
-    (entry) =>
-      /\.tsx?$/.test(entry) &&
-      // node joins with the platform separator; posix everywhere this runs.
-      !entry.split(/[\\/]/).includes("__tests__"),
-  ).length;
+  return readdirSync(join(SRC, dir), { recursive: true, encoding: "utf8" }).filter((entry) => {
+    // node joins with the platform separator; posix everywhere this runs.
+    const parts = entry.split(/[\\/]/);
+    return (
+      /\.tsx?$/.test(entry) && !parts.includes("__tests__") && !HARNESS_MODULES.has(parts.join("/"))
+    );
+  }).length;
 }
 
 describe("the enumeration the guard rests on", () => {
-  it("finds every source file in both trees, nested ones included", () => {
-    const shell = sourceFiles("features/shell");
-    const projects = sourceFiles("features/projects");
-    const git = sourceFiles("features/git");
-    const search = sourceFiles("features/search");
-    const terminal = sourceFiles("features/terminal");
-    const speech = sourceFiles("features/speech");
-    const time = sourceFiles("features/time");
+  /**
+   * The staleness assertion, and the reason the sweep below can be trusted to
+   * cover a directory nobody remembered: every source file under `src` is
+   * either owned by exactly one guarded tree or by the storage tier. A new
+   * directory lands in `guardedTrees` on its own; a walk that stopped
+   * descending, or a tree that quietly stopped being enumerated, makes these
+   * two totals disagree.
+   */
+  it("partitions every source file under src into a guarded tree or the storage tier", () => {
+    const guarded = guardedTrees().flatMap(filesIn);
+    const tier = sourceFiles(STORAGE_TIER_DIR);
 
-    expect(shell.length).toBe(countSourceFiles("features/shell"));
-    expect(projects.length).toBe(countSourceFiles("features/projects"));
-    expect(git.length).toBe(countSourceFiles("features/git"));
-    expect(search.length).toBe(countSourceFiles("features/search"));
-    expect(terminal.length).toBe(countSourceFiles("features/terminal"));
-    expect(speech.length).toBe(countSourceFiles("features/speech"));
-    expect(time.length).toBe(countSourceFiles("features/time"));
-    // Not merely non-empty: the trees are large, and a walk that stopped at
-    // the first directory would still clear a floor.
-    expect(shell.length).toBeGreaterThanOrEqual(21);
-    expect(projects.length).toBeGreaterThanOrEqual(35);
-    expect(git.length).toBeGreaterThanOrEqual(12);
-    expect(search.length).toBeGreaterThanOrEqual(3);
-    expect(terminal.length).toBeGreaterThanOrEqual(50);
-    expect(speech.length).toBeGreaterThanOrEqual(16);
-    expect(time.length).toBeGreaterThanOrEqual(12);
+    // No file counted twice — the trees are disjoint.
+    expect(new Set([...guarded, ...tier]).size).toBe(guarded.length + tier.length);
+    // And none missed.
+    expect(guarded.length + tier.length).toBe(countSourceFiles("."));
+  });
+
+  it("discovers the trees rather than listing them", () => {
+    const trees = guardedTrees();
+
+    // The seven the hand-written version happened to name...
+    for (const tree of [
+      "features/shell",
+      "features/projects",
+      "features/git",
+      "features/search",
+      "features/terminal",
+      "features/speech",
+      "features/time",
+    ]) {
+      expect(trees).toContain(tree);
+    }
+    // ...and the ones it did not, which a new raw call used to walk straight
+    // past. These are named as documentation of the widening, not as the
+    // mechanism: the mechanism is `readdirSync`.
+    for (const tree of [
+      ROOT_TREE,
+      "components",
+      "pages",
+      "hooks",
+      "lib",
+      "features/explorer",
+      "features/markdown",
+      "features/auth",
+      "features/mobile-auth",
+      "features/realtime",
+    ]) {
+      expect(trees).toContain(tree);
+    }
+    expect(trees).not.toContain(STORAGE_TIER_DIR);
+  });
+
+  it("descends into nested directories", () => {
     // `features/shell` has subdirectories (Layout, Breadcrumbs); a walk that
     // did not descend would miss them and this is what says so.
-    expect(shell.some((file) => file.split("/").length > 3)).toBe(true);
+    expect(filesIn("features/shell").some((file) => file.split("/").length > 3)).toBe(true);
+    // And `ROOT_TREE` must NOT descend, or it would swallow every other tree.
+    expect(filesIn(ROOT_TREE).every((file) => !file.includes("/"))).toBe(true);
   });
 });
 
+const STORAGE_TIERS = [
+  { tier: "localStorage", pattern: /\blocalStorage\b/ },
+  { tier: "sessionStorage", pattern: /\bsessionStorage\b/ },
+] as const;
+
+/**
+ * The accumulator is the only standing exemption, and it belongs to one tree
+ * and one tier. Everything else gets the shipped pending list, which is empty.
+ */
+function exemptionsFor(tree: string, tier: string): readonly StatementMarker[] {
+  return tree === "features/time" && tier === "localStorage"
+    ? [...PENDING_MIGRATIONS, ...ACCUMULATOR_EXEMPTIONS]
+    : PENDING_MIGRATIONS;
+}
+
+const SWEEP = guardedTrees().flatMap((tree) =>
+  STORAGE_TIERS.map(({ tier, pattern }) => ({ tree, tier, pattern })),
+);
+
 describe("preferences replace raw browser storage", () => {
-  it("no module under features/shell or features/projects references localStorage directly", () => {
-    const shell = rawStorageUses("features/shell", /\blocalStorage\b/);
-    const projects = rawStorageUses("features/projects", /\blocalStorage\b/);
+  it.each(SWEEP)("no module under $tree references $tier directly", ({ tree, tier, pattern }) => {
+    const files = filesIn(tree);
 
-    expect(report([...shell.offences, ...projects.offences])).toEqual([]);
-  });
-
-  it("no module under features/git or features/search references localStorage directly", () => {
-    const git = rawStorageUses("features/git", /\blocalStorage\b/);
-    const search = rawStorageUses("features/search", /\blocalStorage\b/);
-
-    expect(report([...git.offences, ...search.offences])).toEqual([]);
-  });
-
-  it("no module under features/git or features/search references sessionStorage directly", () => {
-    const git = rawStorageUses("features/git", /\bsessionStorage\b/);
-    const search = rawStorageUses("features/search", /\bsessionStorage\b/);
-
-    expect(report([...git.offences, ...search.offences])).toEqual([]);
-  });
-
-  it("no module under features/shell or features/projects references sessionStorage directly", () => {
-    // Both trees, not just the shell: `features/projects` reaches navigation
-    // memory too (`useReposTabMemory`, the section-file bookmarks), and the
-    // session tier is exactly where a raw call would look harmless.
-    const shell = rawStorageUses("features/shell", /\bsessionStorage\b/);
-    const projects = rawStorageUses("features/projects", /\bsessionStorage\b/);
-
-    expect(report([...shell.offences, ...projects.offences])).toEqual([]);
-  });
-
-  it("no module under features/terminal or features/speech references localStorage directly", () => {
-    const terminal = rawStorageUses("features/terminal", /\blocalStorage\b/);
-    const speech = rawStorageUses("features/speech", /\blocalStorage\b/);
-
-    expect(report([...terminal.offences, ...speech.offences])).toEqual([]);
-  });
-
-  it("no module under features/terminal or features/speech references sessionStorage directly", () => {
-    const terminal = rawStorageUses("features/terminal", /\bsessionStorage\b/);
-    const speech = rawStorageUses("features/speech", /\bsessionStorage\b/);
-
-    expect(report([...terminal.offences, ...speech.offences])).toEqual([]);
-  });
-
-  it("no module under features/time references localStorage except the busy accumulator's own statements", () => {
-    // Matched on the STATEMENT, not on the file: a raw call added anywhere in
-    // either accumulator file under any other name is an offence here.
-    const time = rawStorageUses("features/time", /\blocalStorage\b/, ACCUMULATOR_EXEMPTIONS);
-
-    expect(report(time.offences)).toEqual([]);
+    // Non-vacuity, per case: a tree that enumerated nothing would pass by
+    // finding nothing, and the sweep would grow a silent hole one directory
+    // wide the first time a walk broke.
+    expect(files.length).toBeGreaterThan(0);
+    expect(report(rawStorageUses(files, pattern, exemptionsFor(tree, tier)))).toEqual([]);
   });
 
   it("the accumulator exemption is real, and covers only the two files it claims", () => {
@@ -418,21 +491,12 @@ describe("preferences replace raw browser storage", () => {
     // exemption held, not that the walk found nothing. And the offences are
     // confined to the two accumulator files: a third file reaching raw
     // storage would show up here even before its statement is judged.
-    const unexempt = rawStorageUses("features/time", /\blocalStorage\b/, []);
+    const unexempt = rawStorageUses(filesIn("features/time"), /\blocalStorage\b/, []);
 
-    expect(unexempt.offences.length).toBeGreaterThan(0);
-    expect([...new Set(unexempt.offences.map((offence) => offence.file))].sort()).toEqual(
+    expect(unexempt.length).toBeGreaterThan(0);
+    expect([...new Set(unexempt.map((offence) => offence.file))].sort()).toEqual(
       [...ACCUMULATOR_FILES].sort(),
     );
-  });
-
-  it("no module under features/time references sessionStorage directly", () => {
-    // Nothing on the Time tab is session-scoped; the accumulator is not
-    // exempt here, because it uses the local tier and nothing else should
-    // reach for the narrower one unnoticed.
-    const time = rawStorageUses("features/time", /\bsessionStorage\b/);
-
-    expect(report(time.offences)).toEqual([]);
   });
 
   /**
@@ -441,13 +505,12 @@ describe("preferences replace raw browser storage", () => {
    * `getBrowserStorage()` — and `autoOpenAnswer.ts` imported it, so a plain
    * `localStorage` grep counted two modules short. The helper is gone rather
    * than re-pointed at the registry, and this is what says so: the identifier
-   * must not appear ANYWHERE under `src`, definition included, because a
-   * surviving definition is an invitation to import it again.
+   * must not appear ANYWHERE under `src`, definition included and
+   * `preferences/` included, because a surviving definition is an invitation
+   * to import it again.
    */
   it("no module reaches storage through getBrowserStorage once the migration lands", () => {
-    const { offences } = rawStorageUses(".", /\bgetBrowserStorage\b/);
-
-    expect(report(offences)).toEqual([]);
+    expect(report(rawStorageUses(sourceFiles("."), /\bgetBrowserStorage\b/))).toEqual([]);
   });
 
   /**
@@ -464,10 +527,8 @@ describe("preferences replace raw browser storage", () => {
    * `store.ts` owns both the PATCH and the script URL.
    */
   it("nothing outside preferences/ references the /api/preferences route", () => {
-    const { offences } = rawStorageUses(".", /\/api\/preferences/);
-    // `sourceFiles(".")` spells its paths `./preferences/store.ts`.
-    const inStore = (offence: Offence): boolean =>
-      offence.file.replace(/^\.\//, "").startsWith("preferences/");
+    const offences = rawStorageUses(sourceFiles("."), /\/api\/preferences/);
+    const inStore = (offence: Offence): boolean => offence.file.startsWith(`${STORAGE_TIER_DIR}/`);
 
     expect(report(offences.filter((offence) => !inStore(offence)))).toEqual([]);
     // Not vacuous: `preferences/` itself must still name the route, or the

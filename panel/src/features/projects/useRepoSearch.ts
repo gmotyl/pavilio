@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { preferences } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
 import { usePreference } from "../../preferences/usePreference";
+import { isPreferenceScope } from "../../preferences/types";
 import type { GrepResult } from "../search/grep";
 
 export type RepoSearchScope = "changed" | "branch-diff" | "commits";
@@ -64,16 +65,17 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
             // declaration — so both sides normalize the repo path the same
             // way. A repo with no path is not a scope; the store refuses one.
             //
-            // `typeof` first, and the read inside a `try`. `server/lib/
+            // The guard first, and the read inside a `try`. `server/lib/
             // discovery.ts` does no runtime validation, so a `repos.json` entry
-            // without a `path` arrives here as `undefined` — and the guard
-            // `repo.path.trim()` sits in the same un-wrapped position the old
-            // `localStorage.getItem` did: a TypeError here rejects the whole
-            // `Promise.all`, `setFiles(all)` never runs, and ONE malformed
-            // entry blanks the search for every healthy repository beside it.
+            // without a `path` arrives here as `undefined` — and a bare
+            // `repo.path.trim()` would sit in the same un-wrapped position the
+            // old `localStorage.getItem` did: a TypeError here rejects the
+            // whole `Promise.all`, `setFiles(all)` never runs, and ONE
+            // malformed entry blanks the search for every healthy repository
+            // beside it.
             let base = "";
             try {
-              if (typeof repo.path === "string" && repo.path.trim() !== "") {
+              if (isPreferenceScope(repo.path)) {
                 base = readPreference(preferences.branchDiffBase, repo.path);
               }
             } catch {

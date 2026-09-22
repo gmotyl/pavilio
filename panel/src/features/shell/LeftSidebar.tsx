@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
+import { isPreferenceScope } from "../../preferences/types";
 import GitSummary from "../git/GitSummary";
 import { MobileAccessModal } from "../mobile-access/MobileAccessModal";
 import { LanAccessModal } from "../lan-access/LanAccessModal";
@@ -72,23 +73,6 @@ function SectionHeader({
  */
 function readStoredFocus(project: string | null): string | null {
   return readTerminalFocus(project);
-}
-
-/**
- * Whether a project name is a usable scope argument.
- *
- * `typeof x === "string" && x.trim() !== ""`, never a bare `.trim()`. The
- * `typeof` half is not decoration: `useProjects` types every `name` as
- * `string`, but `server/lib/discovery.ts` validates nothing, so an entry with
- * no name ships straight through to the client. A bare `.trim()` on it throws
- * a TypeError — here, inside a state updater during an effect, that is an
- * unhandled render error that takes the whole sidebar down, where the raw key
- * this replaced merely produced a `…-undefined` key and rendered fine. The
- * same shape `GitBranchDiff`, `useCommitsOpenMap` and the terminal hooks use,
- * for the same reason: this class has cost two real regressions already.
- */
-function resolvedScope(name: string): boolean {
-  return typeof name === "string" && name.trim() !== "";
 }
 
 export default function LeftSidebar() {
@@ -162,7 +146,7 @@ export default function LeftSidebar() {
         // inside a state updater during an effect, where that throw is an
         // unhandled render error. Declared default, and nothing written —
         // the same rule every other Task 6 call site follows.
-        patch[p.name] = resolvedScope(p.name)
+        patch[p.name] = isPreferenceScope(p.name)
           ? readPreference(preferences.projectExpanded, p.name)
           : preferences.projectExpanded.default;
       }
@@ -176,7 +160,7 @@ export default function LeftSidebar() {
   const setExpanded = useCallback((name: string, value: boolean) => {
     setExpandedState((prev) => ({ ...prev, [name]: value }));
     // Same rule on the way out: an unresolved name writes nothing.
-    if (!resolvedScope(name)) return;
+    if (!isPreferenceScope(name)) return;
     writePreference(preferences.projectExpanded, value, name);
   }, []);
 

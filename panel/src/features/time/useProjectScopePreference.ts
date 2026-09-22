@@ -1,25 +1,7 @@
 import { useRef, useState } from "react";
 import { usePreference, type PreferenceSetter } from "../../preferences/usePreference";
 
-import type { PreferenceDef } from "../../preferences/types";
-
-/**
- * The project a Time-tab preference is scoped by, or `undefined` when there is
- * none yet.
- *
- * `ProjectTimePage` reads the route param as `name ?? ""`, so a blank project
- * genuinely reaches these components — and `storageKey` throws on a blank
- * scope by design, because an unresolved scope must read the declared default
- * and write nothing rather than put every project on one shared key.
- *
- * The `typeof` half is not decoration. Every blank-scope guard written as
- * `project.trim() === ""` became a NEW throw site the moment the value was
- * `undefined` rather than "", turning a render into a TypeError. The shape
- * that actually holds is this one.
- */
-export function projectScope(project: string | undefined): string | undefined {
-  return typeof project === "string" && project.trim() !== "" ? project : undefined;
-}
+import { asPreferenceScope, type PreferenceDef } from "../../preferences/types";
 
 /** Distinguishes the placeholder scopes below from one another. */
 let unscopedInstances = 0;
@@ -44,7 +26,7 @@ export function useProjectScopePreference<T>(
   def: PreferenceDef<T>,
   project: string | undefined,
 ): [T, PreferenceSetter<T>] {
-  const scope = projectScope(project);
+  const scope = asPreferenceScope(project);
   const placeholder = useRef("");
   if (placeholder.current === "") {
     // A NUL prefix: no project name can collide with it.

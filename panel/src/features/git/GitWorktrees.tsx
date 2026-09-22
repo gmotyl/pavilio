@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, GitFork } from "lucide-react";
 import GitChanges from "./GitChanges";
-import GitBranchDiff, { repoScope } from "./GitBranchDiff";
+import GitBranchDiff from "./GitBranchDiff";
 import { type GitViewMode } from "./useGitViewMode";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
+import { asPreferenceScope, isPreferenceScope } from "../../preferences/types";
 
 interface Worktree {
   path: string;
@@ -62,7 +63,7 @@ export default function GitWorktrees({
           // prints normalize onto one entry. A path that is missing or blank is
           // not a scope — the store would refuse it — so it stays collapsed.
           const stored = data
-            .filter((wt) => repoScope(wt.path) !== undefined)
+            .filter((wt) => isPreferenceScope(wt.path))
             .filter((wt) => readPreference(preferences.worktreeExpanded, wt.path))
             .map((wt) => wt.path);
           const next = new Set(latest.current);
@@ -94,7 +95,7 @@ export default function GitWorktrees({
     adopt(next);
     // A missing or blank path is not a scope: it toggles on screen and is
     // forgotten on reload, rather than putting every such worktree on one key.
-    const scope = repoScope(path);
+    const scope = asPreferenceScope(path);
     if (scope !== undefined) {
       writePreference(preferences.worktreeExpanded, open, scope);
     }

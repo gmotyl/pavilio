@@ -14,18 +14,8 @@ import {
 } from "./orderingReducer";
 import { preferences } from "../../preferences/declarations";
 import { clearPreference, readPreference, writePreference } from "../../preferences/store";
+import { isPreferenceScope } from "../../preferences/types";
 import type { SessionMeta } from "./useTerminalSessions";
-
-/**
- * True when `scopeKey` names something. `ProjectView` renders
- * `projectName={name || ""}`, so a blank scope reaches this hook on a real
- * route — and `storageKey` throws on one rather than letting every project
- * share a single key. An unresolved scope reads the declared defaults and
- * writes nothing.
- */
-function resolved(scopeKey: string): boolean {
-  return typeof scopeKey === "string" && scopeKey.trim() !== "";
-}
 
 export interface TerminalOrdering {
   sessionOrder: string[];
@@ -49,7 +39,7 @@ export interface TerminalOrdering {
 }
 
 function readOrder(scopeKey: string): string[] {
-  if (!resolved(scopeKey)) return preferences.terminalOrder.default;
+  if (!isPreferenceScope(scopeKey)) return preferences.terminalOrder.default;
   return readPreference(preferences.terminalOrder, scopeKey);
 }
 
@@ -69,7 +59,7 @@ function readOrder(scopeKey: string): string[] {
  * read by nothing". These two join them.
  */
 function readTiles(scopeKey: string): TileLayout {
-  if (!resolved(scopeKey)) return preferences.terminalGrid.default;
+  if (!isPreferenceScope(scopeKey)) return preferences.terminalGrid.default;
   const parsed: unknown = readPreference(preferences.terminalGrid, scopeKey);
   if (!Array.isArray(parsed)) return [];
   // A layout that does not tile the grid is not rendered at all: the caller falls
@@ -148,12 +138,12 @@ export function useTerminalOrdering(
   // write whose stored representation is unchanged, so a mount that re-asserts
   // what is already there does not even notify.
   useEffect(() => {
-    if (!resolved(scopeKey)) return;
+    if (!isPreferenceScope(scopeKey)) return;
     writePreference(preferences.terminalOrder, sessionOrder, scopeKey);
   }, [scopeKey, sessionOrder]);
 
   useEffect(() => {
-    if (!resolved(scopeKey)) return;
+    if (!isPreferenceScope(scopeKey)) return;
     // Empty is CLEARED rather than stored as `[]`, mirroring the `removeItem`
     // this replaces: an empty tiling means "nothing stored for this scope", and
     // the caller falls back to the default preset either way.

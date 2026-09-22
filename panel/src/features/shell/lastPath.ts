@@ -10,39 +10,20 @@
  */
 import { preferences } from "../../preferences/declarations";
 import { clearPreference, readPreference, writePreference } from "../../preferences/store";
+import { asPreferenceScope, isPreferenceScope } from "../../preferences/types";
 
 /**
- * The scope argument for a project-keyed bookmark, or `null` when no project
- * has resolved yet.
+ * `<project>:<section>`, mirroring the old `panel:lastFile:` key exactly, or
+ * `undefined` when either half is unresolved.
  *
- * The store rejects an empty scope rather than letting every project share one
- * key, and `useProjectTabs` reaches these helpers through the
- * `projectName ?? ""` idiom. An unresolved project therefore reads as "nothing
- * remembered" and writes nothing — which is what the raw helpers did in
- * practice, since the key they wrote under was never read back by anything.
+ * The composite is judged one half at a time: `<project>:` with a blank section
+ * IS a non-blank string, so `isPreferenceScope` would wave the pair through and
+ * every section of a project would share one key. `useProjectTabs` reaches
+ * these helpers through the `projectName ?? ""` idiom, so that is a real case,
+ * not a hypothetical.
  */
-function projectScope(project: string): string | null {
-  return resolved(project) ? project : null;
-}
-
-/**
- * Whether `value` is a usable scope argument.
- *
- * `typeof x === "string" && x.trim() !== ""`, never a bare `.trim()`, and the
- * `typeof` half is not decoration: every parameter here is typed `string`, but
- * a route param reaches these helpers through a `name ?? ""` / `projectName`
- * chain that TypeScript believes and the runtime does not. A bare `.trim()` on
- * `undefined` throws a TypeError — that crashed `GitBranchDiff`'s render once
- * and silently emptied `useRepoSearch` once. This is the shape every other
- * blank-scope guard in the change uses.
- */
-function resolved(value: string): boolean {
-  return typeof value === "string" && value.trim() !== "";
-}
-
-/** `<project>:<section>`, mirroring the old `panel:lastFile:` key exactly. */
-function sectionScope(project: string, section: string): string | null {
-  if (projectScope(project) === null || !resolved(section)) return null;
+function sectionScope(project: string, section: string): string | undefined {
+  if (!isPreferenceScope(project) || !isPreferenceScope(section)) return undefined;
   return `${project}:${section}`;
 }
 
@@ -56,46 +37,46 @@ function asPath(value: string | null): string | null {
 }
 
 export function readLastPath(project: string): string | null {
-  const scope = projectScope(project);
-  return scope === null ? null : asPath(readPreference(preferences.lastPath, scope));
+  const scope = asPreferenceScope(project);
+  return scope === undefined ? null : asPath(readPreference(preferences.lastPath, scope));
 }
 
 export function writeLastPath(project: string, path: string): void {
-  const scope = projectScope(project);
-  if (scope === null) return;
+  const scope = asPreferenceScope(project);
+  if (scope === undefined) return;
   writePreference(preferences.lastPath, path, scope);
 }
 
 export function readLastSectionFile(project: string, section: string): string | null {
   const scope = sectionScope(project, section);
-  return scope === null ? null : asPath(readPreference(preferences.lastSectionFile, scope));
+  return scope === undefined ? null : asPath(readPreference(preferences.lastSectionFile, scope));
 }
 
 export function writeLastSectionFile(project: string, section: string, file: string): void {
   const scope = sectionScope(project, section);
-  if (scope === null) return;
+  if (scope === undefined) return;
   writePreference(preferences.lastSectionFile, file, scope);
 }
 
 export function clearLastSectionFile(project: string, section: string): void {
   const scope = sectionScope(project, section);
-  if (scope === null) return;
+  if (scope === undefined) return;
   clearPreference(preferences.lastSectionFile, scope);
 }
 
 export function readLastReposQuery(project: string): string | null {
-  const scope = projectScope(project);
-  return scope === null ? null : asPath(readPreference(preferences.lastReposQuery, scope));
+  const scope = asPreferenceScope(project);
+  return scope === undefined ? null : asPath(readPreference(preferences.lastReposQuery, scope));
 }
 
 export function writeLastReposQuery(project: string, query: string): void {
-  const scope = projectScope(project);
-  if (scope === null) return;
+  const scope = asPreferenceScope(project);
+  if (scope === undefined) return;
   writePreference(preferences.lastReposQuery, query, scope);
 }
 
 export function clearLastReposQuery(project: string): void {
-  const scope = projectScope(project);
-  if (scope === null) return;
+  const scope = asPreferenceScope(project);
+  if (scope === undefined) return;
   clearPreference(preferences.lastReposQuery, scope);
 }

@@ -16,7 +16,7 @@ import {
   usePreference,
   type PreferenceSetter,
 } from "../../preferences/usePreference";
-import type { PreferenceDef } from "../../preferences/types";
+import { asPreferenceScope, type PreferenceDef } from "../../preferences/types";
 
 interface DiffFile {
   status: string;
@@ -39,32 +39,6 @@ interface GitBranchDiffProps {
   onActiveFileChange?: (file: string | null) => void;
   /** When true, render the file list alongside the diff instead of replacing it. */
   showListSidebar?: boolean;
-}
-
-/**
- * The repo path this component's two preferences are scoped by, or `undefined`
- * when there is none yet.
- *
- * The path is the SCOPE ARGUMENT, never part of the key: that is what runs it
- * through `normalizeRepoScope`, so the tilde-spelled paths `repos.json` ships
- * and the absolute ones `git worktree list` prints reach ONE key. The old
- * `panel-branch-diff-open-${repo}` could not — and the storage dump duly found
- * the same repository stored twice, under opposite values.
- *
- * `undefined` is returned rather than the blank path, because `storageKey`
- * throws on a blank scope by design: an unresolved repo must read the declared
- * default and write nothing, not put every repository on one shared key.
- *
- * The `typeof` half is not decoration. Every blank-scope guard added to satisfy
- * that throw became a NEW throw site for `undefined`, because `server/lib/
- * discovery.ts` validates nothing and a `repos.json` entry with no `path` ships
- * straight through to the client. `repo.trim() === ""` then throws a TypeError
- * *during render* and takes the whole RepoBlock subtree down, where the raw key
- * it replaced merely produced a `…-undefined` key and rendered fine.
- * `typeof x === "string" && x.trim() !== ""` is the shape that actually holds.
- */
-export function repoScope(repo: string | undefined): string | undefined {
-  return typeof repo === "string" && repo.trim() !== "" ? repo : undefined;
 }
 
 /** Distinguishes the placeholder scopes below from one another. */
@@ -119,7 +93,7 @@ export default function GitBranchDiff({
    * the `useState` initializer, so nothing flashes a default, and it writes
    * only through its setter, so a mount still writes nothing.
    */
-  const scope = repoScope(repo);
+  const scope = asPreferenceScope(repo);
   const [storedBase, setStoredBase] = useOptionalScopePreference(
     preferences.branchDiffBase,
     scope,
