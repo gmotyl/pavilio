@@ -13,10 +13,17 @@ type Feedback = "path" | "content" | null;
 export function ViewerActions({
   absolutePath,
   content,
+  testIdPrefix = "file-viewer",
 }: {
   absolutePath: string;
   /** Open file's source. Null/undefined/empty means nothing to copy — the button is disabled. */
   content?: string | null;
+  /**
+   * Stem of the buttons' `data-testid`s. It exists so the standalone `/view/*`
+   * viewer can compose this toolbar without renaming the `markdown-viewer-*`
+   * hooks it already published; every other call site takes the default.
+   */
+  testIdPrefix?: string;
 }) {
   const [copied, setCopied] = useState<Feedback>(null);
   // A single revert timer for the whole toolbar: only one button shows feedback
@@ -50,7 +57,7 @@ export function ViewerActions({
   return (
     <>
       <button
-        data-testid="file-viewer-vscode"
+        data-testid={`${testIdPrefix}-vscode`}
         onClick={() => openInVSCode(absolutePath)}
         className={BUTTON_CLASS}
         style={{ color: "var(--text-secondary)" }}
@@ -66,7 +73,7 @@ export function ViewerActions({
         <ExternalLink className="w-3.5 h-3.5" /> VS Code
       </button>
       <button
-        data-testid="file-viewer-copy-path"
+        data-testid={`${testIdPrefix}-copy-path`}
         onClick={() => copy("path", absolutePath)}
         className={BUTTON_CLASS}
         style={{
@@ -81,7 +88,7 @@ export function ViewerActions({
         {copied === "path" ? "Copied" : "Path"}
       </button>
       <button
-        data-testid="file-viewer-copy-content"
+        data-testid={`${testIdPrefix}-copy-content`}
         onClick={() => copy("content", content ?? "")}
         disabled={!canCopyContent}
         className={BUTTON_CLASS}
