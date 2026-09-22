@@ -127,6 +127,91 @@ describe("a refetch racing a write", () => {
     unsubscribe();
   });
 
+  it("does not clobber a write whose ack landed after the refetch was answered", async () => {
+    // The mirror of the test above, on the far side of the ack. The server
+    // answers the GET from the document as it stands BEFORE the PATCH is
+    // applied, the PATCH then acks (so `inFlightKeys` drops the key), and only
+    // afterwards does that stale GET resolve. An overlay that consults only
+    // `pendingKeys` and `inFlightKeys` finds the key in neither and writes the
+    // server's older value into `__PAVILIO_PREFS__`, erasing a write this page
+    // is still showing.
+    let releaseGet!: () => void;
+    const heldGet = new Promise<void>((resolve) => {
+      releaseGet = resolve;
+    });
+    let releasePatch!: () => void;
+    const heldPatch = new Promise<void>((resolve) => {
+      releasePatch = resolve;
+    });
+    const serverDoc: Record<string, unknown> = { version: 1, "test.width": 240 };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/api/preferences.js") {
+          const served = { ...serverDoc };
+          await heldGet;
+          return new Response(scriptBody(served), { status: 200 });
+        }
+        await heldPatch;
+        Object.assign(serverDoc, JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response('{"ok":true}', { status: 200 });
+      }),
+    );
+    const unsubscribe = attach();
+
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.width": 240 };
+    writePreference(portableWidth, 512);
+    await afterDebounce();
+
+    // The frame names an UNRELATED key, so nothing re-renders to expose the
+    // loss: the document is corrupted in silence.
+    await deliverFrame(["something.else"]);
+    releasePatch();
+    await sleep(0);
+    releaseGet();
+    await sleep(0);
+
+    expect(globals.__PAVILIO_PREFS__?.["test.width"]).toBe(512);
+    expect(readPreference(portableWidth)).toBe(512);
+    unsubscribe();
+  });
+
+  it("stops shielding an acked key once a later refetch has asked for it", async () => {
+    // The other direction: protection past the ack must expire, or a genuine
+    // change made in another tab could never reach this page again. The first
+    // refetch after the ask is the one entitled to speak for the key.
+    const serverDoc: Record<string, unknown> = { version: 1 };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/api/preferences.js") {
+          return new Response(scriptBody(serverDoc), { status: 200 });
+        }
+        Object.assign(serverDoc, JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response('{"ok":true}', { status: 200 });
+      }),
+    );
+    const unsubscribe = attach();
+
+    writePreference(portableWidth, 512);
+    await afterDebounce();
+    expect(readPreference(portableWidth)).toBe(512);
+
+    // Another tab moves the same key.
+    serverDoc["test.width"] = 800;
+    await deliverFrame(["test.width"]);
+    expect(readPreference(portableWidth)).toBe(800);
+
+    // And again, to prove the first refetch cleared the shield rather than
+    // merely outlasting it.
+    serverDoc["test.width"] = 900;
+    await deliverFrame(["test.width"]);
+    expect(readPreference(portableWidth)).toBe(900);
+    unsubscribe();
+  });
+
   it("the newest refetch wins, however slowly the older one answers", async () => {
     // Two frames, two unsequenced fetches. The first answers last and with the
     // older document; taking it would walk the store backwards.

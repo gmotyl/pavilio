@@ -51,7 +51,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function signIn(ok: boolean, onSuccess = vi.fn()): Promise<() => void> {
+async function signIn(
+  ok: boolean,
+  onSuccess: () => void = vi.fn(),
+): Promise<() => void> {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => new Response("{}", { status: ok ? 200 : 401 })),
@@ -91,6 +94,33 @@ describe("signing in", () => {
 
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("Network error")).toBeNull();
+  });
+
+  it("a REJECTING onSuccess is not an unhandled rejection", async () => {
+    // `recheck` is async, so its failure is a rejected promise — which the
+    // synchronous `catch` around the call cannot see. Swallowing it explicitly
+    // rather than awaiting it: the reload is already on its way, and awaiting
+    // would reintroduce the ordering the reload is placed first to prevent.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      // A plain function, NOT a `vi.fn`: vitest's spy wrapper attaches its own
+      // `.then` to a returned promise to record the settled result, which
+      // counts as handling the rejection and would make this pass vacuously.
+      const onSuccess = () => Promise.reject(new Error("recheck blew up"));
+
+      await signIn(true, onSuccess);
+
+      await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });
 

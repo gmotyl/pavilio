@@ -36,10 +36,15 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
     // the write-suppressed session the reload exists to prevent.
     window.location.reload();
     try {
-      onSuccess();
+      // `onSuccess` is the shell's ASYNC `recheck`, so a rejection would sail
+      // straight past this synchronous `catch` as an unhandled rejection.
+      // Silenced rather than awaited: awaiting would put the check back in
+      // front of nothing — the reload is already on its way, and nothing this
+      // page does now survives it, so the fresh document re-runs the check for
+      // itself either way.
+      void Promise.resolve(onSuccess()).catch(() => {});
     } catch {
-      // The reload is already on its way, and nothing this page does now
-      // survives it — the fresh document re-runs the check for itself.
+      // A SYNCHRONOUS throw from `onSuccess`, for the same reason.
     }
   };
 

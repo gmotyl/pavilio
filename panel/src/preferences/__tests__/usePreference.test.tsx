@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bool } from "../codecs";
+import { bool, num } from "../codecs";
 import { definePreference } from "../types";
-import { __resetPreferenceStoreForTests } from "../store";
+import { PREFERENCE_PATCH_DEBOUNCE_MS, __resetPreferenceStoreForTests } from "../store";
 import { usePreference } from "../usePreference";
 
 /**
@@ -47,6 +47,14 @@ const other = definePreference({
   scope: "global",
   default: true,
   codec: bool,
+  portable: true,
+});
+
+const width = definePreference({
+  key: "test.hookWidth",
+  scope: "global",
+  default: 240,
+  codec: num,
   portable: true,
 });
 
@@ -264,5 +272,128 @@ describe("usePreference", () => {
 
     view.rerender(<Probe project="beta" />);
     expect(seen.at(-1)).toBe(true);
+  });
+});
+
+describe("a refused non-finite write", () => {
+  it("leaves the writing hook on the stored value, in step with its peers", () => {
+    // `usePreference`'s setter adopts before it writes, so a refusal that
+    // returned without notifying would leave the WRITER rendering NaN while
+    // storage and every other hook on the key still held 320 — the one hook
+    // that asked for the change being the only one that is wrong.
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.hookWidth": 320 };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response('{"ok":true}', { status: 200 })),
+    );
+    let set: ((value: number) => void) | null = null;
+    const writer: number[] = [];
+    const mirror: number[] = [];
+
+    function Writer() {
+      const [value, setValue] = usePreference(width);
+      set = setValue;
+      writer.push(value);
+      return null;
+    }
+
+    function Mirror() {
+      const [value] = usePreference(width);
+      mirror.push(value);
+      return null;
+    }
+
+    render(
+      <>
+        <Writer />
+        <Mirror />
+      </>,
+    );
+    expect(writer.at(-1)).toBe(320);
+
+    act(() => set?.(Number.NaN));
+
+    expect(writer.at(-1)).toBe(320);
+    expect(mirror.at(-1)).toBe(320);
+    expect(globals.__PAVILIO_PREFS__?.["test.hookWidth"]).toBe(320);
+  });
+});
+
+describe("a refetch answered before the PATCH it races was applied", () => {
+  it("does not revert a just-acked write under a mounted hook", async () => {
+    // The order that breaks the overlay: the GET is ANSWERED from the
+    // pre-PATCH document, the PATCH then acks (emptying `inFlightKeys`), and
+    // only afterwards does the stale GET resolve. At that point the key is in
+    // neither pending nor in-flight, so an overlay that consults only those two
+    // takes the server's older value — and the frame's notify makes the user
+    // watch the change they just made revert.
+    globals.__PAVILIO_PREFS__ = { version: 1, "test.hookWidth": 240 };
+    let releaseGet!: () => void;
+    const heldGet = new Promise<void>((resolve) => {
+      releaseGet = resolve;
+    });
+    let releasePatch!: () => void;
+    const heldPatch = new Promise<void>((resolve) => {
+      releasePatch = resolve;
+    });
+    const serverDoc: Record<string, unknown> = { version: 1, "test.hookWidth": 240 };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/api/preferences.js") {
+          // Read now — this is the server answering before it applies the
+          // PATCH — and handed back late.
+          const served = { ...serverDoc };
+          await heldGet;
+          return new Response(scriptBody(served), { status: 200 });
+        }
+        await heldPatch;
+        Object.assign(serverDoc, JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response('{"ok":true}', { status: 200 });
+      }),
+    );
+
+    let set: ((value: number) => void) | null = null;
+    const seen: number[] = [];
+
+    function Probe() {
+      const [value, setValue] = usePreference(width);
+      set = setValue;
+      seen.push(value);
+      return null;
+    }
+
+    render(<Probe />);
+    act(() => set?.(512));
+    expect(seen.at(-1)).toBe(512);
+
+    // The debounce fires; the PATCH is out and unacked.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+    });
+
+    // A frame arrives and its GET is served from the pre-PATCH document.
+    await act(async () => {
+      for (const listener of [...frameListeners]) {
+        listener({ type: "preferences-change", keys: ["test.hookWidth"] });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The PATCH acks — `inFlightKeys` no longer holds the key.
+    await act(async () => {
+      releasePatch();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // Only now does the stale document land.
+    await act(async () => {
+      releaseGet();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(globals.__PAVILIO_PREFS__?.["test.hookWidth"]).toBe(512);
+    expect(seen.at(-1)).toBe(512);
   });
 });

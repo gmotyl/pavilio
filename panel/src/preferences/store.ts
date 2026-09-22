@@ -74,6 +74,27 @@ const pendingKeys = new Set<string>();
  * server's. A refetch landing in that window must not overwrite them.
  */
 const inFlightKeys = new Set<string>();
+/**
+ * The ack clock, and the tick at which each key's PATCH was last acknowledged.
+ *
+ * `inFlightKeys` protects a key only up to its ack — but the ack is not the
+ * moment the key is safe. A refetch whose GET the server ANSWERED before it
+ * applied that PATCH can still resolve afterwards, and the document it carries
+ * predates the write. By then the key is in neither `pendingKeys` nor
+ * `inFlightKeys`, so the overlay in `refresh` would let the older value win and
+ * erase a write this page already shows — the mirror of the in-flight race, on
+ * the far side of the ack.
+ *
+ * So a key stays protected past its ack until a refetch that STARTED after that
+ * ack has resolved: that one really did ask the server after the write landed,
+ * and whatever it answers for the key is the truth. Recording a TICK rather
+ * than membership of a set is what makes a re-written key protected again
+ * instead of being confirmed by a refetch that only ever saw its previous ack.
+ * Entries are dropped the moment a refetch is entitled to confirm them, so
+ * another tab's genuine change reaches an idle key on the very next refetch.
+ */
+let ackClock = 0;
+const ackedAt = new Map<string, number>();
 let patchTimer: ReturnType<typeof setTimeout> | null = null;
 let channelUnsubscribe: (() => void) | null = null;
 
@@ -261,13 +282,14 @@ export function readPreference<T>(def: PreferenceDef<T>, scopeArg?: string): T {
  * WHAT THE SKIP COSTS ON THE PORTABLE TIER. It returns before `queuePatch`, so
  * it arms no debounce timer — and `flushPatch`'s `.catch` deliberately arms
  * none either. A key a failed PATCH put back into `pendingKeys` therefore sits
- * there until the NEXT `queuePatch` call, and an identical re-write is not one:
- * six more writes of the same value leave the failed request un-retried. What
- * rescues a stranded key is a CHANGED value of that key, or any write of a
- * DIFFERENT key — not "any write". That is acceptable (the value the user sees
- * is already correct, and a reload re-reads the server's), but it is a real
- * narrowing and the comment here used to deny it. Pinned by store.test.ts,
- * "identical re-writes after a failed PATCH strand the retry".
+ * there until the next `queuePatch`, and only three things call it: a CHANGED
+ * value of the stranded key, a CHANGED value of any other key, or any portable
+ * `clearPreference` (which queues unconditionally). An identical re-write of
+ * ANY key skips out here and arms nothing, however often it is repeated. That
+ * is acceptable — the value the user sees is already correct, and a reload
+ * re-reads the server's — but it is a real narrowing, and this comment has
+ * twice claimed more. Pinned by store.test.ts, "identical re-writes after a
+ * failed PATCH strand the retry; a changed value rescues it".
  */
 export function writePreference<T>(def: PreferenceDef<T>, value: T, scopeArg?: string): void {
   const key = storageKey(def, scopeArg);
@@ -276,7 +298,19 @@ export function writePreference<T>(def: PreferenceDef<T>, value: T, scopeArg?: s
   // storing the literal text "NaN" in the hand-readable workspace file under a
   // `num` key — where `num.parse` rejects it and every later read answers the
   // declared default anyway. Refusing is the same outcome without the litter.
-  if (typeof value === "number" && !Number.isFinite(value)) return;
+  //
+  // THIS BRANCH NOTIFIES WHERE THE STORAGE `catch` BELOW DELIBERATELY DOES NOT,
+  // and the reason inverts. There the writer holds the value the user asked for
+  // and only the peers are behind, so waking them would re-read the OLD value
+  // into every pane but the one that changed. Here nothing was stored and the
+  // WRITER is the one holding garbage — `usePreference`'s setter adopted the
+  // NaN before calling in — so the notify sends every hook, the writer
+  // included, back to what is actually stored. It corrects the writer rather
+  // than merely disturbing its peers.
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    notify(key);
+    return;
+  }
 
   if (def.portable) {
     const doc = portableDoc();
@@ -424,7 +458,12 @@ function flushPatch(): void {
   })
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      for (const key of keys) inFlightKeys.delete(key);
+      // One tick for the whole batch: the server applied it as one PATCH.
+      ackClock += 1;
+      for (const key of keys) {
+        inFlightKeys.delete(key);
+        ackedAt.set(key, ackClock);
+      }
     })
     .catch((err: unknown) => {
       // No rollback: the in-memory value is what the user asked for, and
@@ -479,18 +518,34 @@ async function refresh(keys: string[]): Promise<void> {
   // can land last and walk the store backwards. Only the newest request's
   // answer is applied, and it carries every key the superseded ones named.
   const generation = ++refreshGeneration;
+  // The clock as it stood when this GET left. A key acked at or before this
+  // tick had already been applied when the server built its answer; one acked
+  // later had not, whatever the answer says about it. Read here rather than
+  // after the await, because that is when the request goes out.
+  const askedAt = ackClock;
   const doc = await fetchDocument();
   if (generation !== refreshGeneration) return;
   if (doc === undefined) return;
 
   // This page's own unconfirmed writes win over what the server answered with.
   // `pendingKeys` have not been sent at all; `inFlightKeys` are racing this
-  // very refetch, so the document that came back predates them either way.
-  // Overlaying only the first is the gap that let a flushed-but-unacked write
-  // be reverted in memory while a mounted hook still rendered the new value.
+  // very refetch; and `ackedAt` covers the window the other two miss — a key
+  // whose ack landed AFTER this GET was issued is acked but not yet reflected
+  // in the document in hand. Overlaying only the first two is what let a
+  // just-acked write be reverted in memory while a mounted hook still rendered
+  // the new value.
   const local = portableDoc() ?? {};
   const merged: Record<string, unknown> = { ...doc };
-  for (const key of [...pendingKeys, ...inFlightKeys]) {
+  const protectedKeys = new Set([...pendingKeys, ...inFlightKeys]);
+  for (const [key, tick] of ackedAt) {
+    if (tick > askedAt) protectedKeys.add(key);
+    // This refetch asked after that ack, so it is entitled to confirm the key:
+    // forget the tick and let the server speak for it from now on. Without
+    // this, a key would be shielded forever and another tab's change could
+    // never reach this page.
+    else ackedAt.delete(key);
+  }
+  for (const key of protectedKeys) {
     if (key in local) merged[key] = local[key];
     else delete merged[key];
   }
@@ -527,6 +582,8 @@ export function __resetPreferenceStoreForTests(): void {
   listeners.clear();
   pendingKeys.clear();
   inFlightKeys.clear();
+  ackedAt.clear();
+  ackClock = 0;
   pendingNotifications.clear();
   // The machine-local warning is latched for the life of the tab, so without
   // this the first suite to hit a refusing store would silence every later
