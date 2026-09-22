@@ -374,15 +374,30 @@ describe("useResizablePane", () => {
   it("a cancelled drag is over too", () => {
     // pointercancel and lostpointercapture both land on `endDrag`. If either
     // left the flag set, the pane would keep its transition suppressed for the
-    // rest of the session and never animate a collapse again.
-    render(<Probe />);
-    const handle = screen.getByTestId("handle");
+    // rest of the session and never animate a collapse again. Both endings are
+    // asserted here, rather than the second one being taken on trust from the
+    // width it leaves behind: the flag is what the pane reads, so the flag is
+    // what each ending has to be pinned against.
+    const cancelled = render(<Probe />);
+    let handle = screen.getByTestId("handle");
 
     fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 540 });
     expect(dragging()).toBe("true");
 
     fireEvent.pointerCancel(handle, { pointerId: 1 });
+    expect(dragging()).toBe("false");
+    cancelled.unmount();
+
+    seed(320);
+    render(<Probe />);
+    handle = screen.getByTestId("handle");
+
+    fireEvent.pointerDown(handle, { pointerId: 2, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 540 });
+    expect(dragging()).toBe("true");
+
+    fireEvent.lostPointerCapture(handle, { pointerId: 2 });
     expect(dragging()).toBe("false");
   });
 

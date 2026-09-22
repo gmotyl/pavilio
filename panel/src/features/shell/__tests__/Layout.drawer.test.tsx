@@ -19,10 +19,11 @@ vi.mock("../../terminal/ProjectTerminalsSurface", () => ({
 
 /** Inline offsets the toggles use when no drawer is docked on their side. */
 const TOGGLE_BASE_LEFT_EXPANDED = 228;
-/** Not a constant in `Layout` any more: the right sidebar's default 264 less
- *  the 12px the toggle sits inside its seam. Spelled out here so the arithmetic
- *  below reads the same way at any width. */
-const TOGGLE_BASE_RIGHT_EXPANDED = 264 - 12;
+/** Not a constant in `Layout` any more: the right sidebar's default width less
+ *  the 12px the toggle sits inside its seam. Derived from the declaration
+ *  rather than copied from it, so changing the default cannot leave this
+ *  arithmetic quietly asserting the old seam. */
+const TOGGLE_BASE_RIGHT_EXPANDED = preferences.rightSidebarWidth.default - 12;
 const TOGGLE_BASE_COLLAPSED = 8;
 
 function setup(
