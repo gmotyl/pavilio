@@ -17,8 +17,9 @@ vi.mock("../../terminal/ProjectTerminalsSurface", () => ({
   ),
 }));
 
-/** Inline offsets the toggles use when no drawer is docked on their side. */
-const TOGGLE_BASE_LEFT_EXPANDED = 228;
+/** Inline offsets the RIGHT toggle uses — the only one left that has any. The
+ *  left side is `sidebar-hamburger` now, placed by the stylesheet against the
+ *  viewport; `SidebarHamburger.test.tsx` owns the claim that nothing moves it. */
 /** Not a constant in `Layout` any more: the right sidebar's default width less
  *  the 12px the toggle sits inside its seam. Derived from the declaration
  *  rather than copied from it, so changing the default cannot leave this
@@ -140,14 +141,13 @@ describe("Layout data-panel-region contract", () => {
 describe("Layout sidebar toggles vs a docked drawer", () => {
   beforeEach(() => localStorage.clear());
 
-  it("keeps the toggles at their base offsets when the drawer is closed", () => {
+  it("keeps the right toggle at its base offset when the drawer is closed", () => {
     setup(false);
-    expect(screen.getByTestId("sidebar-toggle-left")).toHaveStyle({
-      left: `${TOGGLE_BASE_LEFT_EXPANDED}px`,
-    });
     expect(screen.getByTestId("sidebar-toggle-right")).toHaveStyle({
       right: `${TOGGLE_BASE_RIGHT_EXPANDED}px`,
     });
+    // There is no left toggle to offset any more, in any drawer state.
+    expect(screen.queryByTestId("sidebar-toggle-left")).not.toBeInTheDocument();
   });
 
   it("pushes the right toggle out past a drawer docked right", () => {
@@ -155,20 +155,20 @@ describe("Layout sidebar toggles vs a docked drawer", () => {
     expect(screen.getByTestId("sidebar-toggle-right")).toHaveStyle({
       right: `${TOGGLE_BASE_RIGHT_EXPANDED + 400}px`,
     });
-    // The other side has no drawer over it, so it must not move.
-    expect(screen.getByTestId("sidebar-toggle-left")).toHaveStyle({
-      left: `${TOGGLE_BASE_LEFT_EXPANDED}px`,
-    });
+    // The left corner has a drawer nowhere near it, and takes no correction
+    // for one either — an inline style here would be the old defect returning.
+    expect(screen.getByTestId("sidebar-hamburger")).not.toHaveAttribute("style");
   });
 
-  it("pushes the left toggle out past a drawer docked left", () => {
+  it("leaves both controls alone when the drawer docks left", () => {
+    // The mirror of the case above, and the one the left toggle used to answer
+    // with an offset: this drawer is on the other side of <main> from the right
+    // toggle, and the hamburger's corner is clear of its header and rail.
     setup(true, "left", { width: 400 });
-    expect(screen.getByTestId("sidebar-toggle-left")).toHaveStyle({
-      left: `${TOGGLE_BASE_LEFT_EXPANDED + 400}px`,
-    });
     expect(screen.getByTestId("sidebar-toggle-right")).toHaveStyle({
       right: `${TOGGLE_BASE_RIGHT_EXPANDED}px`,
     });
+    expect(screen.getByTestId("sidebar-hamburger")).not.toHaveAttribute("style");
   });
 
   it("stacks the drawer offset on a RESIZED sidebar's seam, not on 264", () => {

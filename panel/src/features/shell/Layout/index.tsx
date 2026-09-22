@@ -1,7 +1,8 @@
 import { useContext, useRef, type ReactNode } from "react";
-import { PanelLeft, PanelRight } from "lucide-react";
+import { PanelRight } from "lucide-react";
 import { Breadcrumbs } from "../Breadcrumbs";
 import LeftSidebar from "../LeftSidebar";
+import SidebarHamburger from "../SidebarHamburger";
 import RightSidebar from "../RightSidebar";
 import { useSidebarState } from "../useSidebarState";
 import { useEdgeSwipe } from "../useEdgeSwipe";
@@ -33,8 +34,11 @@ import {
 const LEFT_BOUNDS: PaneBounds = { min: 180, max: 400, step: 16 };
 const RIGHT_BOUNDS: PaneBounds = { min: 200, max: 440, step: 16 };
 
-/** Toggle offsets from the viewport edge, per sidebar state. */
-const TOGGLE_BASE_LEFT_EXPANDED = 228;
+/**
+ * Where the RIGHT toggle sits when its sidebar is collapsed — the only toggle
+ * offset left. The left side answers this with `<SidebarHamburger>`, which is
+ * placed by `index.css` against the viewport and has no offset to state.
+ */
 const TOGGLE_BASE_COLLAPSED = 8;
 
 /**
@@ -87,10 +91,14 @@ export function Layout({ children }: LayoutProps) {
   const drawer = useTerminalDrawer();
 
   /**
-   * The toggles are viewport-anchored, but a docked drawer sits between the
-   * sidebar and <main> — without this they float over the drawer's header and
-   * resize edge, covering its ✕. Push them outward by the drawer's width on
-   * whichever side it is actually visible on.
+   * The right toggle is viewport-anchored, but a docked drawer sits between the
+   * sidebar and <main> — without this it floats over the drawer's header and
+   * resize edge, covering its ✕. Push it outward by the drawer's width when
+   * the drawer is actually docked on that side.
+   *
+   * One side only now. The left equivalent went with the toggle it corrected:
+   * see the hamburger's own note, and the right toggle's below, for why the two
+   * sides no longer answer this the same way.
    */
   const drawerOffset = (dockedOn: DrawerSide) =>
     drawer.visible && drawer.side === dockedOn ? drawer.width : 0;
@@ -111,23 +119,14 @@ export function Layout({ children }: LayoutProps) {
       className="layout-container flex h-screen overflow-hidden relative"
       style={{ background: "var(--bg-base)", color: "var(--text-primary)" }}
     >
-      <div className="hidden md:block">
-        <button
-          type="button"
-          data-testid="sidebar-toggle-left"
-          onClick={left.toggle}
-          className={`sidebar-toggle ${!left.expanded ? "visible" : ""}`}
-          style={{
-            left:
-              (left.expanded
-                ? TOGGLE_BASE_LEFT_EXPANDED
-                : TOGGLE_BASE_COLLAPSED) + drawerOffset("left"),
-          }}
-          title={left.expanded ? "Collapse sidebar" : "Expand sidebar"}
-        >
-          <PanelLeft size={14} />
-        </button>
-      </div>
+      {/*
+        No `hidden md:block` wrapper, unlike the right toggle below: the
+        hamburger is the only discoverable way to open the left sidebar on a
+        phone, where the alternative is an edge swipe nobody finds. Nor does it
+        take any offset — it is placed against the viewport corner in
+        `index.css`, and `SidebarHamburger` says at length why.
+      */}
+      <SidebarHamburger expanded={left.expanded} onToggle={left.toggle} />
 
       {/*
         `relative` is what gives the rail below a containing block. `.sidebar`
@@ -199,6 +198,19 @@ export function Layout({ children }: LayoutProps) {
 
       <TerminalDrawer />
 
+      {/*
+        The right side keeps a seam-tracking toggle while the left got a corner
+        hamburger, and the asymmetry is deliberate rather than unfinished work.
+
+        The left toggle's OFFSET was the thing that broke: it was frozen at the
+        sidebar's old fixed width, so a resizable sidebar left it stranded. This
+        one derives from the live width instead, which is the fix rather than
+        the bug — and the corner it would otherwise move to is occupied. A
+        left-docked drawer keeps its ✕ at the right end of its header and its
+        resize rail on its right edge, so a control in the LEFT corner overlaps
+        nothing; in the right corner it would land on both. Hence the offset
+        below, which the left no longer needs.
+      */}
       <div className="hidden md:block">
         <button
           type="button"
@@ -219,6 +231,9 @@ export function Layout({ children }: LayoutProps) {
             // release. Same remedy as the aside below, and inline for the
             // same reason: `.sidebar-toggle` is an unlayered author rule and
             // beats a `transition-none` utility.
+            //
+            // The hamburger needs no such guard: nothing about its position
+            // is computed, so there is nothing for a transition to chase.
             transition: rightPane.isDragging ? "none" : undefined,
           }}
           title={right.expanded ? "Collapse file tree" : "Expand file tree"}

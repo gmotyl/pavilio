@@ -194,6 +194,58 @@ code, pre, .font-mono {
   opacity: 1;
 }
 
+/* The left sidebar's hamburger.
+ *
+ * Fixed to the VIEWPORT, with constant offsets: this is the whole reason the
+ * control exists. Its predecessor's `left` was computed from the sidebar's
+ * width plus a docked drawer's, and both of those moved. Nothing here reads a
+ * width, so nothing about the sidebar or the drawer can displace it.
+ *
+ * `top`/`left` line it up with `.sidebar-hamburger-slot`, the box the sidebar's
+ * first header row reserves: 12px is the column's `p-3` padding, and the extra
+ * 4px is the header row's own `px-1`. Above `.sidebar`'s z-40 mobile overlay,
+ * so it stays clickable over an open drawer-style sidebar on a phone.
+ *
+ * The transition names its colour properties rather than `all`. `all` is what
+ * turned the right toggle's offset into pointer lag the moment that offset
+ * started moving; there is no geometry here for it to chase today, and naming
+ * the properties means there never will be. */
+.sidebar-hamburger {
+  position: fixed;
+  top: 12px;
+  left: 16px;
+  z-index: 45;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.sidebar-hamburger:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+
+/* The space the header row keeps for it — same box, in flow, so the heading
+ * beside it starts after the button rather than under it. */
+.sidebar-hamburger-slot {
+  display: block;
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
 /* Diff viewer */
 .diff-line-add {
   background: var(--green-dim);

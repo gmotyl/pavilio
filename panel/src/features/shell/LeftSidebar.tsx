@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Archive as ArchiveIcon,
@@ -16,6 +16,7 @@ import {
   Terminal as TerminalIcon,
   Wifi,
 } from "lucide-react";
+import { HamburgerSlot } from "./SidebarHamburger";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
 import { isPreferenceScope } from "../../preferences/types";
@@ -42,15 +43,25 @@ import {
 } from "../terminal/useTerminalSessions";
 import { createTerminalSession } from "../terminal/createTerminalSession";
 
+/**
+ * `leading` is the slot the corner hamburger occupies — passed to whichever
+ * header renders FIRST, because that is the row the fixed button lands on. It
+ * is a reserved box rather than the button itself: `.sidebar` is
+ * `overflow: hidden` and `.sidebar-collapsed` is `pointer-events: none`, so the
+ * control cannot live in this tree. See `SidebarHamburger`.
+ */
 function SectionHeader({
   icon: Icon,
   label,
+  leading,
 }: {
   icon: typeof FolderOpen;
   label: string;
+  leading?: ReactNode;
 }) {
   return (
     <div className="flex items-center gap-2 mb-2 px-1">
+      {leading}
       <Icon size={12} style={{ color: "var(--text-tertiary)" }} />
       <h2
         className="text-[11px] font-semibold uppercase tracking-widest"
@@ -392,17 +403,26 @@ export default function LeftSidebar() {
   };
 
   return (
-    <div className="p-3 overflow-auto h-full flex flex-col gap-5 pt-10">
+    // `pt-10` used to clear the floating toggle that hovered over this column.
+    // The hamburger sits in the first header row instead, so the row starts at
+    // the padding like every other one.
+    <div className="p-3 overflow-auto h-full flex flex-col gap-5">
       {starredProjects.length > 0 && (
         <section>
-          <SectionHeader icon={Star} label="Starred" />
+          <SectionHeader icon={Star} label="Starred" leading={<HamburgerSlot />} />
           <ul className="space-y-0.5">
             {starredProjects.map(renderProjectRow)}
           </ul>
         </section>
       )}
       <section>
-        <SectionHeader icon={FolderOpen} label="Projects" />
+        <SectionHeader
+          icon={FolderOpen}
+          label="Projects"
+          // Only when there is no Starred section above it: the slot belongs to
+          // the first row on screen, which is where the button actually is.
+          leading={starredProjects.length > 0 ? undefined : <HamburgerSlot />}
+        />
         <ul className="space-y-0.5">
           {otherProjects.map(renderProjectRow)}
           <li>
