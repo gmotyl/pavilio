@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { MOBILE_QUERY } from "../../lib/breakpoints";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-
-/** Same breakpoint as TerminalLayoutGrid. */
-export const MOBILE_QUERY = "(max-width: 767px)";
 
 function matchesMobile(): boolean {
   return window.matchMedia?.(MOBILE_QUERY).matches ?? false;

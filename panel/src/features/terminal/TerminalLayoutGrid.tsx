@@ -25,6 +25,7 @@ import { TerminalSeamHandles } from "./TerminalSeamHandles";
 import type { GridSpeech } from "../speech/types";
 import type { LayoutCommitKind } from "./orderingReducer";
 import { GRID, expandPreset, getLayoutPresets, type TileLayout } from "./tileLayout";
+import { MOBILE_QUERY } from "../../lib/breakpoints";
 
 /**
  * The cell header's speech wiring is {@link GridSpeech}, owned by
@@ -73,7 +74,7 @@ export function TerminalLayoutGrid({
   speech,
 }: Props) {
   const [isMobile, setIsMobile] = useState(
-    () => window.matchMedia("(max-width: 767px)").matches,
+    () => window.matchMedia(MOBILE_QUERY).matches,
   );
   // Imperative, not state: a re-render inside the browser's dragstart dispatch makes
   // Chrome abandon the drag before it starts. See PlacementOverlayHandle.
@@ -88,7 +89,7 @@ export function TerminalLayoutGrid({
   const [gridBox, setGridBox] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
+    const mq = window.matchMedia(MOBILE_QUERY);
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);

@@ -1,15 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MOBILE_QUERY } from "../../lib/breakpoints";
 import { usePreference } from "../../preferences/usePreference";
 import type { PreferenceDef } from "../../preferences/types";
-
-/**
- * Same breakpoint as `useFileListSidebar` and TerminalLayoutGrid. It is spelt
- * again here rather than imported from `features/projects`: the shell primitive
- * sits UNDER the features that resize their panes, and importing upward would
- * close a cycle the moment one of them uses this hook. Change one, change all
- * three.
- */
-export const MOBILE_QUERY = "(max-width: 767px)";
 
 /** The travel a pane is allowed, and how far one arrow key moves it. */
 export interface PaneBounds {
@@ -79,8 +71,14 @@ export function useResizablePane(
   /**
    * The width the pointer is currently proposing, or null when no drag is in
    * flight. The pane follows the pointer from here so that the preference is
-   * written once at the end — a PATCH per pointer-move would beat on the
-   * workspace file for a gesture with a single outcome.
+   * written once, at the end.
+   *
+   * Not to spare the network: `queuePatch` already coalesces on a
+   * `PREFERENCE_PATCH_DEBOUNCE_MS` debounce, so sixty writes a second would
+   * still leave as one PATCH. What it spares is the `notify(key)` every write
+   * broadcasts — that wakes EVERY hook mounted on this key, and re-rendering
+   * all of them on each pointer-move is what makes a drag stutter. The draft
+   * keeps the gesture local to the pane being dragged.
    */
   const [draft, setDraft] = useState<number | null>(null);
   const [isMobile, setIsMobile] = useState(matchesMobile);

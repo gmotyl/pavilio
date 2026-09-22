@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ClipboardList } from "lucide-react";
 import FileListSidebar from "../FileListSidebar";
-import { MOBILE_QUERY } from "../useFileListSidebar";
+import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import { usePeekTriggerProps } from "../peekTrigger";

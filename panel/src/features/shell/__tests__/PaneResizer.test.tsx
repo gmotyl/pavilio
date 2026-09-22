@@ -3,7 +3,8 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { num } from "../../../preferences/codecs";
 import { definePreference } from "../../../preferences/types";
 import PaneResizer from "../PaneResizer";
-import { useResizablePane, MOBILE_QUERY, type PaneBounds } from "../useResizablePane";
+import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { useResizablePane, type PaneBounds } from "../useResizablePane";
 
 /** Controllable matchMedia stub — jsdom has none. */
 function installMatchMedia(mobile: boolean) {
@@ -83,6 +84,26 @@ describe("PaneResizer", () => {
 
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 460 });
     expect(screen.getByTestId("width").textContent).toBe("380");
+  });
+
+  it("a rail on the left edge grows the pane when dragged leftward", () => {
+    // The inversion lives in `growDirection`, which reads the rail's own
+    // `data-edge` — so it is only really exercised through a rail that renders
+    // that attribute itself, rather than a probe that hand-writes it.
+    render(<Pane edge="left" />);
+    const handle = rail();
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 400 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 340 });
+    expect(screen.getByTestId("pane")).toHaveStyle({ width: "380px" });
+
+    // ...and rightward shrinks it, which is the half a sign-agnostic
+    // implementation would still get right by accident.
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 460 });
+    expect(screen.getByTestId("pane")).toHaveStyle({ width: "260px" });
+
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 460 });
+    expect(screen.getByTestId("width").textContent).toBe("260");
   });
 
   it("no handle is rendered on a mobile viewport", () => {

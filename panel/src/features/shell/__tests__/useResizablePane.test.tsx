@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { num } from "../../../preferences/codecs";
 import { definePreference } from "../../../preferences/types";
-import { useResizablePane, MOBILE_QUERY, type PaneBounds } from "../useResizablePane";
+import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { useResizablePane, type PaneBounds } from "../useResizablePane";
 
 /**
  * Every write that reached the store, so "once per drag" can be counted rather
@@ -180,6 +181,69 @@ describe("useResizablePane", () => {
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 580 });
     expect(paneWrites()).toEqual([{ key: WIDTH_KEY, value: 400 }]);
     expect(width()).toBe("400");
+  });
+
+  it("a press with no move writes nothing", () => {
+    render(<Probe />);
+    const handle = screen.getByTestId("handle");
+
+    // Clicking the rail is a legal, meaningless gesture — and `clamp(null)`
+    // would coerce its way to the minimum if the drag wrote unconditionally.
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 500 });
+
+    expect(paneWrites()).toEqual([]);
+    expect(width()).toBe("320");
+  });
+
+  it("a drag past a bound persists the bound, not where the pointer went", () => {
+    const beyondMax = render(<Probe />);
+    let handle = screen.getByTestId("handle");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 1400 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 1400 });
+    // The rendered width is clamped by `width` whatever happens, so this is
+    // about the STORED value: an unclamped 1220 would come back next reload as
+    // a pane wider than the pane is allowed to be.
+    expect(paneWrites()).toEqual([{ key: WIDTH_KEY, value: 600 }]);
+    beyondMax.unmount();
+
+    writes.length = 0;
+    seed(320);
+    render(<Probe />);
+    handle = screen.getByTestId("handle");
+    fireEvent.pointerDown(handle, { pointerId: 2, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 100 });
+    fireEvent.pointerUp(handle, { pointerId: 2, clientX: 100 });
+    expect(paneWrites()).toEqual([{ key: WIDTH_KEY, value: 200 }]);
+  });
+
+  it("a drag that ends twice, as a real browser ends it, writes once", () => {
+    // Releasing a captured pointer fires lostPointerCapture behind the
+    // pointerup, so every real gesture ends TWICE — and the two arrive in
+    // either order depending on the browser. Neither ordering may write twice.
+    const upFirst = render(<Probe />);
+    let handle = screen.getByTestId("handle");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 540 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 540 });
+    fireEvent.lostPointerCapture(handle, { pointerId: 1 });
+    expect(paneWrites()).toEqual([{ key: WIDTH_KEY, value: 360 }]);
+    expect(width()).toBe("360");
+    upFirst.unmount();
+
+    writes.length = 0;
+    seed(320);
+    render(<Probe />);
+    handle = screen.getByTestId("handle");
+    fireEvent.pointerDown(handle, { pointerId: 2, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 540 });
+    fireEvent.lostPointerCapture(handle, { pointerId: 2 });
+    fireEvent.pointerUp(handle, { pointerId: 2, clientX: 540 });
+    expect(paneWrites()).toEqual([{ key: WIDTH_KEY, value: 360 }]);
+    expect(width()).toBe("360");
   });
 
   it("a lost pointer capture ends the drag", () => {
