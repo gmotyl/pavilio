@@ -24,7 +24,6 @@ const baseProps = {
   repo: { name: "pavilio", path: "/tmp/pavilio" },
   viewMode: "flat" as const,
   onViewModeChange: () => {},
-  wideToggle: null,
   repoOpenFile: null,
   onSetRepoOpenFile: () => {},
   branchFile: null,

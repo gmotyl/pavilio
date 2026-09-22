@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   GitBranch,
   Upload,
@@ -37,8 +37,6 @@ interface GitChangesProps {
   viewMode?: GitViewMode;
   /** Callback when view mode changes */
   onViewModeChange?: (mode: GitViewMode) => void;
-  /** Extra actions to render next to the commit buttons */
-  extraActions?: ReactNode;
   /** Filter displayed files by path substring */
   fileFilter?: string;
   /** When set, auto-open the diff for this file path */
@@ -80,7 +78,6 @@ export default function GitChanges({
   showCommit = true,
   viewMode: controlledViewMode,
   onViewModeChange,
-  extraActions,
   fileFilter,
   openFile,
   highlight,
@@ -863,9 +860,6 @@ export default function GitChanges({
                     <Upload className="w-3.5 h-3.5" />
                     Commit & Push
                   </button>
-                  {extraActions && (
-                    <div className="ml-auto">{extraActions}</div>
-                  )}
                 </div>
                 {loading && (
                   <p

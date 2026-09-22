@@ -63,14 +63,13 @@ export default function ProjectView() {
   const [gitViewMode, setGitViewMode] = useGitViewMode();
   const wideToggle = <WideToggle wide={wide} onToggle={toggleWide} />;
 
-  // RepoBlock renders its own inline WideToggle in the GitChanges header on
-  // the repos tab, so skip the floating one there to avoid two toggles on
-  // screen. Every other tab gets it as a floating action — same mechanism
-  // MarkdownViewer uses, which is reliably visible in both wide and compact.
-  useFloatingAction(
-    section !== "repos" ? wideToggle : null,
-    [section, wide, toggleWide],
-  );
+  // Every tab, the repos tab included. The repos tab used to be excepted
+  // because RepoBlock rendered a second copy through GitChanges — but that one
+  // lived in the commit row, which GitChanges only reaches when the working
+  // tree is dirty, so a clean repository had no toggle at all. One floating
+  // action instead: same mechanism MarkdownViewer uses, and reliably visible in
+  // both wide and compact.
+  useFloatingAction(wideToggle, [section, wide, toggleWide]);
 
   const commitsOpen = useCommitsOpenMap();
 
@@ -245,7 +244,6 @@ export default function ProjectView() {
               repo={repo}
               viewMode={gitViewMode}
               onViewModeChange={setGitViewMode}
-              wideToggle={wideToggle}
               repoOpenFile={repoOpenFile}
               onSetRepoOpenFile={setRepoOpenFile}
               branchFile={searchParams.get("branchfile")}
