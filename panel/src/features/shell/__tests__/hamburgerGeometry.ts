@@ -16,12 +16,38 @@ import { resolve } from "node:path";
  */
 const CSS = readFileSync(resolve("src/index.css"), "utf8");
 
-/** One class's declaration block. Throws rather than silently matching none. */
+/**
+ * One class's declaration block. Throws rather than silently matching none —
+ * and, just as importantly, rather than silently matching the wrong one.
+ *
+ * This reads declarations, not the cascade: it has no way to decide which of
+ * several blocks for a selector wins at any given viewport. The old version
+ * took the FIRST match, so an `@media` override written above the base rule —
+ * or a second rule anywhere in the file — would be read as though it were the
+ * whole story, and every constant derived from it would agree with a
+ * stylesheet that no longer says what the number claims. An ambiguity this
+ * helper cannot resolve is one it must refuse, so more than one match is an
+ * error with a name rather than a guess with a green tick.
+ *
+ * The leading `(?:^|[\s,{}])` is what keeps `.sidebar-hamburger` from matching
+ * inside a longer class name; a `:hover` or `-slot` suffix is already excluded
+ * by the `\s*\{` that follows.
+ */
 export function cssRule(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const found = CSS.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
-  if (!found) throw new Error(`no rule for ${selector} in src/index.css`);
-  return found[1];
+  const pattern = new RegExp(`(?:^|[\\s,{}])${escaped}\\s*\\{([^}]*)\\}`, "g");
+  const found = [...CSS.matchAll(pattern)];
+  if (found.length === 0) {
+    throw new Error(`no rule for ${selector} in src/index.css`);
+  }
+  if (found.length > 1) {
+    throw new Error(
+      `${found.length} rules for ${selector} in src/index.css — a media ` +
+        `override or a duplicate. This helper reads declarations, not the ` +
+        `cascade, so it cannot say which one applies.`,
+    );
+  }
+  return found[0][1];
 }
 
 /** One pixel-valued declaration from that block. */

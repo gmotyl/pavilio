@@ -125,6 +125,17 @@ describe("the hamburger's reserved slot", () => {
     expect(SLOT.width).toBe(HAMBURGER.width);
     expect(SLOT.height).toBe(HAMBURGER.height);
 
+    // A width is only half of a reservation, and the other half is why two
+    // more edits used to survive this whole file: `display: none` takes the
+    // box out of the row entirely, and without `flex: none` the row is free to
+    // shrink it toward zero. Neither touches a declared width, so the
+    // arithmetic below goes on answering 68 while the heading has in fact slid
+    // under the button. Read as declared — the same fidelity as the numbers
+    // above, which is all a stylesheet nobody loads can be read at.
+    const slotRule = cssRule(".sidebar-hamburger-slot");
+    expect(slotRule).toMatch(/display:\s*block/);
+    expect(slotRule).toMatch(/flex:\s*none/);
+
     // Same origin. The row's leading edge is the scrolling column's `p-3` plus
     // the row's own `px-1`, and the stylesheet's `left`/`top` have to be that
     // and nothing else — a button moved anywhere else is a button no longer in

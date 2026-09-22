@@ -91,7 +91,16 @@ function installMatchMedia(mobile: boolean) {
 }
 
 describe("SidebarHamburger", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    // Desktop, said out loud. `installMatchMedia` defines the property rather
+    // than mocking it, so a mobile case leaks into every test after it in the
+    // file unless each run starts from a known viewport.
+    installMatchMedia(false);
+    // jsdom implements neither, and the drawer's drag surface calls both.
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+  });
 
   it("the hamburger toggles the left sidebar", () => {
     setup();
@@ -171,6 +180,13 @@ describe("SidebarHamburger", () => {
     // the reserved box has to span the button's offset as well as its width.
     // Held against the rule that positions the button, not against a copy.
     expect(DRAWER_GAP.width).toBe(HAMBURGER.left + HAMBURGER.width);
+    // A width is only half of a reservation. In a flex row `display` and
+    // `flex` are what stop the box collapsing to nothing, and jsdom lays out
+    // no box to catch that with — so they are read as declared, the same
+    // fidelity the widths above are read at.
+    const gapRule = cssRule(".drawer-hamburger-gap");
+    expect(gapRule).toMatch(/display:\s*block/);
+    expect(gapRule).toMatch(/flex:\s*none/);
 
     // Still true, and still worth saying: the ✕ and the rail live at the far
     // end of a drawer whose near end is the end the corner threatens.
@@ -183,6 +199,27 @@ describe("SidebarHamburger", () => {
 
     fireEvent.click(close);
     expect(screen.queryByTestId("terminal-drawer")).not.toBeInTheDocument();
+  });
+
+  it("the reserved corner is still part of the drag surface", () => {
+    // The reservation took 40×28 away from a strip that used to be draggable
+    // header, and the fixed button only occupies 24×24 of it. Everything left
+    // over — a 16px column beside the button and a 4px band above it — was
+    // inert: the gap has no handlers, and neither did the row around it, so
+    // the press fell through to nothing. The handlers live on the ROW now, so
+    // the whole strip drags the drawer again and only the button's own box is
+    // spoken for.
+    setup({ leftExpanded: false, drawer: "left", drawerWidth: 400 });
+    const gap = screen.getByTestId("terminal-drawer-hamburger-gap");
+
+    // Pressed on the GAP, not on the header — the point of the test.
+    fireEvent.pointerDown(gap, { pointerId: 1, button: 0, clientX: 8 });
+    fireEvent.pointerMove(gap, { pointerId: 1, clientX: 900 });
+    expect(screen.getByTestId("terminal-drawer-dropzone").dataset.side).toBe(
+      "right",
+    );
+    fireEvent.pointerUp(gap, { pointerId: 1, clientX: 900 });
+    expect(screen.getByTestId("terminal-drawer").dataset.side).toBe("right");
   });
 
   it("reserves nothing where the hamburger cannot reach the drawer", () => {
@@ -203,6 +240,25 @@ describe("SidebarHamburger", () => {
     expect(
       screen.queryByTestId("terminal-drawer-hamburger-gap"),
     ).not.toBeInTheDocument();
+  });
+
+  it("an OPEN sidebar on mobile still reserves the corner", () => {
+    // What decides the reservation is whether the drawer's left edge clears
+    // the button, and only a sidebar that DISPLACES the drawer does that. On a
+    // phone `.sidebar` is a `position: fixed` overlay, so an open one displaces
+    // nothing and the drawer's header still starts at x=0 — asking "is the
+    // sidebar expanded" answers the wrong question there, and the overlap it
+    // leaves behind is invisible only because a z-40 overlay paints over it.
+    installMatchMedia(true);
+    setup({ drawer: "left", drawerWidth: 400 });
+    // Open it whichever way this viewport starts — the claim is about an OPEN
+    // sidebar, and mobile does not have to start from the stored value.
+    if (collapsed()) fireEvent.click(screen.getByTestId("sidebar-hamburger"));
+    expect(collapsed()).toBe(false);
+
+    expect(
+      screen.getByTestId("terminal-drawer-hamburger-gap"),
+    ).toBeInTheDocument();
   });
 
   it("the hamburger is clickable while the sidebar is collapsed", () => {
