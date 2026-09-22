@@ -5,6 +5,9 @@ import LeftSidebar from "../LeftSidebar";
 import RightSidebar from "../RightSidebar";
 import { useSidebarState } from "../useSidebarState";
 import { useEdgeSwipe } from "../useEdgeSwipe";
+import PaneResizer from "../PaneResizer";
+import useResizablePane, { type PaneBounds } from "../useResizablePane";
+import { preferences } from "../../../preferences/declarations";
 import {
   FloatingActionContext,
   FloatingActionProvider,
@@ -17,10 +20,36 @@ import {
   type DrawerSide,
 } from "../../terminal/useTerminalDrawer";
 
+/**
+ * How far each sidebar may be dragged, chosen per side rather than shared.
+ *
+ * The left is a navigation column: below 180 the project rows turn into a
+ * stack of ellipses and `GitSummary`'s branch row wraps, and past 400 it
+ * starts taking space from the thing it navigates to. The right holds file
+ * TREES, which indent, so it needs a higher floor to keep a nested filename
+ * readable and earns a wider ceiling — a deep path is the reason you widen it.
+ * `step` is the arrow-key increment on both.
+ */
+const LEFT_BOUNDS: PaneBounds = { min: 180, max: 400, step: 16 };
+const RIGHT_BOUNDS: PaneBounds = { min: 200, max: 440, step: 16 };
+
 /** Toggle offsets from the viewport edge, per sidebar state. */
 const TOGGLE_BASE_LEFT_EXPANDED = 228;
 const TOGGLE_BASE_RIGHT_EXPANDED = 252;
 const TOGGLE_BASE_COLLAPSED = 8;
+
+/**
+ * What a sidebar's `width` style should be, which is not always a number.
+ * Collapsed it is `0`, and on mobile it is nothing at all — see the aside
+ * below for why.
+ */
+function sidebarWidth(
+  pane: { isMobile: boolean; width: number },
+  expanded: boolean,
+): string | undefined {
+  if (pane.isMobile) return undefined;
+  return expanded ? `${pane.width}px` : "0";
+}
 
 function FloatingOverlay() {
   const { action } = useContext(FloatingActionContext);
@@ -41,6 +70,8 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const left = useSidebarState("leftSidebar");
   const right = useSidebarState("rightSidebar");
+  const leftPane = useResizablePane(preferences.leftSidebarWidth, LEFT_BOUNDS);
+  const rightPane = useResizablePane(preferences.rightSidebarWidth, RIGHT_BOUNDS);
   const scrollRef = useRef<HTMLDivElement>(null);
   const drawer = useTerminalDrawer();
 
@@ -87,13 +118,29 @@ export function Layout({ children }: LayoutProps) {
         </button>
       </div>
 
+      {/*
+        `relative` is what gives the rail below a containing block. `.sidebar`
+        sets no `position` on desktop, so an absolute child would otherwise
+        resolve against `.layout-container` and land in the middle of the page.
+        It is safe on mobile too: the `@media (max-width: 767px)` block in
+        `index.css` comes after Tailwind's utilities and wins with `fixed`.
+
+        The width is an inline pixel value from the hook. `--sidebar-width` is
+        no longer applied anywhere — it stays in `index.css` as the written-down
+        default, which is `shell.leftSidebar.width`'s declared 240.
+      */}
       <aside
         data-testid="layout-sidebar-left"
         data-panel-region="sidebar-left"
-        className={`sidebar sidebar-left flex-shrink-0 ${!left.expanded ? "sidebar-collapsed" : ""}`}
+        className={`sidebar sidebar-left flex-shrink-0 relative ${!left.expanded ? "sidebar-collapsed" : ""}`}
         style={{
           order: LAYOUT_ORDER.sidebarLeft,
-          width: left.expanded ? "var(--sidebar-width)" : "0",
+          // No width at all on a phone: there the sidebar is a fixed overlay
+          // that `index.css` pins at `width: 280px !important` and slides on a
+          // transform, so a pixel width from the hook would be a desktop habit
+          // stamped onto a box that does not use it — and with no rail on
+          // mobile, nothing to undo it with.
+          width: sidebarWidth(leftPane, left.expanded),
           borderRight: left.expanded
             ? "1px solid var(--border-subtle)"
             : "none",
@@ -101,6 +148,18 @@ export function Layout({ children }: LayoutProps) {
         }}
       >
         <LeftSidebar />
+        {/* The inner edge: the seam with <main>. Outside `LeftSidebar`'s own
+            scrolling body, so it does not scroll away with the project list.
+            Collapsed there is no edge to grab, and `.sidebar-collapsed` is
+            `pointer-events: none` besides — so no rail is rendered at all. */}
+        {left.expanded && (
+          <PaneResizer
+            name="sidebar-left"
+            edge="right"
+            label="Resize the sidebar"
+            {...leftPane.handleProps}
+          />
+        )}
       </aside>
 
       <main
@@ -140,10 +199,10 @@ export function Layout({ children }: LayoutProps) {
       <aside
         data-testid="layout-sidebar-right"
         data-panel-region="sidebar-right"
-        className={`sidebar sidebar-right flex-shrink-0 ${!right.expanded ? "sidebar-collapsed" : ""}`}
+        className={`sidebar sidebar-right flex-shrink-0 relative ${!right.expanded ? "sidebar-collapsed" : ""}`}
         style={{
           order: LAYOUT_ORDER.sidebarRight,
-          width: right.expanded ? "264px" : "0",
+          width: sidebarWidth(rightPane, right.expanded),
           borderLeft: right.expanded
             ? "1px solid var(--border-subtle)"
             : "none",
@@ -151,6 +210,16 @@ export function Layout({ children }: LayoutProps) {
         }}
       >
         <RightSidebar />
+        {/* Mirror image: this sidebar's seam with <main> is on its LEFT, so the
+            same gesture outward from the content is the opposite drag. */}
+        {right.expanded && (
+          <PaneResizer
+            name="sidebar-right"
+            edge="left"
+            label="Resize the file tree"
+            {...rightPane.handleProps}
+          />
+        )}
       </aside>
 
       {/* Mobile: tap-away backdrop closes any open drawer */}

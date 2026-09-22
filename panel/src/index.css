@@ -37,6 +37,15 @@
   --heading-h3: #c678dd;
   --heading-h4: #60a5fa;
 
+  /*
+   * The left sidebar's DEFAULT width, written down — not the applied one.
+   * Since the sidebars grew resize rails the live width is an inline pixel
+   * value from `shell.leftSidebar.width`, whose declared default is this
+   * number. Nothing reads this variable; it is kept so the default has a home
+   * in the stylesheet that describes every other sidebar dimension, and so the
+   * two numbers are changed together. `--sidebar-collapsed` is likewise
+   * descriptive: the collapse is `width: 0` inline plus `.sidebar-collapsed`.
+   */
   --sidebar-width: 240px;
   --sidebar-collapsed: 0px;
   --transition-sidebar: 250ms cubic-bezier(0.4, 0, 0.2, 1);

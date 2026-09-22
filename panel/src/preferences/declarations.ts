@@ -57,20 +57,17 @@ export interface TimeReportPrefs {
 export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
 
 /**
- * Three rows of design.md's portability table are deliberately NOT declared
- * below, because nothing persists or resizes them today and a declaration
- * with no writer is dead weight:
+ * Every row of design.md's portability table is now declared below.
  *
- * - "Sidebar expanded / width, both sides" — only the two `expanded` flags
- *   exist. The widths arrive with the `2026-09-21-panel-ui-polish` change,
- *   whose Task 4 declares `shell.leftSidebar.width` (default 240) and
- *   `shell.rightSidebar.width` (default 264) alongside the resize handles.
- *
- * The "Pane widths" row used to be listed here too. It no longer is: both of
- * its halves — the file list and the git-history tree — are declared below.
- *
- * `declarations.test.ts` lists what remains as not-yet-declared so that adding
- * it is a one-line move in the portability table rather than a spurious red.
+ * Two of them used to be listed here as deliberately absent — a declaration
+ * with no writer is dead weight — and both have since landed. "Pane widths"
+ * went first, when the file list and the git-history tree each got a rail.
+ * "Sidebar expanded / width, both sides" is the last: only the two `expanded`
+ * flags existed until `2026-09-21-panel-ui-polish` Task 4 added the handles,
+ * and `shell.leftSidebar.width` and `shell.rightSidebar.width` arrive with
+ * them. `declarations.test.ts`'s NOT_YET_DECLARED list is empty as a result,
+ * and stays in place: the next row the design names but nothing writes yet
+ * goes there rather than turning this paragraph back into prose.
  */
 
 /**
@@ -111,6 +108,37 @@ export const preferences = {
     scope: "global",
     default: true,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The left sidebar's width. No `// was:` line: nothing stored it before,
+   * because the pane took `var(--sidebar-width)` — 240px, so a workspace with
+   * no entry opens exactly as it always has. That variable survives in
+   * `index.css` as the written-down default and is applied nowhere; the live
+   * width comes from here.
+   *
+   * Global, like the `expanded` flag above it: how wide you like your
+   * navigation column is a habit, not a fact about one project.
+   */
+  leftSidebarWidth: definePreference({
+    key: "shell.leftSidebar.width", // was: nothing — the sidebar had a fixed width
+    scope: "global",
+    default: 240,
+    codec: num,
+    portable: true,
+  }),
+  /**
+   * The right sidebar's width, and a SECOND declaration rather than one keyed
+   * by side — for the reason `useSidebarState` already gives about the two
+   * `expanded` flags: the sides are not a list. They are also not the same
+   * number. 264 is what the layout has hard-coded today, and it is wider than
+   * the left on purpose: this side holds file trees, which indent.
+   */
+  rightSidebarWidth: definePreference({
+    key: "shell.rightSidebar.width", // was: nothing — the sidebar had a fixed width
+    scope: "global",
+    default: 264,
+    codec: num,
     portable: true,
   }),
   /** Scope argument: the right sidebar's section key, e.g. "skills". */

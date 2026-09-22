@@ -20,9 +20,11 @@ const PORTABLE = [
   "repos.searchScope",
   "search.includeArchived",
   "shell.leftSidebar.expanded",
+  "shell.leftSidebar.width",
   "shell.project.expanded",
   "shell.rightSidebar.expanded",
   "shell.rightSidebar.section.expanded",
+  "shell.rightSidebar.width",
   "speech.answerPane.autoOpen",
   "speech.voice",
   "terminal.drawer.open",
@@ -47,13 +49,17 @@ const MACHINE_LOCAL = [
 
 /**
  * Rows the design's portability table names that nothing declares yet: no
- * code persists or resizes them today. The two sidebar widths arrive with
- * `2026-09-21-panel-ui-polish` Task 4 (defaults 240 and 264). Listed here so
- * declaring them is a one-line move into PORTABLE rather than a spurious red
- * — which is exactly what `fileList.paneWidth` and, now, the git-history
- * tree's `git.history.paneWidth` have each been in turn.
+ * code persists or resizes them today. Listed here so declaring one is a
+ * one-line move into PORTABLE rather than a spurious red — which is what
+ * `fileList.paneWidth`, the git-history tree's `git.history.paneWidth` and
+ * finally the two sidebar widths have each been in turn.
+ *
+ * EMPTY, and kept rather than deleted: every row of the design's table is
+ * declared as of `2026-09-21-panel-ui-polish` Task 4, so this is where the
+ * next one goes. The test below it still runs, over nothing — which is the
+ * honest reading of "nothing is outstanding".
  */
-const NOT_YET_DECLARED = ["shell.leftSidebar.width", "shell.rightSidebar.width"];
+const NOT_YET_DECLARED: readonly string[] = [];
 
 /**
  * `[key, default, scope]`, transcribed by hand from `declarations.ts` with
@@ -83,9 +89,12 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["repos.searchScope", "changed", "global"],
   ["search.includeArchived", true, "global"],
   ["shell.leftSidebar.expanded", true, "global"],
+  // `var(--sidebar-width)`, and the inline 264px beside it, as numbers.
+  ["shell.leftSidebar.width", 240, "global"],
   ["shell.project.expanded", false, "project"],
   ["shell.rightSidebar.expanded", true, "global"],
   ["shell.rightSidebar.section.expanded", true, "project"],
+  ["shell.rightSidebar.width", 264, "global"],
   ["speech.answerPane.autoOpen", false, "global"],
   ["speech.armedCell", null, "global"],
   ["speech.voice", "en-US-AndrewMultilingualNeural", "global"],

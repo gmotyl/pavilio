@@ -72,7 +72,9 @@ interface Fixture {
 const FIXTURES: Record<string, Fixture> = {
   // ── Shell ────────────────────────────────────────────────────────────────
   "shell.leftSidebar.expanded": { value: false },
+  "shell.leftSidebar.width": { value: 312 },
   "shell.rightSidebar.expanded": { value: false },
+  "shell.rightSidebar.width": { value: 336 },
   "shell.rightSidebar.section.expanded": { value: false, scopeArg: "skills" },
   "shell.project.expanded": { value: true, scopeArg: "pavilio" },
   "view.wide": { value: false, scopeArg: "viewer" },
@@ -205,8 +207,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(32);
-    expect(portable.length).toBe(25);
+    expect(ALL_PREFERENCES.length).toBe(34);
+    expect(portable.length).toBe(27);
     expect(machineLocal.length).toBe(7);
     expect(sessionTier.length).toBe(3);
     // The portable arm of the union forbids `browserStore`; this says the

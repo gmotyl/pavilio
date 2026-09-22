@@ -16,7 +16,8 @@ type DropTarget = { side: "left" | "right"; offset: number };
 /**
  * A docked drawer lands inside the sidebars, not against the viewport edge, so
  * the drop-zone hint has to start where the sidebar on that side ends. Measured
- * rather than hard-coded, so it tracks --sidebar-width and the collapsed state.
+ * rather than hard-coded, so it tracks the sidebar's live width — the one the
+ * user dragged it to — as well as the collapsed state.
  * Called from the pointer handler, never during render: layout reads belong in
  * events. 0 when the sidebar is absent (e.g. the drawer rendered without Layout).
  */
