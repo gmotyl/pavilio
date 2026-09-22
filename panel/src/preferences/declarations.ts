@@ -130,8 +130,9 @@ export const preferences = {
    * The right sidebar's width, and a SECOND declaration rather than one keyed
    * by side — for the reason `useSidebarState` already gives about the two
    * `expanded` flags: the sides are not a list. They are also not the same
-   * number. 264 is what the layout has hard-coded today, and it is wider than
-   * the left on purpose: this side holds file trees, which indent.
+   * number. 264 was the width the layout hard-coded before the sidebar became
+   * resizable; this declaration is its only home now, and it is wider than the
+   * left on purpose: this side holds file trees, which indent.
    */
   rightSidebarWidth: definePreference({
     key: "shell.rightSidebar.width", // was: nothing — the sidebar had a fixed width

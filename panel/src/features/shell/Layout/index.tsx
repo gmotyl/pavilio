@@ -210,6 +210,16 @@ export function Layout({ children }: LayoutProps) {
               (right.expanded
                 ? rightPane.width - TOGGLE_SEAM_INSET
                 : TOGGLE_BASE_COLLAPSED) + drawerOffset("right"),
+            // `.sidebar-toggle` eases `all` over 150ms — the hover fade, and
+            // the slide across when the sidebar collapses. `all` covers
+            // `right` too, which was harmless while that offset was a
+            // constant and nothing ever animated. It tracks the live width
+            // now, so a drag would ease the button after the seam, restart
+            // the ease every pointermove and keep travelling 150ms past the
+            // release. Same remedy as the aside below, and inline for the
+            // same reason: `.sidebar-toggle` is an unlayered author rule and
+            // beats a `transition-none` utility.
+            transition: rightPane.isDragging ? "none" : undefined,
           }}
           title={right.expanded ? "Collapse file tree" : "Expand file tree"}
         >

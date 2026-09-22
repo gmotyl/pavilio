@@ -222,6 +222,52 @@ describe("resizing the shell's sidebars", () => {
     dragBy(rightRail(), -600);
     expect(rightAside().style.width).toBe("440px");
     expect(rightToggle().style.right).toBe("428px");
+
+    // And the floor, which the ceiling alone does not pin: an offset that had
+    // stopped tracking the width — frozen, or clamped on the wrong side —
+    // would still read 428 here.
+    dragBy(rightRail(), 600);
+    expect(rightAside().style.width).toBe("200px");
+    expect(rightToggle().style.right).toBe("188px");
+  });
+
+  it("the right toggle drops its transition for the length of the drag", () => {
+    // `.sidebar-toggle` in `index.css` carries `transition: all 150ms`, and
+    // `all` covers `right`. That was harmless while the offset was a constant:
+    // nothing ever animated. Now the offset tracks the sidebar's live width,
+    // so every pointermove starts a 150ms ease on the button's position — the
+    // seam jumps to the pointer, the toggle crawls after it, the ease restarts
+    // the next frame, and it keeps travelling for 150ms past the release.
+    //
+    // Inline for the same reason the aside's is: `index.css` declares no
+    // `@layer`, so `.sidebar-toggle` is an UNLAYERED author rule and would
+    // beat a Tailwind `transition-none` utility in `@layer utilities`.
+    setup();
+
+    expect(rightToggle().style.transition).toBe("");
+
+    dragTo(rightRail(), -40);
+    expect(rightToggle().style.transition).toBe("none");
+    // The offset it would otherwise be easing towards.
+    expect(rightToggle().style.right).toBe("292px");
+
+    fireEvent.pointerUp(rightRail(), { pointerId: 1, clientX: 460 });
+    // The pointer is up, so the stylesheet is in charge again.
+    expect(rightToggle().style.transition).toBe("");
+    expect(rightToggle().style.right).toBe("292px");
+  });
+
+  it("the right toggle keeps the stylesheet's transition outside a drag", () => {
+    // The 150ms `transition: all` is not decoration: it fades the button in
+    // under `.layout-container:hover` and carries it across when the sidebar
+    // collapses. No drag is in flight in either case, so nothing inline may
+    // shadow it — a blanket `transition: none` would cure the lag above by
+    // deleting the animation the rule exists for.
+    setup({ rightExpanded: false });
+
+    expect(rightToggle().style.transition).toBe("");
+    expect(rightToggle().style.right).toBe("8px");
+    expect(rightToggle().className).toMatch(/\bvisible\b/);
   });
 
   it("the drag stops at the widths each sidebar was given", () => {
