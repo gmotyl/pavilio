@@ -186,7 +186,10 @@ export default function ProjectView() {
 
   return (
     <div className="relative">
-    <div className={`p-6 ${wide ? "" : "max-w-5xl"}`}>
+    <div
+      data-testid="project-view"
+      className={`p-6 ${wide ? "" : "max-w-5xl"}`}
+    >
       {/* Desktop-only big title */}
       <div className="hidden md:flex items-center mb-4">
         <h1 className="text-2xl font-semibold capitalize">

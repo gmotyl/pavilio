@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useContext } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import ProjectView from "../ProjectView";
 import { preferences } from "../../../preferences/declarations";
@@ -70,6 +70,15 @@ type Doc = Record<string, unknown>;
 const prefsDoc = () =>
   (globalThis as { __PAVILIO_PREFS__?: Doc }).__PAVILIO_PREFS__!;
 
+/**
+ * The element carrying the layout clamp. It has its own `data-testid` because
+ * the old `.p-6` selector was unique only by accident — three sibling blocks
+ * are mocked out in this file, and un-mocking any of them would have made it
+ * ambiguous without failing loudly.
+ */
+const findWrapper = () =>
+  waitFor(() => screen.getByTestId("project-view"));
+
 describe("ProjectView wide mode", () => {
   beforeEach(() => {
     stubRepos([]);
@@ -101,12 +110,8 @@ describe("ProjectView wide mode", () => {
 
     // `max-w-5xl` is the compact clamp, so its absence IS wide — and the
     // toggle offers the way back rather than the way in.
-    const { container } = await waitFor(() => {
-      const el = document.querySelector(".p-6");
-      if (!el) throw new Error("project view not rendered");
-      return { container: el };
-    });
-    expect(container.className).not.toContain("max-w-5xl");
+    const wrapper = await findWrapper();
+    expect(wrapper.className).not.toContain("max-w-5xl");
     expect(
       screen.getByTestId("wide-toggle").getAttribute("title"),
     ).toBe("Compact view");
@@ -117,14 +122,38 @@ describe("ProjectView wide mode", () => {
     prefsDoc()[storageKey(preferences.wideMode, "repos")] = false;
     renderReposTab();
 
-    const { container } = await waitFor(() => {
-      const el = document.querySelector(".p-6");
-      if (!el) throw new Error("project view not rendered");
-      return { container: el };
-    });
-    expect(container.className).toContain("max-w-5xl");
+    const wrapper = await findWrapper();
+    expect(wrapper.className).toContain("max-w-5xl");
     expect(
       screen.getByTestId("wide-toggle").getAttribute("title"),
     ).toBe("Wide view");
+  });
+
+  it("clicking the toggle flips the layout clamp", async () => {
+    // "Present" is not "wired": the toggle is rendered into the shell through a
+    // context, so it can be on screen with its `onToggle` going nowhere. This
+    // clicks it and watches the clamp the page actually lays out with.
+    renderReposTab();
+
+    const wrapper = await findWrapper();
+    expect(wrapper.className).not.toContain("max-w-5xl");
+
+    fireEvent.click(screen.getByTestId("wide-toggle"));
+    await waitFor(() =>
+      expect(screen.getByTestId("project-view").className).toContain(
+        "max-w-5xl",
+      ),
+    );
+    expect(screen.getByTestId("wide-toggle").getAttribute("title")).toBe(
+      "Wide view",
+    );
+
+    // And back, so a one-way write cannot pass either.
+    fireEvent.click(screen.getByTestId("wide-toggle"));
+    await waitFor(() =>
+      expect(screen.getByTestId("project-view").className).not.toContain(
+        "max-w-5xl",
+      ),
+    );
   });
 });
