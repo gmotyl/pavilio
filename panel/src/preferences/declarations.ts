@@ -65,8 +65,9 @@ export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
  *   exist. The widths arrive with the `2026-09-21-panel-ui-polish` change,
  *   whose Task 4 declares `shell.leftSidebar.width` (default 240) and
  *   `shell.rightSidebar.width` (default 264) alongside the resize handles.
- * - "Pane widths — file list, git history" — neither pane is resizable, so
- *   there is no width to remember yet.
+ * - "Pane widths — git history" — that tree is not resizable yet; its
+ *   `git.history.paneWidth` (default 280) arrives with the same change's
+ *   Task 3. The file list's half of that row is declared below.
  *
  * `declarations.test.ts` lists them as not-yet-declared so that adding them
  * is a one-line move in the portability table rather than a spurious red.
@@ -155,6 +156,21 @@ export const preferences = {
     scope: "global",
     default: false,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The pinned-open file list's width. No `// was:` line: nothing stored it
+   * before, because the pane was the fixed `md:w-72` — 18rem, hence 288, so a
+   * workspace with no entry opens exactly as it always has.
+   *
+   * Global, like the collapse flag above it: how wide you like to read a file
+   * list is a habit, not a fact about one project.
+   */
+  fileListPaneWidth: definePreference({
+    key: "fileList.paneWidth", // was: nothing — the pane had a fixed width
+    scope: "global",
+    default: 288,
+    codec: num,
     portable: true,
   }),
   favoriteProjects: definePreference<string[]>({

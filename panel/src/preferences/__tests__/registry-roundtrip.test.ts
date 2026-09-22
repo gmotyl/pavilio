@@ -46,6 +46,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 
   // ── num ─────────────────────────────────────────────────────────────────
   "terminal.drawer.width": [480, 0, 1, 1024, 23.5, -1],
+  "fileList.paneWidth": [288, 0, 200, 560, 344.5, -1],
 
   // ── str: the values that would round-trip WRONG through a JSON re-parse ──
   "git.branchDiff.base": ["", "main", "true", "240", "null", "{}", "[]", "release/1.0"],
@@ -79,7 +80,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 30;
+const DECLARATION_COUNT = 31;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

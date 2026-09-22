@@ -80,6 +80,7 @@ const FIXTURES: Record<string, Fixture> = {
   // ── File list and project lists ──────────────────────────────────────────
   "fileList.sort": { value: { sortKey: "name", sortDir: "asc" } },
   "fileList.sidebarCollapsed": { value: true },
+  "fileList.paneWidth": { value: 344 },
   "projects.favorites": { value: ["pavilio", "vector"] },
   "repos.searchScope": { value: "commits" },
   "search.includeArchived": { value: false },
@@ -203,8 +204,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(30);
-    expect(portable.length).toBe(23);
+    expect(ALL_PREFERENCES.length).toBe(31);
+    expect(portable.length).toBe(24);
     expect(machineLocal.length).toBe(7);
     expect(sessionTier.length).toBe(3);
     // The portable arm of the union forbids `browserStore`; this says the

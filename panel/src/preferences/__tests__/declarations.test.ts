@@ -7,6 +7,7 @@ import { ALL_PREFERENCES } from "../declarations";
  * comparing it against itself would assert nothing at all.
  */
 const PORTABLE = [
+  "fileList.paneWidth",
   "fileList.sidebarCollapsed",
   "fileList.sort",
   "git.branchDiff.base",
@@ -46,14 +47,14 @@ const MACHINE_LOCAL = [
 /**
  * Rows the design's portability table names that nothing declares yet: no
  * code persists or resizes them today. The two sidebar widths arrive with
- * `2026-09-21-panel-ui-polish` Task 4 (defaults 240 and 264); the two pane
- * widths have no writer at all. Listed here so declaring them is a one-line
- * move into PORTABLE rather than a spurious red.
+ * `2026-09-21-panel-ui-polish` Task 4 (defaults 240 and 264); the git-history
+ * tree's width arrives with its Task 3. Listed here so declaring them is a
+ * one-line move into PORTABLE rather than a spurious red — which is exactly
+ * what `fileList.paneWidth` has just been.
  */
 const NOT_YET_DECLARED = [
   "shell.leftSidebar.width",
   "shell.rightSidebar.width",
-  "fileList.paneWidth",
   "git.history.paneWidth",
 ];
 
@@ -68,6 +69,7 @@ const NOT_YET_DECLARED = [
  * change flips it.
  */
 const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
+  ["fileList.paneWidth", 288, "global"],
   ["fileList.sidebarCollapsed", false, "global"],
   ["fileList.sort", { sortKey: "date", sortDir: "desc" }, "global"],
   ["git.branchDiff.base", "", "repo"],
