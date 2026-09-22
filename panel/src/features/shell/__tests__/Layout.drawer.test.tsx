@@ -17,10 +17,12 @@ vi.mock("../../terminal/ProjectTerminalsSurface", () => ({
   ),
 }));
 
-/** Inline offsets the RIGHT toggle uses — the only one left that has any. The
- *  left side is `sidebar-hamburger` now, placed by the stylesheet against the
- *  viewport; `SidebarHamburger.test.tsx` owns the claim that nothing moves it. */
-/** Not a constant in `Layout` any more: the right sidebar's default width less
+/** The inline offsets the RIGHT toggle uses — the only ones left in the shell.
+ *  The left side is `sidebar-hamburger` now, placed by the stylesheet against
+ *  the viewport; `SidebarHamburger.test.tsx` owns the claim that nothing moves
+ *  it.
+ *
+ *  Not a constant in `Layout` any more: the right sidebar's default width less
  *  the 12px the toggle sits inside its seam. Derived from the declaration
  *  rather than copied from it, so changing the default cannot leave this
  *  arithmetic quietly asserting the old seam. */

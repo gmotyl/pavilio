@@ -246,6 +246,23 @@ code, pre, .font-mono {
   height: 24px;
 }
 
+/* The same reservation, made by a LEFT-docked drawer whose sidebar is
+ * collapsed — there the drawer's own origin is x=0 and the fixed button lands
+ * inside its header row.
+ *
+ * Wider than `.sidebar-hamburger-slot` by exactly the button's `left`, and for
+ * a reason: the slot sits inside a column already inset by `p-3` + `px-1`, so
+ * it only has to be as wide as the button. This box starts at the viewport
+ * edge, so it has to span the offset as well — 16px `left` + 24px wide. The
+ * three rules are cross-checked against each other by
+ * `SidebarHamburger.test.tsx` rather than by the cascade, because a stylesheet
+ * cannot assert that two boxes still line up. */
+.drawer-hamburger-gap {
+  display: block;
+  flex: none;
+  width: 40px;
+}
+
 /* Diff viewer */
 .diff-line-add {
   background: var(--green-dim);

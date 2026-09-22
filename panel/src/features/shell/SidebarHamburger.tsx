@@ -56,6 +56,17 @@ export default function SidebarHamburger({
  * row, and `index.css` lines the fixed button up with where that slot lands. So
  * the heading beside it is never covered — and the alignment survives any width
  * the user drags the sidebar to, because neither box is derived from the width.
+ * `SidebarHamburger.test.tsx` holds the two rules to each other; a stylesheet
+ * cannot assert that two separate boxes still line up.
+ *
+ * "Where that slot lands" holds at the top of the sidebar's scroll, which is
+ * where that row is unless the user has scrolled the project list — see the
+ * note on `LeftSidebar`'s scrolling column for why that is left as it is.
+ *
+ * A LEFT-docked drawer makes the same reservation with `.drawer-hamburger-gap`
+ * when the sidebar beside it is collapsed and its header would otherwise begin
+ * underneath the button. Different width, same move: the button never moves, so
+ * whatever arrives in its corner is what yields.
  */
 export function HamburgerSlot() {
   return <span aria-hidden className="sidebar-hamburger-slot" />;

@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 import ProjectTerminalsSurface from "./ProjectTerminalsSurface";
 import { LAYOUT_ORDER } from "../shell/Layout/order";
+import { useSidebarState } from "../shell/useSidebarState";
 import { useTerminalDrawer, DRAWER_MIN_WIDTH } from "./useTerminalDrawer";
 
 const RESIZE_STEP = 16;
@@ -29,6 +30,7 @@ function sidebarWidth(side: "left" | "right") {
 export default function TerminalDrawer() {
   const { visible, width, maxWidth, side, setOpen, setWidth, setSide } =
     useTerminalDrawer();
+  const leftSidebar = useSidebarState("leftSidebar");
   const location = useLocation();
   const match = matchProjectFromPath(location.pathname);
   const asideRef = useRef<HTMLElement>(null);
@@ -144,6 +146,25 @@ export default function TerminalDrawer() {
 
   const dockedRight = side === "right";
 
+  /**
+   * Whether this header has to keep the hamburger's corner clear.
+   *
+   * `.sidebar-hamburger` is fixed at the VIEWPORT corner and stays there in
+   * every state — that constancy is the whole point of the control, and moving
+   * it to dodge a drawer would reopen the width regression it was built to
+   * end. So the drawer yields instead, the same way the sidebar's first header
+   * row does with `<HamburgerSlot>`: it reserves the box rather than putting
+   * its own header underneath it.
+   *
+   * Only when the reservation is actually needed. Docked RIGHT the drawer is
+   * the length of the viewport away. Docked left with the sidebar expanded the
+   * drawer starts at the sidebar's width, and that width's FLOOR is 180 —
+   * already past the button's 40px right edge — so the corner is clear at
+   * every width the user can drag to. Collapsed, the drawer's origin is 0 and
+   * the button lands inside its header. That is the one case, and this is it.
+   */
+  const reservesHamburgerCorner = !dockedRight && !leftSidebar.expanded;
+
   return (
     <aside
       ref={asideRef}
@@ -179,35 +200,50 @@ export default function TerminalDrawer() {
           className={`absolute ${dockedRight ? "left-0" : "right-0"} top-0 h-full w-px transition-colors group-hover:bg-[var(--border-strong)] group-focus-visible:bg-[var(--accent)]`}
         />
       </div>
+      {/* The header ROW: the reserved corner plus the header itself. The row
+          carries the rule under it so the divider still spans the drawer's
+          full width, while the header box — the drag surface, and everything
+          in it — begins after the reservation rather than under the button. */}
       <div
-        data-testid="terminal-drawer-header"
-        onPointerDown={onHeaderPointerDown}
-        onPointerMove={onHeaderPointerMove}
-        onPointerUp={onHeaderPointerUp}
-        onPointerCancel={onHeaderDragAbort}
-        onLostPointerCapture={onHeaderDragAbort}
-        className={`flex items-center justify-between px-2 h-7 flex-shrink-0 select-none touch-none ${dropTarget ? "cursor-grabbing" : "cursor-grab"}`}
+        className="flex items-stretch flex-shrink-0"
         style={{ borderBottom: "1px solid var(--border-subtle)" }}
-        title="Drag to move the drawer to the other side"
       >
-        <span
-          className="text-[11px] font-semibold uppercase tracking-wider truncate"
-          style={{ color: "var(--text-tertiary)" }}
+        {reservesHamburgerCorner && (
+          <span
+            aria-hidden
+            data-testid="terminal-drawer-hamburger-gap"
+            className="drawer-hamburger-gap"
+          />
+        )}
+        <div
+          data-testid="terminal-drawer-header"
+          onPointerDown={onHeaderPointerDown}
+          onPointerMove={onHeaderPointerMove}
+          onPointerUp={onHeaderPointerUp}
+          onPointerCancel={onHeaderDragAbort}
+          onLostPointerCapture={onHeaderDragAbort}
+          className={`flex-1 min-w-0 flex items-center justify-between px-2 h-7 select-none touch-none ${dropTarget ? "cursor-grabbing" : "cursor-grab"}`}
+          title="Drag to move the drawer to the other side"
         >
-          {match.name} · terminals
-        </span>
-        <button
-          type="button"
-          data-testid="terminal-drawer-close"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => setOpen(false)}
-          className="w-5 h-5 flex items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
-          style={{ color: "var(--text-tertiary)" }}
-          title="Close terminal drawer"
-          aria-label="Close terminal drawer"
-        >
-          <X size={13} />
-        </button>
+          <span
+            className="text-[11px] font-semibold uppercase tracking-wider truncate"
+            style={{ color: "var(--text-tertiary)" }}
+          >
+            {match.name} · terminals
+          </span>
+          <button
+            type="button"
+            data-testid="terminal-drawer-close"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setOpen(false)}
+            className="w-5 h-5 flex items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
+            style={{ color: "var(--text-tertiary)" }}
+            title="Close terminal drawer"
+            aria-label="Close terminal drawer"
+          >
+            <X size={13} />
+          </button>
+        </div>
       </div>
       <div className="flex-1 min-h-0">
         <ProjectTerminalsSurface projectName={match.name} active={false} fill />
