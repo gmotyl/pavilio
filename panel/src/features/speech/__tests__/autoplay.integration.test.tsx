@@ -1128,10 +1128,9 @@ describe("the row is reserved from mount", () => {
     const quiet = screen.getByTestId("terminal-cell-speak-cell-b");
     expect(quiet).toHaveAttribute("data-speech", "empty");
     expect(quiet).toHaveAttribute("data-pulse", "0");
-    expect(screen.getByTestId("terminal-cell-speak-cell-c")).toHaveAttribute(
-      "data-speech",
-      "empty",
-    );
+    const alsoQuiet = screen.getByTestId("terminal-cell-speak-cell-c");
+    expect(alsoQuiet).toHaveAttribute("data-speech", "empty");
+    expect(alsoQuiet).toHaveAttribute("data-pulse", "0");
     // The row's contents followed the state, per cell: the cell that spoke
     // swapped its launchers for the transport, and the two that did not still
     // carry theirs.

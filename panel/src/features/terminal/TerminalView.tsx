@@ -215,13 +215,14 @@ export function TerminalView({
   //
   // This is NOT the only fit a toggle produces in a browser. The uncoalesced
   // `new ResizeObserver(() => inst.fit())` above observes the container, sees it
-  // grow, and fires a SECOND, bare `fit()` just after this one — bare meaning it
-  // does not follow the bottom. That is accepted, on two grounds: this effect
-  // runs first, so the bottom is already followed and the viewport is already
-  // right by the time the observer's fit lands; and the observer only fires on a
-  // deliberate user toggle, never on an utterance, which is the resize this
-  // change exists to remove. Coalescing the observer is deliberately out of this
-  // change's scope (see the change's design.md and proposal.md).
+  // change — a hide grows it, a show shrinks it again — and fires a SECOND,
+  // bare `fit()` just after this one, bare meaning it does not follow the
+  // bottom. That is accepted, on two grounds: this effect runs first, so the
+  // bottom is already followed and the viewport is already right by the time
+  // the observer's fit lands; and the observer only fires on a deliberate user
+  // toggle, never on an utterance, which is the resize this change exists to
+  // remove. Coalescing the observer is deliberately out of this change's scope
+  // (see the change's design.md and proposal.md).
   //
   // So "exactly once" is what jsdom can observe — it lays nothing out, so no
   // observer ever fires there — and not a guarantee this code makes in a
