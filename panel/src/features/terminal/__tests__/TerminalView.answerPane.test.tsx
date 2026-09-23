@@ -262,6 +262,23 @@ describe("TerminalView and the answer pane", () => {
     const area = opened!.parentElement;
     expect(area).toBe(observedContainer.parentElement);
 
+    // Parentage alone is not a positioning context. `position: absolute`
+    // resolves against the nearest POSITIONED ancestor, so without `relative`
+    // HERE the pane would resolve against the cell's column instead and its
+    // `top: 0` would land on the row — the exact failure this test exists to
+    // prevent. That one token is what makes the box a box.
+    expect(area?.className).toContain("relative");
+
+    // And the wrapper carries the flex sizing the container used to, so the
+    // terminal's height is unchanged: exactly one claimant of the column's
+    // free space. Moving `flex-1 min-h-0` back down onto the container would
+    // collapse the terminal to zero — `flex-1` on a child of a non-flex block
+    // does nothing.
+    expect(area?.className).toContain("flex-1");
+    expect(area?.className).toContain("min-h-0");
+    expect(observedContainer.className).not.toContain("flex-1");
+    expect(observedContainer.className).toContain("h-full");
+
     // The speech row is OUTSIDE that box: it is the area's previous sibling in
     // the cell's column, so no amount of pane can reach it. The cell header is
     // outside by the same construction — it is not even in this column, it is

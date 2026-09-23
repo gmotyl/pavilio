@@ -1074,14 +1074,21 @@ describe("AnswerPane", () => {
    */
   describe("surfaces", () => {
     /**
-     * The `background` shorthand's value — not `background-color`, which the
-     * `:` in the pattern excludes, and not a value hidden behind a comment,
-     * which is why the comments come out before the declarations are split.
+     * The ground a rule paints — the `background` shorthand or the
+     * `background-color` longhand, whichever it declares last — and not a
+     * value hidden behind a comment, which is why the comments come out
+     * before the declarations are split.
      */
     const background = (selector: string): string | null => {
       const declarations = cssRule(selector).replace(/\/\*[\s\S]*?\*\//g, "");
-      const found = declarations.match(/(?:^|;)\s*background\s*:\s*([^;]+)/);
-      return found ? found[1].trim() : null;
+      // The shorthand OR the `background-color` longhand: a ground painted
+      // with either is a ground, and reading only the shorthand let a
+      // `background-color` on a surface slip past unseen. Last declaration
+      // wins, the way the cascade reads a block top to bottom.
+      const found = [
+        ...declarations.matchAll(/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/g),
+      ];
+      return found.length > 0 ? found[found.length - 1][1].trim() : null;
     };
 
     /**
@@ -1106,7 +1113,12 @@ describe("AnswerPane", () => {
       // The card chrome goes the way the bar's did: nothing sits behind an
       // in-flow speech surface to blur, and a floating panel's edge would draw
       // a border where the row and the pane are meant to read as one surface.
-      expect(pane).not.toMatch(/(^|;)\s*border\s*:/);
+      // Longhands included: a `border-top` here is precisely the edge that
+      // must not be drawn between the row and the pane, and the shorthand-only
+      // pattern read straight past it.
+      expect(pane).not.toMatch(
+        /(^|;)\s*border(-(top|right|bottom|left|width|style|color))?\s*:/,
+      );
       expect(pane).not.toMatch(/border-radius\s*:/);
       expect(pane).not.toMatch(/box-shadow\s*:/);
       expect(pane).not.toMatch(/backdrop-filter\s*:/);
@@ -1134,7 +1146,7 @@ describe("AnswerPane", () => {
       expect(body).toMatch(/grid-template-columns:\s*22px 1fr/);
     });
 
-    it("the footer takes the same surface the body does", () => {
+    it("the footer paints nothing of its own", () => {
       // The footer paints nothing of its own — it never did — so what it shows
       // is the pane it sits in. What changed is the conclusion: the body used
       // to declare a darker ground so the two would read as two surfaces, and
