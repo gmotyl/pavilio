@@ -987,14 +987,23 @@ input[type="checkbox"] {
      - the pane is still a SIBLING of the observed container, never a child, so
        the uncoalesced `ResizeObserver` never sees it appear.
 
-   `max-height: 100%` is the terminal area's height: a short answer is a short
-   pane, a long one stops at the bottom of the terminal and scrolls. */
+   All four insets, so the open pane IS the terminal area rather than a box as
+   tall as its text. A deliberate departure from design.md, which sized the pane
+   to its content and faded the bottom edge with a mask so "the terminal
+   underneath is implied, never announced": read in a real browser that came out
+   as a reply box floating mid-cell with live terminal output scrolling beneath
+   it — two things to read at once. Greg asked for the opposite in as many
+   words ("blend all the way to bottom, form on bottom no terminal visible"),
+   and the superseded `max-height: 100%` was exactly the ceiling that allowed
+   the short pane. The body takes the slack (see its `flex: 1 1 auto`), so the
+   composer and the switch row sit on the bottom edge whatever the answer's
+   length. */
 .answer-pane {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  max-height: 100%;
+  bottom: 0;
   z-index: 4;
   display: flex;
   flex-direction: column;
@@ -1017,6 +1026,13 @@ input[type="checkbox"] {
   display: grid;
   grid-template-columns: 22px 1fr;
   column-gap: 10px;
+  /* The column's one claimant of free space. A short answer leaves empty
+     ground here rather than floating the composer up into the middle of the
+     cell; a long one scrolls inside this box instead of pushing the composer
+     off the bottom. `min-height: 0` is what lets it shrink under its content —
+     a flex item's floor is otherwise its content, and the overflow never
+     engages. */
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 10px 12px 10px 6px;

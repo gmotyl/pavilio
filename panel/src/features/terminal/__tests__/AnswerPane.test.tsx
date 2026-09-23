@@ -1150,6 +1150,103 @@ describe("AnswerPane", () => {
       expect(body).toMatch(/grid-template-columns:\s*22px 1fr/);
     });
 
+    /**
+     * The open pane fills the terminal area.
+     *
+     * A deliberate departure from design.md, which sizes the pane to its
+     * content and fades its bottom edge with a mask so "the terminal underneath
+     * is implied, never announced". Greg read a real answer in a real browser
+     * and asked for the opposite, verbatim: "when I am in answer mode I want
+     * blend all the way to bottom, form on bottom no terminal visible". What he
+     * had was a pane as tall as its text with live terminal output running
+     * underneath the composer — two things to read at once, and the reply box
+     * floating in the middle of the cell.
+     *
+     * jsdom does no layout, so the claim is made where it is written: the four
+     * insets, the absence of a content-sized ceiling, and which single child of
+     * the column is allowed to take the slack.
+     */
+    it("covers the terminal area rather than stopping at its content", () => {
+      const pane = cssRule(".answer-pane").replace(/\/\*[\s\S]*?\*\//g, "");
+
+      // Vacuity guard, as above: every claim here is about a declaration, and
+      // `not.toMatch` is trivially true of an empty block.
+      expect(pane).toMatch(/(^|;)\s*position:\s*absolute/);
+
+      // All four edges. `top: 0` alone is what it already had — the bottom is
+      // the new one, and it is the whole fix.
+      for (const edge of ["top", "right", "bottom", "left"]) {
+        expect(pane).toMatch(new RegExp(`(^|;)\\s*${edge}:\\s*0\\s*(;|$)`));
+      }
+
+      // And nothing that lets it stop short. `max-height: 100%` was what made
+      // it as tall as its content: with all four insets set it is the ceiling
+      // that decides, so leaving it behind would leave the bug behind.
+      expect(pane).not.toMatch(/max-height\s*:/);
+      expect(pane).not.toMatch(/(^|;)\s*height\s*:/);
+
+      // The pane is still the flex column its rows are laid out in.
+      expect(pane).toMatch(/flex-direction:\s*column/);
+    });
+
+    it("gives the slack to the text and pins the rows under it", () => {
+      const body = cssRule(".answer-pane-body").replace(/\/\*[\s\S]*?\*\//g, "");
+
+      // One claimant of the column's free space, and it is the reading area:
+      // a short answer leaves empty ground above the composer rather than
+      // floating the composer up into the middle of the cell, and a long one
+      // scrolls inside the box instead of pushing the composer off the bottom.
+      expect(body).toMatch(/(^|;)\s*flex:\s*1 1 auto\s*(;|$)/);
+      // `min-height: 0` is what lets it shrink below its content — without it
+      // a flex item's floor is its content and the overflow never engages.
+      expect(body).toMatch(/(^|;)\s*min-height:\s*0\s*(;|$)/);
+      expect(body).toMatch(/(^|;)\s*overflow:\s*auto\s*(;|$)/);
+
+      // The rows below it take exactly their own height — neither grows into
+      // the slack the body is claiming.
+      expect(cssRule(".answer-pane-meta")).toMatch(/(^|;)\s*flex:\s*none\s*(;|$)/);
+      expect(cssRule(".answer-pane-composer")).toMatch(/(^|;)\s*flex:\s*none\s*(;|$)/);
+
+      // And the fade is gone with the reason for it. design.md masked the
+      // body's bottom edge so the terminal showing through read as implied;
+      // there is no terminal showing through any more, and a mask over the
+      // last line of an answer that now runs to the composer would simply be
+      // dimming the text.
+      expect(body).not.toMatch(/mask/);
+    });
+
+    it("lays the body out above the rows it is pinned by", () => {
+      const h = harness();
+      render(
+        <MemoryRouter>
+          <AnswerPane
+            sessionId="cell-a"
+            speech={makeSpeech(h)}
+            onClose={() => {}}
+            send={NO_SEND}
+            autoOpen={false}
+            onAutoOpenChange={() => {}}
+          />
+        </MemoryRouter>,
+      );
+
+      // The CSS above only decides how the column shares its height; this is
+      // the order it shares it in. The body is the column's FIRST row, so the
+      // slack it claims sits above everything else rather than below it.
+      const root = screen.getByTestId("answer-pane-cell-a");
+      const body = screen.getByTestId("answer-pane-body-cell-a");
+      expect(body.parentElement).toBe(root);
+      expect(root.firstElementChild).toBe(body);
+      // …and every other row of the pane is a sibling BELOW it, pinned to the
+      // bottom of the terminal area by the slack the body is taking above
+      // them. Which of them comes last is the next commit's business; that
+      // they all come after the body is this one's.
+      const rows = Array.from(root.children);
+      expect(rows.length).toBeGreaterThan(1);
+      expect(rows.indexOf(body)).toBe(0);
+      expect(rows.some((row) => row.classList.contains("answer-pane-meta"))).toBe(true);
+    });
+
     it("the meta row paints nothing of its own", () => {
       // The switch row paints nothing of its own — it never did — so what it
       // shows is the pane it sits in. What changed is the conclusion: the body
