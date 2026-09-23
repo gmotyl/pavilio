@@ -31,8 +31,14 @@ export function ViewerActions({
   // one. Held in a ref so it survives re-renders and can be cleared on unmount.
   const revertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Both call sites unmount this toolbar on every file switch and tab change,
-  // so a pending timer would otherwise outlive the component.
+  // Three call sites mount this toolbar, and they do not agree on when it goes
+  // away. `FileViewer` and `PlansTab` render it inline, so every file switch and
+  // tab change unmounts it and a pending timer would otherwise outlive the
+  // component. The standalone `/view/*` viewer does NOT: it hands the toolbar to
+  // the breadcrumb slot, where a file switch re-registers the same element type
+  // in the same position, so React re-renders it in place — state and this timer
+  // survive the switch, and the unmount only comes when the viewer leaves the
+  // screen. The cleanup still covers that last exit.
   useEffect(
     () => () => {
       if (revertTimer.current !== null) clearTimeout(revertTimer.current);
