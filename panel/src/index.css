@@ -891,6 +891,9 @@ input[type="checkbox"] {
    what `layoutRail` and the follow effect in `AnswerPane` rely on. */
 .answer-pane-body {
   position: relative;
+  /* Darker than the card, so the text well and the footer read as two
+     surfaces. Paint only — the grid below is what the rail measures. */
+  background: var(--bg-base);
   display: grid;
   grid-template-columns: 22px 1fr;
   column-gap: 10px;
