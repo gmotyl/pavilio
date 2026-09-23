@@ -24,7 +24,7 @@
  * produces that height: the same container node, in the same column, with the
  * same siblings in the same order, and nothing refitting it.
  */
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepare } from "../../speech/prepare";
@@ -46,7 +46,9 @@ const term = vi.hoisted(() => {
   const fit = vi.fn();
   const sent: string[] = [];
   const observed: Element[] = [];
-  return { fit, sent, observed };
+  /** Every byte written to the PTY through `inst.send` — the launcher path. */
+  const writes: string[] = [];
+  return { fit, sent, observed, writes };
 });
 
 vi.mock("../terminalInstances", () => {
@@ -70,7 +72,10 @@ vi.mock("../terminalInstances", () => {
         fitAddon: {},
         holder,
         ws,
-        send: () => {},
+        // Recorded, not swallowed: this IS the transport the launcher pills
+        // are supposed to reach, so a stub that dropped the bytes would let a
+        // disconnected pill pass.
+        send: (data: string) => term.writes.push(data),
         fit: () => {
           term.fit();
           ws.send(JSON.stringify({ type: "resize", cols: 80, rows: 24 }));
@@ -227,10 +232,39 @@ beforeEach(() => {
   term.fit.mockClear();
   term.sent.length = 0;
   term.observed.length = 0;
+  term.writes.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
 });
 
 describe("the speech row", () => {
+  // -------------------------------------------------------------------------
+  // The pill's wire, end to end.
+  //
+  // `SpeechControlBar` makes `send` required so that a host cannot render
+  // "pills that look live and do nothing when clicked" — and the type system
+  // cannot see the only thing that would actually cause that: a `TerminalView`
+  // whose `send` callback reaches the wrong transport, or none. That callback
+  // had no test at all; its body could be replaced with a no-op and the whole
+  // suite stayed green, because the one production call site is mocked
+  // wholesale everywhere else. So this clicks a real pill on the real view and
+  // asserts on the bytes the terminal instance received.
+  // -------------------------------------------------------------------------
+  it("hands the row the cell's own PTY write", async () => {
+    render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
+    await settle();
+
+    // A silent cell shows the launchers; the first is the `claude` default.
+    const pill = screen.getByTestId("speech-bar-launch-cell-a-0");
+    expect(pill).toHaveTextContent("claude");
+    expect(term.writes).toEqual([]);
+
+    fireEvent.click(pill);
+
+    // The command plus the return that runs it, on the instance this cell
+    // acquired — not on a spy the view happens to hold.
+    expect(term.writes).toEqual(["claude\r"]);
+  });
+
   it("renders the speech row on a cell that has never spoken", async () => {
     // Nothing in the queue, nothing to play, no interaction — and the row is
     // there anyway. That is what "reserved from mount" means: the height is
