@@ -475,16 +475,14 @@ export function AnswerPane({
           </>
         )}
       </div>
-      {/* The reply, above the switches and under the text it answers. Absent
-          entirely when the switch below is off — not hidden — so the height it
-          held goes back to the body, which is what "returns its height to the
-          text" means. */}
-      {composerOn ? <AnswerComposer sessionId={sessionId} send={sendReply} /> : null}
-      {/* The pane's switches: one row under everything, outside the scroll
-          container so it stays put while the text scrolls. It was the footer
-          when the auto-open switch was the pane's only control; now that the
-          composer sits between it and the text, what is left here is the meta —
-          what the pane does, not what it holds. */}
+      {/* The pane's switches, directly under the text and ABOVE the composer.
+          design.md's order, and the reason for it: the composer is the reply,
+          so the two switches that decide what the pane does belong with the
+          pane rather than under the box you type into. They were the pane's
+          footer when the auto-open switch was its only control, and stayed
+          there when the composer arrived — which put the reply box between the
+          answer and its own switches. Outside the scroll container either way,
+          so the row stays put while the text scrolls. */}
       <div className="answer-pane-meta">
         <label className="answer-pane-meta-label" htmlFor={`answer-pane-auto-open-${sessionId}`}>
           <input
@@ -504,9 +502,16 @@ export function AnswerPane({
             checked={composerOn}
             onChange={() => setComposerOn(!composerOn)}
           />
-          Composer
+          {/* Named for what it does, not for the component it mounts: the
+              switch decides whether a reply typed here goes to the terminal. */}
+          Send to terminal
         </label>
       </div>
+      {/* The reply itself — the grip, the field and its key hint. Absent
+          entirely when the switch above is off, not hidden, so the height it
+          held goes back to the body, which is what "returns its height to the
+          text" means. */}
+      {composerOn ? <AnswerComposer sessionId={sessionId} send={sendReply} /> : null}
     </div>
   );
 }

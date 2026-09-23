@@ -16,6 +16,11 @@ import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
  */
 const BOUNDS: RowBounds = { min: 40, max: 320, step: 12 };
 
+/** The file a path ends in — the chip's whole text. */
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
 export interface AnswerComposerProps {
   sessionId: string;
   /**
@@ -88,6 +93,27 @@ export interface AnswerComposerProps {
  * fixed for the life of its pane — a composer never changes which agent it is
  * replying to.
  *
+ * ## Why there is a send button as well as a key
+ *
+ * `submit` is one function and both controls call it, so the button is not a
+ * second path to the PTY — it is the same one with a pointer on it. It earns
+ * its place on a phone, where Enter is the only key there is and a hint line
+ * naming Shift+Enter would be describing a keyboard that is not there: the
+ * hint and the grip drop on a touch viewport, and the button is what is left.
+ *
+ * ## Why the pasted-image chip is beside the field and not inside it
+ *
+ * design.md draws the chip INSIDE the well with the path still under it as
+ * editable text. A `<textarea>` holds text, not elements, so that drawing
+ * cannot be built as drawn without giving up the editing — and the editing is
+ * the shipped behaviour Greg tested by hand and asked to keep (the path is
+ * spliced at the caret; typing over it points the reply somewhere else). So
+ * the chip stands above the field instead, and it is DERIVED from the text
+ * rather than kept beside it: `pasted` records what the uploads put there, and
+ * a chip is drawn only while its path is still in the reply. Edit the path
+ * away and the chip goes with it, because there is no longer an attachment of
+ * that name to name.
+ *
  * ## Why the height is the row hook's and not a CSS constant
  *
  * `useResizableRow(answerComposerHeight, BOUNDS)` with a `PaneResizer` on the
@@ -95,16 +121,35 @@ export interface AnswerComposerProps {
  * is the only direction there is room in. The hook reports `isMobile` but
  * applies nothing — the consumer decides — and here that decision is the whole
  * of the mobile case: no grip (an 8px rail under the thumb that is scrolling
- * the pane), no stored height at all, and a single row laid out by the viewport.
+ * the pane), no hint, no stored height at all, and a single row laid out by the
+ * viewport.
  */
 export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
   // Seeded from the store, not from `""`: this mount may be the second one for
   // a pane the user closed mid-sentence.
   const [text, setText] = useState(() => getDraft(sessionId));
+  /**
+   * Every path this composer's own pastes have put in the field. NOT the list
+   * of chips — see the note on the component: a chip is shown only while the
+   * path it names is still in the text, so this is the raw record and the text
+   * is what decides.
+   */
+  const [pasted, setPasted] = useState<readonly string[]>([]);
   const { height, isMobile, handleProps } = useResizableRow(
     preferences.answerComposerHeight,
     BOUNDS,
   );
+
+  /** The one way out of this field, whichever control asked for it. */
+  const submit = (): void => {
+    if (text.trim() === "") return;
+    // The one thing that consumes a draft. Nothing else in this file — or in
+    // the pane above it — calls `clearDraft`.
+    clearDraft(sessionId);
+    setText("");
+    setPasted([]);
+    send(`${text}\r`);
+  };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     // Shift+Enter is the textarea's own business, and so is every other key.
@@ -113,12 +158,7 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
     // when the send was swallowed would leave the next line indented by a
     // keystroke the user meant as "send".
     e.preventDefault();
-    if (text.trim() === "") return;
-    // The one thing that consumes a draft. Nothing else in this file — or in
-    // the pane above it — calls `clearDraft`.
-    clearDraft(sessionId);
-    setText("");
-    send(`${text}\r`);
+    submit();
   };
 
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
@@ -152,39 +192,113 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
       const next = `${base.slice(0, from)}${path} ${base.slice(to)}`;
       setDraft(sessionId, next);
       setText(next);
+      setPasted((prev) => (prev.includes(path) ? prev : [...prev, path]));
     });
   };
 
+  /**
+   * The chips to draw: a pasted path is an attachment for exactly as long as
+   * it is still in the reply.
+   */
+  const attachments = pasted.filter((path) => text.includes(path));
+
   return (
-    <div
-      className="answer-pane-composer"
-      // The positioning context the grip's `absolute top-0` is measured from,
-      // and — on desktop only — the row's height. On a touch viewport the
-      // stored number is not applied at all: the field is one row and the
-      // viewport lays the pane out.
-      style={isMobile ? undefined : { height: `${height}px` }}
-    >
-      {/* Renders nothing on a touch viewport — `handleProps` carries the
-          verdict and the rail hides itself, which is the primitive's own rule
-          rather than a second copy of it here. */}
-      <PaneResizer name="composer" edge="top" label="Resize the composer" {...handleProps} />
-      <textarea
-        className="answer-pane-composer-field"
-        data-testid={`answer-pane-composer-${sessionId}`}
-        aria-label="Reply to this cell"
-        placeholder="Reply…"
-        rows={isMobile ? 1 : 2}
-        value={text}
-        onChange={(e) => {
-          // Every keystroke goes to both: the state the field renders from,
-          // and the store it will be rebuilt from after the pane is closed.
-          setDraft(sessionId, e.target.value);
-          setText(e.target.value);
-        }}
-        onKeyDown={onKeyDown}
-        onPaste={onPaste}
-      />
-    </div>
+    <>
+      {/* The grip is its own 7px row now, between the switches and the field,
+          rather than a rail floating on the composer's top edge. Desktop only,
+          and gated HERE as well as inside the primitive: the row has a height
+          of its own, so a mobile pane that rendered it would keep the 7px the
+          hidden rail no longer fills. */}
+      {isMobile ? null : (
+        <div className="answer-pane-grip">
+          <span className="answer-pane-grip-bar" aria-hidden />
+          <PaneResizer name="composer" edge="top" label="Resize the composer" {...handleProps} />
+        </div>
+      )}
+      <div
+        className="answer-pane-composer"
+        // The row's height on desktop. On a touch viewport the stored number is
+        // not applied at all: the field is one row and the viewport lays the
+        // pane out.
+        style={isMobile ? undefined : { height: `${height}px` }}
+      >
+        <div className="answer-pane-composer-well">
+          {attachments.length > 0 ? (
+            <div className="answer-pane-composer-chips">
+              {attachments.map((path, index) => (
+                <span
+                  key={path}
+                  className="answer-pane-composer-chip"
+                  data-testid={`answer-pane-attachment-${sessionId}-${index}`}
+                  // The path is the chip's tooltip and the field's text; the
+                  // basename is all the chip itself says.
+                  title={path}
+                >
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    aria-hidden
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <path d="m21 15-5-5L5 21" />
+                  </svg>
+                  {basename(path)}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <textarea
+            className="answer-pane-composer-field"
+            data-testid={`answer-pane-composer-${sessionId}`}
+            aria-label="Reply to this cell"
+            placeholder="Reply to the terminal…"
+            rows={isMobile ? 1 : 2}
+            value={text}
+            onChange={(e) => {
+              // Every keystroke goes to both: the state the field renders from,
+              // and the store it will be rebuilt from after the pane is closed.
+              setDraft(sessionId, e.target.value);
+              setText(e.target.value);
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+          />
+        </div>
+        {/* The same `submit` Enter runs — not a second path to the PTY. On a
+            phone it is the ONLY one: there is no Shift+Enter to explain, so the
+            hint goes and the button carries the whole action. */}
+        <button
+          type="button"
+          className="answer-pane-composer-send"
+          data-testid={`answer-pane-send-${sessionId}`}
+          aria-label="Send to terminal"
+          onClick={submit}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden
+          >
+            <path d="M4 12h15M13 6l6 6-6 6" />
+          </svg>
+        </button>
+      </div>
+      {/* Desktop only: two of the three keys it names do not exist on a phone. */}
+      {isMobile ? null : (
+        <div className="answer-pane-hint" data-testid={`answer-pane-hint-${sessionId}`}>
+          ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER
+        </div>
+      )}
+    </>
   );
 }
 

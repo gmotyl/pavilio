@@ -1176,59 +1176,160 @@ input[type="checkbox"] {
   }
 }
 
-/* The reply field, between the answer and the switches.
+/* The reply, at the foot of the pane and under the two switches.
 
-   The one surface in the pane that paints a ground of its own, and the third
-   ground of the three: the bar and the pane share `#17171d`, the xterm keeps
-   `#1a1b26`, and what YOU type is neither agent nor shell, so it is darker than
-   both. That colour is the whole separation — the hairline above it is the seam
-   with the text, and there is no other edge.
+   The third ground of the three lives on the FIELD inside this row, not on the
+   row itself: the bar and the pane share `#17171d`, the xterm keeps `#1a1b26`,
+   and what YOU type is neither agent nor shell, so the well is darker than
+   both. Putting it on the field rather than the row is what makes the send
+   button beside it read as part of the surface instead of as part of the input,
+   and the row's `border-top` is the seam with the switches above it.
 
-   `position: relative` is load-bearing twice over: it is what the grip's
-   `absolute top-0` is measured from, and the height set inline by
-   `useResizableRow` is what the grip drags. */
+   The row paints the SPEECH ground, not the well: the well is the field's, so
+   the send button beside it reads as part of the surface rather than as part of
+   the input. `align-items: flex-end` is what parks the 34px button on the
+   field's bottom edge however tall the field has been dragged. */
 .answer-pane-composer {
-  position: relative;
   flex: none;
   display: flex;
-  background: #101014;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  background: #17171d;
   border-top: 1px solid var(--border-subtle);
 }
 
-/* The field fills the row it is given: the height is the row's, dragged, so the
-   textarea must not keep one of its own — and `resize: none` because the grip
-   IS its resize handle, on the edge that has room to grow into. */
-.answer-pane-composer-field {
-  flex: 1;
+/* The field and its chips, stacked — the column that takes the row's width and
+   leaves the send button its 34px. Stretched, because the row aligns its items
+   to the bottom and this one must still fill the height the grip dragged. */
+.answer-pane-composer-well {
+  flex: 1 1 auto;
   min-width: 0;
-  height: 100%;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The third ground of design.md's three: what YOU type is neither what the
+   agent said nor what the shell printed, so the well is darker than both the
+   speech surface and the xterm. `resize: none` because the grip IS the resize
+   handle, on the edge that has room to grow into. */
+.answer-pane-composer-field {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
   resize: none;
-  border: none;
   outline: none;
-  background: transparent;
-  color: var(--text-primary, #c0caf5);
-  font-family: inherit;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: #101014;
+  border: 1px solid var(--border-default);
+  font-family: "JetBrains Mono", monospace;
   font-size: 12px;
-  line-height: 1.45;
-  padding: 7px 12px;
+  line-height: 1.5;
+  color: var(--text-primary, #c0caf5);
+}
+
+.answer-pane-composer-field:focus {
+  border-color: var(--border-strong);
 }
 
 .answer-pane-composer-field::placeholder {
   color: var(--text-muted);
 }
 
-/* One row under everything, inside the pane: the cell's "Open on new answer"
-   switch and the composer's own. Outside the scroll container so it stays put
-   while the text scrolls. It paints nothing of its own — the pane's ground
-   shows through — and the hairline above it is the seam with whatever is above
-   it, the composer or the text. */
+/* The attachment chips, above the field rather than inside it — a textarea
+   holds text, not elements, and the raw path has to stay editable. See the note
+   on `AnswerComposer`. */
+.answer-pane-composer-chips {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.answer-pane-composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px 2px 5px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  background: rgba(96, 165, 250, 0.14);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  color: #60a5fa;
+  font-size: 11px;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The one control that survives the mobile collapse: on a phone there is no
+   Shift+Enter to explain and no grip to drag, so this is the whole affordance. */
+.answer-pane-composer-send {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.answer-pane-composer-send:hover {
+  background: rgba(229, 168, 75, 0.24);
+}
+
+/* The composer's drag handle: its own 7px row between the switches and the
+   field, rather than a rail floating on the composer's top edge. Positioned,
+   because the `PaneResizer` inside it is `absolute top-0`. */
+.answer-pane-grip {
+  position: relative;
+  flex: none;
+  height: 7px;
+  display: grid;
+  place-items: center;
+  cursor: ns-resize;
+  background: #17171d;
+}
+
+.answer-pane-grip-bar {
+  display: block;
+  width: 34px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border-strong);
+}
+
+/* What the three keys do, in the pane's dimmest ink. Desktop only — two of
+   them do not exist on a phone — so nothing here has a mobile case. */
+.answer-pane-hint {
+  flex: none;
+  padding: 0 13px 7px;
+  background: #17171d;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+/* The pane's two switches, right-aligned, directly under the text and ABOVE the
+   composer — design.md's order. Outside the scroll container so the row stays
+   put while the text scrolls. It paints nothing of its own, and draws no rule
+   either: the seam below it is the composer's own `border-top`, and a second
+   hairline here would box the switches in between two lines. */
 .answer-pane-meta {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 6px 12px;
-  border-top: 1px solid var(--border-subtle);
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 5px 14px;
   font-size: 11px;
   color: var(--text-muted);
 }

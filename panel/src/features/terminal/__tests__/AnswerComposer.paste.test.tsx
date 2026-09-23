@@ -56,6 +56,9 @@ function renderComposer() {
 const field = (): HTMLTextAreaElement =>
   screen.getByTestId("answer-pane-composer-cell-a") as HTMLTextAreaElement;
 
+/** The attachment chips standing beside the field, in order. */
+const chips = (): HTMLElement[] => screen.queryAllByTestId(/^answer-pane-attachment-cell-a-/);
+
 /**
  * A clipboard carrying one image, shaped the way `clipboardData` is read —
  * an `items` list whose entries answer `kind`, `type` and `getAsFile()`.
@@ -202,6 +205,63 @@ describe("AnswerComposer paste", () => {
     renderComposer();
 
     expect(field().value).toBe(`look at ${SAVED} please`);
+  });
+
+  /**
+   * The attachment chip.
+   *
+   * design.md draws the chip INSIDE the field, with the path still underneath
+   * it as editable text. A `<textarea>` holds text, not elements, so that
+   * drawing cannot be built as drawn — and the shipped behaviour it would have
+   * to replace is one Greg tested by hand and asked to keep: the raw path is
+   * spliced at the caret and stays editable mid-path, so a screenshot saved
+   * somewhere else can be pointed at by typing over it.
+   *
+   * So the chip is honest about being outside the field: it names the file and
+   * is DERIVED from the path, which is why it follows the text rather than
+   * being a second record of it. Edit the path away and the chip goes with it —
+   * there is no longer an attachment of that name in the reply.
+   */
+  it("names the pasted file in a chip beside the still-editable path", async () => {
+    fetchFn.mockResolvedValue({ ok: true, json: async () => ({ path: SAVED }) });
+    const user = userEvent.setup();
+    renderComposer();
+    await typeAroundACaret(user);
+
+    fireEvent.paste(field(), { clipboardData: imageClipboard(shot()) });
+    await waitFor(() => expect(field().value).toBe(`look at ${SAVED} please`));
+
+    // The basename, not the path: the chip is the glance, the field is the
+    // record.
+    expect(chips()).toHaveLength(1);
+    expect(chips()[0]).toHaveTextContent("paste-1.png");
+    expect(chips()[0]).not.toHaveTextContent("/tmp/pavilio-pastes");
+
+    // The path is still the field's text, and still what reaches the PTY.
+    await user.click(field());
+    await user.keyboard("{Enter}");
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(`look at ${SAVED} please\r`);
+  });
+
+  it("drops the chip when the path it names is edited away", async () => {
+    fetchFn.mockResolvedValue({ ok: true, json: async () => ({ path: SAVED }) });
+    const user = userEvent.setup();
+    renderComposer();
+    await typeAroundACaret(user);
+
+    fireEvent.paste(field(), { clipboardData: imageClipboard(shot()) });
+    await waitFor(() => expect(field().value).toBe(`look at ${SAVED} please`));
+    expect(chips()).toHaveLength(1);
+
+    // The same edit `sends the edited path rather than the inserted one`
+    // makes. The chip is derived, so it cannot outlive what it was derived
+    // from — a chip still claiming `paste-1.png` over a reply pointing at
+    // `crop.png` would be the panel telling the user something untrue.
+    field().setSelectionRange(8, 8 + SAVED.length);
+    await user.keyboard("/srv/shots/crop.png");
+
+    expect(chips()).toHaveLength(0);
   });
 
   it("sends the edited path rather than the inserted one", async () => {

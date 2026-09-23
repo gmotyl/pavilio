@@ -151,6 +151,15 @@ const maybeField = (): HTMLElement | null =>
 
 const grip = (): HTMLElement | null => screen.queryByTestId("pane-resize-composer");
 
+const sendButton = (): HTMLButtonElement =>
+  screen.getByRole("button", { name: "Send to terminal" }) as HTMLButtonElement;
+
+/** The pane's rows, top to bottom, by the class each one is known by. */
+function regionOrder(): string[] {
+  const root = screen.getByTestId("answer-pane-cell-a");
+  return Array.from(root.children).map((row) => row.className.split(/\s+/)[0]);
+}
+
 const composerSwitch = (): HTMLInputElement =>
   screen.getByTestId("answer-pane-composer-on-cell-a") as HTMLInputElement;
 
@@ -478,6 +487,135 @@ describe("AnswerComposer", () => {
   });
 
   /**
+   * The composer's designed shape.
+   *
+   * Greg's verdict on the shipped one was that it "does not look like design",
+   * and the gap was structural rather than cosmetic: a bare borderless
+   * textarea with the switch row UNDER it, no send button, and no key hint.
+   * design.md puts the switches above the composer, gives the field a well of
+   * its own, and ends the pane on a hint line — an order these tests read off
+   * the DOM, and a well they read out of the stylesheet, because jsdom does no
+   * layout and loads no CSS.
+   */
+  describe("the designed shape", () => {
+    it("lays the pane's rows out in the design's order", () => {
+      renderPane();
+
+      // Body, then the two switches, then the grip, then the field, then the
+      // hint. The switch row moving ABOVE the composer is the change: it was
+      // the pane's footer when the auto-open switch was its only control, and
+      // it stayed there when the composer arrived underneath it — which put
+      // the reply box between the answer and its own switches.
+      expect(regionOrder()).toEqual([
+        "answer-pane-body",
+        "answer-pane-meta",
+        "answer-pane-grip",
+        "answer-pane-composer",
+        "answer-pane-hint",
+      ]);
+    });
+
+    it("names the composer's switch for what it does", () => {
+      renderPane();
+
+      // "Composer" named the control after the component. "Send to terminal"
+      // is design.md's label and says where the text goes, which is the thing
+      // the switch is actually deciding.
+      expect(composerSwitch()).toBe(
+        screen.getByRole("checkbox", { name: "Send to terminal" }),
+      );
+    });
+
+    it("gives the field the design's well", () => {
+      renderPane();
+
+      // The placeholder says what the field is for, not merely that it is a
+      // field: a reply typed here reaches the PTY, not a chat.
+      expect(field()).toHaveAttribute("placeholder", "Reply to the terminal…");
+
+      // Read out of the stylesheet — `getComputedStyle` in jsdom answers for a
+      // rule it never saw, and `cssRule` throws on a renamed selector rather
+      // than agreeing with nothing.
+      const well = cssRule(".answer-pane-composer-field").replace(/\/\*[\s\S]*?\*\//g, "");
+      expect(well).toMatch(/(^|;)\s*background:\s*#101014\s*(;|$)/);
+      expect(well).toMatch(/(^|;)\s*border:\s*1px solid var\(--border-default\)\s*(;|$)/);
+      expect(well).toMatch(/(^|;)\s*border-radius:\s*6px\s*(;|$)/);
+    });
+
+    it("sends on the button exactly as it sends on Enter", async () => {
+      const user = userEvent.setup();
+      renderPane();
+
+      await user.click(field());
+      await user.keyboard("both scopes");
+      await user.click(sendButton());
+
+      // Identical to Enter, down to the return that submits the line, and the
+      // field is consumed the same way.
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith("both scopes\r");
+      expect(field().value).toBe("");
+    });
+
+    it("sends nothing from the button when the field is empty", async () => {
+      const user = userEvent.setup();
+      renderPane();
+
+      await user.click(sendButton());
+      await user.click(field());
+      await user.keyboard("   ");
+      await user.click(sendButton());
+
+      // Whitespace is empty here too: a bare return reaches the agent as a
+      // prompt containing nothing, and a button is easier to hit by accident
+      // than a key.
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it("drops the grip and the hint on a narrow viewport", () => {
+      installMatchMedia(true);
+      renderPane();
+
+      // There is no Shift+Enter on a phone, so the hint has nothing to say;
+      // the send button carries the whole action instead.
+      expect(regionOrder()).toEqual([
+        "answer-pane-body",
+        "answer-pane-meta",
+        "answer-pane-composer",
+      ]);
+      expect(grip()).toBeNull();
+      expect(field().rows).toBe(1);
+      // The button is the one control that does NOT go away with the keyboard
+      // affordances — it is the only way to send on a phone.
+      expect(sendButton()).toBeInTheDocument();
+    });
+
+    it("writes the key hint in the pane's own furniture ink", () => {
+      renderPane();
+
+      expect(screen.getByTestId("answer-pane-hint-cell-a")).toHaveTextContent(
+        "ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER",
+      );
+
+      // The hint and the grip paint the pane's own ground rather than the
+      // field's well, which is what keeps the composer reading as one box
+      // inside the surface instead of three stacked strips.
+      const surface = cssRule(".answer-pane").match(/background:\s*([^;]+)/)?.[1].trim();
+      expect(surface).toBe("#17171d");
+      expect(cssRule(".answer-pane-hint")).toMatch(
+        new RegExp(`background:\\s*${surface}\\s*(;|$)`, "m"),
+      );
+      expect(cssRule(".answer-pane-grip")).toMatch(
+        new RegExp(`background:\\s*${surface}\\s*(;|$)`, "m"),
+      );
+      // The grip's own bar, at design.md's size.
+      const bar = cssRule(".answer-pane-grip-bar");
+      expect(bar).toMatch(/(^|;)\s*width:\s*34px\s*(;|$)/);
+      expect(bar).toMatch(/(^|;)\s*height:\s*2px\s*(;|$)/);
+    });
+  });
+
+  /**
    * The composer's ground, read out of the stylesheet that owns it.
    *
    * `AnswerPane.test.tsx` says the composer "is darker than both of the other
@@ -520,7 +658,12 @@ describe("AnswerComposer", () => {
     };
 
     it("paints a ground darker than the pane's and the xterm's", () => {
-      const composer = ground(".answer-pane-composer");
+      // The well is the FIELD's, not the whole row's. design.md's composer row
+      // paints the speech ground and the box you type into is the darker one
+      // inside it — which is also what makes the send button read as part of
+      // the surface rather than as part of the input. The claim itself is
+      // unchanged: three grounds, and yours is the darkest of them.
+      const composer = ground(".answer-pane-composer-field");
       expect(composer).toBe("#101014");
 
       // Darker than BOTH, not merely different from them: the pane and the
