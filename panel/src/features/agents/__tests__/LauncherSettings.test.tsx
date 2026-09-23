@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -29,17 +29,31 @@ const DEFAULTS: TerminalLauncher[] = [
   { name: "opencode", command: "opencode" },
 ];
 
+/**
+ * `test-setup.ts` runs `vi.restoreAllMocks()`, which does NOT undo a
+ * `vi.stubGlobal` — so without this the next test added to this file would
+ * silently inherit a `fetch` that answers `[]` to everything.
+ */
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 /** A real read-back through the store, never the component's own state. */
 function stored(): TerminalLauncher[] {
   return readPreference(preferences.terminalLaunchers);
 }
 
+/**
+  * Every row's fields are named by their POSITION — "Launcher 2 command" — so a
+  * screen reader user hears which row they are in. These read them by that
+  * shape, in DOM order, which is the row order.
+  */
 function nameFields(): HTMLInputElement[] {
-  return screen.getAllByRole("textbox", { name: "Launcher name" }) as HTMLInputElement[];
+  return screen.getAllByRole("textbox", { name: /^Launcher \d+ name$/ }) as HTMLInputElement[];
 }
 
 function commandFields(): HTMLInputElement[] {
-  return screen.getAllByRole("textbox", { name: "Launcher command" }) as HTMLInputElement[];
+  return screen.getAllByRole("textbox", { name: /^Launcher \d+ command$/ }) as HTMLInputElement[];
 }
 
 /** The settings page lists agent config files over `fetch`; it needs none here. */
@@ -73,14 +87,19 @@ describe("LauncherSettings", () => {
     ).toBeInTheDocument();
 
     // One row per stored entry, each carrying both fields and a remove control.
-    const names = scope.getAllByRole("textbox", { name: "Launcher name" }) as HTMLInputElement[];
+    const names = scope.getAllByRole("textbox", {
+      name: /^Launcher \d+ name$/,
+    }) as HTMLInputElement[];
     const commands = scope.getAllByRole("textbox", {
-      name: "Launcher command",
+      name: /^Launcher \d+ command$/,
     }) as HTMLInputElement[];
     expect(names.map((field) => field.value)).toEqual(["claude", "resume"]);
     expect(commands.map((field) => field.value)).toEqual(["claude", "claude --resume"]);
-    expect(scope.getByRole("button", { name: "Remove claude" })).toBeInTheDocument();
-    expect(scope.getByRole("button", { name: "Remove resume" })).toBeInTheDocument();
+    // The row number is in the name too: two launchers may legally share one,
+    // and "Remove claude" twice over is a name that identifies nothing — and a
+    // `getByRole` that throws.
+    expect(scope.getByRole("button", { name: "Remove launcher 1: claude" })).toBeInTheDocument();
+    expect(scope.getByRole("button", { name: "Remove launcher 2: resume" })).toBeInTheDocument();
   });
 
   it("appends an added launcher to the preference", async () => {
@@ -116,7 +135,7 @@ describe("LauncherSettings", () => {
     const user = userEvent.setup();
 
     const view = render(<LauncherSettings />);
-    await user.click(screen.getByRole("button", { name: "Remove codex" }));
+    await user.click(screen.getByRole("button", { name: "Remove launcher 2: codex" }));
 
     // Read back through the store, not off the component's state.
     expect(stored()).toEqual([
@@ -127,8 +146,9 @@ describe("LauncherSettings", () => {
     // The last two go as well. An emptied list is the trap: the declared
     // default is handed back only when NOTHING is stored, so a stored empty
     // list has to stay distinguishable from a workspace that never wrote one.
-    await user.click(screen.getByRole("button", { name: "Remove claude" }));
-    await user.click(screen.getByRole("button", { name: "Remove opencode" }));
+    // Each removal renumbers the rows under it, so these are rows 1 and 1.
+    await user.click(screen.getByRole("button", { name: "Remove launcher 1: claude" }));
+    await user.click(screen.getByRole("button", { name: "Remove launcher 1: opencode" }));
 
     expect(stored()).toEqual([]);
     // The document holds the emptied list — an absent key would read as the
@@ -139,7 +159,7 @@ describe("LauncherSettings", () => {
     // Mounted from scratch, the way a reload mounts it: still no rows.
     view.unmount();
     render(<LauncherSettings />);
-    expect(screen.queryAllByRole("textbox", { name: "Launcher name" })).toHaveLength(0);
+    expect(screen.queryAllByRole("textbox", { name: /^Launcher \d+ name$/ })).toHaveLength(0);
     expect(stored()).toEqual([]);
     // Nothing spliced the frozen defaults in place on the way through.
     expect(DEFAULT_TERMINAL_LAUNCHERS).toEqual(DEFAULTS);

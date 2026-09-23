@@ -15,6 +15,14 @@ import { usePreference } from "../../preferences/usePreference";
  * stored, so an editor that pushed onto — or spliced out of — the value it read
  * would rewrite the defaults for the rest of the session.
  *
+ * EVERY CONTROL IS NAMED BY ITS ROW. A screen reader reads only the accessible
+ * name, so three rows of "Launcher name" / "Launcher command" told a user which
+ * field they were in and nothing about which launcher — and `Remove ${name}`
+ * identified nothing at all when two entries shared a name, which the index
+ * keys below say is legal. The row's 1-based position goes in every one of
+ * them, remove button included; the position is what the user sees, so it is
+ * what they are told.
+ *
  * An entry needs both halves: the name is the pill's label and the command is
  * what the PTY receives, so a blank either side is not an entry. A rejected
  * edit puts the stored value back into the field rather than leaving the user
@@ -66,7 +74,7 @@ function LauncherRow({
   return (
     <li className="flex items-center gap-2">
       <input
-        aria-label="Launcher name"
+        aria-label={`Launcher ${index + 1} name`}
         data-testid={`launcher-name-${index}`}
         value={name}
         onChange={(e) => setName(e.target.value)}
@@ -76,7 +84,7 @@ function LauncherRow({
         spellCheck={false}
       />
       <input
-        aria-label="Launcher command"
+        aria-label={`Launcher ${index + 1} command`}
         data-testid={`launcher-command-${index}`}
         value={command}
         onChange={(e) => setCommand(e.target.value)}
@@ -87,7 +95,7 @@ function LauncherRow({
       />
       <button
         type="button"
-        aria-label={`Remove ${entry.name}`}
+        aria-label={`Remove launcher ${index + 1}: ${entry.name}`}
         data-testid={`launcher-remove-${index}`}
         onClick={onRemove}
         className="rounded p-1 transition-colors"
