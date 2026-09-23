@@ -28,6 +28,10 @@ async function resetTabScopedSingletons(): Promise<void> {
   await reset("./preferences/store", "__resetPreferenceStoreForTests");
   await reset("./features/terminal/sessionStore", "__resetSessionStoreForTests");
   await reset("./features/realtime/channel", "__resetRealtimeChannelForTests");
+  // The mobile sidebar fold is tab-scoped too, and deliberately never stored —
+  // so nothing else in this teardown clears it, and a test that opened a
+  // sidebar on a phone would hand the next one a sidebar already open.
+  await reset("./features/shell/useSidebarState", "__resetSidebarFoldForTests");
 }
 
 function createMemoryStorage(): Storage {

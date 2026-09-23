@@ -16,6 +16,9 @@ import {
   RefreshCw,
 } from "lucide-react";
 import useFileListSidebar from "./useFileListSidebar";
+import PaneResizer from "../shell/PaneResizer";
+import useResizablePane, { type PaneBounds } from "../shell/useResizablePane";
+import { preferences } from "../../preferences/declarations";
 
 /**
  * Grace period before a hover-peek closes on mouse-leave. A re-enter (of the
@@ -23,6 +26,14 @@ import useFileListSidebar from "./useFileListSidebar";
  * crossing the seam between the strip and a short overlay never flickers.
  */
 const PEEK_CLOSE_DELAY_MS = 120;
+
+/**
+ * How far the pinned-open list may be dragged. The floor keeps a filename
+ * column readable rather than a stack of ellipses; the ceiling leaves the
+ * detail pane — the thing the list exists to open — the larger half of a
+ * laptop screen. `step` is the arrow-key increment.
+ */
+const PANE_BOUNDS: PaneBounds = { min: 200, max: 560, step: 16 };
 
 /** Toggle-chevron size. Shared by the button and the peeking spacer so their
  *  boxes stay identical — the no-reflow guarantee depends on it. */
@@ -113,6 +124,9 @@ export default function FileListSidebar({
 }: Props) {
   const { collapsed, peeking, toggle, startPeek, endPeek } =
     useFileListSidebar();
+  // Independent of `collapsed`: the width is what the list comes BACK to, so
+  // collapsing must not touch it.
+  const pane = useResizablePane(preferences.fileListPaneWidth, PANE_BOUNDS);
   const total = sources.reduce((sum, s) => sum + s.count, 0);
 
   // Delayed close so a re-enter cancels it — kills the leave/enter flicker at
@@ -277,9 +291,30 @@ export default function FileListSidebar({
     );
   }
 
+  // `md:w-72` is GONE rather than overridden. `useResizablePane` takes its
+  // starting width from React state, never a layout measurement, so a class
+  // that could still win the cascade — or a `min-w`/`max-w` that pinned the
+  // box — would leave the rendered pane disagreeing with the reported one, and
+  // the rail would jump back to the reported width on the next press.
+  // `shrink-0` stays for the same reason, from the other side: it is what stops
+  // the flex row squeezing the pane below the width the hook thinks it has.
+  // On mobile the row stacks and the aside is full-bleed, so no width is set.
   return (
     <div className="flex flex-col md:flex-row gap-6">
-      <aside className="md:w-72 shrink-0">{listContent}</aside>
+      <aside
+        data-testid="file-list-sidebar"
+        className="shrink-0 relative"
+        style={pane.isMobile ? undefined : { width: `${pane.width}px` }}
+      >
+        {listContent}
+        {/* The inner edge: the seam with the detail pane. */}
+        <PaneResizer
+          name="file-list"
+          edge="right"
+          label="Resize the file list"
+          {...pane.handleProps}
+        />
+      </aside>
       <section className="flex-1 min-w-0">{wrappedDetail}</section>
     </div>
   );

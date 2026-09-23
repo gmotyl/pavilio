@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Archive as ArchiveIcon,
@@ -16,6 +16,7 @@ import {
   Terminal as TerminalIcon,
   Wifi,
 } from "lucide-react";
+import { HamburgerSlot } from "./SidebarHamburger";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
 import { isPreferenceScope } from "../../preferences/types";
@@ -42,15 +43,25 @@ import {
 } from "../terminal/useTerminalSessions";
 import { createTerminalSession } from "../terminal/createTerminalSession";
 
+/**
+ * `leading` is the slot the corner hamburger occupies — passed to whichever
+ * header renders FIRST, because that is the row the fixed button lands on. It
+ * is a reserved box rather than the button itself: `.sidebar` is
+ * `overflow: hidden` and `.sidebar-collapsed` is `pointer-events: none`, so the
+ * control cannot live in this tree. See `SidebarHamburger`.
+ */
 function SectionHeader({
   icon: Icon,
   label,
+  leading,
 }: {
   icon: typeof FolderOpen;
   label: string;
+  leading?: ReactNode;
 }) {
   return (
     <div className="flex items-center gap-2 mb-2 px-1">
+      {leading}
       <Icon size={12} style={{ color: "var(--text-tertiary)" }} />
       <h2
         className="text-[11px] font-semibold uppercase tracking-widest"
@@ -391,18 +402,45 @@ export default function LeftSidebar() {
     );
   };
 
+  // Which header row reserves the hamburger's box, decided ONCE. It belongs to
+  // the first row on screen, which is Starred when there is one and Projects
+  // otherwise — an invariant, and one that two independent `leading` ternaries
+  // could disagree about. Two slots would double-indent, none would put the
+  // heading under the button, and both are a single edit away when the answer
+  // lives in two places.
+  const starredIsFirst = starredProjects.length > 0;
+  const hamburgerSlot = <HamburgerSlot />;
+
   return (
-    <div className="p-3 overflow-auto h-full flex flex-col gap-5 pt-10">
-      {starredProjects.length > 0 && (
+    // `pt-10` used to clear the floating toggle that hovered over this column.
+    // The hamburger sits in the first header row instead, so the row starts at
+    // the padding like every other one.
+    //
+    // That row is inside this `overflow-auto` box while the button is fixed to
+    // the viewport, so the two line up at `scrollTop === 0` and only there:
+    // scroll the project list and the button floats over whatever row has
+    // risen to the top, exactly as the floating toggle it replaced did. Not a
+    // regression, and not fixed by a `sticky` header either — sticky is
+    // constrained by its own `<section>`, so the pinned row is pushed off as
+    // soon as that section's box scrolls past, and the next header arrives at
+    // the top with no slot in it. Pinning it for real means lifting the row out
+    // of this scrollport and away from the list it heads, which is a bigger
+    // change than the misalignment earns.
+    <div className="p-3 overflow-auto h-full flex flex-col gap-5">
+      {starredIsFirst && (
         <section>
-          <SectionHeader icon={Star} label="Starred" />
+          <SectionHeader icon={Star} label="Starred" leading={hamburgerSlot} />
           <ul className="space-y-0.5">
             {starredProjects.map(renderProjectRow)}
           </ul>
         </section>
       )}
       <section>
-        <SectionHeader icon={FolderOpen} label="Projects" />
+        <SectionHeader
+          icon={FolderOpen}
+          label="Projects"
+          leading={starredIsFirst ? undefined : hamburgerSlot}
+        />
         <ul className="space-y-0.5">
           {otherProjects.map(renderProjectRow)}
           <li>

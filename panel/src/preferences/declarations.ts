@@ -57,19 +57,17 @@ export interface TimeReportPrefs {
 export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
 
 /**
- * Three rows of design.md's portability table are deliberately NOT declared
- * below, because nothing persists or resizes them today and a declaration
- * with no writer is dead weight:
+ * Every row of design.md's portability table is now declared below.
  *
- * - "Sidebar expanded / width, both sides" — only the two `expanded` flags
- *   exist. The widths arrive with the `2026-09-21-panel-ui-polish` change,
- *   whose Task 4 declares `shell.leftSidebar.width` (default 240) and
- *   `shell.rightSidebar.width` (default 264) alongside the resize handles.
- * - "Pane widths — file list, git history" — neither pane is resizable, so
- *   there is no width to remember yet.
- *
- * `declarations.test.ts` lists them as not-yet-declared so that adding them
- * is a one-line move in the portability table rather than a spurious red.
+ * Two of them used to be listed here as deliberately absent — a declaration
+ * with no writer is dead weight — and both have since landed. "Pane widths"
+ * went first, when the file list and the git-history tree each got a rail.
+ * "Sidebar expanded / width, both sides" is the last: only the two `expanded`
+ * flags existed until `2026-09-21-panel-ui-polish` Task 4 added the handles,
+ * and `shell.leftSidebar.width` and `shell.rightSidebar.width` arrive with
+ * them. `declarations.test.ts`'s NOT_YET_DECLARED list is empty as a result,
+ * and stays in place: the next row the design names but nothing writes yet
+ * goes there rather than turning this paragraph back into prose.
  */
 
 /**
@@ -110,6 +108,37 @@ export const preferences = {
     scope: "global",
     default: true,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The left sidebar's width. No `// was:` line: nothing stored it before,
+   * because the pane took a fixed 240px from the stylesheet — so a workspace
+   * with no entry opens exactly as it always has. This default is now that
+   * number's only home; `index.css` keeps no copy of it.
+   *
+   * Global, like the `expanded` flag above it: how wide you like your
+   * navigation column is a habit, not a fact about one project.
+   */
+  leftSidebarWidth: definePreference({
+    key: "shell.leftSidebar.width", // was: nothing — the sidebar had a fixed width
+    scope: "global",
+    default: 240,
+    codec: num,
+    portable: true,
+  }),
+  /**
+   * The right sidebar's width, and a SECOND declaration rather than one keyed
+   * by side — for the reason `useSidebarState` already gives about the two
+   * `expanded` flags: the sides are not a list. They are also not the same
+   * number. 264 was the width the layout hard-coded before the sidebar became
+   * resizable; this declaration is its only home now, and it is wider than the
+   * left on purpose: this side holds file trees, which indent.
+   */
+  rightSidebarWidth: definePreference({
+    key: "shell.rightSidebar.width", // was: nothing — the sidebar had a fixed width
+    scope: "global",
+    default: 264,
+    codec: num,
     portable: true,
   }),
   /** Scope argument: the right sidebar's section key, e.g. "skills". */
@@ -155,6 +184,21 @@ export const preferences = {
     scope: "global",
     default: false,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The pinned-open file list's width. No `// was:` line: nothing stored it
+   * before, because the pane was the fixed `md:w-72` — 18rem, hence 288, so a
+   * workspace with no entry opens exactly as it always has.
+   *
+   * Global, like the collapse flag above it: how wide you like to read a file
+   * list is a habit, not a fact about one project.
+   */
+  fileListPaneWidth: definePreference({
+    key: "fileList.paneWidth", // was: nothing — the pane had a fixed width
+    scope: "global",
+    default: 288,
+    codec: num,
     portable: true,
   }),
   favoriteProjects: definePreference<string[]>({
@@ -203,6 +247,25 @@ export const preferences = {
     scope: "repo",
     default: true,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The git-history commit tree's width. No `// was:` line, for the same
+   * reason as `fileList.paneWidth`: nothing stored it before, because the pane
+   * was the fixed `w-[280px]` — so 280, and a workspace with no entry opens
+   * exactly as it always has.
+   *
+   * Global, not `repo`, even though the tree only ever appears beside a repo's
+   * diff. How wide you like to read a list of changed paths is a habit; it
+   * does not become a different preference because you switched repository.
+   * The scope is also load-bearing for the key: a `repo` scope would append
+   * `@<repo>` to the storage key, and this one is read under the bare key.
+   */
+  gitHistoryPaneWidth: definePreference({
+    key: "git.history.paneWidth", // was: nothing — the tree had a fixed width
+    scope: "global",
+    default: 280,
+    codec: num,
     portable: true,
   }),
   /** Empty means "nothing chosen yet" — the view then picks main/master/develop. */

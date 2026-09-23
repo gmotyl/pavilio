@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
-import { useState, useEffect, useCallback } from "react";
-import { ExternalLink, Copy, Check } from "lucide-react";
+import { useState, useEffect } from "react";
 import { useActiveFile } from "../explorer/useActiveFile";
+import ViewerActions from "../projects/ViewerActions";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useFloatingAction } from "../shell/Layout";
@@ -9,8 +9,6 @@ import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import ImageDropZone from "./ImageDropZone";
 import MarkdownRenderer from "./MarkdownRenderer";
-import { copyToClipboard } from "../../lib/clipboard";
-import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 
 /**
  * Build the /api/files/read/... URL from a route path.
@@ -40,7 +38,6 @@ export default function MarkdownViewer() {
   const [content, setContent] = useState("");
   const [absolutePath, setAbsolutePath] = useState("");
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
   const [wide, toggleWide] = useWideMode("viewer");
   const { lastMessage } = useWebSocket();
 
@@ -65,66 +62,21 @@ export default function MarkdownViewer() {
     }
   }, [lastMessage]);
 
-  const openInVSCode = useCallback(() => {
-    void openPathInVSCode(absolutePath);
-  }, [absolutePath]);
-
-  const copyPath = useCallback(async () => {
-    const ok = await copyToClipboard(absolutePath);
-    if (!ok) return;
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }, [absolutePath]);
-
-  // Inject VS Code + Path buttons into the breadcrumb bar
+  // The toolbar above an open file is `ViewerActions`, the same component the
+  // project file viewer and the plans tab mount — VS Code, copy-path and
+  // copy-content, with one shared revert timer so only one confirms at a time.
+  // The prefix keeps this screen's published `markdown-viewer-*` test ids.
+  // While a file switch is in flight `content` still holds the previous file's
+  // text, so it is withheld until this one has loaded.
   useBreadcrumbActions(
     absolutePath ? (
-      <>
-        <button
-          data-testid="markdown-viewer-vscode"
-          onClick={openInVSCode}
-          className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors"
-          style={{ color: "var(--text-secondary)" }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "var(--bg-hover)";
-            e.currentTarget.style.color = "var(--text-primary)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color = "var(--text-secondary)";
-          }}
-        >
-          <ExternalLink className="w-3 h-3" />
-          VS Code
-        </button>
-        <button
-          data-testid="markdown-viewer-copy-path"
-          onClick={copyPath}
-          className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors"
-          style={{ color: copied ? "var(--green)" : "var(--text-secondary)" }}
-          onMouseEnter={(e) => {
-            if (!copied) {
-              e.currentTarget.style.background = "var(--bg-hover)";
-              e.currentTarget.style.color = "var(--text-primary)";
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!copied) {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--text-secondary)";
-            }
-          }}
-        >
-          {copied ? (
-            <Check className="w-3 h-3" />
-          ) : (
-            <Copy className="w-3 h-3" />
-          )}
-          {copied ? "Copied" : "Path"}
-        </button>
-      </>
+      <ViewerActions
+        absolutePath={absolutePath}
+        content={loading ? null : content}
+        testIdPrefix="markdown-viewer"
+      />
     ) : null,
-    [absolutePath, copied, openInVSCode, copyPath],
+    [absolutePath, content, loading],
   );
 
   useFloatingAction(<WideToggle wide={wide} onToggle={toggleWide} />, [

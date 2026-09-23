@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { useFileListSidebar, MOBILE_QUERY } from "../useFileListSidebar";
+import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { useFileListSidebar } from "../useFileListSidebar";
 import { preferences } from "../../../preferences/declarations";
 
 /** Controllable matchMedia stub — jsdom has none. */

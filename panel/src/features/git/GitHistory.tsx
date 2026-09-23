@@ -10,6 +10,17 @@ import {
 import DiffView, { type DiffMode } from "./DiffView";
 import FileChangeList from "./FileChangeList";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
+import PaneResizer from "../shell/PaneResizer";
+import useResizablePane, { type PaneBounds } from "../shell/useResizablePane";
+import { preferences } from "../../preferences/declarations";
+
+/**
+ * How far the commit tree may be dragged. The floor keeps a path column
+ * readable rather than a stack of ellipses; the ceiling is tighter than the
+ * file list's because this tree shares its row with a DIFF, which wants every
+ * column it can get. `step` is the arrow-key increment.
+ */
+const TREE_BOUNDS: PaneBounds = { min: 200, max: 480, step: 16 };
 
 interface Commit {
   sha: string;
@@ -79,6 +90,8 @@ export default function GitHistory({
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
   const [localViewMode] = useGitViewMode();
+  // Above the `commits.length === 0` bail-out below, where every hook has to be.
+  const tree = useResizablePane(preferences.gitHistoryPaneWidth, TREE_BOUNDS);
   const viewMode = controlledViewMode ?? localViewMode;
 
   // Controlled/uncontrolled sync: when activeSha prop changes, mirror to internal state
@@ -295,14 +308,52 @@ export default function GitHistory({
     if (showListSidebar) {
       return (
         <div className="md:flex md:gap-4">
+          {/*
+            `w-[280px]` is GONE rather than overridden, for the reason the file
+            list documents: the hook starts a drag from React state, never a
+            measurement, so a width class still in the cascade would leave the
+            rendered tree disagreeing with the reported one.
+
+            `sticky` survives untouched, and deliberately so. The rail is
+            absolutely positioned and the reflex fix — adding `relative` — would
+            have REPLACED the sticky; a sticky box is already a positioned box,
+            so it is the rail's containing block as it stands. The scrolling
+            moved one level in for the rail's sake: an absolute child of a
+            scroll container scrolls away with the content, and a resize rail
+            that disappears when you scroll the tree is no rail at all. The
+            aside's own overflow never affected its own stickiness anyway —
+            only an ANCESTOR's would — so nothing about the sticky changes.
+
+            The CAP moved in with the scrolling, and its number had to change to
+            keep the box the size it was. Preflight sets `box-sizing:
+            border-box`, so `max-h-[calc(100vh-120px)]` on the aside capped the
+            BORDER box, and the content it left room for was that minus the
+            aside's own `p-2` (8px twice) and its 1px border (twice) — 18px. The
+            inner div has neither padding nor border, so carrying the same
+            expression across would have handed those 18px back and shown ~18px
+            more of the tree before it scrolled. A move sold as structural
+            should not quietly grow the box, so the cap reads
+            `calc(100vh-138px)` here and the tree scrolls exactly where it did.
+          */}
           <aside
-            className="hidden md:block w-[280px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg p-2"
+            data-testid="git-history-tree"
+            className="hidden md:block shrink-0 self-start sticky top-4 rounded-lg p-2"
             style={{
               background: "var(--bg-base)",
               border: "1px solid var(--border-subtle)",
+              ...(tree.isMobile ? null : { width: `${tree.width}px` }),
             }}
           >
-            {renderSidebarList()}
+            <div className="max-h-[calc(100vh-138px)] overflow-y-auto">
+              {renderSidebarList()}
+            </div>
+            {/* The inner edge: the seam with the diff. */}
+            <PaneResizer
+              name="git-history"
+              edge="right"
+              label="Resize the commit tree"
+              {...tree.handleProps}
+            />
           </aside>
           <div className="flex-1 min-w-0">{diffEl}</div>
         </div>

@@ -45,8 +45,8 @@ Agent guidance for the `panel/` app. Read this before making panel-specific chan
 
 ## Persistence / State Notes
 
-- Several panel preferences are persisted in `localStorage` (`useWideMode`, `useSidebarState`, `useGitViewMode`, branch diff base branch selection).
-- When refactoring these features, preserve storage keys unless the user explicitly asks for a migration.
+- Several panel preferences are persisted through the declared registry in `src/preferences/` (`useWideMode`, `useSidebarState`, `useGitViewMode`, branch diff base branch selection). These four are `portable`, so they live in the workspace preferences file and follow the workspace between machines, not in browser storage. Non-portable declarations stay in the browser on a second axis: `localStorage` by default, or `sessionStorage` where a declaration says `browserStore: "session"` (the three navigation-memory entries, `declarations.ts:383-414`). Browser storage is not registry-only either — `pavilio.time.<project>`, the busy accumulator, is still raw undeclared `localStorage` (`declarations.ts:419`).
+- Storage keys already moved once when the registry landed, and **no migration shipped**: each declaration's `// was:` comment names the raw key it replaced, those old keys are orphaned in the browser, and the workspace file is seeded by hand instead. Treat a declared `key` the same way — changing one orphans its value rather than migrating it, so change it only deliberately.
 - Frontend tests assume browser-like `localStorage` behavior; check `src/test-setup.ts` before changing persistence code.
 
 ## Validation Checklist

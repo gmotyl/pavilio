@@ -21,6 +21,7 @@ import {
   utteranceQueueReducer,
   type UtteranceQueue,
 } from "../../speech/utteranceQueue";
+import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { segmentStateFor } from "../segmentState";
 import { AnswerPane } from "../AnswerPane";
 
@@ -1057,6 +1058,60 @@ describe("AnswerPane", () => {
       // Re-laid when the body's box changes — the observer watches the body,
       // never the xterm container.
       expect(observed).toContain(body());
+    });
+  });
+
+  /**
+   * The pane's two surfaces, read out of the stylesheet that owns them.
+   *
+   * jsdom loads no stylesheet, so `getComputedStyle` here would answer for a
+   * rule it never saw. `cssRule` — the helper the hamburger geometry already
+   * reads `index.css` with — returns one selector's declaration block and
+   * refuses to guess when a selector matches more than one rule, so these
+   * assertions are about what the file actually says.
+   */
+  describe("surfaces", () => {
+    /**
+     * The `background` shorthand's value — not `background-color`, which the
+     * `:` in the pattern excludes, and not a value hidden behind a comment,
+     * which is why the comments come out before the declarations are split.
+     */
+    const background = (selector: string): string | null => {
+      const declarations = cssRule(selector).replace(/\/\*[\s\S]*?\*\//g, "");
+      const found = declarations.match(/(?:^|;)\s*background\s*:\s*([^;]+)/);
+      return found ? found[1].trim() : null;
+    };
+
+    /**
+     * What a surface inside the card actually shows: its own `background` if
+     * it declares one, else the card's, which is what shows through an
+     * undeclared one.
+     */
+    const shows = (selector: string): string | null =>
+      background(selector) ?? background(".answer-pane");
+
+    it("the answer pane body uses the base background", () => {
+      expect(background(".answer-pane-body")).toBe("var(--bg-base)");
+
+      // Adding a paint must not have moved the geometry the rail reads: the
+      // body is still the positioned grid whose first column is the rail.
+      const body = cssRule(".answer-pane-body");
+      expect(body).toMatch(/position:\s*relative/);
+      expect(body).toMatch(/display:\s*grid/);
+      expect(body).toMatch(/grid-template-columns:\s*22px 1fr/);
+    });
+
+    it("the footer does not take the body's background", () => {
+      // The footer paints nothing of its own, so what it shows is the card it
+      // sits in. That is the whole point of the darker body: the two surfaces
+      // have to end up different, which they were not while the body also
+      // declared nothing.
+      const card = background(".answer-pane");
+      expect(card).not.toBeNull();
+      expect(cssRule(".answer-pane-footer")).not.toMatch(/background/);
+      expect(shows(".answer-pane-footer")).toBe(card);
+
+      expect(shows(".answer-pane-body")).not.toBe(shows(".answer-pane-footer"));
     });
   });
 });

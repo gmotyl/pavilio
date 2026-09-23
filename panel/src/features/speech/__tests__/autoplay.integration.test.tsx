@@ -9,7 +9,8 @@
  * that forgets to pass it leaves every cell `empty`, every callback a no-op,
  * and a grid-level suite entirely green. So these tests mount
  * `ProjectTerminalsSurface` and `TerminalsPage` — the two hosts — and read the
- * cell header's own `data-speech` / `data-armed` attributes.
+ * cell header's own `data-speech` attribute and, for arming, the `data-armed`
+ * of the switch inside the bar — the only control that reports it since Task 9.
  *
  * Since Task 8 the SPEECH BAR is in that chain too: arming lives in the bar, and
  * the bar is rendered by `TerminalView`, two prop hops below the surface
@@ -491,10 +492,18 @@ const speakState = (sessionId: string): string | null =>
 const speakIcon = (sessionId: string): string | null =>
   screen.getByTestId(`terminal-cell-speak-${sessionId}`).getAttribute("data-icon");
 
+/**
+ * Whether a cell is armed, read where arming is now SHOWN: the switch inside
+ * that cell's bar. Since Task 9 the header control reports nothing at all, so a
+ * cell whose bar is closed cannot be asked this question from the DOM — which
+ * is why the tests below open the bar first with `openBar` when they need the
+ * answer. Opening a bar is inert with respect to arming; that is the whole
+ * point of the task, and several of these tests are what pins it.
+ */
 const armed = (sessionId: string): string | null =>
-  screen.getByTestId(`terminal-cell-autoplay-${sessionId}`).getAttribute("data-armed");
+  screen.getByTestId(`speech-bar-autoplay-${sessionId}`).getAttribute("data-armed");
 
-/** Whether this cell's bar is on screen — what the header icon now toggles. */
+/** Whether this cell's bar is on screen — what the header control toggles. */
 const barVisible = (sessionId: string): boolean =>
   screen.queryByTestId(`speech-bar-${sessionId}`) !== null;
 
@@ -534,11 +543,12 @@ async function renderBothViews(): Promise<void> {
 }
 
 /**
- * The three speech controls a cell has, by where they live. `autoplay` is the
- * HEADER icon, which since Task 8 only shows the bar; `bar-autoplay` is the
- * switch inside the bar, which is the one that arms.
+ * The three speech controls a cell has, by where they live. `speech-controls`
+ * is the HEADER disclosure, which since Task 8 only shows the bar and since
+ * Task 9 says nothing else; `bar-autoplay` is the switch inside the bar, which
+ * is the one that arms and the one that reports arming.
  */
-type ControlKind = "speak" | "autoplay" | "bar-autoplay";
+type ControlKind = "speak" | "speech-controls" | "bar-autoplay";
 
 const testIdFor = (kind: ControlKind, sessionId: string): string =>
   kind === "bar-autoplay"
@@ -549,9 +559,12 @@ const testIdFor = (kind: ControlKind, sessionId: string): string =>
 const controls = (kind: ControlKind, sessionId: string): HTMLElement[] =>
   screen.getAllByTestId(testIdFor(kind, sessionId));
 
-/** What each view says about a cell's arming, in view order. */
+/**
+ * What each view's BAR says about a cell's arming, in view order. Both views'
+ * bars have to be open for this to mean anything — `openBarInViews` is how.
+ */
 const armedInViews = (sessionId: string): (string | null)[] =>
-  controls("autoplay", sessionId).map((el) => el.getAttribute("data-armed"));
+  controls("bar-autoplay", sessionId).map((el) => el.getAttribute("data-armed"));
 
 async function clickIn(view: number, kind: ControlKind, sessionId: string): Promise<void> {
   await act(async () => {
@@ -590,8 +603,28 @@ const latestFetches = (): number =>
  * spoken, or one already opened — it is the single click it always was.
  */
 async function arm(sessionId: string): Promise<void> {
-  if (!barVisible(sessionId)) await click(testIdFor("autoplay", sessionId));
+  await openBar(sessionId);
   await click(testIdFor("bar-autoplay", sessionId));
+}
+
+/**
+ * Brings a cell's bar out if it is not already there — the one way to read that
+ * cell's arming, now that the header control has stopped reporting it.
+ */
+async function openBar(sessionId: string): Promise<void> {
+  if (!barVisible(sessionId)) await click(testIdFor("speech-controls", sessionId));
+}
+
+/**
+ * The same, in both mounted views: each view has its own bar and its own
+ * choice. Every caller here is in the state where the bar is out in both views
+ * or in neither, which is what makes one count enough to decide.
+ */
+async function openBarInViews(sessionId: string): Promise<void> {
+  if (screen.queryAllByTestId(`speech-bar-${sessionId}`).length === 0) {
+    await clickIn(0, "speech-controls", sessionId);
+    await clickIn(1, "speech-controls", sessionId);
+  }
 }
 
 /**
@@ -928,12 +961,13 @@ describe("autoplay — the surfaces and the session language", () => {
   it("the terminals surface wires its cells to the channel", async () => {
     await renderProjectSurface();
 
-    // An unwired grid reports `empty` for every cell forever, and its autoplay
-    // toggle never changes — that is exactly what this pins.
+    // An unwired grid reports `empty` for every cell forever, and its bar can
+    // never arm — that is exactly what this pins.
     expect(speakState("cell-a")).toBe("empty");
     await emitUtterance("cell-a", "a1", "Wired to the channel.");
     expect(speakState("cell-a")).toBe("ready");
 
+    // The utterance brought the bar out, so the arm switch is on screen.
     expect(armed("cell-a")).toBe("0");
     await arm("cell-a");
     expect(armed("cell-a")).toBe("1");
@@ -1040,12 +1074,6 @@ describe("the keyboard transport, mounted", () => {
 });
 
 /**
- * The header icons after Task 8: the autoplay icon opens the bar and REPORTS
- * arming, the bar arms, and the speak control is untouched. Driven through the
- * real surface, because the header icon and the bar it toggles sit in different
- * components and only the cell between them knows they are the same cell.
- */
-/**
  * The bar is a transport for something to play, and on a FRESH terminal the
  * prompt sits on the row the bar covers. So it waits for the cell's own first
  * utterance — and an explicit toggle outranks that arrival from then on, in
@@ -1061,7 +1089,7 @@ describe("the bar waits for something to play", () => {
       false,
     ]);
     // The way back is still in the header, and it says the bar is closed.
-    expect(screen.getByTestId(testIdFor("autoplay", "cell-a"))).toHaveAttribute(
+    expect(screen.getByTestId(testIdFor("speech-controls", "cell-a"))).toHaveAttribute(
       "aria-expanded",
       "false",
     );
@@ -1081,7 +1109,7 @@ describe("the bar waits for something to play", () => {
     expect(play).toHaveAttribute("data-speech", "ready");
     expect(play).toHaveAttribute("data-pulse", "1");
     expect(screen.getByTestId(testIdFor("bar-autoplay", "cell-a"))).toBeInTheDocument();
-    expect(screen.getByTestId(testIdFor("autoplay", "cell-a"))).toHaveAttribute(
+    expect(screen.getByTestId(testIdFor("speech-controls", "cell-a"))).toHaveAttribute(
       "aria-expanded",
       "true",
     );
@@ -1090,7 +1118,7 @@ describe("the bar waits for something to play", () => {
   it("the toggle still opens the bar on a cell that has never spoken", async () => {
     await renderProjectSurface();
 
-    await click(testIdFor("autoplay", "cell-a"));
+    await click(testIdFor("speech-controls", "cell-a"));
 
     expect(barVisible("cell-a")).toBe(true);
     // Empty and inert, as it is for any cell with nothing to play.
@@ -1108,7 +1136,7 @@ describe("the bar waits for something to play", () => {
     await emitUtterance("cell-a", "a1", "The cell has spoken once.");
     expect(barVisible("cell-a")).toBe(true);
 
-    await click(testIdFor("autoplay", "cell-a"));
+    await click(testIdFor("speech-controls", "cell-a"));
     expect(barVisible("cell-a")).toBe(false);
 
     await emitUtterance("cell-a", "a2", "And here is the next answer.");
@@ -1120,7 +1148,7 @@ describe("the bar waits for something to play", () => {
 
   it("showing the bar on a silent cell survives its first utterance", async () => {
     await renderProjectSurface();
-    await click(testIdFor("autoplay", "cell-a"));
+    await click(testIdFor("speech-controls", "cell-a"));
     expect(barVisible("cell-a")).toBe(true);
 
     await emitUtterance("cell-a", "a1", "The cell finally says something.");
@@ -1128,60 +1156,127 @@ describe("the bar waits for something to play", () => {
     expect(barVisible("cell-a")).toBe(true);
     // And the choice keeps outranking the cell in the other direction too: a
     // cell with something to play still closes when the user says so.
-    await click(testIdFor("autoplay", "cell-a"));
+    await click(testIdFor("speech-controls", "cell-a"));
     expect(barVisible("cell-a")).toBe(false);
   });
 });
 
-describe("the header icons and the bar", () => {
-  it("the header icon toggles the bar and leaves arming alone", async () => {
+/**
+ * The header control after Task 9: it opens and closes the bar and does nothing
+ * else. It used to REPORT arming as well — one button answering two questions,
+ * where the answer you could see and the answer your click moved were not the
+ * same one. Arming is the bar's switch, and the bar is where it is read.
+ *
+ * Driven through the real surface, because the header control and the bar it
+ * toggles sit in different components and only the cell between them knows
+ * they are the same cell.
+ */
+describe("the header control and the bar", () => {
+  it("the control shows and hides the speech control bar", async () => {
     await renderProjectSurface();
-    // Hidden until the cell has something to play, so the icon is not merely a
-    // way to get the bar out of the way — it is the way to it.
+    // Hidden until the cell has something to play, so the control is not merely
+    // a way to get the bar out of the way — it is the way to it.
     expect(barVisible("cell-a")).toBe(false);
-    // `arm` opens the bar from this very icon, then arms from the switch in it.
-    await arm("cell-a");
-    expect(barVisible("cell-a")).toBe(true);
-    expect(armed("cell-a")).toBe("1");
 
-    await click(testIdFor("autoplay", "cell-a"));
+    await click(testIdFor("speech-controls", "cell-a"));
+    expect(barVisible("cell-a")).toBe(true);
+
+    await click(testIdFor("speech-controls", "cell-a"));
     expect(barVisible("cell-a")).toBe(false);
-    // The cell is still the armed one: the icon reports arming, it does not
-    // change it, and hiding the bar is not disarming.
-    expect(armed("cell-a")).toBe("1");
 
-    await click(testIdFor("autoplay", "cell-a"));
-    expect(barVisible("cell-a")).toBe(true);
-    expect(armed("cell-a")).toBe("1");
-
-    // And it is per cell: cell b's icon opens cell b's bar and nothing else.
-    await click(testIdFor("autoplay", "cell-b"));
-    expect(barVisible("cell-b")).toBe(true);
-    expect(barVisible("cell-a")).toBe(true);
-    expect(armed("cell-a")).toBe("1");
-    expect(armed("cell-b")).toBe("0");
+    // And it is per cell: cell b's control opens cell b's bar and nothing else.
+    await click(testIdFor("speech-controls", "cell-b"));
+    expect([barVisible("cell-a"), barVisible("cell-b")]).toEqual([false, true]);
   });
 
-  it("the header icon still reports which cell is armed", async () => {
+  it("activating the control does not change the armed cell", async () => {
+    await renderProjectSurface();
+    // `arm` opens the bar from this very control, then arms from the switch.
+    await arm("cell-a");
+    expect(armed("cell-a")).toBe("1");
+
+    // Hide the armed cell's bar and bring it back: hiding is not disarming, and
+    // showing is not arming. The control cannot reach the armed cell at all —
+    // it is handed neither the value nor a way to set it.
+    await click(testIdFor("speech-controls", "cell-a"));
+    expect(barVisible("cell-a")).toBe(false);
+    await click(testIdFor("speech-controls", "cell-a"));
+    expect(barVisible("cell-a")).toBe(true);
+    expect(armed("cell-a")).toBe("1");
+
+    // Nor from another cell's control: opening b's bar leaves a armed and b not.
+    await click(testIdFor("speech-controls", "cell-b"));
+    expect(barVisible("cell-b")).toBe(true);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
+  });
+
+  it("the control renders the same whether or not the cell is armed", async () => {
     await renderProjectSurface();
     await arm("cell-b");
 
-    // Close every bar in the grid: arming has to stay legible at a glance with
-    // nothing open, which is the whole reason the icon stayed in the header.
-    // Only b's is open — a and c have neither spoken nor been asked for, so
-    // clicking their icons would OPEN them, which is the opposite of the point.
-    await click(testIdFor("autoplay", "cell-b"));
+    // Close every bar in the grid, so the three header controls are all in the
+    // same state and the armed cell is the only thing separating them. It used
+    // to separate them: the icon carried a green fill and a `data-armed`. Now
+    // the armed cell's control is byte-for-byte its unarmed neighbours'.
+    await click(testIdFor("speech-controls", "cell-b"));
     expect([barVisible("cell-a"), barVisible("cell-b"), barVisible("cell-c")]).toEqual([
       false,
       false,
       false,
     ]);
 
-    expect([armed("cell-a"), armed("cell-b"), armed("cell-c")]).toEqual(["0", "1", "0"]);
+    const markup = (id: string) =>
+      screen
+        .getByTestId(testIdFor("speech-controls", id))
+        .outerHTML.replaceAll(testIdFor("speech-controls", id), "ID");
+    expect(markup("cell-b")).toBe(markup("cell-a"));
+    expect(markup("cell-b")).toBe(markup("cell-c"));
+    expect(screen.getByTestId(testIdFor("speech-controls", "cell-b"))).not.toHaveAttribute(
+      "data-armed",
+    );
+
+    // Arming is still true — it simply is not the header's story any more. The
+    // bar is where it is read, and b's bar still says so when it is reopened.
+    await openBar("cell-b");
+    expect(armed("cell-b")).toBe("1");
+  });
+
+  it("the bar's arm switch still reports armed state", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+
+    // The switch reports through both channels it always has: the attribute the
+    // stylesheet keys the green off, and `aria-checked`, which is what a screen
+    // reader gets now that the header control says nothing about arming.
+    const armSwitch = screen.getByTestId(testIdFor("bar-autoplay", "cell-a"));
+    expect(armSwitch).toHaveAttribute("data-armed", "1");
+    expect(armSwitch).toHaveAttribute("role", "switch");
+    expect(armSwitch).toHaveAttribute("aria-checked", "true");
+    expect(armSwitch).toHaveAccessibleName(/armed/i);
+
+    // Hidden and shown again from the header: the bar comes back reporting the
+    // same thing, which is what makes the next click on it the one that
+    // disarms rather than a click on a control drawn wrong.
+    await click(testIdFor("speech-controls", "cell-a"));
+    await openBar("cell-a");
+    expect(screen.getByTestId(testIdFor("bar-autoplay", "cell-a"))).toHaveAttribute(
+      "data-armed",
+      "1",
+    );
+
+    // And an unarmed cell's switch says so just as plainly.
+    await openBar("cell-b");
+    const other = screen.getByTestId(testIdFor("bar-autoplay", "cell-b"));
+    expect(other).toHaveAttribute("data-armed", "0");
+    expect(other).toHaveAttribute("aria-checked", "false");
   });
 
   it("arming from the bar disarms the previously armed cell", async () => {
     await renderProjectSurface();
+    // Both bars out, so both arm switches are readable throughout — arming is
+    // read where it lives, and cell b's bar has to be open to be read.
+    await openBar("cell-a");
+    await openBar("cell-b");
 
     await arm("cell-a");
     expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
@@ -1206,16 +1301,17 @@ describe("the header icons and the bar", () => {
     first.unmount();
     await renderProjectSurface();
 
-    expect(armed("cell-a")).toBe("1");
-    expect(armed("cell-b")).toBe("0");
     // The bar's visibility is a view preference and deliberately NOT persisted,
     // so the new tab comes up with no bar on a cell that has said nothing yet —
-    // the armed cell is what survives, not the disclosure. The user opens it.
+    // the armed cell is what survives, not the disclosure. The user opens it,
+    // and that is also the only way to see what survived: the header control
+    // reports nothing, so the bar is the one place arming is legible.
     expect(barVisible("cell-a")).toBe(false);
-    await click(testIdFor("autoplay", "cell-a"));
-    // And the bar agrees with the header, which is what makes the second click
-    // — the one that disarms — land on a control already drawn armed.
-    expect(controls("bar-autoplay", "cell-a")[0]).toHaveAttribute("data-armed", "1");
+    await openBar("cell-a");
+    expect(armed("cell-a")).toBe("1");
+
+    await openBar("cell-b");
+    expect(armed("cell-b")).toBe("0");
   });
 
   it("the header speak control is unchanged", async () => {
@@ -1237,8 +1333,8 @@ describe("the header icons and the bar", () => {
     });
 
     // Both of its neighbours' new jobs leave it exactly as it was: it is the
-    // "new text arrived" signal across a grid, and nothing in Task 8 touches it.
-    await click(testIdFor("autoplay", "cell-a"));
+    // "new text arrived" signal across a grid, and neither task touches it.
+    await click(testIdFor("speech-controls", "cell-a"));
     await arm("cell-b");
     const after = screen.getByTestId("terminal-cell-speak-cell-a");
     expect({
@@ -1254,7 +1350,9 @@ describe("the header icons and the bar", () => {
     expect(speakState("cell-a")).toBe("speaking");
     expect(speakIcon("cell-a")).toBe("pause");
     expect(played).toEqual(["blob:The speak control keeps its job."]);
-    // Speaking a cell is not arming it.
+    // Speaking a cell is not arming it. Read from the bars, which is where
+    // arming is legible — so cell a's is brought back out to be asked.
+    await openBar("cell-a");
     expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "1"]);
   });
 });
@@ -1274,13 +1372,13 @@ describe("one speech host for the panel, not one per surface", () => {
 
     await renderBothViews();
     // Fixture guard: this really is the two-surface arrangement, not one.
-    expect(controls("autoplay", "cell-a")).toHaveLength(2);
-    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
+    expect(controls("speech-controls", "cell-a")).toHaveLength(2);
 
     // Nothing has spoken yet, so neither view has a bar out: each is opened
-    // from its own header icon, the choice being per cell AND per view.
-    await clickIn(0, "autoplay", "cell-a");
-    await clickIn(1, "autoplay", "cell-a");
+    // from its own header control, the choice being per cell AND per view —
+    // and the restored arming is legible only once they are.
+    await openBarInViews("cell-a");
+    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
 
     // The user works in both views, as they do whenever the drawer is open.
     await clickAround(0, "cell-a");
@@ -1304,27 +1402,23 @@ describe("one speech host for the panel, not one per surface", () => {
 
   it("arming stays exclusive across both views", async () => {
     await renderBothViews();
-    expect(armedInViews("cell-a")).toEqual(["0", "0"]);
 
     // No cell has spoken, so every bar is closed: both cells are opened in both
     // views — cell a's second bar is what makes "what the OTHER view reports" a
     // real question, and a cell whose bar is open in one view only would make
-    // the per-view indexing below a lie.
-    await clickIn(0, "autoplay", "cell-a");
-    await clickIn(1, "autoplay", "cell-a");
-    await clickIn(0, "autoplay", "cell-b");
-    await clickIn(1, "autoplay", "cell-b");
+    // the per-view indexing below a lie. It is also the only way to ask the
+    // question at all: the bars are where arming is reported.
+    await openBarInViews("cell-a");
+    await openBarInViews("cell-b");
+    expect(armedInViews("cell-a")).toEqual(["0", "0"]);
 
     // From the bar, which is where arming lives — and from ONE view's bar, so
     // what the other view reports is the shared value and not its own click.
     await clickIn(0, "bar-autoplay", "cell-a");
 
-    // The drawer is not a second browser: it shows the same armed cell, in the
-    // header icon of both views and in both bars.
+    // The drawer is not a second browser: both views' bars show the same
+    // armed cell.
     expect(armedInViews("cell-a")).toEqual(["1", "1"]);
-    expect(
-      controls("bar-autoplay", "cell-a").map((el) => el.getAttribute("data-armed")),
-    ).toEqual(["1", "1"]);
 
     // Arming from the *other* view disarms the first cell everywhere — one
     // armed cell per browser, whichever view it was armed from.
@@ -1358,6 +1452,9 @@ describe("one speech host for the panel, not one per surface", () => {
 
     await renderProjectSurface();
 
+    // The restored arming is read from the bar, the only control that reports
+    // it — brought out here if the hydrated utterance has not already.
+    await openBar("cell-a");
     expect(armed("cell-a")).toBe("1");
     // No gesture has reached the `<audio>` element, so this must be absorbed:
     // a page that starts talking by itself is what the lock gate prevents.

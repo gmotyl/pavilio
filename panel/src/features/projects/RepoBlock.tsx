@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { GitFork, Braces } from "lucide-react";
 import CopyIconButton from "../shell/CopyIconButton";
 import GitBranchDiff from "../git/GitBranchDiff";
@@ -18,7 +18,6 @@ interface Props {
   repo: { name: string; path: string };
   viewMode: GitViewMode;
   onViewModeChange: (mode: GitViewMode) => void;
-  wideToggle: ReactNode;
   repoOpenFile: RepoOpenFile | null;
   onSetRepoOpenFile: (next: RepoOpenFile | null) => void;
   branchFile: string | null;
@@ -38,7 +37,6 @@ export function RepoBlock({
   repo,
   viewMode,
   onViewModeChange,
-  wideToggle,
   repoOpenFile,
   onSetRepoOpenFile,
   branchFile,
@@ -115,7 +113,6 @@ export function RepoBlock({
         showCommit
         viewMode={viewMode}
         onViewModeChange={onViewModeChange}
-        extraActions={wideToggle}
         onBranchChange={setBranch}
         showBranchCopy
         showListSidebar

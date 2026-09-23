@@ -7,20 +7,24 @@ import { ALL_PREFERENCES } from "../declarations";
  * comparing it against itself would assert nothing at all.
  */
 const PORTABLE = [
+  "fileList.paneWidth",
   "fileList.sidebarCollapsed",
   "fileList.sort",
   "git.branchDiff.base",
   "git.branchDiff.open",
   "git.commitsOpen",
+  "git.history.paneWidth",
   "git.viewMode",
   "git.worktree.expanded",
   "projects.favorites",
   "repos.searchScope",
   "search.includeArchived",
   "shell.leftSidebar.expanded",
+  "shell.leftSidebar.width",
   "shell.project.expanded",
   "shell.rightSidebar.expanded",
   "shell.rightSidebar.section.expanded",
+  "shell.rightSidebar.width",
   "speech.answerPane.autoOpen",
   "speech.voice",
   "terminal.drawer.open",
@@ -45,17 +49,17 @@ const MACHINE_LOCAL = [
 
 /**
  * Rows the design's portability table names that nothing declares yet: no
- * code persists or resizes them today. The two sidebar widths arrive with
- * `2026-09-21-panel-ui-polish` Task 4 (defaults 240 and 264); the two pane
- * widths have no writer at all. Listed here so declaring them is a one-line
- * move into PORTABLE rather than a spurious red.
+ * code persists or resizes them today. Listed here so declaring one is a
+ * one-line move into PORTABLE rather than a spurious red — which is what
+ * `fileList.paneWidth`, the git-history tree's `git.history.paneWidth` and
+ * finally the two sidebar widths have each been in turn.
+ *
+ * EMPTY, and kept rather than deleted: every row of the design's table is
+ * declared as of `2026-09-21-panel-ui-polish` Task 4, so this is where the
+ * next one goes. The test below it still runs, over nothing — which is the
+ * honest reading of "nothing is outstanding".
  */
-const NOT_YET_DECLARED = [
-  "shell.leftSidebar.width",
-  "shell.rightSidebar.width",
-  "fileList.paneWidth",
-  "git.history.paneWidth",
-];
+const NOT_YET_DECLARED: readonly string[] = [];
 
 /**
  * `[key, default, scope]`, transcribed by hand from `declarations.ts` with
@@ -68,12 +72,14 @@ const NOT_YET_DECLARED = [
  * change flips it.
  */
 const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
+  ["fileList.paneWidth", 288, "global"],
   ["fileList.sidebarCollapsed", false, "global"],
   ["fileList.sort", { sortKey: "date", sortDir: "desc" }, "global"],
   ["git.branchDiff.base", "", "repo"],
   ["git.branchDiff.open", true, "repo"],
   // `isOpen` reads `map[repoPath] !== false`, so an absent entry is OPEN.
   ["git.commitsOpen", true, "repo"],
+  ["git.history.paneWidth", 280, "global"],
   ["git.viewMode", "flat", "global"],
   ["git.worktree.expanded", false, "repo"],
   ["nav.lastFile", null, "project"],
@@ -83,9 +89,12 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["repos.searchScope", "changed", "global"],
   ["search.includeArchived", true, "global"],
   ["shell.leftSidebar.expanded", true, "global"],
+  // The two fixed sidebar widths the stylesheet used to carry, as numbers.
+  ["shell.leftSidebar.width", 240, "global"],
   ["shell.project.expanded", false, "project"],
   ["shell.rightSidebar.expanded", true, "global"],
   ["shell.rightSidebar.section.expanded", true, "project"],
+  ["shell.rightSidebar.width", 264, "global"],
   ["speech.answerPane.autoOpen", false, "global"],
   ["speech.armedCell", null, "global"],
   ["speech.voice", "en-US-AndrewMultilingualNeural", "global"],
@@ -155,6 +164,11 @@ describe("the declaration table", () => {
     // Guards the tolerance above from rotting into a blanket exemption: a key
     // listed as not-yet-declared must actually be absent.
     const keys = ALL_PREFERENCES.map((d) => d.key);
+    // Stated, not just looped over: the list is empty today, so the loop below
+    // runs zero times and on its own this test would assert nothing at all.
+    // Every row the design names is declared — that is the fact, and it is the
+    // one that breaks if a key is parked here instead of built.
+    expect(NOT_YET_DECLARED).toEqual([]);
     for (const key of NOT_YET_DECLARED) expect(keys).not.toContain(key);
   });
 
