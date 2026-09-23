@@ -289,7 +289,7 @@ describe("SpeechControlBar", () => {
     expect(screen.getByTestId("speech-bar-cell-b")).toBeInTheDocument();
   });
 
-  it("toggling the row refits exactly once per toggle, and never from inside the observed box", async () => {
+  it("toggling the row refits deliberately once per toggle, from outside the observed box", async () => {
     const speech = makeSpeech();
     const view = render(<TerminalView sessionId="cell-a" speech={speech} />);
     await settleTerminal();
@@ -301,6 +301,12 @@ describe("SpeechControlBar", () => {
     // SIGWINCH are what SHOULD happen — once, on the user's own deliberate act,
     // never on an arrival. This is the assertion that used to say "no fit at
     // all"; the overlay it defended is gone.
+    //
+    // The count is the DELIBERATE fit's. In a browser the uncoalesced
+    // `ResizeObserver` in `TerminalView` fires a second, bare fit after this
+    // one (see the comment on that effect); jsdom lays nothing out, so no
+    // observer fires here and only the deliberate fit is countable. Nothing
+    // below claims the browser only fits once.
     view.rerender(<TerminalView sessionId="cell-a" speech={speech} speechBarVisible={false} />);
     await settleTerminal();
     expect(screen.queryByTestId("speech-bar-cell-a")).not.toBeInTheDocument();

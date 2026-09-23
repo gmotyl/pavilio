@@ -277,6 +277,42 @@ describe("the speech row", () => {
     expect(resizeFrames().length).toBe(resizesBefore);
   });
 
+  it("fits nothing of its own on mount", async () => {
+    // A mount already fits three times, and every one of them predates this
+    // change: the mount effect's rAF, the focus effect's rAF (`focused`
+    // defaults to true), and the mount effect's 300ms settle timer. The ROW
+    // must add none of its own — its height is reserved before the first of
+    // those runs, so a mount has nothing to respond to, and a toggle effect
+    // that fired on mount anyway would refit and SIGWINCH every cell in the
+    // grid the moment the panel opened, which is the whole class of resize
+    // this change exists to remove.
+    //
+    // Seeding `lastBarVisible` with the CURRENT value of `speechBarVisible` is
+    // what prevents it — seed it with anything else and the counts below go to
+    // four. So the number is the point, not an incidental total.
+    const shown = render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
+    await settle();
+
+    expect(bar()).toBeInTheDocument();
+    expect(term.fit).toHaveBeenCalledTimes(3);
+    expect(resizeFrames()).toHaveLength(3);
+    shown.unmount();
+
+    // The same on a cell that comes up with the row already hidden: what is
+    // pinned is the ABSENCE of a toggle, not one particular starting value, and
+    // a mount is never a toggle in either direction.
+    term.fit.mockClear();
+    term.sent.length = 0;
+    render(
+      <TerminalView sessionId="cell-b" speech={makeSpeech("empty")} speechBarVisible={false} />,
+    );
+    await settle();
+
+    expect(screen.queryByTestId("speech-bar-cell-b")).not.toBeInTheDocument();
+    expect(term.fit).toHaveBeenCalledTimes(3);
+    expect(resizeFrames()).toHaveLength(3);
+  });
+
   it("refits once when the row is hidden", async () => {
     const speech = makeSpeech("empty");
     const view = render(<TerminalView sessionId="cell-a" speech={speech} />);

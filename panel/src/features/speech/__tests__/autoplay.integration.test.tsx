@@ -1114,7 +1114,13 @@ describe("the row is reserved from mount", () => {
     const play = screen.getByTestId("speech-bar-playpause-cell-a");
     expect(play).toHaveAttribute("data-speech", "ready");
     expect(play).toHaveAttribute("data-pulse", "1");
-    expect(screen.getByTestId("speech-bar-playpause-cell-b")).toHaveAttribute(
+    // Both of the cells that did not speak, and both channels on them: the
+    // state AND the pulse. A pulse that leaked across the grid is the failure
+    // a single-cell reading cannot see.
+    const quiet = screen.getByTestId("speech-bar-playpause-cell-b");
+    expect(quiet).toHaveAttribute("data-speech", "empty");
+    expect(quiet).toHaveAttribute("data-pulse", "0");
+    expect(screen.getByTestId("speech-bar-playpause-cell-c")).toHaveAttribute(
       "data-speech",
       "empty",
     );
@@ -1308,17 +1314,27 @@ describe("the header control and the bar", () => {
     await arm("cell-a");
     expect(armed("cell-a")).toBe("1");
 
+    // The row is shown from mount, so leaving it alone would make the
+    // post-reload reading below true under a persisting implementation too.
+    // Hiding cell a's row spends an EXPLICIT choice first — a stored `false`
+    // under anything that stores this at all — which is what gives the
+    // assertion after the reload something it can fail.
+    await click(testIdFor("speech-controls", "cell-a"));
+    expect(barVisible("cell-a")).toBe(false);
+
     // The tab goes away and comes back: nothing but the browser's own storage
     // survives, and the armed cell is expected to be in it.
     first.unmount();
     await renderProjectSurface();
 
     // The row's visibility is a view preference and deliberately NOT persisted,
-    // so the new tab comes up the way every tab does: the row out, because that
-    // is the default and not because anything was restored. What survived is
-    // the armed cell — and the row is where that is read, since the header
-    // control reports nothing about it.
+    // so the new tab comes up the way every tab does: the row SHOWN, because
+    // that is the default and not because anything was restored. Were the
+    // choice persisted, the hide above would have come back with it and this
+    // would read `false`.
     expect(barVisible("cell-a")).toBe(true);
+    // What survived is the armed cell — and the row is where that is read,
+    // since the header control reports nothing about it.
     expect(armed("cell-a")).toBe("1");
 
     await openBar("cell-b");

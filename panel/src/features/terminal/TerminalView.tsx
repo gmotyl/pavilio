@@ -208,11 +208,25 @@ export function TerminalView({
   }, [sessionId]);
 
   // The row is in the cell's column, so showing or hiding it genuinely changes
-  // the terminal's height — and that is the ONLY thing left that does. The
-  // `ResizeObserver` would eventually notice in a browser, but it is the
-  // uncoalesced `() => inst.fit()`, which fits without following the bottom; a
-  // hide that scrolled the live prompt out of view is the failure this avoids.
-  // So the toggle fits ONCE, deliberately, keeping the viewport where it was.
+  // the terminal's height — and that is the ONLY thing left that does. So the
+  // toggle fits deliberately, through `followBottomAcrossResize`, which keeps
+  // the viewport where it was; a hide that scrolled the live prompt out of view
+  // is the failure this avoids.
+  //
+  // This is NOT the only fit a toggle produces in a browser. The uncoalesced
+  // `new ResizeObserver(() => inst.fit())` above observes the container, sees it
+  // grow, and fires a SECOND, bare `fit()` just after this one — bare meaning it
+  // does not follow the bottom. That is accepted, on two grounds: this effect
+  // runs first, so the bottom is already followed and the viewport is already
+  // right by the time the observer's fit lands; and the observer only fires on a
+  // deliberate user toggle, never on an utterance, which is the resize this
+  // change exists to remove. Coalescing the observer is deliberately out of this
+  // change's scope (see the change's design.md and proposal.md).
+  //
+  // So "exactly once" is what jsdom can observe — it lays nothing out, so no
+  // observer ever fires there — and not a guarantee this code makes in a
+  // browser. What this code does guarantee is the DELIBERATE fit: one per
+  // toggle, before any observer's, and none at all without a toggle.
   //
   // Skipped on mount: the height is reserved before the first fit runs, so
   // there is nothing to respond to. `lastBarVisible` is a ref rather than a

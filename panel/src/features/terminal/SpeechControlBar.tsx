@@ -355,7 +355,7 @@ export function SpeechControlBar({
           // something is waiting. `index.css` styles both selectors in one rule,
           // which is what keeps the two the same pulse — for ten seconds.
           //
-          // Then this one stops. The bar is a 56px rail lying across the top of
+          // Then this one stops. The bar is a 56px rail sitting directly above
           // the terminal, and a pulse that size that never ends reads as a nag
           // over the work rather than a notice about it. The header control is
           // small, at rest, and off to the side, so it keeps pulsing for as
