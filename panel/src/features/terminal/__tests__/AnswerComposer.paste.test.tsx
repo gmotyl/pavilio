@@ -183,6 +183,27 @@ describe("AnswerComposer paste", () => {
     await waitFor(() => expect(field().value).toBe(`look at ${SAVED} please now`));
   });
 
+  it("keeps the pasted path when the composer is unmounted and built again", async () => {
+    fetchFn.mockResolvedValue({ ok: true, json: async () => ({ path: SAVED }) });
+    const user = userEvent.setup();
+    const view = renderComposer();
+    await typeAroundACaret(user);
+
+    fireEvent.paste(field(), { clipboardData: imageClipboard(shot()) });
+    await waitFor(() => expect(field().value).toBe(`look at ${SAVED} please`));
+
+    // The pane is destroyed on Escape and rebuilt on reopen, and the rebuilt
+    // field is seeded from the draft store rather than from whatever the last
+    // mount held. Every assertion above this one passes just as well against a
+    // paste that only ever reached `useState` — and that paste loses the path
+    // the moment the user closes the pane without typing another character,
+    // which is exactly what "the field still holds that text" forbids.
+    view.unmount();
+    renderComposer();
+
+    expect(field().value).toBe(`look at ${SAVED} please`);
+  });
+
   it("sends the edited path rather than the inserted one", async () => {
     fetchFn.mockResolvedValue({ ok: true, json: async () => ({ path: SAVED }) });
     const user = userEvent.setup();

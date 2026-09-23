@@ -434,15 +434,31 @@ describe("AnswerComposer", () => {
 
     it("opens a second cell's pane with an empty composer", async () => {
       const user = userEvent.setup();
-      render(
+      const speechA = makeSpeech();
+      const speechB = makeSpeech();
+      // cell-b's pane is deliberately NOT in the first tree. The criterion is
+      // about a pane being OPENED, and a composer reads its seed exactly once,
+      // at mount: with both mounted up front cell-b reads the store BEFORE
+      // cell-a has a draft in it, and from that moment the two fields are
+      // independent `useState`s that a store with no keying at all — one
+      // global string for the whole panel — would keep apart just as well.
+      const view = render(
         <>
-          {paneTree("cell-a", makeSpeech())}
-          {paneTree("cell-b", makeSpeech())}
+          {paneTree("cell-a", speechA)}
+          {null}
         </>,
       );
 
       await user.click(fieldFor("cell-a"));
       await user.keyboard("for cell a only");
+
+      // Opened now, with the neighbour's draft already sitting in the store.
+      view.rerender(
+        <>
+          {paneTree("cell-a", speechA)}
+          {paneTree("cell-b", speechB)}
+        </>,
+      );
 
       // The draft is the cell's, not the panel's: the neighbour opened empty
       // and stays empty while its neighbour is typed in.

@@ -138,18 +138,20 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
         toast.error("Could not save the pasted image");
         return;
       }
-      // Functional, because the user may have kept typing while the upload was
-      // in flight: what is spliced is the field as it is now, not as it was.
-      // The draft is written from inside the updater for the same reason —
-      // `next` is the only place the spliced value exists, and reading `text`
-      // out here would store the string the paste started from. React may
-      // invoke an updater twice under StrictMode; it is handed the same `prev`
-      // both times, so the write is the same write.
-      setText((prev) => {
-        const next = `${prev.slice(0, from)}${path} ${prev.slice(to)}`;
-        setDraft(sessionId, next);
-        return next;
-      });
+      // Spliced into the field as it is NOW, not as it was when the paste was
+      // made: the upload is a round trip and the user keeps typing across it,
+      // so `text` — captured when this handler ran — is the wrong string.
+      //
+      // The store is what "now" is read from, rather than a `setText` updater's
+      // `prev`. Every keystroke writes it (see `onChange`), so it holds the
+      // same characters the field does, and reading it keeps both writes out
+      // here where they are plain statements. An updater that called `setDraft`
+      // would be a side effect inside a function React requires to be pure and
+      // double-invokes under StrictMode.
+      const base = getDraft(sessionId);
+      const next = `${base.slice(0, from)}${path} ${base.slice(to)}`;
+      setDraft(sessionId, next);
+      setText(next);
     });
   };
 
