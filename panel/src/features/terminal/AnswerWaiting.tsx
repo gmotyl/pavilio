@@ -24,5 +24,3 @@ export function AnswerWaiting({ sessionId }: AnswerWaitingProps) {
     </div>
   );
 }
-
-export default AnswerWaiting;

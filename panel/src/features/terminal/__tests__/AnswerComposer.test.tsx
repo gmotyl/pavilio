@@ -27,6 +27,7 @@ import { writePreference } from "../../../preferences/store";
 import type { GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
+import { __resetAnswerWaitingForTests } from "../answerWaiting";
 
 // The synthesis cache the rail peeks into. Nothing is warm and nothing
 // subscribes: this file draws no units at all.
@@ -155,6 +156,10 @@ const composerSwitch = (): HTMLInputElement =>
 
 beforeEach(() => {
   send.mockClear();
+  // Module-level and keyed by session, so it outlives a test: a draft sent in
+  // one case would otherwise still be "waiting" in the next, and the pane no
+  // longer clears it on mount — the row does.
+  __resetAnswerWaitingForTests();
   onClose.mockClear();
   cellKeys.mockClear();
   documentKeys.mockClear();

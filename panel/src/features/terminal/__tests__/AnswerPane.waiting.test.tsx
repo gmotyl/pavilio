@@ -205,6 +205,52 @@ const surfaceTree = (speech: GridSpeech) => (
   </MemoryRouter>
 );
 
+/**
+ * The same cell with its pane closed — the eye pressed, the row left behind.
+ * `TerminalView` mounts the pane only inside the bar's own condition, so this
+ * is the one shape the surface can take that the two trees above cannot show:
+ * the bar without the pane, never the pane without the bar.
+ */
+const barOnlyTree = (speech: GridSpeech) => (
+  <MemoryRouter>
+    <SpeechControlBar
+      sessionId={SESSION}
+      speech={speech}
+      answerOpen={false}
+      onToggleAnswer={() => {}}
+      send={send}
+    />
+  </MemoryRouter>
+);
+
+/** This cell's surface, and a second cell's row beside it. */
+const twoCellTree = (speech: GridSpeech, other: string) => (
+  <MemoryRouter>
+    <SpeechControlBar
+      sessionId={SESSION}
+      speech={speech}
+      answerOpen
+      onToggleAnswer={() => {}}
+      send={send}
+    />
+    <AnswerPane
+      sessionId={SESSION}
+      speech={speech}
+      onClose={() => {}}
+      send={send}
+      autoOpen={false}
+      onAutoOpenChange={() => {}}
+    />
+    <SpeechControlBar
+      sessionId={other}
+      speech={speech}
+      answerOpen={false}
+      onToggleAnswer={() => {}}
+      send={send}
+    />
+  </MemoryRouter>
+);
+
 const body = (): HTMLElement => screen.getByTestId(`answer-pane-body-${SESSION}`);
 
 const waiting = (): HTMLElement | null => screen.queryByTestId(`answer-pane-waiting-${SESSION}`);
@@ -275,16 +321,20 @@ describe("the answer pane while a reply is pending", () => {
     for (const command of commands) expect(command).not.toHaveBeenCalled();
   });
 
+  // The surface, not the pane alone: the arrival is noticed on the row, which
+  // is what lets the wait end while the pane is closed. A pane without its row
+  // is a shape `TerminalView` cannot render anyway — it mounts the pane only
+  // inside the row's own condition.
   it("renders the new answer when one arrives", () => {
     let queue = queueOf(utterance("u-1", ANSWER));
     const speech = makeSpeech(() => queue);
-    const { rerender } = render(paneTree(speech));
+    const { rerender } = render(surfaceTree(speech));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
 
     queue = queueOf(utterance("u-2", NEXT_ANSWER));
-    rerender(paneTree(speech));
+    rerender(surfaceTree(speech));
 
     expect(waiting()).toBeNull();
     expect(within(body()).getByText(NEXT_ANSWER)).toBeInTheDocument();
@@ -349,5 +399,75 @@ describe("the answer pane while a reply is pending", () => {
 
     expect(waiting()).toBeInTheDocument();
     expect(within(body()).queryByText(ANSWER)).toBeNull();
+  });
+
+  it("notices the reply even when it lands with the pane closed", () => {
+    let queue = queueOf(utterance("u-1", ANSWER));
+    const speech = makeSpeech(() => queue);
+    const { rerender } = render(surfaceTree(speech));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+    expect(playButton()).toHaveAttribute("data-pending", "1");
+
+    // The eye closes the pane. The row stays — and so does the wait, because
+    // nothing has happened yet.
+    rerender(barOnlyTree(speech));
+    expect(waiting()).toBeNull();
+    expect(playButton()).toHaveAttribute("data-pending", "1");
+
+    // ...and only NOW the reply lands, with nobody watching.
+    queue = queueOf(utterance("u-2", NEXT_ANSWER));
+    rerender(barOnlyTree(speech));
+
+    // The mark is out: the answer is in the queue, not still on its way. A mark
+    // that needed the pane to be reopened before it could notice would be
+    // saying the opposite of the truth for as long as the agent stayed busy.
+    expect(playButton()).toHaveAttribute("data-pending", "0");
+
+    // And reopening shows the reply rather than a wait that outlived it.
+    rerender(surfaceTree(speech));
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(NEXT_ANSWER)).toBeInTheDocument();
+  });
+
+  it("keeps waiting when the same activity state is broadcast again", () => {
+    // Nothing seeded: an unknown session reads `idle`, which is the state the
+    // wait begins in. A server re-broadcast of that same `idle` is a reading,
+    // not a transition, and an agent that has not started yet has certainly not
+    // finished.
+    render(paneTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    activity("idle", 2);
+
+    expect(waiting()).toBeInTheDocument();
+    expect(within(body()).queryByText(ANSWER)).toBeNull();
+  });
+
+  it("ignores an answer that arrives for another cell", () => {
+    const OTHER = "cell-b";
+    let otherId = "v-1";
+    const speech: GridSpeech = {
+      ...makeSpeech(() => queueOf(utterance("u-1", ANSWER))),
+      queueFor: (sessionId: string) =>
+        sessionId === OTHER
+          ? queueOf({ id: otherId, sessionId: OTHER, text: NEXT_ANSWER, at: 1 })
+          : queueOf(utterance("u-1", ANSWER)),
+    };
+    const { rerender } = render(twoCellTree(speech, OTHER));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    // A new answer in the OTHER cell. The wait is keyed by session, so this one
+    // is somebody else's reply.
+    otherId = "v-2";
+    rerender(twoCellTree(speech, OTHER));
+
+    expect(waiting()).toBeInTheDocument();
+    expect(playButton()).toHaveAttribute("data-pending", "1");
   });
 });

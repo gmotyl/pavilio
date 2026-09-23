@@ -2,7 +2,7 @@ import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { LauncherPills } from "./LauncherPills";
-import { noteTransport, useAnswerWaiting } from "./answerWaiting";
+import { noteTransport, noteUtterance, useAnswerWaiting } from "./answerWaiting";
 import { segmentStateFor, type SegmentState } from "./segmentState";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
@@ -242,10 +242,24 @@ export function SpeechControlBar({
   // cursor is reported `empty`, never `ready`. So on the only path where this
   // window decides anything — `state === "ready"` — there IS a cursor utterance
   // and the key is never null; a null key means the window is inactive anyway.
-  const withinReadyPulse = useReadyPulseWindow(
-    state === "ready",
-    utteranceUnderCursor(queue)?.id ?? null,
-  );
+  const answerId = utteranceUnderCursor(queue)?.id ?? null;
+  const withinReadyPulse = useReadyPulseWindow(state === "ready", answerId);
+
+  // The reply landing, noticed HERE rather than in the pane. The queue is not a
+  // store anything subscribes to — the host's identity changes when an
+  // utterance arrives and the whole cell re-renders — so the arrival has to be
+  // read off a render, and it has to be a render that still happens once the
+  // user has closed the pane. This row is that render: Task 3 made it present
+  // from mount and independent of speech state, and `TerminalView` mounts the
+  // pane only INSIDE the row's own condition, so the bar outlives the pane by
+  // construction and never misses an arrival the pane would have seen.
+  //
+  // A remount with the same answer is the same id, and ends nothing; a wait
+  // belonging to another cell is untouched, because the id read here is the one
+  // under THIS session's cursor.
+  useEffect(() => {
+    noteUtterance(sessionId, answerId);
+  }, [sessionId, answerId]);
 
   const armed = speech.armedSessionId === sessionId;
   const intent = transportIntent(state);
@@ -405,11 +419,14 @@ export function SpeechControlBar({
               // something is still waiting. The cap narrows where the shared
               // derivation is read, never what it means.
               data-pulse={speechPulse(state) === "1" && withinReadyPulse ? "1" : "0"}
-              // A reply the cell is still waiting for. It arrives here only
-              // once the body has handed the wait back — pressing the
-              // transport is what moves the mark from the pane to this button
-              // — so the two never say the same thing twice, and a reply the
-              // user walked away from is still visibly on its way.
+              // A reply the cell is still waiting for. The mark is on from the
+              // moment the draft goes out until the reply lands, so it outlives
+              // both of the things that can take the pane's body away: a
+              // transport press, which hands the wait back to this button, and
+              // the eye, which closes the pane outright. The second is the case
+              // the row exists to cover — the arrival is noticed HERE (see the
+              // effect above), so a reply the user walked away from is visibly
+              // on its way for exactly as long as it is on its way.
               data-pending={pending ? "1" : "0"}
               className="speech-bar-btn speech-bar-primary"
               // No `disabled` any more: the only state that set it was `empty`,

@@ -4,7 +4,7 @@ import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { AnswerComposer } from "./AnswerComposer";
 import { AnswerWaiting } from "./AnswerWaiting";
-import { beginWaiting, noteUtterance, useAnswerWaiting } from "./answerWaiting";
+import { beginWaiting, useAnswerWaiting } from "./answerWaiting";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
@@ -238,13 +238,10 @@ export function AnswerPane({
     [send, sessionId, answerId],
   );
 
-  // The reply landing. The queue is not a store the pane subscribes to — the
-  // host's identity changes when an utterance arrives and the cell re-renders —
-  // so the arrival is noticed where the pane already reads it: the id under the
-  // cursor. A remount with the same answer is the same id, and ends nothing.
-  useEffect(() => {
-    noteUtterance(sessionId, answerId);
-  }, [sessionId, answerId]);
+  // The reply landing is NOT noticed here — it is noticed on the bar. See the
+  // note beside `noteUtterance` in `SpeechControlBar.tsx`: this pane unmounts
+  // the moment the eye closes it, and a wait that could only end while the pane
+  // was open would stay marked after the answer had already arrived.
 
   // Focus lands on the root the moment it opens — also when it opened itself —
   // so Escape works at once and the read → Escape → type loop needs no mouse.
