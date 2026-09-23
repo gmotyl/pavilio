@@ -25,6 +25,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
+import { prepare } from "../../speech/prepare";
 import { type UtteranceQueue } from "../../speech/utteranceQueue";
 import { cssPx, cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { AnswerPane } from "../AnswerPane";
@@ -648,5 +649,84 @@ describe("the waiting animation", () => {
     expect(cssRule(".answer-pane-waiting-label")).not.toMatch(
       /(^|;)\s*(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0)/,
     );
+  });
+});
+
+/**
+ * The marks on the blocks, across the handover.
+ *
+ * `AnswerPane.test.tsx` owns the mapping itself; the one thing only this file
+ * can see is whether the marks are still drawn on the answer that comes back
+ * AFTER a wait. The text column is unmounted while the body waits, so the
+ * marking pass has to run again when the column returns — and the new text
+ * arrives one render BEFORE it does, on the commit that still shows the wave.
+ * An effect keyed on the text alone has already spent that change by then.
+ *
+ * Real `prepare()` units, cached per answer so the host hands back the same
+ * array on every render: a fresh array each time would re-run the marking
+ * effect on every commit and this test would pass over the defect it is for.
+ */
+const unitsByText = new Map<string, readonly SpeechUnit[]>();
+
+const unitsOf = (text: string): readonly SpeechUnit[] => {
+  const cached = unitsByText.get(text);
+  if (cached) return cached;
+  const units = prepare(text).units;
+  unitsByText.set(text, units);
+  return units;
+};
+
+/** A unit is playing, so `data-speaking` is part of what has to come back. */
+const PROGRESS = Object.freeze({ unitIndex: 0, unitTime: 0, unitDuration: null });
+
+/** The same host with the voice's own units behind it. */
+function spokenSpeech(queueFor: () => UtteranceQueue): GridSpeech {
+  return {
+    ...makeSpeech(queueFor),
+    unitsFor: () => unitsOf(queueFor().current?.text ?? ""),
+    progressFor: () => PROGRESS,
+  };
+}
+
+/** The answer's blocks that carry a mark — the direct children of `.prose`. */
+const markedBlocks = (): HTMLElement[] => {
+  const prose = body().querySelector(".prose");
+  if (!(prose instanceof HTMLElement)) throw new Error("no .prose in the body");
+  return Array.from(prose.children).filter(
+    (child): child is HTMLElement =>
+      child instanceof HTMLElement && child.hasAttribute("data-unit"),
+  );
+};
+
+describe("the marks on the answer that comes back", () => {
+  it("re-marks the blocks once the reply replaces the wait", () => {
+    let queue = queueOf(utterance("u-1", ANSWER));
+    const speech = spokenSpeech(() => queue);
+    const { rerender } = render(surfaceTree(speech));
+
+    // Marked to begin with — without this the assertion below would be about a
+    // pane that never marked anything in the first place.
+    const before = markedBlocks();
+    expect(before).toHaveLength(1);
+    expect(before[0]).toHaveAttribute("data-speaking", "");
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    queue = queueOf(utterance("u-2", NEXT_ANSWER));
+    rerender(surfaceTree(speech));
+
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(NEXT_ANSWER)).toBeInTheDocument();
+
+    // The reply's block carries the whole affordance again: the unit it was
+    // spoken from, the role and the tab stop that make it clickable and
+    // reachable, and the highlight that says it is the one being read.
+    const after = markedBlocks();
+    expect(after).toHaveLength(1);
+    expect(after[0]).toHaveAttribute("data-unit", "0");
+    expect(after[0]).toHaveAttribute("role", "button");
+    expect(after[0]).toHaveAttribute("tabindex", "0");
+    expect(after[0]).toHaveAttribute("data-speaking", "");
   });
 });

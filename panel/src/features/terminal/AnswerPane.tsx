@@ -296,6 +296,15 @@ export function AnswerPane({
   // Mark the blocks. Re-run when the text, the units or the spoken unit
   // change; a tick inside a unit never gets here because the snapshot above
   // did not change.
+  //
+  // ...and when the body hands back from waiting, which is a change none of
+  // those three can stand for. The reply's text lands on the commit that is
+  // STILL showing the wave — the arrival is noticed by the bar's effect, so
+  // the wait ends one render later — and on that commit there is no `.prose`
+  // to mark, so the pass bails out having spent the `text` change. The column
+  // that comes back next carries identical deps and would never be marked
+  // again: no jump, no tab stop, no highlight, until the pane was remounted.
+  // (Regression: "the block marks are lost after the first reply".)
   useLayoutEffect(() => {
     const prose = bodyRef.current?.querySelector<HTMLElement>(".prose");
     if (!prose) return;
@@ -328,7 +337,7 @@ export function AnswerPane({
     });
     // The marks moved or the text changed: the rail follows in the same commit.
     layoutRail(bodyRef.current, railRef.current, unitToBlocks, units);
-  }, [text, units, unitIndex]);
+  }, [text, units, unitIndex, waiting]);
 
   // Re-lay the rail when the body or the text column changes size — see the
   // note on the component. The pane's own boxes, never the xterm container.
@@ -364,7 +373,12 @@ export function AnswerPane({
     const block = body.querySelector<HTMLElement>(`[data-unit="${unitIndex}"]`);
     if (!block) return;
     body.scrollTo({ top: Math.max(0, block.offsetTop - body.clientHeight / 3) });
-  }, [unitIndex]);
+    // `waiting` for the same reason the marking effect has it: the column the
+    // blocks live in is rebuilt on the way out of a wait, and a reply that
+    // lands mid-unit changes no index. Without it the body would sit at the
+    // top of the new answer while the voice read somewhere further down, until
+    // the next unit boundary happened to come along.
+  }, [unitIndex, waiting]);
 
   const jumpTo = useCallback(
     (unit: number): void => {
