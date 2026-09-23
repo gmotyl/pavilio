@@ -686,6 +686,24 @@ input[type="checkbox"] {
   border-bottom: 1px solid var(--border-strong);
 }
 
+/* ...except when the pane is open. The hairline above is the row's seam
+   against the XTERM; the pane is absolutely positioned at the terminal area's
+   `top: 0`, which is that very edge, and it paints the row's own #17171d. So
+   with the pane open the line is not a seam between two surfaces — it is a
+   break drawn across the middle of one, which is exactly what "the bar and the
+   open pane read as one surface" rules out.
+
+   The COLOUR goes, not the border. `border-bottom: 0` would take a pixel out
+   of the row's height every time the pane opened, and the terminal wrapper
+   under it would change size — the uncoalesced `ResizeObserver` in
+   `TerminalView` answers that with `inst.fit()` and a PTY resize, which is the
+   chain the whole in-flow row exists to avoid. Transparent keeps the box
+   exactly where it was and lets the row's background paint through, because a
+   background fills the border box. */
+.speech-bar[data-answer-open="1"] {
+  border-bottom-color: transparent;
+}
+
 .speech-bar-row {
   display: flex;
   align-items: center;

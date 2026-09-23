@@ -337,6 +337,14 @@ export function SpeechControlBar({
     <div
       className="speech-bar"
       data-testid={`speech-bar-${sessionId}`}
+      // The pane's state, on the row, because the SEAM between them is the
+      // row's to draw. `.speech-bar` carries a hairline against the terminal;
+      // with the pane open there is no terminal under that edge — the pane's
+      // own ground is — and the line reads as a break across one surface. The
+      // stylesheet takes it out on this attribute. Told here rather than
+      // derived there: the pane is a sibling mounted by `TerminalView`, so no
+      // selector can reach from the row to it.
+      data-answer-open={answerOpen ? "1" : "0"}
       // The cell header is `draggable` and the cell root focuses on click, so
       // every gesture that could reach either has to stop here.
       draggable={false}

@@ -346,6 +346,61 @@ describe("SpeechControlBar", () => {
     expect(declarations["z-index"]).toBeUndefined();
   });
 
+  // The other half of "in flow": the row draws one hairline for its seam, and
+  // with the pane open that seam is not there to draw. Same discipline as the
+  // test above — the rule is parsed out of `src/index.css`, because
+  // `getComputedStyle` in jsdom reports the user-agent value and would pass
+  // over a stylesheet that says nothing at all.
+  it("drops the row's hairline while the answer pane is open, and keeps it while it is closed", () => {
+    const speech = makeSpeech();
+    const view = render(
+      <SpeechControlBar
+        sessionId="cell-a"
+        answerOpen={false}
+        onToggleAnswer={noop}
+        send={noop}
+        speech={speech}
+      />,
+    );
+
+    // Closed, the line is the row's seam against the terminal and it stays.
+    const base = declarationsOf(".speech-bar");
+    expect(base["border-bottom"]).toMatch(/^1px\s+solid\s+\S/);
+
+    // The state the stylesheet keys on rides on the row, and it FLIPS — a
+    // constant here would leave the rule below matching nothing, or matching
+    // always.
+    expect(screen.getByTestId("speech-bar-cell-a")).toHaveAttribute("data-answer-open", "0");
+    view.rerender(
+      <SpeechControlBar
+        sessionId="cell-a"
+        answerOpen
+        onToggleAnswer={noop}
+        send={noop}
+        speech={speech}
+      />,
+    );
+    const bar = screen.getByTestId("speech-bar-cell-a");
+    expect(bar).toHaveAttribute("data-answer-open", "1");
+
+    // The open rule exists, and it REACHES this element: a selector aimed at an
+    // attribute nobody renders would pass every assertion below on thin air.
+    const OPEN = '.speech-bar[data-answer-open="1"]';
+    expect(bar.matches(OPEN)).toBe(true);
+    const open = declarationsOf(OPEN);
+    expect(Object.keys(open).length).toBeGreaterThan(0);
+
+    // The line goes...
+    expect(open["border-bottom-color"]).toBe("transparent");
+
+    // ...and nothing else does. The 1px stays in the box, so opening the pane
+    // moves no edge and provokes no fit — see the rule's own note.
+    expect(open["border-bottom"]).toBeUndefined();
+    expect(open["border-bottom-width"]).toBeUndefined();
+    expect(open["border-bottom-style"]).toBeUndefined();
+    expect(open.border).toBeUndefined();
+  });
+
   it("renders one segment per unit before anything is synthesized", () => {
     const speech = makeSpeech({
       state: "ready",
