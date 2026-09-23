@@ -2,6 +2,8 @@ import { useState } from "react";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { preferences } from "../../preferences/declarations";
+import { toast } from "../../lib/toast";
+import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
 
 /**
  * How far the composer may be dragged, and how far one arrow key moves it.
@@ -42,6 +44,27 @@ export interface AnswerComposerProps {
  * counts as empty for the same reason — but what is SENT is never trimmed: the
  * text is the user's, and leading indentation in a pasted snippet is theirs too.
  *
+ * ## Why a pasted image goes the same way the terminal's does
+ *
+ * `imageFromClipboardItems` + `uploadPastedImage` are the terminal's own paste
+ * pair, and the composer is their second caller rather than a second
+ * implementation: the same POST, naming the same session, because the server
+ * chowns the saved file to the OS user behind that session before the CLI can
+ * read it. What differs is only where the path lands — spliced into the field
+ * at the caret instead of written into the pty — and that it is spliced at all:
+ * a path appended to the end would be in the wrong place in every reply that
+ * says anything after "look at".
+ *
+ * The trailing space is the terminal handler's too (`terminal.paste(path + " ")`),
+ * and for the same reason: the next word the user types must not run into the
+ * filename.
+ *
+ * A failed upload says so. The terminal's handler can afford its silence — the
+ * user is watching a pty that visibly did not change — but here the field would
+ * simply sit there, and a paste that quietly did nothing is indistinguishable
+ * from a clipboard that held nothing. `toast.error` is the panel's own way of
+ * saying it, the one the file explorer's failed moves already use.
+ *
  * ## Why Escape is not handled here
  *
  * It is handled by the pane's root, which already stops Escape from anywhere
@@ -78,6 +101,27 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
     send(`${text}\r`);
   };
 
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const image = imageFromClipboardItems(e.clipboardData?.items);
+    // No image in the clipboard: the textarea's own paste is exactly right,
+    // so there is nothing to prevent and nothing to upload.
+    if (!image) return;
+    e.preventDefault();
+    // Read off the event's target NOW: the upload is a round trip, and by the
+    // time it answers `currentTarget` is null and the selection has moved.
+    const from = e.currentTarget.selectionStart;
+    const to = e.currentTarget.selectionEnd;
+    void uploadPastedImage(image, sessionId).then((path) => {
+      if (path === null) {
+        toast.error("Could not save the pasted image");
+        return;
+      }
+      // Functional, because the user may have kept typing while the upload was
+      // in flight: what is spliced is the field as it is now, not as it was.
+      setText((prev) => `${prev.slice(0, from)}${path} ${prev.slice(to)}`);
+    });
+  };
+
   return (
     <div
       className="answer-pane-composer"
@@ -100,6 +144,7 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
       />
     </div>
   );
