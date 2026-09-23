@@ -128,7 +128,9 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
     if (!image) return;
     e.preventDefault();
     // Read off the event's target NOW: the upload is a round trip, and by the
-    // time it answers `currentTarget` is null and the selection has moved.
+    // time it answers `currentTarget` is null and the selection may have moved.
+    // `preventDefault` above suppressed the native insertion, so nothing moves
+    // the caret on its own — but the user is free to keep typing, and does.
     const from = e.currentTarget.selectionStart;
     const to = e.currentTarget.selectionEnd;
     void uploadPastedImage(image, sessionId).then((path) => {

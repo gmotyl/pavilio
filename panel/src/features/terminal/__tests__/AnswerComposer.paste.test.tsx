@@ -151,6 +151,38 @@ describe("AnswerComposer paste", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("splices into the text typed while the upload was in flight", async () => {
+    // The round trip, held open: the paste handler is inside its `then` for as
+    // long as this promise is unresolved, which is the window the user types in.
+    let answer!: (response: { ok: boolean; json: () => Promise<unknown> }) => void;
+    fetchFn.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const user = userEvent.setup();
+    renderComposer();
+    await typeAroundACaret(user);
+
+    fireEvent.paste(field(), { clipboardData: imageClipboard(shot()) });
+
+    // Still in flight, and the user has not stopped writing the sentence the
+    // screenshot belongs to.
+    expect(field().value).toBe("look at please");
+    field().setSelectionRange("look at please".length, "look at please".length);
+    await user.keyboard(" now");
+    expect(field().value).toBe("look at please now");
+
+    answer({ ok: true, json: async () => ({ path: SAVED }) });
+
+    // BOTH halves survive: the path lands at the caret the paste was made at,
+    // and the four characters typed after it are still there. The splice reads
+    // the field as it is when the upload answers — a handler that closed over
+    // the text as it was at paste time would write `look at <path> please` and
+    // silently swallow " now".
+    await waitFor(() => expect(field().value).toBe(`look at ${SAVED} please now`));
+  });
+
   it("sends the edited path rather than the inserted one", async () => {
     fetchFn.mockResolvedValue({ ok: true, json: async () => ({ path: SAVED }) });
     const user = userEvent.setup();
