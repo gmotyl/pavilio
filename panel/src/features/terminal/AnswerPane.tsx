@@ -3,6 +3,8 @@ import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { AnswerComposer } from "./AnswerComposer";
+import { AnswerWaiting } from "./AnswerWaiting";
+import { beginWaiting, noteUtterance, useAnswerWaiting } from "./answerWaiting";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
@@ -147,6 +149,22 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * the voice — so a unit that speaks items 3 to 5 spans exactly those items
  * instead of being stacked under the whole list as a stub.
  *
+ * ## Why the body, and only the body, hands over while a reply is pending
+ *
+ * Sending leaves the previous answer on screen, where it reads as the reply to
+ * the question just asked. So the composer's `send` is wrapped here — the
+ * composer raises the keystroke and knows nothing about the pane above it,
+ * while the pane knows which utterance the body was showing when the draft went
+ * out — and the body renders {@link AnswerWaiting} in place of the rail and the
+ * text until that wait ends.
+ *
+ * Nothing on `speech` is touched on the way in. The voice goes on reading
+ * whatever it was reading and the bar's scrubber goes on advancing, because the
+ * wait is a fact about this BODY, not about the one run the panel has. The
+ * state, its three exits and the reason none of them is a timer live in
+ * `answerWaiting.ts`; what the pane owes it is two things it alone knows — the
+ * send, and the id under the cursor when it happened.
+ *
  * ## Why the pane scrolls once per unit, and never on a tick
  *
  * Following is a `useLayoutEffect` on the unit index alone. When the index
@@ -198,6 +216,35 @@ export function AnswerPane({
 
   const voice = getStoredVoice();
   const text = answer?.text ?? "";
+  const answerId = answer?.id ?? null;
+
+  // Whether this cell is still waiting for the reply to a draft it sent. Only
+  // `waiting` is the body's business: `pending` is the bar's, and is what keeps
+  // the mark on the play button after a transport press took the text back.
+  const { waiting } = useAnswerWaiting(sessionId);
+
+  // The composer's write, with the handover attached. The composer raises the
+  // send and knows nothing about the pane above it; the pane knows what the
+  // body was showing when the draft went out, which is exactly what tells a
+  // later arrival apart from the answer that is already there.
+  //
+  // Nothing on `speech` is read here — see the note on `answerWaiting.ts`. The
+  // voice keeps reading; only the body hands over.
+  const sendReply = useCallback(
+    (data: string): void => {
+      send(data);
+      beginWaiting(sessionId, answerId);
+    },
+    [send, sessionId, answerId],
+  );
+
+  // The reply landing. The queue is not a store the pane subscribes to — the
+  // host's identity changes when an utterance arrives and the cell re-renders —
+  // so the arrival is noticed where the pane already reads it: the id under the
+  // cursor. A remount with the same answer is the same id, and ends nothing.
+  useEffect(() => {
+    noteUtterance(sessionId, answerId);
+  }, [sessionId, answerId]);
 
   // Focus lands on the root the moment it opens — also when it opened itself —
   // so Escape works at once and the read → Escape → type loop needs no mouse.
@@ -301,7 +348,11 @@ export function AnswerPane({
     observer.observe(body);
     if (textRef.current) observer.observe(textRef.current);
     return () => observer.disconnect();
-  }, []);
+    // `waiting` is in here because the text column is UNMOUNTED while the body
+    // is waiting: an observer kept across the handover would be holding the
+    // dead element and would never see the new one, so the rail would stop
+    // re-laying itself after the first reply.
+  }, [waiting]);
 
   // Follow the voice: once per unit, on the boundary or on a mid-run mount,
   // and only when there is somewhere to scroll to. Never on a tick — the
@@ -374,41 +425,50 @@ export function AnswerPane({
           jumpTo(Number(block.dataset.unit));
         }}
       >
-        {/* The scrubber turned vertical: a pointer affordance, not a row of
-            buttons — see the note on the component. Each segment is placed by
-            `layoutRail` to span its unit's blocks. */}
-        <div ref={railRef} className="answer-pane-rail" aria-hidden="true">
-          {units.map((unit, index) => {
-            const state = segmentStateFor({
-              index,
-              playingIndex: unitIndex,
-              cache: speechCacheState(unit.text, { voice }),
-            });
-            return (
-              <div
-                key={index}
-                className="answer-pane-seg"
-                data-segment={state}
-                data-testid={`answer-pane-seg-${sessionId}-${index}`}
-                title={`Unit ${index + 1} of ${units.length}`}
-                onClick={() => jumpTo(index)}
-              >
-                {state === "playing" ? (
-                  <span className="answer-pane-head" data-testid={`answer-pane-head-${sessionId}`} />
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-        <div ref={textRef} className="answer-pane-text">
-          {answer ? <MarkdownRenderer content={answer.text} /> : null}
-        </div>
+        {waiting ? (
+          <AnswerWaiting sessionId={sessionId} />
+        ) : (
+          <>
+          {/* The scrubber turned vertical: a pointer affordance, not a row of
+              buttons — see the note on the component. Each segment is placed by
+              `layoutRail` to span its unit's blocks. */}
+          <div ref={railRef} className="answer-pane-rail" aria-hidden="true">
+            {units.map((unit, index) => {
+              const state = segmentStateFor({
+                index,
+                playingIndex: unitIndex,
+                cache: speechCacheState(unit.text, { voice }),
+              });
+              return (
+                <div
+                  key={index}
+                  className="answer-pane-seg"
+                  data-segment={state}
+                  data-testid={`answer-pane-seg-${sessionId}-${index}`}
+                  title={`Unit ${index + 1} of ${units.length}`}
+                  onClick={() => jumpTo(index)}
+                >
+                  {state === "playing" ? (
+                    <span
+                      className="answer-pane-head"
+                      data-testid={`answer-pane-head-${sessionId}`}
+                    />
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          <div ref={textRef} className="answer-pane-text">
+            {answer ? <MarkdownRenderer content={answer.text} /> : null}
+          </div>
+          </>
+        )}
       </div>
       {/* The reply, above the switches and under the text it answers. Absent
           entirely when the switch below is off — not hidden — so the height it
           held goes back to the body, which is what "returns its height to the
           text" means. */}
-      {composerOn ? <AnswerComposer sessionId={sessionId} send={send} /> : null}
+      {composerOn ? <AnswerComposer sessionId={sessionId} send={sendReply} /> : null}
       {/* The pane's switches: one row under everything, outside the scroll
           container so it stays put while the text scrolls. It was the footer
           when the auto-open switch was the pane's only control; now that the

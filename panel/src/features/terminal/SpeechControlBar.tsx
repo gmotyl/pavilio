@@ -2,6 +2,7 @@ import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { LauncherPills } from "./LauncherPills";
+import { noteTransport, useAnswerWaiting } from "./answerWaiting";
 import { segmentStateFor, type SegmentState } from "./segmentState";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
@@ -200,6 +201,9 @@ export function SpeechControlBar({
   send,
 }: SpeechControlBarProps) {
   const state = speech.stateFor(sessionId);
+  // Only the mark: whether the pane's BODY has handed over is the pane's
+  // business, and the bar draws the same fact one control smaller.
+  const { pending } = useAnswerWaiting(sessionId);
   const queue = speech.queueFor(sessionId);
   const units = speech.unitsFor(sessionId);
 
@@ -371,7 +375,10 @@ export function SpeechControlBar({
               data-testid={`speech-bar-previous-${sessionId}`}
               className="speech-bar-btn"
               disabled={!hasPrevious}
-              onClick={() => speech.onPrevious(sessionId)}
+              onClick={() => {
+                noteTransport(sessionId);
+                speech.onPrevious(sessionId);
+              }}
             >
               <SkipBack size={16} />
             </button>
@@ -398,6 +405,12 @@ export function SpeechControlBar({
               // something is still waiting. The cap narrows where the shared
               // derivation is read, never what it means.
               data-pulse={speechPulse(state) === "1" && withinReadyPulse ? "1" : "0"}
+              // A reply the cell is still waiting for. It arrives here only
+              // once the body has handed the wait back — pressing the
+              // transport is what moves the mark from the pane to this button
+              // — so the two never say the same thing twice, and a reply the
+              // user walked away from is still visibly on its way.
+              data-pending={pending ? "1" : "0"}
               className="speech-bar-btn speech-bar-primary"
               // No `disabled` any more: the only state that set it was `empty`,
               // and `empty` renders the launchers instead of reaching here at all.
@@ -406,6 +419,11 @@ export function SpeechControlBar({
               // without being taken out of the tab order while it lands.
               aria-disabled={intent === "none" || undefined}
               onClick={() => {
+                // The press is a transport press whatever it resolves to, and
+                // even when it resolves to nothing: the pane's body goes back
+                // to the text either way, because the user asked for the
+                // transport rather than for the wait.
+                noteTransport(sessionId);
                 if (intent === "pause") speech.onPause(sessionId);
                 else if (intent === "resume") speech.onResume(sessionId);
                 else if (intent === "speak") speech.onSpeak(sessionId);
@@ -421,7 +439,10 @@ export function SpeechControlBar({
               data-testid={`speech-bar-next-${sessionId}`}
               className="speech-bar-btn"
               disabled={!hasNext}
-              onClick={() => speech.onNext(sessionId)}
+              onClick={() => {
+                noteTransport(sessionId);
+                speech.onNext(sessionId);
+              }}
             >
               <SkipForward size={16} />
             </button>
