@@ -956,7 +956,8 @@ input[type="checkbox"] {
   /* No paint of its own: the pane is one surface now, the row's. A darker well
      here is what made the text read as a card's inside, and it is also the
      xterm's own ground (`--bg-base`), which is the one thing the pane must not
-     look like. The footer's hairline is the only seam left. */
+     look like. The seams left are hairlines on the two rows BELOW the text —
+     the meta row's `border-top`, and the composer's own when it is on. */
   display: grid;
   grid-template-columns: 22px 1fr;
   column-gap: 10px;

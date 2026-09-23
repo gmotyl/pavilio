@@ -86,7 +86,6 @@ beforeEach(() => {
   send.mockClear();
   fetchFn.mockReset();
   dismissToast();
-  localStorage.clear();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   vi.stubGlobal("fetch", fetchFn);
   installMatchMedia();

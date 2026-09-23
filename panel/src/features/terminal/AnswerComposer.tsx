@@ -11,7 +11,7 @@ import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
  * The floor is one line plus the field's own padding — below that the box shows
  * less than what is being typed into it. The ceiling is deliberately short of
  * the pane: the composer eats the answer it is a reply to, and a field taller
- * than the text above it has stopped being a footer.
+ * than the text above it has stopped being a reply to it.
  */
 const BOUNDS: RowBounds = { min: 40, max: 320, step: 12 };
 

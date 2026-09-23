@@ -11,11 +11,15 @@
  * the way: an empty queue means no utterance under the cursor, so the markdown
  * renderer is never mounted and the body is empty.
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import type { GridSpeech, SpeechUnit } from "../../speech/types";
@@ -230,6 +234,32 @@ describe("AnswerComposer", () => {
     expect(field().closest(".answer-pane-composer")).not.toHaveStyle({ height: "140px" });
   });
 
+  it("sends what was typed, untrimmed", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("  indented  ");
+    await user.keyboard("{Enter}");
+
+    // The whitespace is the user's. `trim()` on the way out is the obvious
+    // tidying to reach for, and it is wrong twice over: leading indentation in
+    // a pasted snippet is part of the snippet, and a trailing space is how a
+    // CLI is told the next token is an argument. Whitespace decides only
+    // whether there is anything to send at all — never what is sent.
+    expect(send).toHaveBeenCalledWith("  indented  \r");
+  });
+
+  it("opens at the declared default when nothing has been stored", () => {
+    renderPane();
+
+    // `preferences.answerComposerHeight` declares 62, and an unstored pane has
+    // to open at it: two lines plus the field's padding, which is the shape the
+    // BOUNDS floor is reasoned from.
+    expect(field().closest(".answer-pane-composer")).toHaveStyle({ height: "62px" });
+    expect(grip()).toHaveAttribute("aria-valuenow", "62");
+  });
+
   it("opens at the height the grip last left behind", () => {
     writePreference(preferences.answerComposerHeight, 140);
     renderPane();
@@ -237,5 +267,61 @@ describe("AnswerComposer", () => {
     expect(grip()).toBeInTheDocument();
     expect(field().closest(".answer-pane-composer")).toHaveStyle({ height: "140px" });
     expect(grip()).toHaveAttribute("aria-valuenow", "140");
+  });
+
+  /**
+   * The composer's ground, read out of the stylesheet that owns it.
+   *
+   * `AnswerPane.test.tsx` says the composer "is darker than both of the other
+   * two" and points here for the reading; this is that reading. jsdom loads no
+   * stylesheet, so `getComputedStyle` would answer for a rule it never saw —
+   * `cssRule` returns one selector's declaration block, throws when none
+   * matches and refuses to guess when several do, which is what keeps a rename
+   * from turning these into assertions about nothing.
+   */
+  describe("the third ground", () => {
+    /** The ground a rule paints, comments out of the way first. */
+    const ground = (selector: string): string => {
+      const declarations = cssRule(selector).replace(/\/\*[\s\S]*?\*\//g, "");
+      const found = [
+        ...declarations.matchAll(/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/g),
+      ];
+      if (found.length === 0) throw new Error(`${selector} paints no ground`);
+      return found[found.length - 1][1].trim();
+    };
+
+    /** Rec. 709 relative luminance of a `#rrggbb`, 0 (black) to 255 (white). */
+    const luminance = (hex: string): number => {
+      const n = Number.parseInt(hex.slice(1), 16);
+      return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255);
+    };
+
+    /**
+     * The xterm's own ground, read out of the module that hands it to the
+     * terminal rather than repeated here as a literal. Importing
+     * `terminalInstances` for it would pull xterm — and that module's
+     * window/document listeners — into a file about a textarea, so the value is
+     * read the way `cssRule` reads the stylesheet: from the file that owns it,
+     * throwing rather than defaulting if it has moved.
+     */
+    const xtermGround = (): string => {
+      const src = readFileSync(resolve("src/features/terminal/terminalInstances.ts"), "utf8");
+      const found = src.match(/export const THEME = \{\s*background:\s*"(#[0-9a-fA-F]{6})"/);
+      if (!found) throw new Error("no THEME.background in terminalInstances.ts");
+      return found[1];
+    };
+
+    it("paints a ground darker than the pane's and the xterm's", () => {
+      const composer = ground(".answer-pane-composer");
+      expect(composer).toBe("#101014");
+
+      // Darker than BOTH, not merely different from them: the pane and the
+      // speech bar share `#17171d`, the cell keeps the xterm's own, and what
+      // YOU type is neither agent nor shell.
+      const pane = ground(".answer-pane");
+      expect(pane).toBe("#17171d");
+      expect(luminance(composer)).toBeLessThan(luminance(pane));
+      expect(luminance(composer)).toBeLessThan(luminance(xtermGround()));
+    });
   });
 });

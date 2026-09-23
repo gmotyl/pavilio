@@ -21,7 +21,7 @@ export interface AnswerPaneProps {
    */
   onClose: () => void;
   /**
-   * The cell's own "Open on new answer" switch, shown in the footer. Owned by
+   * The cell's own "Open on new answer" switch, shown in the meta row. Owned by
    * `TerminalView` — seeded from the browser-wide default at mount and never
    * written back to it — so the pane only reflects it and reports a flip.
    */
