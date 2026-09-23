@@ -3,6 +3,7 @@ import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { preferences } from "../../preferences/declarations";
 import { toast } from "../../lib/toast";
+import { clearDraft, getDraft, setDraft } from "./composerDrafts";
 import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
 
 /**
@@ -73,6 +74,20 @@ export interface AnswerComposerProps {
  * have to repeat the stop — so the field simply lets the key bubble the three
  * nodes to the root that owns it.
  *
+ * ## Why the text is mirrored into a module store
+ *
+ * `useState` is the field's value, but it is not where the draft LIVES. The
+ * pane is mounted only while it is open, so every Escape destroys this
+ * component — and a reply is typically written in the middle of reading, with
+ * a glance back at the terminal underneath. `composerDrafts` outlives the
+ * mount, so the field is seeded from it and every change is written back to
+ * it. The only thing that clears it is the send that consumed it: closing the
+ * pane, a new answer arriving and unmounting all leave it exactly where it was.
+ *
+ * The seed is read once, as the initial state, because a cell's `sessionId` is
+ * fixed for the life of its pane — a composer never changes which agent it is
+ * replying to.
+ *
  * ## Why the height is the row hook's and not a CSS constant
  *
  * `useResizableRow(answerComposerHeight, BOUNDS)` with a `PaneResizer` on the
@@ -83,7 +98,9 @@ export interface AnswerComposerProps {
  * the pane), no stored height at all, and a single row laid out by the viewport.
  */
 export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
-  const [text, setText] = useState("");
+  // Seeded from the store, not from `""`: this mount may be the second one for
+  // a pane the user closed mid-sentence.
+  const [text, setText] = useState(() => getDraft(sessionId));
   const { height, isMobile, handleProps } = useResizableRow(
     preferences.answerComposerHeight,
     BOUNDS,
@@ -97,6 +114,9 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
     // keystroke the user meant as "send".
     e.preventDefault();
     if (text.trim() === "") return;
+    // The one thing that consumes a draft. Nothing else in this file — or in
+    // the pane above it — calls `clearDraft`.
+    clearDraft(sessionId);
     setText("");
     send(`${text}\r`);
   };
@@ -118,7 +138,16 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
       }
       // Functional, because the user may have kept typing while the upload was
       // in flight: what is spliced is the field as it is now, not as it was.
-      setText((prev) => `${prev.slice(0, from)}${path} ${prev.slice(to)}`);
+      // The draft is written from inside the updater for the same reason —
+      // `next` is the only place the spliced value exists, and reading `text`
+      // out here would store the string the paste started from. React may
+      // invoke an updater twice under StrictMode; it is handed the same `prev`
+      // both times, so the write is the same write.
+      setText((prev) => {
+        const next = `${prev.slice(0, from)}${path} ${prev.slice(to)}`;
+        setDraft(sessionId, next);
+        return next;
+      });
     });
   };
 
@@ -142,7 +171,12 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
         placeholder="Reply…"
         rows={isMobile ? 1 : 2}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          // Every keystroke goes to both: the state the field renders from,
+          // and the store it will be rebuilt from after the pane is closed.
+          setDraft(sessionId, e.target.value);
+          setText(e.target.value);
+        }}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
       />

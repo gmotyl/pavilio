@@ -14,8 +14,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
@@ -23,7 +25,7 @@ import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import type { GridSpeech, SpeechUnit } from "../../speech/types";
-import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
+import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
 
 // The synthesis cache the rail peeks into. Nothing is warm and nothing
@@ -32,6 +34,15 @@ vi.mock("../../speech/synth", () => ({
   isSpeechSynthesized: () => false,
   speechCacheState: () => "cold",
   subscribeSpeechCache: () => () => {},
+}));
+
+// One of the draft tests puts a real answer under the cursor, which mounts the
+// markdown renderer — and the renderer reaches mermaid's browser-only stack.
+// No answer in this file holds a fence, so the mock costs nothing and keeps
+// pulling the renderer in from being a reason not to, exactly as in
+// `AnswerPane.test.tsx`.
+vi.mock("../../markdown/MermaidDiagram", () => ({
+  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
 }));
 
 /** Referentially stable — a fresh array per call is a `useSyncExternalStore` loop. */
@@ -90,23 +101,49 @@ const cellKeys = vi.fn();
 /** Everything that got past the React root: the window-level reach. */
 const documentKeys = vi.fn();
 
-function renderPane() {
-  return render(
+/**
+ * The tree a pane is mounted in — the cell around it included, because the
+ * Escape test asserts what that ancestor did NOT see. Separate from
+ * `renderPane` so a test can hand the same shape to `rerender` and keep the
+ * React instance alive across a change of answer.
+ */
+const paneTree = (sessionId: string, speech: GridSpeech) => (
+  // The router is for the markdown renderer, which links with `useNavigate` —
+  // only the draft test that puts an answer under the cursor mounts it, but
+  // one tree for every test is cheaper than two shapes to keep in step.
+  <MemoryRouter>
     <div data-testid="cell" onKeyDown={cellKeys}>
       <AnswerPane
-        sessionId="cell-a"
-        speech={makeSpeech()}
+        sessionId={sessionId}
+        speech={speech}
         onClose={onClose}
         send={send}
         autoOpen={false}
         onAutoOpenChange={() => {}}
       />
-    </div>,
-  );
+    </div>
+  </MemoryRouter>
+);
+
+function renderPane(sessionId = "cell-a", speech: GridSpeech = makeSpeech()) {
+  return render(paneTree(sessionId, speech));
 }
 
-const field = (): HTMLTextAreaElement =>
-  screen.getByTestId("answer-pane-composer-cell-a") as HTMLTextAreaElement;
+/** A speech host with one answer under the cursor for every cell that asks. */
+function speechWith(text: string): GridSpeech {
+  const queue: UtteranceQueue = {
+    previous: null,
+    current: { id: text, sessionId: "cell-a", text, at: 1 },
+    pending: [],
+    cursor: "current",
+  };
+  return { ...makeSpeech(), queueFor: () => queue };
+}
+
+const fieldFor = (sessionId: string): HTMLTextAreaElement =>
+  screen.getByTestId(`answer-pane-composer-${sessionId}`) as HTMLTextAreaElement;
+
+const field = (): HTMLTextAreaElement => fieldFor("cell-a");
 
 const maybeField = (): HTMLElement | null =>
   screen.queryByTestId("answer-pane-composer-cell-a");
@@ -267,6 +304,156 @@ describe("AnswerComposer", () => {
     expect(grip()).toBeInTheDocument();
     expect(field().closest(".answer-pane-composer")).toHaveStyle({ height: "140px" });
     expect(grip()).toHaveAttribute("aria-valuenow", "140");
+  });
+
+  /**
+   * What a half-typed reply survives.
+   *
+   * All three criteria here are stated about the PANE — closed and reopened, a
+   * new answer arriving, the reply sent — so they are asserted against a
+   * mounted pane rather than against the draft store, which is pinned on its
+   * own in `composerDrafts.test.ts`.
+   *
+   * Closing is Escape, not `unmount()`, and that is the whole point of
+   * `PaneHarness`: `TerminalView` renders the pane only while it is open, so
+   * the real close is the pane's own `onClose` taking it out of the tree. A
+   * test that unmounted by hand would pin the remount but leave the close path
+   * itself — the Escape handler, and anything a future hand hung off it —
+   * untested, and a `clearDraft` added there would not redden a thing.
+   */
+  describe("drafts", () => {
+    /**
+     * The pane as its host renders it: on screen while it is open, gone when
+     * it closes itself, and rebuilt from nothing when it is opened again.
+     */
+    function PaneHarness({ sessionId, speech }: { sessionId: string; speech: GridSpeech }) {
+      const [open, setOpen] = useState(true);
+      return (
+        <MemoryRouter>
+          <div data-testid="cell" onKeyDown={cellKeys}>
+            <button data-testid="reopen" onClick={() => setOpen(true)}>
+              Open the pane
+            </button>
+            {open ? (
+              <AnswerPane
+                sessionId={sessionId}
+                speech={speech}
+                onClose={() => setOpen(false)}
+                send={send}
+                autoOpen={false}
+                onAutoOpenChange={() => {}}
+              />
+            ) : null}
+          </div>
+        </MemoryRouter>
+      );
+    }
+
+    /** Escape from inside the field — the way a reader actually leaves the pane. */
+    async function closePane(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+      await user.keyboard("{Escape}");
+      // Genuinely out of the tree: every assertion after a reopen is about a
+      // field that was built again, not one that was never taken down.
+      expect(screen.queryByTestId("answer-pane-composer-cell-a")).toBeNull();
+    }
+
+    const reopenPane = (user: ReturnType<typeof userEvent.setup>): Promise<void> =>
+      user.click(screen.getByTestId("reopen"));
+
+    it("keeps a draft across closing and reopening the pane", async () => {
+      const user = userEvent.setup();
+      render(<PaneHarness sessionId="cell-a" speech={makeSpeech()} />);
+
+      await user.click(field());
+      await user.keyboard("not sent yet");
+
+      await closePane(user);
+      await reopenPane(user);
+
+      expect(field().value).toBe("not sent yet");
+      // And nothing was written to the PTY on the way: closing a pane is not
+      // sending what was in it.
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it("keeps a draft when a new answer arrives", async () => {
+      const user = userEvent.setup();
+      const second = speechWith("A second answer arrived.");
+      const view = render(
+        <PaneHarness sessionId="cell-a" speech={speechWith("The first answer.")} />,
+      );
+
+      await user.click(field());
+      await user.keyboard("half a reply");
+
+      view.rerender(<PaneHarness sessionId="cell-a" speech={second} />);
+
+      // The new answer is on screen, and the reply being typed underneath it
+      // is untouched — the cell answered again while the user was mid-sentence.
+      expect(screen.getByTestId("answer-pane-body-cell-a")).toHaveTextContent(
+        "A second answer arrived.",
+      );
+      expect(field().value).toBe("half a reply");
+
+      // That much a `useState` nothing re-keyed would also survive. The claim
+      // is stronger than the field's own state: the new answer did not clear
+      // the STORED draft, so it is still there after the pane closes and opens.
+      await user.click(field());
+      await closePane(user);
+      await reopenPane(user);
+
+      expect(field().value).toBe("half a reply");
+    });
+
+    it("clears the draft only when it is sent", async () => {
+      const user = userEvent.setup();
+      render(<PaneHarness sessionId="cell-a" speech={makeSpeech()} />);
+
+      await user.click(field());
+      await user.keyboard("ship it");
+
+      // Closing did not consume it — the "only" half of the criterion, and the
+      // half that tells a draft which was KEPT from one that was never stored
+      // in the first place. Without it the send assertion below would pass
+      // against a composer that has no drafts at all.
+      await closePane(user);
+      await reopenPane(user);
+      expect(field().value).toBe("ship it");
+
+      await user.click(field());
+      await user.keyboard("{Enter}");
+      expect(send).toHaveBeenCalledWith("ship it\r");
+
+      // Sent, so consumed: reopening offers an empty field rather than the
+      // reply the agent already has.
+      await closePane(user);
+      await reopenPane(user);
+
+      expect(field().value).toBe("");
+    });
+
+    it("opens a second cell's pane with an empty composer", async () => {
+      const user = userEvent.setup();
+      render(
+        <>
+          {paneTree("cell-a", makeSpeech())}
+          {paneTree("cell-b", makeSpeech())}
+        </>,
+      );
+
+      await user.click(fieldFor("cell-a"));
+      await user.keyboard("for cell a only");
+
+      // The draft is the cell's, not the panel's: the neighbour opened empty
+      // and stays empty while its neighbour is typed in.
+      expect(fieldFor("cell-b").value).toBe("");
+
+      await user.click(fieldFor("cell-b"));
+      await user.keyboard("for cell b");
+
+      expect(fieldFor("cell-a").value).toBe("for cell a only");
+      expect(fieldFor("cell-b").value).toBe("for cell b");
+    });
   });
 
   /**

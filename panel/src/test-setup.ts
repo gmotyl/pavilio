@@ -32,6 +32,10 @@ async function resetTabScopedSingletons(): Promise<void> {
   // so nothing else in this teardown clears it, and a test that opened a
   // sidebar on a phone would hand the next one a sidebar already open.
   await reset("./features/shell/useSidebarState", "__resetSidebarFoldForTests");
+  // The composer's drafts are tab-scoped too, and deliberately never stored —
+  // so nothing else in this teardown clears them, and a test that typed a reply
+  // would hand the next one a composer that opens with it already in the field.
+  await reset("./features/terminal/composerDrafts", "__resetComposerDraftsForTests");
 }
 
 function createMemoryStorage(): Storage {
