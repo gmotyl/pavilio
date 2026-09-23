@@ -284,8 +284,8 @@ export function TerminalView({
   useMobileReconnect({ ws, getDims, reopen, isViewportBlank });
 
   return (
-    // A COLUMN: the speech row first, the observed xterm container under it,
-    // and the answer pane still an overlay over that container.
+    // A COLUMN: the speech row first, the terminal area under it — the
+    // observed xterm container plus the answer pane overlaying it.
     //
     // `resizeObserver.observe(container)` above watches the inner div only, and
     // `inst.fit()` — which refreshes the terminal AND sends a PTY resize
@@ -305,26 +305,43 @@ export function TerminalView({
           send={send}
         />
       ) : null}
-      <div
-        ref={containerRef}
-        className="w-full flex-1 min-h-0"
-        style={{
-          opacity: focused ? 1 : 0.82,
-          transition: "opacity 150ms ease",
-          background: "#1a1b26",
-        }}
-      />
-      {/* The bar's visibility outranks the eye: a pane without its bar has no
-          eye to close it, so hiding the bar unmounts the pane too. */}
-      {speech && speechBarVisible && answerOpen ? (
-        <AnswerPane
-          sessionId={sessionId}
-          speech={speech}
-          onClose={closeAnswer}
-          autoOpen={autoOpen}
-          onAutoOpenChange={(on) => setAnswerPaneAutoOpen(sessionId, on)}
+      {/* THE TERMINAL AREA: the column cell the xterm fills, and the pane's
+          positioning context.
+
+          The pane overlays the terminal and nothing else — not the row above
+          it, not the cell header above that — and the only honest way to say
+          "the terminal area" to an absolutely positioned box is to make it a
+          box. So the container gets a positioned wrapper, and the pane's
+          `top: 0` is the row's bottom edge by construction. It used to be
+          `top: 68px` — the floating bar's 6 + 56 + 6 — measured from the CELL,
+          which turned into a 12px gap the moment the row joined the flow.
+
+          The wrapper takes the flex sizing the container used to carry, so the
+          terminal's height is unchanged; and the pane stays a SIBLING of the
+          observed container rather than becoming a child of it, so the
+          uncoalesced `ResizeObserver` above still never sees it appear. */}
+      <div className="w-full flex-1 min-h-0 relative">
+        <div
+          ref={containerRef}
+          className="w-full h-full"
+          style={{
+            opacity: focused ? 1 : 0.82,
+            transition: "opacity 150ms ease",
+            background: "#1a1b26",
+          }}
         />
-      ) : null}
+        {/* The bar's visibility outranks the eye: a pane without its bar has no
+            eye to close it, so hiding the bar unmounts the pane too. */}
+        {speech && speechBarVisible && answerOpen ? (
+          <AnswerPane
+            sessionId={sessionId}
+            speech={speech}
+            onClose={closeAnswer}
+            autoOpen={autoOpen}
+            onAutoOpenChange={(on) => setAnswerPaneAutoOpen(sessionId, on)}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

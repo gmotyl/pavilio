@@ -180,9 +180,18 @@ async function settle(): Promise<void> {
 const bar = (): HTMLElement => screen.getByTestId("speech-bar-cell-a");
 const resizeFrames = (): string[] => term.sent.filter((frame) => frame.includes('"resize"'));
 
-/** What the cell's column holds, in order — the shape a height comes from. */
+/**
+ * What the cell's column holds, in order — the shape a height comes from.
+ *
+ * Two levels up from the observed container, not one: the container now sits
+ * inside the TERMINAL AREA, the positioned box that is the answer pane's
+ * offsetParent, and the cell's column is that box's parent. Reading the
+ * container's own parent would describe the terminal area instead — a box with
+ * one child, which agrees with itself no matter what happens to the row.
+ */
 function columnShape(container: Element): string[] {
-  return [...(container.parentElement?.children ?? [])].map(
+  const column = container.parentElement?.parentElement;
+  return [...(column?.children ?? [])].map(
     (child) => child.getAttribute("data-testid") ?? child.tagName.toLowerCase(),
   );
 }
@@ -242,8 +251,17 @@ describe("the speech row", () => {
     expect(container.contains(bar())).toBe(false);
     // …but now a PREVIOUS sibling in the same column, rather than a layer over
     // it: the container starts where the row ends.
-    expect(bar().parentElement).toBe(container.parentElement);
-    expect(bar().nextElementSibling).toBe(container);
+    //
+    // The column's second item is the TERMINAL AREA rather than the container
+    // itself: the answer pane needs a positioned box meaning "the terminal and
+    // nothing above it" to overlay, so the container gained a wrapper (see
+    // `TerminalView`). The row is still the box before it, and the area still
+    // holds the observed container and nothing else of the cell — which is the
+    // claim this test was always making.
+    const area = container.parentElement;
+    expect(area?.contains(bar())).toBe(false);
+    expect(bar().parentElement).toBe(area?.parentElement);
+    expect(bar().nextElementSibling).toBe(area);
     // And the parent lays them out as a column, so "before" is a box above
     // rather than a stacking order.
     expect(bar().parentElement?.className).toContain("flex-col");

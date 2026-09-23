@@ -908,28 +908,41 @@ input[type="checkbox"] {
   flex: 0 0 auto;
 }
 
-/* The answer pane: the card under the speech bar that renders the utterance
-   under the cursor as markdown. An overlay for the bar's reason — see the note
-   on `AnswerPane` — so it never sits in the cell's flow: `top` is the bar's
-   `top 6` + its 56px row + a 6px gap, the inset is the bar's own, and it stops
-   at the cell edge. Under the bar's z-index, over the xterm. Background,
-   border, radius and shadow are the bar's: one visual language. */
+/* The answer pane: the utterance under the cursor, rendered as markdown over
+   the terminal area. NOT a card. The chrome went the way the bar's did (see
+   the note on the speech row above): nothing sits behind an in-flow speech
+   surface to blur, and a floating panel's border, radius and drop shadow would
+   draw an edge exactly where the row and the pane are meant to read as one
+   surface. So no border, no radius, no shadow, no blur — and the row's own
+   ground, #17171d, which is what makes the pane a continuation of the row
+   rather than a thing sitting on the terminal.
+
+   Still an overlay, for the bar's ORIGINAL reason — see the note on
+   `AnswerPane` — but over the TERMINAL AREA rather than the cell.
+   `TerminalView` wraps the observed xterm container in a positioned box and
+   mounts the pane as its sibling inside it, so:
+
+     - `top: 0` IS the row's bottom edge, by construction rather than by
+       arithmetic. The superseded `top: 68px` was the floating bar's
+       6 + 56px + 6, and it became a 12px gap the moment the row entered the
+       flow; a retuned number would only wait for the next change to the row.
+     - the row and the cell header are outside this box, so no amount of pane
+       can cover either.
+     - the pane is still a SIBLING of the observed container, never a child, so
+       the uncoalesced `ResizeObserver` never sees it appear.
+
+   `max-height: 100%` is the terminal area's height: a short answer is a short
+   pane, a long one stops at the bottom of the terminal and scrolls. */
 .answer-pane {
   position: absolute;
-  top: 68px;
-  left: 6px;
-  right: 6px;
-  max-height: calc(100% - 74px);
+  top: 0;
+  left: 0;
+  right: 0;
+  max-height: 100%;
   z-index: 4;
   display: flex;
   flex-direction: column;
-  background: rgba(26, 27, 38, 0.97);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.45),
-    0 0 0 1px rgba(0, 0, 0, 0.3);
+  background: #17171d;
   outline: none;
 }
 
@@ -940,9 +953,10 @@ input[type="checkbox"] {
    what `layoutRail` and the follow effect in `AnswerPane` rely on. */
 .answer-pane-body {
   position: relative;
-  /* Darker than the card, so the text well and the footer read as two
-     surfaces. Paint only — the grid below is what the rail measures. */
-  background: var(--bg-base);
+  /* No paint of its own: the pane is one surface now, the row's. A darker well
+     here is what made the text read as a card's inside, and it is also the
+     xterm's own ground (`--bg-base`), which is the one thing the pane must not
+     look like. The footer's hairline is the only seam left. */
   display: grid;
   grid-template-columns: 22px 1fr;
   column-gap: 10px;
@@ -951,8 +965,10 @@ input[type="checkbox"] {
   padding: 10px 12px 10px 6px;
 }
 
-/* One row under the body, inside the card: the cell's "Open on new answer"
-   switch. Outside the scroll container so it stays put while the text scrolls. */
+/* One row under the body, inside the pane: the cell's "Open on new answer"
+   switch. Outside the scroll container so it stays put while the text scrolls.
+   It paints nothing of its own — the pane's ground shows through — and the
+   hairline above it is the seam between the two. */
 .answer-pane-footer {
   flex: none;
   display: flex;

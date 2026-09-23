@@ -21,6 +21,7 @@ import {
   utteranceQueueReducer,
   type UtteranceQueue,
 } from "../../speech/utteranceQueue";
+import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 
 /**
  * The terminal instance stand-in: `fit()` refreshes AND sends a resize frame,
@@ -220,9 +221,17 @@ describe("TerminalView and the answer pane", () => {
     const opened = pane();
     expect(opened).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
-    // A sibling of the container and of the bar — the same parent as both.
+    // A sibling of the observed container, and never a child of it — an
+    // overlay INSIDE the observed box would hand the uncoalesced
+    // `ResizeObserver` a new trigger every time the pane opened.
+    //
+    // It is no longer a sibling of the BAR, though: the pane's positioning
+    // context is the terminal area, not the cell column, which is what keeps
+    // the row out from under it. The test below is where that is pinned.
     expect(opened!.parentElement).toBe(observedContainer.parentElement);
-    expect(opened!.parentElement).toBe(screen.getByTestId("speech-bar-cell-a").parentElement);
+    expect(opened!.parentElement).not.toBe(
+      screen.getByTestId("speech-bar-cell-a").parentElement,
+    );
     expect(observedContainer.contains(opened!)).toBe(false);
     expect(term.fit.mock.calls.length).toBe(fitsBefore);
     expect(resizeFrames().length).toBe(resizesBefore);
@@ -234,6 +243,39 @@ describe("TerminalView and the answer pane", () => {
     expect(eye()).toHaveAttribute("aria-pressed", "false");
     expect(term.fit.mock.calls.length).toBe(fitsBefore);
     expect(resizeFrames().length).toBe(resizesBefore);
+  });
+
+  it("mounts the pane inside the terminal area so the row stays uncovered", async () => {
+    render(cell(makeSpeech()));
+    await settleTerminal();
+    const observedContainer = term.observed[0];
+    expect(observedContainer).toBeDefined();
+
+    fireEvent.click(eye());
+    await settleTerminal();
+    const opened = pane();
+    expect(opened).not.toBeNull();
+
+    // The pane's positioning context is the TERMINAL AREA — the box that holds
+    // the observed xterm container and the overlay over it, and nothing else
+    // of the cell.
+    const area = opened!.parentElement;
+    expect(area).toBe(observedContainer.parentElement);
+
+    // The speech row is OUTSIDE that box: it is the area's previous sibling in
+    // the cell's column, so no amount of pane can reach it. The cell header is
+    // outside by the same construction — it is not even in this column, it is
+    // the grid cell's own row above it.
+    const row = screen.getByTestId("speech-bar-cell-a");
+    expect(area!.contains(row)).toBe(false);
+    expect(row.nextElementSibling).toBe(area);
+    expect(row.parentElement).toBe(area!.parentElement);
+
+    // Which is what makes the top edge exact instead of arithmetic: the pane
+    // starts at the top of that box, and the top of that box IS where the row
+    // ends. The superseded `top: 68px` was the floating bar's 6 + 56 + 6, and
+    // it became a 12px gap the moment the row entered the flow.
+    expect(cssRule(".answer-pane")).toMatch(/(^|;)\s*top:\s*0\s*(;|$)/);
   });
 
   it("hiding the bar closes the pane", async () => {

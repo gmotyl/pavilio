@@ -54,10 +54,10 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
 
 /**
  * The cell's answer pane: the utterance under the cursor rendered as markdown
- * in a card under the speech bar, with the spoken block marked and a rail of
- * unit segments — the scrubber turned vertical — beside the text.
+ * under the speech row, with the spoken block marked and a rail of unit
+ * segments — the scrubber turned vertical — beside the text.
  *
- * ## Why it is an overlay
+ * ## Why it is an overlay, and over what
  *
  * The same rule the bar lives by, for the same reason. `TerminalView` runs
  * `new ResizeObserver(() => inst.fit())` with no coalescing, and `inst.fit()`
@@ -66,6 +66,14 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * bug a new trigger every time it opened or closed. So this is
  * `position: absolute` over the xterm, a SIBLING of the observed container:
  * nothing reflows, nothing refits, no resize frame is sent when it appears.
+ *
+ * What it is absolute WITHIN is the terminal area — the positioned box
+ * `TerminalView` wraps the observed container in — not the cell. That is what
+ * makes `top: 0` mean "where the speech row ends" without any arithmetic, and
+ * what keeps the row and the cell header out from under it: they are not in
+ * the box. It is also no longer a card. The border, radius, shadow and blur
+ * went the way the bar's did, and it takes the row's own ground, so the row
+ * and the pane read as one speech surface over the terminal.
  *
  * ## Why the progress snapshot is the unit index only
  *
@@ -200,9 +208,10 @@ export function AnswerPane({
   // more, in exchange for a pane that always answers the key it advertises.
   //
   // Only THIS cell's terminal, though. The pane is mounted by `TerminalView`
-  // as a sibling of the xterm container inside the cell's `relative`
-  // wrapper, so an xterm under the root's parent is the cell's own; an xterm
-  // anywhere else is another cell's TUI, and its Escape is left alone.
+  // as a sibling of the xterm container inside the terminal area — the
+  // positioned box that holds the two — so an xterm under the root's parent is
+  // the cell's own; an xterm anywhere else is another cell's TUI, and its
+  // Escape is left alone.
   //
   // An Escape inside the pane never gets here: this listener bails out when
   // the target is inside the root, so `onClose` runs once per keypress — from

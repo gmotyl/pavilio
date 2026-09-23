@@ -1062,13 +1062,15 @@ describe("AnswerPane", () => {
   });
 
   /**
-   * The pane's two surfaces, read out of the stylesheet that owns them.
+   * The pane's surface, read out of the stylesheet that owns it.
    *
    * jsdom loads no stylesheet, so `getComputedStyle` here would answer for a
    * rule it never saw. `cssRule` — the helper the hamburger geometry already
-   * reads `index.css` with — returns one selector's declaration block and
-   * refuses to guess when a selector matches more than one rule, so these
-   * assertions are about what the file actually says.
+   * reads `index.css` with — returns one selector's declaration block, refuses
+   * to guess when a selector matches more than one rule, and THROWS when none
+   * matches. That last part is what carries the absence assertions below: "no
+   * border" is trivially true of a rule that was never found, so the parse has
+   * to fail loudly on a renamed selector rather than quietly agree.
    */
   describe("surfaces", () => {
     /**
@@ -1083,35 +1085,66 @@ describe("AnswerPane", () => {
     };
 
     /**
-     * What a surface inside the card actually shows: its own `background` if
-     * it declares one, else the card's, which is what shows through an
+     * What a surface inside the pane actually shows: its own `background` if
+     * it declares one, else the pane's, which is what shows through an
      * undeclared one.
      */
     const shows = (selector: string): string | null =>
       background(selector) ?? background(".answer-pane");
 
-    it("the answer pane body uses the base background", () => {
-      expect(background(".answer-pane-body")).toBe("var(--bg-base)");
+    it("renders the pane without a border, radius or shadow", () => {
+      const pane = cssRule(".answer-pane").replace(/\/\*[\s\S]*?\*\//g, "");
 
-      // Adding a paint must not have moved the geometry the rail reads: the
-      // body is still the positioned grid whose first column is the rail.
+      // Vacuity guard. Every assertion below is about an ABSENCE, and an
+      // absence is true of nothing at all: a renamed selector must blow up
+      // (`cssRule` throws) and an emptied rule must fail here, not pass.
+      expect(pane.trim().length).toBeGreaterThan(0);
+      // And it is still the overlay rule, not some other block that happens to
+      // declare nothing.
+      expect(pane).toMatch(/(^|;)\s*position:\s*absolute/);
+
+      // The card chrome goes the way the bar's did: nothing sits behind an
+      // in-flow speech surface to blur, and a floating panel's edge would draw
+      // a border where the row and the pane are meant to read as one surface.
+      expect(pane).not.toMatch(/(^|;)\s*border\s*:/);
+      expect(pane).not.toMatch(/border-radius\s*:/);
+      expect(pane).not.toMatch(/box-shadow\s*:/);
+      expect(pane).not.toMatch(/backdrop-filter\s*:/);
+    });
+
+    it("paints the pane on the speech surface, not the terminal ground", () => {
+      // Quoted from the row's own rule rather than repeated as a literal, so
+      // the two grounds cannot drift apart without this failing.
+      const row = background(".speech-bar");
+      expect(row).not.toBeNull();
+      expect(background(".answer-pane")).toBe(row);
+
+      // The body stops painting the xterm's ground under the text. A second,
+      // darker surface inside the pane is precisely the card the pane has
+      // stopped being — the text well and the footer are one ground now, with
+      // the footer's hairline for the seam.
+      expect(shows(".answer-pane-body")).not.toBe("var(--bg-base)");
+      expect(shows(".answer-pane-body")).toBe(row);
+
+      // Dropping the paint must not have moved the geometry the rail reads:
+      // the body is still the positioned grid whose first column is the rail.
       const body = cssRule(".answer-pane-body");
       expect(body).toMatch(/position:\s*relative/);
       expect(body).toMatch(/display:\s*grid/);
       expect(body).toMatch(/grid-template-columns:\s*22px 1fr/);
     });
 
-    it("the footer does not take the body's background", () => {
-      // The footer paints nothing of its own, so what it shows is the card it
-      // sits in. That is the whole point of the darker body: the two surfaces
-      // have to end up different, which they were not while the body also
-      // declared nothing.
-      const card = background(".answer-pane");
-      expect(card).not.toBeNull();
+    it("the footer takes the same surface the body does", () => {
+      // The footer paints nothing of its own — it never did — so what it shows
+      // is the pane it sits in. What changed is the conclusion: the body used
+      // to declare a darker ground so the two would read as two surfaces, and
+      // that split was the card. One ground now, both of them the row's.
+      const surface = background(".answer-pane");
+      expect(surface).not.toBeNull();
       expect(cssRule(".answer-pane-footer")).not.toMatch(/background/);
-      expect(shows(".answer-pane-footer")).toBe(card);
+      expect(shows(".answer-pane-footer")).toBe(surface);
 
-      expect(shows(".answer-pane-body")).not.toBe(shows(".answer-pane-footer"));
+      expect(shows(".answer-pane-body")).toBe(shows(".answer-pane-footer"));
     });
   });
 });
