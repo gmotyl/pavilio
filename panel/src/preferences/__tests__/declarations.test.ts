@@ -311,7 +311,7 @@ describe("the launcher list and the answer composer", () => {
     expect(readPreference(preferences.answerComposerEnabled)).toBe(true);
   });
 
-  it("answerComposerHeight is declared non-portable, like the other pane measurements", () => {
+  it("answerComposerHeight is the first pane measurement declared non-portable", () => {
     const def = keyOf("speech.answerComposer.height");
     expect(def.portable).toBe(false);
     // The local tier, not the narrower session one: a remembered height should
