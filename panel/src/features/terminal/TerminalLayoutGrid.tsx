@@ -14,7 +14,7 @@ import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ProjectColorPicker } from "./ProjectColorPicker";
 import { CellSpeakButton } from "./CellSpeakButton";
-import { CellAutoplayToggle } from "./CellAutoplayToggle";
+import { CellSpeechControlsToggle } from "./CellSpeechControlsToggle";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
 import {
@@ -507,8 +507,11 @@ function TerminalCell({
           {/* Leads the eye · kill group. Renders nothing while the socket is
               healthy, so the group's usual width is unchanged. */}
           <TerminalDisconnectedBadge sessionId={session.id} />
-          {/* Speak · autoplay lead the group: they change per utterance, the
-              rest are static. Both are inert until a speech host is passed. */}
+          {/* Speak · speech-controls lead the group: they change per utterance,
+              the rest are static. The speak control is inert until a speech
+              host is passed; the disclosure beside it never needed one — it
+              shows and hides the bar and reports nothing about arming, so the
+              armed session is not among its props. */}
           <CellSpeakButton
             sessionId={session.id}
             state={speech?.stateFor(session.id) ?? "empty"}
@@ -516,9 +519,8 @@ function TerminalCell({
             onPause={(id) => speech?.onPause(id)}
             onResume={(id) => speech?.onResume(id)}
           />
-          <CellAutoplayToggle
+          <CellSpeechControlsToggle
             sessionId={session.id}
-            armedSessionId={speech?.armedSessionId ?? null}
             barVisible={speechBarVisible}
             // The intent is "not what I am looking at", so the boolean written
             // here comes from what is on screen now — `barChoice` may still be

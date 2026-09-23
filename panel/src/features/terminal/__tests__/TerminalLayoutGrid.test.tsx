@@ -705,13 +705,13 @@ describe("TerminalLayoutGrid — what the cell header no longer carries", () => 
     expect(screen.queryByTestId("terminal-cell-color-s-nc")).toBeNull();
     expect(screen.queryByLabelText("Set colour for alpha")).toBeNull();
 
-    // What the group holds instead, in order: speak · autoplay · eye · kill.
-    // (The disconnected badge leads it but renders nothing while healthy.)
+    // What the group holds instead, in order: speak · speech-controls · eye ·
+    // kill. (The disconnected badge leads it but renders nothing while healthy.)
     const eye = screen.getByTestId("terminal-cell-eye-s-nc");
     const group = Array.from(eye.parentElement!.children) as HTMLElement[];
     expect(group.map((el) => el.dataset.testid)).toEqual([
       "terminal-cell-speak-s-nc",
-      "terminal-cell-autoplay-s-nc",
+      "terminal-cell-speech-controls-s-nc",
       "terminal-cell-eye-s-nc",
       "terminal-cell-kill-s-nc",
     ]);

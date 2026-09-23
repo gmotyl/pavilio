@@ -494,12 +494,15 @@ input[type="checkbox"] {
   height: 8px;
 }
 
-/* Cell-header speak control and autoplay toggle. Both borrow the activity
-   LED's vocabulary above rather than inventing a second one: the same green
-   (#9ece6a), the same `terminal-led-pulse-attention` keyframes, and the same
-   `data-pulse` switch that stops the animation. */
+/* Cell-header speak control and speech-controls disclosure. Both borrow the
+   activity LED's vocabulary above rather than inventing a second one: the same
+   green (#9ece6a), the same `terminal-led-pulse-attention` keyframes, and the
+   same `data-pulse` switch that stops the animation.
+
+   Only the speak control uses that vocabulary now. The disclosure beside it is
+   muted, full stop: it reports nothing, so it has nothing to be coloured by. */
 .terminal-speak,
-.terminal-autoplay {
+.terminal-speech-controls {
   color: var(--text-muted);
   transition:
     color 200ms ease,
@@ -590,18 +593,19 @@ input[type="checkbox"] {
   background: var(--red-dim);
 }
 
-/* Armed for autoplay: the same green plus a fill, so on/off is legible with
-   no hover and no click. */
-.terminal-autoplay[data-armed="1"] {
-  color: #9ece6a;
-  background: rgba(158, 206, 106, 0.16);
-}
+/* The header disclosure used to take the same green plus a fill under
+   `[data-armed="1"]`, and its hover was gated on `[data-armed="0"]` so the
+   green survived a pointer. Both are gone with the attribute: the control no
+   longer reports arming, so nothing in the panel writes `data-armed` outside
+   the bar's own switch and neither rule could ever match again. The bar's
+   switch keeps the green — see `.speech-bar-btn[data-armed="1"]` below.
 
-/* Hover feedback like the sibling header buttons, but only where no fill is
-   already standing — an armed toggle and a speaking cell keep their green. */
+   Hover feedback like the sibling header buttons, but only where no fill is
+   already standing — a speaking cell keeps its green. The disclosure never has
+   a fill now, so it is simply always hovered, no gate needed. */
 .terminal-speak[data-speech="ready"]:hover,
 .terminal-speak[data-speech="heard"]:hover,
-.terminal-autoplay[data-armed="0"]:hover {
+.terminal-speech-controls:hover {
   background: rgba(255, 255, 255, 0.06);
 }
 
