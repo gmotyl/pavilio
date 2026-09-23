@@ -356,7 +356,7 @@ describe("SpeechControlBar", () => {
       durations: new Map<number, number>(),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     expect(screen.getAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(3);
     // Widths seeded from `SpeechUnit.chars`: 100/300/100 of 500.
@@ -383,7 +383,7 @@ describe("SpeechControlBar", () => {
       ]),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     expect(widthOf("cell-a", 0)).toBeCloseTo(25, 1);
     expect(widthOf("cell-a", 1)).toBeCloseTo(75, 1);
@@ -404,7 +404,7 @@ describe("SpeechControlBar", () => {
       durations: new Map<number, number>(),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     expect(segmentAt("cell-a", 0)).toBe("cold");
     expect(segmentAt("cell-a", 1)).toBe("ready");
@@ -430,7 +430,7 @@ describe("SpeechControlBar", () => {
       durations: new Map([[0, 3]]),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     expect(segmentAt("cell-a", 0)).toBe("played");
     expect(segmentAt("cell-a", 1)).toBe("cold");
@@ -462,7 +462,7 @@ describe("SpeechControlBar", () => {
       warming.add(all[1].text); // requested, socket open, no audio yet
       warm.add(all[2].text); // landed
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor(all)} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(all)} />);
 
       expect(segmentAt("cell-a", 0)).toBe("cold");
       expect(segmentAt("cell-a", 1)).toBe("warming");
@@ -473,7 +473,7 @@ describe("SpeechControlBar", () => {
       const all = units(200, 240);
       warming.add(all[0].text);
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor(all)} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(all)} />);
       expect(segmentAt("cell-a", 0)).toBe("warming");
 
       // The audio lands while the run is paused or stalled. `subscribeProgress`
@@ -492,7 +492,7 @@ describe("SpeechControlBar", () => {
       // SYNTHESIS_CONCURRENCY slots open in the same tick.
       for (const unit of all.slice(0, 3)) warming.add(unit.text);
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor(all)} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(all)} />);
 
       const row = () => all.map((_unit, index) => segmentAt("cell-a", index));
       expect(row()).toEqual(["warming", "warming", "warming", "cold"]);
@@ -517,6 +517,7 @@ describe("SpeechControlBar", () => {
           sessionId="cell-a"
           answerOpen={false}
           onToggleAnswer={noop}
+          send={noop}
           speech={barFor(all, { state: "heard", durations: new Map([[0, 3]]) })}
         />,
       );
@@ -535,6 +536,7 @@ describe("SpeechControlBar", () => {
           sessionId="cell-a"
           answerOpen={false}
           onToggleAnswer={noop}
+          send={noop}
           speech={barFor(all, {
             state: "speaking",
             progress: { unitIndex: 1, unitTime: 1, unitDuration: 3 },
@@ -552,11 +554,15 @@ describe("SpeechControlBar", () => {
       // cell must not conjure a scrubber here.
       const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
       act(() => cacheChanged());
 
       expect(screen.queryAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(0);
-      expect(screen.getByTestId("speech-bar-playpause-cell-a")).toBeDisabled();
+      // Nor a transport: a cell with nothing under the cursor carries the
+      // launchers instead, so the notification has no play button to reach
+      // even if it wanted one.
+      expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
+      expect(screen.getByTestId("speech-bar-launchers-cell-a")).toBeInTheDocument();
     });
   });
 
@@ -595,7 +601,7 @@ describe("SpeechControlBar", () => {
       });
 
     it("no segment claims a role it does not implement", () => {
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barWithUnits()} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barWithUnits()} />);
 
       for (const segment of screen.getAllByTestId(/^speech-bar-segment-cell-a-/)) {
         expect(segment).not.toHaveAttribute("role");
@@ -607,7 +613,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("the segments are not announced at all", () => {
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barWithUnits()} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barWithUnits()} />);
 
       expect(screen.getByTestId("speech-bar-scrubber-cell-a")).toHaveAttribute(
         "aria-hidden",
@@ -627,7 +633,7 @@ describe("SpeechControlBar", () => {
         units: units(200, 200, 200),
       });
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
       const previous = screen.getByRole("button", { name: "Previous answer" });
       const next = screen.getByRole("button", { name: "Next answer" });
@@ -652,6 +658,7 @@ describe("SpeechControlBar", () => {
             sessionId="cell-a"
             answerOpen={answerOpen}
             onToggleAnswer={onToggleAnswer}
+            send={noop}
             speech={makeSpeech({
               state: "speaking",
               queue: queueWith({ current: utterance("u-1") }),
@@ -719,7 +726,15 @@ describe("SpeechControlBar", () => {
               sessionId="cell-a"
               answerOpen={false}
               onToggleAnswer={onToggleAnswer}
-              speech={makeSpeech({ units: units(200, 200, 200) })}
+              send={noop}
+              // `ready`, not the default `empty`: the row carries the
+              // launchers before a cell has spoken, and the eye is part of
+              // the transport that replaces them.
+              speech={makeSpeech({
+                state: "ready",
+                queue: queueWith({ current: utterance("u-1") }),
+                units: units(200, 200, 200),
+              })}
             />
           </div>,
         );
@@ -791,7 +806,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("the play button pulses when an unheard utterance becomes ready", () => {
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("ready")} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready")} />);
 
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("1");
     });
@@ -800,7 +815,7 @@ describe("SpeechControlBar", () => {
       render(
         <>
           {header("ready")}
-          <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("ready")} />
+          <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready")} />
         </>,
       );
 
@@ -815,7 +830,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("a newer utterance restarts the play button's pulse", () => {
-      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("ready", "u-1")} />);
+      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready", "u-1")} />);
 
       act(() => {
         vi.advanceTimersByTime(READY_PULSE_MS);
@@ -824,7 +839,7 @@ describe("SpeechControlBar", () => {
 
       // A second answer takes the cursor: a new arrival, and every arrival gets
       // its own ten seconds.
-      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("ready", "u-2")} />);
+      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready", "u-2")} />);
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("1");
 
       act(() => {
@@ -834,7 +849,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("speaking and heard never pulse, however long it has been", () => {
-      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("speaking")} />);
+      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("speaking")} />);
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
 
       // The window is open — the bar mounted a moment ago — and it still does
@@ -845,7 +860,7 @@ describe("SpeechControlBar", () => {
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
 
       // …and once it has been listened to all the way through.
-      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("heard")} />);
+      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("heard")} />);
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
 
       act(() => {
@@ -864,9 +879,21 @@ describe("SpeechControlBar", () => {
         const view = render(
           <>
             {header(state)}
-            <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor(state)} />
+            <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(state)} />
           </>,
         );
+
+        // `empty` is the one state with no play button to agree with: the row
+        // carries the launchers there, and a control that is not rendered
+        // cannot drift from the header. The header still pulses for itself,
+        // and it is `0` — asserted here so the case is covered rather than
+        // quietly skipped.
+        if (state === "empty") {
+          expect(pulseOf("terminal-cell-speak-cell-a")).toBe("0");
+          expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
+          view.unmount();
+          continue;
+        }
 
         const headerPulse = pulseOf("terminal-cell-speak-cell-a");
         expect(headerPulse).toMatch(/^[01]$/);
@@ -890,7 +917,7 @@ describe("SpeechControlBar", () => {
       units: units(200, 200, 200),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
     fireEvent.click(screen.getByTestId("speech-bar-segment-cell-a-2"));
 
     expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 2);
@@ -905,7 +932,7 @@ describe("SpeechControlBar", () => {
       durations: new Map([[1, 4]]),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     const playing = screen.getByTestId("speech-bar-segment-cell-a-1");
     boxFor(playing, 100, 200);
@@ -921,19 +948,28 @@ describe("SpeechControlBar", () => {
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
-  it("a cell with no utterance has inert transport controls", () => {
+  it("a cell with no utterance has no transport controls at all", () => {
+    // Was: the transport was rendered and every control disabled. A rail of
+    // dead buttons is not a control surface, and the row is in flow now, so
+    // the space it took is spent whether or not anything is in it — the
+    // launchers fill it instead. `LauncherPills.test.tsx` carries the pills;
+    // what stays here is that nothing of the transport survives beside them.
     const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
-    expect(screen.getByTestId("speech-bar-playpause-cell-a")).toBeDisabled();
-    expect(screen.getByTestId("speech-bar-previous-cell-a")).toBeDisabled();
-    expect(screen.getByTestId("speech-bar-next-cell-a")).toBeDisabled();
-    // An empty scrubber: present, so the rail keeps its shape, with nothing in it.
-    expect(screen.getByTestId("speech-bar-scrubber-cell-a")).toBeInTheDocument();
+    expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
+    expect(screen.queryByTestId("speech-bar-previous-cell-a")).toBeNull();
+    expect(screen.queryByTestId("speech-bar-next-cell-a")).toBeNull();
+    // The scrubber goes with them: an empty rail kept its shape for a row that
+    // could appear and disappear, and the row no longer does either.
+    expect(screen.queryByTestId("speech-bar-scrubber-cell-a")).toBeNull();
     expect(screen.queryAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(0);
     // No eye either: the header toggle can force the bar onto an empty cell,
     // and "unit 1 of 0" is not a position.
     expect(screen.queryByTestId("speech-bar-eye-cell-a")).toBeNull();
+    // The arm switch is the one control that survives the branch — arming
+    // ahead of the first answer is why the row is reachable before it.
+    expect(screen.getByTestId("speech-bar-autoplay-cell-a")).toBeInTheDocument();
   });
 });

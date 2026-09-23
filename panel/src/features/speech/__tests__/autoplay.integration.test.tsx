@@ -329,6 +329,9 @@ vi.mock("../../terminal/TerminalView", async () => {
             speech={speech}
             answerOpen={false}
             onToggleAnswer={() => {}}
+            // The real view hands the bar its terminal's `send`; there is no
+            // terminal here, and nothing in this file clicks a launcher.
+            send={() => {}}
           />
         ) : null}
       </div>
@@ -1117,26 +1120,39 @@ describe("the row is reserved from mount", () => {
     // Both of the cells that did not speak, and both channels on them: the
     // state AND the pulse. A pulse that leaked across the grid is the failure
     // a single-cell reading cannot see.
-    const quiet = screen.getByTestId("speech-bar-playpause-cell-b");
+    //
+    // Read off the HEADER control, not the bar. A silent cell's row carries
+    // the launchers now, so it has no play button to read — which is itself
+    // the strongest form of "the arrival did not reach this cell", and is
+    // asserted below.
+    const quiet = screen.getByTestId("terminal-cell-speak-cell-b");
     expect(quiet).toHaveAttribute("data-speech", "empty");
     expect(quiet).toHaveAttribute("data-pulse", "0");
-    expect(screen.getByTestId("speech-bar-playpause-cell-c")).toHaveAttribute(
+    expect(screen.getByTestId("terminal-cell-speak-cell-c")).toHaveAttribute(
       "data-speech",
       "empty",
     );
+    // The row's contents followed the state, per cell: the cell that spoke
+    // swapped its launchers for the transport, and the two that did not still
+    // carry theirs.
+    expect(screen.queryByTestId("speech-bar-launchers-cell-a")).toBeNull();
+    expect(screen.getByTestId("speech-bar-launchers-cell-b")).toBeInTheDocument();
+    expect(screen.getByTestId("speech-bar-launchers-cell-c")).toBeInTheDocument();
+    expect(screen.queryByTestId("speech-bar-playpause-cell-b")).toBeNull();
+    expect(screen.queryByTestId("speech-bar-playpause-cell-c")).toBeNull();
     expect(screen.getByTestId(testIdFor("bar-autoplay", "cell-a"))).toBeInTheDocument();
   });
 
-  it("a cell that has never spoken carries an inert transport and a live switch", async () => {
+  it("a cell that has never spoken carries launchers and a live switch", async () => {
     await renderProjectSurface();
 
-    // No click needed to reach it any more — and what it holds is unchanged:
-    // nothing to play, so nothing to press.
-    const play = screen.getByTestId("speech-bar-playpause-cell-a");
-    expect(play).toHaveAttribute("data-speech", "empty");
-    expect(play).toBeDisabled();
-    // Inert transport, live switch: arming ahead of the first answer is the
-    // reason the row is reachable before it at all.
+    // Was: an inert transport — the controls rendered and every one disabled.
+    // The row carries the launchers there now, and the transport is not
+    // rendered at all; what is unchanged is that nothing on it plays anything.
+    expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
+    expect(screen.getByTestId("speech-bar-launchers-cell-a")).toBeInTheDocument();
+    // Launchers, live switch: arming ahead of the first answer is the reason
+    // the row is reachable before it at all.
     await click(testIdFor("bar-autoplay", "cell-a"));
     expect(armed("cell-a")).toBe("1");
   });

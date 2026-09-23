@@ -261,6 +261,19 @@ export function TerminalView({
     instRef.current?.reopen();
   }, []);
 
+  /**
+   * The cell's PTY write, for the bar's launcher pills.
+   *
+   * Read off `instRef` at call time rather than captured: the instance is
+   * created inside the mount effect and swapped by `reopen()`, so a value
+   * closed over at render would be null on the first pass and stale after a
+   * reconnect. This is the same `inst.send` the view already hands out through
+   * `onReady` — one transport, reached two ways.
+   */
+  const send = useCallback((data: string) => {
+    instRef.current?.send(data);
+  }, []);
+
   const isViewportBlank = useCallback(() => {
     const inst = instRef.current;
     // No instance yet is not evidence of a blank screen — don't ask for a nudge.
@@ -288,6 +301,7 @@ export function TerminalView({
           speech={speech}
           answerOpen={answerOpen}
           onToggleAnswer={() => setAnswerPaneOpen(sessionId, !answerOpen)}
+          send={send}
         />
       ) : null}
       <div

@@ -847,6 +847,55 @@ input[type="checkbox"] {
   background: var(--text-primary);
 }
 
+/* The launchers, which fill the row until the cell has spoken — where the
+   scrubber sits afterwards, and taking its place in the flex line: `1 1 auto`,
+   so the pills occupy the rail rather than huddling beside the arm switch.
+
+   It SCROLLS rather than wraps. The row is a fixed 56px, spent at mount so a
+   first utterance resizes nothing; a wrapping strip would grow that row on a
+   narrow cell with six launchers configured, which is the one thing the row
+   exists not to do. `scrollbar-width: none` because the strip is 44px tall and
+   a scrollbar inside it would eat the pills. */
+.speech-bar-launchers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* One pill per configured launcher: the name, over the bar's own ground. Sized
+   from the text rather than the 44px square the transport buttons use — a
+   launcher is read before it is pressed, and a name under a 44px square would
+   be unreadable. `flex: 0 0 auto` keeps a long list scrolling instead of
+   squeezing every pill into an ellipsis. */
+.speech-bar-launch {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  line-height: 1;
+  padding: 7px 12px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 200ms ease,
+    background 200ms ease,
+    border-color 200ms ease;
+}
+
+.speech-bar-launch:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
 /* How many answers are waiting behind this one. */
 .speech-bar-pill {
   font-family: "JetBrains Mono", monospace;

@@ -142,7 +142,14 @@ function Harness({ sessionId }: { sessionId: string }) {
   const speech = useSpeechHost();
   host = speech;
   return (
-    <SpeechControlBar sessionId={sessionId} speech={speech} answerOpen={false} onToggleAnswer={() => {}} />
+    <SpeechControlBar
+      sessionId={sessionId}
+      speech={speech}
+      answerOpen={false}
+      onToggleAnswer={() => {}}
+      // No terminal here, and nothing in this file clicks a launcher.
+      send={() => {}}
+    />
   );
 }
 
