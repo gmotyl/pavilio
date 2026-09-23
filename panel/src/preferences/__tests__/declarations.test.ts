@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { ALL_PREFERENCES } from "../declarations";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ALL_PREFERENCES, preferences } from "../declarations";
+import { __resetPreferenceStoreForTests, readPreference, writePreference } from "../store";
 
 /**
  * The portability table from `design.md`, transcribed by hand. It is
@@ -25,22 +26,31 @@ const PORTABLE = [
   "shell.rightSidebar.expanded",
   "shell.rightSidebar.section.expanded",
   "shell.rightSidebar.width",
+  "speech.answerComposer.on",
   "speech.answerPane.autoOpen",
   "speech.voice",
   "terminal.drawer.open",
   "terminal.drawer.side",
   "terminal.drawer.width",
+  "terminal.launchers",
   "terminal.maximized",
   "time.form.resetAutoOnSave",
   "time.report",
   "view.wide",
 ];
 
-/** Values that name something the other machine does not have. */
+/**
+ * Values that name something the other machine does not have — every one of
+ * them a live session id, with a single exception: `speech.answerComposer.height`
+ * names no session at all. It is a pane measurement, kept per browser because
+ * it is read against THIS window's viewport, and it is the first measurement
+ * declared on this tier.
+ */
 const MACHINE_LOCAL = [
   "nav.lastFile",
   "nav.lastPath",
   "nav.lastReposQuery",
+  "speech.answerComposer.height",
   "speech.armedCell",
   "terminal.focus",
   "terminal.grid",
@@ -95,6 +105,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["shell.rightSidebar.expanded", true, "global"],
   ["shell.rightSidebar.section.expanded", true, "project"],
   ["shell.rightSidebar.width", 264, "global"],
+  ["speech.answerComposer.height", 62, "global"],
+  ["speech.answerComposer.on", true, "global"],
   ["speech.answerPane.autoOpen", false, "global"],
   ["speech.armedCell", null, "global"],
   ["speech.voice", "en-US-AndrewMultilingualNeural", "global"],
@@ -103,6 +115,15 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["terminal.drawer.width", 480, "global"],
   ["terminal.focus", null, "project"],
   ["terminal.grid", [], "project"],
+  [
+    "terminal.launchers",
+    [
+      { name: "claude", command: "claude" },
+      { name: "codex", command: "codex" },
+      { name: "opencode", command: "opencode" },
+    ],
+    "global",
+  ],
   ["terminal.maximized", false, "project"],
   ["terminal.order", [], "project"],
   ["time.form.resetAutoOnSave", false, "project"],
@@ -231,5 +252,76 @@ describe("the declaration table", () => {
     ]);
     expect(keyOf("time.report").portable).toBe(true);
     expect(keyOf("time.form.resetAutoOnSave").portable).toBe(true);
+  });
+});
+
+/**
+ * The three declarations the speech surface adds, asserted through the store
+ * rather than off the table above: "the default is 62" is a fact about the
+ * declaration, but "nothing stored yields the three launchers" is a fact about
+ * what a reader gets, and only a read proves it.
+ */
+type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
+const globals = globalThis as unknown as PrefGlobals;
+
+describe("the launcher list and the answer composer", () => {
+  beforeEach(() => {
+    globals.__PAVILIO_PREFS__ = { version: 1 };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 200 })),
+    );
+  });
+
+  afterEach(() => {
+    delete globals.__PAVILIO_PREFS__;
+    localStorage.clear();
+    sessionStorage.clear();
+    __resetPreferenceStoreForTests();
+    vi.unstubAllGlobals();
+  });
+
+  it("terminalLaunchers defaults to claude, codex and opencode in order", () => {
+    // Written out rather than compared against `DEFAULT_TERMINAL_LAUNCHERS`:
+    // that export IS the declared default, so comparing it to itself would
+    // assert nothing — including that the order survived the read.
+    expect(readPreference(preferences.terminalLaunchers)).toEqual([
+      { name: "claude", command: "claude" },
+      { name: "codex", command: "codex" },
+      { name: "opencode", command: "opencode" },
+    ]);
+  });
+
+  it("terminalLaunchers round-trips entries, order, names and commands", () => {
+    // Deliberately unlike the default in every respect a JSON codec could lose:
+    // a different order, a name that is not its command, and commands carrying
+    // arguments and spaces.
+    const launchers = [
+      { name: "opencode", command: "opencode" },
+      { name: "resume", command: "codex resume --last" },
+      { name: "claude", command: "claude --dangerously-skip-permissions" },
+    ];
+
+    writePreference(preferences.terminalLaunchers, launchers);
+
+    expect(readPreference(preferences.terminalLaunchers)).toEqual(launchers);
+  });
+
+  it("answerComposerEnabled defaults to on", () => {
+    expect(readPreference(preferences.answerComposerEnabled)).toBe(true);
+  });
+
+  it("answerComposerHeight is declared non-portable, like the other pane measurements", () => {
+    const def = keyOf("speech.answerComposer.height");
+    expect(def.portable).toBe(false);
+    // The local tier, not the narrower session one: a remembered height should
+    // survive closing the browser.
+    expect(def.browserStore).toBeUndefined();
+
+    writePreference(preferences.answerComposerHeight, 120);
+
+    // On this machine, and nowhere else — the workspace file is untouched.
+    expect(localStorage.getItem("speech.answerComposer.height")).toBe("120");
+    expect(globals.__PAVILIO_PREFS__).toEqual({ version: 1 });
   });
 });
