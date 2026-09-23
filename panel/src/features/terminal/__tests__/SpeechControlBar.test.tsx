@@ -4,15 +4,21 @@
  * 56px rail carrying autoplay, previous, play/pause, next, the segmented
  * scrubber and the position.
  *
- * Two of these tests are the reason the bar is an overlay rather than a row in
- * the cell's flexbox. `TerminalView` runs `new ResizeObserver(() => inst.fit())`
- * with no coalescing, and `inst.fit()` unconditionally refreshes the terminal
- * AND sends a PTY resize even when nothing changed — the parked
+ * The bar is a ROW IN FLOW above the xterm, reserved from mount — not an
+ * overlay. `TerminalView` runs `new ResizeObserver(() => inst.fit())` with no
+ * coalescing, and `inst.fit()` unconditionally refreshes the terminal AND sends
+ * a PTY resize even when nothing changed — the parked
  * `terminal-resize-discipline` change exists because codex already misbehaves
- * across layout changes. So "showing the bar does not resize the terminal" is
- * asserted against the real `fit` and the real resize frame, never by reading
- * the JSX.
+ * across layout changes. Spending the row's height at MOUNT is what keeps that
+ * from firing on an arrival: the observed box is settled before the cell has
+ * anything to say. The one remaining trigger is the user's own hide toggle,
+ * where a fit is the correct response — asserted against the real `fit` and the
+ * real resize frame, never by reading the JSX.
+ * `TerminalView.speechRow.test.tsx` carries the rest of that contract; what
+ * stays here is the bar's own root element.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
@@ -228,6 +234,34 @@ async function settleTerminal(): Promise<void> {
   });
 }
 
+// Walked at test time, exactly as `CellSpeakButton.test.tsx` walks it:
+// `src/features/terminal/__tests__` → `src/index.css`. Comments are stripped
+// first — the stylesheet documents every rule, and a comment sitting in front
+// of one would otherwise be read as part of its selector list.
+const css = readFileSync(join(__dirname, "..", "..", "..", "index.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
+
+/**
+ * The declarations the stylesheet makes for one exact selector, in cascade
+ * order. Flat blocks only; `@keyframes` bodies match as their own inner blocks
+ * and are simply never selected, because no frame is spelled `.speech-bar`.
+ */
+function declarationsOf(selector: string): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const [, selectorList, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const matches = selectorList.split(",").some((one) => one.trim() === selector);
+    if (!matches) continue;
+    for (const declaration of body.split(";")) {
+      const at = declaration.indexOf(":");
+      if (at === -1) continue;
+      merged[declaration.slice(0, at).trim()] = declaration.slice(at + 1).trim();
+    }
+  }
+  return merged;
+}
+
 beforeEach(() => {
   warm.clear();
   warming.clear();
@@ -255,36 +289,55 @@ describe("SpeechControlBar", () => {
     expect(screen.getByTestId("speech-bar-cell-b")).toBeInTheDocument();
   });
 
-  it("mounting the bar does not refit the terminal or resize the PTY", async () => {
+  it("toggling the row refits exactly once per toggle, and never from inside the observed box", async () => {
     const speech = makeSpeech();
-    const view = render(
-      <TerminalView sessionId="cell-a" speech={speech} speechBarVisible={false} />,
-    );
+    const view = render(<TerminalView sessionId="cell-a" speech={speech} />);
     await settleTerminal();
 
-    const fitsBefore = term.fit.mock.calls.length;
-    const resizesBefore = resizeFrames().length;
+    term.fit.mockClear();
+    term.sent.length = 0;
 
-    // Mount the bar.
-    view.rerender(<TerminalView sessionId="cell-a" speech={speech} speechBarVisible />);
-    await settleTerminal();
-    expect(screen.getByTestId("speech-bar-cell-a")).toBeInTheDocument();
-    expect(term.fit.mock.calls.length).toBe(fitsBefore);
-    expect(resizeFrames().length).toBe(resizesBefore);
-
-    // …and unmount it again.
+    // Hiding the row hands its height back to the terminal, so a fit and a
+    // SIGWINCH are what SHOULD happen — once, on the user's own deliberate act,
+    // never on an arrival. This is the assertion that used to say "no fit at
+    // all"; the overlay it defended is gone.
     view.rerender(<TerminalView sessionId="cell-a" speech={speech} speechBarVisible={false} />);
     await settleTerminal();
     expect(screen.queryByTestId("speech-bar-cell-a")).not.toBeInTheDocument();
-    expect(term.fit.mock.calls.length).toBe(fitsBefore);
-    expect(resizeFrames().length).toBe(resizesBefore);
+    expect(term.fit).toHaveBeenCalledTimes(1);
+    expect(resizeFrames()).toHaveLength(1);
 
-    // The structural reason: the bar is a sibling of the observed container,
-    // not a child of it, so the ResizeObserver cannot see it appear.
+    // …and bringing it back is the same act in the other direction.
     view.rerender(<TerminalView sessionId="cell-a" speech={speech} speechBarVisible />);
+    await settleTerminal();
+    expect(screen.getByTestId("speech-bar-cell-a")).toBeInTheDocument();
+    expect(term.fit).toHaveBeenCalledTimes(2);
+    expect(resizeFrames()).toHaveLength(2);
+
+    // What has NOT changed: the row is a sibling of the observed container, so
+    // no fit is ever provoked from inside the box the observer measures.
     const observedContainer = term.observed[0];
     expect(observedContainer).toBeDefined();
     expect(observedContainer.contains(screen.getByTestId("speech-bar-cell-a"))).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // The row's out-of-flow-ness lived in the stylesheet, and jsdom applies no
+  // stylesheet: `getComputedStyle` here reports the user-agent value and would
+  // pass whatever `.speech-bar` says. So the claim is asserted ON THE RULE —
+  // `src/index.css` is read and its declarations parsed, exactly as
+  // `CellSpeakButton.test.tsx` asserts the colour channel. This proves what the
+  // stylesheet declares, NOT what a browser paints.
+  // -------------------------------------------------------------------------
+  it("places the row before the terminal container, not over it", () => {
+    const declarations = declarationsOf(".speech-bar");
+
+    // The rule has to exist — an empty object would make every assertion below
+    // vacuously true.
+    expect(Object.keys(declarations).length).toBeGreaterThan(0);
+    // Out of the overlay stack: in flow, and in nobody's stacking order.
+    expect(declarations.position).not.toBe("absolute");
+    expect(declarations["z-index"]).toBeUndefined();
   });
 
   it("renders one segment per unit before anything is synthesized", () => {

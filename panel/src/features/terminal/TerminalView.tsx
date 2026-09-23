@@ -31,9 +31,10 @@ interface TerminalViewProps {
    */
   speech?: GridSpeech;
   /**
-   * Whether the speech bar is shown. On by DEFAULT — it is a standing control,
-   * not something to be found — and safe to be so because it sits at the TOP of
-   * the cell, over the oldest rows, while a TUI's live prompt is at the bottom.
+   * Whether the speech row is shown. On by DEFAULT — it is a standing control,
+   * not something to be found — and it is a ROW IN FLOW above the xterm, whose
+   * height is therefore reserved from mount. Hiding it hands that height back
+   * to the terminal, which is the one place a refit is the correct response.
    */
   speechBarVisible?: boolean;
 }
@@ -206,6 +207,25 @@ export function TerminalView({
     };
   }, [sessionId]);
 
+  // The row is in the cell's column, so showing or hiding it genuinely changes
+  // the terminal's height — and that is the ONLY thing left that does. The
+  // `ResizeObserver` would eventually notice in a browser, but it is the
+  // uncoalesced `() => inst.fit()`, which fits without following the bottom; a
+  // hide that scrolled the live prompt out of view is the failure this avoids.
+  // So the toggle fits ONCE, deliberately, keeping the viewport where it was.
+  //
+  // Skipped on mount: the height is reserved before the first fit runs, so
+  // there is nothing to respond to. `lastBarVisible` is a ref rather than a
+  // dependency so a re-render that did not toggle anything fits nothing.
+  const lastBarVisible = useRef(speechBarVisible);
+  useEffect(() => {
+    if (lastBarVisible.current === speechBarVisible) return;
+    lastBarVisible.current = speechBarVisible;
+    const inst = instRef.current;
+    if (!inst) return;
+    followBottomAcrossResize(inst.terminal, inst.fit);
+  }, [speechBarVisible]);
+
   useEffect(() => {
     const inst = instRef.current;
     if (!focused || !inst) return;
@@ -236,24 +256,18 @@ export function TerminalView({
   useMobileReconnect({ ws, getDims, reopen, isViewportBlank });
 
   return (
-    // The bar — and the answer pane under it — are SIBLINGS of the observed
-    // container, never children of it and never in its flow.
-    // `resizeObserver.observe(container)` above watches the inner div only,
-    // and `inst.fit()` — which refreshes the terminal AND sends a PTY resize
+    // A COLUMN: the speech row first, the observed xterm container under it,
+    // and the answer pane still an overlay over that container.
+    //
+    // `resizeObserver.observe(container)` above watches the inner div only, and
+    // `inst.fit()` — which refreshes the terminal AND sends a PTY resize
     // unconditionally — is the thing that must not be provoked by a control
-    // appearing. Absolute positioning over the xterm is what buys that:
-    // showing or hiding the bar, opening or closing the pane, changes no box
-    // that anything measures.
-    <div className="w-full h-full relative">
-      <div
-        ref={containerRef}
-        className="w-full h-full"
-        style={{
-          opacity: focused ? 1 : 0.82,
-          transition: "opacity 150ms ease",
-          background: "#1a1b26",
-        }}
-      />
+    // appearing. What buys that is no longer absolute positioning but the row
+    // being present FROM MOUNT: the container's height is settled before the
+    // cell has anything to say, so a first utterance changes no box. The row is
+    // still a SIBLING of the container, never a child, so nothing inside the
+    // observed box moves when its contents change.
+    <div className="w-full h-full relative flex flex-col">
       {speech && speechBarVisible ? (
         <SpeechControlBar
           sessionId={sessionId}
@@ -262,6 +276,15 @@ export function TerminalView({
           onToggleAnswer={() => setAnswerPaneOpen(sessionId, !answerOpen)}
         />
       ) : null}
+      <div
+        ref={containerRef}
+        className="w-full flex-1 min-h-0"
+        style={{
+          opacity: focused ? 1 : 0.82,
+          transition: "opacity 150ms ease",
+          background: "#1a1b26",
+        }}
+      />
       {/* The bar's visibility outranks the eye: a pane without its bar has no
           eye to close it, so hiding the bar unmounts the pane too. */}
       {speech && speechBarVisible && answerOpen ? (

@@ -597,10 +597,9 @@ const latestFetches = (): number =>
  * is a programmatic play riding on a real user gesture, which is exactly what
  * the browser requires.
  *
- * The bar now waits for the cell's first utterance, so on a cell that has not
- * spoken this walks the route a user walks: the header icon opens the bar, and
- * the switch inside it arms. On a cell whose bar is already out — one that has
- * spoken, or one already opened — it is the single click it always was.
+ * The row is out from mount, so this is the single click it always was — the
+ * switch inside the row. {@link openBar} stays in front of it for the cells a
+ * test has deliberately hidden the row on.
  */
 async function arm(sessionId: string): Promise<void> {
   await openBar(sessionId);
@@ -608,8 +607,10 @@ async function arm(sessionId: string): Promise<void> {
 }
 
 /**
- * Brings a cell's bar out if it is not already there — the one way to read that
- * cell's arming, now that the header control has stopped reporting it.
+ * Brings a cell's row back if a test has hidden it — the one way to read that
+ * cell's arming, now that the header control has stopped reporting it. A no-op
+ * on a cell whose row is out, which since the row is reserved from mount is
+ * every cell nobody has toggled.
  */
 async function openBar(sessionId: string): Promise<void> {
   if (!barVisible(sessionId)) await click(testIdFor("speech-controls", sessionId));
@@ -1074,59 +1075,62 @@ describe("the keyboard transport, mounted", () => {
 });
 
 /**
- * The bar is a transport for something to play, and on a FRESH terminal the
- * prompt sits on the row the bar covers. So it waits for the cell's own first
- * utterance — and an explicit toggle outranks that arrival from then on, in
- * both directions, for that cell.
+ * The row is RESERVED FROM MOUNT, in every cell, spoken to or not.
+ *
+ * It used to wait for the cell's own first utterance, because it was an overlay
+ * lying across the top rows — where a fresh terminal's prompt is — and because
+ * a transport for nothing is furniture. `speech-surface-in-flow` moved it into
+ * the cell's column, and an in-flow row that ARRIVED would shrink the observed
+ * container mid-stream and SIGWINCH the TUI. So the height is spent at mount
+ * and the emptiness is answered by what the row renders, not by whether it is
+ * there. An explicit toggle still outranks everything, in both directions.
  */
-describe("the bar waits for something to play", () => {
-  it("a cell that has never spoken shows no bar", async () => {
+describe("the row is reserved from mount", () => {
+  it("a cell that has never spoken shows the row", async () => {
     await renderProjectSurface();
 
     expect([barVisible("cell-a"), barVisible("cell-b"), barVisible("cell-c")]).toEqual([
-      false,
-      false,
-      false,
+      true,
+      true,
+      true,
     ]);
-    // The way back is still in the header, and it says the bar is closed.
-    expect(screen.getByTestId(testIdFor("speech-controls", "cell-a"))).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-  });
-
-  it("the first utterance brings the bar out", async () => {
-    await renderProjectSurface();
-
-    await emitUtterance("cell-a", "a1", "The first thing this cell has to say.");
-
-    expect(barVisible("cell-a")).toBe(true);
-    // Only the cell that spoke: the arrival is per cell, not per grid.
-    expect([barVisible("cell-b"), barVisible("cell-c")]).toEqual([false, false]);
-    // And it comes out as the whole transport, pulsing exactly as it does for a
-    // bar that was already open — same contents, nothing degraded.
-    const play = screen.getByTestId("speech-bar-playpause-cell-a");
-    expect(play).toHaveAttribute("data-speech", "ready");
-    expect(play).toHaveAttribute("data-pulse", "1");
-    expect(screen.getByTestId(testIdFor("bar-autoplay", "cell-a"))).toBeInTheDocument();
+    // The way out is in the header, and it says the row is out.
     expect(screen.getByTestId(testIdFor("speech-controls", "cell-a"))).toHaveAttribute(
       "aria-expanded",
       "true",
     );
   });
 
-  it("the toggle still opens the bar on a cell that has never spoken", async () => {
+  it("the first utterance finds the row already there", async () => {
     await renderProjectSurface();
+    // The row is not what changes — it was there before the cell spoke.
+    expect(barVisible("cell-a")).toBe(true);
 
-    await click(testIdFor("speech-controls", "cell-a"));
+    await emitUtterance("cell-a", "a1", "The first thing this cell has to say.");
 
     expect(barVisible("cell-a")).toBe(true);
-    // Empty and inert, as it is for any cell with nothing to play.
+    // What changes is the transport inside it, and only for the cell that
+    // spoke: the arrival is per cell, not per grid.
+    const play = screen.getByTestId("speech-bar-playpause-cell-a");
+    expect(play).toHaveAttribute("data-speech", "ready");
+    expect(play).toHaveAttribute("data-pulse", "1");
+    expect(screen.getByTestId("speech-bar-playpause-cell-b")).toHaveAttribute(
+      "data-speech",
+      "empty",
+    );
+    expect(screen.getByTestId(testIdFor("bar-autoplay", "cell-a"))).toBeInTheDocument();
+  });
+
+  it("a cell that has never spoken carries an inert transport and a live switch", async () => {
+    await renderProjectSurface();
+
+    // No click needed to reach it any more — and what it holds is unchanged:
+    // nothing to play, so nothing to press.
     const play = screen.getByTestId("speech-bar-playpause-cell-a");
     expect(play).toHaveAttribute("data-speech", "empty");
     expect(play).toBeDisabled();
     // Inert transport, live switch: arming ahead of the first answer is the
-    // reason the bar is reachable before it at all.
+    // reason the row is reachable before it at all.
     await click(testIdFor("bar-autoplay", "cell-a"));
     expect(armed("cell-a")).toBe("1");
   });
@@ -1146,8 +1150,12 @@ describe("the bar waits for something to play", () => {
     expect(speakState("cell-a")).toBe("ready");
   });
 
-  it("showing the bar on a silent cell survives its first utterance", async () => {
+  it("re-showing the row on a silent cell survives its first utterance", async () => {
     await renderProjectSurface();
+    // Hidden and brought back, so the choice is an explicit `true` rather than
+    // the default — which is the state the arrival has to leave alone.
+    await click(testIdFor("speech-controls", "cell-a"));
+    expect(barVisible("cell-a")).toBe(false);
     await click(testIdFor("speech-controls", "cell-a"));
     expect(barVisible("cell-a")).toBe(true);
 
@@ -1174,28 +1182,28 @@ describe("the bar waits for something to play", () => {
 describe("the header control and the bar", () => {
   it("the control shows and hides the speech control bar", async () => {
     await renderProjectSurface();
-    // Hidden until the cell has something to play, so the control is not merely
-    // a way to get the bar out of the way — it is the way to it.
-    expect(barVisible("cell-a")).toBe(false);
-
-    await click(testIdFor("speech-controls", "cell-a"));
+    // Shown from mount, so the control is the way to get the row out of the
+    // way — and the way back to it.
     expect(barVisible("cell-a")).toBe(true);
 
     await click(testIdFor("speech-controls", "cell-a"));
     expect(barVisible("cell-a")).toBe(false);
 
-    // And it is per cell: cell b's control opens cell b's bar and nothing else.
-    await click(testIdFor("speech-controls", "cell-b"));
+    await click(testIdFor("speech-controls", "cell-a"));
+    expect(barVisible("cell-a")).toBe(true);
+
+    // And it is per cell: cell a's control hides cell a's row and nothing else.
+    await click(testIdFor("speech-controls", "cell-a"));
     expect([barVisible("cell-a"), barVisible("cell-b")]).toEqual([false, true]);
   });
 
   it("activating the control does not change the armed cell", async () => {
     await renderProjectSurface();
-    // `arm` opens the bar from this very control, then arms from the switch.
+    // `arm` presses the switch in the row, which is out from mount.
     await arm("cell-a");
     expect(armed("cell-a")).toBe("1");
 
-    // Hide the armed cell's bar and bring it back: hiding is not disarming, and
+    // Hide the armed cell's row and bring it back: hiding is not disarming, and
     // showing is not arming. The control cannot reach the armed cell at all —
     // it is handed neither the value nor a way to set it.
     await click(testIdFor("speech-controls", "cell-a"));
@@ -1204,7 +1212,9 @@ describe("the header control and the bar", () => {
     expect(barVisible("cell-a")).toBe(true);
     expect(armed("cell-a")).toBe("1");
 
-    // Nor from another cell's control: opening b's bar leaves a armed and b not.
+    // Nor from another cell's control: hiding and restoring b's row leaves a
+    // armed and b not.
+    await click(testIdFor("speech-controls", "cell-b"));
     await click(testIdFor("speech-controls", "cell-b"));
     expect(barVisible("cell-b")).toBe(true);
     expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
@@ -1214,11 +1224,13 @@ describe("the header control and the bar", () => {
     await renderProjectSurface();
     await arm("cell-b");
 
-    // Close every bar in the grid, so the three header controls are all in the
+    // Close every row in the grid, so the three header controls are all in the
     // same state and the armed cell is the only thing separating them. It used
     // to separate them: the icon carried a green fill and a `data-armed`. Now
     // the armed cell's control is byte-for-byte its unarmed neighbours'.
+    await click(testIdFor("speech-controls", "cell-a"));
     await click(testIdFor("speech-controls", "cell-b"));
+    await click(testIdFor("speech-controls", "cell-c"));
     expect([barVisible("cell-a"), barVisible("cell-b"), barVisible("cell-c")]).toEqual([
       false,
       false,
@@ -1301,13 +1313,12 @@ describe("the header control and the bar", () => {
     first.unmount();
     await renderProjectSurface();
 
-    // The bar's visibility is a view preference and deliberately NOT persisted,
-    // so the new tab comes up with no bar on a cell that has said nothing yet —
-    // the armed cell is what survives, not the disclosure. The user opens it,
-    // and that is also the only way to see what survived: the header control
-    // reports nothing, so the bar is the one place arming is legible.
-    expect(barVisible("cell-a")).toBe(false);
-    await openBar("cell-a");
+    // The row's visibility is a view preference and deliberately NOT persisted,
+    // so the new tab comes up the way every tab does: the row out, because that
+    // is the default and not because anything was restored. What survived is
+    // the armed cell — and the row is where that is read, since the header
+    // control reports nothing about it.
+    expect(barVisible("cell-a")).toBe(true);
     expect(armed("cell-a")).toBe("1");
 
     await openBar("cell-b");

@@ -640,31 +640,31 @@ input[type="checkbox"] {
 /* ---------------------------------------------------------------------------
    Speech control bar — layout A of
    `projects/pavilio/mockups/2026-09-14-speech-control-bar-options.html`: one
-   56px rail with 44px tap targets, pinned below the cell header and floating
-   over the xterm.
+   56px rail with 44px tap targets, sitting between the cell header and the
+   xterm.
 
-   ABSOLUTE, and that is not a style choice. `TerminalView` runs
+   IN FLOW, and that is not a style choice either. `TerminalView` runs
    `new ResizeObserver(() => inst.fit())` with no coalescing, and `inst.fit()`
-   refreshes the terminal AND sends a PTY resize even when nothing changed. A
-   bar in the cell's flexbox would fire that on every toggle. Out of flow, it
-   fires nothing.
+   refreshes the terminal AND sends a PTY resize even when nothing changed. The
+   bar used to float over the xterm to keep that from firing when a control
+   appeared. Its height is now RESERVED FROM MOUNT instead, which cuts the same
+   chain at its first link: the observed box is settled before the cell has
+   spoken, so no arrival can change it. The one remaining trigger is the user's
+   own hide toggle, which `TerminalView` answers with a single deliberate fit.
+
+   The card chrome goes with the overlay. Nothing sits behind an in-flow row to
+   blur, and a floating panel's radius and drop shadow would draw an edge where
+   there is now a seam. What separates the row from the terminal is ground
+   colour — #17171d, the speech surface, against the xterm's own #1a1b26 — with
+   one hairline for the seam itself.
 
    Tokens are the panel's own (index.css `:root`) rather than the mockup's
    literals; the one exception is the green, which is the Tokyo-Night #9ece6a
    the speak control and the activity LED already share. */
 .speech-bar {
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  top: 6px;
-  z-index: 5;
-  background: rgba(26, 27, 38, 0.97);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.45),
-    0 0 0 1px rgba(0, 0, 0, 0.3);
+  flex: 0 0 auto;
+  background: #17171d;
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .speech-bar-row {

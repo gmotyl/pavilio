@@ -116,20 +116,24 @@ function transportIntent(state: CellSpeechState): "speak" | "pause" | "resume" |
  * play/pause, next, the segmented scrubber, and the position inside the
  * utterance.
  *
- * ## Why it is an overlay
+ * ## Why it is a row in flow, reserved from mount
  *
  * `TerminalView` runs `new ResizeObserver(() => inst.fit())` with no
  * coalescing, and `inst.fit()` unconditionally calls `terminal.refresh()` AND
  * sends a PTY resize even when the dimensions did not change — the parked
  * `terminal-resize-discipline` change exists because codex already misbehaves
- * across layout changes. A bar in the cell's flexbox would put speech controls
- * on top of that unfixed bug and hand it a new trigger on every toggle. So this
- * is `position: absolute` over the xterm, a SIBLING of the observed container
- * rather than a child of it: nothing reflows, nothing refits, no resize frame
- * is sent. `SpeechControlBar.test.tsx` asserts that against the real `fit`.
+ * across layout changes. A control that APPEARED mid-stream would put speech on
+ * top of that unfixed bug and SIGWINCH a TUI while it was still writing. The
+ * bar was `position: absolute` over the xterm to avoid exactly that.
  *
- * Being on by default is survivable because it sits at the **top**: it covers
- * the oldest rows, while a TUI's live prompt is at the bottom.
+ * It is now a row in the cell's column instead, rendered from the moment the
+ * cell mounts whether or not it has ever spoken. That spends the height before
+ * any utterance can arrive, so the same trigger never fires: the observed
+ * container is settled at mount. The row remains a SIBLING of that container,
+ * never a child, and the only thing that still changes its size is the user's
+ * own hide toggle — a deliberate act, where `TerminalView` answers with a
+ * single fit that follows the bottom. `SpeechControlBar.test.tsx` and
+ * `TerminalView.speechRow.test.tsx` assert that against the real `fit`.
  *
  * ## Why the scrubber is segmented
  *
@@ -345,11 +349,11 @@ export function SpeechControlBar({
           data-speech={state}
           data-icon={intent}
           // The header speak control's own switch, from the header speak
-          // control's own function — not a second rule computed here. The bar
-          // sits over the top of the cell, so without this a user watching the
-          // transport has to look back at the header to learn that something is
-          // waiting. `index.css` styles both selectors in one rule, which is
-          // what keeps the two the same pulse — for the first ten seconds.
+          // control's own function — not a second rule computed here. The row
+          // sits between the header and the terminal, so without this a user
+          // watching the transport has to look back at the header to learn that
+          // something is waiting. `index.css` styles both selectors in one rule,
+          // which is what keeps the two the same pulse — for ten seconds.
           //
           // Then this one stops. The bar is a 56px rail lying across the top of
           // the terminal, and a pulse that size that never ends reads as a nag
