@@ -19,11 +19,14 @@
  * fails this test without anybody remembering to add it.
  */
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { type UtteranceQueue } from "../../speech/utteranceQueue";
+import { cssPx, cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { AnswerPane } from "../AnswerPane";
 import { SpeechControlBar } from "../SpeechControlBar";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
@@ -469,5 +472,181 @@ describe("the answer pane while a reply is pending", () => {
 
     expect(waiting()).toBeInTheDocument();
     expect(playButton()).toHaveAttribute("data-pending", "1");
+  });
+});
+
+/**
+ * The waiting animation, read out of the stylesheet that owns it.
+ *
+ * Same discipline as `AnswerPane.test.tsx`'s "surfaces": jsdom loads no
+ * stylesheet, so `getComputedStyle` here would report the user-agent value and
+ * every assertion would pass over a rule that does not exist. `cssRule` reads
+ * `index.css` itself, throws when a selector matches nothing, and refuses to
+ * guess when it matches more than one — which is what keeps the absence
+ * assertions below from being true of thin air.
+ */
+const CSS = readFileSync(resolve("src/index.css"), "utf8");
+
+const wave = (): HTMLElement => screen.getByTestId(`answer-pane-wave-${SESSION}`);
+
+const crests = (): HTMLElement[] =>
+  Array.from(wave().querySelectorAll<HTMLElement>(".answer-pane-wave-crest"));
+
+/**
+ * The custom property the scrubber paints a live segment with, QUOTED FROM THE
+ * SCRUBBER'S OWN RULE rather than named here.
+ *
+ * This is the whole point of the criterion. A test that spelled the token out
+ * — or worse, asserted the green as a literal — would keep passing after the
+ * scrubber moved to a different one, and the wave would be drawn in a colour
+ * the segments no longer use. Reading the name out of `.speech-bar-seg` means
+ * a rename there fails the wave's test, which is the only way "the same
+ * vocabulary" can be a fact rather than a wish.
+ */
+const segmentToken = (): string => {
+  const found = cssRule('.speech-bar-seg[data-segment="playing"]').match(/var\((--[\w-]+)\)/);
+  if (!found) {
+    throw new Error(
+      "the scrubber's playing segment paints with a literal, not a custom " +
+        "property — there is no token for the wave to share",
+    );
+  }
+  return found[1];
+};
+
+/** One `{...}` starting at `open`, brace-counted so a nested rule cannot end it early. */
+function block(source: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(open + 1, i);
+    }
+  }
+  throw new Error("unterminated block in src/index.css");
+}
+
+/**
+ * The reduced-motion query that covers the wave.
+ *
+ * `cssRule` reads a class's declarations; this reads the media block those
+ * declarations sit inside, because "no animation runs under reduce" is a claim
+ * about the QUERY, not about a rule that happens to say `animation: none`.
+ * Exactly one such block, for the same reason `cssRule` refuses two.
+ */
+const reducedMotion = (): string => {
+  const blocks = [...CSS.matchAll(/@media\s*\(\s*prefers-reduced-motion:\s*reduce\s*\)\s*\{/g)]
+    .map((match) => block(CSS, match.index + match[0].length - 1))
+    .filter((body) => body.includes("answer-pane-wave"));
+  if (blocks.length !== 1) {
+    throw new Error(
+      `${blocks.length} reduced-motion blocks mention the wave in src/index.css — expected one`,
+    );
+  }
+  return blocks[0];
+};
+
+/** The per-crest heights the stylesheet declares, in order, until it runs out. */
+const crestHeights = (): number[] => {
+  const heights: number[] = [];
+  for (let n = 1; n < 24; n += 1) {
+    try {
+      heights.push(cssPx(`.answer-pane-wave-crest:nth-child(${n})`, "height"));
+    } catch {
+      return heights;
+    }
+  }
+  throw new Error("more than 23 crest rules in src/index.css — that is not a wave");
+};
+
+describe("the waiting animation", () => {
+  beforeEach(() => {
+    render(paneTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+  });
+
+  it("renders the wave from the scrubber's own segment vocabulary", () => {
+    // One element per crest, and the stylesheet knows about every one of them:
+    // a sixth crest in the markup with no height rule behind it is a flat bar
+    // glued to the end of a wave.
+    const heights = crestHeights();
+    expect(heights.length).toBeGreaterThan(2);
+    expect(crests()).toHaveLength(heights.length);
+
+    // The colour is the scrubber's token, not a hex that happens to match it
+    // today. See `segmentToken` — the name is quoted from `.speech-bar-seg`.
+    const token = segmentToken();
+    expect(cssRule(".answer-pane-wave-crest")).toContain(`var(${token})`);
+
+    // ...and it is a real token, defined once where the panel keeps them.
+    expect(cssRule(":root")).toMatch(new RegExp(`${token}\\s*:\\s*\\S`));
+
+    // The pane's own rail is the same scrubber turned vertical, so the two
+    // drawings and the wave are one vocabulary rather than two that agree.
+    expect(cssRule('.answer-pane-seg[data-segment="playing"]')).toContain(`var(${token})`);
+  });
+
+  it("stops the animation but keeps a distinguishable shape under reduced motion", () => {
+    // There is motion to stop. Without this the override below is a rule that
+    // cancels nothing and the test passes over a wave that never moved.
+    expect(cssRule(".answer-pane-wave-crest")).toMatch(/(^|;)\s*animation\s*:\s*(?!none)\S/);
+
+    const reduced = reducedMotion();
+
+    // The override actually REACHES a crest: the selectors are taken from the
+    // stylesheet and matched against the element the browser would match them
+    // against, so a rule aimed at a class nobody renders fails here.
+    const stopped = [...reduced.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter(([, , declarations]) => /(^|;)\s*animation\s*:\s*none/.test(declarations))
+      .map(([, selector]) => selector.trim());
+    expect(stopped.length).toBeGreaterThan(0);
+    const crest = crests()[0];
+    expect(crest).toBeDefined();
+    expect(stopped.some((selector) => crest.matches(selector))).toBe(true);
+
+    // The OTHER half of the criterion, and the one a `display: none` would
+    // quietly satisfy the first half with: what is left has to still be a
+    // wave. Nothing in the query hides it...
+    expect(reduced).not.toMatch(
+      /(^|;)\s*(display\s*:\s*none|visibility\s*:\s*hidden|content-visibility\s*:\s*hidden|opacity\s*:\s*0(?!\.)|height\s*:\s*0|width\s*:\s*0)/,
+    );
+
+    // ...and the shape that survives is not flat: the crests' heights are
+    // declared outside the query, and they differ.
+    expect(new Set(crestHeights()).size).toBeGreaterThan(1);
+  });
+
+  it("hides the decorative wave from assistive technology and names the state in text", () => {
+    // The wave is decoration. The state is a sentence.
+    expect(wave()).toHaveAttribute("aria-hidden", "true");
+    expect(wave().textContent).toBe("");
+
+    // Not vacuous: there is a subtree in there, and no part of it claims a
+    // name or a role of its own — the same treatment the scrubber's segments
+    // get in `SpeechControlBar.test.tsx`.
+    const decoration = [wave(), ...Array.from(wave().querySelectorAll("*"))];
+    expect(decoration.length).toBeGreaterThan(1);
+    for (const element of decoration) {
+      expect(element).not.toHaveAttribute("role");
+      expect(element).not.toHaveAttribute("aria-label");
+      expect(element).not.toHaveAttribute("title");
+    }
+
+    // What a screen reader is left with is the label, and the label is the
+    // whole of the state's name.
+    const status = screen.getByRole("status");
+    expect(status).toBe(waiting());
+    expect(status.textContent?.trim()).toMatch(/waiting for a reply/i);
+    expect(within(status).getByText(/waiting for a reply/i)).toHaveClass(
+      "answer-pane-waiting-label",
+    );
+
+    // And it is NAMED IN TEXT: a label the stylesheet hides is a state with no
+    // name at all, because the only other thing in here is `aria-hidden`.
+    expect(cssRule(".answer-pane-waiting-label")).not.toMatch(
+      /(^|;)\s*(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0)/,
+    );
   });
 });

@@ -32,6 +32,19 @@
   --blue: #60a5fa;
   --blue-dim: rgba(96, 165, 250, 0.12);
 
+  /* The speech surface's green — Tokyo-Night #9ece6a, the one colour the row
+     took from the mockup rather than from the tokens above (see the note on
+     `.speech-bar`). It is a TOKEN now because the scrubber is no longer the
+     only thing drawn in it: the answer pane's waiting wave is the same
+     segments in another shape, and a literal repeated in a third place is a
+     third place to forget. Named for the segment because that is what it
+     paints — `.speech-bar-seg`, `.answer-pane-seg`, and the wave's crests.
+
+     Only the segments moved to it. The rest of the speech surface's greens —
+     the speak control, the activity LED, the armed switch — are the same hue
+     for their own reasons and are not this token's to change. */
+  --speech-seg: #9ece6a;
+
   --heading-h1: #e5a84b;
   --heading-h2: #e0815c;
   --heading-h3: #c678dd;
@@ -565,12 +578,18 @@ input[type="checkbox"] {
    that the header keeps pulsing and the bar goes quiet. The animation stays
    one rule regardless — what differs is which control still asks for it.
 
-   Which is also the whole of the reduced-motion story: there is no
-   `prefers-reduced-motion` query anywhere in this stylesheet — not on the
-   activity LED, not on the speak control, not on the busy pulse — so the bar
-   inherits exactly the treatment the header control has, by being the same
-   rule. Adding a query for the bar alone would be the two disagreeing; adding
-   one for every pulse in the panel is a change of its own. */
+   Which is also the whole of the reduced-motion story: no pulse in this
+   stylesheet carries a `prefers-reduced-motion` query — not the activity LED,
+   not the speak control, not this one — so the bar inherits exactly the
+   treatment the header control has, by being the same rule. Adding a query for
+   the bar alone would be the two disagreeing; adding one for every pulse in the
+   panel is a change of its own.
+
+   The answer pane's waiting wave DOES carry one, and that is not this rule
+   quietly losing its argument: the wave is a row of bars moving continuously in
+   the middle of the pane's body for as long as an answer takes, where these are
+   a tint on a 24px control. The note above `@media (prefers-reduced-motion)`
+   further down spells the distinction out. */
 .terminal-speak[data-pulse="1"],
 .speech-bar-primary[data-pulse="1"] {
   animation: terminal-led-pulse-attention 0.8s ease-in-out infinite;
@@ -764,7 +783,7 @@ input[type="checkbox"] {
 }
 
 .speech-bar-seg[data-segment="played"] {
-  background: rgba(158, 206, 106, 0.32);
+  background: color-mix(in srgb, var(--speech-seg) 32%, transparent);
 }
 
 /* Ready: the audio is in hand, so a click starts with no wait.
@@ -802,7 +821,7 @@ input[type="checkbox"] {
    here. */
 .speech-bar-seg[data-segment="ready"] {
   background: rgba(255, 255, 255, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(158, 206, 106, 0.28);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--speech-seg) 28%, transparent);
 }
 
 /* Warming: requested, socket open, audio not here yet.
@@ -836,8 +855,8 @@ input[type="checkbox"] {
 }
 
 .speech-bar-seg[data-segment="playing"] {
-  background: rgba(158, 206, 106, 0.18);
-  box-shadow: inset 0 0 0 1px #9ece6a;
+  background: color-mix(in srgb, var(--speech-seg) 18%, transparent);
+  box-shadow: inset 0 0 0 1px var(--speech-seg);
 }
 
 .speech-bar-fill {
@@ -977,8 +996,8 @@ input[type="checkbox"] {
 
 /* The body while a reply is pending. It replaces the text AND the rail, so it
    spans both of the body's grid columns rather than sitting in the text one and
-   leaving a 22px gutter beside a centred state. The wave and its halo land here
-   in the change's next step; what this rule owes the state machine is the box. */
+   leaving a 22px gutter beside a centred state. The wave and its halo sit in
+   the box this rule owes the state machine; they are below. */
 .answer-pane-waiting {
   grid-column: 1 / -1;
   display: flex;
@@ -989,6 +1008,128 @@ input[type="checkbox"] {
   min-height: 96px;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* The state's name — and, with the wave `aria-hidden`, the only thing a screen
+   reader gets out of this box. `--text-secondary` rather than the box's own
+   `--text-muted`: muted is the pane's dimmest ink, picked for furniture sitting
+   BESIDE text, and here there is no text for it to sit beside. */
+.answer-pane-waiting-label {
+  color: var(--text-secondary);
+}
+
+/* The halo: the ground the wave sits on, not a thing of its own. A closest-side
+   wash in the segment colour, so the state reads as a soft patch of light in a
+   dark body rather than five bars floating in the middle of an empty pane. It
+   does NOT move — the movement is the wave's, and a breathing halo under it
+   would be the same beat drawn twice.
+
+   The ornament's outermost node, which is why `AnswerWaiting` hangs
+   `aria-hidden` here: one attribute covers the halo, the wave and every crest. */
+.answer-pane-halo {
+  display: grid;
+  place-items: center;
+  width: 132px;
+  height: 48px;
+  border-radius: 999px;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--speech-seg) 12%, transparent),
+    transparent
+  );
+}
+
+/* The wave. ONE CREST PER SEGMENT, in the scrubber's own vocabulary: the pane's
+   rail is a column of segments in `--speech-seg`, and this is those segments
+   while there is nothing yet to draw a rail for. A spinner would have been a
+   second visual language for "the speech surface is busy" on the one surface
+   that already has one.
+
+   Laid out the way `.speech-bar-scrub` lays out its segments — a flex row,
+   sitting on its bottom edge, a few px apart. */
+.answer-pane-wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 28px;
+}
+
+/* One crest. Its HEIGHT is not here: each crest declares its own below, so the
+   row has a shape before anything animates it — which is exactly what is left
+   of the wave under `prefers-reduced-motion`. What is here is what the crests
+   share, the segment colour included. */
+.answer-pane-wave-crest {
+  width: 4px;
+  border-radius: 2px;
+  background: var(--speech-seg);
+  transform-origin: bottom;
+  animation: answer-pane-wave-crest 1200ms ease-in-out infinite;
+}
+
+/* The shape, and the stagger that makes it travel. Symmetric about the middle
+   crest: the wave rises through the row and falls back, rather than scrolling
+   off one end. */
+.answer-pane-wave-crest:nth-child(1) {
+  height: 9px;
+  animation-delay: 0ms;
+}
+
+.answer-pane-wave-crest:nth-child(2) {
+  height: 16px;
+  animation-delay: 140ms;
+}
+
+.answer-pane-wave-crest:nth-child(3) {
+  height: 24px;
+  animation-delay: 280ms;
+}
+
+.answer-pane-wave-crest:nth-child(4) {
+  height: 16px;
+  animation-delay: 420ms;
+}
+
+.answer-pane-wave-crest:nth-child(5) {
+  height: 9px;
+  animation-delay: 560ms;
+}
+
+/* Rest is the crest's declared height at full strength; the keyframes only take
+   it DOWN and let it back. So the frame the animation is stopped at — 100%, or
+   the static box when it never starts — is the tallest the crest gets, and the
+   row still draws the shape above. */
+@keyframes answer-pane-wave-crest {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* The one `prefers-reduced-motion` query in this stylesheet — and the note on
+   `.terminal-speak[data-pulse]` says why the pulses still have none. Those are
+   a 0.8s tint on a 24px control, the same rule in the header and the row, and a
+   query for one of them would be the two disagreeing. This is not that: it is a
+   row of bars moving continuously in the middle of the pane's body, in the
+   reader's line of sight, for as long as the agent takes to answer. It is the
+   one animation in the panel asked to run for minutes.
+
+   `animation: none`, NEVER `display: none`. The wave IS how the pane says it is
+   waiting, so taking the movement away has to leave the shape — which is what
+   the per-crest heights above are for, and why the keyframes produce no height
+   of their own.
+
+   Two classes in the selector so it outranks `.answer-pane-wave-crest` on
+   specificity rather than on source order, and `*` so a part of the ornament
+   added later is stopped without anybody remembering to come back here. */
+@media (prefers-reduced-motion: reduce) {
+  .answer-pane-waiting .answer-pane-wave * {
+    animation: none;
+  }
 }
 
 /* The reply field, between the answer and the switches.
@@ -1083,12 +1224,12 @@ input[type="checkbox"] {
 /* The five states are the scrubber's, verbatim — one `segmentStateFor`, two
    drawings. See the notes on `.speech-bar-seg[data-segment]`. */
 .answer-pane-seg[data-segment="played"] {
-  background: rgba(158, 206, 106, 0.32);
+  background: color-mix(in srgb, var(--speech-seg) 32%, transparent);
 }
 
 .answer-pane-seg[data-segment="ready"] {
   background: rgba(255, 255, 255, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(158, 206, 106, 0.28);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--speech-seg) 28%, transparent);
 }
 
 .answer-pane-seg[data-segment="warming"] {
@@ -1106,8 +1247,8 @@ input[type="checkbox"] {
 }
 
 .answer-pane-seg[data-segment="playing"] {
-  background: rgba(158, 206, 106, 0.18);
-  box-shadow: inset 0 0 0 1px #9ece6a;
+  background: color-mix(in srgb, var(--speech-seg) 18%, transparent);
+  box-shadow: inset 0 0 0 1px var(--speech-seg);
 }
 
 /* The playhead: a triangle beside the playing segment, pointing at the text. */
