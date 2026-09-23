@@ -965,21 +965,64 @@ input[type="checkbox"] {
   padding: 10px 12px 10px 6px;
 }
 
-/* One row under the body, inside the pane: the cell's "Open on new answer"
-   switch. Outside the scroll container so it stays put while the text scrolls.
-   It paints nothing of its own — the pane's ground shows through — and the
-   hairline above it is the seam between the two. */
-.answer-pane-footer {
+/* The reply field, between the answer and the switches.
+
+   The one surface in the pane that paints a ground of its own, and the third
+   ground of the three: the bar and the pane share `#17171d`, the xterm keeps
+   `#1a1b26`, and what YOU type is neither agent nor shell, so it is darker than
+   both. That colour is the whole separation — the hairline above it is the seam
+   with the text, and there is no other edge.
+
+   `position: relative` is load-bearing twice over: it is what the grip's
+   `absolute top-0` is measured from, and the height set inline by
+   `useResizableRow` is what the grip drags. */
+.answer-pane-composer {
+  position: relative;
+  flex: none;
+  display: flex;
+  background: #101014;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* The field fills the row it is given: the height is the row's, dragged, so the
+   textarea must not keep one of its own — and `resize: none` because the grip
+   IS its resize handle, on the edge that has room to grow into. */
+.answer-pane-composer-field {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary, #c0caf5);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 7px 12px;
+}
+
+.answer-pane-composer-field::placeholder {
+  color: var(--text-muted);
+}
+
+/* One row under everything, inside the pane: the cell's "Open on new answer"
+   switch and the composer's own. Outside the scroll container so it stays put
+   while the text scrolls. It paints nothing of its own — the pane's ground
+   shows through — and the hairline above it is the seam with whatever is above
+   it, the composer or the text. */
+.answer-pane-meta {
   flex: none;
   display: flex;
   align-items: center;
+  gap: 14px;
   padding: 6px 12px;
   border-top: 1px solid var(--border-subtle);
   font-size: 11px;
   color: var(--text-muted);
 }
 
-.answer-pane-footer-label {
+.answer-pane-meta-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -987,7 +1030,7 @@ input[type="checkbox"] {
   user-select: none;
 }
 
-.answer-pane-footer input[type="checkbox"] {
+.answer-pane-meta input[type="checkbox"] {
   margin: 0;
   accent-color: var(--accent, #7aa2f7);
 }

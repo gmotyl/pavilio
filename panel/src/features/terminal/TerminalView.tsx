@@ -339,6 +339,10 @@ export function TerminalView({
             onClose={closeAnswer}
             autoOpen={autoOpen}
             onAutoOpenChange={(on) => setAnswerPaneAutoOpen(sessionId, on)}
+            // The same `send` the row's pills take — one transport to the PTY,
+            // reached from the two places the user can type into this cell
+            // without touching the terminal.
+            send={send}
           />
         ) : null}
       </div>

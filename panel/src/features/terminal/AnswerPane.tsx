@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
+import { AnswerComposer } from "./AnswerComposer";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
@@ -24,6 +27,13 @@ export interface AnswerPaneProps {
    */
   autoOpen: boolean;
   onAutoOpenChange: (on: boolean) => void;
+  /**
+   * The cell's own PTY write, handed straight to the composer. `TerminalView`
+   * reads it off the live instance at call time — the same one the bar's
+   * launcher pills send with, so a reply typed here and a pill clicked up there
+   * reach the shell by one transport.
+   */
+  send: (data: string) => void;
 }
 
 /**
@@ -155,7 +165,13 @@ export function AnswerPane({
   onClose,
   autoOpen,
   onAutoOpenChange,
+  send,
 }: AnswerPaneProps) {
+  // Global, and read here rather than passed in: unlike `autoOpen` — which is
+  // the CELL's switch, seeded from a browser-wide default and owned by
+  // `TerminalView` — whether a pane carries a composer at all is one answer for
+  // the whole panel, so the pane reads and writes it directly.
+  const [composerOn, setComposerOn] = usePreference(preferences.answerComposerEnabled);
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
@@ -388,11 +404,18 @@ export function AnswerPane({
           {answer ? <MarkdownRenderer content={answer.text} /> : null}
         </div>
       </div>
-      {/* One row under the body, inside the card and outside the scroll
-          container, so it stays put while the text scrolls. The pane's only
-          control besides the text. */}
-      <div className="answer-pane-footer">
-        <label className="answer-pane-footer-label" htmlFor={`answer-pane-auto-open-${sessionId}`}>
+      {/* The reply, above the switches and under the text it answers. Absent
+          entirely when the switch below is off — not hidden — so the height it
+          held goes back to the body, which is what "returns its height to the
+          text" means. */}
+      {composerOn ? <AnswerComposer sessionId={sessionId} send={send} /> : null}
+      {/* The pane's switches: one row under everything, outside the scroll
+          container so it stays put while the text scrolls. It was the footer
+          when the auto-open switch was the pane's only control; now that the
+          composer sits between it and the text, what is left here is the meta —
+          what the pane does, not what it holds. */}
+      <div className="answer-pane-meta">
+        <label className="answer-pane-meta-label" htmlFor={`answer-pane-auto-open-${sessionId}`}>
           <input
             id={`answer-pane-auto-open-${sessionId}`}
             data-testid={`answer-pane-auto-open-${sessionId}`}
@@ -401,6 +424,16 @@ export function AnswerPane({
             onChange={() => onAutoOpenChange(!autoOpen)}
           />
           Open on new answer
+        </label>
+        <label className="answer-pane-meta-label" htmlFor={`answer-pane-composer-on-${sessionId}`}>
+          <input
+            id={`answer-pane-composer-on-${sessionId}`}
+            data-testid={`answer-pane-composer-on-${sessionId}`}
+            type="checkbox"
+            checked={composerOn}
+            onChange={() => setComposerOn(!composerOn)}
+          />
+          Composer
         </label>
       </div>
     </div>

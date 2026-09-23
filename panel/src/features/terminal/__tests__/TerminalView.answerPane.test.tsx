@@ -31,8 +31,10 @@ const term = vi.hoisted(() => {
   const fit = vi.fn();
   const focus = vi.fn();
   const sent: string[] = [];
+  /** Everything written to the PTY — what the composer's Enter has to reach. */
+  const writes: string[] = [];
   const observed: Element[] = [];
-  return { fit, focus, sent, observed };
+  return { fit, focus, sent, writes, observed };
 });
 
 vi.mock("../terminalInstances", () => {
@@ -57,7 +59,7 @@ vi.mock("../terminalInstances", () => {
         fitAddon: {},
         holder,
         ws,
-        send: () => {},
+        send: (data: string) => term.writes.push(data),
         // Mirrors the real `fit`: a refresh AND a resize frame, unconditionally.
         fit: () => {
           term.fit();
@@ -195,6 +197,7 @@ beforeEach(() => {
   term.fit.mockClear();
   term.focus.mockClear();
   term.sent.length = 0;
+  term.writes.length = 0;
   term.observed.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   // The pane's state outlives the view on purpose (see `answerPaneState.ts`),
@@ -243,6 +246,25 @@ describe("TerminalView and the answer pane", () => {
     expect(eye()).toHaveAttribute("aria-pressed", "false");
     expect(term.fit.mock.calls.length).toBe(fitsBefore);
     expect(resizeFrames().length).toBe(resizesBefore);
+  });
+
+  it("hands the pane the cell's own PTY write", async () => {
+    // The bar's `send` was untested until Task 6 had to close it; this is the
+    // pane's half of the same wiring, and it is asserted on the instance this
+    // cell acquired rather than on a spy the test hands in — a prop threaded to
+    // the wrong place would still satisfy the latter.
+    render(cell(makeSpeech()));
+    await settleTerminal();
+
+    fireEvent.click(eye());
+    await settleTerminal();
+    expect(term.writes).toEqual([]);
+
+    const field = screen.getByTestId("answer-pane-composer-cell-a");
+    fireEvent.change(field, { target: { value: "yes, both scopes" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+
+    expect(term.writes).toEqual(["yes, both scopes\r"]);
   });
 
   it("mounts the pane inside the terminal area so the row stays uncovered", async () => {

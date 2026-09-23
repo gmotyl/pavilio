@@ -216,14 +216,17 @@ function harness(markdown = MARKDOWN, progress: SpeechProgress | null = null): H
   };
 }
 
-/** The footer's switch, off and inert unless a test wires it. */
+/** The meta row's switch, off and inert unless a test wires it. */
 const OFF = { autoOpen: false, onAutoOpenChange: () => {} };
+
+/** The composer's PTY write. `AnswerComposer.test.tsx` is where it is spent. */
+const NO_SEND = () => {};
 
 function paneElement(speech: GridSpeech, onClose: () => void = () => {}) {
   // MarkdownRenderer calls useNavigate, so the body needs a router.
   return (
     <MemoryRouter>
-      <AnswerPane sessionId="cell-a" speech={speech} onClose={onClose} {...OFF} />
+      <AnswerPane sessionId="cell-a" speech={speech} onClose={onClose} send={NO_SEND} {...OFF} />
     </MemoryRouter>
   );
 }
@@ -596,15 +599,16 @@ describe("AnswerPane", () => {
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
-  it("the footer checkbox reflects the cell switch and writes nothing to storage", () => {
+  it("the meta row's checkbox reflects the cell switch and writes nothing to storage", () => {
     const h = harness();
     const onAutoOpenChange = vi.fn();
-    const footer = (autoOpen: boolean) => (
+    const withSwitch = (autoOpen: boolean) => (
       <MemoryRouter>
         <AnswerPane
           sessionId="cell-a"
           speech={makeSpeech(h)}
           onClose={() => {}}
+          send={NO_SEND}
           autoOpen={autoOpen}
           onAutoOpenChange={onAutoOpenChange}
         />
@@ -613,14 +617,14 @@ describe("AnswerPane", () => {
     const setItem = vi.spyOn(localStorage, "setItem");
     const removeItem = vi.spyOn(localStorage, "removeItem");
 
-    const view = render(footer(false));
+    const view = render(withSwitch(false));
     const box = screen.getByTestId("answer-pane-auto-open-cell-a") as HTMLInputElement;
     expect(box).toBe(screen.getByRole("checkbox", { name: "Open on new answer" }));
     expect(box).not.toBeChecked();
-    // The footer is a row of the card, under the body — not inside the scroll container.
+    // The meta row is a row of the pane, under the body — not inside the scroll container.
     const root = screen.getByTestId("answer-pane-cell-a");
     const body = screen.getByTestId("answer-pane-body-cell-a");
-    expect(box.closest(".answer-pane-footer")?.parentElement).toBe(root);
+    expect(box.closest(".answer-pane-meta")?.parentElement).toBe(root);
     expect(body.contains(box)).toBe(false);
 
     // A click reports the flipped value to the owner and touches no storage:
@@ -632,7 +636,7 @@ describe("AnswerPane", () => {
     expect(removeItem).not.toHaveBeenCalled();
 
     // Controlled: the box follows the prop, and flips the other way from on.
-    view.rerender(footer(true));
+    view.rerender(withSwitch(true));
     expect(box).toBeChecked();
     fireEvent.click(box);
     expect(onAutoOpenChange).toHaveBeenLastCalledWith(false);
@@ -668,7 +672,7 @@ describe("AnswerPane", () => {
     render(
       <MemoryRouter>
         <div onMouseDown={cell.mouseDown} onClick={cell.click} onDragStart={cell.dragStart}>
-          <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} send={NO_SEND} {...OFF} />
         </div>
       </MemoryRouter>,
     );
@@ -699,7 +703,7 @@ describe("AnswerPane", () => {
     render(
       <MemoryRouter>
         <div onKeyDown={cell.keyDown}>
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} {...OFF} />
         </div>
       </MemoryRouter>,
     );
@@ -750,7 +754,7 @@ describe("AnswerPane", () => {
           <div className="xterm">
             <textarea aria-label="terminal input" />
           </div>
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} {...OFF} />
         </div>
       </MemoryRouter>,
     );
@@ -786,7 +790,7 @@ describe("AnswerPane", () => {
           </div>
         </div>
         <div className="relative">
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} {...OFF} />
         </div>
       </MemoryRouter>,
     );
@@ -1133,8 +1137,8 @@ describe("AnswerPane", () => {
 
       // The body stops painting the xterm's ground under the text. A second,
       // darker surface inside the pane is precisely the card the pane has
-      // stopped being — the text well and the footer are one ground now, with
-      // the footer's hairline for the seam.
+      // stopped being — the text well and the switch row are one ground now,
+      // with the row's hairline for the seam.
       expect(shows(".answer-pane-body")).not.toBe("var(--bg-base)");
       expect(shows(".answer-pane-body")).toBe(row);
 
@@ -1146,17 +1150,23 @@ describe("AnswerPane", () => {
       expect(body).toMatch(/grid-template-columns:\s*22px 1fr/);
     });
 
-    it("the footer paints nothing of its own", () => {
-      // The footer paints nothing of its own — it never did — so what it shows
-      // is the pane it sits in. What changed is the conclusion: the body used
-      // to declare a darker ground so the two would read as two surfaces, and
-      // that split was the card. One ground now, both of them the row's.
+    it("the meta row paints nothing of its own", () => {
+      // The switch row paints nothing of its own — it never did — so what it
+      // shows is the pane it sits in. What changed is the conclusion: the body
+      // used to declare a darker ground so the two would read as two surfaces,
+      // and that split was the card. One ground now, both of them the row's.
+      //
+      // The composer is the exception, and deliberately so: it declares the
+      // third ground of design.md's three, because what YOU type is neither
+      // agent nor shell. It is darker than both of the other two rather than
+      // merely different, and `AnswerComposer.test.tsx` is where that is read
+      // out of the stylesheet.
       const surface = background(".answer-pane");
       expect(surface).not.toBeNull();
-      expect(cssRule(".answer-pane-footer")).not.toMatch(/background/);
-      expect(shows(".answer-pane-footer")).toBe(surface);
+      expect(cssRule(".answer-pane-meta")).not.toMatch(/background/);
+      expect(shows(".answer-pane-meta")).toBe(surface);
 
-      expect(shows(".answer-pane-body")).toBe(shows(".answer-pane-footer"));
+      expect(shows(".answer-pane-body")).toBe(shows(".answer-pane-meta"));
     });
   });
 });
