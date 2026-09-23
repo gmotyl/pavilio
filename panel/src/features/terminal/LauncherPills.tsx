@@ -1,5 +1,6 @@
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { noteLauncherUsed, useLauncherUsed } from "./launcherUse";
 
 export interface LauncherPillsProps {
   /** Only for test ids — the pills act on the `send` they are handed. */
@@ -29,6 +30,18 @@ export interface LauncherPillsProps {
  * must show the short name and run the long command, and code that showed
  * `entry.command` would pass every default and fail the first real edit.
  *
+ * ## Why a used row goes quiet instead of going away
+ *
+ * The bar swaps the pills for the transport when the cell has SPOKEN, and that
+ * is a later moment than launching: an agent loads, prints a banner and works
+ * before its first hook fires. For the whole of that window the row used to
+ * show three live buttons, and pressing one does not start a second agent — it
+ * types `claude` into the prompt of the one already running. So the pills go
+ * inert the moment one is used (`launcherUse`, keyed by session), and they go
+ * inert rather than absent: the row is a fixed 56px spent at mount so no box
+ * moves under a running TUI, and unmounting the pills would be exactly that
+ * jump.
+ *
  * The command is sent with a trailing `\r` — the return that runs it — and
  * nothing else. Never mutate `launchers` or its members: `readPreference` hands
  * the declared `DEFAULT_TERMINAL_LAUNCHERS` back BY REFERENCE when nothing is
@@ -36,6 +49,7 @@ export interface LauncherPillsProps {
  */
 export function LauncherPills({ sessionId, send }: LauncherPillsProps) {
   const [launchers] = usePreference(preferences.terminalLaunchers);
+  const spent = useLauncherUsed(sessionId);
 
   return (
     <div className="speech-bar-launchers" data-testid={`speech-bar-launchers-${sessionId}`}>
@@ -52,7 +66,16 @@ export function LauncherPills({ sessionId, send }: LauncherPillsProps) {
           title={entry.command}
           data-testid={`speech-bar-launch-${sessionId}-${index}`}
           className="speech-bar-launch"
-          onClick={() => send(`${entry.command}\r`)}
+          disabled={spent}
+          // The attribute is what a pointer meets; this guard is what a click
+          // dispatched straight at the node meets. Both matter — `disabled` is
+          // the affordance, and a handler that stayed live behind it would
+          // still answer a synthetic click.
+          onClick={() => {
+            if (spent) return;
+            send(`${entry.command}\r`);
+            noteLauncherUsed(sessionId);
+          }}
         >
           {entry.name}
         </button>

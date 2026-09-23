@@ -20,6 +20,7 @@ import { speechTransportKeyFor } from "../speech/useSpeechKeys";
 // its entry with it so the store does not leak.
 import { forgetAnswerPane } from "./answerPaneState";
 import { forgetAnswerWaiting } from "./answerWaiting";
+import { forgetLauncherUse } from "./launcherUse";
 
 // Shared cache of live xterm instances, keyed by sessionId.
 // The Terminal (+ its DOM node) survive React unmounts so that scrollback
@@ -1085,6 +1086,9 @@ export function destroyTerminal(sessionId: string): void {
   // The wait holds an activity subscription open; a destroyed session has
   // nothing left to wait for and nobody left to tell.
   forgetAnswerWaiting(sessionId);
+  // …and the "a launcher was used here" flag with it: the session id is gone,
+  // and a cell that reuses it later is a different cell with nothing running.
+  forgetLauncherUse(sessionId);
   try {
     // Detach handlers as reopen() does: a browser's close event lands on a
     // later tick, and nothing about a destroyed instance should still speak.

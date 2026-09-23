@@ -936,10 +936,20 @@ input[type="checkbox"] {
     border-color 200ms ease;
 }
 
-.speech-bar-launch:hover {
+.speech-bar-launch:hover:not([disabled]) {
   background: var(--bg-hover);
   border-color: var(--border-strong);
   color: var(--text-primary);
+}
+
+/* A cell that has already been launched. Greyed and inert, never gone: the row
+   is a fixed 56px spent at mount so no box moves under a running TUI, and
+   pulling the pills out of it the moment one was pressed would be that jump.
+   design.md's own disabled vocabulary — `.btn[disabled] { opacity: .3; cursor:
+   default }`, with `.rm[disabled]` at .25 for the smaller control. */
+.speech-bar-launch[disabled] {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* How many answers are waiting behind this one. */

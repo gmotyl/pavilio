@@ -36,6 +36,11 @@ async function resetTabScopedSingletons(): Promise<void> {
   // so nothing else in this teardown clears them, and a test that typed a reply
   // would hand the next one a composer that opens with it already in the field.
   await reset("./features/terminal/composerDrafts", "__resetComposerDraftsForTests");
+  // Which cells have had a launcher pill clicked is tab-scoped module state
+  // too, and deliberately never stored — so a test that launched an agent
+  // would otherwise hand the next one a speech row whose pills were already
+  // spent, and every assertion about a live pill would go green on nothing.
+  await reset("./features/terminal/launcherUse", "__resetLauncherUseForTests");
 }
 
 function createMemoryStorage(): Storage {
