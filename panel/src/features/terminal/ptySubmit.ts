@@ -77,6 +77,32 @@
  * each entry is attempted and reports its own refusal. Dropping the rest of the
  * queue on the floor would put this module straight back in the business of
  * losing text without saying so.
+ *
+ * ## Why the bookkeeping sits in a `finally`
+ *
+ * Every report raised here — the delivery, either refusal — is a call into code
+ * this module does not own and cannot vet. The answer composer hands over the
+ * pane's move into its waiting state, the launcher row hands over a store
+ * notification that reaches every subscriber of it, and any of that is entitled
+ * to throw. What must not follow from a caller throwing is that the queue is
+ * left mid-submit. A session's entry in {@link queues} IS its busy flag, so an
+ * entry left standing with no return scheduled and no {@link advance} to come
+ * is a cell whose composer and launcher pills are dead until the page is
+ * reloaded: every later submit for it is pushed onto an array nothing will ever
+ * drain. That invariant belongs to the queue and must not be contingent on how
+ * a caller behaves, so each report is raised inside a `try` whose `finally`
+ * carries out the bookkeeping that was owed.
+ *
+ * On the delivered path that `finally` also owes the return itself. The body is
+ * already on the socket by the time the caller hears about it, so a caller that
+ * throws out of `onDelivered` must not take the return down with it — that
+ * would leave the user's line sitting in the TUI's prompt with nobody having
+ * pressed Enter on it, which is a worse outcome than the throw it came from.
+ *
+ * The exception is not swallowed: `finally` rather than `catch`, deliberately.
+ * The bookkeeping happens and the error goes on propagating to the caller, who
+ * is the one with the bug to fix. An error quietly eaten in the submit path is
+ * the very class of defect the rest of this file exists to undo.
  */
 
 /** The submitting return itself — the key the TUI runs a line on. */
@@ -167,25 +193,42 @@ function write(sessionId: string, submission: Submission): void {
   if (!submission.send(submission.body)) {
     // Nothing was written, so there is nothing for a return to submit and no
     // reason to make the next submit wait a gap that only exists to separate a
-    // paste from a keypress.
-    submission.onFailed?.("body");
-    advance(sessionId);
+    // paste from a keypress. The handing on of the session's turn is owed
+    // whatever the caller's own code does with the news — see "Why the
+    // bookkeeping sits in a `finally`" above.
+    try {
+      submission.onFailed?.("body");
+    } finally {
+      advance(sessionId);
+    }
     return;
   }
   // The body is on the socket. Said HERE rather than where the submit was
   // asked for, because this line is the first moment it is true — for an
   // enqueued submit it runs a gap after the caller's own code did.
-  submission.onDelivered?.();
-  timers.set(
-    sessionId,
-    setTimeout(() => {
-      timers.delete(sessionId);
-      // The body is on the far side either way: a refused return leaves it in
-      // the prompt, which is a different failure from having sent nothing.
-      if (!submission.send(RETURN)) submission.onFailed?.("return");
-      advance(sessionId);
-    }, SUBMIT_RETURN_MS),
-  );
+  //
+  // The return is scheduled in the `finally` because from this line on the body
+  // exists on the far side: a caller that throws out of `onDelivered` must
+  // still get the keypress that runs the line, or its own bug becomes a reply
+  // left unsubmitted in the agent's prompt.
+  try {
+    submission.onDelivered?.();
+  } finally {
+    timers.set(
+      sessionId,
+      setTimeout(() => {
+        timers.delete(sessionId);
+        // The body is on the far side either way: a refused return leaves it in
+        // the prompt, which is a different failure from having sent nothing.
+        // The queue is handed on regardless, for the reason it is above.
+        try {
+          if (!submission.send(RETURN)) submission.onFailed?.("return");
+        } finally {
+          advance(sessionId);
+        }
+      }, SUBMIT_RETURN_MS),
+    );
+  }
 }
 
 /**
