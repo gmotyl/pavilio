@@ -5,6 +5,7 @@ import { preferences } from "../../preferences/declarations";
 import { toast } from "../../lib/toast";
 import { clearDraft, getDraft, setDraft } from "./composerDrafts";
 import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
+import { submitToPty } from "./ptySubmit";
 
 /**
  * How far the composer may be dragged, and how far one arrow key moves it.
@@ -26,8 +27,18 @@ export interface AnswerComposerProps {
   /**
    * The cell's own PTY write — `TerminalView`'s `send`, read off the live
    * instance at call time, the same one the bar's launcher pills use.
+   *
+   * The raw write, not a wrapped one: a submit is TWO writes now (see
+   * `ptySubmit`), and anything the pane wants to do once per submit belongs in
+   * {@link onSubmitted} rather than on a write it would then see twice.
    */
   send: (data: string) => void;
+  /**
+   * A draft has just gone out. Raised once per submit, after the body has been
+   * written — the pane hands its body over to the waiting state here, because
+   * it is the pane that knows which answer the draft was a reply to.
+   */
+  onSubmitted: () => void;
 }
 
 /**
@@ -49,6 +60,15 @@ export interface AnswerComposerProps {
  * which is the one thing a stray keystroke must not be able to do. Whitespace
  * counts as empty for the same reason — but what is SENT is never trimmed: the
  * text is the user's, and leading indentation in a pasted snippet is theirs too.
+
+ * ## Why the return is not part of the text that is sent
+ *
+ * `submitToPty` writes the body, and then the `\r` on a turn of its own. The
+ * composer used to send `` `${text}\r` `` as one write, which is one websocket
+ * frame and one `pty.write` — and a TUI with bracketed paste enabled reads a
+ * burst like that as a PASTE, trailing return included. The reply landed in the
+ * prompt and sat there unsubmitted, which is the bug the split fixes; the whole
+ * of the reasoning is on `ptySubmit`.
  *
  * ## Why a pasted image goes the same way the terminal's does
  *
@@ -124,7 +144,7 @@ export interface AnswerComposerProps {
  * the pane), no hint, no stored height at all, and a single row laid out by the
  * viewport.
  */
-export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
+export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerProps) {
   // Seeded from the store, not from `""`: this mount may be the second one for
   // a pane the user closed mid-sentence.
   const [text, setText] = useState(() => getDraft(sessionId));
@@ -148,7 +168,9 @@ export function AnswerComposer({ sessionId, send }: AnswerComposerProps) {
     clearDraft(sessionId);
     setText("");
     setPasted([]);
-    send(`${text}\r`);
+    // The body now, its submitting return on a later turn — never one write.
+    submitToPty(sessionId, send, text);
+    onSubmitted();
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {

@@ -7,7 +7,7 @@
  * is asserted against a `fit` stand-in that does exactly that, the way
  * `SpeechControlBar.test.tsx` does.
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -270,7 +270,11 @@ describe("TerminalView and the answer pane", () => {
     fireEvent.change(field, { target: { value: "yes, both scopes" } });
     fireEvent.keyDown(field, { key: "Enter" });
 
-    expect(term.writes).toEqual(["yes, both scopes\r"]);
+    // The body first, and the submitting return as a write of its own — a
+    // submit is two writes now (`ptySubmit`), because a TUI reading one burst
+    // takes the trailing `\r` for part of the pasted text and never submits.
+    expect(term.writes).toEqual(["yes, both scopes"]);
+    await waitFor(() => expect(term.writes).toEqual(["yes, both scopes", "\r"]));
   });
 
   it("mounts the pane inside the terminal area so the row stays uncovered", async () => {

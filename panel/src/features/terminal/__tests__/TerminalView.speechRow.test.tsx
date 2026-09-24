@@ -24,7 +24,7 @@
  * produces that height: the same container node, in the same column, with the
  * same siblings in the same order, and nothing refitting it.
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepare } from "../../speech/prepare";
@@ -261,9 +261,11 @@ describe("the speech row", () => {
 
     fireEvent.click(pill);
 
-    // The command plus the return that runs it, on the instance this cell
-    // acquired — not on a spy the view happens to hold.
-    expect(term.writes).toEqual(["claude\r"]);
+    // The command, and then the return that runs it as a separate write, on
+    // the instance this cell acquired — not on a spy the view happens to hold.
+    // The split is `ptySubmit`'s and every caller has it.
+    expect(term.writes).toEqual(["claude"]);
+    await waitFor(() => expect(term.writes).toEqual(["claude", "\r"]));
   });
 
   it("renders the speech row on a cell that has never spoken", async () => {

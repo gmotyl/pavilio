@@ -17,12 +17,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ToastHost from "../../../components/ToastHost";
 import { dismissToast } from "../../../lib/toast";
 import { AnswerComposer } from "../AnswerComposer";
+import { __resetPtySubmitForTests } from "../ptySubmit";
 
 /** What the server answers with — the same shape `uploadPastedImage` reads. */
 const SAVED = "/tmp/pavilio-pastes/paste-1.png";
 
 const send = vi.fn();
+/** The pane's handover. Not this file's subject — the pane's own suites pin it. */
+const onSubmitted = vi.fn();
 const fetchFn = vi.fn();
+
+/**
+ * The two writes one submit makes: the body, then the return on its own turn.
+ * See `ptySubmit` — the `\r` is no longer part of the body it submits.
+ */
+const expectSubmitted = async (body: string): Promise<void> => {
+  await waitFor(() => expect(send.mock.calls).toEqual([[body], ["\r"]]));
+};
 
 class StubResizeObserver {
   observe(): void {}
@@ -47,7 +58,7 @@ function installMatchMedia(): void {
 function renderComposer() {
   return render(
     <>
-      <AnswerComposer sessionId="cell-a" send={send} />
+      <AnswerComposer sessionId="cell-a" send={send} onSubmitted={onSubmitted} />
       <ToastHost />
     </>,
   );
@@ -87,6 +98,8 @@ async function typeAroundACaret(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   send.mockClear();
+  onSubmitted.mockClear();
+  __resetPtySubmitForTests();
   fetchFn.mockReset();
   dismissToast();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
@@ -240,8 +253,7 @@ describe("AnswerComposer paste", () => {
     // The path is still the field's text, and still what reaches the PTY.
     await user.click(field());
     await user.keyboard("{Enter}");
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith(`look at ${SAVED} please\r`);
+    await expectSubmitted(`look at ${SAVED} please`);
   });
 
   it("drops the chip when the path it names is edited away", async () => {
@@ -279,7 +291,6 @@ describe("AnswerComposer paste", () => {
     await user.keyboard("/srv/shots/crop.png");
     await user.keyboard("{Enter}");
 
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith("look at /srv/shots/crop.png please\r");
+    await expectSubmitted("look at /srv/shots/crop.png please");
   });
 });

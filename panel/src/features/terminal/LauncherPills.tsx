@@ -1,6 +1,7 @@
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { noteLauncherUsed, useLauncherUsed } from "./launcherUse";
+import { submitToPty } from "./ptySubmit";
 import { getSessions } from "./sessionStore";
 
 export interface LauncherPillsProps {
@@ -86,8 +87,13 @@ function sessionStartCommand(sessionId: string): string {
  * `.speech-bar-launchers` strip, whose height is fixed, inside a row of a fixed
  * 56px spent at mount so that no box moves under a running TUI.
  *
- * Commands are sent with a trailing `\r` — the return that runs them — and
- * nothing else. Never mutate `launchers` or its members: `readPreference` hands
+ * Commands go out through `submitToPty`, which writes the command and then the
+ * return that runs it as a SEPARATE write. A pill used to send
+ * `` `${command}\r` `` in one go and that is the burst the answer composer's
+ * stuck sends came from — see the note on `ptySubmit`. A launcher command is
+ * short enough that it never hit the bug, but the split lives in one place so
+ * that every caller has it, and the `start` pill's command grows with the
+ * project name it carries. Never mutate `launchers` or its members: `readPreference` hands
  * the declared `DEFAULT_TERMINAL_LAUNCHERS` back BY REFERENCE when nothing is
  * stored, so an in-place edit here would rewrite the defaults for the session.
  */
@@ -107,7 +113,7 @@ export function LauncherPills({ sessionId, send }: LauncherPillsProps) {
           // place this row has no live answer to compose it from.
           data-testid={`speech-bar-start-${sessionId}`}
           className="speech-bar-launch"
-          onClick={() => send(`${sessionStartCommand(sessionId)}\r`)}
+          onClick={() => submitToPty(sessionId, send, sessionStartCommand(sessionId))}
         >
           start
         </button>
@@ -126,7 +132,7 @@ export function LauncherPills({ sessionId, send }: LauncherPillsProps) {
             data-testid={`speech-bar-launch-${sessionId}-${index}`}
             className="speech-bar-launch"
             onClick={() => {
-              send(`${entry.command}\r`);
+              submitToPty(sessionId, send, entry.command);
               noteLauncherUsed(sessionId);
             }}
           >

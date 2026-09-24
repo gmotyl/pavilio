@@ -223,20 +223,21 @@ export function AnswerPane({
   // the mark on the play button after a transport press took the text back.
   const { waiting } = useAnswerWaiting(sessionId);
 
-  // The composer's write, with the handover attached. The composer raises the
-  // send and knows nothing about the pane above it; the pane knows what the
-  // body was showing when the draft went out, which is exactly what tells a
-  // later arrival apart from the answer that is already there.
+  // The handover, raised once per submit. The composer raises the send and
+  // knows nothing about the pane above it; the pane knows what the body was
+  // showing when the draft went out, which is exactly what tells a later
+  // arrival apart from the answer that is already there.
+  //
+  // It is a separate callback rather than a wrapper around `send` because a
+  // submit is TWO writes now — the body, then the return (`ptySubmit`) — and a
+  // wrapped `send` would hand the body over twice, re-opening the wait forty
+  // milliseconds after it began.
   //
   // Nothing on `speech` is read here — see the note on `answerWaiting.ts`. The
   // voice keeps reading; only the body hands over.
-  const sendReply = useCallback(
-    (data: string): void => {
-      send(data);
-      beginWaiting(sessionId, answerId);
-    },
-    [send, sessionId, answerId],
-  );
+  const onSubmitted = useCallback((): void => {
+    beginWaiting(sessionId, answerId);
+  }, [sessionId, answerId]);
 
   // The reply landing is NOT noticed here — it is noticed on the bar. See the
   // note beside `noteUtterance` in `SpeechControlBar.tsx`: this pane unmounts
@@ -511,7 +512,9 @@ export function AnswerPane({
           entirely when the switch above is off, not hidden, so the height it
           held goes back to the body, which is what "returns its height to the
           text" means. */}
-      {composerOn ? <AnswerComposer sessionId={sessionId} send={sendReply} /> : null}
+      {composerOn ? (
+        <AnswerComposer sessionId={sessionId} send={send} onSubmitted={onSubmitted} />
+      ) : null}
     </div>
   );
 }
