@@ -308,18 +308,19 @@ describe("the scrubber's durations belong to an utterance, not to a cell", () =>
     // Two answers, neither played: the newer is current, the older is history.
     await emitUtterance("cell-a", "u-1", MEASURED);
     await emitUtterance("cell-a", "u-2", ARRIVING);
-    expect(host.queueFor("cell-a").previous?.id).toBe("u-1");
+    expect(host.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["u-1"]);
     expect(host.queueFor("cell-a").current?.id).toBe("u-2");
 
     // Step back and play the older one right through. Its last unit ending
-    // returns the cursor to `current` — onto the answer nobody has played.
+    // returns the cursor to the newest answer — onto the one nobody has
+    // played.
     await settle(() => host.onPrevious("cell-a"));
     await loadDuration(2);
     await endCurrentUnit();
     await loadDuration(20);
     await endCurrentUnit();
 
-    expect(host.queueFor("cell-a").cursor).toBe("current");
+    expect(host.queueFor("cell-a").cursor).toBe(0);
     expect(host.unitsFor("cell-a")).toHaveLength(3);
     expect([...host.unitDurationsFor("cell-a")]).toEqual([]);
 
@@ -438,7 +439,7 @@ describe("the scrubber's durations belong to an utterance, not to a cell", () =>
 
     // The cursor is on the utterance being measured, so the widths it learned
     // are exactly the ones it may keep: 2s and 20s of 22.
-    expect(host.queueFor("cell-a").cursor).toBe("previous");
+    expect(host.queueFor("cell-a").cursor).toBe(1);
     expect([...host.unitDurationsFor("cell-a")]).toEqual([
       [0, 2],
       [1, 20],

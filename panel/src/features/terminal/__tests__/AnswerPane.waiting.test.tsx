@@ -98,10 +98,10 @@ const utterance = (id: string, text: string): Utterance => ({
 });
 
 const queueOf = (u: Utterance): UtteranceQueue => ({
-  previous: null,
+  previous: [],
   current: u,
   pending: [],
-  cursor: "current",
+  cursor: 0,
 });
 
 function makeSpeech(queueFor: () => UtteranceQueue): GridSpeech {

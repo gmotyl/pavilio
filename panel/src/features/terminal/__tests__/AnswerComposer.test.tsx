@@ -150,10 +150,10 @@ function renderPane(sessionId = "cell-a", speech: GridSpeech = makeSpeech()) {
 /** A speech host with one answer under the cursor for every cell that asks. */
 function speechWith(text: string): GridSpeech {
   const queue: UtteranceQueue = {
-    previous: null,
+    previous: [],
     current: { id: text, sessionId: "cell-a", text, at: 1 },
     pending: [],
-    cursor: "current",
+    cursor: 0,
   };
   return { ...makeSpeech(), queueFor: () => queue };
 }

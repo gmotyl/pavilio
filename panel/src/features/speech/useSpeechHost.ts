@@ -436,7 +436,7 @@ export function useSpeechHost(): SpeechHost {
     // at depth three two whole answers are never played and never offered.
     // With this guard the next pass finds the cursor moved off `held` and
     // falls through to the stop below, which is where it was always going.
-    if (holdingTheCursor && queue.cursor === "current" && queue.pending.length > 0) {
+    if (holdingTheCursor && queue.cursor === 0 && queue.pending.length > 0) {
       // The stop follows on the next pass, once `current` has moved onto it.
       dispatchQueue(paused, { type: "next" });
       return;
@@ -446,6 +446,18 @@ export function useSpeechHost(): SpeechHost {
     // paused on the utterance the cursor is still on, and this effect runs the
     // moment that pause is taken. Without it every pause would supersede
     // itself.
+    //
+    // It now carries a second case the shape of the queue handed it. A paused
+    // replay of HISTORY used to be superseded here by accident: an idle
+    // arrival reset the cursor to `current`, the held run stopped matching it,
+    // and the stop below fired. The list-shaped queue deliberately stopped
+    // doing that — the cursor follows its own utterance down the history — so
+    // the held run is still exactly what the cursor is on, and there is
+    // nothing stale to abandon. Leaving it alone is the point rather than an
+    // omission: a listener who stepped back to an older answer and paused it
+    // has not asked to be returned to the front every time the agent answers
+    // again, and the arrival is one forward press away rather than hostage to
+    // anything.
     if (!under || holdingTheCursor) return;
 
     // Stamped before `stop()` so the abandoned run lands on `ready` rather than
@@ -596,17 +608,26 @@ export function useSpeechHost(): SpeechHost {
   const onPrevious = useCallback(
     (sessionId: string): void => {
       const queue = queueFor(sessionId);
-      // History is one step deep, so a second press is a no-op — and so is a
-      // press on a cell with nothing behind its cursor. The reducer says the
-      // same; asking here is what keeps it from making a sound anyway.
-      if (queue.cursor === "previous" || queue.previous === null) return;
+      // What the press lands on: the cursor one step further back, read off
+      // the queue as it stands now because the dispatch below has not been
+      // applied to this value yet. Asking `utteranceUnderCursor` rather than
+      // indexing `previous` here keeps the cursor's meaning in the file that
+      // owns it — and reading `previous[0]` instead would quietly replay the
+      // newest step of history however deep the listener had walked.
+      //
+      // Nothing there is a press with nothing behind it: the cursor is already
+      // on the oldest answer the cell holds, or the cell has no history at
+      // all. The reducer says the same; asking here is what keeps a refused
+      // press from making a sound anyway.
+      const target = utteranceUnderCursor({ ...queue, cursor: queue.cursor + 1 });
+      if (!target) return;
 
       unlock();
       dispatchQueue(sessionId, { type: "previous" });
-      recordAutoplayed(sessionId, queue.previous.id);
+      recordAutoplayed(sessionId, target.id);
       // From its first unit: the transport steps onto a whole answer, never
       // into the middle of the one it was cut off in.
-      speakUtterance(sessionId, queue.previous);
+      speakUtterance(sessionId, target);
     },
     [dispatchQueue, queueFor, recordAutoplayed, speakUtterance, unlock],
   );
@@ -614,10 +635,14 @@ export function useSpeechHost(): SpeechHost {
   const onNext = useCallback(
     (sessionId: string): void => {
       const queue = queueFor(sessionId);
-      // From history, next means "come back", and what plays is the utterance
-      // that was current. Otherwise it means "skip ahead" into what is waiting.
-      const returning = queue.cursor === "previous";
-      const target = returning ? queue.current : (queue.pending[0] ?? null);
+      // From history, next means "come back" — one step towards the newest
+      // answer, which is the step in between rather than `current` whenever
+      // the listener has walked further than one back. Otherwise it means
+      // "skip ahead" into what is waiting.
+      const returning = queue.cursor > 0;
+      const target = returning
+        ? utteranceUnderCursor({ ...queue, cursor: queue.cursor - 1 })
+        : (queue.pending[0] ?? null);
       if (!returning && !target) return;
 
       unlock();

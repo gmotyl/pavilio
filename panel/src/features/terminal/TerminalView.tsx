@@ -122,7 +122,11 @@ export function TerminalView({
   const queue: UtteranceQueue | undefined = speech?.queueFor(sessionId);
   useEffect(() => {
     if (!queue) return;
-    const ids = [queue.previous, queue.current, ...queue.pending]
+    // Spread, not nested: `previous` is a list of up to five answers, and a
+    // list dropped into this array as one element survives the null filter and
+    // maps to `undefined` — which records nothing, and leaves every answer in
+    // the history to come back as an arrival the next time it is offered.
+    const ids = [...queue.previous, queue.current, ...queue.pending]
       .filter((u) => u !== null)
       .map((u) => u.id);
     const arrived = markSeenUtterances(sessionId, ids).length > 0;

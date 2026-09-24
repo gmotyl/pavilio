@@ -42,14 +42,28 @@ const frozen = (state: UtteranceQueue): UtteranceQueue => {
 const arrive = (state: UtteranceQueue, utterance: Utterance, speaking: boolean): UtteranceQueue =>
   utteranceQueueReducer(frozen(state), { type: "arrived", utterance, speaking });
 
+/**
+ * The three events that carry no payload, one ready-made object each. Named
+ * rather than built from a string at the call site: `{ type }` where `type` is
+ * the union of their names is not assignable to the event union — a value of
+ * that shape could be any one of the three, and the compiler will not pick for
+ * us — and the honest way past that is to hand back an event that IS one of
+ * them, not to assert one into being.
+ */
+const PRESSES = {
+  finished: { type: "finished" },
+  previous: { type: "previous" },
+  next: { type: "next" },
+} as const satisfies Record<string, UtteranceQueueEvent>;
+
 /** The same transport press, `times` over, each on a frozen input. */
 const press = (
   state: UtteranceQueue,
   times: number,
-  type: UtteranceQueueEvent["type"],
+  type: keyof typeof PRESSES,
 ): UtteranceQueue => {
   let walked = state;
-  for (let n = 0; n < times; n += 1) walked = utteranceQueueReducer(frozen(walked), { type });
+  for (let n = 0; n < times; n += 1) walked = utteranceQueueReducer(frozen(walked), PRESSES[type]);
   return walked;
 };
 

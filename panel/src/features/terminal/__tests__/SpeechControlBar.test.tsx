@@ -684,7 +684,7 @@ describe("SpeechControlBar", () => {
       // and `useSpeechKeys` binds Ctrl+Shift+←/→ to the same two handlers.
       const speech = makeSpeech({
         state: "ready",
-        queue: queueWith({ previous: utterance("u-0"), current: utterance("u-1") }),
+        queue: queueWith({ previous: [utterance("u-0")], current: utterance("u-1") }),
         units: units(200, 200, 200),
       });
 
@@ -1026,5 +1026,97 @@ describe("SpeechControlBar", () => {
     // The arm switch is the one control that survives the branch — arming
     // ahead of the first answer is why the row is reachable before it.
     expect(screen.getByTestId("speech-bar-autoplay-cell-a")).toBeInTheDocument();
+  });
+  /**
+   * The transport's two ends, read off the shape the history now has.
+   *
+   * History used to be a single slot, so "is there an answer behind the
+   * cursor" was two questions bolted together: is the slot full, and has the
+   * cursor not already been spent on it. With a list there is only one
+   * question — does the cursor still have a step left to take — and the bar
+   * has to ask it exactly the way the reducer answers it. Ask it any other way
+   * and the rail either offers a press that does nothing or refuses one that
+   * would have worked, and neither is visible to a type checker: `previous` is
+   * an array now, so the old `!== null` half is true forever.
+   */
+  describe("the transport walks the whole history", () => {
+    /** Three superseded answers, newest first, behind whatever is current. */
+    const history = (): Utterance[] => [utterance("u-3"), utterance("u-2"), utterance("u-1")];
+
+    const barAt = (cursor: number, pending: Utterance[] = []) =>
+      makeSpeech({
+        state: "ready",
+        queue: queueWith({ previous: history(), current: utterance("u-4"), pending, cursor }),
+        units: units(200, 200),
+      });
+
+    const railAt = (cursor: number, pending: Utterance[] = []) => {
+      const view = render(
+        <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barAt(cursor, pending)} />,
+      );
+      const rail = {
+        previous: screen.getByTestId("speech-bar-previous-cell-a") as HTMLButtonElement,
+        next: screen.getByTestId("speech-bar-next-cell-a") as HTMLButtonElement,
+        unmount: view.unmount,
+      };
+      return rail;
+    };
+
+    it("offers a previous answer from anywhere but the newest", () => {
+      // On `current`, three answers behind it: the ordinary case, and the one
+      // the old expression got right.
+      const newest = railAt(0);
+      expect(newest.previous).not.toBeDisabled();
+      newest.unmount();
+
+      // One step back, and two: the old `cursor === "current"` half refused
+      // both of these outright, because a one-step history had nowhere left to
+      // go. A five-deep one does, and the rail has to say so.
+      for (const cursor of [1, 2]) {
+        const stepped = railAt(cursor);
+        expect(stepped.previous).not.toBeDisabled();
+        stepped.unmount();
+      }
+
+      // The oldest answer the history holds. There is nothing behind it, the
+      // reducer's `previous` arm is a no-op here, and the button agrees.
+      const oldest = railAt(3);
+      expect(oldest.previous).toBeDisabled();
+      oldest.unmount();
+
+      // And a cell with no history at all: the array is non-null and empty,
+      // which is exactly what the careless port reads as "yes".
+      const alone = render(
+        <SpeechControlBar
+          sessionId="cell-a"
+          answerOpen={false}
+          onToggleAnswer={noop}
+          send={noop}
+          speech={makeSpeech({ state: "ready", queue: queueWith({ current: utterance("u-1") }), units: units(200, 200) })}
+        />,
+      );
+      expect(screen.getByTestId("speech-bar-previous-cell-a")).toBeDisabled();
+      alone.unmount();
+    });
+
+    it("offers next from anywhere in the history, and from current only with something waiting", () => {
+      // Anywhere in the history, next means "come back", and there is always
+      // somewhere to come back to.
+      for (const cursor of [1, 2, 3]) {
+        const stepped = railAt(cursor);
+        expect(stepped.next).not.toBeDisabled();
+        stepped.unmount();
+      }
+
+      // On `current` with nothing waiting there is no forward step at all.
+      const newest = railAt(0);
+      expect(newest.next).toBeDisabled();
+      newest.unmount();
+
+      // With an answer waiting behind it, there is.
+      const waiting = railAt(0, [utterance("u-5")]);
+      expect(waiting.next).not.toBeDisabled();
+      waiting.unmount();
+    });
   });
 });

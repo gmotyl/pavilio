@@ -60,19 +60,20 @@ import { getStoredArmedSession, setStoredArmedSession } from "./voices";
  */
 interface SessionSpeech {
   /**
-   * The cell's whole transport state: one step of history, the utterance the
-   * transport is on, and the answers waiting behind it. Empty until the session
-   * has received something speakable — the vote below still had to be recorded
-   * for a response with nothing to say, and a record exists for that alone.
+   * The cell's whole transport state: up to five steps of history, the
+   * utterance the transport is on, and the answers waiting behind it. Empty
+   * until the session has received something speakable — the vote below still
+   * had to be recorded for a response with nothing to say, and a record exists
+   * for that alone.
    */
   queue: UtteranceQueue;
   /**
    * Utterance ids that played to their last unit in this browser.
    *
    * A SET rather than the flag it used to be, because the cursor no longer sits
-   * on one fixed utterance: a cell can hold a heard answer in `previous` and an
-   * unheard one in `current` at the same time, and a single flag would report
-   * whichever of the two the cursor was not on.
+   * on one fixed utterance: a cell can hold heard answers all through its
+   * history and an unheard one in `current` at the same time, and a single flag
+   * would report whichever of them the cursor was not on.
    */
   heard: ReadonlySet<string>;
   /**
@@ -133,12 +134,12 @@ function withHeard(existing: SessionSpeech | undefined): ReadonlySet<string> {
  * its cursor, and everything waiting behind it.
  *
  * `heard` is only ever asked of the utterance under the cursor, so an id that
- * has fallen out of the queue (the `previous` a newer answer discarded, a
- * pending answer dropped past `MAX_PENDING`) can never be asked about again.
- * Left alone the set grows for the life of the tab, and {@link withHeard}
- * rebuilds the whole of it on every mark — quadratic over a long session. Cut
- * on every advance it is bounded by the queue itself: seven utterances at its
- * very widest.
+ * has fallen out of the queue (an answer pushed off the far end of the history
+ * past `MAX_PREVIOUS`, a pending answer dropped past `MAX_PENDING`) can never
+ * be asked about again. Left alone the set grows for the life of the tab, and
+ * {@link withHeard} rebuilds the whole of it on every mark — quadratic over a
+ * long session. Cut on every advance it is bounded by the queue itself: eleven
+ * utterances at its very widest.
  *
  * The one shadow this casts is a re-broadcast of an utterance the cell has
  * already let go of: it arrives as news rather than as something heard. The
@@ -152,7 +153,11 @@ function prunedHeard(heard: ReadonlySet<string>, queue: UtteranceQueue): Readonl
   if (heard.size === 0) return heard;
 
   const reachable = new Set<string>();
-  if (queue.previous) reachable.add(queue.previous.id);
+  // The WHOLE history, not its newest step: every answer the transport can
+  // still be walked back onto is one the listener may be asked about again,
+  // and a reach that stops at one step throws away the mark for the other
+  // four the moment anything advances.
+  for (const step of queue.previous) reachable.add(step.id);
   if (queue.current) reachable.add(queue.current.id);
   for (const waiting of queue.pending) reachable.add(waiting.id);
 
@@ -176,8 +181,13 @@ function withArrival(
   speaking: boolean,
 ): SessionSpeech {
   const base = existing ?? emptySession(language);
-  // An idle arrival discards whatever was in `previous`, so it is an advance
-  // like any other and the heard set is cut back with it.
+  // An arrival is an advance like any other, so the heard set is cut back with
+  // it. It usually drops nothing now: an idle arrival pushes what it
+  // superseded onto the front of the history rather than discarding it, and
+  // only a history already holding `MAX_PREVIOUS` answers loses one off the far
+  // end. The cut is still taken on every arrival, because that is the moment
+  // the queue's reach changes and `prunedHeard` returns the set it was handed
+  // when nothing has actually fallen out.
   const queue = utteranceQueueReducer(base.queue, { type: "arrived", utterance, speaking });
   return { ...base, language, queue, heard: prunedHeard(base.heard, queue) };
 }
@@ -190,7 +200,7 @@ function withArrival(
  */
 function queueHolds(queue: UtteranceQueue, id: string): boolean {
   return (
-    queue.previous?.id === id ||
+    queue.previous.some((step) => step.id === id) ||
     queue.current?.id === id ||
     queue.pending.some((waiting) => waiting.id === id)
   );
@@ -202,7 +212,7 @@ function queueHolds(queue: UtteranceQueue, id: string): boolean {
  * oldest answer waiting behind it.
  *
  * Deliberately NOT "everything the cell might yet be asked to speak". That list
- * is up to seven utterances per cell; the host fires a `synthesizeSpeech` for
+ * is up to eleven utterances per cell; the host fires a `synthesizeSpeech` for
  * each of them with no await and no limiter, and the player's own
  * `SYNTHESIS_CONCURRENCY` bounds the units of the one RUN it is playing and
  * nothing else — so a full queue behind a live run put seven requests in flight
@@ -218,7 +228,17 @@ function queueHolds(queue: UtteranceQueue, id: string): boolean {
  */
 function warmableOf(queue: UtteranceQueue): Utterance[] {
   const under = utteranceUnderCursor(queue);
-  const next = under === queue.current ? (queue.pending[0] ?? null) : queue.current;
+  // Where a `next` press would land: one step towards the newest answer while
+  // the cursor is back in the history, and the oldest answer waiting once it
+  // is on `current`. Asking the cursor rather than comparing against
+  // `queue.current` is what makes this right at depth: from two steps back the
+  // next press reaches the step in between, not `current`, and warming
+  // `current` there prepares an answer the transport will not touch for two
+  // more presses while leaving the one it lands on cold.
+  const next =
+    queue.cursor > 0
+      ? utteranceUnderCursor({ ...queue, cursor: queue.cursor - 1 })
+      : (queue.pending[0] ?? null);
   return [under, next].filter((entry): entry is Utterance => entry !== null);
 }
 
@@ -263,9 +283,9 @@ export type QueueCommand = Exclude<UtteranceQueueEvent, { type: "arrived" }>;
 
 export interface Channel {
   stateFor(sessionId: string): CellSpeechState;
-  /** The utterance the transport is on — `previous` while history is replaying. */
+  /** The utterance the transport is on — a step of history while one replays. */
   utteranceFor(sessionId: string): Utterance | null;
-  /** The cell's whole queue: one step of history, the cursor, what waits. */
+  /** The cell's whole queue: its history, the cursor, and what waits. */
   queueFor(sessionId: string): UtteranceQueue;
   /** Raise previous / next / finished on a cell's queue. */
   dispatchQueue(sessionId: string, command: QueueCommand): void;
@@ -570,7 +590,7 @@ export function useUtteranceChannel({
       // empty queue and the cursor on `current`, `finished` would null the
       // cell out — and `heard` is a flag, never a deletion: the utterance has
       // to stay retrievable so a click replays it.
-      const advances = existing.queue.pending.length > 0 || existing.queue.cursor === "previous";
+      const advances = existing.queue.pending.length > 0 || existing.queue.cursor > 0;
       const queue = advances
         ? utteranceQueueReducer(existing.queue, { type: "finished" })
         : existing.queue;

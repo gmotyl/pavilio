@@ -266,8 +266,17 @@ export function SpeechControlBar({
   const weights = segmentWeights(units, durations);
   const total = weights.reduce((sum, weight) => sum + weight, 0);
 
-  const hasPrevious = queue.previous !== null && queue.cursor === "current";
-  const hasNext = queue.cursor === "previous" || queue.pending.length > 0;
+  // The transport's two ends, asked of the CURSOR rather than of the lists.
+  // While history was a single slot the question was "is the slot full, and
+  // has the cursor not already been spent on it"; now that it is a list there
+  // is only one question — does the cursor still have a step left to take —
+  // and it has to be the same question the reducer's own no-op guards ask. A
+  // rail that asks it any other way either offers a press that does nothing or
+  // refuses one that would have worked, and neither is visible to the type
+  // checker: `previous` is an array, so the old `!== null` half is true
+  // forever and would leave `hasPrevious` permanently reading `cursor === 0`.
+  const hasPrevious = queue.cursor < queue.previous.length;
+  const hasNext = queue.cursor > 0 || queue.pending.length > 0;
 
   const eyeLabel = `Answer, unit ${(progress?.unitIndex ?? 0) + 1} of ${units.length}`;
 

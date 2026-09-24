@@ -486,14 +486,14 @@ describe("useUtteranceChannel", () => {
     await act(async () => {
       result.current.dispatchQueue("cell-a", { type: "finished" });
     });
-    expect(result.current.queueFor("cell-a").previous?.id).toBe("a1");
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["a1"]);
 
     lastMessage = frame({ ...first, at: first.at + 9_000 });
     await act(async () => {
       rerender();
     });
     const after = result.current.queueFor("cell-a");
-    expect(after.previous?.id).toBe("a1");
+    expect(after.previous.map((step) => step.id)).toEqual(["a1"]);
     expect(after.current?.id).toBe("a2");
     expect(after.pending).toEqual([]);
   });
@@ -533,21 +533,112 @@ describe("useUtteranceChannel", () => {
       result.current.dispatchQueue("cell-a", { type: "next" });
     });
 
-    // a3 discards a1 out of the queue altogether. Nothing can ask about it
+    // What it takes to drop a1 now: the history is five deep, so a1 has to be
+    // pushed off the far end of it before anything can stop carrying its mark.
+    // a3 alone used to do this; with a list it takes six answers behind a1,
+    // and asserting the shallow version would be asserting the old shape.
+    for (const [id, at] of [
+      ["a3", 3_000],
+      ["a4", 4_000],
+      ["a5", 5_000],
+      ["a6", 6_000],
+    ] as const) {
+      lastMessage = frame(utterance("cell-a", id, at));
+      await act(async () => {
+        rerender();
+      });
+    }
+    // Still the oldest step the history holds, and still heard: nothing that
+    // can be stepped onto has been forgotten.
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual([
+      "a5",
+      "a4",
+      "a3",
+      "a2",
+      "a1",
+    ]);
+
+    // a7 is the one that pushes a1 off the end. Nothing can ask about it
     // again, so the session stops carrying it — and a re-broadcast of it is
     // news, which is the one shadow the cut casts.
-    lastMessage = frame(utterance("cell-a", "a3", 3_000));
+    lastMessage = frame(utterance("cell-a", "a7", 7_000));
     await act(async () => {
       rerender();
     });
-    expect(result.current.queueFor("cell-a").previous?.id).toBe("a2");
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual([
+      "a6",
+      "a5",
+      "a4",
+      "a3",
+      "a2",
+    ]);
 
-    lastMessage = frame(utterance("cell-a", "a1", 4_000));
+    lastMessage = frame(utterance("cell-a", "a1", 8_000));
     await act(async () => {
       rerender();
     });
     expect(result.current.queueFor("cell-a").current?.id).toBe("a1");
     expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+
+  /**
+   * The retention half again, at the depth the list makes possible. The prune
+   * reads the queue's reach; a reach that asks `queue.previous` for ONE id —
+   * or, worse, asks an array for an `.id` it does not have — throws the mark
+   * away for every answer but the newest, and the listener who walks back
+   * through a run they already heard is told all of it is unheard news.
+   *
+   * Every step is asserted, not just the far end: a reach that kept only the
+   * first step of history would pass an assertion taken at depth one.
+   */
+  it("keeps the heard flag for every answer the history can still reach", async () => {
+    const { result, rerender } = await renderChannel();
+
+    // Five answers, each played to its end as it lands — an agent that ran
+    // ahead of a listener who was keeping up.
+    for (const [id, at] of [
+      ["h1", 1_000],
+      ["h2", 2_000],
+      ["h3", 3_000],
+      ["h4", 4_000],
+      ["h5", 5_000],
+    ] as const) {
+      lastMessage = frame(utterance("cell-a", id, at));
+      await act(async () => {
+        rerender();
+      });
+      await act(async () => {
+        result.current.markHeard("cell-a");
+      });
+      expect(result.current.stateFor("cell-a")).toBe("heard");
+    }
+
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual([
+      "h4",
+      "h3",
+      "h2",
+      "h1",
+    ]);
+
+    // Walking back through the whole history: every one of them is still a
+    // cell the listener has heard, all four steps of it.
+    for (let step = 1; step <= 4; step += 1) {
+      await act(async () => {
+        result.current.dispatchQueue("cell-a", { type: "previous" });
+      });
+      expect(result.current.queueFor("cell-a").cursor).toBe(step);
+      expect(result.current.stateFor("cell-a")).toBe("heard");
+    }
+
+    // And back out again, unchanged — the walk itself marks nothing and
+    // forgets nothing.
+    for (let step = 3; step >= 0; step -= 1) {
+      await act(async () => {
+        result.current.dispatchQueue("cell-a", { type: "next" });
+      });
+      expect(result.current.queueFor("cell-a").cursor).toBe(step);
+      expect(result.current.stateFor("cell-a")).toBe("heard");
+    }
   });
 
   /**
@@ -586,7 +677,7 @@ describe("useUtteranceChannel", () => {
     // Both are still reachable, so both are still heard: marking u-2 REPLACING
     // the set rather than adding to it would report the one the user has
     // already listened to as unheard news the moment they stepped back to it.
-    expect(result.current.queueFor("cell-a").previous?.id).toBe("u-1");
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["u-1"]);
     expect(result.current.stateFor("cell-a")).toBe("heard");
 
     await act(async () => {
@@ -609,9 +700,9 @@ describe("useUtteranceChannel", () => {
     await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
     const queue = result.current.queueFor("cell-a");
     expect(queue.current).toEqual(utterance("cell-a", "a7"));
-    expect(queue.previous).toBeNull();
+    expect(queue.previous).toEqual([]);
     expect(queue.pending).toEqual([]);
-    expect(queue.cursor).toBe("current");
+    expect(queue.cursor).toBe(0);
     // A cell the tab has never heard of has an EMPTY queue, not an undefined
     // one: the transport is rendered in every cell, before any arrival.
     expect(result.current.queueFor("cell-z").current).toBeNull();
