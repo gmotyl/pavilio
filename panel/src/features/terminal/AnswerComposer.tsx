@@ -6,6 +6,7 @@ import { toast } from "../../lib/toast";
 import { clearDraft, getDraft, setDraft } from "./composerDrafts";
 import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
 import { submitToPty } from "./ptySubmit";
+import { projectOfSession } from "./sessionProject";
 
 /**
  * How far the composer may be dragged, and how far one arrow key moves it.
@@ -136,13 +137,22 @@ export interface AnswerComposerProps {
  *
  * ## Why the height is the row hook's and not a CSS constant
  *
- * `useResizableRow(answerComposerHeight, BOUNDS)` with a `PaneResizer` on the
- * `top` edge: dragging upward grows the field into the answer above it, which
- * is the only direction there is room in. The hook reports `isMobile` but
+ * `useResizableRow(answerComposerHeight, BOUNDS, project)` with a `PaneResizer`
+ * on the `top` edge: dragging upward grows the field into the answer above it,
+ * which is the only direction there is room in. The hook reports `isMobile` but
  * applies nothing — the consumer decides — and here that decision is the whole
  * of the mobile case: no grip (an 8px rail under the thumb that is scrolling
  * the pane), no hint, no stored height at all, and a single row laid out by the
  * viewport.
+ *
+ * ## Why the height's scope is looked up rather than passed in
+ *
+ * The height is remembered per PROJECT, and this component is handed a
+ * `sessionId` and nothing else — as is the pane above it, and the four
+ * surfaces above that. `projectOfSession` reads the tab's own session list,
+ * which is where `LauncherPills` already gets the project for its
+ * `pavilio-session-start` argument and for the same reason; the whole of the
+ * reasoning is on that function.
  */
 export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerProps) {
   // Seeded from the store, not from `""`: this mount may be the second one for
@@ -158,6 +168,9 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   const { height, isMobile, handleProps } = useResizableRow(
     preferences.answerComposerHeight,
     BOUNDS,
+    // The scope: a cell's reply box is as tall as the project's work wants it,
+    // and a session id would be forgotten the next time the agent restarted.
+    projectOfSession(sessionId),
   );
 
   /** The one way out of this field, whichever control asked for it. */

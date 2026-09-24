@@ -18,7 +18,7 @@ import { useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
@@ -29,6 +29,8 @@ import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utterance
 import { AnswerPane } from "../AnswerPane";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
+import { refreshSessions } from "../sessionStore";
+import type { SessionMeta } from "../useTerminalSessions";
 
 // The synthesis cache the rail peeks into. Nothing is warm and nothing
 // subscribes: this file draws no units at all.
@@ -186,7 +188,46 @@ function regionOrder(): string[] {
 const composerSwitch = (): HTMLInputElement =>
   screen.getByTestId("answer-pane-composer-on-cell-a") as HTMLInputElement;
 
-beforeEach(() => {
+/** The project every cell in this file belongs to — the composer height's scope. */
+const PROJECT = "alpha";
+
+function session(id: string, project: string): SessionMeta {
+  return {
+    id,
+    name: id,
+    project,
+    cwd: `/srv/git/${project}`,
+    pid: 4242,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+/**
+ * Puts a session list in the tab's store, the way a load does.
+ *
+ * The composer's height is remembered per PROJECT, and the composer is handed
+ * a `sessionId` and nothing else — so the tab's session list is where the
+ * project comes from, exactly as it is for the launcher row's
+ * `pavilio-session-start` argument. `refreshSessions` is the store's own
+ * fetch-and-publish, so this is the real path the project reaches the row by;
+ * `test-setup.ts` clears the store between tests.
+ */
+async function seedSessions(sessions: SessionMeta[]): Promise<void> {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(sessions),
+        }) as unknown as Promise<Response>,
+    ),
+  );
+  await refreshSessions();
+}
+
+beforeEach(async () => {
   send.mockClear();
   // Module-level and keyed by session, so it outlives a test: a draft sent in
   // one case would otherwise still be "waiting" in the next, and the pane no
@@ -200,6 +241,16 @@ beforeEach(() => {
   documentKeys.mockClear();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   installMatchMedia(false);
+  // Without a session list the pane cannot name its project, and a height
+  // written here would land under a different key than the one the composer
+  // reads.
+  await seedSessions([session("cell-a", PROJECT), session("cell-b", PROJECT)]);
+});
+
+afterEach(() => {
+  // `seedSessions` stubs `fetch`, and a stub left behind would answer the next
+  // file's session load.
+  vi.unstubAllGlobals();
 });
 
 describe("AnswerComposer", () => {
@@ -342,7 +393,7 @@ describe("AnswerComposer", () => {
 
   it("drops the grip and uses a single row on a narrow viewport", () => {
     installMatchMedia(true);
-    writePreference(preferences.answerComposerHeight, 140);
+    writePreference(preferences.answerComposerHeight, 140, PROJECT);
     renderPane();
 
     // No grip: an 8px rail on a phone sits under the thumb that is scrolling
@@ -380,7 +431,7 @@ describe("AnswerComposer", () => {
   });
 
   it("opens at the height the grip last left behind", () => {
-    writePreference(preferences.answerComposerHeight, 140);
+    writePreference(preferences.answerComposerHeight, 140, PROJECT);
     renderPane();
 
     expect(grip()).toBeInTheDocument();

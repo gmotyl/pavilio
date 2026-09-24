@@ -18,16 +18,19 @@
  * pane is rendered into declares its own `clientHeight`. That is the fact the
  * component reads in a browser too, off the same element.
  */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import type { UtteranceQueue } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
+import { refreshSessions } from "../sessionStore";
+import type { SessionMeta } from "../useTerminalSessions";
 
 // The activity channel opens a WebSocket at import time and re-arms a 2s
 // reconnect timer whenever that socket closes. A socket that never closes
@@ -59,6 +62,10 @@ vi.mock("../../markdown/MermaidDiagram", () => ({
 }));
 
 const SESSION = "cell-a";
+/** A second cell of the SAME project — the two that share a height. */
+const SIBLING = "cell-b";
+/** The project both cells belong to, and the scope both heights are kept per. */
+const PROJECT = "alpha";
 
 /** The height of the terminal area the pane is rendered into. */
 const AREA = 600;
@@ -125,19 +132,62 @@ function installMatchMedia(mobile: boolean): void {
   });
 }
 
+function session(id: string, project: string): SessionMeta {
+  return {
+    id,
+    name: id,
+    project,
+    cwd: `/srv/git/${project}`,
+    pid: 4242,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
 /**
- * The pane inside a terminal area of {@link AREA} pixels — the positioned box
+ * Puts a session list in the tab's store, the way a load does.
+ *
+ * The pane's height is remembered per PROJECT, and a cell is handed a
+ * `sessionId` and nothing else — so the tab's session list is where the
+ * project comes from, exactly as it is for the launcher row's
+ * `pavilio-session-start` argument. `refreshSessions` is the store's own
+ * fetch-and-publish, so this is the real path the project reaches the pane by
+ * rather than a hand-set module field; `test-setup.ts` clears the store
+ * between tests.
+ */
+async function seedSessions(sessions: SessionMeta[]): Promise<void> {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(sessions),
+        }) as unknown as Promise<Response>,
+    ),
+  );
+  await refreshSessions();
+}
+
+/**
+ * The pane inside a terminal area of `areaHeight` pixels — the positioned box
  * `TerminalView` wraps the xterm container in, which is the pane's
  * `offsetParent` and its ceiling.
+ *
+ * `areaHeight` is a parameter rather than a constant because ZERO is a real
+ * answer, not a missing one: it is what every box measures in jsdom, what a
+ * detached element measures in a browser, and what any pane measures on the
+ * frame before layout has run. The component has to tell that apart from an
+ * area of no height, so a test has to be able to hand it either.
  */
-function renderPane(): HTMLElement {
+function renderPaneFor(sessionId = SESSION, areaHeight = AREA): HTMLElement {
   const area = document.createElement("div");
-  Object.defineProperty(area, "clientHeight", { value: AREA, configurable: true });
+  Object.defineProperty(area, "clientHeight", { value: areaHeight, configurable: true });
   document.body.appendChild(area);
   render(
     <MemoryRouter>
       <AnswerPane
-        sessionId={SESSION}
+        sessionId={sessionId}
         speech={makeSpeech()}
         onClose={() => {}}
         send={() => {}}
@@ -150,24 +200,45 @@ function renderPane(): HTMLElement {
   return area;
 }
 
-const pane = (): HTMLElement => screen.getByTestId(`answer-pane-${SESSION}`);
+function renderPane(): HTMLElement {
+  return renderPaneFor();
+}
 
-const handle = (): HTMLElement | null =>
-  screen.queryByTestId(`pane-resize-answer-pane-${SESSION}`);
+const paneFor = (sessionId: string): HTMLElement =>
+  screen.getByTestId(`answer-pane-${sessionId}`);
 
-beforeEach(() => {
+const pane = (): HTMLElement => paneFor(SESSION);
+
+const handleFor = (sessionId: string): HTMLElement | null =>
+  screen.queryByTestId(`pane-resize-answer-pane-${sessionId}`);
+
+const handle = (): HTMLElement | null => handleFor(SESSION);
+
+/** The composer row of a given cell's pane — the other height that is shared. */
+const composerRowFor = (sessionId: string): HTMLElement =>
+  screen
+    .getByTestId(`answer-pane-composer-${sessionId}`)
+    .closest(".answer-pane-composer") as HTMLElement;
+
+beforeEach(async () => {
   // jsdom implements none of these
   Element.prototype.setPointerCapture = vi.fn();
   Element.prototype.releasePointerCapture = vi.fn();
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
     StubResizeObserver;
   installMatchMedia(false);
+  // Both cells belong to one project, because that is the scope both heights
+  // are now kept per: without a list the pane cannot name its project.
+  await seedSessions([session(SESSION, PROJECT), session(SIBLING, PROJECT)]);
 });
 
 afterEach(() => {
   // The area is this file's own container, so testing-library does not take it
   // away — and a pane left in the document is one the next test would find.
   document.body.innerHTML = "";
+  // `seedSessions` stubs `fetch`, and a stub left behind would answer the next
+  // file's session load.
+  vi.unstubAllGlobals();
 });
 
 describe("the answer pane's bottom edge", () => {
@@ -204,7 +275,10 @@ describe("the answer pane's bottom edge", () => {
     fireEvent.pointerMove(rail, { pointerId: 1, clientY: 460.4 });
     fireEvent.pointerUp(rail, { pointerId: 1, clientY: 460.4 });
 
-    const stored = readPreference(preferences.answerPaneHeight);
+    // Read back under the CELL'S PROJECT, which is the scope the drag wrote
+    // it under: the height belongs to the project the cell is in, not to the
+    // browser.
+    const stored = readPreference(preferences.answerPaneHeight, PROJECT);
     expect(stored).toBe(560);
     expect(Number.isInteger(stored)).toBe(true);
   });
@@ -213,7 +287,7 @@ describe("the answer pane's bottom edge", () => {
     installMatchMedia(true);
     // Stored, so that the absence below is the viewport's doing and not an
     // empty preference's.
-    writePreference(preferences.answerPaneHeight, 240);
+    writePreference(preferences.answerPaneHeight, 240, PROJECT);
     renderPane();
 
     // No rail: an 8px pointer target on a phone sits under the thumb that is
@@ -222,5 +296,85 @@ describe("the answer pane's bottom edge", () => {
     // And no stored height either — the pane is laid out by the viewport
     // there, exactly as the composer's row is.
     expect(pane().style.height).toBe("");
+  });
+
+  /**
+   * The zero-measurement guard, pinned.
+   *
+   * `clientHeight` is 0 for every box in jsdom, for a detached element in a
+   * real browser, and for any element on the frame before layout has run. The
+   * component reads that as "not measured yet" and applies NO height, leaving
+   * the stylesheet's four insets to say "cover the terminal area".
+   *
+   * Without the guard the measurement would be 0, the bounds would clamp to
+   * `Math.max(120, 0)` and every pane would open at its 120px floor with the
+   * terminal exposed below it — the behaviour change #115 rejected — on the
+   * first frame of every real mount. Nothing else in this suite sees it: the
+   * other tests all declare a measured area, so they never reach the branch.
+   */
+  it("applies no height while the terminal area measures zero", () => {
+    renderPaneFor(SESSION, 0);
+
+    // Not "120px", and not "0px": no height at all, which is the only thing
+    // that leaves `.answer-pane`'s bottom inset in force.
+    expect(pane().style.height).toBe("");
+    expect(pane().style.bottom).toBe("");
+    // The handle is still there — the pane is resizable, it simply has no
+    // ceiling to be resized against yet — and it reports the full default
+    // rather than the floor.
+    expect(handle()).not.toBeNull();
+    expect(handle()).toHaveAttribute("aria-valuenow", "4000");
+  });
+
+  it("shares a height between two cells of the same project", () => {
+    // Accepted, and asserted so that it is a decision rather than a surprise:
+    // the scope is the PROJECT, so two cells of one project are two readers of
+    // one number. A per-cell height would have to be keyed by a session id,
+    // which names nothing after a restart.
+    renderPaneFor(SESSION);
+    renderPaneFor(SIBLING);
+
+    const rail = handleFor(SESSION)!;
+    fireEvent.pointerDown(rail, { pointerId: 1, clientY: 500 });
+    fireEvent.pointerMove(rail, { pointerId: 1, clientY: 420 });
+    fireEvent.pointerUp(rail, { pointerId: 1, clientY: 420 });
+
+    // The drag settled at 520 and the sibling followed it, because the write
+    // notifies every hook mounted on the key — one project, one height.
+    expect(pane().style.height).toBe(`${AREA - 80}px`);
+    expect(paneFor(SIBLING).style.height).toBe(`${AREA - 80}px`);
+
+    // Both heights, not just the pane's: the composer's is the same scope and
+    // the same sharing.
+    // `act`, because this write is not a user gesture: it lands in the store,
+    // which notifies both composers' hooks — and a `setState` React did not
+    // schedule is not flushed before the next assertion reads the DOM.
+    act(() => writePreference(preferences.answerComposerHeight, 140, PROJECT));
+    expect(composerRowFor(SESSION)).toHaveStyle({ height: "140px" });
+    expect(composerRowFor(SIBLING)).toHaveStyle({ height: "140px" });
+  });
+
+  /**
+   * The row the handle lives in, read back out of the stylesheet that owns it.
+   *
+   * Both declarations are load-bearing and neither is visible to jsdom, which
+   * does no layout: `position: relative` is what the `PaneResizer` inside the
+   * row is `absolute bottom-0` against — without it the rail escapes to the
+   * nearest positioned ancestor, the pane itself, and lands on the pane's
+   * bottom edge over whatever row is actually there — and `flex: none` is what
+   * stops the 7px row claiming the column's slack from the body above it.
+   *
+   * Gutting this rule to nothing leaves every behavioural test in the terminal
+   * and shell suites green, which is exactly why the claim is made here.
+   */
+  it("gives the drag row its own position and none of the column's slack", () => {
+    const drag = cssRule(".answer-pane-drag").replace(/\/\*[\s\S]*?\*\//g, "");
+
+    expect(drag).toMatch(/(^|;)\s*position:\s*relative\s*(;|$)/);
+    expect(drag).toMatch(/(^|;)\s*flex:\s*none\s*(;|$)/);
+    // The row's own height, and the gesture it advertises — a 7px strip with
+    // no `ns-resize` cursor is a handle nobody can find.
+    expect(drag).toMatch(/(^|;)\s*height:\s*7px\s*(;|$)/);
+    expect(drag).toMatch(/(^|;)\s*cursor:\s*ns-resize\s*(;|$)/);
   });
 });

@@ -121,8 +121,12 @@ const FIXTURES: Record<string, Fixture> = {
   "speech.answerComposer.on": { value: false },
   // Non-portable, and the two entries on that tier naming no session: the
   // speech surface's measurements, each read against this window's viewport.
-  "speech.answerComposer.height": { value: 148 },
-  "speech.answerPane.height": { value: 412 },
+  // `project`-scoped as well, so each needs a scope argument. The two axes are
+  // independent — the scope says how many of these a browser keeps, the
+  // portability flag says whether any of them travels — and a height that is
+  // remembered per project must still never leave this machine.
+  "speech.answerComposer.height": { value: 148, scopeArg: "pavilio" },
+  "speech.answerPane.height": { value: 412, scopeArg: "pavilio" },
   "speech.armedCell": { value: "sess-0b2e55d1" },
 
   // ── Navigation memory (the session tier) ─────────────────────────────────

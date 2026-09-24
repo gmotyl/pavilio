@@ -46,6 +46,13 @@ const PORTABLE = [
  * surface's two measurements, kept per browser because each is read against
  * THIS window's viewport — the composer's against the pane it is spent from,
  * the pane's against the terminal area it covers.
+ *
+ * Both are `project`-scoped as well as machine-local, and the two axes are
+ * independent: the scope says how many of these a browser keeps, the
+ * portability flag says whether any of them travels. A cell's pane is as tall
+ * as the work in it wants — a repository read mostly through its answers
+ * deserves a taller pane than one driven from the terminal — so the height is
+ * remembered per project, and still never leaves this machine.
  */
 const MACHINE_LOCAL = [
   "nav.lastFile",
@@ -107,12 +114,14 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["shell.rightSidebar.expanded", true, "global"],
   ["shell.rightSidebar.section.expanded", true, "project"],
   ["shell.rightSidebar.width", 264, "global"],
-  ["speech.answerComposer.height", 62, "global"],
+  // Per project, both of them: how much of a cell you hand to the answer is a
+  // fact about the work, not a habit the whole panel shares.
+  ["speech.answerComposer.height", 62, "project"],
   ["speech.answerComposer.on", true, "global"],
   ["speech.answerPane.autoOpen", true, "global"],
   // Not a height so much as the word "full": taller than any terminal area, so
   // the pane clamps to the area it is in and an unresized one covers it.
-  ["speech.answerPane.height", 4000, "global"],
+  ["speech.answerPane.height", 4000, "project"],
   ["speech.armedCell", null, "global"],
   ["speech.voice", "en-US-AndrewMultilingualNeural", "global"],
   ["terminal.drawer.open", false, "global"],
@@ -269,6 +278,10 @@ describe("the declaration table", () => {
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
 
+/** Two projects, so that "per project" is a claim about telling them apart. */
+const ALPHA = "alpha";
+const BETA = "beta";
+
 describe("the launcher list and the answer composer", () => {
   beforeEach(() => {
     globals.__PAVILIO_PREFS__ = { version: 1 };
@@ -323,10 +336,89 @@ describe("the launcher list and the answer composer", () => {
     // survive closing the browser.
     expect(def.browserStore).toBeUndefined();
 
-    writePreference(preferences.answerComposerHeight, 120);
+    writePreference(preferences.answerComposerHeight, 120, ALPHA);
 
     // On this machine, and nowhere else — the workspace file is untouched.
-    expect(localStorage.getItem("speech.answerComposer.height")).toBe("120");
+    // The stored key carries the project it was measured in, because the
+    // declaration is `project`-scoped.
+    expect(localStorage.getItem(`speech.answerComposer.height@${ALPHA}`)).toBe("120");
     expect(globals.__PAVILIO_PREFS__).toEqual({ version: 1 });
+  });
+});
+
+/**
+ * The speech surface's two heights, read and written the way the panes do.
+ *
+ * Asserted through the store rather than off the declaration table above: that
+ * the scope reads `"project"` is a fact about the table, while "a height
+ * measured in one project leaves the other one's alone" is a fact about what a
+ * reader gets, and only a write followed by two reads proves it.
+ */
+describe("the answer surface's heights are kept per project", () => {
+  beforeEach(() => {
+    globals.__PAVILIO_PREFS__ = { version: 1 };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 200 })),
+    );
+  });
+
+  afterEach(() => {
+    delete globals.__PAVILIO_PREFS__;
+    localStorage.clear();
+    sessionStorage.clear();
+    __resetPreferenceStoreForTests();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps a composer height per project", () => {
+    writePreference(preferences.answerComposerHeight, 148, ALPHA);
+
+    expect(readPreference(preferences.answerComposerHeight, ALPHA)).toBe(148);
+    // The other project never asked for a taller box, and does not get one.
+    expect(readPreference(preferences.answerComposerHeight, BETA)).toBe(62);
+    // The project is in the KEY, which is the mechanism that keeps them apart
+    // — asserted so that a scope quietly reverted to `global` fails here with
+    // the reason rather than only as a puzzling shared height.
+    expect(localStorage.getItem(`speech.answerComposer.height@${ALPHA}`)).toBe("148");
+    expect(localStorage.getItem("speech.answerComposer.height")).toBeNull();
+  });
+
+  it("keeps an answer pane height per project", () => {
+    writePreference(preferences.answerPaneHeight, 412, ALPHA);
+
+    expect(readPreference(preferences.answerPaneHeight, ALPHA)).toBe(412);
+    // 4000 is the declared "full", written out rather than read back off the
+    // declaration: comparing the registry against itself would assert nothing.
+    expect(readPreference(preferences.answerPaneHeight, BETA)).toBe(4000);
+    expect(localStorage.getItem(`speech.answerPane.height@${ALPHA}`)).toBe("412");
+    expect(localStorage.getItem("speech.answerPane.height")).toBeNull();
+  });
+
+  it("writes neither height to the portable document", () => {
+    writePreference(preferences.answerComposerHeight, 148, ALPHA);
+    writePreference(preferences.answerPaneHeight, 412, ALPHA);
+
+    // Becoming `project`-scoped is a change to how many of these a browser
+    // keeps, never to whether one of them travels. A height measured against
+    // this window is a lie on a machine with a different one, so the workspace
+    // file stays exactly as it booted.
+    expect(globals.__PAVILIO_PREFS__).toEqual({ version: 1 });
+    expect(keyOf("speech.answerComposer.height").portable).toBe(false);
+    expect(keyOf("speech.answerPane.height").portable).toBe(false);
+  });
+
+  it("falls back to the declared default for a project with nothing stored", () => {
+    // A project the user has never dragged either handle in reads the
+    // declared defaults — 62, the two-line box, and the word "full" — rather
+    // than inheriting whatever the last project was left at.
+    expect(readPreference(preferences.answerComposerHeight, BETA)).toBe(62);
+    expect(readPreference(preferences.answerPaneHeight, BETA)).toBe(4000);
+
+    writePreference(preferences.answerComposerHeight, 148, ALPHA);
+    writePreference(preferences.answerPaneHeight, 412, ALPHA);
+
+    expect(readPreference(preferences.answerComposerHeight, BETA)).toBe(62);
+    expect(readPreference(preferences.answerPaneHeight, BETA)).toBe(4000);
   });
 });

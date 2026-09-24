@@ -15,6 +15,7 @@ import { usePreference } from "../../preferences/usePreference";
 import { AnswerComposer } from "./AnswerComposer";
 import { AnswerWaiting, AnswerWaitingNext } from "./AnswerWaiting";
 import { beginWaiting, releaseAnswer, useAnswerHeld, useAnswerWaiting } from "./answerWaiting";
+import { projectOfSession } from "./sessionProject";
 import { useActivityState } from "./useTerminalActivityChannel";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
@@ -200,13 +201,26 @@ const PANE_HEIGHT_STEP = 24;
  * the drag and what the drag persists.
  *
  * The stored default is `ANSWER_PANE_FULL_HEIGHT`, which is not a height so
- * much as the word "full": it exceeds any area, so it clamps to exactly the
- * area and an unresized pane covers the terminal — the behaviour #115 settled.
- * And until the area HAS been measured, no height is applied at all: the
- * stylesheet's four insets already say "cover the terminal area", which is the
- * right answer for the frame before the layout effect runs and the only
- * possible answer where there is no layout to read (jsdom). Applying a height
- * means giving up the bottom inset, so the two are written together.
+ * much as the word "full": it exceeds any area the panel is opened in today,
+ * so it clamps to exactly the area and an unresized pane covers the terminal —
+ * the behaviour #115 settled. And until the area HAS been measured, no height
+ * is applied at all: the stylesheet's four insets already say "cover the
+ * terminal area", which is the right answer for the frame before the layout
+ * effect runs and the only possible answer where there is no layout to read
+ * (jsdom). Applying a height means giving up the bottom inset, so the two are
+ * written together.
+ *
+ * ## Why the height is remembered per project
+ *
+ * How much of a cell you are willing to hand to the answer is a fact about the
+ * work, not a habit the whole panel shares: a repository read mostly through
+ * its answers earns a taller pane than one driven from the terminal. So the
+ * declaration is `project`-scoped, and the scope argument is looked up from the
+ * tab's session list rather than threaded down — see `projectOfSession`, and
+ * `LauncherPills`, which reached the same conclusion first. Two cells of one
+ * project therefore share the number; that is accepted, because the
+ * alternative scope is a session id, which names nothing once the agent has
+ * been restarted.
  *
  * ## Why the pane scrolls once per unit, and never on a tick
  *
@@ -265,7 +279,14 @@ export function AnswerPane({
     height: paneHeight,
     isMobile: narrowViewport,
     handleProps: dragProps,
-  } = useResizableRow(preferences.answerPaneHeight, bounds);
+  } = useResizableRow(
+    preferences.answerPaneHeight,
+    bounds,
+    // The scope the height is remembered under — see the note on the
+    // component. The pane is handed a `sessionId` and nothing else, so the
+    // project comes from the tab's session list rather than from a prop.
+    projectOfSession(sessionId),
+  );
 
   const queue = speech.queueFor(sessionId);
   const answer = utteranceUnderCursor(queue);

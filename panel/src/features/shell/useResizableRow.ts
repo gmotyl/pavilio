@@ -75,9 +75,18 @@ interface Drag {
 export function useResizableRow(
   def: PreferenceDef<number>,
   bounds: RowBounds,
+  /**
+   * The scope the height is remembered under — a project name for a
+   * `project`-scoped declaration, and nothing at all for a `global` one.
+   * Handed straight to `usePreference`, exactly as `useResizablePane` does on
+   * the width axis: which scope a row's height belongs to is a fact about the
+   * declaration, and the caller is what knows the argument that declaration
+   * needs.
+   */
+  scopeArg?: string,
 ): ResizableRow {
   const { min, max, step } = bounds;
-  const [stored, setStored] = usePreference(def);
+  const [stored, setStored] = usePreference(def, scopeArg);
   /**
    * The height the pointer is currently proposing, or null when no drag is in
    * flight. The row follows the pointer from here so that the preference is
