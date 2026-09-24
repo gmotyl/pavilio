@@ -18,6 +18,7 @@
  * Letting the grid reach into this context itself would delete that signal.
  */
 import { createContext, useContext, type ReactNode } from "react";
+import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
 import { useMediaSessionTransport } from "./useMediaSessionTransport";
 import { useSpeechHost } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
@@ -37,12 +38,22 @@ export function SpeechHostProvider({ children }: Props) {
   // machine per DOCUMENT, so a transport mounted per surface would have the two
   // surfaces overwriting each other's action handlers and each clearing them on
   // the other's unmount. One host, one audio element, one transport.
-  useMediaSessionTransport(speech);
+  //
+  // The second argument is what the panel does when a person — as opposed to
+  // autoplay — works the transport: it clears that cell's attention LED. The
+  // hooks are handed it rather than importing it, because the rule reads the
+  // terminal's activity channel and writes to the terminal's socket, and
+  // `features/speech` does not depend on `features/terminal` in either
+  // direction that would survive (`terminalInstances.ts` already imports
+  // `speechTransportKeyFor` from `./useSpeechKeys`). This provider is the one
+  // place that legitimately sees both features at once, so it is where the two
+  // are joined. See `features/terminal/attentionArrival`.
+  useMediaSessionTransport(speech, dismissAttentionOnArrival);
 
   // And here for the same reason again: one `window` keydown listener, not one
   // per surface, or a single Ctrl+Shift+Space would toggle the transport twice
   // — pause, then resume — and read as a key that does nothing at all.
-  useSpeechKeys(speech);
+  useSpeechKeys(speech, dismissAttentionOnArrival);
 
   return (
     <SpeechHostContext.Provider value={speech}>{children}</SpeechHostContext.Provider>

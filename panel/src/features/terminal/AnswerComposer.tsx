@@ -7,8 +7,7 @@ import { clearDraft, getDraft, setDraft } from "./composerDrafts";
 import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
 import { submitToPty, type SubmitFailure } from "./ptySubmit";
 import { projectOfSession } from "./sessionProject";
-import { sendDismiss } from "./terminalInstances";
-import { getActivityState } from "./useTerminalActivityChannel";
+import { dismissAttentionOnArrival } from "./attentionArrival";
 
 /**
  * How far the composer may be dragged, and how far one arrow key moves it.
@@ -19,30 +18,6 @@ import { getActivityState } from "./useTerminalActivityChannel";
  * than the text above it has stopped being a reply to it.
  */
 const BOUNDS: RowBounds = { min: 40, max: 320, step: 12 };
-
-/**
- * The user has arrived at this cell: clear its attention LED if one is lit.
- *
- * The caret landing in this field is the plainest arrival there is — the user
- * is not merely looking at the answer, they are typing a reply to it — and the
- * green "done" LED is a *check me* notification that is over once they have.
- * `TerminalsSurface.handleFocus` has said exactly this about a focused
- * terminal since the LED existed; this is the same sentence about the reply box.
- *
- * Only `attention` is dismissed. `busy` is the AGENT's state rather than a
- * message to the user, and clearing it because somebody started typing would
- * claim the agent had stopped working. `idle` has nothing to clear, so a frame
- * per focus would be traffic that changes nothing — and the field is focused
- * and re-focused constantly while a reply is written.
- *
- * Read imperatively rather than subscribed to: the answer is only needed inside
- * the focus handler, and the composer has no reason to re-render when a session
- * elsewhere goes busy. Twin of the same guard in `SpeechControlBar`.
- */
-function dismissAttentionOnArrival(sessionId: string): void {
-  if (getActivityState(sessionId) !== "attention") return;
-  sendDismiss(sessionId);
-}
 
 /**
  * What the pane says when the socket refused one half of a submit.
@@ -410,10 +385,17 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               setFailure(null);
             }}
             onKeyDown={onKeyDown}
-            // Arriving at the cell, in the most explicit form the panel has.
+            // Arriving at the cell, in the plainest form the panel has: the
+            // user is not merely looking at the answer, they are typing a reply
+            // to it. The rule itself — why only `attention` is cleared, and why
+            // the state is read imperatively rather than subscribed to — is
+            // `attentionArrival`, shared with every transport control.
+            //
             // `onFocus` rather than the first keystroke: the reply is being
             // written from the moment the caret is here, and a notice the user
-            // is demonstrably answering has already served its purpose.
+            // is demonstrably answering has already served its purpose. Focus
+            // repeats freely while a reply is written, which is the case that
+            // rule's `attention`-only guard exists for.
             onFocus={() => dismissAttentionOnArrival(sessionId)}
             onPaste={onPaste}
           />

@@ -74,6 +74,15 @@ vi.mock("../terminalInstances", () => {
       };
     },
     releaseTerminal: () => {},
+    // The attention LED's dismiss. Present even where no test here lights
+    // one: the arrival rule short-circuits on a session that is not on
+    // `attention`, so a factory without this export passes for exactly as long
+    // as nobody writes a test that does — and then fails as an UNHANDLED error
+    // beside a green result, which is the worst shape a failure can take. See
+    // `attentionDismiss.test.tsx`, which is where the rule is actually
+    // asserted, and `autoplay.integration.test.tsx`, which has always carried
+    // it.
+    sendDismiss: () => {},
     // `bufferSnapshot` reads the palette off this at module load.
     THEME: new Proxy({}, { get: () => "#000000" }),
     // The real one fits; keeping that faithful is the point of the mock.

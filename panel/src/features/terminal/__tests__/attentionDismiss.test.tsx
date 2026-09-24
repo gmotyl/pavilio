@@ -3,10 +3,34 @@
  *
  * Focusing a terminal already says the user is here — `TerminalsSurface`'s
  * `handleFocus` calls `sendDismiss`, which puts `{ type: "dismiss-attention" }`
- * on that session's socket. Two other gestures mean the same thing just as
- * plainly: pressing the speech transport's play control, and putting the caret
- * in the answer composer. Both are asserted here, against the two components
- * that own them.
+ * on that session's socket. Working the transport, or putting the caret in the
+ * answer composer, means the same thing just as plainly, and the panel offers
+ * four doors onto the transport. All of them go through one rule —
+ * `attentionArrival.dismissAttentionOnArrival` — and each is asserted here
+ * against the thing that actually owns the gesture:
+ *
+ * - the speech bar's play/pause button, driven as a click on the real bar;
+ * - `Ctrl+Shift+Space`, driven through `features/speech/useSpeechKeys`;
+ * - the OS media session's `play` and `pause`, driven through
+ *   `features/speech/useMediaSessionTransport`;
+ * - the cell header's own speak button, which is wired in
+ *   `TerminalLayoutGrid` and therefore asserted in `TerminalLayoutGrid.test.tsx`,
+ *   where that grid already has a harness. It is the one door whose test lives
+ *   somewhere else, and it is named here so the set can still be counted from
+ *   one place.
+ *
+ * The two hooks are driven with the REAL helper rather than a spy callback, so
+ * what these tests pin is the whole path down to the frame. That the panel
+ * actually hands the hooks that helper is a separate question, and the answer
+ * is structural: both take the arrival as a required parameter, so a
+ * `SpeechHostProvider` that stopped passing it does not compile.
+ *
+ * ## The no-socket case
+ *
+ * Every door funnels into `sendDismiss`, which writes only on an OPEN socket
+ * and is a silent no-op for a session with no instance at all — pinned by
+ * `terminalInstances.test.ts`. jsdom has no socket under any of the tests
+ * below, and none of them throws, which is the rest of that criterion.
  *
  * ## Why the mock answers the dismiss with an `idle` event
  *
@@ -24,14 +48,18 @@
  * resulting state: "sends no dismiss" is the claim, and a session that was
  * already `idle` would read `idle` afterwards whether or not a frame went out.
  */
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
+import type { MediaSessionTransportTarget } from "../../speech/useMediaSessionTransport";
+import { useMediaSessionTransport } from "../../speech/useMediaSessionTransport";
+import { useSpeechKeys } from "../../speech/useSpeechKeys";
 import { AnswerComposer } from "../AnswerComposer";
 import { SpeechControlBar } from "../SpeechControlBar";
+import { dismissAttentionOnArrival } from "../attentionArrival";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
 import {
   _applyEventForTests,
@@ -136,21 +164,51 @@ const autoplay = (sessionId: string): HTMLElement =>
 const field = (sessionId: string): HTMLElement =>
   screen.getByTestId(`answer-pane-composer-${sessionId}`);
 
-describe("attention clears when the user actually arrives", () => {
-  beforeEach(() => {
-    _resetForTests();
-    __resetAnswerWaitingForTests();
-    installMatchMedia(false);
-    sendDismiss.mockReset();
-    // The server's half of the round trip — see the note on this file.
-    sendDismiss.mockImplementation((sessionId: string) => {
-      setActivity(sessionId, "idle");
-    });
+/**
+ * The activity channel, the waiting store and the dismiss spy, back to nothing.
+ *
+ * Shared by all three describes below rather than written out again in each:
+ * the last two drive the same rule through hooks instead of components, and a
+ * harness that drifted between them would let one door be reset differently
+ * from the rest.
+ */
+function resetArrivalHarness(): void {
+  _resetForTests();
+  __resetAnswerWaitingForTests();
+  installMatchMedia(false);
+  sendDismiss.mockReset();
+  // The server's half of the round trip — see the note on this file.
+  sendDismiss.mockImplementation((sessionId: string) => {
+    setActivity(sessionId, "idle");
   });
+}
+
+describe("attention clears when the user actually arrives", () => {
+  beforeEach(resetArrivalHarness);
 
   it("dismisses attention when the transport is played", () => {
     setActivity("cell-a", "attention");
     renderBar("cell-a");
+
+    fireEvent.click(play("cell-a"));
+
+    expect(sendDismiss).toHaveBeenCalledWith("cell-a");
+    expect(getActivityState("cell-a")).toBe("idle");
+  });
+
+  /**
+   * The same one control, pressed while the voice is reading.
+   *
+   * The rule is keyed on the gesture rather than on the direction the transport
+   * moves — see `attentionArrival`. Nobody pauses an answer they are not
+   * listening to, and this button IS the play button: which of the two a press
+   * means is decided by where the run happens to be, so a dismiss that fired
+   * only on the play half would fire or not fire for a reason the user never
+   * expressed.
+   */
+  it("dismisses attention when the transport is paused", () => {
+    setActivity("cell-a", "attention");
+    renderBar("cell-a", "speaking");
 
     fireEvent.click(play("cell-a"));
 
@@ -233,5 +291,245 @@ describe("attention clears when the user actually arrives", () => {
 
     expect(sendDismiss).not.toHaveBeenCalled();
     expect(getActivityState("cell-a")).toBe("attention");
+  });
+});
+
+/**
+ * The two doors that are not components.
+ *
+ * `useSpeechKeys` and `useMediaSessionTransport` both act on a RESOLVED target
+ * — the run that is playing, else the one being held, else the armed cell —
+ * and neither reads focus. So the arrival cannot hang off a component the way
+ * the bar's and the composer's do: it has to be raised for the session the
+ * hook just resolved, inside the same branch that starts or holds the audio.
+ * These tests drive the hooks with the real rule and assert the frame.
+ *
+ * Autoplay needs no case of its own here, and that is the point: an autoplayed
+ * answer never enters either hook. It is a change of state inside the host, so
+ * neither a key press nor an OS action handler ever runs, and there is no
+ * branch for a dismiss to escape from.
+ */
+interface FakeMediaSession {
+  playbackState: MediaSessionPlaybackState;
+  setActionHandler: (action: MediaSessionAction, handler: (() => void) | null) => void;
+}
+
+let mediaHandlers = new Map<string, (() => void) | null>();
+
+/** jsdom implements no Media Session API, so the OS side is stood up by hand. */
+function installMediaSession(): void {
+  mediaHandlers = new Map();
+  const session: FakeMediaSession = {
+    playbackState: "none",
+    setActionHandler(action, handler) {
+      mediaHandlers.set(action, handler);
+    },
+  };
+  Object.defineProperty(navigator, "mediaSession", { configurable: true, value: session });
+}
+
+function removeMediaSession(): void {
+  Object.defineProperty(navigator, "mediaSession", { configurable: true, value: undefined });
+}
+
+/** What the OS does when a media key, a lock screen or a shade button is used. */
+function fireMediaAction(action: MediaSessionAction): void {
+  const handler = mediaHandlers.get(action);
+  if (!handler) throw new Error(`no handler is bound for the "${action}" action`);
+  handler();
+}
+
+/** The panel's one playback, as the two hooks are allowed to see it. */
+function transportTarget(
+  run: {
+    speakingSessionId?: string | null;
+    pausedSessionId?: string | null;
+    armedSessionId?: string | null;
+  } = {},
+): MediaSessionTransportTarget {
+  return {
+    speakingSessionId: run.speakingSessionId ?? null,
+    pausedSessionId: run.pausedSessionId ?? null,
+    armedSessionId: run.armedSessionId ?? null,
+    onSpeak: vi.fn(),
+    onPause: vi.fn(),
+    onResume: vi.fn(),
+    onNext: vi.fn(),
+    onPrevious: vi.fn(),
+    onSeekBackward: vi.fn(),
+  };
+}
+
+/** `Ctrl+Shift+Space`, at the body — nothing focused, as the panel is left. */
+function pressToggleChord(): void {
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      code: "Space",
+      key: " ",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
+describe("attention clears from the keyboard transport", () => {
+  beforeEach(resetArrivalHarness);
+
+  it("dismisses the armed cell that Ctrl+Shift+Space starts", () => {
+    setActivity("cell-b", "attention");
+    renderHook(() => useSpeechKeys(transportTarget({ armedSessionId: "cell-b" }), dismissAttentionOnArrival));
+
+    pressToggleChord();
+
+    expect(sendDismiss).toHaveBeenCalledWith("cell-b");
+    expect(getActivityState("cell-b")).toBe("idle");
+  });
+
+  it("dismisses the held run that Ctrl+Shift+Space resumes", () => {
+    setActivity("cell-a", "attention");
+    renderHook(() =>
+      useSpeechKeys(
+        transportTarget({ speakingSessionId: "cell-a", pausedSessionId: "cell-a" }),
+        dismissAttentionOnArrival,
+      ),
+    );
+
+    pressToggleChord();
+
+    expect(sendDismiss).toHaveBeenCalledWith("cell-a");
+  });
+
+  // The chord is one key with two meanings, exactly like the bar's button, so
+  // it dismisses whichever meaning the run gives it.
+  it("dismisses the live run that Ctrl+Shift+Space holds", () => {
+    setActivity("cell-a", "attention");
+    renderHook(() =>
+      useSpeechKeys(transportTarget({ speakingSessionId: "cell-a" }), dismissAttentionOnArrival),
+    );
+
+    pressToggleChord();
+
+    expect(sendDismiss).toHaveBeenCalledWith("cell-a");
+  });
+
+  it("leaves a busy cell and an idle cell alone", () => {
+    setActivity("cell-busy", "busy");
+    setActivity("cell-idle", "idle");
+    const { unmount } = renderHook(() =>
+      useSpeechKeys(transportTarget({ armedSessionId: "cell-busy" }), dismissAttentionOnArrival),
+    );
+    pressToggleChord();
+    unmount();
+
+    renderHook(() =>
+      useSpeechKeys(transportTarget({ armedSessionId: "cell-idle" }), dismissAttentionOnArrival),
+    );
+    pressToggleChord();
+
+    expect(sendDismiss).not.toHaveBeenCalled();
+    expect(getActivityState("cell-busy")).toBe("busy");
+  });
+
+  // Nothing playing, nothing held, nothing armed: the chord resolves to no
+  // session, so there is nobody to have arrived and nothing to throw about.
+  it("does nothing when the chord resolves to no cell", () => {
+    expect(() => {
+      renderHook(() => useSpeechKeys(transportTarget(), dismissAttentionOnArrival));
+      pressToggleChord();
+    }).not.toThrow();
+
+    expect(sendDismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe("attention clears from the OS media session", () => {
+  beforeEach(() => {
+    resetArrivalHarness();
+    installMediaSession();
+  });
+
+  afterEach(removeMediaSession);
+
+  it("dismisses the armed cell that `play` starts", () => {
+    setActivity("cell-b", "attention");
+    renderHook(() =>
+      useMediaSessionTransport(
+        transportTarget({ armedSessionId: "cell-b" }),
+        dismissAttentionOnArrival,
+      ),
+    );
+
+    fireMediaAction("play");
+
+    expect(sendDismiss).toHaveBeenCalledWith("cell-b");
+    expect(getActivityState("cell-b")).toBe("idle");
+  });
+
+  it("dismisses the held run that `play` resumes", () => {
+    setActivity("cell-a", "attention");
+    renderHook(() =>
+      useMediaSessionTransport(
+        transportTarget({ speakingSessionId: "cell-a", pausedSessionId: "cell-a" }),
+        dismissAttentionOnArrival,
+      ),
+    );
+
+    fireMediaAction("play");
+
+    expect(sendDismiss).toHaveBeenCalledWith("cell-a");
+  });
+
+  /**
+   * The OS is the one surface where play and pause are two separate actions
+   * rather than one button. That is a platform detail, not a different
+   * intention, so `pause` arrives here too — otherwise the lock screen would
+   * be the only transport in the panel where holding an answer left the LED
+   * burning.
+   */
+  it("dismisses the live run that `pause` holds", () => {
+    setActivity("cell-a", "attention");
+    renderHook(() =>
+      useMediaSessionTransport(
+        transportTarget({ speakingSessionId: "cell-a" }),
+        dismissAttentionOnArrival,
+      ),
+    );
+
+    fireMediaAction("pause");
+
+    expect(sendDismiss).toHaveBeenCalledWith("cell-a");
+  });
+
+  it("leaves a busy cell and an idle cell alone", () => {
+    setActivity("cell-busy", "busy");
+    setActivity("cell-idle", "idle");
+    const { unmount } = renderHook(() =>
+      useMediaSessionTransport(
+        transportTarget({ armedSessionId: "cell-busy" }),
+        dismissAttentionOnArrival,
+      ),
+    );
+    fireMediaAction("play");
+    unmount();
+
+    renderHook(() =>
+      useMediaSessionTransport(
+        transportTarget({ armedSessionId: "cell-idle" }),
+        dismissAttentionOnArrival,
+      ),
+    );
+    fireMediaAction("play");
+
+    expect(sendDismiss).not.toHaveBeenCalled();
+    expect(getActivityState("cell-busy")).toBe("busy");
+  });
+
+  it("does nothing when `play` resolves to no cell", () => {
+    renderHook(() => useMediaSessionTransport(transportTarget(), dismissAttentionOnArrival));
+
+    expect(() => fireMediaAction("play")).not.toThrow();
+    expect(sendDismiss).not.toHaveBeenCalled();
   });
 });

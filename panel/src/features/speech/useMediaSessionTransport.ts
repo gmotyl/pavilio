@@ -58,6 +58,27 @@ export interface MediaSessionTransportTarget {
 }
 
 /**
+ * Told that a person — not autoplay, not the host — just worked the transport
+ * on a cell.
+ *
+ * Injected rather than imported, and that is deliberate. What the panel does
+ * with it today is clear that cell's attention LED
+ * (`features/terminal/attentionArrival`), which reads the terminal's activity
+ * channel and writes to the terminal's socket. `features/speech` knows nothing
+ * about either and must not start to: the arrow between the two features points
+ * terminal → speech throughout, and `terminalInstances.ts` imports
+ * {@link speechTransportKeyFor} from `./useSpeechKeys`, so a speech hook that
+ * reached back would close a real import cycle through the panel's heaviest
+ * module. `SpeechHostProvider` is the one place that already knows both sides,
+ * and it is where this comes from.
+ *
+ * Required rather than optional, on purpose: an arrival with a no-op default is
+ * a wiring bug that compiles, mounts and stays green — the same failure
+ * `GridSpeech` was made a required prop to remove.
+ */
+export type TransportArrival = (sessionId: string) => void;
+
+/**
  * How far one `seekbackward` goes.
  *
  * The Media Session spec lets the OS suggest its own `seekOffset` on the
@@ -107,11 +128,19 @@ function mediaSessionOrNull(): MediaSession | null {
  * Returns nothing: every effect it has is on `navigator.mediaSession` and on
  * the host it was handed.
  */
-export function useMediaSessionTransport(target: MediaSessionTransportTarget): void {
+export function useMediaSessionTransport(
+  target: MediaSessionTransportTarget,
+  onArrival: TransportArrival,
+): void {
   const targetRef = useRef(target);
+  // Through a ref for the same reason the target is: the handlers are bound
+  // once, so a handler that closed over the first `onArrival` would go on
+  // calling it after the panel had been handed a different one.
+  const arrivalRef = useRef(onArrival);
 
   useEffect(() => {
     targetRef.current = target;
+    arrivalRef.current = onArrival;
   });
 
   useEffect(() => {
@@ -137,25 +166,44 @@ export function useMediaSessionTransport(target: MediaSessionTransportTarget): v
       }
     };
 
+    // Somebody used a hardware key, a lock screen or the notification shade,
+    // which is a person operating this cell's transport — {@link TransportArrival}
+    // is raised for the session the action resolved to, never for a session the
+    // host started reading on its own. It is raised INSIDE each branch rather
+    // than once at the top because the resolution is what names the cell: at the
+    // top there is no session yet, only three candidates.
     bind("play", () => {
       const current = targetRef.current;
       // A held run continues from where it was suspended. Restarting it — which
       // is what `onSpeak` would do — is the one thing the user pressing play on
       // a paused answer cannot have meant.
       if (current.pausedSessionId) {
+        arrivalRef.current(current.pausedSessionId);
         current.onResume(current.pausedSessionId);
         return;
       }
       // Nothing is playing, so the OS is willing to send `play` at all. The
       // armed cell is the panel's standing answer to "what did you want to
       // hear?", and it is the same answer autoplay gives.
-      if (current.armedSessionId) current.onSpeak(current.armedSessionId);
+      if (current.armedSessionId) {
+        arrivalRef.current(current.armedSessionId);
+        current.onSpeak(current.armedSessionId);
+      }
     });
 
     bind("pause", () => {
       const current = targetRef.current;
       // The cell that is speaking, whichever one that is and whatever has focus.
-      if (current.speakingSessionId) current.onPause(current.speakingSessionId);
+      //
+      // An arrival too. This is the one surface where the platform splits the
+      // play/pause button into two actions; every other transport in the panel
+      // is a single control whose meaning depends on where the run is, and they
+      // all dismiss either way. Leaving it off here would make the lock screen
+      // the only place where holding an answer left the LED burning.
+      if (current.speakingSessionId) {
+        arrivalRef.current(current.speakingSessionId);
+        current.onPause(current.speakingSessionId);
+      }
     });
 
     bind("nexttrack", () => {
