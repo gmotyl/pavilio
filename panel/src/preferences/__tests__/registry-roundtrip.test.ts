@@ -52,6 +52,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "shell.leftSidebar.width": [240, 0, 180, 400, 344.5, -1],
   "shell.rightSidebar.width": [264, 0, 200, 440, 344.5, -1],
   "speech.answerComposer.height": [62, 0, 40, 320, 96.5, -1],
+  "speech.answerPane.height": [4000, 0, 120, 720, 344.5, -1],
 
   // ── str: the values that would round-trip WRONG through a JSON re-parse ──
   "git.branchDiff.base": ["", "main", "true", "240", "null", "{}", "[]", "release/1.0"],
@@ -93,7 +94,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 37;
+const DECLARATION_COUNT = 38;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

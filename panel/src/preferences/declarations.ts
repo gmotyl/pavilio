@@ -78,6 +78,18 @@ export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
 export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
 
 /**
+ * The answer pane's height when nothing has been dragged: taller than any
+ * terminal area a cell can have, on any display the panel is opened on.
+ *
+ * So it is not really a height — it is the word "full" written as a number,
+ * because the declaration table holds numbers. The pane clamps itself to the
+ * area it is absolutely positioned within, so this value resolves to exactly
+ * that area and the unresized pane covers the terminal. See the declaration
+ * for why a plausible-looking pixel default would be the wrong answer.
+ */
+export const ANSWER_PANE_FULL_HEIGHT = 4000;
+
+/**
  * Every row of design.md's portability table is now declared below.
  *
  * Two of them used to be listed here as deliberately absent — a declaration
@@ -440,6 +452,30 @@ export const preferences = {
     key: "speech.answerComposer.height", // was: nothing — the composer is new
     scope: "global",
     default: 62,
+    codec: num,
+    portable: false,
+  }),
+  /**
+   * The answer pane's own height — what the handle on its bottom edge drags.
+   *
+   * Non-portable for the reason the composer's height is, and more so: the
+   * pane covers a terminal, and how much of THIS window the user is willing to
+   * hand it is a fact about this screen. Carried to a machine with a different
+   * one it is not a habit reproduced, it is a pane sized for a window that is
+   * not there.
+   *
+   * The default is {@link ANSWER_PANE_FULL_HEIGHT} — "full", written as a
+   * number. An unresized pane is clamped to the terminal area it sits in and
+   * so covers it, which is what change #115 settled and what Greg asked for in
+   * as many words ("blend all the way to bottom, form on bottom no terminal
+   * visible"). A plausible-looking pixel default — 400, say — would instead
+   * open every pane short of the cell's bottom edge on a tall screen,
+   * uncovering a strip of live terminal that nobody asked to see.
+   */
+  answerPaneHeight: definePreference({
+    key: "speech.answerPane.height", // was: nothing — the handle is new
+    scope: "global",
+    default: ANSWER_PANE_FULL_HEIGHT,
     codec: num,
     portable: false,
   }),

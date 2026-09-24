@@ -55,6 +55,12 @@ function clamp(height: number, min: number, max: number): number {
  * `data-edge`. A rail on the row's top edge grows it UPWARD — and up the screen
  * is a falling clientY, hence -1. The edge is a property of the rail, not of
  * the hook's arguments, so the element carrying it is the honest place to ask.
+ *
+ * A rail on the row's BOTTOM edge needs no arm of its own: it grows the row
+ * downward, which is a rising clientY, which is what the default 1 already
+ * says. The answer pane hangs off such a rail and drags UP to shorten itself —
+ * a falling clientY times 1 is a falling height — so the branch this function
+ * does not have is the branch that would be wrong.
  */
 function growDirection(el: EventTarget | null): 1 | -1 {
   return (el as HTMLElement | null)?.dataset?.edge === "top" ? -1 : 1;

@@ -574,12 +574,18 @@ describe("AnswerComposer", () => {
       // the pane's footer when the auto-open switch was its only control, and
       // it stayed there when the composer arrived underneath it — which put
       // the reply box between the answer and its own switches.
+      //
+      // The pane's own drag row comes after all of them, because it IS the
+      // pane's bottom edge: dragging it up shortens the whole column and
+      // uncovers the terminal, where the grip two rows above it only moves the
+      // boundary between the answer and the reply.
       expect(regionOrder()).toEqual([
         "answer-pane-body",
         "answer-pane-meta",
         "answer-pane-grip",
         "answer-pane-composer",
         "answer-pane-hint",
+        "answer-pane-drag",
       ]);
     });
 
@@ -644,7 +650,10 @@ describe("AnswerComposer", () => {
       renderPane();
 
       // There is no Shift+Enter on a phone, so the hint has nothing to say;
-      // the send button carries the whole action instead.
+      // the send button carries the whole action instead. The pane's own drag
+      // row goes with them, for the reason the grip does: the pane is laid out
+      // by the viewport there, and a 7px rail is a thumb's width from the
+      // scroll it borders.
       expect(regionOrder()).toEqual([
         "answer-pane-body",
         "answer-pane-meta",

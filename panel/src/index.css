@@ -992,7 +992,15 @@ input[type="checkbox"] {
    and the superseded `max-height: 100%` was exactly the ceiling that allowed
    the short pane. The body takes the slack (see its `flex: 1 1 auto`), so the
    composer and the switch row sit on the bottom edge whatever the answer's
-   length. */
+   length.
+
+   All four insets are what an UNRESIZED pane is, and that stays the whole of
+   what this rule says. The handle on the pane's bottom edge gives the last of
+   them up at runtime — `height: <dragged>px; bottom: auto`, written as inline
+   style by `AnswerPane`, because that number is measured against the terminal
+   area and no stylesheet can know it. So nothing here declares a height or a
+   ceiling: `max-height` was the content-sized bug above, and a `height` would
+   be a second opinion about a number the drag already owns. */
 .answer-pane {
   position: absolute;
   top: 0;
@@ -1346,6 +1354,26 @@ input[type="checkbox"] {
   height: 2px;
   border-radius: 1px;
   background: var(--border-strong);
+}
+
+/* The PANE's drag handle — the last row of the column, dragged up to uncover
+   the terminal the pane covers. Its own 7px row rather than a rail floating on
+   the pane's bottom edge, for the reason the composer's grip is a row: an
+   absolutely positioned rail there would sit on the last 8px of whatever row
+   ended up beneath it — the key hint, or the field itself when the composer is
+   switched off. It wears the grip's own bar, because it is the same gesture in
+   the same place on a different box, and a second bar drawn differently would
+   read as a different control.
+
+   Positioned, because the `PaneResizer` inside it is `absolute bottom-0`. */
+.answer-pane-drag {
+  position: relative;
+  flex: none;
+  height: 7px;
+  display: grid;
+  place-items: center;
+  cursor: ns-resize;
+  background: #17171d;
 }
 
 /* What the three keys do, in the pane's dimmest ink. Desktop only — two of

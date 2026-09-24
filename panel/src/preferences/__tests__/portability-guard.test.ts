@@ -119,9 +119,10 @@ const FIXTURES: Record<string, Fixture> = {
   "speech.voice": { value: "en-GB-RyanNeural" },
   "speech.answerPane.autoOpen": { value: true },
   "speech.answerComposer.on": { value: false },
-  // Non-portable, and the only entry on that tier naming no session: a pane
-  // measurement read against this window's viewport.
+  // Non-portable, and the two entries on that tier naming no session: the
+  // speech surface's measurements, each read against this window's viewport.
   "speech.answerComposer.height": { value: 148 },
+  "speech.answerPane.height": { value: 412 },
   "speech.armedCell": { value: "sess-0b2e55d1" },
 
   // ── Navigation memory (the session tier) ─────────────────────────────────
@@ -217,9 +218,9 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(37);
+    expect(ALL_PREFERENCES.length).toBe(38);
     expect(portable.length).toBe(29);
-    expect(machineLocal.length).toBe(8);
+    expect(machineLocal.length).toBe(9);
     expect(sessionTier.length).toBe(3);
     // The portable arm of the union forbids `browserStore`; this says the
     // shipped table agrees with it, not merely that it type-checked.

@@ -41,16 +41,18 @@ const PORTABLE = [
 
 /**
  * Values that name something the other machine does not have — every one of
- * them a live session id, with a single exception: `speech.answerComposer.height`
- * names no session at all. It is a pane measurement, kept per browser because
- * it is read against THIS window's viewport, and it is the first measurement
- * declared on this tier.
+ * them a live session id, with two exceptions: `speech.answerComposer.height`
+ * and `speech.answerPane.height` name no session at all. They are the speech
+ * surface's two measurements, kept per browser because each is read against
+ * THIS window's viewport — the composer's against the pane it is spent from,
+ * the pane's against the terminal area it covers.
  */
 const MACHINE_LOCAL = [
   "nav.lastFile",
   "nav.lastPath",
   "nav.lastReposQuery",
   "speech.answerComposer.height",
+  "speech.answerPane.height",
   "speech.armedCell",
   "terminal.focus",
   "terminal.grid",
@@ -108,6 +110,9 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["speech.answerComposer.height", 62, "global"],
   ["speech.answerComposer.on", true, "global"],
   ["speech.answerPane.autoOpen", true, "global"],
+  // Not a height so much as the word "full": taller than any terminal area, so
+  // the pane clamps to the area it is in and an unresized one covers it.
+  ["speech.answerPane.height", 4000, "global"],
   ["speech.armedCell", null, "global"],
   ["speech.voice", "en-US-AndrewMultilingualNeural", "global"],
   ["terminal.drawer.open", false, "global"],
