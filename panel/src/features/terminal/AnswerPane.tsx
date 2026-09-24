@@ -1,12 +1,25 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
-import { preferences } from "../../preferences/declarations";
+import PaneResizer from "../shell/PaneResizer";
+import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
+import { ANSWER_PANE_FULL_HEIGHT, preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { AnswerComposer } from "./AnswerComposer";
-import { AnswerWaiting } from "./AnswerWaiting";
-import { beginWaiting, useAnswerWaiting } from "./answerWaiting";
+import { AnswerWaiting, AnswerWaitingNext } from "./AnswerWaiting";
+import { beginWaiting, releaseAnswer, useAnswerHeld, useAnswerWaiting } from "./answerWaiting";
+import { projectOfSession } from "./sessionProject";
+import { useActivityState } from "./useTerminalActivityChannel";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
+import { unreadAnswerCount } from "../speech/unreadAnswers";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
 import { getStoredVoice } from "../speech/voices";
 import { type UnitToBlocks, layoutRail, matchableBlocks } from "./layoutRail";
@@ -34,8 +47,11 @@ export interface AnswerPaneProps {
    * reads it off the live instance at call time — the same one the bar's
    * launcher pills send with, so a reply typed here and a pill clicked up there
    * reach the shell by one transport.
+   *
+   * It reports whether the frame reached an OPEN socket; the composer is what
+   * acts on that, by keeping a reply the socket refused.
    */
-  send: (data: string) => void;
+  send: (data: string) => boolean;
 }
 
 /**
@@ -63,6 +79,17 @@ function readCacheVersion(): number {
 
 /** The three attributes a matched block carries, and the one the spoken block adds. */
 const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as const;
+
+/**
+ * How short the pane may be dragged, and how far one arrow key moves it.
+ *
+ * The floor leaves the meta row and a line or two of the answer above it: a
+ * pane shorter than that has stopped being a pane and is merely in the way of
+ * the terminal it was dragged out of. There is no matching CEILING constant —
+ * see {@link AnswerPane} on why the ceiling is measured rather than declared.
+ */
+const MIN_PANE_HEIGHT = 120;
+const PANE_HEIGHT_STEP = 24;
 
 /**
  * The cell's answer pane: the utterance under the cursor rendered as markdown
@@ -165,6 +192,43 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * `answerWaiting.ts`; what the pane owes it is two things it alone knows — the
  * send, and the id under the cursor when it happened.
  *
+ * ## Why the pane's ceiling is measured and its default is not a height
+ *
+ * The pane has a handle on its BOTTOM edge, dragged up to uncover the terminal
+ * without closing the pane. That makes its height a number, and a number needs
+ * a ceiling — but the honest ceiling is the terminal area itself: a pane
+ * taller than the box it is absolute within hangs past the bottom of the cell,
+ * over the next one. So the area is measured (its `clientHeight`, re-read by a
+ * `ResizeObserver` because a cell is resized by the grid, by a seam drag and by
+ * the window) and handed to `useResizableRow` as `max`, where it clamps both
+ * the drag and what the drag persists.
+ *
+ * The stored default is `ANSWER_PANE_FULL_HEIGHT`, which is not a height so
+ * much as the word "full": it exceeds any area the panel is opened in today,
+ * so it clamps to exactly the area and an unresized pane covers the terminal —
+ * the behaviour #115 settled. And until the area HAS been measured, no height
+ * is applied at all: the stylesheet's four insets already say "cover the
+ * terminal area", which is the right answer for the frame before the layout
+ * effect runs and the only possible answer where there is no layout to read
+ * (jsdom). Applying a height means giving up the bottom inset, so the two are
+ * written together.
+ *
+ * ## Why the height is remembered per project
+ *
+ * How much of a cell you are willing to hand to the answer is a fact about the
+ * work, not a habit the whole panel shares: a repository read mostly through
+ * its answers earns a taller pane than one driven from the terminal. So the
+ * declaration is `project`-scoped, and the scope argument is looked up from the
+ * tab's session list rather than threaded down — see `projectOfSession`, and
+ * `LauncherPills`, which reached the same conclusion first. Two cells of one
+ * project therefore share the number; that is accepted, because the
+ * alternative scope is a session id, which names nothing once the agent has
+ * been restarted. And a pane whose project the list cannot name — a cell of the
+ * quick modal, or any cell at all before the store's first load lands — opens
+ * at the declared height and persists nothing until it can: see
+ * `projectOfSession`, which answers `null` there precisely so that nothing is
+ * written under a name no one will read back.
+ *
  * ## Why the pane scrolls once per unit, and never on a tick
  *
  * Following is a `useLayoutEffect` on the unit index alone. When the index
@@ -200,7 +264,39 @@ export function AnswerPane({
   // for the weight of a shared block; mirrored next to the block map.
   const unitsRef = useRef<readonly SpeechUnit[]>([]);
 
-  const answer = utteranceUnderCursor(speech.queueFor(sessionId));
+  /**
+   * The height of the terminal area the pane is absolute within, or null while
+   * it has not been read. See the note on the component: this is the pane's
+   * ceiling, and it is a measurement rather than a constant.
+   */
+  const [areaHeight, setAreaHeight] = useState<number | null>(null);
+  const bounds: RowBounds = useMemo(
+    () => ({
+      min: MIN_PANE_HEIGHT,
+      // The unmeasured case keeps the declared default reachable rather than
+      // collapsing it to the floor — nothing is applied while it holds, and a
+      // max of `MIN_PANE_HEIGHT` would make the handle report 120 for a pane
+      // that is covering the whole area.
+      max: Math.max(MIN_PANE_HEIGHT, areaHeight ?? ANSWER_PANE_FULL_HEIGHT),
+      step: PANE_HEIGHT_STEP,
+    }),
+    [areaHeight],
+  );
+  const {
+    height: paneHeight,
+    isMobile: narrowViewport,
+    handleProps: dragProps,
+  } = useResizableRow(
+    preferences.answerPaneHeight,
+    bounds,
+    // The scope the height is remembered under — see the note on the
+    // component. The pane is handed a `sessionId` and nothing else, so the
+    // project comes from the tab's session list rather than from a prop.
+    projectOfSession(sessionId),
+  );
+
+  const queue = speech.queueFor(sessionId);
+  const answer = utteranceUnderCursor(queue);
   const units = speech.unitsFor(sessionId);
 
   // Unit index ONLY — see the note on the component. Null for every cell but
@@ -222,6 +318,22 @@ export function AnswerPane({
   // `waiting` is the body's business: `pending` is the bar's, and is what keeps
   // the mark on the play button after a transport press took the text back.
   const { waiting } = useAnswerWaiting(sessionId);
+  // The hold, and the agent's own state — the two halves of "the user stepped
+  // back and the agent is STILL working", which is the only situation the wave
+  // has somewhere else to be. Read as two separate facts rather than folded
+  // into the snapshot: see `isAnswerHeld` on why the body's four shared
+  // snapshots stay four.
+  const held = useAnswerHeld(sessionId);
+  const activity = useActivityState(sessionId);
+
+  /**
+   * How many of the answers this cell can still reach have never been played
+   * — a derivation over the `heard` set the channel already keeps, never a
+   * tally of its own. Computed here rather than inside the waiting state so
+   * the state stays a rendering of what it is handed, and so the count is
+   * definitively absent from every other body the pane can show.
+   */
+  const unread = unreadAnswerCount(queue, speech.heardFor(sessionId));
 
   // The handover, raised once per submit. The composer raises the send and
   // knows nothing about the pane above it; the pane knows what the body was
@@ -248,6 +360,31 @@ export function AnswerPane({
   // so Escape works at once and the read → Escape → type loop needs no mouse.
   useEffect(() => {
     rootRef.current?.focus();
+  }, []);
+
+  // Measure the terminal area: the pane's ceiling, and the number the drag is
+  // clamped against. A LAYOUT effect, so the measurement is in hand before the
+  // first paint and no frame shows a pane sized by the unmeasured default; and
+  // an observer, because a cell is resized by the grid, by a seam drag and by
+  // the window, and a stale ceiling would let the handle persist a height
+  // taller than the cell it was dragged in.
+  //
+  // The AREA is what is observed, never the xterm container `TerminalView`
+  // watches: that observer unconditionally refits the terminal and sends a PTY
+  // resize, and this pane is careful not to become a new trigger for it.
+  useLayoutEffect(() => {
+    const area = rootRef.current?.parentElement;
+    if (!area) return;
+    // Zero is jsdom's answer for every box, and a detached element's in a real
+    // browser. It means "not measured", not "an area of no height" — and the
+    // difference matters, because an area of no height would clamp the pane to
+    // its floor and apply it.
+    const measure = (): void =>
+      setAreaHeight(area.clientHeight > 0 ? area.clientHeight : null);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(area);
+    return () => observer.disconnect();
   }, []);
 
   // Escape closes the pane from wherever focus is while it is open —
@@ -395,6 +532,16 @@ export function AnswerPane({
     return block && bodyRef.current?.contains(block) ? block : null;
   };
 
+  /**
+   * The height to apply, or null to leave the stylesheet's four insets alone —
+   * which is the same thing as "cover the terminal area".
+   *
+   * Null on a touch viewport, where the pane is laid out by the viewport and a
+   * stored height is not applied at all (the composer's row makes the same
+   * call, for the same reason), and null until the area has been measured.
+   */
+  const appliedHeight = narrowViewport || areaHeight === null ? null : paneHeight;
+
   return (
     <div
       ref={rootRef}
@@ -403,6 +550,25 @@ export function AnswerPane({
       role="region"
       aria-label="Answer"
       tabIndex={-1}
+      style={
+        appliedHeight === null
+          ? undefined
+          : {
+              height: `${appliedHeight}px`,
+              // The bottom inset is given up in the same breath as the height
+              // is taken: `.answer-pane` pins all four edges, and a box pinned
+              // to both ends of its container with a height as well is
+              // over-constrained — the browser resolves that by ignoring one
+              // of the two, and which one it ignores is not a thing to leave
+              // to a rule about writing direction. Dropped explicitly, the
+              // pane is pinned to the top and as tall as it was dragged, and
+              // the strip below it is terminal again.
+              bottom: "auto",
+              // For the frame between a cell shrinking and the observer above
+              // re-clamping: the pane never paints past the area it covers.
+              maxHeight: "100%",
+            }
+      }
       // The cell header is `draggable` and the cell root focuses on click, so
       // every gesture that could reach either has to stop here — as on the bar.
       draggable={false}
@@ -438,9 +604,19 @@ export function AnswerPane({
         }}
       >
         {waiting ? (
-          <AnswerWaiting sessionId={sessionId} />
+          <AnswerWaiting sessionId={sessionId} unread={unread} />
         ) : (
           <>
+          {/* The wave, moved: the user asked for the text and got it, and the
+              agent is still working, so the one thing the pane must not do is
+              go quiet about that. Pressing it releases the hold and the body
+              goes back to the agent. */}
+          {held && activity === "busy" ? (
+            <AnswerWaitingNext
+              sessionId={sessionId}
+              onActivate={() => releaseAnswer(sessionId)}
+            />
+          ) : null}
           {/* The scrubber turned vertical: a pointer affordance, not a row of
               buttons — see the note on the component. Each segment is placed by
               `layoutRail` to span its unit's blocks. */}
@@ -515,6 +691,30 @@ export function AnswerPane({
       {composerOn ? (
         <AnswerComposer sessionId={sessionId} send={send} onSubmitted={onSubmitted} />
       ) : null}
+      {/* The pane's own bottom edge — dragged up to uncover the terminal
+          without closing the pane. Its own row at the foot of the column,
+          rather than a rail floating on the pane's bottom edge, for the reason
+          the composer's grip is a row: an absolutely positioned rail there
+          would sit on the last 8px of whatever row happened to end up beneath
+          it — the key hint, or the field itself when the composer is off.
+
+          Gated here as well as inside the primitive, exactly as the grip is:
+          the row has a height of its own, so a mobile pane that rendered it
+          would keep the 7px the hidden rail no longer fills. */}
+      {narrowViewport ? null : (
+        <div className="answer-pane-drag">
+          <span className="answer-pane-grip-bar" aria-hidden />
+          <PaneResizer
+            // Named for the cell, unlike the composer's grip: two cells can
+            // have their panes open at once, and two rails answering to one
+            // test id is a trap for whoever writes that test.
+            name={`answer-pane-${sessionId}`}
+            edge="bottom"
+            label="Resize the answer pane"
+            {...dragProps}
+          />
+        </div>
+      )}
     </div>
   );
 }

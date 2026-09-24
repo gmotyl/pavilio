@@ -140,6 +140,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
 
 import { prepare } from "../prepare";
 import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
+import { utteranceUnderCursor } from "../utteranceQueue";
 import { DEFAULT_SPEECH_VOICE } from "../voices";
 
 /** The `src` of every started playback, in order. Warming must never add one. */
@@ -670,7 +671,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     // no click anywhere, because the cell is armed.
     expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`, `blob:${newer[0]}`]);
     const queue = result.current.queueFor("cell-a");
-    expect(queue.previous?.id).toBe("u-1");
+    expect(queue.previous.map((step) => step.id)).toEqual(["u-1"]);
     expect(queue.current?.id).toBe("u-2");
     expect(queue.pending).toEqual([]);
     expect(result.current.stateFor("cell-a")).toBe("speaking");
@@ -693,7 +694,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
     const queue = result.current.queueFor("cell-a");
     expect(queue.current?.id).toBe("u-2");
-    expect(queue.previous?.id).toBe("u-1");
+    expect(queue.previous.map((step) => step.id)).toEqual(["u-1"]);
     // Holding it, not hiding it: green, with the newer answer under the click.
     expect(result.current.stateFor("cell-a")).toBe("ready");
   });
@@ -780,7 +781,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     const queue = result.current.queueFor("cell-a");
     // Arrival order intact: u-2 is what the cell is on, u-3 is still behind
     // it, and nothing was dropped on the way through.
-    expect(queue.previous?.id).toBe("u-1");
+    expect(queue.previous.map((step) => step.id)).toEqual(["u-1"]);
     expect(queue.current?.id).toBe("u-2");
     expect(queue.pending.map((w) => w.id)).toEqual(["u-3"]);
     expect(result.current.stateFor("cell-a")).toBe("ready");
@@ -981,5 +982,232 @@ describe("useSpeechHost — no budget, no resume point", () => {
     await clickControl(result.current, "cell-a");
 
     expect(played).toEqual([`blob:${newer[0]}`]);
+  });
+});
+
+/**
+ * The transport, seen from the host, now that the history is a list.
+ *
+ * The host is the half of `previous` / `next` that makes a sound: the reducer
+ * moves the cursor and `onPrevious` plays what it moved onto. While history
+ * was one slot those were the same utterance by construction — `previous` was
+ * the only thing behind the cursor, so playing it could not be wrong. With a
+ * list they part company, and reading the wrong step is silent: the bar still
+ * moves, the cell still talks, and it talks about the wrong answer.
+ */
+describe("useSpeechHost — the transport walks the whole history", () => {
+  it("plays the answer the cursor lands on when stepping back", async () => {
+    const first = unitsOf(response(2, "First"));
+    const second = unitsOf(response(2, "Second"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    // Three answers, none of them played: u-3 is current, u-2 and u-1 are the
+    // two steps of history behind it, newest first.
+    await emitUtterance("cell-a", "u-1", response(2, "First"));
+    await emitUtterance("cell-a", "u-2", response(2, "Second"));
+    await emitUtterance("cell-a", "u-3", response(2, "Third"));
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual([
+      "u-2",
+      "u-1",
+    ]);
+
+    // One step back is the answer immediately behind the cursor.
+    played.length = 0;
+    await settle(() => result.current.onPrevious("cell-a"));
+    expect(result.current.queueFor("cell-a").cursor).toBe(1);
+    expect(played).toEqual([`blob:${second[0]}`]);
+
+    // Two steps back is the one behind THAT — the press a one-step history
+    // refused outright, and the press a careless port answers by replaying
+    // `previous[0]` a second time.
+    played.length = 0;
+    await settle(() => result.current.onPrevious("cell-a"));
+    expect(result.current.queueFor("cell-a").cursor).toBe(2);
+    expect(played).toEqual([`blob:${first[0]}`]);
+
+    // The oldest answer the cell holds: the cursor stops there and nothing is
+    // spoken, rather than falling off the end of the list.
+    played.length = 0;
+    await settle(() => result.current.onPrevious("cell-a"));
+    expect(result.current.queueFor("cell-a").cursor).toBe(2);
+    expect(played).toEqual([]);
+
+    // Coming forward plays what it comes back onto, all the way to current.
+    played.length = 0;
+    await settle(() => result.current.onNext("cell-a"));
+    expect(result.current.queueFor("cell-a").cursor).toBe(1);
+    expect(played).toEqual([`blob:${second[0]}`]);
+  });
+
+  /**
+   * "A paused cell does not hold the next answer hostage" meets "a listener
+   * already reading something older is not yanked out of it".
+   *
+   * The supersession effect asks one question — is the held run still the
+   * utterance under the cursor — and it used to be answered for it by the
+   * queue: an idle arrival reset the cursor to `current`, so a paused replay
+   * of history was superseded along with everything else. The list-shaped
+   * queue deliberately stopped doing that; the cursor follows its own
+   * utterance down the history instead. So the held run is NOT stale, the
+   * effect leaves it alone, and the arrival is one forward press away rather
+   * than hostage to anything.
+   *
+   * Without this the effect would abandon a run the user had deliberately
+   * stepped back to and paused, every time the agent answered again — which
+   * is the very thing the change exists to stop.
+   */
+  it("a paused replay of history keeps its place when a newer answer arrives", async () => {
+    const older = unitsOf(response(3, "Older"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3, "Older"));
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    // Step back onto u-1 and pause part-way into it, so a run that was
+    // abandoned here would be audibly gone rather than coincidentally right.
+    await settle(() => result.current.onPrevious("cell-a"));
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${older[0]}`, `blob:${older[1]}`]);
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+
+    const before = [...played];
+    await emitUtterance("cell-a", "u-3", response(3, "Latest"));
+
+    // The arrival took `current`, the history grew behind it, and the cursor
+    // moved with its own utterance rather than being dragged to the front.
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("u-3");
+    expect(queue.previous.map((step) => step.id)).toEqual(["u-2", "u-1"]);
+    expect(queue.cursor).toBe(2);
+    // Neither advanced nor stopped: the held run is what the cursor is on, so
+    // there is nothing stale to abandon and nothing was spoken over it.
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+    expect(played).toEqual(before);
+
+    // And resuming continues the answer the user parked on.
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${older[1]}`]);
+  });
+
+  /**
+   * The same protection, reached from the other side: the release arm of the
+   * supersession effect is fenced by `cursor === 0`, and that term is what
+   * keeps a paused HISTORY replay out of it.
+   *
+   * The arm exists for a pause taken on `current` with answers waiting behind
+   * it. A pause taken part-way into a replay is a different thing entirely —
+   * the user stepped back on purpose and is holding an older answer — and it
+   * satisfies every other condition the arm tests: the held run is still the
+   * utterance under the cursor, and `pending` is non-empty because an answer
+   * landed while the replay was speaking. Drop `cursor === 0` and the effect
+   * steps the cursor forward out of the replay, the held run stops matching
+   * what the cursor is on, and the next pass abandons it — the user's parked
+   * answer silently gone, the cell moved on to something they did not ask for.
+   *
+   * What the pending answers do NOT get here is released: `holdingTheCursor`
+   * is true, so the stop below returns as well and they wait for a `next`
+   * press. That hole predates the list-shaped queue — see the
+   * `TODO(follow-up)` on the guard — and keeping the replay is the behaviour
+   * this test pins.
+   */
+  it("a paused replay of history is not stepped forward to release a queued answer", async () => {
+    const older = unitsOf(response(3, "Older"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3, "Older"));
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    // Step back onto u-1 and play part of it, so an abandoned run would be
+    // audibly gone rather than coincidentally right.
+    await settle(() => result.current.onPrevious("cell-a"));
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${older[0]}`, `blob:${older[1]}`]);
+
+    // The answer lands while the replay is SPEAKING, so it queues behind it —
+    // this is what makes `pending` non-empty at the moment of the pause.
+    await emitUtterance("cell-a", "u-3", response(3, "Latest"));
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["u-3"]);
+    expect(result.current.queueFor("cell-a").cursor).toBe(1);
+
+    const before = [...played];
+    await clickControl(result.current, "cell-a");
+
+    // Paused exactly where the user left it: the cursor did not move, the
+    // queued answer is still queued, and nothing was spoken over the replay.
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.cursor).toBe(1);
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.previous.map((step) => step.id)).toEqual(["u-1"]);
+    expect(queue.pending.map((w) => w.id)).toEqual(["u-3"]);
+    expect(played).toEqual(before);
+
+    // And resuming continues the answer the user parked on, not the newer one.
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${older[1]}`]);
+  });
+});
+
+/**
+ * The snap back to the newest answer.
+ *
+ * `answerWaiting` releases a hold when an answer lands, and hands the surface
+ * a `true` meaning *put the cursor back on the newest answer*. The cursor is
+ * the queue's, so that half lands here — and it is a BODY MOVE, not a
+ * transport press: the voice is reading whatever it was reading and must go on
+ * reading it. `onNext` cannot serve, because it steps one place AND speaks.
+ */
+describe("useSpeechHost — the snap to the newest answer", () => {
+  it("returns the cursor to the newest answer without speaking", async () => {
+    const first = unitsOf(response(2, "First"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(2, "First"));
+    await emitUtterance("cell-a", "u-2", response(2, "Second"));
+    await emitUtterance("cell-a", "u-3", response(2, "Third"));
+
+    // Two steps back, and reading aloud — the state a hold is made in.
+    await settle(() => result.current.onPrevious("cell-a"));
+    await settle(() => result.current.onPrevious("cell-a"));
+    expect(result.current.queueFor("cell-a").cursor).toBe(2);
+
+    played.length = 0;
+    await settle(() => result.current.onNewestAnswer("cell-a"));
+
+    // The body is back on the answer that just landed...
+    expect(result.current.queueFor("cell-a").cursor).toBe(0);
+    expect(utteranceUnderCursor(result.current.queueFor("cell-a"))?.id).toBe("u-3");
+
+    // ...and NOTHING was spoken. A snap routed through `onNext` would have
+    // started the answer it stepped onto, cutting off the sentence the
+    // listener is in the middle of hearing.
+    expect(played).toEqual([]);
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    // The run in the element is still the one that was playing before the
+    // snap: the OLDEST answer, two steps back, not the newest one the cursor
+    // now sits on.
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${first[1]}`]);
+  });
+
+  it("changes nothing when the cursor is already on the newest answer", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(2, "First"));
+    await emitUtterance("cell-a", "u-2", response(2, "Second"));
+    const before = result.current.queueFor("cell-a");
+    expect(before.cursor).toBe(0);
+
+    played.length = 0;
+    await settle(() => result.current.onNewestAnswer("cell-a"));
+
+    // Every arrival for a cell nobody stepped back in takes this path, so it
+    // has to be free: the same queue object, and no sound.
+    expect(result.current.queueFor("cell-a")).toBe(before);
+    expect(played).toEqual([]);
   });
 });

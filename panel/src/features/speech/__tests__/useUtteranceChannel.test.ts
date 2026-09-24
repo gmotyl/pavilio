@@ -449,11 +449,55 @@ describe("useUtteranceChannel", () => {
   });
 
   /**
+   * The second warmable is where a `next` press LANDS, and from two steps back
+   * that is the step in between — not `current`.
+   *
+   * The reading that compares the utterance under the cursor against
+   * `queue.current` agrees at depth one and is wrong at every depth past it: it
+   * warms an answer the transport will not touch for two more presses while
+   * leaving cold the one the very next press plays. Restore that reading and
+   * every other test in this file still passes; only this one fails.
+   */
+  it("warms the step a next press reaches, not `current`, from two steps back", async () => {
+    const { result, rerender } = await renderChannel();
+
+    for (const id of ["a1", "a2", "a3"]) {
+      lastMessage = frame(utterance("cell-a", id, 1_000));
+      await act(async () => {
+        rerender();
+      });
+    }
+
+    // Idle arrivals, so each one pushed its predecessor into the history:
+    // previous is [a2, a1] and the cursor is on a3.
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["a2", "a1"]);
+
+    await act(async () => {
+      result.current.dispatchQueue("cell-a", { type: "previous" });
+      result.current.dispatchQueue("cell-a", { type: "previous" });
+    });
+    expect(result.current.queueFor("cell-a").cursor).toBe(2);
+
+    // a1 is under the cursor; a2 — `previous[cursor - 2]` — is one press away.
+    // a3 is two presses away and has no business being warmed ahead of it.
+    const warmed = result.current.warmableUtterances.map((entry) => entry.id);
+    expect(warmed).toEqual(["a1", "a2"]);
+    expect(warmed).not.toContain("a3");
+  });
+
+  /**
    * The dedupe gate is wider than the cursor, and this is the test that says
    * so. An answer already WAITING behind the live run, or already stepped back
    * into history, is just as much a re-delivery as the one being spoken —
    * a reconnect replays the lot. Narrow `queueHolds` to `queue.current?.id`
    * and every other test in this file still passes; only this one fails.
+   *
+   * And the history half is walked to its DEPTH, not just to its head. The gate
+   * has to ask every step the queue still holds: narrowing the scan to
+   * `previous[0]` reads as covered for as long as the replayed answer is the
+   * most recent one stepped back, and quietly appends a duplicate of anything
+   * further down the list — which is the ordinary case for a reconnect, since a
+   * reconnect replays the whole history at once.
    */
   it("re-delivering a queued or historical utterance does not duplicate it", async () => {
     const { result, rerender } = await renderChannel();
@@ -486,16 +530,46 @@ describe("useUtteranceChannel", () => {
     await act(async () => {
       result.current.dispatchQueue("cell-a", { type: "finished" });
     });
-    expect(result.current.queueFor("cell-a").previous?.id).toBe("a1");
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["a1"]);
 
     lastMessage = frame({ ...first, at: first.at + 9_000 });
     await act(async () => {
       rerender();
     });
     const after = result.current.queueFor("cell-a");
-    expect(after.previous?.id).toBe("a1");
+    expect(after.previous.map((step) => step.id)).toEqual(["a1"]);
     expect(after.current?.id).toBe("a2");
     expect(after.pending).toEqual([]);
+
+    // Now push a1 DOWN the history, so the gate has to walk past the head to
+    // find it. Two idle arrivals: each takes the cursor and shoves what it
+    // superseded onto the front of the list.
+    speaking = null;
+    for (const id of ["a3", "a4"]) {
+      lastMessage = frame(utterance("cell-a", id, 3_000));
+      await act(async () => {
+        rerender();
+      });
+    }
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual([
+      "a3",
+      "a2",
+      "a1",
+    ]);
+
+    // a1 is three steps back and a2 two. The reconnect replays them both, and
+    // a gate that only checked `previous[0]` would take each one as news and
+    // append it over the top of the history it is already in.
+    for (const replayed of [first, queued]) {
+      lastMessage = frame({ ...replayed, at: replayed.at + 20_000 });
+      await act(async () => {
+        rerender();
+      });
+    }
+    const deep = result.current.queueFor("cell-a");
+    expect(deep.previous.map((step) => step.id)).toEqual(["a3", "a2", "a1"]);
+    expect(deep.current?.id).toBe("a4");
+    expect(deep.pending).toEqual([]);
   });
 
   /**
@@ -533,21 +607,112 @@ describe("useUtteranceChannel", () => {
       result.current.dispatchQueue("cell-a", { type: "next" });
     });
 
-    // a3 discards a1 out of the queue altogether. Nothing can ask about it
+    // What it takes to drop a1 now: the history is five deep, so a1 has to be
+    // pushed off the far end of it before anything can stop carrying its mark.
+    // a3 alone used to do this; with a list it takes six answers behind a1,
+    // and asserting the shallow version would be asserting the old shape.
+    for (const [id, at] of [
+      ["a3", 3_000],
+      ["a4", 4_000],
+      ["a5", 5_000],
+      ["a6", 6_000],
+    ] as const) {
+      lastMessage = frame(utterance("cell-a", id, at));
+      await act(async () => {
+        rerender();
+      });
+    }
+    // Still the oldest step the history holds, and still heard: nothing that
+    // can be stepped onto has been forgotten.
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual([
+      "a5",
+      "a4",
+      "a3",
+      "a2",
+      "a1",
+    ]);
+
+    // a7 is the one that pushes a1 off the end. Nothing can ask about it
     // again, so the session stops carrying it — and a re-broadcast of it is
     // news, which is the one shadow the cut casts.
-    lastMessage = frame(utterance("cell-a", "a3", 3_000));
+    lastMessage = frame(utterance("cell-a", "a7", 7_000));
     await act(async () => {
       rerender();
     });
-    expect(result.current.queueFor("cell-a").previous?.id).toBe("a2");
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual([
+      "a6",
+      "a5",
+      "a4",
+      "a3",
+      "a2",
+    ]);
 
-    lastMessage = frame(utterance("cell-a", "a1", 4_000));
+    lastMessage = frame(utterance("cell-a", "a1", 8_000));
     await act(async () => {
       rerender();
     });
     expect(result.current.queueFor("cell-a").current?.id).toBe("a1");
     expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+
+  /**
+   * The retention half again, at the depth the list makes possible. The prune
+   * reads the queue's reach; a reach that asks `queue.previous` for ONE id —
+   * or, worse, asks an array for an `.id` it does not have — throws the mark
+   * away for every answer but the newest, and the listener who walks back
+   * through a run they already heard is told all of it is unheard news.
+   *
+   * Every step is asserted, not just the far end: a reach that kept only the
+   * first step of history would pass an assertion taken at depth one.
+   */
+  it("keeps the heard flag for every answer the history can still reach", async () => {
+    const { result, rerender } = await renderChannel();
+
+    // Five answers, each played to its end as it lands — an agent that ran
+    // ahead of a listener who was keeping up.
+    for (const [id, at] of [
+      ["h1", 1_000],
+      ["h2", 2_000],
+      ["h3", 3_000],
+      ["h4", 4_000],
+      ["h5", 5_000],
+    ] as const) {
+      lastMessage = frame(utterance("cell-a", id, at));
+      await act(async () => {
+        rerender();
+      });
+      await act(async () => {
+        result.current.markHeard("cell-a");
+      });
+      expect(result.current.stateFor("cell-a")).toBe("heard");
+    }
+
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual([
+      "h4",
+      "h3",
+      "h2",
+      "h1",
+    ]);
+
+    // Walking back through the whole history: every one of them is still a
+    // cell the listener has heard, all four steps of it.
+    for (let step = 1; step <= 4; step += 1) {
+      await act(async () => {
+        result.current.dispatchQueue("cell-a", { type: "previous" });
+      });
+      expect(result.current.queueFor("cell-a").cursor).toBe(step);
+      expect(result.current.stateFor("cell-a")).toBe("heard");
+    }
+
+    // And back out again, unchanged — the walk itself marks nothing and
+    // forgets nothing.
+    for (let step = 3; step >= 0; step -= 1) {
+      await act(async () => {
+        result.current.dispatchQueue("cell-a", { type: "next" });
+      });
+      expect(result.current.queueFor("cell-a").cursor).toBe(step);
+      expect(result.current.stateFor("cell-a")).toBe("heard");
+    }
   });
 
   /**
@@ -586,7 +751,7 @@ describe("useUtteranceChannel", () => {
     // Both are still reachable, so both are still heard: marking u-2 REPLACING
     // the set rather than adding to it would report the one the user has
     // already listened to as unheard news the moment they stepped back to it.
-    expect(result.current.queueFor("cell-a").previous?.id).toBe("u-1");
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["u-1"]);
     expect(result.current.stateFor("cell-a")).toBe("heard");
 
     await act(async () => {
@@ -609,9 +774,9 @@ describe("useUtteranceChannel", () => {
     await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
     const queue = result.current.queueFor("cell-a");
     expect(queue.current).toEqual(utterance("cell-a", "a7"));
-    expect(queue.previous).toBeNull();
+    expect(queue.previous).toEqual([]);
     expect(queue.pending).toEqual([]);
-    expect(queue.cursor).toBe("current");
+    expect(queue.cursor).toBe(0);
     // A cell the tab has never heard of has an EMPTY queue, not an undefined
     // one: the transport is rendered in every cell, before any arrival.
     expect(result.current.queueFor("cell-z").current).toBeNull();

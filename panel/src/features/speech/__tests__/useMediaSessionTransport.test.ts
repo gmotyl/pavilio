@@ -202,6 +202,18 @@ function stubTarget(
   };
 }
 
+/**
+ * Where the hook reports that a person — not autoplay — just worked the
+ * transport, and on which cell. See {@link TransportArrival}; the panel's own
+ * answer to it is asserted with the real rule in
+ * `features/terminal/__tests__/attentionDismiss.test.tsx`.
+ */
+const arrival = vi.fn<(sessionId: string) => void>();
+
+beforeEach(() => {
+  arrival.mockClear();
+});
+
 describe("useMediaSessionTransport", () => {
   let session: FakeMediaSession;
 
@@ -215,7 +227,7 @@ describe("useMediaSessionTransport", () => {
 
   it("binds all five action handlers on mount", () => {
     const target = stubTarget({ speakingSessionId: "cell-a" });
-    const { unmount } = renderHook(() => useMediaSessionTransport(target));
+    const { unmount } = renderHook(() => useMediaSessionTransport(target, arrival));
 
     expect(boundActions()).toEqual([
       "nexttrack",
@@ -238,7 +250,7 @@ describe("useMediaSessionTransport", () => {
   });
 
   it("playbackState tracks the run", () => {
-    const { rerender } = renderHook(({ target }) => useMediaSessionTransport(target), {
+    const { rerender } = renderHook(({ target }) => useMediaSessionTransport(target, arrival), {
       initialProps: { target: stubTarget() },
     });
 
@@ -259,7 +271,7 @@ describe("useMediaSessionTransport", () => {
 
   it("play with nothing active starts the armed cell", () => {
     const target = stubTarget({ armedSessionId: "cell-b" });
-    renderHook(() => useMediaSessionTransport(target));
+    renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("play");
 
@@ -273,7 +285,7 @@ describe("useMediaSessionTransport", () => {
       pausedSessionId: "cell-a",
       armedSessionId: "cell-b",
     });
-    renderHook(() => useMediaSessionTransport(target));
+    renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("play");
 
@@ -281,10 +293,76 @@ describe("useMediaSessionTransport", () => {
     expect(target.onSpeak).not.toHaveBeenCalled();
   });
 
+  /**
+   * Every action that works the play/pause button reports an arrival on the
+   * cell it resolved to.
+   *
+   * The hook says only that, and cannot say more: what an arrival means is the
+   * terminal feature's rule (`attentionArrival`), which this hook is handed
+   * rather than allowed to import. The cell named has to be the one the action
+   * acted on, because the failure this closes was a transport that started an
+   * answer on one cell while the notice on it stayed lit.
+   */
+  it("play and pause report an arrival on the cell they acted on", () => {
+    const armed = stubTarget({ armedSessionId: "cell-b" });
+    const { unmount } = renderHook(() => useMediaSessionTransport(armed, arrival));
+    fire("play");
+    expect(arrival).toHaveBeenCalledTimes(1);
+    expect(arrival).toHaveBeenCalledWith("cell-b");
+    unmount();
+
+    arrival.mockClear();
+    const held = stubTarget({
+      speakingSessionId: "cell-a",
+      pausedSessionId: "cell-a",
+      armedSessionId: "cell-b",
+    });
+    const second = renderHook(() => useMediaSessionTransport(held, arrival));
+    fire("play");
+    expect(arrival).toHaveBeenCalledWith("cell-a");
+    second.unmount();
+
+    // The platform splits one button into two actions; the panel's other
+    // transports are a single control that means pause or play depending on
+    // where the run is, and they dismiss either way. So does this one.
+    arrival.mockClear();
+    const playing = stubTarget({ speakingSessionId: "cell-a" });
+    renderHook(() => useMediaSessionTransport(playing, arrival));
+    fire("pause");
+    expect(arrival).toHaveBeenCalledWith("cell-a");
+  });
+
+  /**
+   * Walking the queue is not arriving at a cell — see `attentionArrival` on why
+   * `previous` and `next` are deliberately outside the rule. Pinned because
+   * they resolve a target exactly as `play` does, so including them would be a
+   * one-line change nothing else would catch.
+   */
+  it("nexttrack, previoustrack and seekbackward report no arrival", () => {
+    const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    renderHook(() => useMediaSessionTransport(target, arrival));
+
+    fire("nexttrack");
+    fire("previoustrack");
+    fire("seekbackward");
+
+    expect(arrival).not.toHaveBeenCalled();
+  });
+
+  it("play with nothing at all resolved reports no arrival", () => {
+    const target = stubTarget();
+    renderHook(() => useMediaSessionTransport(target, arrival));
+
+    fire("play");
+    fire("pause");
+
+    expect(arrival).not.toHaveBeenCalled();
+  });
+
   it("next and previous walk the playing cell's queue", () => {
     // The armed cell is a different one on purpose: the run wins.
     const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
-    renderHook(() => useMediaSessionTransport(target));
+    renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("nexttrack");
     fire("previoustrack");
@@ -297,7 +375,7 @@ describe("useMediaSessionTransport", () => {
 
   it("next and previous fall back to the armed cell with nothing playing", () => {
     const target = stubTarget({ armedSessionId: "cell-b" });
-    renderHook(() => useMediaSessionTransport(target));
+    renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("nexttrack");
 
@@ -306,7 +384,7 @@ describe("useMediaSessionTransport", () => {
 
   it("seekbackward moves back ten seconds", () => {
     const target = stubTarget({ speakingSessionId: "cell-a" });
-    renderHook(() => useMediaSessionTransport(target));
+    renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("seekbackward");
 
@@ -317,7 +395,7 @@ describe("useMediaSessionTransport", () => {
   it("reads the target as it is when the key is pressed, not as it was at mount", () => {
     // The handlers are bound once, so they must not close over the first
     // render's target — the run they are meant to act on had not started yet.
-    const { rerender } = renderHook(({ target }) => useMediaSessionTransport(target), {
+    const { rerender } = renderHook(({ target }) => useMediaSessionTransport(target, arrival), {
       initialProps: { target: stubTarget() },
     });
 
@@ -350,7 +428,7 @@ describe("useMediaSessionTransport", () => {
       armedSessionId: "cell-b",
     });
 
-    const { unmount } = renderHook(() => useMediaSessionTransport(target));
+    const { unmount } = renderHook(() => useMediaSessionTransport(target, arrival));
 
     // The three it refused are simply absent; the two it knows are bound.
     expect(boundActions()).toEqual(["pause", "play"]);
@@ -376,7 +454,7 @@ describe("useMediaSessionTransport", () => {
     removeMediaSession();
     const target = stubTarget({ speakingSessionId: "cell-a" });
 
-    const { unmount } = renderHook(() => useMediaSessionTransport(target));
+    const { unmount } = renderHook(() => useMediaSessionTransport(target, arrival));
 
     // Nothing bound, nothing thrown, nothing called — and the teardown that
     // clears the handlers must not reach for the missing object either.
@@ -494,7 +572,7 @@ describe("the transport acts on the playback, never on the focused cell", () => 
   it("pause acts on the speaking cell, not the focused one", async () => {
     const { result } = renderHook(() => {
       const host = useSpeechHost();
-      useMediaSessionTransport(host);
+      useMediaSessionTransport(host, arrival);
       return host;
     });
 

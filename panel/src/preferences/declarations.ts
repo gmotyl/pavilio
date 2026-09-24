@@ -78,6 +78,41 @@ export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
 export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
 
 /**
+ * The answer pane's height when nothing has been dragged: taller than any
+ * terminal area a cell can have on the displays this is opened on today.
+ *
+ * So it is not really a height — it is the word "full" written as a number,
+ * because the declaration table holds numbers. The pane clamps itself to the
+ * area it is absolutely positioned within, so this value resolves to exactly
+ * that area and the unresized pane covers the terminal. See the declaration
+ * for why a plausible-looking pixel default would be the wrong answer.
+ *
+ * ## The limit, stated honestly
+ *
+ * "Taller than any area" is a claim about a number, and this number is 4000,
+ * so it is true only up to 4000 CSS pixels of terminal area. Above that the
+ * clamp stops biting and the pane opens 4000px tall inside a taller cell — a
+ * 4600px area would leave a 600px strip of live terminal below the composer,
+ * which is precisely what change #115 rejected.
+ *
+ * That is accepted today rather than fixed, because a cell's terminal area is
+ * a fraction of the viewport — the grid divides it, and the speech row and the
+ * cell header come off the top — so reaching 4000 needs a browser window
+ * around 4300 CSS pixels tall with a single maximized cell in it. CSS pixels,
+ * not device pixels: an 8K display at the 200% scaling such a display is
+ * actually used at is a ~2160px viewport, comfortably inside the number. A
+ * portrait-rotated 8K panel at 100% would not be, and that is the shape of
+ * display this would first break on.
+ *
+ * The honest fix is a default of `null` meaning "unset", which would make the
+ * absent case a state rather than a very large number — see the note on the
+ * declaration. It is a wider change than raising a constant, and raising the
+ * constant only moves the same cliff further away, so the number stays and the
+ * limit is written down instead of implied.
+ */
+export const ANSWER_PANE_FULL_HEIGHT = 4000;
+
+/**
  * Every row of design.md's portability table is now declared below.
  *
  * Two of them used to be listed here as deliberately absent — a declaration
@@ -435,11 +470,55 @@ export const preferences = {
    *
    * `local`, not the session tier: a remembered height should survive closing
    * the browser. 62 is the two-line box the composer opens at.
+   *
+   * Scope argument: the project the cell belongs to. How much of a cell you
+   * hand to the reply box is a fact about the work in front of you — a project
+   * driven by long answers wants a different box from one driven from the
+   * terminal — so the two axes here are independent: `project` says how many of
+   * these one browser keeps, `portable: false` says that none of them travels.
+   * The scope is the project rather than the SESSION on purpose: a session id
+   * names nothing after a restart, so a per-cell height would be forgotten
+   * every time the agent was relaunched. The cost is that two cells of one
+   * project share the number, which is accepted and asserted.
    */
   answerComposerHeight: definePreference({
     key: "speech.answerComposer.height", // was: nothing — the composer is new
-    scope: "global",
+    scope: "project",
     default: 62,
+    codec: num,
+    portable: false,
+  }),
+  /**
+   * The answer pane's own height — what the handle on its bottom edge drags.
+   *
+   * Non-portable for the reason the composer's height is, and more so: the
+   * pane covers a terminal, and how much of THIS window the user is willing to
+   * hand it is a fact about this screen. Carried to a machine with a different
+   * one it is not a habit reproduced, it is a pane sized for a window that is
+   * not there.
+   *
+   * Scope argument: the project the cell belongs to, for the reason the
+   * composer's height above it is project-scoped — and more so, because this
+   * is the number that decides how much terminal a project's cells show at all.
+   *
+   * The default is {@link ANSWER_PANE_FULL_HEIGHT} — "full", written as a
+   * number. An unresized pane is clamped to the terminal area it sits in and
+   * so covers it, which is what change #115 settled and what Greg asked for in
+   * as many words ("blend all the way to bottom, form on bottom no terminal
+   * visible"). A plausible-looking pixel default — 400, say — would instead
+   * open every pane short of the cell's bottom edge on a tall screen,
+   * uncovering a strip of live terminal that nobody asked to see.
+   *
+   * Writing "full" as a very large number rather than as `null` is the known
+   * compromise, and the limit it carries is spelt out on
+   * {@link ANSWER_PANE_FULL_HEIGHT}. A `number | null` default would say
+   * "unset" in the type instead of approximating it, at the cost of widening
+   * the codec, the row hook's arithmetic and every reader of both.
+   */
+  answerPaneHeight: definePreference({
+    key: "speech.answerPane.height", // was: nothing — the handle is new
+    scope: "project",
+    default: ANSWER_PANE_FULL_HEIGHT,
     codec: num,
     portable: false,
   }),

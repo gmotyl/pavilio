@@ -18,7 +18,7 @@ import { useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
@@ -29,6 +29,8 @@ import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utterance
 import { AnswerPane } from "../AnswerPane";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
+import { refreshSessions } from "../sessionStore";
+import type { SessionMeta } from "../useTerminalSessions";
 
 // The synthesis cache the rail peeks into. Nothing is warm and nothing
 // subscribes: this file draws no units at all.
@@ -51,10 +53,15 @@ vi.mock("../../markdown/MermaidDiagram", () => ({
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(): GridSpeech {
   return {
     stateFor: () => "ready",
     queueFor: () => emptyUtteranceQueue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => NO_UNITS,
     subscribeProgress: () => () => {},
     progressFor: () => null,
@@ -66,6 +73,7 @@ function makeSpeech(): GridSpeech {
     onStop: vi.fn(),
     onPrevious: vi.fn(),
     onNext: vi.fn(),
+    onNewestAnswer: vi.fn(),
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
@@ -96,7 +104,9 @@ function installMatchMedia(mobile: boolean): void {
   });
 }
 
-const send = vi.fn();
+/** A live socket: the write landed. `send` reports delivery now, and a stub
+ *  that returned nothing would read as a socket that is not OPEN. */
+const send = vi.fn((_data: string) => true);
 
 /**
  * The two writes ONE submit makes: the body, and then the return that runs it
@@ -150,10 +160,10 @@ function renderPane(sessionId = "cell-a", speech: GridSpeech = makeSpeech()) {
 /** A speech host with one answer under the cursor for every cell that asks. */
 function speechWith(text: string): GridSpeech {
   const queue: UtteranceQueue = {
-    previous: null,
+    previous: [],
     current: { id: text, sessionId: "cell-a", text, at: 1 },
     pending: [],
-    cursor: "current",
+    cursor: 0,
   };
   return { ...makeSpeech(), queueFor: () => queue };
 }
@@ -180,7 +190,46 @@ function regionOrder(): string[] {
 const composerSwitch = (): HTMLInputElement =>
   screen.getByTestId("answer-pane-composer-on-cell-a") as HTMLInputElement;
 
-beforeEach(() => {
+/** The project every cell in this file belongs to — the composer height's scope. */
+const PROJECT = "alpha";
+
+function session(id: string, project: string): SessionMeta {
+  return {
+    id,
+    name: id,
+    project,
+    cwd: `/srv/git/${project}`,
+    pid: 4242,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+/**
+ * Puts a session list in the tab's store, the way a load does.
+ *
+ * The composer's height is remembered per PROJECT, and the composer is handed
+ * a `sessionId` and nothing else — so the tab's session list is where the
+ * project comes from, exactly as it is for the launcher row's
+ * `pavilio-session-start` argument. `refreshSessions` is the store's own
+ * fetch-and-publish, so this is the real path the project reaches the row by;
+ * `test-setup.ts` clears the store between tests.
+ */
+async function seedSessions(sessions: SessionMeta[]): Promise<void> {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(sessions),
+        }) as unknown as Promise<Response>,
+    ),
+  );
+  await refreshSessions();
+}
+
+beforeEach(async () => {
   send.mockClear();
   // Module-level and keyed by session, so it outlives a test: a draft sent in
   // one case would otherwise still be "waiting" in the next, and the pane no
@@ -194,6 +243,16 @@ beforeEach(() => {
   documentKeys.mockClear();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   installMatchMedia(false);
+  // Without a session list the pane cannot name its project, and a height
+  // written here would land under a different key than the one the composer
+  // reads.
+  await seedSessions([session("cell-a", PROJECT), session("cell-b", PROJECT)]);
+});
+
+afterEach(() => {
+  // `seedSessions` stubs `fetch`, and a stub left behind would answer the next
+  // file's session load.
+  vi.unstubAllGlobals();
 });
 
 describe("AnswerComposer", () => {
@@ -336,7 +395,7 @@ describe("AnswerComposer", () => {
 
   it("drops the grip and uses a single row on a narrow viewport", () => {
     installMatchMedia(true);
-    writePreference(preferences.answerComposerHeight, 140);
+    writePreference(preferences.answerComposerHeight, 140, PROJECT);
     renderPane();
 
     // No grip: an 8px rail on a phone sits under the thumb that is scrolling
@@ -374,7 +433,7 @@ describe("AnswerComposer", () => {
   });
 
   it("opens at the height the grip last left behind", () => {
-    writePreference(preferences.answerComposerHeight, 140);
+    writePreference(preferences.answerComposerHeight, 140, PROJECT);
     renderPane();
 
     expect(grip()).toBeInTheDocument();
@@ -568,12 +627,18 @@ describe("AnswerComposer", () => {
       // the pane's footer when the auto-open switch was its only control, and
       // it stayed there when the composer arrived underneath it — which put
       // the reply box between the answer and its own switches.
+      //
+      // The pane's own drag row comes after all of them, because it IS the
+      // pane's bottom edge: dragging it up shortens the whole column and
+      // uncovers the terminal, where the grip two rows above it only moves the
+      // boundary between the answer and the reply.
       expect(regionOrder()).toEqual([
         "answer-pane-body",
         "answer-pane-meta",
         "answer-pane-grip",
         "answer-pane-composer",
         "answer-pane-hint",
+        "answer-pane-drag",
       ]);
     });
 
@@ -638,7 +703,10 @@ describe("AnswerComposer", () => {
       renderPane();
 
       // There is no Shift+Enter on a phone, so the hint has nothing to say;
-      // the send button carries the whole action instead.
+      // the send button carries the whole action instead. The pane's own drag
+      // row goes with them, for the reason the grip does: the pane is laid out
+      // by the viewport there, and a 7px rail is a thumb's width from the
+      // scroll it borders.
       expect(regionOrder()).toEqual([
         "answer-pane-body",
         "answer-pane-meta",

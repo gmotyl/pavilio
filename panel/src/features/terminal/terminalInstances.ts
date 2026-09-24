@@ -19,7 +19,7 @@ import { speechTransportKeyFor } from "../speech/useSpeechKeys";
 // the xterm does (layout changes remount the cell); a destroyed session takes
 // its entry with it so the store does not leak.
 import { forgetAnswerPane } from "./answerPaneState";
-import { forgetAnswerWaiting } from "./answerWaiting";
+import { forgetAnswerWaiting, watchSessionActivity } from "./answerWaiting";
 import { forgetLauncherUse } from "./launcherUse";
 
 // Shared cache of live xterm instances, keyed by sessionId.
@@ -90,7 +90,22 @@ export interface LiveTerminal {
   fitAddon: FitAddon;
   holder: HTMLDivElement;
   ws: WebSocket;
-  send: (data: string) => void;
+  /**
+   * Write one input frame to the cell's PTY, and say whether it went.
+   *
+   * True when the frame was handed to an OPEN socket; false when it was
+   * dropped because there was no socket to hand it to. The boolean exists
+   * because this used to be the silent end of the answer form: a socket that
+   * was not OPEN took the guard and the function returned normally, so no
+   * caller could tell a delivered write from a dropped one — `ptySubmit` went
+   * on to schedule the return that submits it, and the composer cleared a
+   * reply that never left the browser.
+   *
+   * `false` is not an error: a dead socket is an expected, repairable state
+   * (`reconnectOnActivate`, ADR 0010). It is the caller's business what to do
+   * about it, and the answer form's business is to keep the text.
+   */
+  send: (data: string) => boolean;
   fit: () => void;
   focus: () => void;
   addExitListener: (fn: ExitListener) => () => void;
@@ -803,9 +818,9 @@ function createInstance(sessionId: string): InternalInstance {
     connectionState: "disconnected",
     send: (data: string) => {
       const currentWs = inst.ws;
-      if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-        currentWs.send(JSON.stringify({ type: "input", data }));
-      }
+      if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return false;
+      currentWs.send(JSON.stringify({ type: "input", data }));
+      return true;
     },
     fit: () => {
       try {
@@ -950,6 +965,12 @@ function createInstance(sessionId: string): InternalInstance {
   //     wait.
   instances.set(sessionId, inst);
 
+  // The answer pane follows the agent, not only the user's last send: the
+  // session's activity watch opens with the session and lives as long as it
+  // does, so a cell that goes busy with nothing typed into it still hands the
+  // pane's body over. Released in destroyTerminal, below.
+  watchSessionActivity(sessionId);
+
   connectWs(sessionId, inst);
 
   return inst;
@@ -1083,8 +1104,9 @@ export function destroyTerminal(sessionId: string): void {
   // getConnectionState() from inside a listener already reads "unattached".
   instances.delete(sessionId);
   forgetAnswerPane(sessionId);
-  // The wait holds an activity subscription open; a destroyed session has
-  // nothing left to wait for and nobody left to tell.
+  // ...and the session's activity watch with it: a destroyed session has
+  // nothing left to wait for, nobody left to tell, and no reason to keep a
+  // channel subscription open under its name.
   forgetAnswerWaiting(sessionId);
   // …and the "a launcher was used here" flag with it: the session id is gone,
   // and a cell that reuses it later is a different cell with nothing running.

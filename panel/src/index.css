@@ -992,7 +992,15 @@ input[type="checkbox"] {
    and the superseded `max-height: 100%` was exactly the ceiling that allowed
    the short pane. The body takes the slack (see its `flex: 1 1 auto`), so the
    composer and the switch row sit on the bottom edge whatever the answer's
-   length. */
+   length.
+
+   All four insets are what an UNRESIZED pane is, and that stays the whole of
+   what this rule says. The handle on the pane's bottom edge gives the last of
+   them up at runtime — `height: <dragged>px; bottom: auto`, written as inline
+   style by `AnswerPane`, because that number is measured against the terminal
+   area and no stylesheet can know it. So nothing here declares a height or a
+   ceiling: `max-height` was the content-sized bug above, and a `height` would
+   be a second opinion about a number the drag already owns. */
 .answer-pane {
   position: absolute;
   top: 0;
@@ -1055,6 +1063,52 @@ input[type="checkbox"] {
    BESIDE text, and here there is no text for it to sit beside. */
 .answer-pane-waiting-label {
   color: var(--text-secondary);
+}
+
+/* How many answers have never been played. A line of TEXT under the state's
+   name, not a number painted on the ornament: the wave is `aria-hidden`, so a
+   count drawn there would exist for sighted readers alone.
+
+   Dimmer and smaller than the label, because it is the second thing the state
+   says rather than a badge competing with the first — and left in normal flow
+   for the same reason, so nothing here may hide it. `--speech-seg` on the ink
+   ties it to the crests above it: the count is about the same backlog the wave
+   is running for. */
+.answer-pane-waiting-count {
+  color: color-mix(in srgb, var(--speech-seg) 75%, var(--text-muted));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* The wave with the body taken away from it.
+
+   Stepping back through the transport pins the answer on screen, and the agent
+   may still be working — so the wave does not disappear, it shrinks onto this
+   button and goes on running. A bare, borderless control: everything that says
+   "this is live" is already inside it, and a chrome box around the crests would
+   read as a second thing rather than as the same thing, smaller.
+
+   It spans both of the body's grid columns, like the waiting state it came
+   from, and sits above the answer it is holding — the position the wave would
+   have had if it still had the body. */
+.answer-pane-waiting-next {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 6px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.answer-pane-waiting-next:hover .answer-pane-halo,
+.answer-pane-waiting-next:focus-visible .answer-pane-halo {
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--speech-seg) 22%, transparent),
+    transparent
+  );
 }
 
 /* The halo: the ground the wave sits on, not a thing of its own. A closest-side
@@ -1166,7 +1220,8 @@ input[type="checkbox"] {
    specificity rather than on source order, and `*` so a part of the ornament
    added later is stopped without anybody remembering to come back here. */
 @media (prefers-reduced-motion: reduce) {
-  .answer-pane-waiting .answer-pane-wave * {
+  .answer-pane-waiting .answer-pane-wave *,
+  .answer-pane-waiting-next .answer-pane-wave * {
     animation: none;
   }
 }
@@ -1299,6 +1354,47 @@ input[type="checkbox"] {
   height: 2px;
   border-radius: 1px;
   background: var(--border-strong);
+}
+
+/* The PANE's drag handle — the last row of the column, dragged up to uncover
+   the terminal the pane covers. Its own 7px row rather than a rail floating on
+   the pane's bottom edge, for the reason the composer's grip is a row: an
+   absolutely positioned rail there would sit on the last 8px of whatever row
+   ended up beneath it — the key hint, or the field itself when the composer is
+   switched off. It wears the grip's own bar, because it is the same gesture in
+   the same place on a different box, and a second bar drawn differently would
+   read as a different control.
+
+   Positioned, because the `PaneResizer` inside it is `absolute bottom-0`. */
+.answer-pane-drag {
+  position: relative;
+  flex: none;
+  height: 7px;
+  display: grid;
+  place-items: center;
+  cursor: ns-resize;
+  background: #17171d;
+}
+
+/* A submit the socket refused, said where the reply is: directly under the
+   field that still holds it, in the same monospace furniture the hint uses so
+   it reads as part of the composer rather than as something modal.
+
+   `--red` on the ink and nothing else — no panel, no border, no icon. The row
+   lasts only until the user types again, and a box drawn around it would keep
+   claiming space in a pane whose whole job is to show an answer. The sentence
+   itself carries the message for anyone the colour does not reach, and
+   `role="alert"` on the element carries it to a screen reader. On every
+   viewport, unlike the hint above it: a phone is exactly where a socket
+   drops. */
+.answer-pane-send-failed {
+  flex: none;
+  padding: 0 13px 7px;
+  background: #17171d;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--red);
 }
 
 /* What the three keys do, in the pane's dimmest ink. Desktop only — two of

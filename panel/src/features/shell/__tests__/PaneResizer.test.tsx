@@ -62,6 +62,21 @@ function Row() {
   );
 }
 
+/**
+ * The other side of the same axis: a rail on a row's BOTTOM edge, which is
+ * what the answer pane hangs off. Horizontal like the composer's, and driven
+ * by the same hook — the difference is only which end of the row it sits on
+ * and, because of that, which way a drag has to travel to shorten it.
+ */
+function BottomRow() {
+  const { height, handleProps } = useResizableRow(rowHeight, ROW_BOUNDS);
+  return (
+    <section data-testid="row" style={{ height: `${height}px` }}>
+      <PaneResizer name="pane" edge="bottom" label="Resize the answer pane" {...handleProps} />
+    </section>
+  );
+}
+
 const rail = () => screen.getByTestId("pane-resize-files");
 
 describe("PaneResizer", () => {
@@ -149,6 +164,57 @@ describe("PaneResizer", () => {
     fireEvent.pointerDown(handle, { pointerId: 1, clientY: 500 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientY: 460 });
     expect(screen.getByTestId("row")).toHaveStyle({ height: "180px" });
+  });
+
+  it("renders a horizontal rail for the bottom edge", () => {
+    render(<BottomRow />);
+    const handle = screen.getByTestId("pane-resize-pane");
+
+    // The axis a screen reader is told about is the one the bar lies along,
+    // which is the same for both ends of a row — `top` and `bottom` are one
+    // question (horizontal or vertical) and `data-edge` is the other (which
+    // end), and it is `data-edge` that `growDirection` reads back.
+    expect(handle).toHaveAttribute("aria-orientation", "horizontal");
+    expect(handle).toHaveAttribute("data-edge", "bottom");
+    expect(handle).toHaveAttribute("aria-label", "Resize the answer pane");
+    expect(handle).toHaveAttribute("tabindex", "0");
+    expect(handle).toHaveAttribute("aria-valuenow", "140");
+    expect(handle).toHaveAttribute("aria-valuemin", "96");
+    expect(handle).toHaveAttribute("aria-valuemax", "320");
+
+    // A bar across the row, as on the top edge...
+    expect(handle.className).toContain("cursor-row-resize");
+    expect(handle.className).toContain("w-full");
+    expect(handle.className).toContain("h-2");
+    expect(handle.className).not.toContain("cursor-col-resize");
+    // ...and pinned to the end of the row it actually borders. A rail that
+    // announced `bottom` and rendered at `top-0` would drag the right way and
+    // sit in the wrong place, which is the one failure the geometry above
+    // cannot catch on its own.
+    expect(handle.className).toContain("bottom-0");
+    expect(handle.className).not.toContain("top-0");
+  });
+
+  it("shrinks the pane when a bottom-edge drag moves the pointer up", () => {
+    render(<BottomRow />);
+    const handle = screen.getByTestId("pane-resize-pane");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 500 });
+    // Up the screen is a falling clientY, and on the bottom edge that takes
+    // the row's own bottom with it: 40px up is 40px shorter.
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 460 });
+    expect(screen.getByTestId("row")).toHaveStyle({ height: "100px" });
+
+    // ...and downward grows it, which is the half a sign-agnostic
+    // implementation would still get right by accident.
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 540 });
+    expect(screen.getByTestId("row")).toHaveStyle({ height: "180px" });
+
+    // Clamped at the floor rather than following the pointer past it.
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 200 });
+    expect(screen.getByTestId("row")).toHaveStyle({ height: "96px" });
+
+    fireEvent.pointerUp(handle, { pointerId: 1, clientY: 200 });
   });
 
   it("no handle is rendered on a mobile viewport", () => {

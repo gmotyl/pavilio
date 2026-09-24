@@ -17,6 +17,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
+import { useIsMobile } from "./useIsMobile";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
 import { isPreferenceScope } from "../../preferences/types";
@@ -42,6 +43,7 @@ import {
   type TerminalFocusEventDetail,
 } from "../terminal/useTerminalSessions";
 import { createTerminalSession } from "../terminal/createTerminalSession";
+import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 
 /**
  * `leading` is the slot the corner hamburger occupies — passed to whichever
@@ -92,14 +94,24 @@ export default function LeftSidebar() {
   const projects = useProjects();
   const { isFavorite, toggle } = useFavorites();
   const { sessions } = useAllTerminalSessions();
+  const isMobile = useIsMobile();
   const { archive, archivedNames } = useArchivedProjects();
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
   const [lanAccessOpen, setLanAccessOpen] = useState(false);
   const [autoSyncOpen, setAutoSyncOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const currentProject =
-    location.pathname.match(/^\/project\/([^/]+)/)?.[1] ?? null;
+  /**
+   * Which project the user is standing in, DECODED — because everything it is
+   * measured against is decoded: the `project.name` the rows carry, the
+   * `detail.project` a focus broadcast names, and the preference scope
+   * `readStoredFocus` looks under. Reading the raw segment out of the pathname
+   * left this holding `my%20proj` while every one of those held `my proj`, so
+   * for a name that needs encoding no session row could light up and the stored
+   * focus was read from a scope nothing ever writes. `matchProjectFromPath` is
+   * the same decode the active-row highlight below now uses.
+   */
+  const currentProject = matchProjectFromPath(location.pathname)?.name ?? null;
 
   // Focused session id (for highlighting individual terminals)
   const [focusedId, setFocusedId] = useState<string | null>(() =>
@@ -182,7 +194,10 @@ export default function LeftSidebar() {
       if (created) {
         dispatchTerminalFocus(project, created.id);
         setExpanded(project, true);
-        navigate(`/project/${project}/iterm`);
+        // Encoded for the same reason `projectHref` encodes: this is the same
+        // `/project/<name>/iterm` destination, and a `#` left raw would end the
+        // path at the fragment and hand the router a truncated project name.
+        navigate(`/project/${encodeURIComponent(project)}/iterm`);
       } else {
         setCreateError("Could not create terminal");
         setTimeout(() => setCreateError(null), 4000);
@@ -242,13 +257,67 @@ export default function LeftSidebar() {
     return m;
   }, [sessions]);
 
+  /**
+   * Where tapping a project goes — from its NAME or from any of its session
+   * rows. One function for both, because the reason below is about what is
+   * worth arriving at on a phone and says nothing about which row the thumb
+   * landed on; two copies of it would be one edit away from disagreeing, and
+   * did disagree until the session rows were brought in with it.
+   *
+   * On a desktop it is the bare project route, which `ProjectRedirect` resolves
+   * through the Last-open-view bookmark — the user is returned to whichever view
+   * they left the project in. A phone has one view worth arriving at, and it is
+   * the terminal: the sections are reading surfaces opened deliberately, while
+   * the reason to pick the phone up at all is an agent waiting in a session. So
+   * the tap is sent straight there, over the top of whatever the bookmark holds.
+   *
+   * This overrides the DESTINATION and nothing else. The bookmark goes on being
+   * written by the page the user lands on (`useLastPath`, mounted in
+   * `ProjectView`), so a phone visit still records where they were, and the bare
+   * route still restores it on their desktop. Suppressing the write instead would
+   * be the easy mistake here: it looks the same from the phone and quietly loses
+   * the desktop's place.
+   *
+   * Derived from the live `useIsMobile()` rather than a `matchMedia` read taken
+   * once at mount, so a rotation moves the destination with it — and never
+   * stored, because being on a phone is a fact about the viewport, not a
+   * preference the user expressed.
+   *
+   * The name is percent-encoded, matching `QuickTerminalModal`, which builds
+   * this same `/project/<name>/iterm` target. A project may be named with a
+   * space or a `#`, and unencoded those do not survive the trip: a `#` starts
+   * the fragment, so the route would see a truncated name. Encoding is safe on
+   * the far side — `matchProjectFromPath` decodes the segment itself, and the
+   * router hands `useParams` the decoded form, which is what every preference
+   * scope downstream (the bookmark, the expand state) is keyed on.
+   */
+  const projectHref = (name: string) =>
+    isMobile
+      ? `/project/${encodeURIComponent(name)}/iterm`
+      : `/project/${encodeURIComponent(name)}`;
+
   const renderProjectRow = (project: { name: string }) => {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
     const projectSessionIds = projectSessions.map((s) => s.id);
     const expandedNow = isExpanded(project.name);
+    /**
+     * Read the open path the way the router reads it, rather than rebuilding
+     * this project's path and comparing the two strings. The rebuilt form has
+     * to agree with whatever spelling the href happens to use, and it stopped
+     * agreeing the moment the href was percent-encoded: a project named
+     * `my proj` is standing at `/project/my%20proj`, which no raw comparison
+     * against its name will ever match, and the highlight silently went out for
+     * every name with a space, a `+` or a `%` in it. `matchProjectFromPath`
+     * decodes the first segment once and is already the file's answer to "which
+     * project is this path", so there is one reading of it instead of two.
+     *
+     * It matches a prefix of the path rather than the whole of it, which is
+     * what keeps a deeper route under the project — its terminals, its notes —
+     * highlighting the row, while stopping at the segment boundary so a
+     * different project whose name merely starts the same never does.
+     */
     const isCurrent =
-      location.pathname === `/project/${project.name}` ||
-      location.pathname.startsWith(`/project/${project.name}/`);
+      matchProjectFromPath(location.pathname)?.name === project.name;
 
     const fav = isFavorite(project.name);
 
@@ -286,7 +355,7 @@ export default function LeftSidebar() {
             </span>
           )}
           <NavLink
-            to={`/project/${project.name}`}
+            to={projectHref(project.name)}
             className="flex-1 truncate text-[13px] py-0.5"
             style={({ isActive }) => ({
               color:
@@ -372,11 +441,15 @@ export default function LeftSidebar() {
                       // listener above for why that order is load-bearing.
                       writeTerminalFocus(s.project, s.id);
                       dispatchTerminalFocus(s.project, s.id);
-                      // Bare project route — same as the project-name link.
-                      // ProjectRedirect resolves the destination via the
+                      // The same destination as the project-name link, from
+                      // the same function: the bare project route on a
+                      // desktop, where `ProjectRedirect` resolves it via the
                       // Last-open-view bookmark (or falls through to the
-                      // default section when there is none).
-                      navigate(`/project/${s.project}`);
+                      // default section when there is none), and the terminal
+                      // tab on a phone. Tapping a SESSION and landing on notes
+                      // was the sharpest form of the problem the phone rule
+                      // exists to solve.
+                      navigate(projectHref(s.project));
                     }}
                     className="w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left"
                     style={{

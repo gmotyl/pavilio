@@ -46,6 +46,15 @@ vi.mock("../terminalInstances", () => {
       };
     },
     releaseTerminal: () => {},
+    // The attention LED's dismiss. Present even where no test here lights
+    // one: the arrival rule short-circuits on a session that is not on
+    // `attention`, so a factory without this export passes for exactly as long
+    // as nobody writes a test that does — and then fails as an UNHANDLED error
+    // beside a green result, which is the worst shape a failure can take. See
+    // `attentionDismiss.test.tsx`, which is where the rule is actually
+    // asserted, and `autoplay.integration.test.tsx`, which has always carried
+    // it.
+    sendDismiss: () => {},
     destroyTerminal: () => {},
     hasExited: () => false,
     reconnectSession: () => {},
@@ -102,6 +111,10 @@ const MARKDOWN = "# Deploy plan\n\nThe first paragraph explains why the deploy w
 const utterance: Utterance = { id: "u-1", sessionId: "cell-a", text: MARKDOWN, at: 1 };
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(): GridSpeech {
   const queue = utteranceQueueReducer(emptyUtteranceQueue, {
     type: "arrived",
@@ -112,6 +125,7 @@ function makeSpeech(): GridSpeech {
   return {
     stateFor: () => "ready",
     queueFor: () => queue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
     subscribeProgress: () => () => {},
     progressFor: () => null,
@@ -123,6 +137,7 @@ function makeSpeech(): GridSpeech {
     onStop: vi.fn(),
     onPrevious: vi.fn(),
     onNext: vi.fn(),
+    onNewestAnswer: vi.fn(),
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),

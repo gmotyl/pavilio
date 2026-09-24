@@ -44,7 +44,7 @@
  * the day the terminal is mounted somewhere new.
  */
 import { useEffect, useRef } from "react";
-import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
+import type { MediaSessionTransportTarget, TransportArrival } from "./useMediaSessionTransport";
 
 /** What one of the three combos means. */
 export type SpeechTransportKey = "toggle" | "previous" | "next";
@@ -131,13 +131,20 @@ function isXtermHelperTextarea(element: Element): boolean {
  * Mount once, with the host. See `SpeechHostProvider`.
  *
  * Returns nothing: its only effect is one `window` listener and the calls it
- * makes on the target it was handed.
+ * makes on the target and the arrival it was handed.
  */
-export function useSpeechKeys(target: MediaSessionTransportTarget): void {
+export function useSpeechKeys(
+  target: MediaSessionTransportTarget,
+  onArrival: TransportArrival,
+): void {
   const targetRef = useRef(target);
+  // Through a ref for the same reason the target is: the listener is attached
+  // once, so a closure over the first `onArrival` would outlive it.
+  const arrivalRef = useRef(onArrival);
 
   useEffect(() => {
     targetRef.current = target;
+    arrivalRef.current = onArrival;
   });
 
   useEffect(() => {
@@ -158,18 +165,31 @@ export function useSpeechKeys(target: MediaSessionTransportTarget): void {
      * nothing running the armed cell starts. Resume rather than `onSpeak`: the
      * one thing the user pressing play on a paused answer cannot have meant is
      * to hear the unit from its start again.
+     *
+     * Every branch raises {@link TransportArrival} first, because a person
+     * pressing this chord is a person at that cell however the chord resolves —
+     * the panel's rule for what that means is
+     * `features/terminal/attentionArrival`, and this hook deliberately does not
+     * know it. It is raised INSIDE each branch rather than once at the top: at
+     * the top there is no session yet, only three candidates, and it is the
+     * resolution that names the cell the user arrived at.
      */
     const toggle = (): void => {
       const current = targetRef.current;
       if (current.pausedSessionId) {
+        arrivalRef.current(current.pausedSessionId);
         current.onResume(current.pausedSessionId);
         return;
       }
       if (current.speakingSessionId) {
+        arrivalRef.current(current.speakingSessionId);
         current.onPause(current.speakingSessionId);
         return;
       }
-      if (current.armedSessionId) current.onSpeak(current.armedSessionId);
+      if (current.armedSessionId) {
+        arrivalRef.current(current.armedSessionId);
+        current.onSpeak(current.armedSessionId);
+      }
     };
 
     const onKeyDown = (event: KeyboardEvent): void => {

@@ -14,6 +14,7 @@ import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ProjectColorPicker } from "./ProjectColorPicker";
 import { CellSpeakButton } from "./CellSpeakButton";
+import { dismissAttentionOnArrival } from "./attentionArrival";
 import { CellSpeechControlsToggle } from "./CellSpeechControlsToggle";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
@@ -511,12 +512,35 @@ function TerminalCell({
               host is passed; the disclosure beside it never needed one — it
               shows and hides the bar and reports nothing about arming, so the
               armed session is not among its props. */}
+          {/*
+              The arrival is wired HERE rather than inside `CellSpeakButton`,
+              which is presentational by design and imports nothing that talks
+              to a socket — see its own header, and `CellSpeechControlsToggle`,
+              which makes the same promise. This wrapper is already where the
+              header's intents are joined to the panel, so it is also where a
+              press is joined to "the user has arrived at this cell".
+
+              All three intents, not only `onSpeak`: they are one button whose
+              meaning is decided by where the run happens to be, and the rule is
+              keyed on the press rather than on the direction. See
+              `attentionArrival`, which is the same rule the bar's play control
+              and the keyboard and OS transports call.
+          */}
           <CellSpeakButton
             sessionId={session.id}
             state={speech?.stateFor(session.id) ?? "empty"}
-            onSpeak={(id) => speech?.onSpeak(id)}
-            onPause={(id) => speech?.onPause(id)}
-            onResume={(id) => speech?.onResume(id)}
+            onSpeak={(id) => {
+              dismissAttentionOnArrival(id);
+              speech?.onSpeak(id);
+            }}
+            onPause={(id) => {
+              dismissAttentionOnArrival(id);
+              speech?.onPause(id);
+            }}
+            onResume={(id) => {
+              dismissAttentionOnArrival(id);
+              speech?.onResume(id);
+            }}
           />
           <CellSpeechControlsToggle
             sessionId={session.id}

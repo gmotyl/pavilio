@@ -74,6 +74,15 @@ vi.mock("../terminalInstances", () => {
       };
     },
     releaseTerminal: () => {},
+    // The attention LED's dismiss. Present even where no test here lights
+    // one: the arrival rule short-circuits on a session that is not on
+    // `attention`, so a factory without this export passes for exactly as long
+    // as nobody writes a test that does — and then fails as an UNHANDLED error
+    // beside a green result, which is the worst shape a failure can take. See
+    // `attentionDismiss.test.tsx`, which is where the rule is actually
+    // asserted, and `autoplay.integration.test.tsx`, which has always carried
+    // it.
+    sendDismiss: () => {},
     THEME: new Proxy({}, { get: () => "#000000" }),
     followBottomAcrossResize: (_terminal: unknown, fit: () => void) => fit(),
   };
@@ -96,7 +105,7 @@ vi.mock("../../speech/synth", async (importOriginal) => ({
 
 // Imported after the mocks so it picks them up.
 const { TerminalView } = await import("../TerminalView");
-const { forgetAnswerPane } = await import("../answerPaneState");
+const { forgetAnswerPane, markSeenUtterances } = await import("../answerPaneState");
 
 const resizeFrames = (): string[] => term.sent.filter((frame) => frame.includes('"resize"'));
 
@@ -131,6 +140,10 @@ type Host = GridSpeech & {
   next: () => void;
 };
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(): Host {
   let queue: UtteranceQueue = utteranceQueueReducer(emptyUtteranceQueue, {
     type: "arrived",
@@ -154,6 +167,7 @@ function makeSpeech(): Host {
     },
     stateFor: () => "ready",
     queueFor: () => queue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
     subscribeProgress: () => () => {},
     progressFor: () => null,
@@ -165,6 +179,12 @@ function makeSpeech(): Host {
     onStop: vi.fn(),
     onPrevious: vi.fn(),
     onNext: vi.fn(),
+    // The real host dispatches `newest` and speaks nothing, so this one moves
+    // the boxed queue the same way: a stub that did nothing would let the cell
+    // pass a test about the body following an arrival.
+    onNewestAnswer: () => {
+      queue = utteranceQueueReducer(queue, { type: "newest" });
+    },
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
@@ -536,6 +556,36 @@ describe("TerminalView opens the pane on a new answer", () => {
     expect(pane()).toBeNull();
     view.rerender(cell(speech));
     expect(pane()).toBeNull();
+  });
+
+  /**
+   * The seen set is what tells an arrival from a cursor move, and the view
+   * fills it from the whole queue. With a one-step history "the whole queue"
+   * was one slot plus the cursor plus what waits; with a list it is a list,
+   * and an id list built by nesting the array into it records `undefined`
+   * where five answers should have been.
+   *
+   * Nothing about that is visible in the pane on the way IN — every genuine
+   * arrival still opens it — so the probe is the store itself: an id the view
+   * recorded is reported as old news the next time it is offered, and an id it
+   * missed comes back as an arrival.
+   */
+  it("marks every answer in the history as seen", async () => {
+    storeDefault(true);
+    const speech = makeSpeech();
+    // Three superseded answers behind the cursor, which is four utterances the
+    // cell has shown and exactly what the mount has to seed itself from.
+    speech.arrive("u-2");
+    speech.arrive("u-3");
+    speech.arrive("u-4");
+    render(cell(speech));
+    await settleTerminal();
+
+    // Every one of them is old news, the four-deep history included. Offering
+    // them back reports no arrival at all.
+    expect(markSeenUtterances("cell-a", ["u-1", "u-2", "u-3", "u-4"])).toEqual([]);
+    // The control: an id the cell has genuinely never shown is still news.
+    expect(markSeenUtterances("cell-a", ["u-9"])).toEqual(["u-9"]);
   });
 
   it("previous and next open nothing", async () => {

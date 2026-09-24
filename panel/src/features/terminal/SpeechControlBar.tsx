@@ -2,8 +2,17 @@ import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { LauncherPills } from "./LauncherPills";
-import { noteTransport, noteUtterance, useAnswerWaiting } from "./answerWaiting";
+import {
+  holdAnswer,
+  noteNewestAnswer,
+  noteSpeaking,
+  noteTransport,
+  noteUtterance,
+  releaseAnswer,
+  useAnswerWaiting,
+} from "./answerWaiting";
 import { segmentStateFor, type SegmentState } from "./segmentState";
+import { dismissAttentionOnArrival } from "./attentionArrival";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
@@ -26,8 +35,11 @@ export interface SpeechControlBarProps {
    * row's contents on a silent cell, and a host that forgot to pass this would
    * render pills that look live and do nothing when clicked — a failure no
    * test of the bar alone can see. A no-op default would buy exactly that.
+   *
+   * It reports whether the frame reached an OPEN socket, which is how a pill
+   * on a dead cell says so instead of flashing and doing nothing.
    */
-  send: (data: string) => void;
+  send: (data: string) => boolean;
 }
 
 /**
@@ -261,13 +273,76 @@ export function SpeechControlBar({
     noteUtterance(sessionId, answerId);
   }, [sessionId, answerId]);
 
+  /**
+   * The newest answer the cell HOLDS — not the one under the cursor.
+   *
+   * `queue.current?.id` alone would be wrong, and wrong in exactly the case
+   * the hold exists for: an answer arriving while the voice is reading takes
+   * the reducer's `speaking: true` arm, which appends to `pending` and leaves
+   * `current` where it was. A listener who stepped back to re-read while the
+   * agent was still talking would never be told the answer landed.
+   *
+   * `pending` is oldest-first, so its LAST entry is the newest thing the cell
+   * has been given.
+   */
+  const newestAnswerId = queue.pending.at(-1)?.id ?? queue.current?.id ?? null;
+
+  // The arrival, pushed on every queue change. `answerWaiting` absorbs the
+  // first push per session as SEEDING — an entry that has never been told
+  // where the cell stands cannot tell an arrival from a starting point — so
+  // there is nothing to seed by hand here; there is only the duty to push
+  // every time.
+  //
+  // `true` back means that arrival released a hold, and the cursor is then
+  // ours to move: the store owns the hold, this row owns the cursor, and
+  // neither reaches into the other. Declared BEFORE the speaking effect below
+  // so the session's entry exists by the time that one pushes into it.
+  useEffect(() => {
+    if (noteNewestAnswer(sessionId, newestAnswerId)) speech.onNewestAnswer(sessionId);
+  }, [sessionId, newestAnswerId, speech]);
+
+  /**
+   * Whether this cell's voice is reading — the one fact `answerWaiting` needs
+   * and may not go and get (see its header: every arrow into that module
+   * points the same way).
+   *
+   * `speaking` and `stalled` both count. A stalled run is a run the listener
+   * is inside: more of the same answer is coming, the pause is still theirs to
+   * press, and an agent going busy behind it must not pull the text out from
+   * under the sentence. `paused` does NOT count — a held run is not
+   * mid-sentence, so there is nothing for the handover to be patient about.
+   */
+  const voiceIsReading = state === "speaking" || state === "stalled";
+
+  // The DEPENDENCY is the predicate, not the state: `speaking → stalled` is
+  // the same answer to this question, and re-running the effect across it
+  // would push a `false` through the cleanup and drop a deferral that is still
+  // waiting on a sentence that has not finished.
+  useEffect(() => {
+    noteSpeaking(sessionId, voiceIsReading);
+    // A cell torn out of the grid mid-sentence — a layout change, a preset, a
+    // maximize — must not leave a `true` standing behind it: nothing would
+    // ever push the matching `false`, and every later handover for that
+    // session would defer against a playback no surface is watching.
+    return () => noteSpeaking(sessionId, false);
+  }, [sessionId, voiceIsReading]);
+
   const armed = speech.armedSessionId === sessionId;
   const intent = transportIntent(state);
   const weights = segmentWeights(units, durations);
   const total = weights.reduce((sum, weight) => sum + weight, 0);
 
-  const hasPrevious = queue.previous !== null && queue.cursor === "current";
-  const hasNext = queue.cursor === "previous" || queue.pending.length > 0;
+  // The transport's two ends, asked of the CURSOR rather than of the lists.
+  // While history was a single slot the question was "is the slot full, and
+  // has the cursor not already been spent on it"; now that it is a list there
+  // is only one question — does the cursor still have a step left to take —
+  // and it has to be the same question the reducer's own no-op guards ask. A
+  // rail that asks it any other way either offers a press that does nothing or
+  // refuses one that would have worked, and neither is visible to the type
+  // checker: `previous` is an array, so the old `!== null` half is true
+  // forever and would leave `hasPrevious` permanently reading `cursor === 0`.
+  const hasPrevious = queue.cursor < queue.previous.length;
+  const hasNext = queue.cursor > 0 || queue.pending.length > 0;
 
   const eyeLabel = `Answer, unit ${(progress?.unitIndex ?? 0) + 1} of ${units.length}`;
 
@@ -399,6 +474,10 @@ export function SpeechControlBar({
               disabled={!hasPrevious}
               onClick={() => {
                 noteTransport(sessionId);
+                // Stepping back is the user saying *I want the text*. Without
+                // the hold the pane would give it back for exactly as long as
+                // it took the agent's next activity broadcast to arrive.
+                holdAnswer(sessionId);
                 speech.onPrevious(sessionId);
               }}
             >
@@ -449,6 +528,20 @@ export function SpeechControlBar({
                 // to the text either way, because the user asked for the
                 // transport rather than for the wait.
                 noteTransport(sessionId);
+                // Reaching for the transport is reaching for THIS cell, so an
+                // attention LED lit for it has been answered. On the CLICK, and
+                // on every other gesture that works a transport — see
+                // `attentionArrival`, which is the one rule all of them share.
+                // What it is deliberately not on is a change of `state`: an
+                // autoplayed answer arrives that way and never as a press, and
+                // a reply that starts reading itself is the agent talking
+                // rather than the user arriving, so it must leave the notice
+                // standing.
+                //
+                // Above the intent branch, so a press of PAUSE dismisses too.
+                // This is one button whose meaning is decided by where the run
+                // is; the rule is keyed on the press.
+                dismissAttentionOnArrival(sessionId);
                 if (intent === "pause") speech.onPause(sessionId);
                 else if (intent === "resume") speech.onResume(sessionId);
                 else if (intent === "speak") speech.onSpeak(sessionId);
@@ -466,6 +559,8 @@ export function SpeechControlBar({
               disabled={!hasNext}
               onClick={() => {
                 noteTransport(sessionId);
+                // Forward is the user done with what they stepped back for.
+                releaseAnswer(sessionId);
                 speech.onNext(sessionId);
               }}
             >

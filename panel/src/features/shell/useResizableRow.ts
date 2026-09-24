@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MOBILE_QUERY } from "../../lib/breakpoints";
-import { usePreference } from "../../preferences/usePreference";
+import { useScopedPreference } from "../../preferences/usePreference";
 import type { PreferenceDef } from "../../preferences/types";
 import type { PaneResizerProps } from "./useResizablePane";
 
@@ -55,6 +55,12 @@ function clamp(height: number, min: number, max: number): number {
  * `data-edge`. A rail on the row's top edge grows it UPWARD — and up the screen
  * is a falling clientY, hence -1. The edge is a property of the rail, not of
  * the hook's arguments, so the element carrying it is the honest place to ask.
+ *
+ * A rail on the row's BOTTOM edge needs no arm of its own: it grows the row
+ * downward, which is a rising clientY, which is what the default 1 already
+ * says. The answer pane hangs off such a rail and drags UP to shorten itself —
+ * a falling clientY times 1 is a falling height — so the branch this function
+ * does not have is the branch that would be wrong.
  */
 function growDirection(el: EventTarget | null): 1 | -1 {
   return (el as HTMLElement | null)?.dataset?.edge === "top" ? -1 : 1;
@@ -69,9 +75,25 @@ interface Drag {
 export function useResizableRow(
   def: PreferenceDef<number>,
   bounds: RowBounds,
+  /**
+   * The scope the height is remembered under — a project name for a
+   * `project`-scoped declaration, and nothing at all for a `global` one. Which
+   * scope a row's height belongs to is a fact about the declaration, and the
+   * caller is what knows the argument that declaration needs.
+   *
+   * `null` is the third answer, and a real one: "I looked, and there is no
+   * scope". A caller whose scope is discovered rather than known — a project
+   * looked up from a session id, say — can be asked for a height before the
+   * lookup can answer. It says so with `null` rather than with a stand-in name,
+   * and `useScopedPreference` then reads the declared default and persists
+   * nothing while the row still drags. The hook needs no vocabulary of its own
+   * for whatever the caller could not find, which is why this is a `null` and
+   * not somebody's placeholder string.
+   */
+  scopeArg?: string | null,
 ): ResizableRow {
   const { min, max, step } = bounds;
-  const [stored, setStored] = usePreference(def);
+  const [stored, setStored] = useScopedPreference(def, scopeArg);
   /**
    * The height the pointer is currently proposing, or null when no drag is in
    * flight. The row follows the pointer from here so that the preference is

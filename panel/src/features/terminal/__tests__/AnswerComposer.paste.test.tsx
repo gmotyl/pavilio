@@ -22,7 +22,9 @@ import { __resetPtySubmitForTests } from "../ptySubmit";
 /** What the server answers with — the same shape `uploadPastedImage` reads. */
 const SAVED = "/tmp/pavilio-pastes/paste-1.png";
 
-const send = vi.fn();
+/** A live socket: the write landed. `send` reports delivery now, and a stub
+ *  that returned nothing would read as a socket that is not OPEN. */
+const send = vi.fn((_data: string) => true);
 /** The pane's handover. Not this file's subject — the pane's own suites pin it. */
 const onSubmitted = vi.fn();
 const fetchFn = vi.fn();

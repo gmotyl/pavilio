@@ -44,6 +44,65 @@
  * held back, and it is written only once the return before it has gone out.
  * Per session, because two cells are two PTYs and neither should wait on the
  * other.
+ *
+ * ## Why a submit can fail, and what failing means here
+ *
+ * `send` reports whether the frame reached an OPEN socket. It used to report
+ * nothing at all, which is how a reply typed into the answer form on a dead
+ * socket vanished: the body was dropped in silence, this module believed it had
+ * gone and scheduled the return, and the composer cleared. So a refusal is
+ * propagated to whoever asked for the submit, through {@link SubmitFailure},
+ * and the two halves are told apart because they mean opposite things to the
+ * caller. A refused BODY means nothing at all reached the agent — the text is
+ * still only in the browser, and the composer must keep it. A refused RETURN
+ * means the body is sitting in the TUI's prompt unsubmitted — the text exists
+ * on the far side, so putting it back in the composer would make two copies of
+ * one reply, and what the user needs is to be told the line never ran.
+ *
+ * Delivery is reported for the same reason refusal is. A caller that moves the
+ * UI on — the answer pane into its waiting state, the launcher row from its
+ * pills to `start` — must do it where the body is actually written, and for a
+ * submit held behind another that is a gap after the click that asked for it.
+ * So the two are one report with two halves ({@link SubmitReport}) rather than
+ * a refusal channel beside a return value nobody could trust.
+ *
+ * Nothing is queued for a retry and nothing is re-attempted on reconnect. That
+ * was weighed and rejected: an answer that lands two minutes later replies to a
+ * prompt the agent has moved past, and a silent retry is a worse failure than
+ * an honest refusal.
+ *
+ * A refused body does not strand the submits behind it either. There is no
+ * return to wait for — nothing was written that a return could submit — so the
+ * queue advances immediately instead of after {@link SUBMIT_RETURN_MS}, and
+ * each entry is attempted and reports its own refusal. Dropping the rest of the
+ * queue on the floor would put this module straight back in the business of
+ * losing text without saying so.
+ *
+ * ## Why the bookkeeping sits in a `finally`
+ *
+ * Every report raised here — the delivery, either refusal — is a call into code
+ * this module does not own and cannot vet. The answer composer hands over the
+ * pane's move into its waiting state, the launcher row hands over a store
+ * notification that reaches every subscriber of it, and any of that is entitled
+ * to throw. What must not follow from a caller throwing is that the queue is
+ * left mid-submit. A session's entry in {@link queues} IS its busy flag, so an
+ * entry left standing with no return scheduled and no {@link advance} to come
+ * is a cell whose composer and launcher pills are dead until the page is
+ * reloaded: every later submit for it is pushed onto an array nothing will ever
+ * drain. That invariant belongs to the queue and must not be contingent on how
+ * a caller behaves, so each report is raised inside a `try` whose `finally`
+ * carries out the bookkeeping that was owed.
+ *
+ * On the delivered path that `finally` also owes the return itself. The body is
+ * already on the socket by the time the caller hears about it, so a caller that
+ * throws out of `onDelivered` must not take the return down with it — that
+ * would leave the user's line sitting in the TUI's prompt with nobody having
+ * pressed Enter on it, which is a worse outcome than the throw it came from.
+ *
+ * The exception is not swallowed: `finally` rather than `catch`, deliberately.
+ * The bookkeeping happens and the error goes on propagating to the caller, who
+ * is the one with the bug to fix. An error quietly eaten in the submit path is
+ * the very class of defect the rest of this file exists to undo.
  */
 
 /** The submitting return itself — the key the TUI runs a line on. */
@@ -58,8 +117,50 @@ const RETURN = "\r";
  */
 export const SUBMIT_RETURN_MS = 40;
 
-interface Submission {
-  readonly send: (data: string) => void;
+/**
+ * Which half of a submit was refused.
+ *
+ * `"body"` — nothing reached the PTY; the text is still only in the browser.
+ * `"return"` — the body landed and the return that runs it did not, so the
+ * text is in the TUI's prompt with nobody having pressed Enter on it.
+ */
+export type SubmitFailure = "body" | "return";
+
+/**
+ * How a submit reports what became of it.
+ *
+ * Both halves are optional and a submit raises at most one of them: a body
+ * either reaches the socket, in which case {@link SubmitReport.onDelivered} is
+ * raised there and then, or it does not, in which case
+ * {@link SubmitReport.onFailed} is. A refused RETURN comes after a delivered
+ * body and is the one case that raises both, in that order — which is the
+ * truth of it: the text IS on the far side, it simply has not been run.
+ *
+ * An object rather than two positional callbacks because the two mean opposite
+ * things and nothing in a call site reading `submitToPty(id, send, body, f, g)`
+ * would say which was which.
+ */
+export interface SubmitReport {
+  /**
+   * The body has just been written to an OPEN socket. Raised at most once, at
+   * the moment of that write — which is NOT necessarily the moment the submit
+   * was asked for: a submit made while the session already has one in flight
+   * is enqueued, and is written a gap later when its turn comes.
+   *
+   * That timing is the whole reason this is a callback rather than a boolean
+   * returned from {@link submitToPty}. A caller that ADVANCES on a submit —
+   * the answer pane's waiting state, the launcher row swapping its pills for
+   * `start` — has to advance on the write, and anything it could read
+   * synchronously on an enqueued submit would be a guess about a write that
+   * has not happened yet.
+   */
+  readonly onDelivered?: () => void;
+  /** Raised at most once, with the half that was refused. */
+  readonly onFailed?: (stage: SubmitFailure) => void;
+}
+
+interface Submission extends SubmitReport {
+  readonly send: (data: string) => boolean;
   readonly body: string;
 }
 
@@ -73,22 +174,61 @@ const queues = new Map<string, Submission[]>();
 /** The pending return per session, so a reset can drop it. */
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/**
+ * Hand the session's turn to whatever is queued behind the submit that has
+ * just finished — delivered or refused — and forget the session when nothing
+ * is.
+ */
+function advance(sessionId: string): void {
+  const queued = queues.get(sessionId);
+  const next = queued?.shift();
+  if (!next) {
+    queues.delete(sessionId);
+    return;
+  }
+  write(sessionId, next);
+}
+
 function write(sessionId: string, submission: Submission): void {
-  submission.send(submission.body);
-  timers.set(
-    sessionId,
-    setTimeout(() => {
-      timers.delete(sessionId);
-      submission.send(RETURN);
-      const queued = queues.get(sessionId);
-      const next = queued?.shift();
-      if (!next) {
-        queues.delete(sessionId);
-        return;
-      }
-      write(sessionId, next);
-    }, SUBMIT_RETURN_MS),
-  );
+  if (!submission.send(submission.body)) {
+    // Nothing was written, so there is nothing for a return to submit and no
+    // reason to make the next submit wait a gap that only exists to separate a
+    // paste from a keypress. The handing on of the session's turn is owed
+    // whatever the caller's own code does with the news — see "Why the
+    // bookkeeping sits in a `finally`" above.
+    try {
+      submission.onFailed?.("body");
+    } finally {
+      advance(sessionId);
+    }
+    return;
+  }
+  // The body is on the socket. Said HERE rather than where the submit was
+  // asked for, because this line is the first moment it is true — for an
+  // enqueued submit it runs a gap after the caller's own code did.
+  //
+  // The return is scheduled in the `finally` because from this line on the body
+  // exists on the far side: a caller that throws out of `onDelivered` must
+  // still get the keypress that runs the line, or its own bug becomes a reply
+  // left unsubmitted in the agent's prompt.
+  try {
+    submission.onDelivered?.();
+  } finally {
+    timers.set(
+      sessionId,
+      setTimeout(() => {
+        timers.delete(sessionId);
+        // The body is on the far side either way: a refused return leaves it in
+        // the prompt, which is a different failure from having sent nothing.
+        // The queue is handed on regardless, for the reason it is above.
+        try {
+          if (!submission.send(RETURN)) submission.onFailed?.("return");
+        } finally {
+          advance(sessionId);
+        }
+      }, SUBMIT_RETURN_MS),
+    );
+  }
 }
 
 /**
@@ -101,19 +241,27 @@ function write(sessionId: string, submission: Submission): void {
  *
  * `body` is written verbatim and is never trimmed or split: its newlines are
  * the user's, and a per-line write would submit each line separately.
+ *
+ * `report` is how a caller hears what became of the submit — see
+ * {@link SubmitReport}. Both halves are optional because not every caller has
+ * somewhere to say it, but a caller that CLEARS anything on submit needs
+ * `onFailed`, or it is clearing on the strength of a write that never
+ * happened, and a caller that ADVANCES on one needs `onDelivered`, for the
+ * same reason read the other way round.
  */
 export function submitToPty(
   sessionId: string,
-  send: (data: string) => void,
+  send: (data: string) => boolean,
   body: string,
+  report: SubmitReport = {},
 ): void {
   const queued = queues.get(sessionId);
   if (queued) {
-    queued.push({ send, body });
+    queued.push({ send, body, ...report });
     return;
   }
   queues.set(sessionId, []);
-  write(sessionId, { send, body });
+  write(sessionId, { send, body, ...report });
 }
 
 /** Drops every queued submit and the returns still scheduled for them. */

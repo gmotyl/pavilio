@@ -42,9 +42,23 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
-/** A launcher pill in this cell was clicked. Idempotent — the pills are gone
- *  from the row by the time a second click could land, but a re-launch by any
- *  other route must not notify for nothing. */
+/**
+ * A launcher pill in this cell was clicked.
+ *
+ * Idempotent, and it has to be rather than merely happening to be: the row
+ * swaps the pills for `start` only once a command has been DELIVERED, so while
+ * another submit is already in flight on this cell the launchers stay on the
+ * row for the whole of the queue gap and a second click does land there. What
+ * the guard buys is the notify, not the flag — a second call would re-run every
+ * `useLauncherUsed` subscriber to tell it a thing it already knows — and the
+ * same holds for a re-launch arriving by any other route.
+ *
+ * The second click's COMMAND is not stopped by this: it is queued behind the
+ * first and written when its turn comes, so two clicks in that gap send the
+ * launcher twice. Stopping that would need a "launch in flight" fact, distinct
+ * from this one and cleared when a submit is refused; it is deliberately not
+ * here.
+ */
 export function noteLauncherUsed(sessionId: string): void {
   if (used.has(sessionId)) return;
   used.add(sessionId);

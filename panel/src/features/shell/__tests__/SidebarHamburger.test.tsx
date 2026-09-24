@@ -242,13 +242,20 @@ describe("SidebarHamburger", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("an OPEN sidebar on mobile still reserves the corner", () => {
-    // What decides the reservation is whether the drawer's left edge clears
-    // the button, and only a sidebar that DISPLACES the drawer does that. On a
-    // phone `.sidebar` is a `position: fixed` overlay, so an open one displaces
-    // nothing and the drawer's header still starts at x=0 — asking "is the
-    // sidebar expanded" answers the wrong question there, and the overlap it
-    // leaves behind is invisible only because a z-40 overlay paints over it.
+  it("a phone has no drawer to reserve a corner for", () => {
+    // This used to assert the reservation itself on a phone: what decides it
+    // is whether the drawer's left edge clears the button, and only a sidebar
+    // that DISPLACES the drawer does that — on a phone `.sidebar` is a
+    // `position: fixed` overlay, so an open one displaces nothing and the
+    // drawer's header still started at x=0, overlapping the button invisibly
+    // under a z-40 overlay.
+    //
+    // The drawer now stands down on a narrow viewport altogether — the
+    // terminal has a tab of its own there and the drawer has nothing to sit
+    // beside — so the overlap that reservation existed to cover cannot arise.
+    // That is the stronger guarantee, and it is what is asserted here: not
+    // that the corner is reserved, but that there is no header row in the
+    // corner at all.
     installMatchMedia(true);
     setup({ drawer: "left", drawerWidth: 400 });
     // Open it whichever way this viewport starts — the claim is about an OPEN
@@ -256,9 +263,13 @@ describe("SidebarHamburger", () => {
     if (collapsed()) fireEvent.click(screen.getByTestId("sidebar-hamburger"));
     expect(collapsed()).toBe(false);
 
+    expect(screen.queryByTestId("terminal-drawer")).not.toBeInTheDocument();
     expect(
-      screen.getByTestId("terminal-drawer-hamburger-gap"),
-    ).toBeInTheDocument();
+      screen.queryByTestId("terminal-drawer-hamburger-gap"),
+    ).not.toBeInTheDocument();
+    // And the button it would have threatened is still where the stylesheet
+    // alone puts it, uncorrected.
+    expect(screen.getByTestId("sidebar-hamburger").getAttribute("style")).toBeNull();
   });
 
   it("the hamburger is clickable while the sidebar is collapsed", () => {

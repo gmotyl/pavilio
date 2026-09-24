@@ -119,9 +119,14 @@ const FIXTURES: Record<string, Fixture> = {
   "speech.voice": { value: "en-GB-RyanNeural" },
   "speech.answerPane.autoOpen": { value: true },
   "speech.answerComposer.on": { value: false },
-  // Non-portable, and the only entry on that tier naming no session: a pane
-  // measurement read against this window's viewport.
-  "speech.answerComposer.height": { value: 148 },
+  // Non-portable, and the two entries on that tier naming no session: the
+  // speech surface's measurements, each read against this window's viewport.
+  // `project`-scoped as well, so each needs a scope argument. The two axes are
+  // independent — the scope says how many of these a browser keeps, the
+  // portability flag says whether any of them travels — and a height that is
+  // remembered per project must still never leave this machine.
+  "speech.answerComposer.height": { value: 148, scopeArg: "pavilio" },
+  "speech.answerPane.height": { value: 412, scopeArg: "pavilio" },
   "speech.armedCell": { value: "sess-0b2e55d1" },
 
   // ── Navigation memory (the session tier) ─────────────────────────────────
@@ -217,9 +222,9 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(37);
+    expect(ALL_PREFERENCES.length).toBe(38);
     expect(portable.length).toBe(29);
-    expect(machineLocal.length).toBe(8);
+    expect(machineLocal.length).toBe(9);
     expect(sessionTier.length).toBe(3);
     // The portable arm of the union forbids `browserStore`; this says the
     // shipped table agrees with it, not merely that it type-checked.

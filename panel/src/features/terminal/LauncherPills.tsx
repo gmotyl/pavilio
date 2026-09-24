@@ -1,5 +1,6 @@
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { toast } from "../../lib/toast";
 import { noteLauncherUsed, useLauncherUsed } from "./launcherUse";
 import { submitToPty } from "./ptySubmit";
 import { getSessions } from "./sessionStore";
@@ -7,8 +8,12 @@ import { getSessions } from "./sessionStore";
 export interface LauncherPillsProps {
   /** Only for test ids — the pills act on the `send` they are handed. */
   sessionId: string;
-  /** The cell's PTY write, straight off its terminal instance. */
-  send: (data: string) => void;
+  /**
+   * The cell's PTY write, straight off its terminal instance. Reports whether
+   * the frame reached an OPEN socket — see {@link runCommand} for what a pill
+   * does when it did not.
+   */
+  send: (data: string) => boolean;
 }
 
 /** The workspace command that loads a project's context into a fresh agent. */
@@ -32,6 +37,50 @@ const SESSION_START = "pavilio-session-start";
 function sessionStartCommand(sessionId: string): string {
   const project = getSessions().find((session) => session.id === sessionId)?.project?.trim();
   return project ? `${SESSION_START} ${project}` : SESSION_START;
+}
+
+/**
+ * Run a pill's command on the cell, say so when the socket refused it, and
+ * tell the caller when it actually went.
+ *
+ * A pill has no field to keep anything in and nothing to put back: its command
+ * is a constant the user can press again. What it must not do is what the
+ * whole panel used to do on a dead socket, which is nothing at all — the pill
+ * flashed, the command was dropped in silence, and the user waited on an agent
+ * that had never been asked.
+ *
+ * The toast is where it is said because the pills have no surface of their own
+ * — they ARE the speech row, one line of buttons — and `ToastHost` is already
+ * the panel's way of reporting a background failure, in a live region a screen
+ * reader picks up. The answer composer says its own refusals in the pane
+ * instead, because there the news is about text the user can still see.
+ *
+ * `onDelivered` exists because a refusal is only half of what a caller needs.
+ * Marking the cell launched is a thing to do on the strength of a command that
+ * WENT, and `submitToPty` is the only place that knows whether one did — this
+ * function is simply where that report reaches the row. So the fact is handed
+ * on rather than left to the pill to ask the socket a second time, which would
+ * be the delivery check written twice and answered at the wrong moment. It is a callback and not a returned boolean because
+ * `submitToPty` writes a queued submit a gap later (see `SubmitReport` on
+ * `ptySubmit`): a value returned from the click would be a guess about a write
+ * that had not happened yet.
+ */
+function runCommand(
+  sessionId: string,
+  send: (data: string) => boolean,
+  command: string,
+  onDelivered?: () => void,
+): void {
+  submitToPty(sessionId, send, command, {
+    onDelivered,
+    onFailed: (stage) => {
+      toast.error(
+        stage === "body"
+          ? `Not sent — the terminal is not connected: ${command}`
+          : `Not submitted — the terminal disconnected: ${command}`,
+      );
+    },
+  });
 }
 
 /**
@@ -113,7 +162,7 @@ export function LauncherPills({ sessionId, send }: LauncherPillsProps) {
           // place this row has no live answer to compose it from.
           data-testid={`speech-bar-start-${sessionId}`}
           className="speech-bar-launch"
-          onClick={() => submitToPty(sessionId, send, sessionStartCommand(sessionId))}
+          onClick={() => runCommand(sessionId, send, sessionStartCommand(sessionId))}
         >
           start
         </button>
@@ -131,10 +180,14 @@ export function LauncherPills({ sessionId, send }: LauncherPillsProps) {
             title={entry.command}
             data-testid={`speech-bar-launch-${sessionId}-${index}`}
             className="speech-bar-launch"
-            onClick={() => {
-              submitToPty(sessionId, send, entry.command);
-              noteLauncherUsed(sessionId);
-            }}
+            // The row is marked launched by the command LANDING, not by the
+            // click. A refused pill leaves a cell with no agent in it, and a
+            // row that swapped anyway would claim one had started, take the
+            // other launchers away, and leave the user with a `start` pill for
+            // a session that does not exist.
+            onClick={() =>
+              runCommand(sessionId, send, entry.command, () => noteLauncherUsed(sessionId))
+            }
           >
             {entry.name}
           </button>

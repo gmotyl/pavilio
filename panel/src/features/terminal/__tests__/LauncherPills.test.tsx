@@ -61,12 +61,17 @@ interface SpeechOverrides {
   armedSessionId?: string | null;
 }
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
   const units = over.units ?? NO_UNITS;
 
   return {
     stateFor: () => over.state ?? "empty",
     queueFor: () => over.queue ?? emptyUtteranceQueue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
     subscribeProgress: () => () => {},
     progressFor: () => null,
@@ -78,6 +83,7 @@ function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
     onStop: vi.fn(),
     onPrevious: vi.fn(),
     onNext: vi.fn(),
+    onNewestAnswer: vi.fn(),
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
@@ -157,7 +163,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function bar(speech: GridSpeech, send: (data: string) => void, sessionId = "cell-a") {
+function bar(speech: GridSpeech, send: (data: string) => boolean, sessionId = "cell-a") {
   return (
     <SpeechControlBar
       sessionId={sessionId}
@@ -169,7 +175,7 @@ function bar(speech: GridSpeech, send: (data: string) => void, sessionId = "cell
   );
 }
 
-function renderBar(speech: GridSpeech, send: (data: string) => void) {
+function renderBar(speech: GridSpeech, send: (data: string) => boolean) {
   return render(bar(speech, send));
 }
 
@@ -191,7 +197,7 @@ describe("LauncherPills", () => {
 
   it("sends the command with a trailing return, once, on click", async () => {
     const user = userEvent.setup();
-    const send = vi.fn();
+    const send = vi.fn((_data: string) => true);
     renderBar(makeSpeech({ state: "empty" }), send);
 
     await user.click(screen.getByRole("button", { name: "claude" }));
@@ -203,7 +209,7 @@ describe("LauncherPills", () => {
 
   it("labels the pill with the name and sends the command", async () => {
     const user = userEvent.setup();
-    const send = vi.fn();
+    const send = vi.fn((_data: string) => true);
     writePreference(preferences.terminalLaunchers, [
       { name: "resume", command: "claude --resume" },
     ]);
@@ -221,7 +227,7 @@ describe("LauncherPills", () => {
   });
 
   it("swaps the pills for the transport once the cell has spoken", () => {
-    const send = vi.fn();
+    const send = vi.fn((_data: string) => true);
     const view = renderBar(makeSpeech({ state: "empty" }), send);
     expect(pillLabels()).toEqual(["claude", "codex", "opencode"]);
 
@@ -286,7 +292,7 @@ describe("LauncherPills", () => {
 
     it("replaces the launchers with a single start pill the moment one is clicked", async () => {
       const user = userEvent.setup();
-      const send = vi.fn();
+      const send = vi.fn((_data: string) => true);
       renderBar(makeSpeech({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
@@ -310,7 +316,7 @@ describe("LauncherPills", () => {
 
     it("sends the session-start command for the cell's own project", async () => {
       const user = userEvent.setup();
-      const send = vi.fn();
+      const send = vi.fn((_data: string) => true);
       await seedSessions([session("cell-b", "pavilio"), session("cell-a", "my-blog")]);
       renderBar(makeSpeech({ state: "empty" }), send);
 
@@ -327,7 +333,7 @@ describe("LauncherPills", () => {
 
     it("sends the bare command when the cell's project is unknown", async () => {
       const user = userEvent.setup();
-      const send = vi.fn();
+      const send = vi.fn((_data: string) => true);
       // Nothing seeded: the store has not loaded, which is the real case on a
       // fresh tab, and the session is simply not in the list.
       renderBar(makeSpeech({ state: "empty" }), send);
@@ -345,7 +351,7 @@ describe("LauncherPills", () => {
 
     it("sends the bare command when the session carries an empty project", async () => {
       const user = userEvent.setup();
-      const send = vi.fn();
+      const send = vi.fn((_data: string) => true);
       // A session with no project of its own — a quick terminal, say. The list
       // HAS loaded and the cell IS in it, so a lookup that only guarded
       // `undefined` would send a trailing separator with nothing after it.
@@ -362,7 +368,7 @@ describe("LauncherPills", () => {
 
     it("keeps the start pill live for a second press", async () => {
       const user = userEvent.setup();
-      const send = vi.fn();
+      const send = vi.fn((_data: string) => true);
       await seedSessions([session("cell-a", "pavilio")]);
       renderBar(makeSpeech({ state: "empty" }), send);
 
@@ -383,8 +389,8 @@ describe("LauncherPills", () => {
 
     it("leaves a second cell's launchers alone", async () => {
       const user = userEvent.setup();
-      const sendA = vi.fn();
-      const sendB = vi.fn();
+      const sendA = vi.fn((_data: string) => true);
+      const sendB = vi.fn((_data: string) => true);
       render(
         <>
           {bar(makeSpeech({ state: "empty" }), sendA, "cell-a")}

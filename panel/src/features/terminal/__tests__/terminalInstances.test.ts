@@ -132,6 +132,52 @@ describe("terminalInstances", () => {
     expect(createdSockets[0].url).toMatch(/\/ws\/terminal\/test-session$/);
   });
 
+  /**
+   * The write reports whether it landed.
+   *
+   * It used to take the `if` on a socket that was not OPEN and return normally
+   * — no value, no throw — so no caller could tell a delivered write from a
+   * dropped one, and the answer composer cleared a reply that never left the
+   * panel. The boolean is the whole of what a caller needs to stop doing that.
+   */
+  it("reports true for a frame it wrote to an open socket", async () => {
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+
+    expect(inst.send("ship it")).toBe(true);
+    expect(createdSockets[0].send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: "ship it" }),
+    );
+  });
+
+  it("reports false and writes nothing when the socket is not open", async () => {
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+    const socket = createdSockets[0];
+    socket.send.mockClear();
+    socket.readyState = 3; // CLOSED
+
+    expect(inst.send("ship it")).toBe(false);
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `sendDismiss` keeps its silence, deliberately. A dropped dismiss costs a
+   * notification LED that stays lit until the session's next frame; a dropped
+   * reply costs the reply. Widening the honest refusal to every writer on the
+   * socket is a different change from this one.
+   */
+  it("still drops a dismiss silently when the socket is not open", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+    const socket = createdSockets[0];
+    socket.send.mockClear();
+    socket.readyState = 3; // CLOSED
+
+    expect(() => mod.sendDismiss("test-session")).not.toThrow();
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
   it("reopen() tears down the previous ws and opens a fresh one", async () => {
     const mod = await import("../terminalInstances");
     const inst = mod.acquireTerminal("test-session");

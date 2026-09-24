@@ -74,6 +74,15 @@ vi.mock("../terminalInstances", () => {
       };
     },
     releaseTerminal: () => {},
+    // The attention LED's dismiss. Present even where no test here lights
+    // one: the arrival rule short-circuits on a session that is not on
+    // `attention`, so a factory without this export passes for exactly as long
+    // as nobody writes a test that does — and then fails as an UNHANDLED error
+    // beside a green result, which is the worst shape a failure can take. See
+    // `attentionDismiss.test.tsx`, which is where the rule is actually
+    // asserted, and `autoplay.integration.test.tsx`, which has always carried
+    // it.
+    sendDismiss: () => {},
     // `bufferSnapshot` reads the palette off this at module load.
     THEME: new Proxy({}, { get: () => "#000000" }),
     // The real one fits; keeping that faithful is the point of the mock.
@@ -138,6 +147,10 @@ const { TerminalView } = await import("../TerminalView");
 /** For tests that render the bar and never touch the eye. */
 const noop = (): void => {};
 
+/** A live socket: `send` reports delivery, and a stub that returned nothing
+ *  would read as a socket that is not OPEN. */
+const noSend = (): boolean => true;
+
 const resizeFrames = (): string[] => term.sent.filter((frame) => frame.includes('"resize"'));
 
 class StubResizeObserver {
@@ -181,6 +194,10 @@ interface SpeechOverrides {
  *  render loop, which is exactly what this caught the first time. */
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
   const durations = over.durations ?? NO_DURATIONS;
   const progress = over.progress ?? null;
@@ -189,6 +206,7 @@ function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
   return {
     stateFor: () => over.state ?? "empty",
     queueFor: () => over.queue ?? emptyUtteranceQueue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units_,
     // Nothing here moves, so the store never notifies: the snapshots below are
     // read once and stay put.
@@ -202,6 +220,7 @@ function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
     onStop: vi.fn(),
     onPrevious: vi.fn(),
     onNext: vi.fn(),
+    onNewestAnswer: vi.fn(),
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
@@ -358,7 +377,7 @@ describe("SpeechControlBar", () => {
         sessionId="cell-a"
         answerOpen={false}
         onToggleAnswer={noop}
-        send={noop}
+        send={noSend}
         speech={speech}
       />,
     );
@@ -376,7 +395,7 @@ describe("SpeechControlBar", () => {
         sessionId="cell-a"
         answerOpen
         onToggleAnswer={noop}
-        send={noop}
+        send={noSend}
         speech={speech}
       />,
     );
@@ -411,7 +430,7 @@ describe("SpeechControlBar", () => {
       durations: new Map<number, number>(),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
 
     expect(screen.getAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(3);
     // Widths seeded from `SpeechUnit.chars`: 100/300/100 of 500.
@@ -438,7 +457,7 @@ describe("SpeechControlBar", () => {
       ]),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
 
     expect(widthOf("cell-a", 0)).toBeCloseTo(25, 1);
     expect(widthOf("cell-a", 1)).toBeCloseTo(75, 1);
@@ -459,7 +478,7 @@ describe("SpeechControlBar", () => {
       durations: new Map<number, number>(),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
 
     expect(segmentAt("cell-a", 0)).toBe("cold");
     expect(segmentAt("cell-a", 1)).toBe("ready");
@@ -485,7 +504,7 @@ describe("SpeechControlBar", () => {
       durations: new Map([[0, 3]]),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
 
     expect(segmentAt("cell-a", 0)).toBe("played");
     expect(segmentAt("cell-a", 1)).toBe("cold");
@@ -517,7 +536,7 @@ describe("SpeechControlBar", () => {
       warming.add(all[1].text); // requested, socket open, no audio yet
       warm.add(all[2].text); // landed
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(all)} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor(all)} />);
 
       expect(segmentAt("cell-a", 0)).toBe("cold");
       expect(segmentAt("cell-a", 1)).toBe("warming");
@@ -528,7 +547,7 @@ describe("SpeechControlBar", () => {
       const all = units(200, 240);
       warming.add(all[0].text);
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(all)} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor(all)} />);
       expect(segmentAt("cell-a", 0)).toBe("warming");
 
       // The audio lands while the run is paused or stalled. `subscribeProgress`
@@ -547,7 +566,7 @@ describe("SpeechControlBar", () => {
       // SYNTHESIS_CONCURRENCY slots open in the same tick.
       for (const unit of all.slice(0, 3)) warming.add(unit.text);
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(all)} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor(all)} />);
 
       const row = () => all.map((_unit, index) => segmentAt("cell-a", index));
       expect(row()).toEqual(["warming", "warming", "warming", "cold"]);
@@ -572,7 +591,7 @@ describe("SpeechControlBar", () => {
           sessionId="cell-a"
           answerOpen={false}
           onToggleAnswer={noop}
-          send={noop}
+          send={noSend}
           speech={barFor(all, { state: "heard", durations: new Map([[0, 3]]) })}
         />,
       );
@@ -591,7 +610,7 @@ describe("SpeechControlBar", () => {
           sessionId="cell-a"
           answerOpen={false}
           onToggleAnswer={noop}
-          send={noop}
+          send={noSend}
           speech={barFor(all, {
             state: "speaking",
             progress: { unitIndex: 1, unitTime: 1, unitDuration: 3 },
@@ -609,7 +628,7 @@ describe("SpeechControlBar", () => {
       // cell must not conjure a scrubber here.
       const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
       act(() => cacheChanged());
 
       expect(screen.queryAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(0);
@@ -656,7 +675,7 @@ describe("SpeechControlBar", () => {
       });
 
     it("no segment claims a role it does not implement", () => {
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barWithUnits()} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barWithUnits()} />);
 
       for (const segment of screen.getAllByTestId(/^speech-bar-segment-cell-a-/)) {
         expect(segment).not.toHaveAttribute("role");
@@ -668,7 +687,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("the segments are not announced at all", () => {
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barWithUnits()} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barWithUnits()} />);
 
       expect(screen.getByTestId("speech-bar-scrubber-cell-a")).toHaveAttribute(
         "aria-hidden",
@@ -684,11 +703,11 @@ describe("SpeechControlBar", () => {
       // and `useSpeechKeys` binds Ctrl+Shift+←/→ to the same two handlers.
       const speech = makeSpeech({
         state: "ready",
-        queue: queueWith({ previous: utterance("u-0"), current: utterance("u-1") }),
+        queue: queueWith({ previous: [utterance("u-0")], current: utterance("u-1") }),
         units: units(200, 200, 200),
       });
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
 
       const previous = screen.getByRole("button", { name: "Previous answer" });
       const next = screen.getByRole("button", { name: "Next answer" });
@@ -713,7 +732,7 @@ describe("SpeechControlBar", () => {
             sessionId="cell-a"
             answerOpen={answerOpen}
             onToggleAnswer={onToggleAnswer}
-            send={noop}
+            send={noSend}
             speech={makeSpeech({
               state: "speaking",
               queue: queueWith({ current: utterance("u-1") }),
@@ -781,7 +800,7 @@ describe("SpeechControlBar", () => {
               sessionId="cell-a"
               answerOpen={false}
               onToggleAnswer={onToggleAnswer}
-              send={noop}
+              send={noSend}
               // `ready`, not the default `empty`: the row carries the
               // launchers before a cell has spoken, and the eye is part of
               // the transport that replaces them.
@@ -861,7 +880,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("the play button pulses when an unheard utterance becomes ready", () => {
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready")} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor("ready")} />);
 
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("1");
     });
@@ -870,7 +889,7 @@ describe("SpeechControlBar", () => {
       render(
         <>
           {header("ready")}
-          <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready")} />
+          <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor("ready")} />
         </>,
       );
 
@@ -885,7 +904,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("a newer utterance restarts the play button's pulse", () => {
-      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready", "u-1")} />);
+      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor("ready", "u-1")} />);
 
       act(() => {
         vi.advanceTimersByTime(READY_PULSE_MS);
@@ -894,7 +913,7 @@ describe("SpeechControlBar", () => {
 
       // A second answer takes the cursor: a new arrival, and every arrival gets
       // its own ten seconds.
-      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready", "u-2")} />);
+      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor("ready", "u-2")} />);
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("1");
 
       act(() => {
@@ -904,7 +923,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("speaking and heard never pulse, however long it has been", () => {
-      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("speaking")} />);
+      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor("speaking")} />);
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
 
       // The window is open — the bar mounted a moment ago — and it still does
@@ -915,7 +934,7 @@ describe("SpeechControlBar", () => {
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
 
       // …and once it has been listened to all the way through.
-      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("heard")} />);
+      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor("heard")} />);
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
 
       act(() => {
@@ -934,7 +953,7 @@ describe("SpeechControlBar", () => {
         const view = render(
           <>
             {header(state)}
-            <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(state)} />
+            <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor(state)} />
           </>,
         );
 
@@ -972,7 +991,7 @@ describe("SpeechControlBar", () => {
       units: units(200, 200, 200),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
     fireEvent.click(screen.getByTestId("speech-bar-segment-cell-a-2"));
 
     expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 2);
@@ -987,7 +1006,7 @@ describe("SpeechControlBar", () => {
       durations: new Map([[1, 4]]),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
 
     const playing = screen.getByTestId("speech-bar-segment-cell-a-1");
     boxFor(playing, 100, 200);
@@ -1011,7 +1030,7 @@ describe("SpeechControlBar", () => {
     // what stays here is that nothing of the transport survives beside them.
     const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
 
     expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
     expect(screen.queryByTestId("speech-bar-previous-cell-a")).toBeNull();
@@ -1026,5 +1045,97 @@ describe("SpeechControlBar", () => {
     // The arm switch is the one control that survives the branch — arming
     // ahead of the first answer is why the row is reachable before it.
     expect(screen.getByTestId("speech-bar-autoplay-cell-a")).toBeInTheDocument();
+  });
+  /**
+   * The transport's two ends, read off the shape the history now has.
+   *
+   * History used to be a single slot, so "is there an answer behind the
+   * cursor" was two questions bolted together: is the slot full, and has the
+   * cursor not already been spent on it. With a list there is only one
+   * question — does the cursor still have a step left to take — and the bar
+   * has to ask it exactly the way the reducer answers it. Ask it any other way
+   * and the rail either offers a press that does nothing or refuses one that
+   * would have worked, and neither is visible to a type checker: `previous` is
+   * an array now, so the old `!== null` half is true forever.
+   */
+  describe("the transport walks the whole history", () => {
+    /** Three superseded answers, newest first, behind whatever is current. */
+    const history = (): Utterance[] => [utterance("u-3"), utterance("u-2"), utterance("u-1")];
+
+    const barAt = (cursor: number, pending: Utterance[] = []) =>
+      makeSpeech({
+        state: "ready",
+        queue: queueWith({ previous: history(), current: utterance("u-4"), pending, cursor }),
+        units: units(200, 200),
+      });
+
+    const railAt = (cursor: number, pending: Utterance[] = []) => {
+      const view = render(
+        <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barAt(cursor, pending)} />,
+      );
+      const rail = {
+        previous: screen.getByTestId("speech-bar-previous-cell-a") as HTMLButtonElement,
+        next: screen.getByTestId("speech-bar-next-cell-a") as HTMLButtonElement,
+        unmount: view.unmount,
+      };
+      return rail;
+    };
+
+    it("offers a previous answer from anywhere but the newest", () => {
+      // On `current`, three answers behind it: the ordinary case, and the one
+      // the old expression got right.
+      const newest = railAt(0);
+      expect(newest.previous).not.toBeDisabled();
+      newest.unmount();
+
+      // One step back, and two: the old `cursor === "current"` half refused
+      // both of these outright, because a one-step history had nowhere left to
+      // go. A five-deep one does, and the rail has to say so.
+      for (const cursor of [1, 2]) {
+        const stepped = railAt(cursor);
+        expect(stepped.previous).not.toBeDisabled();
+        stepped.unmount();
+      }
+
+      // The oldest answer the history holds. There is nothing behind it, the
+      // reducer's `previous` arm is a no-op here, and the button agrees.
+      const oldest = railAt(3);
+      expect(oldest.previous).toBeDisabled();
+      oldest.unmount();
+
+      // And a cell with no history at all: the array is non-null and empty,
+      // which is exactly what the careless port reads as "yes".
+      const alone = render(
+        <SpeechControlBar
+          sessionId="cell-a"
+          answerOpen={false}
+          onToggleAnswer={noop}
+          send={noSend}
+          speech={makeSpeech({ state: "ready", queue: queueWith({ current: utterance("u-1") }), units: units(200, 200) })}
+        />,
+      );
+      expect(screen.getByTestId("speech-bar-previous-cell-a")).toBeDisabled();
+      alone.unmount();
+    });
+
+    it("offers next from anywhere in the history, and from current only with something waiting", () => {
+      // Anywhere in the history, next means "come back", and there is always
+      // somewhere to come back to.
+      for (const cursor of [1, 2, 3]) {
+        const stepped = railAt(cursor);
+        expect(stepped.next).not.toBeDisabled();
+        stepped.unmount();
+      }
+
+      // On `current` with nothing waiting there is no forward step at all.
+      const newest = railAt(0);
+      expect(newest.next).toBeDisabled();
+      newest.unmount();
+
+      // With an answer waiting behind it, there is.
+      const waiting = railAt(0, [utterance("u-5")]);
+      expect(waiting.next).not.toBeDisabled();
+      waiting.unmount();
+    });
   });
 });

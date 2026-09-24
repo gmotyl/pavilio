@@ -19,7 +19,7 @@
  *   `Shift+Enter` is untouched.
  */
 import { renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { isTypingInPanelField, speechTransportKeyFor, useSpeechKeys } from "../useSpeechKeys";
 import type { MediaSessionTransportTarget } from "../useMediaSessionTransport";
 
@@ -153,6 +153,22 @@ function focusXtermHelperByAncestorOnly(): HTMLTextAreaElement {
 }
 
 /**
+ * Where the hook reports that a person — not autoplay — just worked the
+ * transport, and on which cell.
+ *
+ * The hook is handed this rather than importing it: what the panel does with
+ * an arrival is clear that cell's attention LED, which is the terminal
+ * feature's business. See `useMediaSessionTransport.TransportArrival`, and
+ * `features/terminal/__tests__/attentionDismiss.test.tsx` for the same paths
+ * driven with the real rule.
+ */
+const arrival = vi.fn<(sessionId: string) => void>();
+
+beforeEach(() => {
+  arrival.mockClear();
+});
+
+/**
  * Mount the hook, run `body`, unmount. Several of these tests walk a target
  * through more than one run state, and a hook left mounted from an earlier
  * state would still be listening — every press would then fire every handler
@@ -160,7 +176,7 @@ function focusXtermHelperByAncestorOnly(): HTMLTextAreaElement {
  * the wrong reason.
  */
 function mounted(target: MediaSessionTransportTarget, body: () => void): void {
-  const { unmount } = renderHook(() => useSpeechKeys(target));
+  const { unmount } = renderHook(() => useSpeechKeys(target, arrival));
   try {
     body();
   } finally {
@@ -201,6 +217,60 @@ describe("useSpeechKeys", () => {
     expect(silent(nothing)).toBe(true);
   });
 
+  /**
+   * The chord resolves a cell, and the person who pressed it is AT that cell.
+   *
+   * The hook says so and stops there: what an arrival means is the terminal
+   * feature's rule (`attentionArrival`), and this hook deliberately cannot
+   * reach it. The cell reported has to be the one the toggle acted on — the
+   * run before the armed cell, and never both — because the whole failure this
+   * closes was a transport that started an answer on one cell while the notice
+   * on it stayed lit.
+   */
+  it("ctrl+shift+space reports an arrival on the cell it acted on", () => {
+    const speaking = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    mounted(speaking, () => press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true }));
+    // Pause is an arrival too: one key, and which of the two it means is
+    // decided by where the run is rather than by what the user expressed.
+    expect(arrival).toHaveBeenCalledTimes(1);
+    expect(arrival).toHaveBeenCalledWith("cell-a");
+
+    arrival.mockClear();
+    const held = stubTarget({ speakingSessionId: "cell-a", pausedSessionId: "cell-a" });
+    mounted(held, () => press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true }));
+    expect(arrival).toHaveBeenCalledWith("cell-a");
+
+    arrival.mockClear();
+    const idle = stubTarget({ armedSessionId: "cell-b" });
+    mounted(idle, () => press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true }));
+    expect(arrival).toHaveBeenCalledWith("cell-b");
+
+    // Nothing playing, nothing held, nothing armed: no cell resolved, so
+    // nobody arrived anywhere.
+    arrival.mockClear();
+    const nothing = stubTarget();
+    mounted(nothing, () => press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true }));
+    expect(arrival).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Stepping between answers is not arriving at a cell — see `attentionArrival`
+   * on why `previous` and `next` are deliberately left out of the rule. Pinned
+   * rather than left implicit: they resolve a target exactly as the toggle
+   * does, so adding them would be a one-line change nothing else would notice.
+   */
+  it("ctrl+shift+arrows report no arrival", () => {
+    const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    mounted(target, () => {
+      press({ code: "ArrowLeft", ctrlKey: true, shiftKey: true });
+      press({ code: "ArrowRight", ctrlKey: true, shiftKey: true });
+    });
+
+    expect(target.onPrevious).toHaveBeenCalledWith("cell-a");
+    expect(target.onNext).toHaveBeenCalledWith("cell-a");
+    expect(arrival).not.toHaveBeenCalled();
+  });
+
   it("ctrl+shift+arrows walk the queue and are withheld from the PTY", () => {
     expect(
       speechTransportKeyFor({ type: "keydown", code: "ArrowLeft", ctrlKey: true, shiftKey: true }),
@@ -227,7 +297,7 @@ describe("useSpeechKeys", () => {
 
   it("ctrl+shift+digits still reach the existing shortcut family", () => {
     const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
-    renderHook(() => useSpeechKeys(target));
+    renderHook(() => useSpeechKeys(target, arrival));
 
     for (const digit of [1, 2, 3, 4, 5, 6]) {
       const code = `Digit${digit}`;
@@ -245,7 +315,7 @@ describe("useSpeechKeys", () => {
 
   it("speech keys do not fire while typing in a panel input", () => {
     const target = stubTarget({ speakingSessionId: "cell-a" });
-    renderHook(() => useSpeechKeys(target));
+    renderHook(() => useSpeechKeys(target, arrival));
 
     for (const tag of ["input", "textarea"] as const) {
       focusPanelField(tag);
@@ -328,7 +398,7 @@ describe("useSpeechKeys", () => {
 
   it("ignores the combo when alt or meta is held, and on keyup", () => {
     const target = stubTarget({ speakingSessionId: "cell-a" });
-    renderHook(() => useSpeechKeys(target));
+    renderHook(() => useSpeechKeys(target, arrival));
 
     press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true, altKey: true });
     press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true, metaKey: true });
@@ -340,7 +410,7 @@ describe("useSpeechKeys", () => {
 
   it("stops listening once the host unmounts", () => {
     const target = stubTarget({ speakingSessionId: "cell-a" });
-    const { unmount } = renderHook(() => useSpeechKeys(target));
+    const { unmount } = renderHook(() => useSpeechKeys(target, arrival));
     unmount();
 
     press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true });

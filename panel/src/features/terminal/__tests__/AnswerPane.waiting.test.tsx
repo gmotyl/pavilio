@@ -24,7 +24,7 @@ import { resolve } from "node:path";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
+import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { prepare } from "../../speech/prepare";
 import { type UtteranceQueue } from "../../speech/utteranceQueue";
 import { cssPx, cssRule } from "../../shell/__tests__/hamburgerGeometry";
@@ -83,6 +83,9 @@ const NEXT_ANSWER =
 const READERS = new Set([
   "stateFor",
   "queueFor",
+  // The `heard` set the unread count is derived from. A reader like every
+  // other one here: the pane asks it while it renders and never writes to it.
+  "heardFor",
   "unitsFor",
   "subscribeProgress",
   "progressFor",
@@ -98,16 +101,36 @@ const utterance = (id: string, text: string): Utterance => ({
 });
 
 const queueOf = (u: Utterance): UtteranceQueue => ({
-  previous: null,
+  previous: [],
   current: u,
   pending: [],
-  cursor: "current",
+  cursor: 0,
 });
 
-function makeSpeech(queueFor: () => UtteranceQueue): GridSpeech {
+/**
+ * The same cell with one step of history behind the answer on screen — what a
+ * *previous* press needs in order to be a press at all. The bar disables the
+ * control when the cursor has nothing left behind it, so a fixture without a
+ * history would let a test about stepping back click a dead button and pass.
+ */
+const queueBehind = (older: Utterance, u: Utterance): UtteranceQueue => ({
+  previous: [older],
+  current: u,
+  pending: [],
+  cursor: 0,
+});
+
+/** Nothing has been played — referentially stable, like every other snapshot. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
+function makeSpeech(
+  queueFor: () => UtteranceQueue,
+  heardFor: () => ReadonlySet<string> = () => NOTHING_HEARD,
+): GridSpeech {
   return {
     stateFor: () => "ready",
     queueFor,
+    heardFor,
     unitsFor: () => NO_UNITS,
     subscribeProgress: () => () => {},
     progressFor: () => null,
@@ -119,6 +142,7 @@ function makeSpeech(queueFor: () => UtteranceQueue): GridSpeech {
     onStop: vi.fn(),
     onPrevious: vi.fn(),
     onNext: vi.fn(),
+    onNewestAnswer: vi.fn(),
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
@@ -173,7 +197,9 @@ function installMatchMedia(): void {
   });
 }
 
-const send = vi.fn();
+/** A live socket: the write landed. `send` reports delivery now, and a stub
+ *  that returned nothing would read as a socket that is not OPEN. */
+const send = vi.fn((_data: string) => true);
 
 /** The pane alone — every criterion but the transport one. */
 const paneTree = (speech: GridSpeech) => (
@@ -264,6 +290,10 @@ const field = (): HTMLTextAreaElement =>
   screen.getByTestId(`answer-pane-composer-${SESSION}`) as HTMLTextAreaElement;
 
 const playButton = (): HTMLElement => screen.getByTestId(`speech-bar-playpause-${SESSION}`);
+
+const previousButton = (): HTMLElement => screen.getByTestId(`speech-bar-previous-${SESSION}`);
+
+const nextButton = (): HTMLElement => screen.getByTestId(`speech-bar-next-${SESSION}`);
 
 /**
  * An activity broadcast landing while the panel is mounted. Wrapped in `act`
@@ -360,6 +390,45 @@ describe("the answer pane while a reply is pending", () => {
     // its way — the wait shrank, it did not end.
     expect(waiting()).toBeNull();
     expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+    expect(playButton()).toHaveAttribute("data-pending", "1");
+  });
+
+  /**
+   * The same scenario as the test above, with the one thing the real app does
+   * that it leaves out: the agent goes busy within a second of a send.
+   *
+   * With that broadcast in place a transport press no longer settles the body
+   * by itself — the agent's own claim on it is still standing — so the test
+   * above has quietly stopped covering the gesture it was written for. It is
+   * not weakened: a press on a cell whose agent has NOT gone busy still hands
+   * the body straight back, which is exactly what it asserts. This is its
+   * sibling, and the hold is what answers the case it cannot reach.
+   */
+  it("keeps the wave while the agent works, and gives the body back on a step back", () => {
+    const older = utterance("u-0", NEXT_ANSWER);
+    render(surfaceTree(makeSpeech(() => queueBehind(older, utterance("u-1", ANSWER)))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    // The agent picked the draft up.
+    activity("busy", 2);
+    expect(waiting()).toBeInTheDocument();
+
+    // A press on play hands the SEND wait back to the play button and touches
+    // nothing else, so the agent still has the body: the wave stays up.
+    fireEvent.click(playButton());
+    expect(waiting()).toBeInTheDocument();
+    expect(playButton()).toHaveAttribute("data-pending", "1");
+
+    // Stepping BACK is a different gesture. It is the user saying they want
+    // the text, and it outranks every claim on the body until it is released
+    // — which is the whole of why the hold exists.
+    fireEvent.click(previousButton());
+
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+    // The reply is still coming, so the mark is still on the play button.
     expect(playButton()).toHaveAttribute("data-pending", "1");
   });
 
@@ -736,5 +805,249 @@ describe("the marks on the answer that comes back", () => {
     expect(after[0]).toHaveAttribute("role", "button");
     expect(after[0]).toHaveAttribute("tabindex", "0");
     expect(after[0]).toHaveAttribute("data-speaking", "");
+  });
+});
+
+/**
+ * The count of what has not been played, and the way back out of a hold.
+ *
+ * Both live on the waiting state's own surface, and both are derivations —
+ * `unreadAnswerCount` over the `heard` set the channel already keeps, and the
+ * hold `answerWaiting` already owns. Nothing here records a new fact, which is
+ * why the fixtures can say what the cell holds and what has been heard and the
+ * assertions can be about what is on screen.
+ */
+
+/** The count the waiting state puts on screen, or `null` when it shows none. */
+const unreadCount = (): HTMLElement | null =>
+  screen.queryByTestId(`answer-pane-waiting-count-${SESSION}`);
+
+/** The *Next answer* control: the wave, moved out of the body onto a button. */
+const nextAnswerControl = (): HTMLElement | null =>
+  screen.queryByTestId(`answer-pane-waiting-next-${SESSION}`);
+
+/**
+ * A cell holding four answers the transport can reach: two steps of history,
+ * the one on screen, and one waiting behind it.
+ */
+const BACKLOG: UtteranceQueue = {
+  previous: [utterance("u-2", NEXT_ANSWER), utterance("u-1", NEXT_ANSWER)],
+  current: utterance("u-3", ANSWER),
+  pending: [utterance("u-4", NEXT_ANSWER)],
+  cursor: 0,
+};
+
+const heardOf = (...ids: string[]): ReadonlySet<string> => new Set(ids);
+
+describe("the waiting state counts what has not been played", () => {
+  it("shows how many answers have not been played", () => {
+    // Four reachable, one of them already played: three are still unheard.
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    const count = unreadCount();
+    expect(count).toBeInTheDocument();
+    expect(count?.textContent).toMatch(/\b3\b/);
+  });
+
+  it("shows no count when nothing is unread", () => {
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1", "u-2", "u-3", "u-4"))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    // A pip reading "0" is worse than no pip: it says there is a backlog and
+    // then says the backlog is empty.
+    expect(unreadCount()).toBeNull();
+  });
+
+  it("shows no count while the body is rendering an answer", () => {
+    render(paneTree(makeSpeech(() => BACKLOG)));
+
+    // Nothing sent, nothing busy — the body is the answer, and the count is
+    // the waiting state's, not the pane's.
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+    expect(unreadCount()).toBeNull();
+  });
+
+  it("names the count in text, not in the animation", () => {
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
+    sendReply();
+
+    // In the status region, as a sentence a screen reader reads out...
+    const status = screen.getByRole("status");
+    expect(status).toBe(waiting());
+    const count = unreadCount();
+    expect(count).not.toBeNull();
+    expect(status.contains(count)).toBe(true);
+    expect(count?.textContent?.trim()).not.toBe("");
+
+    // ...and it is really IN that region as far as assistive tech is
+    // concerned. Sitting inside `role="status"` is not the same fact as being
+    // exposed: one `aria-hidden` on the count, or on anything between it and
+    // the region, takes the whole subtree back out of the accessibility tree
+    // and leaves the backlog conveyed by the animation alone — which is the
+    // one thing this criterion forbids. The wave beside it is `aria-hidden`
+    // by design, so the attribute is very much in reach here.
+    for (let node: HTMLElement | null = count; node !== null; node = node.parentElement) {
+      expect(node).not.toHaveAttribute("aria-hidden");
+      if (node === status) break;
+    }
+
+    // ...and NOT in the ornament, which stays silent: no text, no name, no
+    // role, exactly as the state's label already has it.
+    expect(wave()).toHaveAttribute("aria-hidden", "true");
+    expect(wave().textContent).toBe("");
+    expect(wave().contains(count)).toBe(false);
+
+    // A count the stylesheet hides is a count only the animation conveys.
+    expect(cssRule(".answer-pane-waiting-count")).not.toMatch(
+      /(^|;)\s*(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0)/,
+    );
+  });
+});
+
+describe("the way back out of a hold", () => {
+  /** The cell with a backlog, its agent at work, and the answer held on screen. */
+  function heldOnScreen(): void {
+    render(surfaceTree(makeSpeech(() => BACKLOG)));
+    activity("busy", 2);
+    expect(waiting()).toBeInTheDocument();
+
+    fireEvent.click(previousButton());
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+  }
+
+  it("offers a Next answer control while the answer is held", () => {
+    heldOnScreen();
+
+    const control = nextAnswerControl();
+    expect(control).toBeInTheDocument();
+    expect(control).toHaveAccessibleName(/next answer/i);
+
+    // It CARRIES THE ANIMATION: the wave did not disappear when the body went
+    // back to the text, it moved onto this control — so the fact that the
+    // agent is still working is never hidden, only made smaller.
+    const carried = Array.from(
+      control?.querySelectorAll<HTMLElement>(".answer-pane-wave-crest") ?? [],
+    );
+    expect(carried).toHaveLength(crestHeights().length);
+
+    // ...and the reduced-motion query reaches the crests HERE too. The rule
+    // was written for a wave that only ever sat in the body; a wave the body
+    // handed to a button would otherwise keep running under `reduce`.
+    const stopped = [...reducedMotion().matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter(([, , declarations]) => /(^|;)\s*animation\s*:\s*none/.test(declarations))
+      .map(([, selector]) => selector.trim());
+    expect(stopped.some((selector) => carried[0].matches(selector))).toBe(true);
+
+    // The ornament is still an ornament: the NAME is the button's, and nothing
+    // inside it claims one of its own.
+    for (const node of [
+      ...(control?.querySelectorAll("[data-testid^='answer-pane-wave']") ?? []),
+    ]) {
+      expect(node).toHaveAttribute("aria-hidden", "true");
+    }
+  });
+
+  it("returns to the waiting state when Next answer is activated", () => {
+    heldOnScreen();
+
+    fireEvent.click(nextAnswerControl() as HTMLElement);
+
+    // The hold is gone, so the agent has the body back.
+    expect(waiting()).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
+    expect(within(body()).queryByText(ANSWER)).toBeNull();
+  });
+
+  it("holds on previous and releases on next", () => {
+    heldOnScreen();
+
+    // The transport's own forward control says the same thing the pane's does.
+    fireEvent.click(nextButton());
+
+    expect(waiting()).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
+  });
+
+  it("shows no Next answer control while the body is already waiting", () => {
+    render(surfaceTree(makeSpeech(() => BACKLOG)));
+    activity("busy", 2);
+
+    // The wave has the body. A control carrying a second copy of it would be
+    // the same fact drawn twice, on the one surface that already says it.
+    expect(waiting()).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
+  });
+
+  /**
+   * The same cell, with a voice that is READING when the agent goes to work.
+   *
+   * Everything above steps back against a silent cell, where taking the hold
+   * moves the body's snapshot — `AGENT_HAS_THE_BODY` to `SETTLED` — and the
+   * pane is told about it as a matter of course. Mid-sentence the handover is
+   * DEFERRED, so the body keeps the answer either way and held and not-held
+   * derive to the very same frozen snapshot. The hold is the only thing that
+   * moved, and it is exactly the fact this control draws.
+   */
+  const speakingCell = (voice: { state: CellSpeechState }): GridSpeech => ({
+    ...makeSpeech(() => BACKLOG),
+    stateFor: () => voice.state,
+  });
+
+  it("offers a Next answer control when the hold is taken mid-sentence", () => {
+    const voice = { state: "speaking" as CellSpeechState };
+    render(surfaceTree(speakingCell(voice)));
+
+    activity("busy", 2);
+
+    // The deferral: the agent went to work while the voice was reading, so the
+    // body keeps the text rather than pulling it out from under a sentence the
+    // listener is halfway through hearing.
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
+
+    fireEvent.click(previousButton());
+
+    // The body's snapshot did not move — it could not, the answer was already
+    // on screen — and the control still has to appear, because what changed is
+    // the hold and the hold is what this control is about.
+    expect(nextAnswerControl()).toBeInTheDocument();
+  });
+
+  it("takes the Next answer control away when it is activated mid-sentence", () => {
+    const voice = { state: "speaking" as CellSpeechState };
+    const speech = speakingCell(voice);
+    const { rerender } = render(surfaceTree(speech));
+
+    activity("busy", 2);
+    fireEvent.click(previousButton());
+
+    const control = nextAnswerControl();
+    expect(control).toBeInTheDocument();
+
+    fireEvent.click(control as HTMLElement);
+
+    // Pressing it releases the hold, and nothing else on the surface says so:
+    // the pane's own control calls `releaseAnswer` and no transport command,
+    // so if the release does not reach the pane by itself the one button whose
+    // entire job is to be pressable sits there dead until the playback ends.
+    expect(nextAnswerControl()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+
+    // ...and the deferral it was released into is still the deferral: when the
+    // sentence finally ends, the body hands over to the agent that is by then
+    // still working, exactly as it would have without the detour.
+    voice.state = "heard";
+    rerender(surfaceTree(speech));
+
+    expect(waiting()).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
   });
 });

@@ -11,6 +11,7 @@ import { useLocation } from "react-router-dom";
 import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { useIsMobile } from "../shell/useIsMobile";
 
 export const DRAWER_MIN_WIDTH = 320;
 export const DRAWER_DEFAULT_WIDTH = 480;
@@ -47,7 +48,16 @@ interface DrawerCtx {
    * cannot outlive itself or a reload.
    */
   overlayActive: boolean;
-  /** open && !suppressed && !overlayActive — what the drawer actually renders on. */
+  /**
+   * open && !suppressed && !overlayActive && !narrowViewport — what the drawer
+   * actually renders on. The narrow-viewport term has no field of its own on
+   * this context: nothing outside the provider ever needed to tell the reasons
+   * apart, and a published fact with no reader is a promise the next change
+   * has to keep for nobody. The distinction it was there to make — that the
+   * ROUTE is still perfectly able to host the drawer on a phone — is carried
+   * by `suppressed` staying false while this is false, which is what the
+   * drawer suite asserts.
+   */
   visible: boolean;
   width: number;
   maxWidth: number;
@@ -75,6 +85,23 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   // Deliberately never persisted: an overlay conflict is a transient fact about
   // this session, not a preference.
   const [overlayActive, setOverlayActive] = useState(false);
+  /**
+   * The viewport is too narrow to share with a drawer. On a phone the terminal
+   * has a tab of its own — it is what the panel is open for there — and the
+   * drawer has nothing left to sit beside.
+   *
+   * A term of its own rather than a fourth condition folded into `suppressed`,
+   * because `suppressed` answers a different question — whether the ROUTE can
+   * host the drawer — and a consumer asking it is asking about the route. Both
+   * are derived every render and neither is ever stored.
+   *
+   * Kept live across a resize or a rotation rather than read once at mount, so
+   * a window dragged back out to a desktop width brings the drawer back with
+   * it. `useIsMobile` is the shared subscription the rest of the shell already
+   * uses for exactly this question, and reusing it is what keeps every
+   * component agreeing on where the phone stops.
+   */
+  const narrowViewport = useIsMobile();
 
   useEffect(() => {
     const onResize = () => setViewport(window.innerWidth);
@@ -122,7 +149,7 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
 
   const match = matchProjectFromPath(location.pathname);
   const suppressed = !match || match.section === "iterm";
-  const visible = open && !suppressed && !overlayActive;
+  const visible = open && !suppressed && !overlayActive && !narrowViewport;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

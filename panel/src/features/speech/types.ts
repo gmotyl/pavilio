@@ -72,12 +72,34 @@ export type CellSpeechState =
 export interface GridSpeech {
   stateFor: (sessionId: string) => CellSpeechState;
   /**
-   * The cell's queue: one step of history, the utterance the transport is on,
-   * and the answers waiting behind it. Every cell has one, including a cell
-   * nothing has ever arrived for — the transport renders before any arrival, so
-   * this never hands back `undefined`.
+   * The cell's queue: up to five steps of history, the utterance the transport
+   * is on, and the answers waiting behind it. Every cell has one, including a
+   * cell nothing has ever arrived for — the transport renders before any
+   * arrival, so this never hands back `undefined`.
+   *
+   * Which of those three the transport is actually on is the queue's `cursor`,
+   * a number rather than a flag: `0` means the utterance in `current`, and `n`
+   * greater than zero means `previous[n - 1]`, the nth answer back. A surface
+   * that needs the utterance itself should ask `utteranceUnderCursor` for it
+   * rather than re-deriving that indexing, which is the queue's business and
+   * not the caller's.
    */
   queueFor: (sessionId: string) => UtteranceQueue;
+  /**
+   * The ids of this cell's answers that have been played to their end.
+   *
+   * Per UTTERANCE and not per session, deliberately: a cell can hold a heard
+   * answer in its history and an unheard one under the cursor at the same
+   * time, which is the whole reason the pane can say how many answers are
+   * still unplayed. That count is a derivation over this set and the queue —
+   * see `unreadAnswers.ts` — never a tally kept beside them.
+   *
+   * Narrowed to what the queue can still reach, like the queue itself: an
+   * answer that fell off the far end of the history is gone from here too,
+   * because a count that promised a step the transport cannot take would be
+   * worse than no count. Empty for a cell that has played nothing.
+   */
+  heardFor: (sessionId: string) => ReadonlySet<string>;
   /** The single armed session in this browser, or `null`. */
   armedSessionId: string | null;
   /** Speak the cell's utterance from the start — or replay a heard one. */
@@ -103,9 +125,13 @@ export interface GridSpeech {
    */
   onStop: (sessionId: string) => void;
   /**
-   * Step the transport back onto the answer before the current one, and play it
-   * from its first unit. History is one step deep, so a second press does
-   * nothing — and so does a press on a cell with nothing behind its cursor.
+   * Step the transport back onto the answer before the one the cursor is on,
+   * and play it from its first unit. The history is five answers deep, so this
+   * is a walk rather than a single toggle: each press moves the cursor one
+   * answer further back, and a listener a busy run overtook can read the whole
+   * backlog rather than only the answer immediately behind them. A press with
+   * nothing left behind the cursor — an empty cell, or one already parked on
+   * the oldest answer still held — does nothing at all.
    */
   onPrevious: (sessionId: string) => void;
   /**
@@ -113,6 +139,25 @@ export interface GridSpeech {
    * the oldest answer waiting. Nothing ahead, nothing happens.
    */
   onNext: (sessionId: string) => void;
+  /**
+   * Put the cell's cursor back on the newest answer it holds, **without
+   * speaking**.
+   *
+   * Raised by the pane's surface when an answer landing released the hold it
+   * had on the text — see `noteNewestAnswer` in
+   * `features/terminal/answerWaiting.ts`. That module owns the hold and never
+   * reaches for a cursor; this is the other half of the same event, and the two
+   * meet on the bar rather than inside either of them.
+   *
+   * It is a BODY move, not a transport press: the voice goes on reading
+   * whatever it was reading, and the answer the cursor lands on is played only
+   * if somebody presses play. Neither {@link GridSpeech.onNext} nor
+   * {@link GridSpeech.onSpeak} can stand in for it — the first steps ONE place
+   * and speaks what it steps onto, which from two answers back lands somewhere
+   * else entirely and cuts off the sentence the listener is in the middle of
+   * hearing.
+   */
+  onNewestAnswer: (sessionId: string) => void;
   onArm: (sessionId: string | null) => void;
   /**
    * The speech units of the utterance the cell's transport is on — the

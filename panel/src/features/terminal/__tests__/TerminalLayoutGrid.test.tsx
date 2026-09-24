@@ -4,7 +4,7 @@ import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
 import type { ConnectionState } from "../terminalInstances";
-import { reconnectSession } from "../terminalInstances";
+import { reconnectSession, sendDismiss } from "../terminalInstances";
 import { useTerminalOrdering } from "../useTerminalOrdering";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
@@ -14,6 +14,7 @@ import {
   rgb,
 } from "./projectColors.harness";
 import { INERT_SPEECH } from "./speech.harness";
+import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
 
 // Connection state is per-browser and lives in the terminal instance pool.
 // Stub the two leaf reads the disconnected badge makes so a cell can be put
@@ -33,6 +34,11 @@ vi.mock("../terminalInstances", async (importOriginal) => {
     ...actual,
     hasExited: () => conn.exited,
     reconnectSession: vi.fn(),
+    // The cell header's speak control clears an attention LED, and that goes
+    // out as a frame on the session's socket. Spied rather than left to the
+    // real one, which has no instance to write to here and would be a silent
+    // no-op — the assertion would then be on nothing at all.
+    sendDismiss: vi.fn(),
   };
 });
 
@@ -40,6 +46,8 @@ beforeEach(() => {
   conn.state = "connected";
   conn.exited = false;
   vi.mocked(reconnectSession).mockClear();
+  vi.mocked(sendDismiss).mockClear();
+  _resetForTests();
 });
 
 // TerminalView pulls in xterm which cannot render in jsdom; stub it.
@@ -1158,5 +1166,79 @@ describe("TerminalLayoutGrid — seam resize", () => {
     ]);
     // ...and the numbering did not, though readingOrder of that tiling is a,c,d,b.
     expect(screen.getByTestId("session-order").textContent).toBe("a,c,b,d");
+  });
+});
+
+/**
+ * The cell header's speak control is a play button too.
+ *
+ * The bar carries one and the header carries another, on the same cell, and
+ * until this was wired only the bar's cleared the attention LED — two buttons
+ * with the same icon disagreeing about what a press meant. The rule itself is
+ * `attentionArrival.dismissAttentionOnArrival`, and the rest of its cases are
+ * asserted in `attentionDismiss.test.tsx`; what belongs here is the one thing
+ * only this file can see, which is that the grid actually hands the header
+ * control that rule when it wires `onSpeak`, `onPause` and `onResume`.
+ */
+describe("TerminalLayoutGrid — the header speak control is an arrival", () => {
+  const speakingSpeech = (state: "ready" | "speaking" | "paused") => ({
+    ...INERT_SPEECH,
+    stateFor: () => state,
+  });
+
+  const setAttention = (sessionId: string): void => {
+    _applyEventForTests({ sessionId, state: "attention", at: 1, attentionSinceAt: 1 });
+  };
+
+  it("clears the LED when the header control starts the answer", () => {
+    const session = makeSession({ id: "s-speak" });
+    setAttention(session.id);
+    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech("ready") });
+
+    fireEvent.click(screen.getByTestId(`terminal-cell-speak-${session.id}`));
+
+    expect(vi.mocked(sendDismiss)).toHaveBeenCalledWith("s-speak");
+  });
+
+  // Same button, same press, the other direction — see `attentionArrival` on
+  // why the rule is keyed on the gesture rather than on where the audio is.
+  it("clears the LED when the header control holds a live run", () => {
+    const session = makeSession({ id: "s-pause" });
+    setAttention(session.id);
+    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech("speaking") });
+
+    fireEvent.click(screen.getByTestId(`terminal-cell-speak-${session.id}`));
+
+    expect(vi.mocked(sendDismiss)).toHaveBeenCalledWith("s-pause");
+  });
+
+  it("clears the LED when the header control resumes a held run", () => {
+    const session = makeSession({ id: "s-resume" });
+    setAttention(session.id);
+    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech("paused") });
+
+    fireEvent.click(screen.getByTestId(`terminal-cell-speak-${session.id}`));
+
+    expect(vi.mocked(sendDismiss)).toHaveBeenCalledWith("s-resume");
+  });
+
+  // `busy` is the agent's own state rather than a notice to the user, and a
+  // session with nothing lit has nothing to clear — a frame either way would
+  // be traffic that changes nothing.
+  it("sends nothing for a busy cell or an idle one", () => {
+    const busy = makeSession({ id: "s-busy" });
+    _applyEventForTests({ sessionId: busy.id, state: "busy", at: 1 });
+    const idle = makeSession({ id: "s-idle" });
+
+    renderGrid({
+      sessions: [busy, idle],
+      focusedId: busy.id,
+      speech: speakingSpeech("ready"),
+    });
+
+    fireEvent.click(screen.getByTestId(`terminal-cell-speak-${busy.id}`));
+    fireEvent.click(screen.getByTestId(`terminal-cell-speak-${idle.id}`));
+
+    expect(vi.mocked(sendDismiss)).not.toHaveBeenCalled();
   });
 });

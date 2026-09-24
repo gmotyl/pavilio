@@ -5,7 +5,6 @@ import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 import ProjectTerminalsSurface from "./ProjectTerminalsSurface";
 import { LAYOUT_ORDER } from "../shell/Layout/order";
 import { useSidebarState } from "../shell/useSidebarState";
-import { useIsMobile } from "../shell/useIsMobile";
 import { useTerminalDrawer, DRAWER_MIN_WIDTH } from "./useTerminalDrawer";
 
 const RESIZE_STEP = 16;
@@ -32,7 +31,6 @@ export default function TerminalDrawer() {
   const { visible, width, maxWidth, side, setOpen, setWidth, setSide } =
     useTerminalDrawer();
   const leftSidebar = useSidebarState("leftSidebar");
-  const isMobile = useIsMobile();
   const location = useLocation();
   const match = matchProjectFromPath(location.pathname);
   const asideRef = useRef<HTMLElement>(null);
@@ -159,23 +157,22 @@ export default function TerminalDrawer() {
    * its own header underneath it.
    *
    * Only when the reservation is actually needed, and the question that
-   * decides it is "does this drawer's left edge clear the button?" — not "is
-   * the sidebar expanded", which is merely the desktop answer to it. Docked
+   * decides it is "does this drawer's left edge clear the button?". Docked
    * RIGHT the drawer is the length of the viewport away. Docked LEFT its left
    * edge is whatever the sidebar takes out of the flow before it, which is the
-   * sidebar's width only while the sidebar is IN that flow: expanded on
-   * desktop, where the width's floor is 180 and the button's right edge is at
-   * 40, so the corner is clear at every width the user can drag to.
+   * sidebar's width only while the sidebar is expanded — and then the width's
+   * floor is 180 against the button's right edge at 40, so the corner is clear
+   * at every width the user can drag to.
    *
-   * On a phone `.sidebar` is a `position: fixed` overlay, so an open one
-   * displaces nothing and the drawer's header still starts at x=0. Asking
-   * about `expanded` there dropped the reservation while the overlap was still
-   * real — invisible only because the overlay's z-40 paints over it, which
-   * makes a layout decision hostage to a stacking order. Asking about the
-   * displacement instead is true on both viewports whatever `expanded` comes
-   * to mean on a phone.
+   * `expanded` is the whole answer here because this code only ever runs on a
+   * desktop: the drawer stands down entirely on a narrow viewport (`visible`
+   * carries `!narrowViewport`, and the early return above fires long before
+   * this line), so the phone case — where `.sidebar` is a fixed overlay that
+   * displaces nothing — cannot reach it. Pinned by "stands down entirely on a
+   * phone" in the drawer suite; should the drawer ever render on a phone
+   * again, that test fails and this line needs the displacement question back.
    */
-  const drawerClearsHamburger = !isMobile && leftSidebar.expanded;
+  const drawerClearsHamburger = leftSidebar.expanded;
   const reservesHamburgerCorner = !dockedRight && !drawerClearsHamburger;
 
   return (
