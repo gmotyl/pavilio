@@ -141,6 +141,29 @@ describe("utteranceQueueReducer", () => {
     expect(state.current).toEqual(answer(7));
   });
 
+  it("clamps the cursor to the oldest answer still held when its own falls off the end", () => {
+    // The one case the walk-back tests cannot reach: the cursor is parked on the
+    // very oldest answer of a FULL history when a new one arrives idle. Tracking
+    // the cursor's own utterance would step it one further back, but there is no
+    // further back to step to — the answer it was on has just been pushed off the
+    // end to make room. Clamping is what keeps the transport on a real answer
+    // instead of on an index past the list, which reads back as nothing at all
+    // and would strand a listener on a silent cell.
+    const full = withHistory(MAX_PREVIOUS + 1);
+    const parked = press(full, MAX_PREVIOUS, "previous");
+    // Fixture guard: a full history, and the cursor on its last answer.
+    expect(parked.previous.map((u) => u.id)).toEqual(["u5", "u4", "u3", "u2", "u1"]);
+    expect(parked.cursor).toBe(MAX_PREVIOUS);
+    expect(utteranceUnderCursor(parked)).toEqual(answer(1));
+
+    const state = arrive(parked, answer(MAX_PREVIOUS + 2), false);
+
+    expect(state.previous.map((u) => u.id)).toEqual(["u6", "u5", "u4", "u3", "u2"]);
+    expect(state.cursor).toBe(MAX_PREVIOUS);
+    // Not `answer(1)` — that one is gone — and emphatically not nothing.
+    expect(utteranceUnderCursor(state)).toEqual(answer(2));
+  });
+
   it("returns to where it started after going back and forward the same number of steps", () => {
     const state = withHistory(4);
     const started = utteranceUnderCursor(state);
@@ -151,6 +174,27 @@ describe("utteranceQueueReducer", () => {
     expect(utteranceUnderCursor(round)).toBe(started);
     expect(round.previous).toEqual(state.previous);
     expect(round.pending).toEqual(state.pending);
+  });
+
+  it("next steps exactly one answer forward, from the middle of the history", () => {
+    // The round trip above starts and ends on `current`, so it cannot tell a
+    // symmetric walk from a jump straight home: a `next` that collapsed the
+    // cursor to 0 in one press would satisfy it just as well. Asserted from the
+    // middle of the history instead, where the two differ — the transport is a
+    // walk, one answer per press in either direction, and a listener stepping
+    // forward out of a deep replay must not be thrown past everything between.
+    const state = press(withHistory(5), 3, "previous");
+    // Fixture guard: mid-history, with answers on BOTH sides of the cursor.
+    expect(state.cursor).toBe(3);
+    expect(state.previous).toHaveLength(4);
+    expect(utteranceUnderCursor(state)).toEqual(answer(2));
+
+    const forward = press(state, 1, "next");
+
+    expect(forward.cursor).toBe(2);
+    expect(utteranceUnderCursor(forward)).toEqual(answer(3));
+    // And the press after it is one more step, not the rest of the way home.
+    expect(press(forward, 1, "next").cursor).toBe(1);
   });
 
   it("stops at the oldest answer rather than falling off the end", () => {

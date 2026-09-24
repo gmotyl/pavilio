@@ -141,7 +141,9 @@ export function utteranceQueueReducer(
         previous,
         current: event.utterance,
         pending: state.pending,
-        cursor: trackCursor(state.cursor, previous !== state.previous, previous),
+        // A step of history is added exactly when there was an utterance to
+        // supersede, so that is what the cursor has to be tracked against.
+        cursor: trackCursor(state.cursor, state.current !== null, previous),
       };
     }
 

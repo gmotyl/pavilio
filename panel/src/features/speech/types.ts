@@ -72,10 +72,17 @@ export type CellSpeechState =
 export interface GridSpeech {
   stateFor: (sessionId: string) => CellSpeechState;
   /**
-   * The cell's queue: one step of history, the utterance the transport is on,
-   * and the answers waiting behind it. Every cell has one, including a cell
-   * nothing has ever arrived for — the transport renders before any arrival, so
-   * this never hands back `undefined`.
+   * The cell's queue: up to five steps of history, the utterance the transport
+   * is on, and the answers waiting behind it. Every cell has one, including a
+   * cell nothing has ever arrived for — the transport renders before any
+   * arrival, so this never hands back `undefined`.
+   *
+   * Which of those three the transport is actually on is the queue's `cursor`,
+   * a number rather than a flag: `0` means the utterance in `current`, and `n`
+   * greater than zero means `previous[n - 1]`, the nth answer back. A surface
+   * that needs the utterance itself should ask `utteranceUnderCursor` for it
+   * rather than re-deriving that indexing, which is the queue's business and
+   * not the caller's.
    */
   queueFor: (sessionId: string) => UtteranceQueue;
   /** The single armed session in this browser, or `null`. */
@@ -103,9 +110,13 @@ export interface GridSpeech {
    */
   onStop: (sessionId: string) => void;
   /**
-   * Step the transport back onto the answer before the current one, and play it
-   * from its first unit. History is one step deep, so a second press does
-   * nothing — and so does a press on a cell with nothing behind its cursor.
+   * Step the transport back onto the answer before the one the cursor is on,
+   * and play it from its first unit. The history is five answers deep, so this
+   * is a walk rather than a single toggle: each press moves the cursor one
+   * answer further back, and a listener a busy run overtook can read the whole
+   * backlog rather than only the answer immediately behind them. A press with
+   * nothing left behind the cursor — an empty cell, or one already parked on
+   * the oldest answer still held — does nothing at all.
    */
   onPrevious: (sessionId: string) => void;
   /**
