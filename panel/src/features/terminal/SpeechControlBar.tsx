@@ -12,6 +12,8 @@ import {
   useAnswerWaiting,
 } from "./answerWaiting";
 import { segmentStateFor, type SegmentState } from "./segmentState";
+import { sendDismiss } from "./terminalInstances";
+import { getActivityState } from "./useTerminalActivityChannel";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
@@ -80,6 +82,34 @@ function subscribeCacheVersion(onStoreChange: () => void): () => void {
 
 function readCacheVersion(): number {
   return cacheVersion;
+}
+
+/**
+ * The user has arrived at this cell: clear its attention LED if one is lit.
+ *
+ * `TerminalsSurface.handleFocus` has said this about a focused terminal since
+ * the LED existed — the green "done" light is a *check me* notification, and a
+ * notification is over the moment the person it was for is looking. Pressing
+ * the transport is the same arrival by another door: nobody presses play on an
+ * answer they are not at.
+ *
+ * Only `attention` is dismissed. `busy` is the AGENT's state, not a message to
+ * the user, and turning it off because somebody looked would claim the agent
+ * had stopped working. `idle` has nothing to clear, so sending anyway would be
+ * a websocket frame per press that changes nothing — the reason the check is
+ * here rather than being left to the server to ignore.
+ *
+ * Read imperatively at the moment of the press rather than subscribed to: the
+ * answer is only ever needed inside a click handler, and a bar that re-rendered
+ * on every activity broadcast would re-render every cell in the grid for a fact
+ * none of them draws.
+ *
+ * `AnswerComposer` carries the same three lines for the composer's focus; the
+ * reasoning is this one.
+ */
+function dismissAttentionOnArrival(sessionId: string): void {
+  if (getActivityState(sessionId) !== "attention") return;
+  sendDismiss(sessionId);
 }
 
 /** How long a unit is, in seconds — measured where it can be, estimated where not. */
@@ -524,6 +554,13 @@ export function SpeechControlBar({
                 // to the text either way, because the user asked for the
                 // transport rather than for the wait.
                 noteTransport(sessionId);
+                // Reaching for the transport is reaching for THIS cell, so an
+                // attention LED lit for it has been answered. Deliberately on
+                // the control's own click and nowhere else: an autoplayed
+                // answer arrives as a change of `state`, never as a press, and
+                // a reply that starts reading itself is the agent talking, not
+                // the user arriving — so it must leave the notice standing.
+                dismissAttentionOnArrival(sessionId);
                 if (intent === "pause") speech.onPause(sessionId);
                 else if (intent === "resume") speech.onResume(sessionId);
                 else if (intent === "speak") speech.onSpeak(sessionId);
