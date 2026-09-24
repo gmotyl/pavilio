@@ -58,7 +58,20 @@ export type UtteranceQueueEvent =
   /** Previous pressed, on any of the three surfaces. */
   | { type: "previous" }
   /** Next pressed, on any of the three surfaces. */
-  | { type: "next" };
+  | { type: "next" }
+  /**
+   * Put the cursor back on the newest answer, without playing anything.
+   *
+   * Not a transport press, and deliberately not expressible as one. An answer
+   * landing while the listener is parked in the history releases the pane's
+   * hold on the text (see `features/terminal/answerWaiting.ts`), and the body
+   * then has to show the answer that just landed rather than the older one the
+   * listener had stepped back to — otherwise the arrival is invisible. `next`
+   * cannot serve: it steps ONE place and speaks what it steps onto, which both
+   * lands on the wrong answer from two steps back and cuts off the sentence
+   * the listener is in the middle of hearing.
+   */
+  | { type: "newest" };
 
 /**
  * The state every cell starts in — and a **module singleton**, handed out as
@@ -168,6 +181,18 @@ export function utteranceQueueReducer(
       if (state.cursor > 0) return { ...state, cursor: state.cursor - 1 };
       if (state.pending.length === 0) return state;
       return advance(state);
+    }
+
+    case "newest": {
+      // The whole of the move: the cursor, home, in one step however deep the
+      // listener had walked. Nothing is consumed, promoted or dropped — an
+      // answer waiting behind the cursor is still waiting afterwards.
+      //
+      // A cursor already at 0 is every arrival for a cell nobody stepped back
+      // in, so the no-op has to hand the SAME reference back: a fresh object
+      // there would repaint the grid on the one event that changed nothing
+      // about what the cell is showing.
+      return state.cursor === 0 ? state : { ...state, cursor: 0 };
     }
 
     default:

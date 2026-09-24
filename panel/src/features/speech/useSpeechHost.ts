@@ -665,6 +665,28 @@ export function useSpeechHost(): SpeechHost {
   );
 
   /**
+   * The cursor, home — and **deliberately nothing else**.
+   *
+   * There is no `speakUtterance` here, and no `unlock` either. The pane raises
+   * this when an answer landing released the hold it had on the text: the
+   * listener had stepped back to re-read something and is, in all likelihood,
+   * still listening to it. Moving the body to the answer that just landed is
+   * what the arrival is owed; starting that answer's audio would cut off the
+   * sentence they are hearing, and it is not what the release means.
+   *
+   * So the voice keeps reading whatever it was reading. The reducer's own
+   * no-op discipline makes the common case — every arrival for a cell nobody
+   * stepped back in — free: the cursor is already 0, the same queue object
+   * comes back, and no cell re-renders.
+   */
+  const onNewestAnswer = useCallback(
+    (sessionId: string): void => {
+      dispatchQueue(sessionId, { type: "newest" });
+    },
+    [dispatchQueue],
+  );
+
+  /**
    * The scrubber's segments: the units of the utterance the cell's cursor is
    * on. Preparation is memoized per utterance id and costs no synthesis, so
    * calling this on every render of every cell is a Map lookup after the first
@@ -880,6 +902,7 @@ export function useSpeechHost(): SpeechHost {
       onStop,
       onPrevious,
       onNext,
+      onNewestAnswer,
       onArm,
       unitsFor,
       subscribeProgress,
@@ -901,6 +924,7 @@ export function useSpeechHost(): SpeechHost {
       armedSessionId,
       onArm,
       onJumpToUnit,
+      onNewestAnswer,
       onNext,
       onPause,
       onPrevious,

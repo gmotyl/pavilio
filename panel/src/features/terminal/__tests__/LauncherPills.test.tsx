@@ -78,6 +78,7 @@ function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
     onStop: vi.fn(),
     onPrevious: vi.fn(),
     onNext: vi.fn(),
+    onNewestAnswer: vi.fn(),
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),

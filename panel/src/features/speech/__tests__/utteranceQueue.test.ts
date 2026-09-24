@@ -43,10 +43,10 @@ const arrive = (state: UtteranceQueue, utterance: Utterance, speaking: boolean):
   utteranceQueueReducer(frozen(state), { type: "arrived", utterance, speaking });
 
 /**
- * The three events that carry no payload, one ready-made object each. Named
+ * The four events that carry no payload, one ready-made object each. Named
  * rather than built from a string at the call site: `{ type }` where `type` is
  * the union of their names is not assignable to the event union — a value of
- * that shape could be any one of the three, and the compiler will not pick for
+ * that shape could be any one of the four, and the compiler will not pick for
  * us — and the honest way past that is to hand back an event that IS one of
  * them, not to assert one into being.
  */
@@ -54,6 +54,7 @@ const PRESSES = {
   finished: { type: "finished" },
   previous: { type: "previous" },
   next: { type: "next" },
+  newest: { type: "newest" },
 } as const satisfies Record<string, UtteranceQueueEvent>;
 
 /** The same transport press, `times` over, each on a frozen input. */
@@ -344,6 +345,34 @@ describe("utteranceQueueReducer", () => {
     expect(state.pending).toEqual([answer(9)]);
   });
 
+  it("snaps the cursor back onto the newest answer", () => {
+    // A listener two answers deep in the history. `newest` is not a transport
+    // press — nothing is played by it — it is the body being moved back to the
+    // front of the queue because an answer has just landed and the pane is
+    // about to render it.
+    const walked = press(withHistory(3), 2, "previous");
+    expect(walked.cursor).toBe(2);
+
+    const state = utteranceQueueReducer(frozen(walked), PRESSES.newest);
+
+    expect(state.cursor).toBe(0);
+    expect(utteranceUnderCursor(state)).toEqual(answer(3));
+    // The snap moves the cursor and nothing else: no answer is consumed,
+    // promoted or dropped on the way.
+    expect(state.previous).toEqual(walked.previous);
+    expect(state.current).toEqual(walked.current);
+    expect(state.pending).toEqual(walked.pending);
+  });
+
+  it("snaps from one step back as readily as from five", () => {
+    // The one-step case is the common one — an answer lands while the listener
+    // is re-reading the answer immediately behind it — and it is the case a
+    // guard written as `cursor > 1` would silently miss.
+    const walked = press(withHistory(2), 1, "previous");
+
+    expect(utteranceQueueReducer(frozen(walked), PRESSES.newest).cursor).toBe(0);
+  });
+
   it("names the utterance the transport is on, whichever side of the cursor", () => {
     const advanced = utteranceQueueReducer(frozen(withPending(1)), { type: "finished" });
     expect(utteranceUnderCursor(advanced)).toEqual(answer(1));
@@ -377,6 +406,13 @@ describe("utteranceQueueReducer", () => {
     expect(utteranceQueueReducer(oldest, { type: "previous" })).toBe(oldest);
     const newest = withHistory(3);
     expect(utteranceQueueReducer(newest, { type: "next" })).toBe(newest);
+
+    // A snap with the cursor already on the newest answer. Every arrival for a
+    // cell whose listener never stepped back takes this path, so a fresh
+    // object here would repaint the grid on the one event that changed nothing
+    // about what the cell is showing.
+    expect(utteranceQueueReducer(newest, PRESSES.newest)).toBe(newest);
+    expect(utteranceQueueReducer(emptyUtteranceQueue, PRESSES.newest)).toBe(emptyUtteranceQueue);
   });
 
   it("never mutates the state it was given", () => {
@@ -403,6 +439,7 @@ describe("utteranceQueueReducer", () => {
     utteranceQueueReducer(frozen(walked), { type: "previous" });
     utteranceQueueReducer(frozen(walked), { type: "next" });
     utteranceQueueReducer(frozen(walked), { type: "finished" });
+    utteranceQueueReducer(frozen(walked), PRESSES.newest);
     utteranceQueueReducer(frozen(walked), { type: "arrived", utterance: answer(9), speaking: true });
 
     expect(walked).toEqual(walkedSnapshot);

@@ -2,7 +2,15 @@ import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { LauncherPills } from "./LauncherPills";
-import { noteTransport, noteUtterance, useAnswerWaiting } from "./answerWaiting";
+import {
+  holdAnswer,
+  noteNewestAnswer,
+  noteSpeaking,
+  noteTransport,
+  noteUtterance,
+  releaseAnswer,
+  useAnswerWaiting,
+} from "./answerWaiting";
 import { segmentStateFor, type SegmentState } from "./segmentState";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
@@ -261,6 +269,60 @@ export function SpeechControlBar({
     noteUtterance(sessionId, answerId);
   }, [sessionId, answerId]);
 
+  /**
+   * The newest answer the cell HOLDS — not the one under the cursor.
+   *
+   * `queue.current?.id` alone would be wrong, and wrong in exactly the case
+   * the hold exists for: an answer arriving while the voice is reading takes
+   * the reducer's `speaking: true` arm, which appends to `pending` and leaves
+   * `current` where it was. A listener who stepped back to re-read while the
+   * agent was still talking would never be told the answer landed.
+   *
+   * `pending` is oldest-first, so its LAST entry is the newest thing the cell
+   * has been given.
+   */
+  const newestAnswerId = queue.pending.at(-1)?.id ?? queue.current?.id ?? null;
+
+  // The arrival, pushed on every queue change. `answerWaiting` absorbs the
+  // first push per session as SEEDING — an entry that has never been told
+  // where the cell stands cannot tell an arrival from a starting point — so
+  // there is nothing to seed by hand here; there is only the duty to push
+  // every time.
+  //
+  // `true` back means that arrival released a hold, and the cursor is then
+  // ours to move: the store owns the hold, this row owns the cursor, and
+  // neither reaches into the other. Declared BEFORE the speaking effect below
+  // so the session's entry exists by the time that one pushes into it.
+  useEffect(() => {
+    if (noteNewestAnswer(sessionId, newestAnswerId)) speech.onNewestAnswer(sessionId);
+  }, [sessionId, newestAnswerId, speech]);
+
+  /**
+   * Whether this cell's voice is reading — the one fact `answerWaiting` needs
+   * and may not go and get (see its header: every arrow into that module
+   * points the same way).
+   *
+   * `speaking` and `stalled` both count. A stalled run is a run the listener
+   * is inside: more of the same answer is coming, the pause is still theirs to
+   * press, and an agent going busy behind it must not pull the text out from
+   * under the sentence. `paused` does NOT count — a held run is not
+   * mid-sentence, so there is nothing for the handover to be patient about.
+   */
+  const voiceIsReading = state === "speaking" || state === "stalled";
+
+  // The DEPENDENCY is the predicate, not the state: `speaking → stalled` is
+  // the same answer to this question, and re-running the effect across it
+  // would push a `false` through the cleanup and drop a deferral that is still
+  // waiting on a sentence that has not finished.
+  useEffect(() => {
+    noteSpeaking(sessionId, voiceIsReading);
+    // A cell torn out of the grid mid-sentence — a layout change, a preset, a
+    // maximize — must not leave a `true` standing behind it: nothing would
+    // ever push the matching `false`, and every later handover for that
+    // session would defer against a playback no surface is watching.
+    return () => noteSpeaking(sessionId, false);
+  }, [sessionId, voiceIsReading]);
+
   const armed = speech.armedSessionId === sessionId;
   const intent = transportIntent(state);
   const weights = segmentWeights(units, durations);
@@ -408,6 +470,10 @@ export function SpeechControlBar({
               disabled={!hasPrevious}
               onClick={() => {
                 noteTransport(sessionId);
+                // Stepping back is the user saying *I want the text*. Without
+                // the hold the pane would give it back for exactly as long as
+                // it took the agent's next activity broadcast to arrive.
+                holdAnswer(sessionId);
                 speech.onPrevious(sessionId);
               }}
             >
@@ -475,6 +541,8 @@ export function SpeechControlBar({
               disabled={!hasNext}
               onClick={() => {
                 noteTransport(sessionId);
+                // Forward is the user done with what they stepped back for.
+                releaseAnswer(sessionId);
                 speech.onNext(sessionId);
               }}
             >

@@ -104,6 +104,19 @@ const queueOf = (u: Utterance): UtteranceQueue => ({
   cursor: 0,
 });
 
+/**
+ * The same cell with one step of history behind the answer on screen — what a
+ * *previous* press needs in order to be a press at all. The bar disables the
+ * control when the cursor has nothing left behind it, so a fixture without a
+ * history would let a test about stepping back click a dead button and pass.
+ */
+const queueBehind = (older: Utterance, u: Utterance): UtteranceQueue => ({
+  previous: [older],
+  current: u,
+  pending: [],
+  cursor: 0,
+});
+
 function makeSpeech(queueFor: () => UtteranceQueue): GridSpeech {
   return {
     stateFor: () => "ready",
@@ -119,6 +132,7 @@ function makeSpeech(queueFor: () => UtteranceQueue): GridSpeech {
     onStop: vi.fn(),
     onPrevious: vi.fn(),
     onNext: vi.fn(),
+    onNewestAnswer: vi.fn(),
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
@@ -265,6 +279,8 @@ const field = (): HTMLTextAreaElement =>
 
 const playButton = (): HTMLElement => screen.getByTestId(`speech-bar-playpause-${SESSION}`);
 
+const previousButton = (): HTMLElement => screen.getByTestId(`speech-bar-previous-${SESSION}`);
+
 /**
  * An activity broadcast landing while the panel is mounted. Wrapped in `act`
  * because it is the realtime channel's own listener that reaches React here —
@@ -360,6 +376,45 @@ describe("the answer pane while a reply is pending", () => {
     // its way — the wait shrank, it did not end.
     expect(waiting()).toBeNull();
     expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+    expect(playButton()).toHaveAttribute("data-pending", "1");
+  });
+
+  /**
+   * The same scenario as the test above, with the one thing the real app does
+   * that it leaves out: the agent goes busy within a second of a send.
+   *
+   * With that broadcast in place a transport press no longer settles the body
+   * by itself — the agent's own claim on it is still standing — so the test
+   * above has quietly stopped covering the gesture it was written for. It is
+   * not weakened: a press on a cell whose agent has NOT gone busy still hands
+   * the body straight back, which is exactly what it asserts. This is its
+   * sibling, and the hold is what answers the case it cannot reach.
+   */
+  it("keeps the wave while the agent works, and gives the body back on a step back", () => {
+    const older = utterance("u-0", NEXT_ANSWER);
+    render(surfaceTree(makeSpeech(() => queueBehind(older, utterance("u-1", ANSWER)))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    // The agent picked the draft up.
+    activity("busy", 2);
+    expect(waiting()).toBeInTheDocument();
+
+    // A press on play hands the SEND wait back to the play button and touches
+    // nothing else, so the agent still has the body: the wave stays up.
+    fireEvent.click(playButton());
+    expect(waiting()).toBeInTheDocument();
+    expect(playButton()).toHaveAttribute("data-pending", "1");
+
+    // Stepping BACK is a different gesture. It is the user saying they want
+    // the text, and it outranks every claim on the body until it is released
+    // — which is the whole of why the hold exists.
+    fireEvent.click(previousButton());
+
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+    // The reply is still coming, so the mark is still on the play button.
     expect(playButton()).toHaveAttribute("data-pending", "1");
   });
 

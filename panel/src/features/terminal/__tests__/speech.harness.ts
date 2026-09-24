@@ -29,6 +29,7 @@ export const INERT_SPEECH: GridSpeech = {
   onStop: () => {},
   onPrevious: () => {},
   onNext: () => {},
+  onNewestAnswer: () => {},
   onArm: () => {},
   unitsFor: () => NO_UNITS,
   subscribeProgress: () => () => {},

@@ -165,6 +165,12 @@ function makeSpeech(): Host {
     onStop: vi.fn(),
     onPrevious: vi.fn(),
     onNext: vi.fn(),
+    // The real host dispatches `newest` and speaks nothing, so this one moves
+    // the boxed queue the same way: a stub that did nothing would let the cell
+    // pass a test about the body following an arrival.
+    onNewestAnswer: () => {
+      queue = utteranceQueueReducer(queue, { type: "newest" });
+    },
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),

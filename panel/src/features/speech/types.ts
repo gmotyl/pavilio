@@ -124,6 +124,25 @@ export interface GridSpeech {
    * the oldest answer waiting. Nothing ahead, nothing happens.
    */
   onNext: (sessionId: string) => void;
+  /**
+   * Put the cell's cursor back on the newest answer it holds, **without
+   * speaking**.
+   *
+   * Raised by the pane's surface when an answer landing released the hold it
+   * had on the text — see `noteNewestAnswer` in
+   * `features/terminal/answerWaiting.ts`. That module owns the hold and never
+   * reaches for a cursor; this is the other half of the same event, and the two
+   * meet on the bar rather than inside either of them.
+   *
+   * It is a BODY move, not a transport press: the voice goes on reading
+   * whatever it was reading, and the answer the cursor lands on is played only
+   * if somebody presses play. Neither {@link GridSpeech.onNext} nor
+   * {@link GridSpeech.onSpeak} can stand in for it — the first steps ONE place
+   * and speaks what it steps onto, which from two answers back lands somewhere
+   * else entirely and cuts off the sentence the listener is in the middle of
+   * hearing.
+   */
+  onNewestAnswer: (sessionId: string) => void;
   onArm: (sessionId: string | null) => void;
   /**
    * The speech units of the utterance the cell's transport is on — the

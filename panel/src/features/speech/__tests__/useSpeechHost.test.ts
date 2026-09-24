@@ -140,6 +140,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
 
 import { prepare } from "../prepare";
 import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
+import { utteranceUnderCursor } from "../utteranceQueue";
 import { DEFAULT_SPEECH_VOICE } from "../voices";
 
 /** The `src` of every started playback, in order. Warming must never add one. */
@@ -1147,5 +1148,66 @@ describe("useSpeechHost — the transport walks the whole history", () => {
     played.length = 0;
     await clickControl(result.current, "cell-a");
     expect(played).toEqual([`blob:${older[1]}`]);
+  });
+});
+
+/**
+ * The snap back to the newest answer.
+ *
+ * `answerWaiting` releases a hold when an answer lands, and hands the surface
+ * a `true` meaning *put the cursor back on the newest answer*. The cursor is
+ * the queue's, so that half lands here — and it is a BODY MOVE, not a
+ * transport press: the voice is reading whatever it was reading and must go on
+ * reading it. `onNext` cannot serve, because it steps one place AND speaks.
+ */
+describe("useSpeechHost — the snap to the newest answer", () => {
+  it("returns the cursor to the newest answer without speaking", async () => {
+    const first = unitsOf(response(2, "First"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(2, "First"));
+    await emitUtterance("cell-a", "u-2", response(2, "Second"));
+    await emitUtterance("cell-a", "u-3", response(2, "Third"));
+
+    // Two steps back, and reading aloud — the state a hold is made in.
+    await settle(() => result.current.onPrevious("cell-a"));
+    await settle(() => result.current.onPrevious("cell-a"));
+    expect(result.current.queueFor("cell-a").cursor).toBe(2);
+
+    played.length = 0;
+    await settle(() => result.current.onNewestAnswer("cell-a"));
+
+    // The body is back on the answer that just landed...
+    expect(result.current.queueFor("cell-a").cursor).toBe(0);
+    expect(utteranceUnderCursor(result.current.queueFor("cell-a"))?.id).toBe("u-3");
+
+    // ...and NOTHING was spoken. A snap routed through `onNext` would have
+    // started the answer it stepped onto, cutting off the sentence the
+    // listener is in the middle of hearing.
+    expect(played).toEqual([]);
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+
+    // The run in the element is still the one that was playing before the
+    // snap: the OLDEST answer, two steps back, not the newest one the cursor
+    // now sits on.
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${first[1]}`]);
+  });
+
+  it("changes nothing when the cursor is already on the newest answer", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(2, "First"));
+    await emitUtterance("cell-a", "u-2", response(2, "Second"));
+    const before = result.current.queueFor("cell-a");
+    expect(before.cursor).toBe(0);
+
+    played.length = 0;
+    await settle(() => result.current.onNewestAnswer("cell-a"));
+
+    // Every arrival for a cell nobody stepped back in takes this path, so it
+    // has to be free: the same queue object, and no sound.
+    expect(result.current.queueFor("cell-a")).toBe(before);
+    expect(played).toEqual([]);
   });
 });
