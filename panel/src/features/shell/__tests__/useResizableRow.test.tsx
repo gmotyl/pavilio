@@ -269,7 +269,9 @@ describe("useResizableRow with an unresolved scope", () => {
     expect(height()).toBe("180");
 
     fireEvent.pointerUp(handle, { pointerId: 1, clientY: 460 });
-    // And it holds for the life of the hook.
+    // And it holds for as long as the scope stays unresolved — NOT for the
+    // life of the hook, which is what this comment used to claim: the test
+    // below is the transition it does not survive.
     expect(height()).toBe("180");
 
     // Nothing written, under any key — not a placeholder, and not the real
@@ -312,5 +314,40 @@ describe("useResizableRow with an unresolved scope", () => {
     // Self-healing: the row that mounted before its project was known is a
     // reader of that project's height the moment the project arrives.
     expect(height()).toBe("200");
+  });
+
+  /**
+   * What happens to a drag the user made BEFORE the scope arrived.
+   *
+   * Nothing pinned this until now, and the hook's own note claimed the wrong
+   * thing about it — that an unresolved scope keeps what the user does "for
+   * the life of the hook". It does not, and it should not: the dragged number
+   * was never stored, so surviving the transition would leave the control
+   * showing a height this project does not have and will not have after a
+   * reload. The stored value wins, and the drag is not written into the scope
+   * on its way out either — the user chose it before anyone knew which project
+   * they were choosing it for.
+   */
+  it("drops a drag made while the scope was unresolved once it resolves", () => {
+    // The project's height, and nowhere near the one the drag below settles
+    // on, so the assertion afterwards can only be read one way.
+    doc()[`${SCOPED_KEY}@alpha`] = 272;
+    const { rerender } = render(<ScopedProbe scope={null} />);
+
+    const handle = screen.getByTestId("handle");
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 440 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientY: 440 });
+    // The drag worked, as the case above pins.
+    expect(height()).toBe("200");
+
+    rerender(<ScopedProbe scope="alpha" />);
+
+    // The project's own height, not the one under the hand a moment ago.
+    expect(height()).toBe("272");
+    // And the drag was not persisted on the way past: the project still holds
+    // what it held, and no write was made under any key.
+    expect(doc()[`${SCOPED_KEY}@alpha`]).toBe(272);
+    expect(scopedWrites()).toEqual([]);
   });
 });

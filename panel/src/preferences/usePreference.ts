@@ -47,9 +47,10 @@ export function usePreference<T>(
  * during render takes the surface down with it.
  *
  * So an unresolved scope is answered honestly here: the hook reports the
- * DECLARED DEFAULT, it keeps whatever the user does for the life of the hook so
- * the control still works under the hand, and it PERSISTS NOTHING. That is the
- * rule `isPreferenceScope` states and `writeTerminalFocus` already follows.
+ * DECLARED DEFAULT, it keeps whatever the user does for as long as the scope
+ * stays unresolved so the control still works under the hand, and it PERSISTS
+ * NOTHING. That is the rule `isPreferenceScope` states and `writeTerminalFocus`
+ * already follows.
  * Writing under a placeholder scope instead would put the value somewhere
  * nothing reads it back from — which discards user input while looking like it
  * stored it — and would pool every unresolved caller onto one number on the way.
@@ -57,6 +58,16 @@ export function usePreference<T>(
  * A scope that resolves later is not a lost cause: the effect below notices the
  * new key and adopts what is stored under it, so a surface that mounted early
  * corrects itself as soon as the lookup succeeds.
+ *
+ * That adoption is what bounds the sentence above, and the order matters when
+ * both happen: a value dragged while the scope was unresolved is REPLACED by
+ * whatever the resolved scope has stored, rather than surviving the transition
+ * or being written into it. It has to be. The dragged number was never
+ * persisted — that is the whole of the unresolved rule — so keeping it would
+ * leave the control showing a height the project does not have and will not
+ * have after a reload, and writing it would store a number the user chose
+ * before anyone knew which project they were choosing it for. A stored value
+ * loses only to a drag that can be stored.
  *
  * A `global` declaration has no scope to resolve and so is never unresolved: it
  * behaves here exactly as it does under `usePreference`.

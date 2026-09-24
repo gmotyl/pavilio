@@ -48,6 +48,38 @@ vi.hoisted(() => {
   (globalThis as unknown as { WebSocket: unknown }).WebSocket = QuietSocket;
 });
 
+/**
+ * Every write that reached the preference store.
+ *
+ * The unresolved-project case below asserts the ABSENCE of a write, and
+ * absence is exactly what a test can be fooled about. Reading storage for it
+ * was not enough: with the setter's guard removed, `writePreference` throws
+ * inside `storageKey` on the blank scope before it touches storage at all — so
+ * "no keys in storage" stayed true while the guard it was meant to pin was
+ * gone. The spy records the CALL, which the throw cannot hide, and it is the
+ * same device `useResizableRow.test.tsx` already uses one layer down.
+ *
+ * Hoisted with the factory, because the factory closes over it.
+ */
+const { writes } = vi.hoisted(() => ({
+  writes: [] as Array<{ key: string; value: unknown }>,
+}));
+
+vi.mock("../../../preferences/store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../preferences/store")>();
+  return {
+    ...actual,
+    writePreference: <T,>(
+      def: Parameters<typeof actual.writePreference<T>>[0],
+      value: T,
+      scopeArg?: string,
+    ) => {
+      writes.push({ key: def.key, value });
+      actual.writePreference(def, value, scopeArg);
+    },
+  };
+});
+
 // The synthesis cache the rail peeks into. Nothing is warm and nothing
 // subscribes: no test here draws a segment.
 vi.mock("../../speech/synth", () => ({
@@ -433,6 +465,8 @@ describe("the answer pane with no project to name", () => {
     // store holds before its first successful load and what it returns to
     // after a failed one.
     __resetSessionStoreForTests();
+    // The seeds other cases in this file write are not this one's subject.
+    writes.length = 0;
   });
 
   it("drags without persisting either height", () => {
@@ -461,9 +495,15 @@ describe("the answer pane with no project to name", () => {
     expect(composerRowFor(SESSION)).toHaveStyle({ height: "102px" });
     fireEvent.pointerUp(composerRail, { pointerId: 2, clientY: 260 });
 
-    // Nothing stored, under any scope — not the real project, and not a
-    // placeholder standing in for one. Both declarations are `portable: false`,
-    // so `localStorage` is the whole surface a write could have reached.
+    // No WRITE was attempted, under any scope — not the real project, and not
+    // a placeholder standing in for one. Asserted on the call rather than on
+    // storage alone: a `writePreference` reached with a blank scope throws
+    // inside `storageKey` before it stores anything, so an empty storage would
+    // be just as true of the bug as of the fix.
+    expect(writes).toEqual([]);
+    // And storage agrees, which is the user-visible half of the same claim.
+    // Both declarations are `portable: false`, so `localStorage` is the whole
+    // surface a write could have reached.
     expect(heightKeysInStorage()).toEqual([]);
   });
 
