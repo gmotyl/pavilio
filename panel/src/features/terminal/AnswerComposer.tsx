@@ -152,7 +152,9 @@ export interface AnswerComposerProps {
  * surfaces above that. `projectOfSession` reads the tab's own session list,
  * which is where `LauncherPills` already gets the project for its
  * `pavilio-session-start` argument and for the same reason; the whole of the
- * reasoning is on that function.
+ * reasoning — including what happens when the list cannot name one, which is
+ * that the field opens at its declared height and stores nothing until it can
+ * — is on that function.
  */
 export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerProps) {
   // Seeded from the store, not from `""`: this mount may be the second one for

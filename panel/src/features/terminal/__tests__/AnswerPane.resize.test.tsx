@@ -29,7 +29,7 @@ import { readPreference, writePreference } from "../../../preferences/store";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import type { UtteranceQueue } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
-import { refreshSessions } from "../sessionStore";
+import { __resetSessionStoreForTests, refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
 
 // The activity channel opens a WebSocket at import time and re-arms a 2s
@@ -180,11 +180,24 @@ async function seedSessions(sessions: SessionMeta[]): Promise<void> {
  * frame before layout has run. The component has to tell that apart from an
  * area of no height, so a test has to be able to hand it either.
  */
-function renderPaneFor(sessionId = SESSION, areaHeight = AREA): HTMLElement {
+interface RenderedPane {
+  area: HTMLElement;
+  /**
+   * Draw the pane again, unchanged — a render this component has for reasons
+   * of its own all day (a speech frame, a queue change, a resized cell) and
+   * that no test here can trigger through its stubs. What it is used for is
+   * the one thing that needs a SECOND render to be visible: a value the pane
+   * reads during render, like the project its session belongs to, arriving
+   * after the pane was already on screen.
+   */
+  redraw: () => void;
+}
+
+function renderPaneFor(sessionId = SESSION, areaHeight = AREA): RenderedPane {
   const area = document.createElement("div");
   Object.defineProperty(area, "clientHeight", { value: areaHeight, configurable: true });
   document.body.appendChild(area);
-  render(
+  const ui = () => (
     <MemoryRouter>
       <AnswerPane
         sessionId={sessionId}
@@ -194,13 +207,13 @@ function renderPaneFor(sessionId = SESSION, areaHeight = AREA): HTMLElement {
         autoOpen={false}
         onAutoOpenChange={() => {}}
       />
-    </MemoryRouter>,
-    { container: area },
+    </MemoryRouter>
   );
-  return area;
+  const { rerender } = render(ui(), { container: area });
+  return { area, redraw: () => rerender(ui()) };
 }
 
-function renderPane(): HTMLElement {
+function renderPane(): RenderedPane {
   return renderPaneFor();
 }
 
@@ -376,5 +389,99 @@ describe("the answer pane's bottom edge", () => {
     // no `ns-resize` cursor is a handle nobody can find.
     expect(drag).toMatch(/(^|;)\s*height:\s*7px\s*(;|$)/);
     expect(drag).toMatch(/(^|;)\s*cursor:\s*ns-resize\s*(;|$)/);
+  });
+});
+
+/**
+ * A cell whose project the tab's session list cannot name.
+ *
+ * Both heights are `project`-scoped, and the project is looked up rather than
+ * threaded down — so there is a real state in which the pane is on screen and
+ * the scope is not known yet: a cell mounted by `QuickTerminalModal`, which
+ * fetches its own list and never touches `sessionStore`, and every cell on
+ * screen for the 8s after a failed session load. The store is emptied here to
+ * put the pane in exactly that state.
+ *
+ * What the pane must do there is what `writeTerminalFocus` already does with an
+ * unresolved project: show the declared default, keep working under the hand,
+ * and WRITE NOTHING. A placeholder scope would write — and the number would go
+ * under a key nothing reads back once the project resolves, so the drag the
+ * user just made would be silently discarded, with every unnameable cell in the
+ * tab sharing the one value in the meantime.
+ */
+describe("the answer pane with no project to name", () => {
+  /** Both `project`-scoped heights, under every scope they could be keyed by. */
+  function heightKeysInStorage(): string[] {
+    const prefixes = [
+      preferences.answerPaneHeight.key,
+      preferences.answerComposerHeight.key,
+    ];
+    const keys: string[] = [];
+    // `Object.keys` answers for the Storage OBJECT, not its entries — the
+    // index API is the only one that enumerates what was actually stored.
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key !== null && prefixes.some((p) => key === p || key.startsWith(`${p}@`))) {
+        keys.push(key);
+      }
+    }
+    return keys;
+  }
+
+  beforeEach(() => {
+    // Undo the file's own seeding: this is the cold store, which is what the
+    // store holds before its first successful load and what it returns to
+    // after a failed one.
+    __resetSessionStoreForTests();
+  });
+
+  it("drags without persisting either height", () => {
+    renderPane();
+
+    // It renders, and at the declared default clamped to the area — the pane
+    // covers the terminal exactly as it does for a named project.
+    expect(pane().style.height).toBe(`${AREA}px`);
+
+    const rail = handle()!;
+    fireEvent.pointerDown(rail, { pointerId: 1, clientY: 500 });
+    fireEvent.pointerMove(rail, { pointerId: 1, clientY: 420 });
+    // The drag WORKS: the pane follows the pointer, because an unresolved
+    // scope is a reason not to store a number, not a reason to refuse one.
+    expect(pane().style.height).toBe(`${AREA - 80}px`);
+
+    fireEvent.pointerUp(rail, { pointerId: 1, clientY: 420 });
+    // And it holds for the life of the pane, in the hook's own state.
+    expect(pane().style.height).toBe(`${AREA - 80}px`);
+
+    // The composer's rail is the same hook and the same scope: drag it too, so
+    // the assertion below covers both heights rather than one.
+    const composerRail = screen.getByTestId("pane-resize-composer");
+    fireEvent.pointerDown(composerRail, { pointerId: 2, clientY: 300 });
+    fireEvent.pointerMove(composerRail, { pointerId: 2, clientY: 260 });
+    expect(composerRowFor(SESSION)).toHaveStyle({ height: "102px" });
+    fireEvent.pointerUp(composerRail, { pointerId: 2, clientY: 260 });
+
+    // Nothing stored, under any scope — not the real project, and not a
+    // placeholder standing in for one. Both declarations are `portable: false`,
+    // so `localStorage` is the whole surface a write could have reached.
+    expect(heightKeysInStorage()).toEqual([]);
+  });
+
+  it("adopts the project's stored height once the list names one", async () => {
+    // What the pane gives up by writing nothing: only the number from the gap.
+    // The moment the project resolves, the pane is a reader of that project's
+    // height like any other.
+    writePreference(preferences.answerPaneHeight, 300, PROJECT);
+    const rendered = renderPane();
+    expect(pane().style.height).toBe(`${AREA}px`);
+
+    const { redraw } = rendered;
+    await seedSessions([session(SESSION, PROJECT)]);
+    // The lookup is a plain read during render, so the project reaches the
+    // pane on its next render, whatever causes that render. Nothing here
+    // touches either height.
+    redraw();
+
+    expect(pane().style.height).toBe("300px");
   });
 });

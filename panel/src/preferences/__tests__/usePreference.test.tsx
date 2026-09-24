@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bool, num } from "../codecs";
 import { definePreference } from "../types";
 import { PREFERENCE_PATCH_DEBOUNCE_MS, __resetPreferenceStoreForTests } from "../store";
-import { usePreference } from "../usePreference";
+import { usePreference, useScopedPreference } from "../usePreference";
 
 /**
  * The rendering half of the store: the first-render guarantee that makes the
@@ -395,5 +395,125 @@ describe("a refetch answered before the PATCH it races was applied", () => {
 
     expect(globals.__PAVILIO_PREFS__?.["test.hookWidth"]).toBe(512);
     expect(seen.at(-1)).toBe(512);
+  });
+});
+
+/**
+ * The scope that did not resolve.
+ *
+ * `storageKey` throws on a blank scope rather than letting every project share
+ * one key, and callers whose scope is LOOKED UP — a project read off the tab's
+ * session list, a repo path discovered from `repos.json` — can be rendered
+ * before the lookup can answer. `useScopedPreference` is what those callers
+ * reach for, and the contract it owes them is the one `isPreferenceScope`
+ * states: read the declared default, write nothing.
+ *
+ * Writing under a placeholder scope instead is the failure this exists to
+ * prevent. It looks like storing and is not: nothing reads that key back once
+ * the real scope arrives, so the user's input is discarded — and every
+ * unresolved caller in the tab shares the one value while it lasts.
+ */
+const scopedWidth = definePreference({
+  key: "test.scopedWidth",
+  scope: "project",
+  default: 240,
+  codec: num,
+  portable: true,
+});
+
+function ScopedProbe({
+  scope,
+  onReady,
+}: {
+  scope: string | null;
+  onReady: (api: { value: number; set: (n: number) => void }) => void;
+}) {
+  const [value, set] = useScopedPreference(scopedWidth, scope);
+  onReady({ value, set });
+  return <span data-testid="scoped">{value}</span>;
+}
+
+function GlobalScopedProbe({
+  onReady,
+}: {
+  onReady: (api: { value: number; set: (n: number) => void }) => void;
+}) {
+  // `null` for a GLOBAL declaration: there is no scope to resolve, so there is
+  // nothing unresolved about it.
+  const [value, set] = useScopedPreference(width, null);
+  onReady({ value, set });
+  return <span data-testid="global-scoped">{value}</span>;
+}
+
+const scopedKeys = () =>
+  Object.keys(globals.__PAVILIO_PREFS__ ?? {}).filter((k) =>
+    k.startsWith(scopedWidth.key),
+  );
+
+describe("useScopedPreference", () => {
+  it("reads the declared default when the scope did not resolve", () => {
+    globals.__PAVILIO_PREFS__![`${scopedWidth.key}@alpha`] = 512;
+    let api = { value: 0, set: (_: number) => {} };
+
+    render(<ScopedProbe scope={null} onReady={(next) => (api = next)} />);
+
+    // Not a throw, and not some other project's number either.
+    expect(api.value).toBe(240);
+  });
+
+  it("keeps what the setter is given, and stores none of it", () => {
+    let api = { value: 0, set: (_: number) => {} };
+    render(<ScopedProbe scope={null} onReady={(next) => (api = next)} />);
+
+    act(() => api.set(300));
+
+    // The control still moves — a resize handle with no scope must not freeze
+    // under the hand...
+    expect(api.value).toBe(300);
+    // ...but the number goes nowhere. No key, under any scope: not a
+    // placeholder's, not a real project's.
+    expect(scopedKeys()).toEqual([]);
+  });
+
+  it("adopts the stored value once the scope resolves", () => {
+    globals.__PAVILIO_PREFS__![`${scopedWidth.key}@alpha`] = 512;
+    let api = { value: 0, set: (_: number) => {} };
+    const { rerender } = render(
+      <ScopedProbe scope={null} onReady={(next) => (api = next)} />,
+    );
+    expect(api.value).toBe(240);
+
+    rerender(<ScopedProbe scope="alpha" onReady={(next) => (api = next)} />);
+
+    // The gap costs the value written during it, and nothing after: the
+    // consumer is an ordinary reader of the project's key from here.
+    expect(api.value).toBe(512);
+    act(() => api.set(300));
+    expect(globals.__PAVILIO_PREFS__![`${scopedWidth.key}@alpha`]).toBe(300);
+  });
+
+  it("leaves a global declaration exactly as usePreference has it", () => {
+    globals.__PAVILIO_PREFS__![width.key] = 400;
+    let api = { value: 0, set: (_: number) => {} };
+
+    render(<GlobalScopedProbe onReady={(next) => (api = next)} />);
+    expect(api.value).toBe(400);
+
+    act(() => api.set(320));
+    expect(api.value).toBe(320);
+    expect(globals.__PAVILIO_PREFS__![width.key]).toBe(320);
+  });
+
+  it("does not soften usePreference, which still refuses a missing scope", () => {
+    function StrictProbe() {
+      usePreference(scopedWidth, undefined);
+      return null;
+    }
+    // React logs a render error of its own alongside the throw.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(() => render(<StrictProbe />)).toThrow(/needs a scope argument/);
+
+    errors.mockRestore();
   });
 });

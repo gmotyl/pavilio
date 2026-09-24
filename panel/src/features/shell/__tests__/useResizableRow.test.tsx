@@ -203,3 +203,114 @@ describe("useResizableRow", () => {
     expect(screen.getByTestId("row")).toHaveStyle({ height: "140px" });
   });
 });
+
+/** A `project`-scoped row, for the scope argument itself rather than the drag. */
+const SCOPED_KEY = "test.row.scopedHeight";
+
+const scopedRowHeight = definePreference({
+  key: SCOPED_KEY,
+  scope: "project",
+  default: 140,
+  codec: num,
+  portable: true,
+});
+
+function ScopedProbe({ scope }: { scope: string | null }) {
+  const { height, isMobile, handleProps } = useResizableRow(scopedRowHeight, BOUNDS, scope);
+  const { isMobile: hideOnMobile, ...rail } = handleProps;
+  return (
+    <div>
+      <span data-testid="height">{height}</span>
+      <span data-testid="mobile">{String(isMobile)}</span>
+      <span data-testid="handle-mobile">{String(hideOnMobile)}</span>
+      <div data-testid="handle" data-edge="top" {...rail} />
+    </div>
+  );
+}
+
+const scopedKeys = () => Object.keys(doc()).filter((k) => k.startsWith(SCOPED_KEY));
+const scopedWrites = () => writes.filter((w) => w.key === SCOPED_KEY);
+
+/**
+ * The hook's third answer to "which scope": none.
+ *
+ * A row whose scope is DISCOVERED — a project looked up from a session id, say
+ * — can be asked for a height before the lookup can answer. The hook is in
+ * `features/shell` and has no business knowing what any one caller failed to
+ * find, so "I looked and there is nothing" is spelt `null` and nothing else.
+ *
+ * What it must not do with that is invent a key. A stand-in name is a key, and
+ * a key is written to: the number would land where nothing reads it back once
+ * the real scope arrives, so the drag would be silently discarded — and every
+ * unresolved row in the tab would share the one value until then.
+ */
+describe("useResizableRow with an unresolved scope", () => {
+  beforeEach(() => {
+    writes.length = 0;
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+    installMatchMedia(false);
+  });
+
+  it("drags from the declared default and stores nothing", () => {
+    // A height stored for a real project, to make the point that the
+    // unresolved row neither reads it nor writes over it.
+    doc()[`${SCOPED_KEY}@alpha`] = 200;
+
+    render(<ScopedProbe scope={null} />);
+    // The DECLARED default, not the named project's height and not a throw.
+    expect(height()).toBe("140");
+
+    const handle = screen.getByTestId("handle");
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 460 });
+    // The drag works: an unresolved scope is a reason not to store a number,
+    // not a reason to refuse one.
+    expect(height()).toBe("180");
+
+    fireEvent.pointerUp(handle, { pointerId: 1, clientY: 460 });
+    // And it holds for the life of the hook.
+    expect(height()).toBe("180");
+
+    // Nothing written, under any key — not a placeholder, and not the real
+    // project's, which still holds what it held.
+    expect(scopedWrites()).toEqual([]);
+    expect(scopedKeys()).toEqual([`${SCOPED_KEY}@alpha`]);
+    expect(doc()[`${SCOPED_KEY}@alpha`]).toBe(200);
+  });
+
+  it("keeps the arrow keys working without storing them either", () => {
+    render(<ScopedProbe scope={null} />);
+    const handle = screen.getByTestId("handle");
+    handle.focus();
+
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+    expect(height()).toBe("164");
+
+    expect(scopedWrites()).toEqual([]);
+    expect(scopedKeys()).toEqual([]);
+  });
+
+  it("stores under the scope as soon as there is one", () => {
+    render(<ScopedProbe scope="alpha" />);
+    const handle = screen.getByTestId("handle");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 460 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientY: 460 });
+
+    expect(scopedWrites()).toEqual([{ key: SCOPED_KEY, value: 180 }]);
+    expect(doc()[`${SCOPED_KEY}@alpha`]).toBe(180);
+  });
+
+  it("adopts the scope's stored height when the lookup answers later", () => {
+    doc()[`${SCOPED_KEY}@alpha`] = 200;
+    const { rerender } = render(<ScopedProbe scope={null} />);
+    expect(height()).toBe("140");
+
+    rerender(<ScopedProbe scope="alpha" />);
+    // Self-healing: the row that mounted before its project was known is a
+    // reader of that project's height the moment the project arrives.
+    expect(height()).toBe("200");
+  });
+});

@@ -1,26 +1,9 @@
+import { isPreferenceScope } from "../../preferences/types";
 import { getSessions } from "./sessionStore";
 
 /**
- * The scope a cell whose project cannot be named falls back to.
- *
- * `storageKey` throws on a blank scope argument rather than letting every
- * project share one key, and a preference read that throws would take the
- * whole pane down — so a cell with no project reads and writes here instead.
- * It is a bucket, not a project: whatever lands in it is shared by every
- * unnameable cell and named after none of them.
- *
- * It should not be reachable in the panel. A cell exists because the tab's
- * session list produced it, and that list is exactly what {@link projectOfSession}
- * reads, so by the time a pane is mounted the session is in it. What this
- * covers is the gap between those two facts in a test harness that renders a
- * pane directly, and a server that has answered `/api/terminal/sessions` with
- * a session carrying no `project` — `server/lib/discovery.ts` validates
- * nothing, so that is a real shape rather than a hypothetical one.
- */
-export const UNKNOWN_PROJECT = "__unknown__";
-
-/**
- * The project a cell belongs to, for use as a preference scope argument.
+ * The project a cell belongs to, for use as a preference scope argument, or
+ * `null` when the tab's session list cannot name one.
  *
  * ## Why the session store, and not a prop
  *
@@ -33,19 +16,57 @@ export const UNKNOWN_PROJECT = "__unknown__";
  * themselves resolve a session through. `LauncherPills` reached the same
  * conclusion for the same reason, and this is that answer with a name.
  *
+ * ## When it answers `null`
+ *
+ * Three ways, and none of them is hypothetical.
+ *
+ * A session the store has never carried. `QuickTerminalModal` is mounted
+ * app-wide in `App.tsx` and opens on Cmd/Ctrl+O from any project route; it
+ * fetches `/api/terminal/sessions` itself, into its own `useState`, and never
+ * touches `sessionStore`. So the cell it mounts — a full `TerminalView`, answer
+ * pane and all — is drawn off a list that is a SEPARATE request from the
+ * store's, and a session present in one is not thereby present in the other.
+ *
+ * A store that has not loaded yet, or whose load failed. `load()` keeps the
+ * list it already has when the fetch throws, answers non-2xx, or returns a
+ * non-array 200 — and before the first success that list is `[]`. The poll
+ * retries on an 8s interval, so every cell on screen is unresolvable for the
+ * length of that window, however many cells that is.
+ *
+ * A session carrying no project. `POST /api/terminal/sessions` destructures
+ * `project = ""` out of the request body and stores whatever it got, so a blank
+ * is a shape the server hands out rather than one only a test can build. A
+ * blank project is a MISSING project, not a project — see `isPreferenceScope`,
+ * which is the predicate this shares with every other scope site in the panel.
+ *
+ * `null` rather than a placeholder name is the whole point: a placeholder is a
+ * key, and a key can be WRITTEN to. Every unnameable cell would then share one
+ * number, under a key nothing reads back once the project does resolve — so the
+ * user's drag would be silently discarded. `useScopedPreference` takes the
+ * `null` instead and does what an unresolved scope is supposed to do: read the
+ * declared default, and persist nothing.
+ *
  * ## Why it does not subscribe
  *
- * It is a plain read, so a caller gets the list as it stands rather than
- * re-rendering when it moves. That is enough here: a pane is mounted by a cell
- * that the list itself produced, so the session is already in it, and a
- * session never changes the project it belongs to. Subscribing would start the
- * store's poll from inside a pane — a fetch and an 8s interval per open
- * answer — to learn a value that cannot change.
+ * Not to save a fetch or a timer — it would save neither. `start()` is
+ * `if (started) return`-guarded, so the store runs one `load()` and one 8s
+ * interval per tab however many subscribers it has, and `TimeTrackingProvider`
+ * sits above the routes in `App.tsx` and subscribes at boot, so the store is
+ * already running before any pane can mount.
  *
- * A blank project is a MISSING project, not a project (see `isPreferenceScope`),
- * so it resolves to {@link UNKNOWN_PROJECT} along with an unknown id.
+ * What subscribing would cost is a re-render of every open answer pane every
+ * time the tab-wide list really changes — a session opened, killed or renamed
+ * anywhere in the panel, in any project — to learn a value that, for this pane,
+ * cannot change: a session never moves to another project.
+ *
+ * What that leaves is a pane that resolved to `null` staying there until
+ * something else re-renders it. This is a plain read during render, so a pane
+ * picks the project up on its next render for any reason at all — a speech
+ * frame, a queue change, a cell resize — and what it lives with until then is a
+ * default height that is not written down. That is the same cost the `null`
+ * already accepts, so it does not buy a subscription.
  */
-export function projectOfSession(sessionId: string): string {
-  const project = getSessions().find((session) => session.id === sessionId)?.project?.trim();
-  return project ? project : UNKNOWN_PROJECT;
+export function projectOfSession(sessionId: string): string | null {
+  const project = getSessions().find((session) => session.id === sessionId)?.project;
+  return isPreferenceScope(project) ? project.trim() : null;
 }

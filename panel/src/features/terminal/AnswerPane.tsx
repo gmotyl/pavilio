@@ -220,7 +220,11 @@ const PANE_HEIGHT_STEP = 24;
  * `LauncherPills`, which reached the same conclusion first. Two cells of one
  * project therefore share the number; that is accepted, because the
  * alternative scope is a session id, which names nothing once the agent has
- * been restarted.
+ * been restarted. And a pane whose project the list cannot name — a cell of the
+ * quick modal, or any cell at all before the store's first load lands — opens
+ * at the declared height and persists nothing until it can: see
+ * `projectOfSession`, which answers `null` there precisely so that nothing is
+ * written under a name no one will read back.
  *
  * ## Why the pane scrolls once per unit, and never on a tick
  *
