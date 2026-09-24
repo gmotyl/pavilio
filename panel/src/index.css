@@ -936,20 +936,15 @@ input[type="checkbox"] {
     border-color 200ms ease;
 }
 
-.speech-bar-launch:hover:not([disabled]) {
+/* Every pill wearing this class is live: the launchers on a cell that has not
+   launched, and the single `start` pill that stands in their place once one
+   has. Nothing renders a disabled one any more, so the hover lift needs no
+   `:not([disabled])` guard and the greyed spent-pill rule that used to sit
+   below it is gone with the state it described. */
+.speech-bar-launch:hover {
   background: var(--bg-hover);
   border-color: var(--border-strong);
   color: var(--text-primary);
-}
-
-/* A cell that has already been launched. Greyed and inert, never gone: the row
-   is a fixed 56px spent at mount so no box moves under a running TUI, and
-   pulling the pills out of it the moment one was pressed would be that jump.
-   design.md's own disabled vocabulary — `.btn[disabled] { opacity: .3; cursor:
-   default }`, with `.rm[disabled]` at .25 for the smaller control. */
-.speech-bar-launch[disabled] {
-  opacity: 0.3;
-  cursor: default;
 }
 
 /* How many answers are waiting behind this one. */

@@ -13,12 +13,14 @@
  * of the branch, and `autoplay.integration.test.tsx` proves it against the real
  * host; what this file pins is that the pills branch did not drop it.
  */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { SpeechControlBar } from "../SpeechControlBar";
+import { refreshSessions } from "../sessionStore";
+import type { SessionMeta } from "../useTerminalSessions";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
@@ -82,6 +84,50 @@ function pillLabels(): string[] {
   return pills().map((pill) => pill.textContent ?? "");
 }
 
+/**
+ * Puts a session list in the tab's store, the way a load does.
+ *
+ * `refreshSessions` is the store's own fetch-and-publish, so this is the real
+ * path a project reaches the row by — not a hand-set module field. It does not
+ * start the poll, and `test-setup.ts` clears the store between tests.
+ */
+async function seedSessions(sessions: SessionMeta[]): Promise<void> {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(sessions),
+        }) as unknown as Promise<Response>,
+    ),
+  );
+  await refreshSessions();
+}
+
+function session(id: string, project: string): SessionMeta {
+  return {
+    id,
+    name: id,
+    project,
+    cwd: `/srv/git/${project || "unknown"}`,
+    pid: 4242,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+/** The pill a used row carries in place of the launchers. */
+function startPill(sessionId = "cell-a"): HTMLButtonElement | null {
+  return screen.queryByTestId(`speech-bar-start-${sessionId}`) as HTMLButtonElement | null;
+}
+
+// `seedSessions` stubs `fetch`; vitest is not configured to unstub globals, and
+// a stub left behind would answer the next file's session load.
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 function bar(speech: GridSpeech, send: (data: string) => void, sessionId = "cell-a") {
   return (
     <SpeechControlBar
@@ -104,6 +150,9 @@ describe("LauncherPills", () => {
 
     // Nothing stored, so the row shows the declared defaults, in order.
     expect(pillLabels()).toEqual(["claude", "codex", "opencode"]);
+    // …and nothing has been launched here, so the row does not yet offer to
+    // start a session in it.
+    expect(startPill()).toBeNull();
     // …and the transport, which controls nothing yet, is not there at all.
     expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
     expect(screen.queryByTestId("speech-bar-previous-cell-a")).toBeNull();
@@ -181,7 +230,8 @@ describe("LauncherPills", () => {
   });
 
   /**
-   * Once a launcher has been used in a cell, the pills stop being live there.
+   * Once a launcher has been used in a cell, the row stops offering launchers
+   * and offers the step that comes next instead.
    *
    * The cell's speech state is NOT the signal: `SpeechControlBar` swaps the
    * pills for the transport only when the cell has SPOKEN, and an agent runs
@@ -190,23 +240,24 @@ describe("LauncherPills", () => {
    * launch — a click then does not start a second agent, it types `claude`
    * into the prompt of the one already running.
    *
-   * Disabled rather than unmounted, deliberately: the row is a fixed 56px
-   * spent at mount so that no box moves under a running TUI, and pulling the
-   * pills out of it the moment one was pressed would be the same jump the
-   * reserved row exists to prevent.
+   * The first answer to that greyed the pills out, and three dead buttons are
+   * not worth the width. What Greg types by hand in that window is
+   * `pavilio-session-start <project>`, the moment the agent finishes booting —
+   * so that is the one pill the row carries there now.
    */
   describe("once a launcher has been used", () => {
-    it("leaves every pill live in a cell that has not launched", () => {
+    it("leaves a cell that has not launched showing its launchers", () => {
       renderBar(makeSpeech({ state: "empty" }), vi.fn());
 
-      // Three pills, all of them pressable. This is also what proves the flag
-      // is cleared between tests — the case above this one clicked a pill in
-      // `cell-a`, and a flag that leaked would disable these.
+      // Three pills, all of them pressable, and no start pill. This is also
+      // what proves the flag is cleared between tests — a case above clicked a
+      // pill in `cell-a`, and a flag that leaked would put `start` here.
       expect(pills()).toHaveLength(3);
       for (const pill of pills()) expect(pill).toBeEnabled();
+      expect(startPill()).toBeNull();
     });
 
-    it("disables every pill in the cell the moment one is clicked", async () => {
+    it("replaces the launchers with a single start pill the moment one is clicked", async () => {
       const user = userEvent.setup();
       const send = vi.fn();
       renderBar(makeSpeech({ state: "empty" }), send);
@@ -217,31 +268,97 @@ describe("LauncherPills", () => {
       expect(send).toHaveBeenCalledTimes(1);
       expect(send).toHaveBeenCalledWith("claude\r");
 
-      // …and the whole row goes quiet, not just the pill that was pressed:
-      // `codex` would type into claude's prompt exactly as `claude` would.
-      expect(pills()).toHaveLength(3);
-      for (const pill of pills()) expect(pill).toBeDisabled();
+      // And the row's whole offer changes: not `codex` greyed out beside a
+      // spent `claude`, but one live pill for the step that actually follows.
+      expect(pills()).toEqual([]);
+      const start = startPill();
+      expect(start).toBeInTheDocument();
+      expect(start).toHaveTextContent("start");
+      expect(start).toBeEnabled();
+
+      // Still inside the fixed-height strip the launchers filled: the row is a
+      // 56px box spent at mount, and swapping three pills for one must not be
+      // a resize under a running TUI.
+      expect(screen.getByTestId("speech-bar-launchers-cell-a")).toContainElement(start);
     });
 
-    it("sends nothing when a spent pill is clicked again", async () => {
+    it("sends the session-start command for the cell's own project", async () => {
       const user = userEvent.setup();
       const send = vi.fn();
+      await seedSessions([session("cell-b", "pavilio"), session("cell-a", "my-blog")]);
       renderBar(makeSpeech({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
       send.mockClear();
 
-      // Both routes to the handler: the pointer a user actually has, and a
-      // click dispatched straight at the node — which is what a listener left
-      // live behind a `disabled` attribute would still answer.
-      await user.click(screen.getByRole("button", { name: "claude" }));
-      await user.click(screen.getByRole("button", { name: "codex" }));
-      fireEvent.click(screen.getByRole("button", { name: "claude" }));
+      await user.click(screen.getByRole("button", { name: "start" }));
 
-      expect(send).not.toHaveBeenCalled();
+      // Verbatim, with no leading slash: this is prompt text typed into a
+      // running agent, not a client-side slash command. The project is this
+      // cell's, resolved by session id — `cell-b`'s would load the wrong one.
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith("pavilio-session-start my-blog\r");
     });
 
-    it("leaves a second cell's pills alone", async () => {
+    it("sends the bare command when the cell's project is unknown", async () => {
+      const user = userEvent.setup();
+      const send = vi.fn();
+      // Nothing seeded: the store has not loaded, which is the real case on a
+      // fresh tab, and the session is simply not in the list.
+      renderBar(makeSpeech({ state: "empty" }), send);
+
+      await user.click(screen.getByRole("button", { name: "claude" }));
+      send.mockClear();
+
+      await user.click(screen.getByRole("button", { name: "start" }));
+
+      // The bare command, which is a valid invocation. Not a trailing space,
+      // and not the word `undefined` — both of which would be typed into the
+      // prompt exactly as written.
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith("pavilio-session-start\r");
+    });
+
+    it("sends the bare command when the session carries an empty project", async () => {
+      const user = userEvent.setup();
+      const send = vi.fn();
+      // A session with no project of its own — a quick terminal, say. The list
+      // HAS loaded and the cell IS in it, so a lookup that only guarded
+      // `undefined` would send a trailing separator with nothing after it.
+      await seedSessions([session("cell-a", "")]);
+      renderBar(makeSpeech({ state: "empty" }), send);
+
+      await user.click(screen.getByRole("button", { name: "claude" }));
+      send.mockClear();
+
+      await user.click(screen.getByRole("button", { name: "start" }));
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith("pavilio-session-start\r");
+    });
+
+    it("keeps the start pill live for a second press", async () => {
+      const user = userEvent.setup();
+      const send = vi.fn();
+      await seedSessions([session("cell-a", "pavilio")]);
+      renderBar(makeSpeech({ state: "empty" }), send);
+
+      await user.click(screen.getByRole("button", { name: "claude" }));
+      send.mockClear();
+
+      await user.click(screen.getByRole("button", { name: "start" }));
+      await user.click(screen.getByRole("button", { name: "start" }));
+
+      // Not one-shot, unlike the launchers: re-loading a project's context into
+      // the agent is a legitimate thing to ask for twice, and its effect is
+      // visible in the prompt either way.
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenNthCalledWith(1, "pavilio-session-start pavilio\r");
+      expect(send).toHaveBeenNthCalledWith(2, "pavilio-session-start pavilio\r");
+      expect(startPill()).toBeEnabled();
+    });
+
+    it("leaves a second cell's launchers alone", async () => {
       const user = userEvent.setup();
       const sendA = vi.fn();
       const sendB = vi.fn();
@@ -255,36 +372,34 @@ describe("LauncherPills", () => {
       await user.click(screen.getAllByRole("button", { name: "claude" })[0]);
 
       // The fact is the SESSION's. Keyed globally — one flag for the panel —
-      // launching in one cell would silence every other cell's row, and the
-      // second terminal a user opens would arrive with no way to start
-      // anything in it.
-      for (const pill of pills("cell-a")) expect(pill).toBeDisabled();
+      // launching in one cell would turn every other cell's row into a start
+      // pill, and the second terminal a user opens would arrive with no way to
+      // launch anything in it.
+      expect(pills("cell-a")).toEqual([]);
+      expect(startPill("cell-a")).toBeInTheDocument();
+      expect(startPill("cell-b")).toBeNull();
       expect(pills("cell-b")).toHaveLength(3);
       for (const pill of pills("cell-b")) expect(pill).toBeEnabled();
 
-      await user.click(screen.getAllByRole("button", { name: "codex" })[1]);
+      await user.click(screen.getAllByRole("button", { name: "codex" })[0]);
       expect(sendB).toHaveBeenCalledTimes(1);
       expect(sendB).toHaveBeenCalledWith("codex\r");
       expect(sendA).toHaveBeenCalledTimes(1);
     });
 
-    it("dims a spent pill in the stylesheet's own disabled vocabulary", () => {
+    it("lifts every pill under the pointer, with no disabled state to withhold it from", () => {
       // jsdom loads no stylesheet, so `getComputedStyle` would answer for a
       // rule it never saw. `cssRule` reads the declaration block out of
       // `index.css`, throws when the selector matches nothing, and refuses to
       // guess when it matches more than one — which is what keeps a rename
       // from turning this into an assertion about nothing.
-      const spent = cssRule(".speech-bar-launch[disabled]");
+      expect(cssRule(".speech-bar-launch:hover")).toMatch(/background/);
 
-      // design.md's own disabled control: `.btn[disabled] { opacity: .3;
-      // cursor: default }`. Visible and greyed, never gone — the row's height
-      // is the thing that must not move.
-      expect(spent).toMatch(/(^|;)\s*opacity:\s*0?\.3\s*(;|$)/);
-      expect(spent).toMatch(/(^|;)\s*cursor:\s*default\s*(;|$)/);
-
-      // And the hover lift is withheld from it: a pill that still lit up under
-      // the pointer would read as pressable however faint it was.
-      expect(cssRule(".speech-bar-launch:hover:not([disabled])")).toMatch(/background/);
+      // Nothing renders a disabled pill any more, so the guard the hover rule
+      // used to carry and the greyed rule it guarded against are both gone —
+      // a dead selector left behind would be a promise the markup cannot keep.
+      expect(() => cssRule(".speech-bar-launch:hover:not([disabled])")).toThrow(/no rule/);
+      expect(() => cssRule(".speech-bar-launch[disabled]")).toThrow(/no rule/);
     });
   });
 });
