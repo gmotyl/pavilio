@@ -39,6 +39,40 @@
  * The activity trigger ends with the activity itself: the body is the agent's
  * for as long as the agent is busy.
  *
+ * ## The hold
+ *
+ * Without one the feature eats itself. A busy session takes the body, so a user
+ * who steps back through the transport to re-read something loses the text
+ * again on the very next activity broadcast. `holdAnswer` is the user saying *I
+ * want the text*, and it outranks every claim on the body for as long as it
+ * stands — which is why it is ONE term at the top of `derive` rather than a
+ * qualifier bolted onto each trigger.
+ *
+ * Three things release it, and every one of them is something that HAPPENED:
+ *
+ * - a forward transport press, or the *Next answer* control (`releaseAnswer`),
+ * - a new answer landing for the cell (`noteNewestAnswer`),
+ * - the session leaving `busy` — a hold with nothing left to hold it against is
+ *   not a hold, it is a pane stuck on an old answer.
+ *
+ * Nothing else releases it, and no timer does.
+ *
+ * ### Why the arrival release hands a value BACK
+ *
+ * An arrival that releases the hold has to leave the body showing the answer
+ * that just landed, and the queue's reducer deliberately parks the cursor on
+ * the utterance it was already on when an answer arrives. So the release has to
+ * be accompanied by a reset of the cursor to the newest answer — and this
+ * module owns no cursor and may not go and get one (see below).
+ *
+ * So the arrival comes IN as a push like every other fact here, and the answer
+ * goes OUT as `noteNewestAnswer`'s return value: `true` means *that arrival
+ * released a hold*, which is the surface's cue to put its own cursor back on
+ * the newest answer. This module owns the hold, the surface owns the cursor,
+ * and neither reaches into the other. Losing the reader's place in the backlog
+ * there is deliberate: the alternative is releasing the hold onto the answer
+ * they had stepped back to, which makes the arrival invisible.
+ *
  * ## Why the two triggers differ on playback
  *
  * A send is a decision to move on — you typed, you pressed Enter, the previous
@@ -127,6 +161,18 @@ interface Entry {
    * handover already made is not undone by a later playback starting.
    */
   deferred: boolean;
+  /**
+   * The user stepped back through the transport and wants the text. Outranks
+   * every claim on the body until something releases it.
+   */
+  held: boolean;
+  /**
+   * The newest answer the cell holds, as the surface last pushed it. A
+   * different id is an ARRIVAL — which is not the same question as
+   * `noteUtterance`'s, because the cursor moves for a transport press too and
+   * the press that SETS the hold must not be read as the event that ends it.
+   */
+  newest: string | null;
   snapshot: AnswerWaitingSnapshot;
   /** The activity subscription opened for this session. */
   unsubscribe: () => void;
@@ -141,6 +187,11 @@ function notify(): void {
 
 /** What the entry's facts add up to, as one of the four shared snapshots. */
 function derive(entry: Entry): AnswerWaitingSnapshot {
+  // The hold, ahead of both triggers rather than inside either: the user asked
+  // for the text, and neither the draft they sent nor the agent's own work is
+  // a reason to take it away again. A send still outstanding keeps its mark on
+  // the play button, exactly as a transport press leaves it.
+  if (entry.held) return entry.send !== null ? MARK_ONLY : SETTLED;
   const sendHasTheBody = entry.send !== null && !entry.markOnly;
   const agentHasTheBody = entry.activity === "busy" && !entry.deferred;
   if (entry.send !== null) return sendHasTheBody || agentHasTheBody ? BODY_HANDED_OVER : MARK_ONLY;
@@ -168,8 +219,12 @@ function onActivity(sessionId: string, state: ActivityState): void {
     // body now.
     entry.deferred = entry.speaking;
   } else {
-    // Nothing left to defer to — and for `idle`, nothing left to wait for.
+    // Nothing left to defer to — and nothing left to hold the answer against
+    // either: the hold is a press made against work in progress, and work that
+    // is no longer in progress must not leave the pane pinned to an old
+    // answer for the next thing the agent does.
     entry.deferred = false;
+    entry.held = false;
     if (state === "idle") {
       entry.send = null;
       entry.markOnly = false;
@@ -192,6 +247,8 @@ function ensureEntry(sessionId: string): Entry {
     activity: getActivityState(sessionId),
     speaking: false,
     deferred: false,
+    held: false,
+    newest: null,
     snapshot: SETTLED,
     unsubscribe: () => {},
   };
@@ -283,6 +340,51 @@ export function noteTransport(sessionId: string): void {
   if (!entry || entry.send === null || entry.markOnly) return;
   entry.markOnly = true;
   publish(sessionId);
+}
+
+/**
+ * A backward transport press: hold the answer on screen until released.
+ *
+ * Idempotent, and deliberately unconditional — a press made while nothing has
+ * the body is a hold that costs nothing and is already standing when the agent
+ * next goes busy, which is the case the user is actually protecting themselves
+ * against.
+ */
+export function holdAnswer(sessionId: string): void {
+  const entry = ensureEntry(sessionId);
+  if (entry.held) return;
+  entry.held = true;
+  publish(sessionId);
+}
+
+/** A forward transport press, or the *Next answer* control. */
+export function releaseAnswer(sessionId: string): void {
+  const entry = entries.get(sessionId);
+  if (!entry || !entry.held) return;
+  entry.held = false;
+  publish(sessionId);
+}
+
+/**
+ * The newest answer the cell holds, as the surface that owns the queue sees it.
+ * A different id than the last one pushed is an ARRIVAL — which is a different
+ * question from `noteUtterance`'s, because the cursor also moves for a
+ * transport press, and the press that SETS the hold must not read as the event
+ * that ends it.
+ *
+ * Returns whether that arrival released a hold. `true` is the surface's cue to
+ * return its cursor to the newest answer so the body shows what just landed —
+ * the one half of this that lives outside the module, because the cursor is the
+ * speech queue's and this module never reaches for it (see the header).
+ */
+export function noteNewestAnswer(sessionId: string, newestId: string | null): boolean {
+  const entry = ensureEntry(sessionId);
+  if (newestId === entry.newest) return false;
+  entry.newest = newestId;
+  if (!entry.held) return false;
+  entry.held = false;
+  publish(sessionId);
+  return true;
 }
 
 /** Drops the session's wait, and the activity watch holding it open. */
