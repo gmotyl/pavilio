@@ -17,6 +17,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
+import { useIsMobile } from "./useIsMobile";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
 import { isPreferenceScope } from "../../preferences/types";
@@ -92,6 +93,7 @@ export default function LeftSidebar() {
   const projects = useProjects();
   const { isFavorite, toggle } = useFavorites();
   const { sessions } = useAllTerminalSessions();
+  const isMobile = useIsMobile();
   const { archive, archivedNames } = useArchivedProjects();
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
   const [lanAccessOpen, setLanAccessOpen] = useState(false);
@@ -242,6 +244,31 @@ export default function LeftSidebar() {
     return m;
   }, [sessions]);
 
+  /**
+   * Where tapping a project's name goes.
+   *
+   * On a desktop it is the bare project route, which `ProjectRedirect` resolves
+   * through the Last-open-view bookmark — the user is returned to whichever view
+   * they left the project in. A phone has one view worth arriving at, and it is
+   * the terminal: the sections are reading surfaces opened deliberately, while
+   * the reason to pick the phone up at all is an agent waiting in a session. So
+   * the tap is sent straight there, over the top of whatever the bookmark holds.
+   *
+   * This overrides the DESTINATION and nothing else. The bookmark goes on being
+   * written by the page the user lands on (`useLastPath`, mounted in
+   * `ProjectView`), so a phone visit still records where they were, and the bare
+   * route still restores it on their desktop. Suppressing the write instead would
+   * be the easy mistake here: it looks the same from the phone and quietly loses
+   * the desktop's place.
+   *
+   * Derived from the live `useIsMobile()` rather than a `matchMedia` read taken
+   * once at mount, so a rotation moves the destination with it — and never
+   * stored, because being on a phone is a fact about the viewport, not a
+   * preference the user expressed.
+   */
+  const projectHref = (name: string) =>
+    isMobile ? `/project/${name}/iterm` : `/project/${name}`;
+
   const renderProjectRow = (project: { name: string }) => {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
     const projectSessionIds = projectSessions.map((s) => s.id);
@@ -286,7 +313,7 @@ export default function LeftSidebar() {
             </span>
           )}
           <NavLink
-            to={`/project/${project.name}`}
+            to={projectHref(project.name)}
             className="flex-1 truncate text-[13px] py-0.5"
             style={({ isActive }) => ({
               color:
