@@ -1,5 +1,5 @@
 /**
- * The per-cell **utterance queue**: one step of history, the utterance the
+ * The per-cell **utterance queue**: five steps of history, the utterance the
  * transport is on, and the answers waiting behind it.
  *
  * It holds **whole agent responses** — a finished answer, or a question the
@@ -31,14 +31,23 @@ import type { Utterance } from "./types";
  */
 export const MAX_PENDING = 5;
 
+/**
+ * How far back the transport can walk. History used to be a single slot, which
+ * made a backlog unwalkable: a listener who stepped back past the last answer
+ * found nothing behind it. Five is the same depth the queue already tolerates
+ * ahead of the cursor, so a run that overtook a listener can be read back in
+ * full without the cell holding an unbounded transcript.
+ */
+export const MAX_PREVIOUS = 5;
+
 export interface UtteranceQueue {
-  /** One step of history. Null until something has finished or been superseded. */
-  previous: Utterance | null;
+  /** Newest first, at most MAX_PREVIOUS. */
+  previous: Utterance[];
   current: Utterance | null;
   /** FIFO, oldest first, at most MAX_PENDING. */
   pending: Utterance[];
-  /** Which of previous|current the transport is on. */
-  cursor: "previous" | "current";
+  /** 0 = `current`; n > 0 = `previous[n - 1]`. */
+  cursor: number;
 }
 
 export type UtteranceQueueEvent =
@@ -53,39 +62,61 @@ export type UtteranceQueueEvent =
 
 /**
  * The state every cell starts in — and a **module singleton**, handed out as
- * the initial state of every queue in the panel. So it is frozen, list and all:
- * one stray mutation anywhere would not corrupt one cell, it would poison the
- * starting point of every cell that has not received an utterance yet.
+ * the initial state of every queue in the panel. So it is frozen, both lists
+ * included: one stray mutation anywhere would not corrupt one cell, it would
+ * poison the starting point of every cell that has not received an utterance
+ * yet.
  *
  * Freezing takes nothing away from the declared type: `Object.freeze` narrows
  * no member, it only makes the writes the type would have permitted throw.
  */
 export const emptyUtteranceQueue: UtteranceQueue = Object.freeze({
-  previous: null,
+  previous: Object.freeze([]) as unknown as Utterance[],
   current: null,
   pending: Object.freeze([]) as unknown as Utterance[],
-  cursor: "current",
+  cursor: 0,
 });
 
 /**
  * The utterance the transport is on — the one a play, a pause or a `finished`
  * is about. The cursor's meaning lives here, in the file that owns the cursor,
- * rather than being re-inlined as `cursor === "previous" ? previous : current`
- * at every surface that has to ask it.
+ * rather than being re-inlined as `previous[cursor - 1]` at every surface that
+ * has to ask it.
  */
 export const utteranceUnderCursor = (state: UtteranceQueue): Utterance | null =>
-  state.cursor === "previous" ? state.previous : state.current;
+  state.cursor === 0 ? state.current : (state.previous[state.cursor - 1] ?? null);
 
 /**
- * `current` steps back into `previous` and the head of `pending` takes its
- * place. The old `previous` is discarded — history is one step deep by
- * decision, so `previous` is a slot and not a list.
+ * Push a superseded answer onto the front of the history, dropping the oldest
+ * once it is full. A null `current` pushes nothing: an empty cursor is not a
+ * step of history, and writing one would cost the listener a real answer at the
+ * far end of the list.
+ */
+const pushPrevious = (previous: Utterance[], utterance: Utterance | null): Utterance[] =>
+  utterance === null ? previous : [utterance, ...previous].slice(0, MAX_PREVIOUS);
+
+/**
+ * Where the cursor has to sit to stay on the **same utterance** after the
+ * history has shifted under it. A cursor on `current` stays on `current`; one
+ * parked in history moves back a step for the answer pushed in front of it, and
+ * clamps at the oldest answer still held if its own has just fallen off the
+ * end.
+ */
+const trackCursor = (cursor: number, shifted: boolean, previous: Utterance[]): number => {
+  if (cursor === 0) return 0;
+  return Math.min(shifted ? cursor + 1 : cursor, previous.length);
+};
+
+/**
+ * `current` steps back into the history and the head of `pending` takes its
+ * place. Only ever reached with the cursor on `current` — a replay ends by
+ * returning the cursor, never by moving the list on — so the cursor lands at 0.
  */
 const advance = (state: UtteranceQueue): UtteranceQueue => ({
-  previous: state.current,
+  previous: pushPrevious(state.previous, state.current),
   current: state.pending[0] ?? null,
   pending: state.pending.slice(1),
-  cursor: "current",
+  cursor: 0,
 });
 
 export function utteranceQueueReducer(
@@ -102,31 +133,37 @@ export function utteranceQueueReducer(
         return { ...state, pending };
       }
       // Idle: the arrival is what the transport is on, and whatever it
-      // superseded becomes the one step of history.
+      // superseded becomes the newest step of history. A listener already
+      // reading something older is not yanked out of it — the cursor follows
+      // its own utterance down the list.
+      const previous = pushPrevious(state.previous, state.current);
       return {
-        previous: state.current ?? state.previous,
+        previous,
         current: event.utterance,
         pending: state.pending,
-        cursor: "current",
+        cursor: trackCursor(state.cursor, previous !== state.previous, previous),
       };
     }
 
     case "finished": {
-      // Finishing a replay of `previous` only returns the cursor; the utterance
-      // sitting in `current` has not been heard and must not be shifted away.
-      if (state.cursor === "previous") return { ...state, cursor: "current" };
+      // Finishing a replay out of the history only returns the cursor; the
+      // utterance sitting in `current` has not been heard and must not be
+      // shifted away.
+      if (state.cursor > 0) return { ...state, cursor: 0 };
       if (state.current === null && state.pending.length === 0) return state;
       return advance(state);
     }
 
     case "previous": {
-      if (state.previous === null || state.cursor === "previous") return state;
-      return { ...state, cursor: "previous" };
+      // The cursor may sit one step per remembered answer, and no further.
+      if (state.cursor >= state.previous.length) return state;
+      return { ...state, cursor: state.cursor + 1 };
     }
 
     case "next": {
-      // Back from a replay first; only then forward into what is waiting.
-      if (state.cursor === "previous") return { ...state, cursor: "current" };
+      // Back towards the newest answer first; only then forward into what is
+      // waiting.
+      if (state.cursor > 0) return { ...state, cursor: state.cursor - 1 };
       if (state.pending.length === 0) return state;
       return advance(state);
     }
