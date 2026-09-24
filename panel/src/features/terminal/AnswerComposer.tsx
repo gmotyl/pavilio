@@ -56,9 +56,13 @@ export interface AnswerComposerProps {
    */
   send: (data: string) => boolean;
   /**
-   * A draft has just gone out. Raised once per submit, after the body has been
-   * written — the pane hands its body over to the waiting state here, because
-   * it is the pane that knows which answer the draft was a reply to.
+   * A draft has just gone out. Raised at the moment the body is written, and
+   * only then — the pane hands its body over to the waiting state here,
+   * because it is the pane that knows which answer the draft was a reply to.
+   *
+   * Not raised at all for a submit the socket refused, and raised late rather
+   * than early for one that had to queue behind another: a submit is written
+   * when its turn comes, and the wait is about the write.
    */
   onSubmitted: () => void;
 }
@@ -239,31 +243,34 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     setPasted([]);
     // The last submit's verdict is spent the moment a new one is made.
     setFailure(null);
-    /**
-     * Whether the body reached the socket. A refused body is reported
-     * SYNCHRONOUSLY — `submitToPty` writes it inline unless this session
-     * already has a submit in flight — so this flag is answered by the time
-     * the call returns, which is what lets the handover below be skipped.
-     */
-    let delivered = true;
     // The body now, its submitting return on a later turn — never one write.
-    submitToPty(sessionId, send, reply, (stage) => {
-      setFailure(stage);
-      if (stage !== "body") return;
-      delivered = false;
-      // Nothing left the browser, so the reply is this field's again. Written
-      // back to the store as well as the state: the store is what the field is
-      // rebuilt from, and a refusal must survive the pane being closed exactly
-      // as an unsent draft does.
-      setDraft(sessionId, reply);
-      setText(reply);
+    submitToPty(sessionId, send, reply, {
+      // The waiting state means "the agent is working on what I just said", so
+      // the pane is handed over where the body is actually WRITTEN and nowhere
+      // else. This used to be decided here, from a flag the failure callback
+      // cleared, on the reasoning that a refusal is reported synchronously —
+      // and that is true only of a submit `submitToPty` writes inline. A
+      // submit made while this session already has one in flight is enqueued
+      // and written a gap later, so the flag was still saying "delivered" when
+      // it was read, and a reply the socket went on to refuse put the pane
+      // into a wait for an answer to something the agent had never been told.
+      onDelivered: onSubmitted,
+      onFailed: (stage) => {
+        setFailure(stage);
+        if (stage !== "body") return;
+        // Nothing left the browser, so the reply is this field's again. Written
+        // back to the store as well as the state: the store is what the field is
+        // rebuilt from, and a refusal must survive the pane being closed exactly
+        // as an unsent draft does.
+        setDraft(sessionId, reply);
+        setText(reply);
+      },
     });
-    // The waiting state means "the agent is working on what I just said". On a
-    // refused body it said nothing, so there is nothing to wait for. The other
-    // failure cannot be known in time — the return is written a turn later,
-    // and by then the pane has already handed its body over — which is fair:
-    // the reply IS on the far side, it simply has not been run.
-    if (delivered) onSubmitted();
+    // A refused RETURN is deliberately not undone here. It arrives after the
+    // handover above — the return is written a turn later — and that is fair:
+    // the reply IS on the far side, it simply has not been run, so the wait is
+    // about something the agent can still be given with one keypress in the
+    // terminal, and the notice says exactly that.
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {

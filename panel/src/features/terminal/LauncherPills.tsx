@@ -40,7 +40,8 @@ function sessionStartCommand(sessionId: string): string {
 }
 
 /**
- * Run a pill's command on the cell, and say so when the socket refused it.
+ * Run a pill's command on the cell, say so when the socket refused it, and
+ * tell the caller when it actually went.
  *
  * A pill has no field to keep anything in and nothing to put back: its command
  * is a constant the user can press again. What it must not do is what the
@@ -53,14 +54,32 @@ function sessionStartCommand(sessionId: string): string {
  * the panel's way of reporting a background failure, in a live region a screen
  * reader picks up. The answer composer says its own refusals in the pane
  * instead, because there the news is about text the user can still see.
+ *
+ * `onDelivered` exists because a refusal is only half of what a caller needs.
+ * Marking the cell launched is a thing to do on the strength of a command that
+ * WENT, and this function is the only place that knows whether one did — so it
+ * hands the fact on rather than leaving the pill to ask the socket a second
+ * time, which would be the delivery check written twice and answered at the
+ * wrong moment. It is a callback and not a returned boolean because
+ * `submitToPty` writes a queued submit a gap later (see `SubmitReport` on
+ * `ptySubmit`): a value returned from the click would be a guess about a write
+ * that had not happened yet.
  */
-function runCommand(sessionId: string, send: (data: string) => boolean, command: string): void {
-  submitToPty(sessionId, send, command, (stage) => {
-    toast.error(
-      stage === "body"
-        ? `Not sent — the terminal is not connected: ${command}`
-        : `Not submitted — the terminal disconnected: ${command}`,
-    );
+function runCommand(
+  sessionId: string,
+  send: (data: string) => boolean,
+  command: string,
+  onDelivered?: () => void,
+): void {
+  submitToPty(sessionId, send, command, {
+    onDelivered,
+    onFailed: (stage) => {
+      toast.error(
+        stage === "body"
+          ? `Not sent — the terminal is not connected: ${command}`
+          : `Not submitted — the terminal disconnected: ${command}`,
+      );
+    },
   });
 }
 
@@ -161,10 +180,14 @@ export function LauncherPills({ sessionId, send }: LauncherPillsProps) {
             title={entry.command}
             data-testid={`speech-bar-launch-${sessionId}-${index}`}
             className="speech-bar-launch"
-            onClick={() => {
-              runCommand(sessionId, send, entry.command);
-              noteLauncherUsed(sessionId);
-            }}
+            // The row is marked launched by the command LANDING, not by the
+            // click. A refused pill leaves a cell with no agent in it, and a
+            // row that swapped anyway would claim one had started, take the
+            // other launchers away, and leave the user with a `start` pill for
+            // a session that does not exist.
+            onClick={() =>
+              runCommand(sessionId, send, entry.command, () => noteLauncherUsed(sessionId))
+            }
           >
             {entry.name}
           </button>

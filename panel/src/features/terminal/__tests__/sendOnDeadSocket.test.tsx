@@ -23,6 +23,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import ToastHost from "../../../components/ToastHost";
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { getToastSnapshot, dismissToast } from "../../../lib/toast";
 import { preferences } from "../../../preferences/declarations";
@@ -33,7 +34,7 @@ import { AnswerPane } from "../AnswerPane";
 import { SpeechControlBar } from "../SpeechControlBar";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
 import { getDraft, __resetComposerDraftsForTests } from "../composerDrafts";
-import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
+import { SUBMIT_RETURN_MS, __resetPtySubmitForTests, submitToPty } from "../ptySubmit";
 import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
 
@@ -278,6 +279,101 @@ describe("a submit on a dead socket", () => {
     expect(screen.queryByTestId(`answer-pane-waiting-${SESSION}`)).toBeNull();
   });
 
+  it("hands the pane over to the waiting state when the body does reach the socket", () => {
+    const send = liveSend();
+    renderPane(send);
+
+    submit("on its way");
+
+    // The control every "does not wait" case in this file rests on: this pane
+    // CAN show the state, so an absent wave means the submit was refused and
+    // not merely that the harness never draws one.
+    expect(screen.getByTestId(`answer-pane-waiting-${SESSION}`)).toBeInTheDocument();
+  });
+
+  it("does not wait for a queued reply whose body is refused when its turn comes", () => {
+    vi.useFakeTimers();
+    // Something else on this cell is already mid-submit — a launcher pill
+    // pressed a moment earlier writes through the same per-session queue — so
+    // this reply is ENQUEUED rather than written, and whether it will reach
+    // the socket is not known by the time `submit` returns.
+    const earlier = vi.fn((_data: string) => true);
+    submitToPty(SESSION, earlier, "pavilio-session-start alpha");
+    const send = deadSend();
+    renderPane(send);
+
+    act(() => submit("queued behind the pill"));
+
+    // Nothing has been written for this reply yet, so nothing about it can be
+    // known — least of all that the agent is working on it.
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.queryByTestId(`answer-pane-waiting-${SESSION}`)).toBeNull();
+
+    act(() => vi.advanceTimersByTime(SUBMIT_RETURN_MS));
+
+    // Its turn came and the socket refused the body, so the pane is left
+    // exactly as any other refusal leaves it: the text is back in the field,
+    // the notice is up, and nothing is being waited for.
+    expect(send.mock.calls).toEqual([["queued behind the pill"]]);
+    expect(field().value).toBe("queued behind the pill");
+    expect(failure()).not.toBeNull();
+    expect(screen.queryByTestId(`answer-pane-waiting-${SESSION}`)).toBeNull();
+  });
+
+  it("waits for a queued reply from the moment its body is written", () => {
+    vi.useFakeTimers();
+    const earlier = vi.fn((_data: string) => true);
+    submitToPty(SESSION, earlier, "pavilio-session-start alpha");
+    const send = liveSend();
+    renderPane(send);
+
+    act(() => submit("queued behind the pill"));
+
+    // Still only enqueued: the agent has not been told anything yet.
+    expect(screen.queryByTestId(`answer-pane-waiting-${SESSION}`)).toBeNull();
+
+    act(() => vi.advanceTimersByTime(SUBMIT_RETURN_MS));
+
+    // The wait is about a write, so it begins where the write does.
+    expect(send.mock.calls).toEqual([["queued behind the pill"]]);
+    expect(screen.getByTestId(`answer-pane-waiting-${SESSION}`)).toBeInTheDocument();
+  });
+
+  it("takes the notice down on the next keystroke", () => {
+    const send = deadSend();
+    renderPane(send);
+
+    submit("did this go?");
+    expect(failure()).not.toBeNull();
+
+    fireEvent.change(field(), { target: { value: "did this go? " } });
+
+    // Typing is the user having read the refusal and moved on. A notice that
+    // outlived the reply it was about would go on claiming the next one failed
+    // too, in a live region, while the user was typing it.
+    expect(failure()).toBeNull();
+  });
+
+  it("takes the notice down on the next submit", async () => {
+    let open = false;
+    const send = vi.fn((_data: string) => open);
+    renderPane(send);
+
+    submit("first try");
+    expect(failure()).not.toBeNull();
+
+    // The socket comes back and the user presses Enter on the very text the
+    // refusal put back — no keystroke in between, so the submit itself is the
+    // only thing that can have taken the notice down.
+    open = true;
+    fireEvent.keyDown(field(), { key: "Enter" });
+
+    expect(failure()).toBeNull();
+    await waitFor(() =>
+      expect(send.mock.calls).toEqual([["first try"], ["first try"], ["\r"]]),
+    );
+  });
+
   it("does not strand the submits queued behind a failed body", () => {
     vi.useFakeTimers();
     // First body lands, its return lands, and the socket dies before the
@@ -315,7 +411,13 @@ describe("a submit on a dead socket", () => {
 });
 
 describe("a launcher pill on a dead socket", () => {
-  /** The bar alone, which is where the pills live before a cell has spoken. */
+  /**
+   * The bar alone, which is where the pills live before a cell has spoken —
+   * with `ToastHost` beside it, because what the pills promise is that the
+   * refusal is ANNOUNCED. Asserting the store alone would have rested that
+   * claim on the host's own suite rather than on this path, which is the same
+   * reason `AnswerComposer.paste.test.tsx` mounts it for its failed upload.
+   */
   function renderBar(send: (data: string) => boolean) {
     return render(
       <MemoryRouter>
@@ -328,9 +430,14 @@ describe("a launcher pill on a dead socket", () => {
           onToggleAnswer={() => {}}
           send={send}
         />
+        <ToastHost />
       </MemoryRouter>,
     );
   }
+
+  /** Every launcher pill on the row, in order. */
+  const launcherPills = (): HTMLElement[] =>
+    screen.queryAllByTestId(new RegExp(`^speech-bar-launch-${SESSION}-`));
 
   it("says a launcher command was not sent", async () => {
     writePreference(preferences.terminalLaunchers, [{ name: "claude", command: "claude" }]);
@@ -341,8 +448,49 @@ describe("a launcher pill on a dead socket", () => {
 
     // The pills have no pane of their own to write into, so they say it where
     // the panel says everything else — the toast host, which is a live region.
-    const toast = getToastSnapshot();
-    expect(toast?.kind).toBe("error");
-    expect(toast?.text ?? "").toMatch(/not sent/i);
+    const announced = await screen.findByTestId("toast");
+    expect(announced).toHaveTextContent(/not sent/i);
+    // In a live region rather than merely on screen: nothing draws a pill's
+    // attention to itself, so a screen reader has to be told.
+    expect(announced).toHaveAttribute("role", "status");
+    expect(announced).toHaveAttribute("aria-live", "polite");
+    // The store still carries the severity the host paints from — the only
+    // part of "this is an error" that never reaches the text.
+    expect(getToastSnapshot()?.kind).toBe("error");
+  });
+
+  it("leaves every launcher on the row when the command was not sent", async () => {
+    writePreference(preferences.terminalLaunchers, [
+      { name: "claude", command: "claude" },
+      { name: "codex", command: "codex" },
+    ]);
+    const send = deadSend();
+    renderBar(send);
+
+    fireEvent.click(await screen.findByTestId(`speech-bar-launch-${SESSION}-0`));
+
+    // Nothing was launched, so the row must not claim one was. Swapping the
+    // pills for `start` here is the owner's own bug in another place: the UI
+    // moving on from a write that never happened — and it costs the user the
+    // only way back to `codex` on this cell.
+    expect(launcherPills()).toHaveLength(2);
+    expect(screen.queryByTestId(`speech-bar-start-${SESSION}`)).toBeNull();
+  });
+
+  it("swaps the row for the start pill when the command does go", async () => {
+    writePreference(preferences.terminalLaunchers, [
+      { name: "claude", command: "claude" },
+      { name: "codex", command: "codex" },
+    ]);
+    const send = liveSend();
+    renderBar(send);
+
+    fireEvent.click(await screen.findByTestId(`speech-bar-launch-${SESSION}-0`));
+
+    // Exactly today's behaviour on a live socket: an agent was asked for, so
+    // the row offers the step that follows a launch instead of the launchers.
+    expect(launcherPills()).toEqual([]);
+    expect(screen.getByTestId(`speech-bar-start-${SESSION}`)).toBeInTheDocument();
+    expect(send.mock.calls).toEqual([["claude"]]);
   });
 });

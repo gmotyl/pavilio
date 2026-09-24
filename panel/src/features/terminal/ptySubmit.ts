@@ -59,6 +59,13 @@
  * on the far side, so putting it back in the composer would make two copies of
  * one reply, and what the user needs is to be told the line never ran.
  *
+ * Delivery is reported for the same reason refusal is. A caller that moves the
+ * UI on — the answer pane into its waiting state, the launcher row from its
+ * pills to `start` — must do it where the body is actually written, and for a
+ * submit held behind another that is a gap after the click that asked for it.
+ * So the two are one report with two halves ({@link SubmitReport}) rather than
+ * a refusal channel beside a return value nobody could trust.
+ *
  * Nothing is queued for a retry and nothing is re-attempted on reconnect. That
  * was weighed and rejected: an answer that lands two minutes later replies to a
  * prompt the agent has moved past, and a silent retry is a worse failure than
@@ -93,11 +100,42 @@ export const SUBMIT_RETURN_MS = 40;
  */
 export type SubmitFailure = "body" | "return";
 
-interface Submission {
-  readonly send: (data: string) => boolean;
-  readonly body: string;
+/**
+ * How a submit reports what became of it.
+ *
+ * Both halves are optional and a submit raises at most one of them: a body
+ * either reaches the socket, in which case {@link SubmitReport.onDelivered} is
+ * raised there and then, or it does not, in which case
+ * {@link SubmitReport.onFailed} is. A refused RETURN comes after a delivered
+ * body and is the one case that raises both, in that order — which is the
+ * truth of it: the text IS on the far side, it simply has not been run.
+ *
+ * An object rather than two positional callbacks because the two mean opposite
+ * things and nothing in a call site reading `submitToPty(id, send, body, f, g)`
+ * would say which was which.
+ */
+export interface SubmitReport {
+  /**
+   * The body has just been written to an OPEN socket. Raised at most once, at
+   * the moment of that write — which is NOT necessarily the moment the submit
+   * was asked for: a submit made while the session already has one in flight
+   * is enqueued, and is written a gap later when its turn comes.
+   *
+   * That timing is the whole reason this is a callback rather than a boolean
+   * returned from {@link submitToPty}. A caller that ADVANCES on a submit —
+   * the answer pane's waiting state, the launcher row swapping its pills for
+   * `start` — has to advance on the write, and anything it could read
+   * synchronously on an enqueued submit would be a guess about a write that
+   * has not happened yet.
+   */
+  readonly onDelivered?: () => void;
   /** Raised at most once, with the half that was refused. */
   readonly onFailed?: (stage: SubmitFailure) => void;
+}
+
+interface Submission extends SubmitReport {
+  readonly send: (data: string) => boolean;
+  readonly body: string;
 }
 
 /**
@@ -134,6 +172,10 @@ function write(sessionId: string, submission: Submission): void {
     advance(sessionId);
     return;
   }
+  // The body is on the socket. Said HERE rather than where the submit was
+  // asked for, because this line is the first moment it is true — for an
+  // enqueued submit it runs a gap after the caller's own code did.
+  submission.onDelivered?.();
   timers.set(
     sessionId,
     setTimeout(() => {
@@ -157,26 +199,26 @@ function write(sessionId: string, submission: Submission): void {
  * `body` is written verbatim and is never trimmed or split: its newlines are
  * the user's, and a per-line write would submit each line separately.
  *
- * `onFailed` is how a caller hears that the socket refused one of the two
- * writes. It is optional because not every caller has somewhere to say it —
- * but a caller that CLEARS anything on submit needs it, or it is clearing on
- * the strength of a write that never happened. A submit raises it at most
- * once: a refused body ends the submit, and a refused return is the last thing
- * that can go wrong with one.
+ * `report` is how a caller hears what became of the submit — see
+ * {@link SubmitReport}. Both halves are optional because not every caller has
+ * somewhere to say it, but a caller that CLEARS anything on submit needs
+ * `onFailed`, or it is clearing on the strength of a write that never
+ * happened, and a caller that ADVANCES on one needs `onDelivered`, for the
+ * same reason read the other way round.
  */
 export function submitToPty(
   sessionId: string,
   send: (data: string) => boolean,
   body: string,
-  onFailed?: (stage: SubmitFailure) => void,
+  report: SubmitReport = {},
 ): void {
   const queued = queues.get(sessionId);
   if (queued) {
-    queued.push({ send, body, onFailed });
+    queued.push({ send, body, ...report });
     return;
   }
   queues.set(sessionId, []);
-  write(sessionId, { send, body, onFailed });
+  write(sessionId, { send, body, ...report });
 }
 
 /** Drops every queued submit and the returns still scheduled for them. */
