@@ -1376,6 +1376,27 @@ input[type="checkbox"] {
   background: #17171d;
 }
 
+/* A submit the socket refused, said where the reply is: directly under the
+   field that still holds it, in the same monospace furniture the hint uses so
+   it reads as part of the composer rather than as something modal.
+
+   `--red` on the ink and nothing else — no panel, no border, no icon. The row
+   lasts only until the user types again, and a box drawn around it would keep
+   claiming space in a pane whose whole job is to show an answer. The sentence
+   itself carries the message for anyone the colour does not reach, and
+   `role="alert"` on the element carries it to a screen reader. On every
+   viewport, unlike the hint above it: a phone is exactly where a socket
+   drops. */
+.answer-pane-send-failed {
+  flex: none;
+  padding: 0 13px 7px;
+  background: #17171d;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--red);
+}
+
 /* What the three keys do, in the pane's dimmest ink. Desktop only — two of
    them do not exist on a phone — so nothing here has a mobile case. */
 .answer-pane-hint {

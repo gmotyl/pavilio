@@ -331,7 +331,7 @@ vi.mock("../../terminal/TerminalView", async () => {
             onToggleAnswer={() => {}}
             // The real view hands the bar its terminal's `send`; there is no
             // terminal here, and nothing in this file clicks a launcher.
-            send={() => {}}
+            send={() => true}
           />
         ) : null}
       </div>

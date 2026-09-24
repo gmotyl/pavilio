@@ -148,7 +148,7 @@ function Harness({ sessionId }: { sessionId: string }) {
       answerOpen={false}
       onToggleAnswer={() => {}}
       // No terminal here, and nothing in this file clicks a launcher.
-      send={() => {}}
+      send={() => true}
     />
   );
 }

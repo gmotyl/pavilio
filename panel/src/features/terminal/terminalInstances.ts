@@ -90,7 +90,22 @@ export interface LiveTerminal {
   fitAddon: FitAddon;
   holder: HTMLDivElement;
   ws: WebSocket;
-  send: (data: string) => void;
+  /**
+   * Write one input frame to the cell's PTY, and say whether it went.
+   *
+   * True when the frame was handed to an OPEN socket; false when it was
+   * dropped because there was no socket to hand it to. The boolean exists
+   * because this used to be the silent end of the answer form: a socket that
+   * was not OPEN took the guard and the function returned normally, so no
+   * caller could tell a delivered write from a dropped one — `ptySubmit` went
+   * on to schedule the return that submits it, and the composer cleared a
+   * reply that never left the browser.
+   *
+   * `false` is not an error: a dead socket is an expected, repairable state
+   * (`reconnectOnActivate`, ADR 0010). It is the caller's business what to do
+   * about it, and the answer form's business is to keep the text.
+   */
+  send: (data: string) => boolean;
   fit: () => void;
   focus: () => void;
   addExitListener: (fn: ExitListener) => () => void;
@@ -803,9 +818,9 @@ function createInstance(sessionId: string): InternalInstance {
     connectionState: "disconnected",
     send: (data: string) => {
       const currentWs = inst.ws;
-      if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-        currentWs.send(JSON.stringify({ type: "input", data }));
-      }
+      if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return false;
+      currentWs.send(JSON.stringify({ type: "input", data }));
+      return true;
     },
     fit: () => {
       try {

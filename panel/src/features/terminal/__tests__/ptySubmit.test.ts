@@ -25,7 +25,7 @@ afterEach(() => {
 
 describe("submitToPty", () => {
   it("writes the body now and the return on a later turn", () => {
-    const send = vi.fn();
+    const send = vi.fn((_data: string) => true);
 
     submitToPty("cell-a", send, "ship it");
 
@@ -39,7 +39,7 @@ describe("submitToPty", () => {
   });
 
   it("never concatenates the return onto the body", () => {
-    const send = vi.fn();
+    const send = vi.fn((_data: string) => true);
 
     submitToPty("cell-a", send, "ship it");
     vi.advanceTimersByTime(SUBMIT_RETURN_MS);
@@ -51,7 +51,7 @@ describe("submitToPty", () => {
   });
 
   it("keeps every line of a multi-line body in the one body write", () => {
-    const send = vi.fn();
+    const send = vi.fn((_data: string) => true);
     const body = "first paragraph\nsecond paragraph\nthird";
 
     submitToPty("cell-a", send, body);
@@ -63,7 +63,7 @@ describe("submitToPty", () => {
   });
 
   it("does not interleave two sends made in the same tick", () => {
-    const send = vi.fn();
+    const send = vi.fn((_data: string) => true);
 
     submitToPty("cell-a", send, "first");
     submitToPty("cell-a", send, "second");
@@ -80,8 +80,8 @@ describe("submitToPty", () => {
   });
 
   it("queues per session rather than across the panel", () => {
-    const a = vi.fn();
-    const b = vi.fn();
+    const a = vi.fn((_data: string) => true);
+    const b = vi.fn((_data: string) => true);
 
     submitToPty("cell-a", a, "for a");
     submitToPty("cell-b", b, "for b");
@@ -97,7 +97,7 @@ describe("submitToPty", () => {
   });
 
   it("gives the return a turn of its own rather than a microtask", async () => {
-    const send = vi.fn();
+    const send = vi.fn((_data: string) => true);
 
     submitToPty("cell-a", send, "ship it");
     await Promise.resolve();

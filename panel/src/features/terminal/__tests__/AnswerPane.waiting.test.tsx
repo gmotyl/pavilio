@@ -197,7 +197,9 @@ function installMatchMedia(): void {
   });
 }
 
-const send = vi.fn();
+/** A live socket: the write landed. `send` reports delivery now, and a stub
+ *  that returned nothing would read as a socket that is not OPEN. */
+const send = vi.fn((_data: string) => true);
 
 /** The pane alone — every criterion but the transport one. */
 const paneTree = (speech: GridSpeech) => (

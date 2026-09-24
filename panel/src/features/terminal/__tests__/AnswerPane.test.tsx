@@ -225,8 +225,9 @@ function harness(markdown = MARKDOWN, progress: SpeechProgress | null = null): H
 /** The meta row's switch, off and inert unless a test wires it. */
 const OFF = { autoOpen: false, onAutoOpenChange: () => {} };
 
-/** The composer's PTY write. `AnswerComposer.test.tsx` is where it is spent. */
-const NO_SEND = () => {};
+/** The composer's PTY write, on a live socket — `AnswerComposer.test.tsx` is
+ *  where it is spent, and `sendOnDeadSocket.test.tsx` is where a dead one is. */
+const NO_SEND = (): boolean => true;
 
 function paneElement(speech: GridSpeech, onClose: () => void = () => {}) {
   // MarkdownRenderer calls useNavigate, so the body needs a router.

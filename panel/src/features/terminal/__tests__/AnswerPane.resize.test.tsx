@@ -203,7 +203,7 @@ function renderPaneFor(sessionId = SESSION, areaHeight = AREA): RenderedPane {
         sessionId={sessionId}
         speech={makeSpeech()}
         onClose={() => {}}
-        send={() => {}}
+        send={() => true}
         autoOpen={false}
         onAutoOpenChange={() => {}}
       />

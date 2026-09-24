@@ -275,8 +275,12 @@ export function TerminalView({
    * reconnect. This is the same `inst.send` the view already hands out through
    * `onReady` — one transport, reached two ways.
    */
-  const send = useCallback((data: string) => {
-    instRef.current?.send(data);
+  const send = useCallback((data: string): boolean => {
+    // No instance is no delivery, and the callers of this — the composer and
+    // the launcher pills — have to be able to tell. `?? false` rather than a
+    // non-null assertion: the window between mount and the effect that creates
+    // the instance is real, and a reply written into it went nowhere.
+    return instRef.current?.send(data) ?? false;
   }, []);
 
   const isViewportBlank = useCallback(() => {

@@ -116,14 +116,14 @@ function renderBar(sessionId: string, state: CellSpeechState = "ready") {
       speech={makeSpeech(state)}
       answerOpen={false}
       onToggleAnswer={() => {}}
-      send={() => {}}
+      send={() => true}
     />,
   );
 }
 
 function renderComposer(sessionId: string) {
   return render(
-    <AnswerComposer sessionId={sessionId} send={() => {}} onSubmitted={() => {}} />,
+    <AnswerComposer sessionId={sessionId} send={() => true} onSubmitted={() => {}} />,
   );
 }
 
@@ -226,7 +226,7 @@ describe("attention clears when the user actually arrives", () => {
           speech={makeSpeech(state)}
           answerOpen={false}
           onToggleAnswer={() => {}}
-          send={() => {}}
+          send={() => true}
         />,
       );
     }

@@ -36,8 +36,11 @@ export interface SpeechControlBarProps {
    * row's contents on a silent cell, and a host that forgot to pass this would
    * render pills that look live and do nothing when clicked — a failure no
    * test of the bar alone can see. A no-op default would buy exactly that.
+   *
+   * It reports whether the frame reached an OPEN socket, which is how a pill
+   * on a dead cell says so instead of flashing and doing nothing.
    */
-  send: (data: string) => void;
+  send: (data: string) => boolean;
 }
 
 /**

@@ -5,7 +5,7 @@ import { preferences } from "../../preferences/declarations";
 import { toast } from "../../lib/toast";
 import { clearDraft, getDraft, setDraft } from "./composerDrafts";
 import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
-import { submitToPty } from "./ptySubmit";
+import { submitToPty, type SubmitFailure } from "./ptySubmit";
 import { projectOfSession } from "./sessionProject";
 import { sendDismiss } from "./terminalInstances";
 import { getActivityState } from "./useTerminalActivityChannel";
@@ -44,6 +44,22 @@ function dismissAttentionOnArrival(sessionId: string): void {
   sendDismiss(sessionId);
 }
 
+/**
+ * What the pane says when the socket refused one half of a submit.
+ *
+ * Two sentences, because the two failures leave the reply in two different
+ * places and the user's next move differs. A refused BODY never left the
+ * browser, so the text is back in the field and the whole of the news is that
+ * it did not go. A refused RETURN left the body in the TUI's prompt with
+ * nobody having pressed Enter on it — the field is legitimately empty, and
+ * saying "not sent" there would be a lie that sent the user looking for text
+ * that is sitting in the terminal underneath.
+ */
+const FAILURE_TEXT: Record<SubmitFailure, string> = {
+  body: "Not sent — the terminal is not connected. Your reply is still here.",
+  return: "Sent but not submitted — the terminal disconnected. The line is in the prompt below.",
+};
+
 /** The file a path ends in — the chip's whole text. */
 function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -58,8 +74,12 @@ export interface AnswerComposerProps {
    * The raw write, not a wrapped one: a submit is TWO writes now (see
    * `ptySubmit`), and anything the pane wants to do once per submit belongs in
    * {@link onSubmitted} rather than on a write it would then see twice.
+   *
+   * It reports whether the frame reached an OPEN socket, and this field is the
+   * reason that boolean exists: a reply cleared on the strength of a write
+   * that was silently dropped is a reply the user cannot get back.
    */
-  send: (data: string) => void;
+  send: (data: string) => boolean;
   /**
    * A draft has just gone out. Raised once per submit, after the body has been
    * written — the pane hands its body over to the waiting state here, because
@@ -117,6 +137,28 @@ export interface AnswerComposerProps {
  * simply sit there, and a paste that quietly did nothing is indistinguishable
  * from a clipboard that held nothing. `toast.error` is the panel's own way of
  * saying it, the one the file explorer's failed moves already use.
+ *
+ * ## Why a refused send keeps the text
+ *
+ * The cell's `send` says whether the frame reached an OPEN socket. It used to
+ * say nothing: a socket that was not OPEN took the guard, the write was
+ * dropped in silence, `submitToPty` scheduled the return anyway and this field
+ * cleared — so a reply typed while the socket was down was simply gone, with
+ * no error and no way back to it. That is the bug Greg hit in use, and the
+ * answer is the honest refusal rather than a queue: the text stays here, the
+ * pane says it did not go, and the user resends it when the cell is back.
+ *
+ * Nothing is retried. `reconnectOnActivate` already repairs a dead socket the
+ * moment the user goes near the cell (ADR 0010), so the resend costs a second
+ * keypress — whereas a reply flushed on reconnect would arrive at whatever the
+ * agent had moved on to, answering a prompt that is no longer on screen.
+ *
+ * The notice is a row of the pane, not a toast, and it carries `role="alert"`.
+ * A refusal is about the text still in this field, so it belongs beside the
+ * field; and it is the one thing here a sighted user learns from a colour, so
+ * it has to be announced rather than merely drawn. It clears on the next
+ * keystroke and on the next submit, because either one means the user has
+ * already read it and moved.
  *
  * ## Why Escape is not handled here
  *
@@ -193,6 +235,13 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    * is what decides.
    */
   const [pasted, setPasted] = useState<readonly string[]>([]);
+  /**
+   * The half of the last submit the socket refused, or null when the last
+   * submit went. Not a count and not a history: a second refusal replaces the
+   * first, because what the user needs to know is the state of the reply that
+   * is in front of them now.
+   */
+  const [failure, setFailure] = useState<SubmitFailure | null>(null);
   const { height, isMobile, handleProps } = useResizableRow(
     preferences.answerComposerHeight,
     BOUNDS,
@@ -204,14 +253,42 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   /** The one way out of this field, whichever control asked for it. */
   const submit = (): void => {
     if (text.trim() === "") return;
+    // The reply this submit is made of, held across the clear below so a
+    // refusal has something to put back. `text` itself is the render's value
+    // and would still be right here, but naming it says what it is for.
+    const reply = text;
     // The one thing that consumes a draft. Nothing else in this file — or in
     // the pane above it — calls `clearDraft`.
     clearDraft(sessionId);
     setText("");
     setPasted([]);
+    // The last submit's verdict is spent the moment a new one is made.
+    setFailure(null);
+    /**
+     * Whether the body reached the socket. A refused body is reported
+     * SYNCHRONOUSLY — `submitToPty` writes it inline unless this session
+     * already has a submit in flight — so this flag is answered by the time
+     * the call returns, which is what lets the handover below be skipped.
+     */
+    let delivered = true;
     // The body now, its submitting return on a later turn — never one write.
-    submitToPty(sessionId, send, text);
-    onSubmitted();
+    submitToPty(sessionId, send, reply, (stage) => {
+      setFailure(stage);
+      if (stage !== "body") return;
+      delivered = false;
+      // Nothing left the browser, so the reply is this field's again. Written
+      // back to the store as well as the state: the store is what the field is
+      // rebuilt from, and a refusal must survive the pane being closed exactly
+      // as an unsent draft does.
+      setDraft(sessionId, reply);
+      setText(reply);
+    });
+    // The waiting state means "the agent is working on what I just said". On a
+    // refused body it said nothing, so there is nothing to wait for. The other
+    // failure cannot be known in time — the return is written a turn later,
+    // and by then the pane has already handed its body over — which is fair:
+    // the reply IS on the far side, it simply has not been run.
+    if (delivered) onSubmitted();
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -327,6 +404,10 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               // and the store it will be rebuilt from after the pane is closed.
               setDraft(sessionId, e.target.value);
               setText(e.target.value);
+              // Typing is the user having read the refusal and moved on; a
+              // notice that outlived the reply it was about would go on
+              // claiming the next one failed too.
+              setFailure(null);
             }}
             onKeyDown={onKeyDown}
             // Arriving at the cell, in the most explicit form the panel has.
@@ -360,6 +441,21 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           </svg>
         </button>
       </div>
+      {/* The refusal, in the pane rather than in a toast that floats over the
+          corner of the window: it is about the text in the field above it. On
+          every viewport, unlike the hint — a phone is exactly where a socket
+          drops, and there is no second place there to notice it. `role="alert"`
+          because the colour is what tells a sighted user, and a screen reader
+          is not looking at the pane when a send is refused. */}
+      {failure === null ? null : (
+        <div
+          className="answer-pane-send-failed"
+          data-testid={`answer-pane-send-failed-${sessionId}`}
+          role="alert"
+        >
+          {FAILURE_TEXT[failure]}
+        </div>
+      )}
       {/* Desktop only: two of the three keys it names do not exist on a phone. */}
       {isMobile ? null : (
         <div className="answer-pane-hint" data-testid={`answer-pane-hint-${sessionId}`}>

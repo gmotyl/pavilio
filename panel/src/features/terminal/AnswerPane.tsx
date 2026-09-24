@@ -47,8 +47,11 @@ export interface AnswerPaneProps {
    * reads it off the live instance at call time — the same one the bar's
    * launcher pills send with, so a reply typed here and a pill clicked up there
    * reach the shell by one transport.
+   *
+   * It reports whether the frame reached an OPEN socket; the composer is what
+   * acts on that, by keeping a reply the socket refused.
    */
-  send: (data: string) => void;
+  send: (data: string) => boolean;
 }
 
 /**

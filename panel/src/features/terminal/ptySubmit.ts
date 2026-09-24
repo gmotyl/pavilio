@@ -44,6 +44,32 @@
  * held back, and it is written only once the return before it has gone out.
  * Per session, because two cells are two PTYs and neither should wait on the
  * other.
+ *
+ * ## Why a submit can fail, and what failing means here
+ *
+ * `send` reports whether the frame reached an OPEN socket. It used to report
+ * nothing at all, which is how a reply typed into the answer form on a dead
+ * socket vanished: the body was dropped in silence, this module believed it had
+ * gone and scheduled the return, and the composer cleared. So a refusal is
+ * propagated to whoever asked for the submit, through {@link SubmitFailure},
+ * and the two halves are told apart because they mean opposite things to the
+ * caller. A refused BODY means nothing at all reached the agent — the text is
+ * still only in the browser, and the composer must keep it. A refused RETURN
+ * means the body is sitting in the TUI's prompt unsubmitted — the text exists
+ * on the far side, so putting it back in the composer would make two copies of
+ * one reply, and what the user needs is to be told the line never ran.
+ *
+ * Nothing is queued for a retry and nothing is re-attempted on reconnect. That
+ * was weighed and rejected: an answer that lands two minutes later replies to a
+ * prompt the agent has moved past, and a silent retry is a worse failure than
+ * an honest refusal.
+ *
+ * A refused body does not strand the submits behind it either. There is no
+ * return to wait for — nothing was written that a return could submit — so the
+ * queue advances immediately instead of after {@link SUBMIT_RETURN_MS}, and
+ * each entry is attempted and reports its own refusal. Dropping the rest of the
+ * queue on the floor would put this module straight back in the business of
+ * losing text without saying so.
  */
 
 /** The submitting return itself — the key the TUI runs a line on. */
@@ -58,9 +84,20 @@ const RETURN = "\r";
  */
 export const SUBMIT_RETURN_MS = 40;
 
+/**
+ * Which half of a submit was refused.
+ *
+ * `"body"` — nothing reached the PTY; the text is still only in the browser.
+ * `"return"` — the body landed and the return that runs it did not, so the
+ * text is in the TUI's prompt with nobody having pressed Enter on it.
+ */
+export type SubmitFailure = "body" | "return";
+
 interface Submission {
-  readonly send: (data: string) => void;
+  readonly send: (data: string) => boolean;
   readonly body: string;
+  /** Raised at most once, with the half that was refused. */
+  readonly onFailed?: (stage: SubmitFailure) => void;
 }
 
 /**
@@ -73,20 +110,38 @@ const queues = new Map<string, Submission[]>();
 /** The pending return per session, so a reset can drop it. */
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/**
+ * Hand the session's turn to whatever is queued behind the submit that has
+ * just finished — delivered or refused — and forget the session when nothing
+ * is.
+ */
+function advance(sessionId: string): void {
+  const queued = queues.get(sessionId);
+  const next = queued?.shift();
+  if (!next) {
+    queues.delete(sessionId);
+    return;
+  }
+  write(sessionId, next);
+}
+
 function write(sessionId: string, submission: Submission): void {
-  submission.send(submission.body);
+  if (!submission.send(submission.body)) {
+    // Nothing was written, so there is nothing for a return to submit and no
+    // reason to make the next submit wait a gap that only exists to separate a
+    // paste from a keypress.
+    submission.onFailed?.("body");
+    advance(sessionId);
+    return;
+  }
   timers.set(
     sessionId,
     setTimeout(() => {
       timers.delete(sessionId);
-      submission.send(RETURN);
-      const queued = queues.get(sessionId);
-      const next = queued?.shift();
-      if (!next) {
-        queues.delete(sessionId);
-        return;
-      }
-      write(sessionId, next);
+      // The body is on the far side either way: a refused return leaves it in
+      // the prompt, which is a different failure from having sent nothing.
+      if (!submission.send(RETURN)) submission.onFailed?.("return");
+      advance(sessionId);
     }, SUBMIT_RETURN_MS),
   );
 }
@@ -101,19 +156,27 @@ function write(sessionId: string, submission: Submission): void {
  *
  * `body` is written verbatim and is never trimmed or split: its newlines are
  * the user's, and a per-line write would submit each line separately.
+ *
+ * `onFailed` is how a caller hears that the socket refused one of the two
+ * writes. It is optional because not every caller has somewhere to say it —
+ * but a caller that CLEARS anything on submit needs it, or it is clearing on
+ * the strength of a write that never happened. A submit raises it at most
+ * once: a refused body ends the submit, and a refused return is the last thing
+ * that can go wrong with one.
  */
 export function submitToPty(
   sessionId: string,
-  send: (data: string) => void,
+  send: (data: string) => boolean,
   body: string,
+  onFailed?: (stage: SubmitFailure) => void,
 ): void {
   const queued = queues.get(sessionId);
   if (queued) {
-    queued.push({ send, body });
+    queued.push({ send, body, onFailed });
     return;
   }
   queues.set(sessionId, []);
-  write(sessionId, { send, body });
+  write(sessionId, { send, body, onFailed });
 }
 
 /** Drops every queued submit and the returns still scheduled for them. */
