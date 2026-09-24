@@ -449,11 +449,55 @@ describe("useUtteranceChannel", () => {
   });
 
   /**
+   * The second warmable is where a `next` press LANDS, and from two steps back
+   * that is the step in between — not `current`.
+   *
+   * The reading that compares the utterance under the cursor against
+   * `queue.current` agrees at depth one and is wrong at every depth past it: it
+   * warms an answer the transport will not touch for two more presses while
+   * leaving cold the one the very next press plays. Restore that reading and
+   * every other test in this file still passes; only this one fails.
+   */
+  it("warms the step a next press reaches, not `current`, from two steps back", async () => {
+    const { result, rerender } = await renderChannel();
+
+    for (const id of ["a1", "a2", "a3"]) {
+      lastMessage = frame(utterance("cell-a", id, 1_000));
+      await act(async () => {
+        rerender();
+      });
+    }
+
+    // Idle arrivals, so each one pushed its predecessor into the history:
+    // previous is [a2, a1] and the cursor is on a3.
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["a2", "a1"]);
+
+    await act(async () => {
+      result.current.dispatchQueue("cell-a", { type: "previous" });
+      result.current.dispatchQueue("cell-a", { type: "previous" });
+    });
+    expect(result.current.queueFor("cell-a").cursor).toBe(2);
+
+    // a1 is under the cursor; a2 — `previous[cursor - 2]` — is one press away.
+    // a3 is two presses away and has no business being warmed ahead of it.
+    const warmed = result.current.warmableUtterances.map((entry) => entry.id);
+    expect(warmed).toEqual(["a1", "a2"]);
+    expect(warmed).not.toContain("a3");
+  });
+
+  /**
    * The dedupe gate is wider than the cursor, and this is the test that says
    * so. An answer already WAITING behind the live run, or already stepped back
    * into history, is just as much a re-delivery as the one being spoken —
    * a reconnect replays the lot. Narrow `queueHolds` to `queue.current?.id`
    * and every other test in this file still passes; only this one fails.
+   *
+   * And the history half is walked to its DEPTH, not just to its head. The gate
+   * has to ask every step the queue still holds: narrowing the scan to
+   * `previous[0]` reads as covered for as long as the replayed answer is the
+   * most recent one stepped back, and quietly appends a duplicate of anything
+   * further down the list — which is the ordinary case for a reconnect, since a
+   * reconnect replays the whole history at once.
    */
   it("re-delivering a queued or historical utterance does not duplicate it", async () => {
     const { result, rerender } = await renderChannel();
@@ -496,6 +540,36 @@ describe("useUtteranceChannel", () => {
     expect(after.previous.map((step) => step.id)).toEqual(["a1"]);
     expect(after.current?.id).toBe("a2");
     expect(after.pending).toEqual([]);
+
+    // Now push a1 DOWN the history, so the gate has to walk past the head to
+    // find it. Two idle arrivals: each takes the cursor and shoves what it
+    // superseded onto the front of the list.
+    speaking = null;
+    for (const id of ["a3", "a4"]) {
+      lastMessage = frame(utterance("cell-a", id, 3_000));
+      await act(async () => {
+        rerender();
+      });
+    }
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual([
+      "a3",
+      "a2",
+      "a1",
+    ]);
+
+    // a1 is three steps back and a2 two. The reconnect replays them both, and
+    // a gate that only checked `previous[0]` would take each one as news and
+    // append it over the top of the history it is already in.
+    for (const replayed of [first, queued]) {
+      lastMessage = frame({ ...replayed, at: replayed.at + 20_000 });
+      await act(async () => {
+        rerender();
+      });
+    }
+    const deep = result.current.queueFor("cell-a");
+    expect(deep.previous.map((step) => step.id)).toEqual(["a3", "a2", "a1"]);
+    expect(deep.current?.id).toBe("a4");
+    expect(deep.pending).toEqual([]);
   });
 
   /**

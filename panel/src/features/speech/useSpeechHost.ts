@@ -436,6 +436,15 @@ export function useSpeechHost(): SpeechHost {
     // at depth three two whole answers are never played and never offered.
     // With this guard the next pass finds the cursor moved off `held` and
     // falls through to the stop below, which is where it was always going.
+    //
+    // TODO(follow-up): a pause taken DURING a history replay while `pending` is
+    // non-empty releases nothing. The cursor is back in the history, so
+    // `cursor === 0` is false and this arm is skipped; `holdingTheCursor` is
+    // true, so the stop below returns as well — and the answers waiting behind
+    // the replay sit there until the user presses next twice. The hole is
+    // pre-existing, not a regression: the old `cursor === "current"` guard was
+    // equally false in the same state. What the list-shaped queue changed is
+    // the size of it — up to five answers held instead of one.
     if (holdingTheCursor && queue.cursor === 0 && queue.pending.length > 0) {
       // The stop follows on the next pass, once `current` has moved onto it.
       dispatchQueue(paused, { type: "next" });

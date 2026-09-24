@@ -208,15 +208,22 @@ function queueHolds(queue: UtteranceQueue, id: string): boolean {
 
 /**
  * What the host **warms**, per cell: the utterance the transport is on, and the
- * one it would reach next — `current` while history is replaying, otherwise the
- * oldest answer waiting behind it.
+ * one a `next` press would actually land on. That second entry is read off the
+ * cursor, never off `queue.current` — while the cursor is back in the history a
+ * press walks one step towards the newest answer, so from two steps back it
+ * reaches `previous[cursor - 2]` and `current` is still two presses away; only
+ * once the cursor is on `current` does a press move forward into the oldest
+ * answer waiting behind it. Warming what the transport would reach is the whole
+ * point of the list, so it has to be the cursor's own answer to that question
+ * and not an approximation that happens to agree at depth one.
  *
  * Deliberately NOT "everything the cell might yet be asked to speak". That list
  * is up to eleven utterances per cell; the host fires a `synthesizeSpeech` for
  * each of them with no await and no limiter, and the player's own
  * `SYNTHESIS_CONCURRENCY` bounds the units of the one RUN it is playing and
- * nothing else — so a full queue behind a live run put seven requests in flight
- * against the audio somebody is actually listening to.
+ * nothing else — so back when history was a single slot, a full queue behind a
+ * live run put seven requests in flight against the audio somebody is actually
+ * listening to, and the list-shaped history would now make that eleven.
  *
  * Two is what the bound buys and what it costs: a queued answer still has its
  * first unit in hand before the transport reaches it, and the ones further back

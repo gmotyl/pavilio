@@ -1089,4 +1089,63 @@ describe("useSpeechHost — the transport walks the whole history", () => {
     await clickControl(result.current, "cell-a");
     expect(played).toEqual([`blob:${older[1]}`]);
   });
+
+  /**
+   * The same protection, reached from the other side: the release arm of the
+   * supersession effect is fenced by `cursor === 0`, and that term is what
+   * keeps a paused HISTORY replay out of it.
+   *
+   * The arm exists for a pause taken on `current` with answers waiting behind
+   * it. A pause taken part-way into a replay is a different thing entirely —
+   * the user stepped back on purpose and is holding an older answer — and it
+   * satisfies every other condition the arm tests: the held run is still the
+   * utterance under the cursor, and `pending` is non-empty because an answer
+   * landed while the replay was speaking. Drop `cursor === 0` and the effect
+   * steps the cursor forward out of the replay, the held run stops matching
+   * what the cursor is on, and the next pass abandons it — the user's parked
+   * answer silently gone, the cell moved on to something they did not ask for.
+   *
+   * What the pending answers do NOT get here is released: `holdingTheCursor`
+   * is true, so the stop below returns as well and they wait for a `next`
+   * press. That hole predates the list-shaped queue — see the
+   * `TODO(follow-up)` on the guard — and keeping the replay is the behaviour
+   * this test pins.
+   */
+  it("a paused replay of history is not stepped forward to release a queued answer", async () => {
+    const older = unitsOf(response(3, "Older"));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", response(3, "Older"));
+    await emitUtterance("cell-a", "u-2", response(3, "Newer"));
+
+    // Step back onto u-1 and play part of it, so an abandoned run would be
+    // audibly gone rather than coincidentally right.
+    await settle(() => result.current.onPrevious("cell-a"));
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${older[0]}`, `blob:${older[1]}`]);
+
+    // The answer lands while the replay is SPEAKING, so it queues behind it —
+    // this is what makes `pending` non-empty at the moment of the pause.
+    await emitUtterance("cell-a", "u-3", response(3, "Latest"));
+    expect(result.current.queueFor("cell-a").pending.map((w) => w.id)).toEqual(["u-3"]);
+    expect(result.current.queueFor("cell-a").cursor).toBe(1);
+
+    const before = [...played];
+    await clickControl(result.current, "cell-a");
+
+    // Paused exactly where the user left it: the cursor did not move, the
+    // queued answer is still queued, and nothing was spoken over the replay.
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.cursor).toBe(1);
+    expect(queue.current?.id).toBe("u-2");
+    expect(queue.previous.map((step) => step.id)).toEqual(["u-1"]);
+    expect(queue.pending.map((w) => w.id)).toEqual(["u-3"]);
+    expect(played).toEqual(before);
+
+    // And resuming continues the answer the user parked on, not the newer one.
+    played.length = 0;
+    await clickControl(result.current, "cell-a");
+    expect(played).toEqual([`blob:${older[1]}`]);
+  });
 });
