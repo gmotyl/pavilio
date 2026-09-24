@@ -48,14 +48,21 @@
  * stands — which is why it is ONE term at the top of `derive` rather than a
  * qualifier bolted onto each trigger.
  *
- * Three things release it, and every one of them is something that HAPPENED:
+ * FOUR things release it, and every one of them is something that HAPPENED:
  *
  * - a forward transport press, or the *Next answer* control (`releaseAnswer`),
  * - a new answer landing for the cell (`noteNewestAnswer`),
+ * - a draft being sent (`beginWaiting`) — sending is the user moving on, and the
+ *   answer they stepped back to read is no longer what they are waiting to see.
+ *   Without this the hold would outrank the send that follows it, and the most
+ *   ordinary path there is — step back to re-read, then type a reply — would
+ *   hand the reply no wave at all,
  * - the session leaving `busy` — a hold with nothing left to hold it against is
  *   not a hold, it is a pane stuck on an old answer.
  *
- * Nothing else releases it, and no timer does.
+ * Nothing else releases it, and no clock does: every release above is an event
+ * this module was TOLD about, and no timer is scheduled on either the setting
+ * or the releasing side.
  *
  * ### Why the arrival release hands a value BACK
  *
@@ -167,12 +174,16 @@ interface Entry {
    */
   held: boolean;
   /**
-   * The newest answer the cell holds, as the surface last pushed it. A
-   * different id is an ARRIVAL — which is not the same question as
-   * `noteUtterance`'s, because the cursor moves for a transport press too and
-   * the press that SETS the hold must not be read as the event that ends it.
+   * The newest answer the cell holds, as the surface last pushed it — BOXED, so
+   * that "I have never been told" (`null`) is a different fact from "the newest
+   * is null" (`{ id: null }`). A different id is an ARRIVAL — which is not the
+   * same question as `noteUtterance`'s, because the cursor moves for a transport
+   * press too and the press that SETS the hold must not be read as the event
+   * that ends it. The very first push is SEEDING, not an arrival: an entry
+   * created by the hold itself has been told nothing yet, and reading its first
+   * push as an answer landing would kill the hold on the frame it was made.
    */
-  newest: string | null;
+  newest: { id: string | null } | null;
   snapshot: AnswerWaitingSnapshot;
   /** The activity subscription opened for this session. */
   unsubscribe: () => void;
@@ -295,6 +306,11 @@ export function beginWaiting(sessionId: string, sentOn: string | null): void {
   // The body has handed over by the user's own decision, so there is nothing
   // left for the activity trigger to be patient about.
   entry.deferred = false;
+  // ...and nothing left for a standing hold to protect either: sending IS the
+  // user moving on from the answer they had stepped back to read. Leaving the
+  // hold up here would let `derive` answer the send with MARK_ONLY — the old
+  // answer on the body, no wave, for the whole reply.
+  entry.held = false;
   publish(sessionId);
 }
 
@@ -372,6 +388,19 @@ export function releaseAnswer(sessionId: string): void {
  * transport press, and the press that SETS the hold must not read as the event
  * that ends it.
  *
+ * **What the caller must push:** the id of the newest answer the cell HOLDS,
+ * which is `queue.pending.at(-1)?.id ?? queue.current?.id ?? null` — never
+ * `queue.current?.id` alone. An answer arriving while the voice is reading
+ * takes the reducer's `speaking: true` arm, which appends to `pending` and
+ * leaves `current` exactly where it was; keying on `current` would see no
+ * change and release no hold in the one situation a hold exists for — the user
+ * stepped back to re-read while the agent was still talking.
+ *
+ * The FIRST push for an entry is seeding, not an arrival: `holdAnswer` creates
+ * the entry, so an entry that has never been told a newest id would otherwise
+ * read its first push as an answer landing and drop the hold on the frame it
+ * was made. Seeding returns `false` and leaves any hold standing.
+ *
  * Returns whether that arrival released a hold. `true` is the surface's cue to
  * return its cursor to the newest answer so the body shows what just landed —
  * the one half of this that lives outside the module, because the cursor is the
@@ -379,8 +408,12 @@ export function releaseAnswer(sessionId: string): void {
  */
 export function noteNewestAnswer(sessionId: string, newestId: string | null): boolean {
   const entry = ensureEntry(sessionId);
-  if (newestId === entry.newest) return false;
-  entry.newest = newestId;
+  const told = entry.newest;
+  entry.newest = { id: newestId };
+  // `told === null` is the SEEDING push: this entry has never been given a
+  // newest id — `holdAnswer` may well be what created it — so the first thing
+  // the surface says is where it stands, not an answer landing.
+  if (told === null || newestId === told.id) return false;
   if (!entry.held) return false;
   entry.held = false;
   publish(sessionId);

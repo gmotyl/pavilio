@@ -9,10 +9,12 @@
  *
  * ## What releases it, and what does not
  *
- * Three things release it, and every one of them is something that HAPPENED:
- * a forward transport press, a new answer landing, and the session leaving
- * `busy` — the last because a hold with nothing to hold it against is not a
- * hold, it is a stuck pane. Nothing else does, and no clock does.
+ * FOUR things release it, and every one of them is something that HAPPENED: a
+ * forward transport press, a new answer landing, a draft being SENT — sending
+ * is the user moving on, so the answer they stepped back to read is no longer
+ * what they are waiting to see — and the session leaving `busy`, because a hold
+ * with nothing to hold it against is not a hold, it is a stuck pane. Nothing
+ * else does, and no clock does, on either the setting or the releasing side.
  *
  * ## The cursor snap, and why it is a RETURN VALUE
  *
@@ -91,6 +93,7 @@ vi.mock("../../speech/useSpeechHost", () => recorder("useSpeechHost"));
 
 import {
   __resetAnswerWaitingForTests,
+  beginWaiting,
   forgetAnswerWaiting,
   getAnswerWaiting,
   holdAnswer,
@@ -222,6 +225,80 @@ describe("the answer pane when the user steps back", () => {
     expect(noteNewestAnswer(SESSION, "u-3")).toBe(false);
   });
 
+  it("a send releases a standing hold", () => {
+    watchSessionActivity(SESSION);
+
+    // The most ordinary path there is once the *Previous* button sets the
+    // hold: the agent is idle, the user steps back to re-read, and then types
+    // a reply and presses Enter.
+    holdAnswer(SESSION);
+    expect(handedOver()).toBe(false);
+
+    beginWaiting(SESSION, "u-1");
+
+    // Task 4's contract, which the hold does not get to overrule: a sent draft
+    // hands the body over at once, speaking or not. A hold left standing here
+    // would answer the send with MARK_ONLY — the OLD answer on the body and no
+    // wave — for the entire reply.
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: true });
+
+    // And it is released, not merely outranked: the agent picking the work up
+    // must not find the pane pinned again by a press made before the send.
+    activity("busy");
+    expect(handedOver()).toBe(true);
+  });
+
+  it("treats the first push of a newest answer as seeding, not an arrival", () => {
+    watchSessionActivity(SESSION);
+    activity("busy");
+
+    // `holdAnswer` creates the entry, so at this point nothing has ever told
+    // it which answer is newest. The first push is the surface saying where it
+    // stands, not an answer landing — reading it as an arrival would drop the
+    // hold on the very frame the user made it, which is the failure the seam
+    // exists to avoid.
+    holdAnswer(SESSION);
+    expect(noteNewestAnswer(SESSION, "u-1")).toBe(false);
+    expect(handedOver()).toBe(false);
+
+    // The next genuinely different id IS the arrival.
+    expect(noteNewestAnswer(SESSION, "u-2")).toBe(true);
+    expect(handedOver()).toBe(true);
+  });
+
+  it("releases on an answer that lands in `pending` while the voice is reading", () => {
+    // Task 1's queue, as far as this seam cares: an arrival while the voice is
+    // reading takes the `speaking: true` arm, which appends to `pending` and
+    // leaves `current` exactly where it was. So the id the surface pushes must
+    // be the newest answer the cell HOLDS — `pending.at(-1)?.id ?? current?.id`
+    // — and never `current?.id` alone, which does not move here at all.
+    const queue: { current: { id: string } | null; pending: { id: string }[] } = {
+      current: { id: "u-1" },
+      pending: [],
+    };
+    const arrivedWhileSpeaking = (id: string): void => {
+      queue.pending = [...queue.pending, { id }];
+    };
+    const newestId = (): string | null => queue.pending.at(-1)?.id ?? queue.current?.id ?? null;
+
+    watchSessionActivity(SESSION);
+    expect(noteNewestAnswer(SESSION, newestId())).toBe(false);
+
+    // Busy and mid-sentence — the exact situation the hold exists for.
+    activity("busy");
+    noteSpeaking(SESSION, true);
+    holdAnswer(SESSION);
+    expect(handedOver()).toBe(false);
+
+    arrivedWhileSpeaking("u-2");
+
+    // `current` has not moved. Keyed on it, this arrival would be invisible and
+    // the hold would stand through the whole reply.
+    expect(queue.current?.id).toBe("u-1");
+    expect(noteNewestAnswer(SESSION, newestId())).toBe(true);
+    expect(handedOver()).toBe(true);
+  });
+
   it("releases when the session goes idle", () => {
     watchSessionActivity(SESSION);
     activity("busy");
@@ -258,6 +335,30 @@ describe("the answer pane when the user steps back", () => {
     expect(handedOver()).toBe(false);
     vi.runOnlyPendingTimers();
     expect(handedOver()).toBe(false);
+
+    expect(timeout).not.toHaveBeenCalled();
+    expect(interval).not.toHaveBeenCalled();
+
+    // The claim is about the RELEASING side too, so every way out of a hold is
+    // driven under the same spies rather than only the way in.
+    releaseAnswer(SESSION);
+    expect(handedOver()).toBe(true);
+
+    holdAnswer(SESSION);
+    expect(noteNewestAnswer(SESSION, "u-1")).toBe(false);
+    expect(noteNewestAnswer(SESSION, "u-2")).toBe(true);
+    expect(handedOver()).toBe(true);
+
+    holdAnswer(SESSION);
+    beginWaiting(SESSION, "u-2");
+    expect(handedOver()).toBe(true);
+
+    holdAnswer(SESSION);
+    activity("idle");
+    expect(handedOver()).toBe(false);
+
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    vi.runOnlyPendingTimers();
 
     expect(timeout).not.toHaveBeenCalled();
     expect(interval).not.toHaveBeenCalled();
