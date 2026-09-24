@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import {
   MemoryRouter,
   Route,
@@ -20,7 +27,7 @@ import {
  * The factory is hoisted above the imports, so the array it closes over has to
  * be hoisted with it.
  */
-const { writes, SESSION, projectName } = vi.hoisted(() => ({
+const { writes, SESSION, projectName, createTerminalSession } = vi.hoisted(() => ({
   writes: [] as Array<{ key: string; value: unknown; scope?: string }>,
   /**
    * The single project the sidebar is given, in a box so a test can swap it
@@ -43,6 +50,16 @@ const { writes, SESSION, projectName } = vi.hoisted(() => ({
     pid: 4242,
     createdAt: "2026-09-24T09:00:00.000Z",
   },
+  /**
+   * The server call behind the `+` button. Stubbed because the destination it
+   * hands the router is the subject here, not the session it creates — and a
+   * real call would go nowhere in jsdom.
+   */
+  createTerminalSession: vi.fn(),
+}));
+
+vi.mock("../../terminal/createTerminalSession", () => ({
+  createTerminalSession: (...args: unknown[]) => createTerminalSession(...args),
 }));
 
 vi.mock("../../../preferences/store", async (importOriginal) => {
@@ -80,6 +97,7 @@ import LeftSidebar from "../LeftSidebar";
 import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
 import ProjectRedirect from "../../projects/ProjectRedirect";
 import { readLastPath, writeLastPath } from "../lastPath";
+import { writeTerminalFocus } from "../../terminal/useTerminalSessions";
 import { useLastPath } from "../useLastPath";
 import { preferences } from "../../../preferences/declarations";
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
@@ -98,7 +116,15 @@ vi.mock("../../projects/useFavorites", () => ({
   }),
 }));
 vi.mock("../../terminal/useAllTerminalSessions", () => ({
-  useAllTerminalSessions: () => ({ sessions: [SESSION], refresh: () => {} }),
+  // The session belongs to whichever project the box currently holds. Pinning
+  // it to the literal "vector" would leave the encoding tests rendering a
+  // project with no session rows at all — a row that is absent looks exactly
+  // like a row that failed to highlight, which is the one thing those tests
+  // must be able to tell apart.
+  useAllTerminalSessions: () => ({
+    sessions: [{ ...SESSION, project: projectName.current }],
+    refresh: () => {},
+  }),
 }));
 vi.mock("../../mobile-access/useMobileAccessStatus", () => ({
   useMobileAccessStatus: () => ({ enabled: false }),
@@ -216,6 +242,20 @@ function renderShell(initial = "/") {
 }
 
 const projectLink = () => screen.getByRole("link", { name: "vector" });
+
+/**
+ * The inline background of a project's ROW — the active-row highlight. The
+ * styled element is the one wrapping the disclosure button, which is the only
+ * part of the row carrying a testid keyed on the project name.
+ */
+const rowBackground = (name: string) =>
+  (
+    screen.getByTestId(`sidebar-project-expand-${name}`)
+      .parentElement as HTMLElement
+  ).style.background;
+
+const HIGHLIGHTED = "var(--bg-active)";
+const PLAIN = "transparent";
 
 /**
  * The project's session rows are behind the disclosure triangle, and the stored
@@ -485,6 +525,169 @@ describe("LeftSidebar project link", () => {
       expect(screen.getByTestId("landed")).toHaveTextContent(
         "/project/my%20proj%231/memo",
       );
+    });
+  });
+
+  /**
+   * The row the user is standing on is drawn with `--bg-active`, and for a
+   * while it was found by rebuilding the project's path and comparing that
+   * string to `location.pathname`. That spelling agreed with the link only for
+   * as long as the link was built the same way; the moment the href was
+   * percent-encoded the two drifted apart for exactly the names encoding
+   * exists for, and the highlight went dark with nothing to notice it. The
+   * comparison now runs through `matchProjectFromPath` — the one decode the
+   * rest of this file already trusts — so the sidebar reads a path the way the
+   * router does rather than guessing at its spelling.
+   */
+  describe("the active-row highlight", () => {
+    it("highlights the row the user is standing on (plain name, bare route)", () => {
+      installMatchMedia(false);
+      renderShell("/project/vector");
+      expect(rowBackground("vector")).toBe(HIGHLIGHTED);
+    });
+
+    it("highlights the row from a deeper route under the project (plain name)", () => {
+      installMatchMedia(false);
+      renderShell("/project/vector/memo");
+      expect(rowBackground("vector")).toBe(HIGHLIGHTED);
+    });
+
+    it("leaves the row plain while the user is somewhere else entirely", () => {
+      installMatchMedia(false);
+      renderShell("/");
+      expect(rowBackground("vector")).toBe(PLAIN);
+    });
+
+    /**
+     * A name that is merely a PREFIX of the open project is a different
+     * project, and the segment boundary is the only thing that says so. Any
+     * comparison loose enough to rescue the encoded names by accident — a bare
+     * `startsWith` on the name, say — lights this row up too.
+     */
+    it("leaves a row plain when its name is only a prefix of the open project", () => {
+      installMatchMedia(false);
+      renderShell("/project/vector-2");
+      expect(rowBackground("vector")).toBe(PLAIN);
+    });
+
+    describe("a project name that needs encoding", () => {
+      beforeEach(() => {
+        projectName.current = "my proj#1";
+      });
+      afterEach(() => {
+        projectName.current = "vector";
+      });
+
+      it("highlights the row the user is standing on (space in the name, desktop)", () => {
+        installMatchMedia(false);
+        renderShell("/project/my%20proj%231");
+        expect(rowBackground("my proj#1")).toBe(HIGHLIGHTED);
+      });
+
+      it("highlights the row from a deeper route under an encoded name", () => {
+        installMatchMedia(false);
+        renderShell("/project/my%20proj%231/memo");
+        expect(rowBackground("my proj#1")).toBe(HIGHLIGHTED);
+      });
+
+      /**
+       * The same encoded path is read a second time, near the top of the
+       * component, to answer "which project is the user in" for the SESSION
+       * rows and for the focus broadcasts. That reading was a raw regex over
+       * the pathname, so it handed back `my%20proj%231` and compared it against
+       * the decoded name the rest of the sidebar uses — no row could light up,
+       * and the stored focus was read under a scope nothing ever writes. It is
+       * the identical bug one screen up in the same file, and it needs the
+       * identical decode.
+       */
+      it("highlights the focused session row under an encoded name", () => {
+        writeTerminalFocus("my proj#1", SESSION.id);
+        installMatchMedia(false);
+        renderShell("/project/my%20proj%231/iterm");
+        act(() => {
+          fireEvent.click(
+            screen.getByTestId("sidebar-project-expand-my proj#1"),
+          );
+        });
+        expect(
+          screen.getByTestId(`sidebar-session-${SESSION.id}`).style.background,
+        ).toBe(HIGHLIGHTED);
+      });
+    });
+
+    /**
+     * The control for the session-row case above: a plain name has always
+     * worked, so a fix that broke it would be caught here rather than looking
+     * like a green suite.
+     */
+    it("highlights the focused session row under a plain name", () => {
+      writeTerminalFocus("vector", SESSION.id);
+      installMatchMedia(false);
+      renderShell("/project/vector/iterm");
+      act(() => {
+        fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
+      });
+      expect(
+        screen.getByTestId(`sidebar-session-${SESSION.id}`).style.background,
+      ).toBe(HIGHLIGHTED);
+    });
+  });
+
+  /**
+   * The `+` button builds the same `/project/<name>/iterm` destination the link
+   * above builds, and has to spell it the same way. Unencoded, a `#` in the
+   * name starts the fragment and the router is handed a truncated project —
+   * the user watches a terminal get created and then lands somewhere that is
+   * not theirs.
+   */
+  describe("creating a terminal from a project row", () => {
+    beforeEach(() => {
+      createTerminalSession.mockReset();
+      createTerminalSession.mockResolvedValue({ ...SESSION, id: "s-new" });
+    });
+
+    it("lands on the new terminal for a plain name", async () => {
+      installMatchMedia(false);
+      renderShell();
+      act(() => {
+        fireEvent.click(
+          screen.getByTestId("sidebar-project-create-terminal-vector"),
+        );
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("landed").textContent).toBe(
+          "/project/vector/iterm",
+        );
+      });
+    });
+
+    describe("a project name that needs encoding", () => {
+      beforeEach(() => {
+        projectName.current = "my proj#1";
+      });
+      afterEach(() => {
+        projectName.current = "vector";
+      });
+
+      it("encodes the name into the created terminal's destination", async () => {
+        installMatchMedia(false);
+        renderShell();
+        act(() => {
+          fireEvent.click(
+            screen.getByTestId("sidebar-project-create-terminal-my proj#1"),
+          );
+        });
+        await waitFor(() => {
+          expect(screen.getByTestId("landed").textContent).toBe(
+            "/project/my%20proj%231/iterm",
+          );
+        });
+        // And the page still sees the decoded name, which is what every
+        // preference scope downstream is keyed on.
+        expect(screen.getByTestId("landed-name")).toHaveTextContent(
+          "my proj#1",
+        );
+      });
     });
   });
 });

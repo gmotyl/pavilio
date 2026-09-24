@@ -43,6 +43,7 @@ import {
   type TerminalFocusEventDetail,
 } from "../terminal/useTerminalSessions";
 import { createTerminalSession } from "../terminal/createTerminalSession";
+import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 
 /**
  * `leading` is the slot the corner hamburger occupies — passed to whichever
@@ -100,8 +101,17 @@ export default function LeftSidebar() {
   const [autoSyncOpen, setAutoSyncOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const currentProject =
-    location.pathname.match(/^\/project\/([^/]+)/)?.[1] ?? null;
+  /**
+   * Which project the user is standing in, DECODED — because everything it is
+   * measured against is decoded: the `project.name` the rows carry, the
+   * `detail.project` a focus broadcast names, and the preference scope
+   * `readStoredFocus` looks under. Reading the raw segment out of the pathname
+   * left this holding `my%20proj` while every one of those held `my proj`, so
+   * for a name that needs encoding no session row could light up and the stored
+   * focus was read from a scope nothing ever writes. `matchProjectFromPath` is
+   * the same decode the active-row highlight below now uses.
+   */
+  const currentProject = matchProjectFromPath(location.pathname)?.name ?? null;
 
   // Focused session id (for highlighting individual terminals)
   const [focusedId, setFocusedId] = useState<string | null>(() =>
@@ -184,7 +194,10 @@ export default function LeftSidebar() {
       if (created) {
         dispatchTerminalFocus(project, created.id);
         setExpanded(project, true);
-        navigate(`/project/${project}/iterm`);
+        // Encoded for the same reason `projectHref` encodes: this is the same
+        // `/project/<name>/iterm` destination, and a `#` left raw would end the
+        // path at the fragment and hand the router a truncated project name.
+        navigate(`/project/${encodeURIComponent(project)}/iterm`);
       } else {
         setCreateError("Could not create terminal");
         setTimeout(() => setCreateError(null), 4000);
@@ -287,9 +300,24 @@ export default function LeftSidebar() {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
     const projectSessionIds = projectSessions.map((s) => s.id);
     const expandedNow = isExpanded(project.name);
+    /**
+     * Read the open path the way the router reads it, rather than rebuilding
+     * this project's path and comparing the two strings. The rebuilt form has
+     * to agree with whatever spelling the href happens to use, and it stopped
+     * agreeing the moment the href was percent-encoded: a project named
+     * `my proj` is standing at `/project/my%20proj`, which no raw comparison
+     * against its name will ever match, and the highlight silently went out for
+     * every name with a space, a `+` or a `%` in it. `matchProjectFromPath`
+     * decodes the first segment once and is already the file's answer to "which
+     * project is this path", so there is one reading of it instead of two.
+     *
+     * It matches a prefix of the path rather than the whole of it, which is
+     * what keeps a deeper route under the project — its terminals, its notes —
+     * highlighting the row, while stopping at the segment boundary so a
+     * different project whose name merely starts the same never does.
+     */
     const isCurrent =
-      location.pathname === `/project/${project.name}` ||
-      location.pathname.startsWith(`/project/${project.name}/`);
+      matchProjectFromPath(location.pathname)?.name === project.name;
 
     const fav = isFavorite(project.name);
 
