@@ -15,12 +15,15 @@ import {
   setStoredAutoOpenAnswer,
 } from "../../speech/autoOpenAnswer";
 import { prepare } from "../../speech/prepare";
+import { preferences } from "../../../preferences/declarations";
+import { storageKey } from "../../../preferences/types";
 import type { GridSpeech, Utterance } from "../../speech/types";
 import {
   emptyUtteranceQueue,
   utteranceQueueReducer,
   type UtteranceQueue,
 } from "../../speech/utteranceQueue";
+import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 
 /**
  * The terminal instance stand-in: `fit()` refreshes AND sends a resize frame,
@@ -30,8 +33,10 @@ const term = vi.hoisted(() => {
   const fit = vi.fn();
   const focus = vi.fn();
   const sent: string[] = [];
+  /** Everything written to the PTY — what the composer's Enter has to reach. */
+  const writes: string[] = [];
   const observed: Element[] = [];
-  return { fit, focus, sent, observed };
+  return { fit, focus, sent, writes, observed };
 });
 
 vi.mock("../terminalInstances", () => {
@@ -56,7 +61,7 @@ vi.mock("../terminalInstances", () => {
         fitAddon: {},
         holder,
         ws,
-        send: () => {},
+        send: (data: string) => term.writes.push(data),
         // Mirrors the real `fit`: a refresh AND a resize frame, unconditionally.
         fit: () => {
           term.fit();
@@ -190,10 +195,15 @@ const storeDefault = (on: boolean): void => {
   setStoredAutoOpenAnswer(on);
 };
 
+/** The injected preferences document, to survive a simulated reload. */
+type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
+const globals = globalThis as unknown as PrefGlobals;
+
 beforeEach(() => {
   term.fit.mockClear();
   term.focus.mockClear();
   term.sent.length = 0;
+  term.writes.length = 0;
   term.observed.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   // The pane's state outlives the view on purpose (see `answerPaneState.ts`),
@@ -220,9 +230,17 @@ describe("TerminalView and the answer pane", () => {
     const opened = pane();
     expect(opened).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
-    // A sibling of the container and of the bar — the same parent as both.
+    // A sibling of the observed container, and never a child of it — an
+    // overlay INSIDE the observed box would hand the uncoalesced
+    // `ResizeObserver` a new trigger every time the pane opened.
+    //
+    // It is no longer a sibling of the BAR, though: the pane's positioning
+    // context is the terminal area, not the cell column, which is what keeps
+    // the row out from under it. The test below is where that is pinned.
     expect(opened!.parentElement).toBe(observedContainer.parentElement);
-    expect(opened!.parentElement).toBe(screen.getByTestId("speech-bar-cell-a").parentElement);
+    expect(opened!.parentElement).not.toBe(
+      screen.getByTestId("speech-bar-cell-a").parentElement,
+    );
     expect(observedContainer.contains(opened!)).toBe(false);
     expect(term.fit.mock.calls.length).toBe(fitsBefore);
     expect(resizeFrames().length).toBe(resizesBefore);
@@ -234,6 +252,75 @@ describe("TerminalView and the answer pane", () => {
     expect(eye()).toHaveAttribute("aria-pressed", "false");
     expect(term.fit.mock.calls.length).toBe(fitsBefore);
     expect(resizeFrames().length).toBe(resizesBefore);
+  });
+
+  it("hands the pane the cell's own PTY write", async () => {
+    // The bar's `send` was untested until Task 6 had to close it; this is the
+    // pane's half of the same wiring, and it is asserted on the instance this
+    // cell acquired rather than on a spy the test hands in — a prop threaded to
+    // the wrong place would still satisfy the latter.
+    render(cell(makeSpeech()));
+    await settleTerminal();
+
+    fireEvent.click(eye());
+    await settleTerminal();
+    expect(term.writes).toEqual([]);
+
+    const field = screen.getByTestId("answer-pane-composer-cell-a");
+    fireEvent.change(field, { target: { value: "yes, both scopes" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+
+    expect(term.writes).toEqual(["yes, both scopes\r"]);
+  });
+
+  it("mounts the pane inside the terminal area so the row stays uncovered", async () => {
+    render(cell(makeSpeech()));
+    await settleTerminal();
+    const observedContainer = term.observed[0];
+    expect(observedContainer).toBeDefined();
+
+    fireEvent.click(eye());
+    await settleTerminal();
+    const opened = pane();
+    expect(opened).not.toBeNull();
+
+    // The pane's positioning context is the TERMINAL AREA — the box that holds
+    // the observed xterm container and the overlay over it, and nothing else
+    // of the cell.
+    const area = opened!.parentElement;
+    expect(area).toBe(observedContainer.parentElement);
+
+    // Parentage alone is not a positioning context. `position: absolute`
+    // resolves against the nearest POSITIONED ancestor, so without `relative`
+    // HERE the pane would resolve against the cell's column instead and its
+    // `top: 0` would land on the row — the exact failure this test exists to
+    // prevent. That one token is what makes the box a box.
+    expect(area?.className).toContain("relative");
+
+    // And the wrapper carries the flex sizing the container used to, so the
+    // terminal's height is unchanged: exactly one claimant of the column's
+    // free space. Moving `flex-1 min-h-0` back down onto the container would
+    // collapse the terminal to zero — `flex-1` on a child of a non-flex block
+    // does nothing.
+    expect(area?.className).toContain("flex-1");
+    expect(area?.className).toContain("min-h-0");
+    expect(observedContainer.className).not.toContain("flex-1");
+    expect(observedContainer.className).toContain("h-full");
+
+    // The speech row is OUTSIDE that box: it is the area's previous sibling in
+    // the cell's column, so no amount of pane can reach it. The cell header is
+    // outside by the same construction — it is not even in this column, it is
+    // the grid cell's own row above it.
+    const row = screen.getByTestId("speech-bar-cell-a");
+    expect(area!.contains(row)).toBe(false);
+    expect(row.nextElementSibling).toBe(area);
+    expect(row.parentElement).toBe(area!.parentElement);
+
+    // Which is what makes the top edge exact instead of arithmetic: the pane
+    // starts at the top of that box, and the top of that box IS where the row
+    // ends. The superseded `top: 68px` was the floating bar's 6 + 56 + 6, and
+    // it became a 12px gap the moment the row entered the flow.
+    expect(cssRule(".answer-pane")).toMatch(/(^|;)\s*top:\s*0\s*(;|$)/);
   });
 
   it("hiding the bar closes the pane", async () => {
@@ -389,6 +476,49 @@ describe("TerminalView opens the pane on a new answer", () => {
     expect(eye()).toHaveAttribute("aria-pressed", "true");
     // Focus lands on the pane so Escape works at once.
     expect(document.activeElement).toBe(opened);
+  });
+
+  it("a new answer opens the pane with nothing stored at all", async () => {
+    // No `storeDefault` here, on purpose: the document is empty, exactly as it
+    // is for a user who has never touched the box. The declared default is ON,
+    // so the answer this cell has just produced opens its own pane with no
+    // click on the eye — the correction this default exists for.
+    const speech = makeSpeech();
+    const view = render(cell(speech));
+    await settleTerminal();
+    expect(pane()).toBeNull();
+
+    speech.arrive("u-2");
+    view.rerender(cell(speech));
+
+    expect(pane()).not.toBeNull();
+    expect(eye()).toHaveAttribute("aria-pressed", "true");
+    // And the meta row's box shows the value that did it.
+    expect(footerBox()).toBeChecked();
+  });
+
+  it("a box the user cleared still governs after a reload", async () => {
+    // Cleared once, in Settings. A reload re-injects the stored document and
+    // drops every cell's in-memory entry, so the fresh cell seeds from the
+    // STORED false rather than from the declared true: the choice outranks
+    // the default, which is why the box is still a box.
+    storeDefault(false);
+    const reloaded = { ...globals.__PAVILIO_PREFS__! };
+    expect(reloaded[storageKey(preferences.answerPaneAutoOpen)]).toBe(false);
+    delete globals.__PAVILIO_PREFS__;
+    globals.__PAVILIO_PREFS__ = reloaded;
+    forgetAnswerPane("cell-a");
+
+    const speech = makeSpeech();
+    const view = render(cell(speech));
+    await settleTerminal();
+
+    speech.arrive("u-2");
+    view.rerender(cell(speech));
+    expect(pane()).toBeNull();
+
+    fireEvent.click(eye());
+    expect(footerBox()).not.toBeChecked();
   });
 
   it("the utterance a fresh tab is handed does not open the pane", async () => {

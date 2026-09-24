@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
+import { AnswerComposer } from "./AnswerComposer";
+import { AnswerWaiting } from "./AnswerWaiting";
+import { beginWaiting, useAnswerWaiting } from "./answerWaiting";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
@@ -18,12 +23,19 @@ export interface AnswerPaneProps {
    */
   onClose: () => void;
   /**
-   * The cell's own "Open on new answer" switch, shown in the footer. Owned by
+   * The cell's own "Open on new answer" switch, shown in the meta row. Owned by
    * `TerminalView` — seeded from the browser-wide default at mount and never
    * written back to it — so the pane only reflects it and reports a flip.
    */
   autoOpen: boolean;
   onAutoOpenChange: (on: boolean) => void;
+  /**
+   * The cell's own PTY write, handed straight to the composer. `TerminalView`
+   * reads it off the live instance at call time — the same one the bar's
+   * launcher pills send with, so a reply typed here and a pill clicked up there
+   * reach the shell by one transport.
+   */
+  send: (data: string) => void;
 }
 
 /**
@@ -54,10 +66,10 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
 
 /**
  * The cell's answer pane: the utterance under the cursor rendered as markdown
- * in a card under the speech bar, with the spoken block marked and a rail of
- * unit segments — the scrubber turned vertical — beside the text.
+ * under the speech row, with the spoken block marked and a rail of unit
+ * segments — the scrubber turned vertical — beside the text.
  *
- * ## Why it is an overlay
+ * ## Why it is an overlay, and over what
  *
  * The same rule the bar lives by, for the same reason. `TerminalView` runs
  * `new ResizeObserver(() => inst.fit())` with no coalescing, and `inst.fit()`
@@ -66,6 +78,14 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * bug a new trigger every time it opened or closed. So this is
  * `position: absolute` over the xterm, a SIBLING of the observed container:
  * nothing reflows, nothing refits, no resize frame is sent when it appears.
+ *
+ * What it is absolute WITHIN is the terminal area — the positioned box
+ * `TerminalView` wraps the observed container in — not the cell. That is what
+ * makes `top: 0` mean "where the speech row ends" without any arithmetic, and
+ * what keeps the row and the cell header out from under it: they are not in
+ * the box. It is also no longer a card. The border, radius, shadow and blur
+ * went the way the bar's did, and it takes the row's own ground, so the row
+ * and the pane read as one speech surface over the terminal.
  *
  * ## Why the progress snapshot is the unit index only
  *
@@ -129,6 +149,22 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * the voice — so a unit that speaks items 3 to 5 spans exactly those items
  * instead of being stacked under the whole list as a stub.
  *
+ * ## Why the body, and only the body, hands over while a reply is pending
+ *
+ * Sending leaves the previous answer on screen, where it reads as the reply to
+ * the question just asked. So the composer's `send` is wrapped here — the
+ * composer raises the keystroke and knows nothing about the pane above it,
+ * while the pane knows which utterance the body was showing when the draft went
+ * out — and the body renders {@link AnswerWaiting} in place of the rail and the
+ * text until that wait ends.
+ *
+ * Nothing on `speech` is touched on the way in. The voice goes on reading
+ * whatever it was reading and the bar's scrubber goes on advancing, because the
+ * wait is a fact about this BODY, not about the one run the panel has. The
+ * state, its three exits and the reason none of them is a timer live in
+ * `answerWaiting.ts`; what the pane owes it is two things it alone knows — the
+ * send, and the id under the cursor when it happened.
+ *
  * ## Why the pane scrolls once per unit, and never on a tick
  *
  * Following is a `useLayoutEffect` on the unit index alone. When the index
@@ -147,7 +183,13 @@ export function AnswerPane({
   onClose,
   autoOpen,
   onAutoOpenChange,
+  send,
 }: AnswerPaneProps) {
+  // Global, and read here rather than passed in: unlike `autoOpen` — which is
+  // the CELL's switch, seeded from a browser-wide default and owned by
+  // `TerminalView` — whether a pane carries a composer at all is one answer for
+  // the whole panel, so the pane reads and writes it directly.
+  const [composerOn, setComposerOn] = usePreference(preferences.answerComposerEnabled);
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
@@ -174,6 +216,32 @@ export function AnswerPane({
 
   const voice = getStoredVoice();
   const text = answer?.text ?? "";
+  const answerId = answer?.id ?? null;
+
+  // Whether this cell is still waiting for the reply to a draft it sent. Only
+  // `waiting` is the body's business: `pending` is the bar's, and is what keeps
+  // the mark on the play button after a transport press took the text back.
+  const { waiting } = useAnswerWaiting(sessionId);
+
+  // The composer's write, with the handover attached. The composer raises the
+  // send and knows nothing about the pane above it; the pane knows what the
+  // body was showing when the draft went out, which is exactly what tells a
+  // later arrival apart from the answer that is already there.
+  //
+  // Nothing on `speech` is read here — see the note on `answerWaiting.ts`. The
+  // voice keeps reading; only the body hands over.
+  const sendReply = useCallback(
+    (data: string): void => {
+      send(data);
+      beginWaiting(sessionId, answerId);
+    },
+    [send, sessionId, answerId],
+  );
+
+  // The reply landing is NOT noticed here — it is noticed on the bar. See the
+  // note beside `noteUtterance` in `SpeechControlBar.tsx`: this pane unmounts
+  // the moment the eye closes it, and a wait that could only end while the pane
+  // was open would stay marked after the answer had already arrived.
 
   // Focus lands on the root the moment it opens — also when it opened itself —
   // so Escape works at once and the read → Escape → type loop needs no mouse.
@@ -200,9 +268,10 @@ export function AnswerPane({
   // more, in exchange for a pane that always answers the key it advertises.
   //
   // Only THIS cell's terminal, though. The pane is mounted by `TerminalView`
-  // as a sibling of the xterm container inside the cell's `relative`
-  // wrapper, so an xterm under the root's parent is the cell's own; an xterm
-  // anywhere else is another cell's TUI, and its Escape is left alone.
+  // as a sibling of the xterm container inside the terminal area — the
+  // positioned box that holds the two — so an xterm under the root's parent is
+  // the cell's own; an xterm anywhere else is another cell's TUI, and its
+  // Escape is left alone.
   //
   // An Escape inside the pane never gets here: this listener bails out when
   // the target is inside the root, so `onClose` runs once per keypress — from
@@ -227,6 +296,15 @@ export function AnswerPane({
   // Mark the blocks. Re-run when the text, the units or the spoken unit
   // change; a tick inside a unit never gets here because the snapshot above
   // did not change.
+  //
+  // ...and when the body hands back from waiting, which is a change none of
+  // those three can stand for. The reply's text lands on the commit that is
+  // STILL showing the wave — the arrival is noticed by the bar's effect, so
+  // the wait ends one render later — and on that commit there is no `.prose`
+  // to mark, so the pass bails out having spent the `text` change. The column
+  // that comes back next carries identical deps and would never be marked
+  // again: no jump, no tab stop, no highlight, until the pane was remounted.
+  // (Regression: "the block marks are lost after the first reply".)
   useLayoutEffect(() => {
     const prose = bodyRef.current?.querySelector<HTMLElement>(".prose");
     if (!prose) return;
@@ -259,7 +337,7 @@ export function AnswerPane({
     });
     // The marks moved or the text changed: the rail follows in the same commit.
     layoutRail(bodyRef.current, railRef.current, unitToBlocks, units);
-  }, [text, units, unitIndex]);
+  }, [text, units, unitIndex, waiting]);
 
   // Re-lay the rail when the body or the text column changes size — see the
   // note on the component. The pane's own boxes, never the xterm container.
@@ -276,7 +354,11 @@ export function AnswerPane({
     observer.observe(body);
     if (textRef.current) observer.observe(textRef.current);
     return () => observer.disconnect();
-  }, []);
+    // `waiting` is in here because the text column is UNMOUNTED while the body
+    // is waiting: an observer kept across the handover would be holding the
+    // dead element and would never see the new one, so the rail would stop
+    // re-laying itself after the first reply.
+  }, [waiting]);
 
   // Follow the voice: once per unit, on the boundary or on a mid-run mount,
   // and only when there is somewhere to scroll to. Never on a tick — the
@@ -291,7 +373,12 @@ export function AnswerPane({
     const block = body.querySelector<HTMLElement>(`[data-unit="${unitIndex}"]`);
     if (!block) return;
     body.scrollTo({ top: Math.max(0, block.offsetTop - body.clientHeight / 3) });
-  }, [unitIndex]);
+    // `waiting` for the same reason the marking effect has it: the column the
+    // blocks live in is rebuilt on the way out of a wait, and a reply that
+    // lands mid-unit changes no index. Without it the body would sit at the
+    // top of the new answer while the voice read somewhere further down, until
+    // the next unit boundary happened to come along.
+  }, [unitIndex, waiting]);
 
   const jumpTo = useCallback(
     (unit: number): void => {
@@ -349,41 +436,55 @@ export function AnswerPane({
           jumpTo(Number(block.dataset.unit));
         }}
       >
-        {/* The scrubber turned vertical: a pointer affordance, not a row of
-            buttons — see the note on the component. Each segment is placed by
-            `layoutRail` to span its unit's blocks. */}
-        <div ref={railRef} className="answer-pane-rail" aria-hidden="true">
-          {units.map((unit, index) => {
-            const state = segmentStateFor({
-              index,
-              playingIndex: unitIndex,
-              cache: speechCacheState(unit.text, { voice }),
-            });
-            return (
-              <div
-                key={index}
-                className="answer-pane-seg"
-                data-segment={state}
-                data-testid={`answer-pane-seg-${sessionId}-${index}`}
-                title={`Unit ${index + 1} of ${units.length}`}
-                onClick={() => jumpTo(index)}
-              >
-                {state === "playing" ? (
-                  <span className="answer-pane-head" data-testid={`answer-pane-head-${sessionId}`} />
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-        <div ref={textRef} className="answer-pane-text">
-          {answer ? <MarkdownRenderer content={answer.text} /> : null}
-        </div>
+        {waiting ? (
+          <AnswerWaiting sessionId={sessionId} />
+        ) : (
+          <>
+          {/* The scrubber turned vertical: a pointer affordance, not a row of
+              buttons — see the note on the component. Each segment is placed by
+              `layoutRail` to span its unit's blocks. */}
+          <div ref={railRef} className="answer-pane-rail" aria-hidden="true">
+            {units.map((unit, index) => {
+              const state = segmentStateFor({
+                index,
+                playingIndex: unitIndex,
+                cache: speechCacheState(unit.text, { voice }),
+              });
+              return (
+                <div
+                  key={index}
+                  className="answer-pane-seg"
+                  data-segment={state}
+                  data-testid={`answer-pane-seg-${sessionId}-${index}`}
+                  title={`Unit ${index + 1} of ${units.length}`}
+                  onClick={() => jumpTo(index)}
+                >
+                  {state === "playing" ? (
+                    <span
+                      className="answer-pane-head"
+                      data-testid={`answer-pane-head-${sessionId}`}
+                    />
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          <div ref={textRef} className="answer-pane-text">
+            {answer ? <MarkdownRenderer content={answer.text} /> : null}
+          </div>
+          </>
+        )}
       </div>
-      {/* One row under the body, inside the card and outside the scroll
-          container, so it stays put while the text scrolls. The pane's only
-          control besides the text. */}
-      <div className="answer-pane-footer">
-        <label className="answer-pane-footer-label" htmlFor={`answer-pane-auto-open-${sessionId}`}>
+      {/* The pane's switches, directly under the text and ABOVE the composer.
+          design.md's order, and the reason for it: the composer is the reply,
+          so the two switches that decide what the pane does belong with the
+          pane rather than under the box you type into. They were the pane's
+          footer when the auto-open switch was its only control, and stayed
+          there when the composer arrived — which put the reply box between the
+          answer and its own switches. Outside the scroll container either way,
+          so the row stays put while the text scrolls. */}
+      <div className="answer-pane-meta">
+        <label className="answer-pane-meta-label" htmlFor={`answer-pane-auto-open-${sessionId}`}>
           <input
             id={`answer-pane-auto-open-${sessionId}`}
             data-testid={`answer-pane-auto-open-${sessionId}`}
@@ -393,7 +494,24 @@ export function AnswerPane({
           />
           Open on new answer
         </label>
+        <label className="answer-pane-meta-label" htmlFor={`answer-pane-composer-on-${sessionId}`}>
+          <input
+            id={`answer-pane-composer-on-${sessionId}`}
+            data-testid={`answer-pane-composer-on-${sessionId}`}
+            type="checkbox"
+            checked={composerOn}
+            onChange={() => setComposerOn(!composerOn)}
+          />
+          {/* Named for what it does, not for the component it mounts: the
+              switch decides whether a reply typed here goes to the terminal. */}
+          Send to terminal
+        </label>
       </div>
+      {/* The reply itself — the grip, the field and its key hint. Absent
+          entirely when the switch above is off, not hidden, so the height it
+          held goes back to the body, which is what "returns its height to the
+          text" means. */}
+      {composerOn ? <AnswerComposer sessionId={sessionId} send={sendReply} /> : null}
     </div>
   );
 }

@@ -42,6 +42,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "terminal.drawer.open": [true, false],
   "terminal.maximized": [true, false],
   "speech.answerPane.autoOpen": [true, false],
+  "speech.answerComposer.on": [true, false],
   "time.form.resetAutoOnSave": [true, false],
 
   // ── num ─────────────────────────────────────────────────────────────────
@@ -50,6 +51,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "git.history.paneWidth": [280, 0, 200, 480, 344.5, -1],
   "shell.leftSidebar.width": [240, 0, 180, 400, 344.5, -1],
   "shell.rightSidebar.width": [264, 0, 200, 440, 344.5, -1],
+  "speech.answerComposer.height": [62, 0, 40, 320, 96.5, -1],
 
   // ── str: the values that would round-trip WRONG through a JSON re-parse ──
   "git.branchDiff.base": ["", "main", "true", "240", "null", "{}", "[]", "release/1.0"],
@@ -71,6 +73,14 @@ const SAMPLES: Record<string, readonly unknown[]> = {
     { period: "today", format: "markdown", detail: "summary" },
   ],
   "terminal.order": [[], ["sess-1"], ["true", "240"]],
+  "terminal.launchers": [
+    [],
+    [{ name: "claude", command: "claude" }],
+    [
+      { name: "resume", command: "codex resume --last" },
+      { name: "240", command: "true" },
+    ],
+  ],
   "terminal.grid": [[], [{ id: "sess-1", x: 0, y: 0, w: 1, h: 1 }]],
 
   // ── json whose payload can be a BARE STRING — the shape that breaks a
@@ -83,7 +93,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 34;
+const DECLARATION_COUNT = 37;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

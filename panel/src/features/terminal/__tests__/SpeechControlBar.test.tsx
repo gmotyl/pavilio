@@ -4,15 +4,21 @@
  * 56px rail carrying autoplay, previous, play/pause, next, the segmented
  * scrubber and the position.
  *
- * Two of these tests are the reason the bar is an overlay rather than a row in
- * the cell's flexbox. `TerminalView` runs `new ResizeObserver(() => inst.fit())`
- * with no coalescing, and `inst.fit()` unconditionally refreshes the terminal
- * AND sends a PTY resize even when nothing changed — the parked
+ * The bar is a ROW IN FLOW above the xterm, reserved from mount — not an
+ * overlay. `TerminalView` runs `new ResizeObserver(() => inst.fit())` with no
+ * coalescing, and `inst.fit()` unconditionally refreshes the terminal AND sends
+ * a PTY resize even when nothing changed — the parked
  * `terminal-resize-discipline` change exists because codex already misbehaves
- * across layout changes. So "showing the bar does not resize the terminal" is
- * asserted against the real `fit` and the real resize frame, never by reading
- * the JSX.
+ * across layout changes. Spending the row's height at MOUNT is what keeps that
+ * from firing on an arrival: the observed box is settled before the cell has
+ * anything to say. The one remaining trigger is the user's own hide toggle,
+ * where a fit is the correct response — asserted against the real `fit` and the
+ * real resize frame, never by reading the JSX.
+ * `TerminalView.speechRow.test.tsx` carries the rest of that contract; what
+ * stays here is the bar's own root element.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
@@ -228,6 +234,34 @@ async function settleTerminal(): Promise<void> {
   });
 }
 
+// Walked at test time, exactly as `CellSpeakButton.test.tsx` walks it:
+// `src/features/terminal/__tests__` → `src/index.css`. Comments are stripped
+// first — the stylesheet documents every rule, and a comment sitting in front
+// of one would otherwise be read as part of its selector list.
+const css = readFileSync(join(__dirname, "..", "..", "..", "index.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
+
+/**
+ * The declarations the stylesheet makes for one exact selector, in cascade
+ * order. Flat blocks only; `@keyframes` bodies match as their own inner blocks
+ * and are simply never selected, because no frame is spelled `.speech-bar`.
+ */
+function declarationsOf(selector: string): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const [, selectorList, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const matches = selectorList.split(",").some((one) => one.trim() === selector);
+    if (!matches) continue;
+    for (const declaration of body.split(";")) {
+      const at = declaration.indexOf(":");
+      if (at === -1) continue;
+      merged[declaration.slice(0, at).trim()] = declaration.slice(at + 1).trim();
+    }
+  }
+  return merged;
+}
+
 beforeEach(() => {
   warm.clear();
   warming.clear();
@@ -255,36 +289,116 @@ describe("SpeechControlBar", () => {
     expect(screen.getByTestId("speech-bar-cell-b")).toBeInTheDocument();
   });
 
-  it("mounting the bar does not refit the terminal or resize the PTY", async () => {
+  it("toggling the row refits deliberately once per toggle, from outside the observed box", async () => {
     const speech = makeSpeech();
-    const view = render(
-      <TerminalView sessionId="cell-a" speech={speech} speechBarVisible={false} />,
-    );
+    const view = render(<TerminalView sessionId="cell-a" speech={speech} />);
     await settleTerminal();
 
-    const fitsBefore = term.fit.mock.calls.length;
-    const resizesBefore = resizeFrames().length;
+    term.fit.mockClear();
+    term.sent.length = 0;
 
-    // Mount the bar.
-    view.rerender(<TerminalView sessionId="cell-a" speech={speech} speechBarVisible />);
-    await settleTerminal();
-    expect(screen.getByTestId("speech-bar-cell-a")).toBeInTheDocument();
-    expect(term.fit.mock.calls.length).toBe(fitsBefore);
-    expect(resizeFrames().length).toBe(resizesBefore);
-
-    // …and unmount it again.
+    // Hiding the row hands its height back to the terminal, so a fit and a
+    // SIGWINCH are what SHOULD happen — once, on the user's own deliberate act,
+    // never on an arrival. This is the assertion that used to say "no fit at
+    // all"; the overlay it defended is gone.
+    //
+    // The count is the DELIBERATE fit's. In a browser the uncoalesced
+    // `ResizeObserver` in `TerminalView` fires a second, bare fit after this
+    // one (see the comment on that effect); jsdom lays nothing out, so no
+    // observer fires here and only the deliberate fit is countable. Nothing
+    // below claims the browser only fits once.
     view.rerender(<TerminalView sessionId="cell-a" speech={speech} speechBarVisible={false} />);
     await settleTerminal();
     expect(screen.queryByTestId("speech-bar-cell-a")).not.toBeInTheDocument();
-    expect(term.fit.mock.calls.length).toBe(fitsBefore);
-    expect(resizeFrames().length).toBe(resizesBefore);
+    expect(term.fit).toHaveBeenCalledTimes(1);
+    expect(resizeFrames()).toHaveLength(1);
 
-    // The structural reason: the bar is a sibling of the observed container,
-    // not a child of it, so the ResizeObserver cannot see it appear.
+    // …and bringing it back is the same act in the other direction.
     view.rerender(<TerminalView sessionId="cell-a" speech={speech} speechBarVisible />);
+    await settleTerminal();
+    expect(screen.getByTestId("speech-bar-cell-a")).toBeInTheDocument();
+    expect(term.fit).toHaveBeenCalledTimes(2);
+    expect(resizeFrames()).toHaveLength(2);
+
+    // What has NOT changed: the row is a sibling of the observed container, so
+    // no fit is ever provoked from inside the box the observer measures.
     const observedContainer = term.observed[0];
     expect(observedContainer).toBeDefined();
     expect(observedContainer.contains(screen.getByTestId("speech-bar-cell-a"))).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // The row's out-of-flow-ness lived in the stylesheet, and jsdom applies no
+  // stylesheet: `getComputedStyle` here reports the user-agent value and would
+  // pass whatever `.speech-bar` says. So the claim is asserted ON THE RULE —
+  // `src/index.css` is read and its declarations parsed, exactly as
+  // `CellSpeakButton.test.tsx` asserts the colour channel. This proves what the
+  // stylesheet declares, NOT what a browser paints.
+  // -------------------------------------------------------------------------
+  it("places the row before the terminal container, not over it", () => {
+    const declarations = declarationsOf(".speech-bar");
+
+    // The rule has to exist — an empty object would make every assertion below
+    // vacuously true.
+    expect(Object.keys(declarations).length).toBeGreaterThan(0);
+    // Out of the overlay stack: in flow, and in nobody's stacking order.
+    expect(declarations.position).not.toBe("absolute");
+    expect(declarations["z-index"]).toBeUndefined();
+  });
+
+  // The other half of "in flow": the row draws one hairline for its seam, and
+  // with the pane open that seam is not there to draw. Same discipline as the
+  // test above — the rule is parsed out of `src/index.css`, because
+  // `getComputedStyle` in jsdom reports the user-agent value and would pass
+  // over a stylesheet that says nothing at all.
+  it("drops the row's hairline while the answer pane is open, and keeps it while it is closed", () => {
+    const speech = makeSpeech();
+    const view = render(
+      <SpeechControlBar
+        sessionId="cell-a"
+        answerOpen={false}
+        onToggleAnswer={noop}
+        send={noop}
+        speech={speech}
+      />,
+    );
+
+    // Closed, the line is the row's seam against the terminal and it stays.
+    const base = declarationsOf(".speech-bar");
+    expect(base["border-bottom"]).toMatch(/^1px\s+solid\s+\S/);
+
+    // The state the stylesheet keys on rides on the row, and it FLIPS — a
+    // constant here would leave the rule below matching nothing, or matching
+    // always.
+    expect(screen.getByTestId("speech-bar-cell-a")).toHaveAttribute("data-answer-open", "0");
+    view.rerender(
+      <SpeechControlBar
+        sessionId="cell-a"
+        answerOpen
+        onToggleAnswer={noop}
+        send={noop}
+        speech={speech}
+      />,
+    );
+    const bar = screen.getByTestId("speech-bar-cell-a");
+    expect(bar).toHaveAttribute("data-answer-open", "1");
+
+    // The open rule exists, and it REACHES this element: a selector aimed at an
+    // attribute nobody renders would pass every assertion below on thin air.
+    const OPEN = '.speech-bar[data-answer-open="1"]';
+    expect(bar.matches(OPEN)).toBe(true);
+    const open = declarationsOf(OPEN);
+    expect(Object.keys(open).length).toBeGreaterThan(0);
+
+    // The line goes...
+    expect(open["border-bottom-color"]).toBe("transparent");
+
+    // ...and nothing else does. The 1px stays in the box, so opening the pane
+    // moves no edge and provokes no fit — see the rule's own note.
+    expect(open["border-bottom"]).toBeUndefined();
+    expect(open["border-bottom-width"]).toBeUndefined();
+    expect(open["border-bottom-style"]).toBeUndefined();
+    expect(open.border).toBeUndefined();
   });
 
   it("renders one segment per unit before anything is synthesized", () => {
@@ -297,7 +411,7 @@ describe("SpeechControlBar", () => {
       durations: new Map<number, number>(),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     expect(screen.getAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(3);
     // Widths seeded from `SpeechUnit.chars`: 100/300/100 of 500.
@@ -324,7 +438,7 @@ describe("SpeechControlBar", () => {
       ]),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     expect(widthOf("cell-a", 0)).toBeCloseTo(25, 1);
     expect(widthOf("cell-a", 1)).toBeCloseTo(75, 1);
@@ -345,7 +459,7 @@ describe("SpeechControlBar", () => {
       durations: new Map<number, number>(),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     expect(segmentAt("cell-a", 0)).toBe("cold");
     expect(segmentAt("cell-a", 1)).toBe("ready");
@@ -371,7 +485,7 @@ describe("SpeechControlBar", () => {
       durations: new Map([[0, 3]]),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     expect(segmentAt("cell-a", 0)).toBe("played");
     expect(segmentAt("cell-a", 1)).toBe("cold");
@@ -403,7 +517,7 @@ describe("SpeechControlBar", () => {
       warming.add(all[1].text); // requested, socket open, no audio yet
       warm.add(all[2].text); // landed
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor(all)} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(all)} />);
 
       expect(segmentAt("cell-a", 0)).toBe("cold");
       expect(segmentAt("cell-a", 1)).toBe("warming");
@@ -414,7 +528,7 @@ describe("SpeechControlBar", () => {
       const all = units(200, 240);
       warming.add(all[0].text);
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor(all)} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(all)} />);
       expect(segmentAt("cell-a", 0)).toBe("warming");
 
       // The audio lands while the run is paused or stalled. `subscribeProgress`
@@ -433,7 +547,7 @@ describe("SpeechControlBar", () => {
       // SYNTHESIS_CONCURRENCY slots open in the same tick.
       for (const unit of all.slice(0, 3)) warming.add(unit.text);
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor(all)} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(all)} />);
 
       const row = () => all.map((_unit, index) => segmentAt("cell-a", index));
       expect(row()).toEqual(["warming", "warming", "warming", "cold"]);
@@ -458,6 +572,7 @@ describe("SpeechControlBar", () => {
           sessionId="cell-a"
           answerOpen={false}
           onToggleAnswer={noop}
+          send={noop}
           speech={barFor(all, { state: "heard", durations: new Map([[0, 3]]) })}
         />,
       );
@@ -476,6 +591,7 @@ describe("SpeechControlBar", () => {
           sessionId="cell-a"
           answerOpen={false}
           onToggleAnswer={noop}
+          send={noop}
           speech={barFor(all, {
             state: "speaking",
             progress: { unitIndex: 1, unitTime: 1, unitDuration: 3 },
@@ -493,11 +609,15 @@ describe("SpeechControlBar", () => {
       // cell must not conjure a scrubber here.
       const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
       act(() => cacheChanged());
 
       expect(screen.queryAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(0);
-      expect(screen.getByTestId("speech-bar-playpause-cell-a")).toBeDisabled();
+      // Nor a transport: a cell with nothing under the cursor carries the
+      // launchers instead, so the notification has no play button to reach
+      // even if it wanted one.
+      expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
+      expect(screen.getByTestId("speech-bar-launchers-cell-a")).toBeInTheDocument();
     });
   });
 
@@ -536,7 +656,7 @@ describe("SpeechControlBar", () => {
       });
 
     it("no segment claims a role it does not implement", () => {
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barWithUnits()} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barWithUnits()} />);
 
       for (const segment of screen.getAllByTestId(/^speech-bar-segment-cell-a-/)) {
         expect(segment).not.toHaveAttribute("role");
@@ -548,7 +668,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("the segments are not announced at all", () => {
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barWithUnits()} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barWithUnits()} />);
 
       expect(screen.getByTestId("speech-bar-scrubber-cell-a")).toHaveAttribute(
         "aria-hidden",
@@ -568,7 +688,7 @@ describe("SpeechControlBar", () => {
         units: units(200, 200, 200),
       });
 
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
       const previous = screen.getByRole("button", { name: "Previous answer" });
       const next = screen.getByRole("button", { name: "Next answer" });
@@ -593,6 +713,7 @@ describe("SpeechControlBar", () => {
             sessionId="cell-a"
             answerOpen={answerOpen}
             onToggleAnswer={onToggleAnswer}
+            send={noop}
             speech={makeSpeech({
               state: "speaking",
               queue: queueWith({ current: utterance("u-1") }),
@@ -660,7 +781,15 @@ describe("SpeechControlBar", () => {
               sessionId="cell-a"
               answerOpen={false}
               onToggleAnswer={onToggleAnswer}
-              speech={makeSpeech({ units: units(200, 200, 200) })}
+              send={noop}
+              // `ready`, not the default `empty`: the row carries the
+              // launchers before a cell has spoken, and the eye is part of
+              // the transport that replaces them.
+              speech={makeSpeech({
+                state: "ready",
+                queue: queueWith({ current: utterance("u-1") }),
+                units: units(200, 200, 200),
+              })}
             />
           </div>,
         );
@@ -732,7 +861,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("the play button pulses when an unheard utterance becomes ready", () => {
-      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("ready")} />);
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready")} />);
 
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("1");
     });
@@ -741,7 +870,7 @@ describe("SpeechControlBar", () => {
       render(
         <>
           {header("ready")}
-          <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("ready")} />
+          <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready")} />
         </>,
       );
 
@@ -756,7 +885,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("a newer utterance restarts the play button's pulse", () => {
-      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("ready", "u-1")} />);
+      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready", "u-1")} />);
 
       act(() => {
         vi.advanceTimersByTime(READY_PULSE_MS);
@@ -765,7 +894,7 @@ describe("SpeechControlBar", () => {
 
       // A second answer takes the cursor: a new arrival, and every arrival gets
       // its own ten seconds.
-      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("ready", "u-2")} />);
+      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("ready", "u-2")} />);
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("1");
 
       act(() => {
@@ -775,7 +904,7 @@ describe("SpeechControlBar", () => {
     });
 
     it("speaking and heard never pulse, however long it has been", () => {
-      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("speaking")} />);
+      const view = render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("speaking")} />);
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
 
       // The window is open — the bar mounted a moment ago — and it still does
@@ -786,7 +915,7 @@ describe("SpeechControlBar", () => {
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
 
       // …and once it has been listened to all the way through.
-      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor("heard")} />);
+      view.rerender(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor("heard")} />);
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
 
       act(() => {
@@ -805,9 +934,21 @@ describe("SpeechControlBar", () => {
         const view = render(
           <>
             {header(state)}
-            <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={barFor(state)} />
+            <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={barFor(state)} />
           </>,
         );
+
+        // `empty` is the one state with no play button to agree with: the row
+        // carries the launchers there, and a control that is not rendered
+        // cannot drift from the header. The header still pulses for itself,
+        // and it is `0` — asserted here so the case is covered rather than
+        // quietly skipped.
+        if (state === "empty") {
+          expect(pulseOf("terminal-cell-speak-cell-a")).toBe("0");
+          expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
+          view.unmount();
+          continue;
+        }
 
         const headerPulse = pulseOf("terminal-cell-speak-cell-a");
         expect(headerPulse).toMatch(/^[01]$/);
@@ -831,7 +972,7 @@ describe("SpeechControlBar", () => {
       units: units(200, 200, 200),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
     fireEvent.click(screen.getByTestId("speech-bar-segment-cell-a-2"));
 
     expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 2);
@@ -846,7 +987,7 @@ describe("SpeechControlBar", () => {
       durations: new Map([[1, 4]]),
     });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
     const playing = screen.getByTestId("speech-bar-segment-cell-a-1");
     boxFor(playing, 100, 200);
@@ -862,19 +1003,28 @@ describe("SpeechControlBar", () => {
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
-  it("a cell with no utterance has inert transport controls", () => {
+  it("a cell with no utterance has no transport controls at all", () => {
+    // Was: the transport was rendered and every control disabled. A rail of
+    // dead buttons is not a control surface, and the row is in flow now, so
+    // the space it took is spent whether or not anything is in it — the
+    // launchers fill it instead. `LauncherPills.test.tsx` carries the pills;
+    // what stays here is that nothing of the transport survives beside them.
     const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
 
-    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} speech={speech} />);
+    render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noop} speech={speech} />);
 
-    expect(screen.getByTestId("speech-bar-playpause-cell-a")).toBeDisabled();
-    expect(screen.getByTestId("speech-bar-previous-cell-a")).toBeDisabled();
-    expect(screen.getByTestId("speech-bar-next-cell-a")).toBeDisabled();
-    // An empty scrubber: present, so the rail keeps its shape, with nothing in it.
-    expect(screen.getByTestId("speech-bar-scrubber-cell-a")).toBeInTheDocument();
+    expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
+    expect(screen.queryByTestId("speech-bar-previous-cell-a")).toBeNull();
+    expect(screen.queryByTestId("speech-bar-next-cell-a")).toBeNull();
+    // The scrubber goes with them: an empty rail kept its shape for a row that
+    // could appear and disappear, and the row no longer does either.
+    expect(screen.queryByTestId("speech-bar-scrubber-cell-a")).toBeNull();
     expect(screen.queryAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(0);
     // No eye either: the header toggle can force the bar onto an empty cell,
     // and "unit 1 of 0" is not a position.
     expect(screen.queryByTestId("speech-bar-eye-cell-a")).toBeNull();
+    // The arm switch is the one control that survives the branch — arming
+    // ahead of the first answer is why the row is reachable before it.
+    expect(screen.getByTestId("speech-bar-autoplay-cell-a")).toBeInTheDocument();
   });
 });

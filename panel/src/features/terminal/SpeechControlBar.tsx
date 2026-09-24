@@ -1,6 +1,8 @@
 import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
+import { LauncherPills } from "./LauncherPills";
+import { noteTransport, noteUtterance, useAnswerWaiting } from "./answerWaiting";
 import { segmentStateFor, type SegmentState } from "./segmentState";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
@@ -16,6 +18,16 @@ export interface SpeechControlBarProps {
   answerOpen: boolean;
   /** The eye was pressed: open the pane if it is closed, close it if it is open. */
   onToggleAnswer: () => void;
+  /**
+   * The cell's PTY write, for the launcher pills the row carries before the
+   * cell has spoken.
+   *
+   * REQUIRED, like `speech` on the surfaces: the pills are the whole of the
+   * row's contents on a silent cell, and a host that forgot to pass this would
+   * render pills that look live and do nothing when clicked — a failure no
+   * test of the bar alone can see. A no-op default would buy exactly that.
+   */
+  send: (data: string) => void;
 }
 
 /**
@@ -116,20 +128,29 @@ function transportIntent(state: CellSpeechState): "speak" | "pause" | "resume" |
  * play/pause, next, the segmented scrubber, and the position inside the
  * utterance.
  *
- * ## Why it is an overlay
+ * ## Why it is a row in flow, reserved from mount
  *
  * `TerminalView` runs `new ResizeObserver(() => inst.fit())` with no
  * coalescing, and `inst.fit()` unconditionally calls `terminal.refresh()` AND
  * sends a PTY resize even when the dimensions did not change — the parked
  * `terminal-resize-discipline` change exists because codex already misbehaves
- * across layout changes. A bar in the cell's flexbox would put speech controls
- * on top of that unfixed bug and hand it a new trigger on every toggle. So this
- * is `position: absolute` over the xterm, a SIBLING of the observed container
- * rather than a child of it: nothing reflows, nothing refits, no resize frame
- * is sent. `SpeechControlBar.test.tsx` asserts that against the real `fit`.
+ * across layout changes. A control that APPEARED mid-stream would put speech on
+ * top of that unfixed bug and SIGWINCH a TUI while it was still writing. The
+ * bar was `position: absolute` over the xterm to avoid exactly that.
  *
- * Being on by default is survivable because it sits at the **top**: it covers
- * the oldest rows, while a TUI's live prompt is at the bottom.
+ * It is now a row in the cell's column instead, rendered from the moment the
+ * cell mounts whether or not it has ever spoken. That spends the height before
+ * any utterance can arrive, so the same trigger never fires: the observed
+ * container is settled at mount. The row remains a SIBLING of that container,
+ * never a child, and the only thing that still changes its size is the user's
+ * own hide toggle — a deliberate act, where `TerminalView` answers with a
+ * single fit that follows the bottom. `SpeechControlBar.test.tsx` and
+ * `TerminalView.speechRow.test.tsx` assert that against the real `fit`.
+ *
+ * What changes on a first utterance is therefore the row's CONTENTS, not its
+ * existence: the transport listed above replaces the launcher pills the row
+ * carries while the cell's state is `empty`. See the branch in the JSX, and
+ * `LauncherPills.test.tsx`.
  *
  * ## Why the scrubber is segmented
  *
@@ -177,8 +198,12 @@ export function SpeechControlBar({
   speech,
   answerOpen,
   onToggleAnswer,
+  send,
 }: SpeechControlBarProps) {
   const state = speech.stateFor(sessionId);
+  // Only the mark: whether the pane's BODY has handed over is the pane's
+  // business, and the bar draws the same fact one control smaller.
+  const { pending } = useAnswerWaiting(sessionId);
   const queue = speech.queueFor(sessionId);
   const units = speech.unitsFor(sessionId);
 
@@ -217,10 +242,24 @@ export function SpeechControlBar({
   // cursor is reported `empty`, never `ready`. So on the only path where this
   // window decides anything — `state === "ready"` — there IS a cursor utterance
   // and the key is never null; a null key means the window is inactive anyway.
-  const withinReadyPulse = useReadyPulseWindow(
-    state === "ready",
-    utteranceUnderCursor(queue)?.id ?? null,
-  );
+  const answerId = utteranceUnderCursor(queue)?.id ?? null;
+  const withinReadyPulse = useReadyPulseWindow(state === "ready", answerId);
+
+  // The reply landing, noticed HERE rather than in the pane. The queue is not a
+  // store anything subscribes to — the host's identity changes when an
+  // utterance arrives and the whole cell re-renders — so the arrival has to be
+  // read off a render, and it has to be a render that still happens once the
+  // user has closed the pane. This row is that render: Task 3 made it present
+  // from mount and independent of speech state, and `TerminalView` mounts the
+  // pane only INSIDE the row's own condition, so the bar outlives the pane by
+  // construction and never misses an arrival the pane would have seen.
+  //
+  // A remount with the same answer is the same id, and ends nothing; a wait
+  // belonging to another cell is untouched, because the id read here is the one
+  // under THIS session's cursor.
+  useEffect(() => {
+    noteUtterance(sessionId, answerId);
+  }, [sessionId, answerId]);
 
   const armed = speech.armedSessionId === sessionId;
   const intent = transportIntent(state);
@@ -298,6 +337,14 @@ export function SpeechControlBar({
     <div
       className="speech-bar"
       data-testid={`speech-bar-${sessionId}`}
+      // The pane's state, on the row, because the SEAM between them is the
+      // row's to draw. `.speech-bar` carries a hairline against the terminal;
+      // with the pane open there is no terminal under that edge — the pane's
+      // own ground is — and the line reads as a break across one surface. The
+      // stylesheet takes it out on this attribute. Told here rather than
+      // derived there: the pane is a sibling mounted by `TerminalView`, so no
+      // selector can reach from the row to it.
+      data-answer-open={answerOpen ? "1" : "0"}
       // The cell header is `draggable` and the cell root focuses on click, so
       // every gesture that could reach either has to stop here.
       draggable={false}
@@ -323,153 +370,197 @@ export function SpeechControlBar({
           <Radio size={17} />
         </button>
 
-        <span className="speech-bar-sep" />
+        {/*
+          The row's CONTENTS are what the cell's speech state selects — its
+          existence is not, and has not been since the row went into flow.
+          `empty` means nothing under the cursor, so every transport control
+          would be disabled, the scrubber would have no segments and the eye
+          would have no pane to open: a rail of dead buttons above a fresh
+          prompt. The launchers take that space instead, and give the row a job
+          before the cell has one.
 
-        <button
-          type="button"
-          title="Previous answer"
-          aria-label="Previous answer"
-          data-testid={`speech-bar-previous-${sessionId}`}
-          className="speech-bar-btn"
-          disabled={!hasPrevious}
-          onClick={() => speech.onPrevious(sessionId)}
-        >
-          <SkipBack size={16} />
-        </button>
+          One direction only. `stateFor` never returns to `empty` once an
+          utterance is under the cursor, so the pills go when the first answer
+          lands and do not come back — see the change's design.md on why an
+          exited agent cannot honestly bring them back.
+        */}
+        {state === "empty" ? (
+          <LauncherPills sessionId={sessionId} send={send} />
+        ) : (
+          <>
+            <span className="speech-bar-sep" />
 
-        <button
-          type="button"
-          title={PLAY_PAUSE_LABEL[state]}
-          aria-label={PLAY_PAUSE_LABEL[state]}
-          data-testid={`speech-bar-playpause-${sessionId}`}
-          data-speech={state}
-          data-icon={intent}
-          // The header speak control's own switch, from the header speak
-          // control's own function — not a second rule computed here. The bar
-          // sits over the top of the cell, so without this a user watching the
-          // transport has to look back at the header to learn that something is
-          // waiting. `index.css` styles both selectors in one rule, which is
-          // what keeps the two the same pulse — for the first ten seconds.
-          //
-          // Then this one stops. The bar is a 56px rail lying across the top of
-          // the terminal, and a pulse that size that never ends reads as a nag
-          // over the work rather than a notice about it. The header control is
-          // small, at rest, and off to the side, so it keeps pulsing for as
-          // long as the answer goes unheard: it stays the place that says
-          // something is still waiting. The cap narrows where the shared
-          // derivation is read, never what it means.
-          data-pulse={speechPulse(state) === "1" && withinReadyPulse ? "1" : "0"}
-          className="speech-bar-btn speech-bar-primary"
-          disabled={state === "empty"}
-          aria-disabled={intent === "none" || undefined}
-          onClick={() => {
-            if (intent === "pause") speech.onPause(sessionId);
-            else if (intent === "resume") speech.onResume(sessionId);
-            else if (intent === "speak") speech.onSpeak(sessionId);
-          }}
-        >
-          {intent === "pause" ? <Pause size={16} /> : <Play size={16} />}
-        </button>
+            <button
+              type="button"
+              title="Previous answer"
+              aria-label="Previous answer"
+              data-testid={`speech-bar-previous-${sessionId}`}
+              className="speech-bar-btn"
+              disabled={!hasPrevious}
+              onClick={() => {
+                noteTransport(sessionId);
+                speech.onPrevious(sessionId);
+              }}
+            >
+              <SkipBack size={16} />
+            </button>
 
-        <button
-          type="button"
-          title="Next answer"
-          aria-label="Next answer"
-          data-testid={`speech-bar-next-${sessionId}`}
-          className="speech-bar-btn"
-          disabled={!hasNext}
-          onClick={() => speech.onNext(sessionId)}
-        >
-          <SkipForward size={16} />
-        </button>
+            <button
+              type="button"
+              title={PLAY_PAUSE_LABEL[state]}
+              aria-label={PLAY_PAUSE_LABEL[state]}
+              data-testid={`speech-bar-playpause-${sessionId}`}
+              data-speech={state}
+              data-icon={intent}
+              // The header speak control's own switch, from the header speak
+              // control's own function — not a second rule computed here. The row
+              // sits between the header and the terminal, so without this a user
+              // watching the transport has to look back at the header to learn that
+              // something is waiting. `index.css` styles both selectors in one rule,
+              // which is what keeps the two the same pulse — for ten seconds.
+              //
+              // Then this one stops. The bar is a 56px rail sitting directly above
+              // the terminal, and a pulse that size that never ends reads as a nag
+              // over the work rather than a notice about it. The header control is
+              // small, at rest, and off to the side, so it keeps pulsing for as
+              // long as the answer goes unheard: it stays the place that says
+              // something is still waiting. The cap narrows where the shared
+              // derivation is read, never what it means.
+              data-pulse={speechPulse(state) === "1" && withinReadyPulse ? "1" : "0"}
+              // A reply the cell is still waiting for. The mark is on from the
+              // moment the draft goes out until the reply lands, so it outlives
+              // both of the things that can take the pane's body away: a
+              // transport press, which hands the wait back to this button, and
+              // the eye, which closes the pane outright. The second is the case
+              // the row exists to cover — the arrival is noticed HERE (see the
+              // effect above), so a reply the user walked away from is visibly
+              // on its way for exactly as long as it is on its way.
+              data-pending={pending ? "1" : "0"}
+              className="speech-bar-btn speech-bar-primary"
+              // No `disabled` any more: the only state that set it was `empty`,
+              // and `empty` renders the launchers instead of reaching here at all.
+              // `preparing` keeps `aria-disabled` alone, as it always did — the
+              // audio is on its way, so the button is announced as not-yet-live
+              // without being taken out of the tab order while it lands.
+              aria-disabled={intent === "none" || undefined}
+              onClick={() => {
+                // The press is a transport press whatever it resolves to, and
+                // even when it resolves to nothing: the pane's body goes back
+                // to the text either way, because the user asked for the
+                // transport rather than for the wait.
+                noteTransport(sessionId);
+                if (intent === "pause") speech.onPause(sessionId);
+                else if (intent === "resume") speech.onResume(sessionId);
+                else if (intent === "speak") speech.onSpeak(sessionId);
+              }}
+            >
+              {intent === "pause" ? <Pause size={16} /> : <Play size={16} />}
+            </button>
 
-        <span className="speech-bar-sep" />
+            <button
+              type="button"
+              title="Next answer"
+              aria-label="Next answer"
+              data-testid={`speech-bar-next-${sessionId}`}
+              className="speech-bar-btn"
+              disabled={!hasNext}
+              onClick={() => {
+                noteTransport(sessionId);
+                speech.onNext(sessionId);
+              }}
+            >
+              <SkipForward size={16} />
+            </button>
 
-        <div
-          className="speech-bar-scrub"
-          data-testid={`speech-bar-scrubber-${sessionId}`}
-          // A pointer affordance, hidden from assistive tech — see the note on
-          // the component. Announcing it would mean announcing one item per
-          // unit, and an answer runs to fifteen of them. The eye beside it
-          // carries the position in its name instead, and that is what a
-          // screen reader is given.
-          aria-hidden="true"
-        >
-          {units.map((_unit, index) => {
-            const segment = segmentStateAt(index);
-            const width = total > 0 ? (weights[index] / total) * 100 : 100 / units.length;
-            const fill =
-              segment === "playing" && progress?.unitDuration
-                ? clamp(progress.unitTime / progress.unitDuration, 0, 1) * 100
-                : 0;
+            <span className="speech-bar-sep" />
 
-            return (
-              <div
-                // Index is the identity here: the segment IS unit n of this
-                // utterance, and a re-prepare rebuilds the array in place.
-                key={index}
-                // No `role`, no `tabIndex`, no `aria-label`: this is a
-                // graphic a mouse can act on, not a control. `title` stays —
-                // it is a hover tooltip for the pointer user, and an
-                // `aria-hidden` subtree never announces it.
-                title={`Unit ${index + 1} of ${units.length}`}
-                data-testid={`speech-bar-segment-${sessionId}-${index}`}
-                data-segment={segment}
-                className="speech-bar-seg"
-                style={{ width: `${width}%` }}
-                onMouseDown={(e) => {
-                  // A drag belongs to the unit already in the element: it moves
-                  // `currentTime` and re-synthesizes nothing. Every other
-                  // segment is a jump, which `onClick` raises.
-                  if (segment !== "playing") return;
-                  e.preventDefault();
-                  const element = e.currentTarget;
-                  setDragging({ index, element });
-                  seekAt(e.clientX, index, element);
-                }}
-                onClick={() => {
-                  if (segment === "playing") return;
-                  // Cold included, deliberately: the run reports the existing
-                  // `stalled` red until the unit lands, and then plays it.
-                  speech.onJumpToUnit(sessionId, index);
-                }}
+            <div
+              className="speech-bar-scrub"
+              data-testid={`speech-bar-scrubber-${sessionId}`}
+              // A pointer affordance, hidden from assistive tech — see the note on
+              // the component. Announcing it would mean announcing one item per
+              // unit, and an answer runs to fifteen of them. The eye beside it
+              // carries the position in its name instead, and that is what a
+              // screen reader is given.
+              aria-hidden="true"
+            >
+              {units.map((_unit, index) => {
+                const segment = segmentStateAt(index);
+                const width = total > 0 ? (weights[index] / total) * 100 : 100 / units.length;
+                const fill =
+                  segment === "playing" && progress?.unitDuration
+                    ? clamp(progress.unitTime / progress.unitDuration, 0, 1) * 100
+                    : 0;
+
+                return (
+                  <div
+                    // Index is the identity here: the segment IS unit n of this
+                    // utterance, and a re-prepare rebuilds the array in place.
+                    key={index}
+                    // No `role`, no `tabIndex`, no `aria-label`: this is a
+                    // graphic a mouse can act on, not a control. `title` stays —
+                    // it is a hover tooltip for the pointer user, and an
+                    // `aria-hidden` subtree never announces it.
+                    title={`Unit ${index + 1} of ${units.length}`}
+                    data-testid={`speech-bar-segment-${sessionId}-${index}`}
+                    data-segment={segment}
+                    className="speech-bar-seg"
+                    style={{ width: `${width}%` }}
+                    onMouseDown={(e) => {
+                      // A drag belongs to the unit already in the element: it moves
+                      // `currentTime` and re-synthesizes nothing. Every other
+                      // segment is a jump, which `onClick` raises.
+                      if (segment !== "playing") return;
+                      e.preventDefault();
+                      const element = e.currentTarget;
+                      setDragging({ index, element });
+                      seekAt(e.clientX, index, element);
+                    }}
+                    onClick={() => {
+                      if (segment === "playing") return;
+                      // Cold included, deliberately: the run reports the existing
+                      // `stalled` red until the unit lands, and then plays it.
+                      speech.onJumpToUnit(sessionId, index);
+                    }}
+                  >
+                    {segment === "playing" ? (
+                      <>
+                        <span className="speech-bar-fill" style={{ width: `${fill}%` }} />
+                        <span className="speech-bar-head" style={{ left: `${fill}%` }} />
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+
+            {units.length > 0 ? (
+              <button
+                type="button"
+                // The position rides in the name — `(unitIndex ?? 0) + 1`, exactly
+                // the readout's computation — so a screen reader loses nothing to
+                // the eye replacing it. See the note on the component.
+                title={eyeLabel}
+                aria-label={eyeLabel}
+                aria-pressed={answerOpen}
+                data-testid={`speech-bar-eye-${sessionId}`}
+                // Open borrows the armed toggle's fill — `index.css` styles the
+                // two attributes in one rule.
+                data-open={answerOpen ? "1" : "0"}
+                className="speech-bar-btn"
+                onClick={onToggleAnswer}
               >
-                {segment === "playing" ? (
-                  <>
-                    <span className="speech-bar-fill" style={{ width: `${fill}%` }} />
-                    <span className="speech-bar-head" style={{ left: `${fill}%` }} />
-                  </>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
+                <Eye size={17} />
+              </button>
+            ) : null}
 
-        {units.length > 0 ? (
-          <button
-            type="button"
-            // The position rides in the name — `(unitIndex ?? 0) + 1`, exactly
-            // the readout's computation — so a screen reader loses nothing to
-            // the eye replacing it. See the note on the component.
-            title={eyeLabel}
-            aria-label={eyeLabel}
-            aria-pressed={answerOpen}
-            data-testid={`speech-bar-eye-${sessionId}`}
-            // Open borrows the armed toggle's fill — `index.css` styles the
-            // two attributes in one rule.
-            data-open={answerOpen ? "1" : "0"}
-            className="speech-bar-btn"
-            onClick={onToggleAnswer}
-          >
-            <Eye size={17} />
-          </button>
-        ) : null}
-
-        {queue.pending.length > 0 ? (
-          <span className="speech-bar-pill" data-testid={`speech-bar-queue-${sessionId}`}>
-            +{queue.pending.length}
-          </span>
-        ) : null}
+            {queue.pending.length > 0 ? (
+              <span className="speech-bar-pill" data-testid={`speech-bar-queue-${sessionId}`}>
+                +{queue.pending.length}
+              </span>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );

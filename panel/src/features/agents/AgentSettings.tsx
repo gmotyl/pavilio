@@ -4,6 +4,7 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 import { VoiceSelect } from "../speech/VoiceSelect";
 import { AutoOpenAnswerToggle } from "../speech/AutoOpenAnswerToggle";
+import { LauncherSettings } from "./LauncherSettings";
 
 interface SettingsFile {
   name: string;
@@ -462,6 +463,9 @@ export default function AgentSettings() {
         <VoiceSelect />
         <div className="mt-4">
           <AutoOpenAnswerToggle />
+        </div>
+        <div className="mt-4">
+          <LauncherSettings />
         </div>
       </section>
 

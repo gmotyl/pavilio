@@ -216,14 +216,17 @@ function harness(markdown = MARKDOWN, progress: SpeechProgress | null = null): H
   };
 }
 
-/** The footer's switch, off and inert unless a test wires it. */
+/** The meta row's switch, off and inert unless a test wires it. */
 const OFF = { autoOpen: false, onAutoOpenChange: () => {} };
+
+/** The composer's PTY write. `AnswerComposer.test.tsx` is where it is spent. */
+const NO_SEND = () => {};
 
 function paneElement(speech: GridSpeech, onClose: () => void = () => {}) {
   // MarkdownRenderer calls useNavigate, so the body needs a router.
   return (
     <MemoryRouter>
-      <AnswerPane sessionId="cell-a" speech={speech} onClose={onClose} {...OFF} />
+      <AnswerPane sessionId="cell-a" speech={speech} onClose={onClose} send={NO_SEND} {...OFF} />
     </MemoryRouter>
   );
 }
@@ -596,15 +599,16 @@ describe("AnswerPane", () => {
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
-  it("the footer checkbox reflects the cell switch and writes nothing to storage", () => {
+  it("the meta row's checkbox reflects the cell switch and writes nothing to storage", () => {
     const h = harness();
     const onAutoOpenChange = vi.fn();
-    const footer = (autoOpen: boolean) => (
+    const withSwitch = (autoOpen: boolean) => (
       <MemoryRouter>
         <AnswerPane
           sessionId="cell-a"
           speech={makeSpeech(h)}
           onClose={() => {}}
+          send={NO_SEND}
           autoOpen={autoOpen}
           onAutoOpenChange={onAutoOpenChange}
         />
@@ -613,14 +617,14 @@ describe("AnswerPane", () => {
     const setItem = vi.spyOn(localStorage, "setItem");
     const removeItem = vi.spyOn(localStorage, "removeItem");
 
-    const view = render(footer(false));
+    const view = render(withSwitch(false));
     const box = screen.getByTestId("answer-pane-auto-open-cell-a") as HTMLInputElement;
     expect(box).toBe(screen.getByRole("checkbox", { name: "Open on new answer" }));
     expect(box).not.toBeChecked();
-    // The footer is a row of the card, under the body — not inside the scroll container.
+    // The meta row is a row of the pane, under the body — not inside the scroll container.
     const root = screen.getByTestId("answer-pane-cell-a");
     const body = screen.getByTestId("answer-pane-body-cell-a");
-    expect(box.closest(".answer-pane-footer")?.parentElement).toBe(root);
+    expect(box.closest(".answer-pane-meta")?.parentElement).toBe(root);
     expect(body.contains(box)).toBe(false);
 
     // A click reports the flipped value to the owner and touches no storage:
@@ -632,7 +636,7 @@ describe("AnswerPane", () => {
     expect(removeItem).not.toHaveBeenCalled();
 
     // Controlled: the box follows the prop, and flips the other way from on.
-    view.rerender(footer(true));
+    view.rerender(withSwitch(true));
     expect(box).toBeChecked();
     fireEvent.click(box);
     expect(onAutoOpenChange).toHaveBeenLastCalledWith(false);
@@ -668,7 +672,7 @@ describe("AnswerPane", () => {
     render(
       <MemoryRouter>
         <div onMouseDown={cell.mouseDown} onClick={cell.click} onDragStart={cell.dragStart}>
-          <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} send={NO_SEND} {...OFF} />
         </div>
       </MemoryRouter>,
     );
@@ -699,7 +703,7 @@ describe("AnswerPane", () => {
     render(
       <MemoryRouter>
         <div onKeyDown={cell.keyDown}>
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} {...OFF} />
         </div>
       </MemoryRouter>,
     );
@@ -750,7 +754,7 @@ describe("AnswerPane", () => {
           <div className="xterm">
             <textarea aria-label="terminal input" />
           </div>
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} {...OFF} />
         </div>
       </MemoryRouter>,
     );
@@ -786,7 +790,7 @@ describe("AnswerPane", () => {
           </div>
         </div>
         <div className="relative">
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} {...OFF} />
         </div>
       </MemoryRouter>,
     );
@@ -1062,56 +1066,204 @@ describe("AnswerPane", () => {
   });
 
   /**
-   * The pane's two surfaces, read out of the stylesheet that owns them.
+   * The pane's surface, read out of the stylesheet that owns it.
    *
    * jsdom loads no stylesheet, so `getComputedStyle` here would answer for a
    * rule it never saw. `cssRule` — the helper the hamburger geometry already
-   * reads `index.css` with — returns one selector's declaration block and
-   * refuses to guess when a selector matches more than one rule, so these
-   * assertions are about what the file actually says.
+   * reads `index.css` with — returns one selector's declaration block, refuses
+   * to guess when a selector matches more than one rule, and THROWS when none
+   * matches. That last part is what carries the absence assertions below: "no
+   * border" is trivially true of a rule that was never found, so the parse has
+   * to fail loudly on a renamed selector rather than quietly agree.
    */
   describe("surfaces", () => {
     /**
-     * The `background` shorthand's value — not `background-color`, which the
-     * `:` in the pattern excludes, and not a value hidden behind a comment,
-     * which is why the comments come out before the declarations are split.
+     * The ground a rule paints — the `background` shorthand or the
+     * `background-color` longhand, whichever it declares last — and not a
+     * value hidden behind a comment, which is why the comments come out
+     * before the declarations are split.
      */
     const background = (selector: string): string | null => {
       const declarations = cssRule(selector).replace(/\/\*[\s\S]*?\*\//g, "");
-      const found = declarations.match(/(?:^|;)\s*background\s*:\s*([^;]+)/);
-      return found ? found[1].trim() : null;
+      // The shorthand OR the `background-color` longhand: a ground painted
+      // with either is a ground, and reading only the shorthand let a
+      // `background-color` on a surface slip past unseen. Last declaration
+      // wins, the way the cascade reads a block top to bottom.
+      const found = [
+        ...declarations.matchAll(/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/g),
+      ];
+      return found.length > 0 ? found[found.length - 1][1].trim() : null;
     };
 
     /**
-     * What a surface inside the card actually shows: its own `background` if
-     * it declares one, else the card's, which is what shows through an
+     * What a surface inside the pane actually shows: its own `background` if
+     * it declares one, else the pane's, which is what shows through an
      * undeclared one.
      */
     const shows = (selector: string): string | null =>
       background(selector) ?? background(".answer-pane");
 
-    it("the answer pane body uses the base background", () => {
-      expect(background(".answer-pane-body")).toBe("var(--bg-base)");
+    it("renders the pane without a border, radius or shadow", () => {
+      const pane = cssRule(".answer-pane").replace(/\/\*[\s\S]*?\*\//g, "");
 
-      // Adding a paint must not have moved the geometry the rail reads: the
-      // body is still the positioned grid whose first column is the rail.
+      // Vacuity guard. Every assertion below is about an ABSENCE, and an
+      // absence is true of nothing at all: a renamed selector must blow up
+      // (`cssRule` throws) and an emptied rule must fail here, not pass.
+      expect(pane.trim().length).toBeGreaterThan(0);
+      // And it is still the overlay rule, not some other block that happens to
+      // declare nothing.
+      expect(pane).toMatch(/(^|;)\s*position:\s*absolute/);
+
+      // The card chrome goes the way the bar's did: nothing sits behind an
+      // in-flow speech surface to blur, and a floating panel's edge would draw
+      // a border where the row and the pane are meant to read as one surface.
+      // Longhands included: a `border-top` here is precisely the edge that
+      // must not be drawn between the row and the pane, and the shorthand-only
+      // pattern read straight past it.
+      expect(pane).not.toMatch(
+        /(^|;)\s*border(-(top|right|bottom|left|width|style|color))?\s*:/,
+      );
+      expect(pane).not.toMatch(/border-radius\s*:/);
+      expect(pane).not.toMatch(/box-shadow\s*:/);
+      expect(pane).not.toMatch(/backdrop-filter\s*:/);
+    });
+
+    it("paints the pane on the speech surface, not the terminal ground", () => {
+      // Quoted from the row's own rule rather than repeated as a literal, so
+      // the two grounds cannot drift apart without this failing.
+      const row = background(".speech-bar");
+      expect(row).not.toBeNull();
+      expect(background(".answer-pane")).toBe(row);
+
+      // The body stops painting the xterm's ground under the text. A second,
+      // darker surface inside the pane is precisely the card the pane has
+      // stopped being — the text well and the switch row are one ground now,
+      // with the row's hairline for the seam.
+      expect(shows(".answer-pane-body")).not.toBe("var(--bg-base)");
+      expect(shows(".answer-pane-body")).toBe(row);
+
+      // Dropping the paint must not have moved the geometry the rail reads:
+      // the body is still the positioned grid whose first column is the rail.
       const body = cssRule(".answer-pane-body");
       expect(body).toMatch(/position:\s*relative/);
       expect(body).toMatch(/display:\s*grid/);
       expect(body).toMatch(/grid-template-columns:\s*22px 1fr/);
     });
 
-    it("the footer does not take the body's background", () => {
-      // The footer paints nothing of its own, so what it shows is the card it
-      // sits in. That is the whole point of the darker body: the two surfaces
-      // have to end up different, which they were not while the body also
-      // declared nothing.
-      const card = background(".answer-pane");
-      expect(card).not.toBeNull();
-      expect(cssRule(".answer-pane-footer")).not.toMatch(/background/);
-      expect(shows(".answer-pane-footer")).toBe(card);
+    /**
+     * The open pane fills the terminal area.
+     *
+     * A deliberate departure from design.md, which sizes the pane to its
+     * content and fades its bottom edge with a mask so "the terminal underneath
+     * is implied, never announced". Greg read a real answer in a real browser
+     * and asked for the opposite, verbatim: "when I am in answer mode I want
+     * blend all the way to bottom, form on bottom no terminal visible". What he
+     * had was a pane as tall as its text with live terminal output running
+     * underneath the composer — two things to read at once, and the reply box
+     * floating in the middle of the cell.
+     *
+     * jsdom does no layout, so the claim is made where it is written: the four
+     * insets, the absence of a content-sized ceiling, and which single child of
+     * the column is allowed to take the slack.
+     */
+    it("covers the terminal area rather than stopping at its content", () => {
+      const pane = cssRule(".answer-pane").replace(/\/\*[\s\S]*?\*\//g, "");
 
-      expect(shows(".answer-pane-body")).not.toBe(shows(".answer-pane-footer"));
+      // Vacuity guard, as above: every claim here is about a declaration, and
+      // `not.toMatch` is trivially true of an empty block.
+      expect(pane).toMatch(/(^|;)\s*position:\s*absolute/);
+
+      // All four edges. `top: 0` alone is what it already had — the bottom is
+      // the new one, and it is the whole fix.
+      for (const edge of ["top", "right", "bottom", "left"]) {
+        expect(pane).toMatch(new RegExp(`(^|;)\\s*${edge}:\\s*0\\s*(;|$)`));
+      }
+
+      // And nothing that lets it stop short. `max-height: 100%` was what made
+      // it as tall as its content: with all four insets set it is the ceiling
+      // that decides, so leaving it behind would leave the bug behind.
+      expect(pane).not.toMatch(/max-height\s*:/);
+      expect(pane).not.toMatch(/(^|;)\s*height\s*:/);
+
+      // The pane is still the flex column its rows are laid out in.
+      expect(pane).toMatch(/flex-direction:\s*column/);
+    });
+
+    it("gives the slack to the text and pins the rows under it", () => {
+      const body = cssRule(".answer-pane-body").replace(/\/\*[\s\S]*?\*\//g, "");
+
+      // One claimant of the column's free space, and it is the reading area:
+      // a short answer leaves empty ground above the composer rather than
+      // floating the composer up into the middle of the cell, and a long one
+      // scrolls inside the box instead of pushing the composer off the bottom.
+      expect(body).toMatch(/(^|;)\s*flex:\s*1 1 auto\s*(;|$)/);
+      // `min-height: 0` is what lets it shrink below its content — without it
+      // a flex item's floor is its content and the overflow never engages.
+      expect(body).toMatch(/(^|;)\s*min-height:\s*0\s*(;|$)/);
+      expect(body).toMatch(/(^|;)\s*overflow:\s*auto\s*(;|$)/);
+
+      // The rows below it take exactly their own height — neither grows into
+      // the slack the body is claiming.
+      expect(cssRule(".answer-pane-meta")).toMatch(/(^|;)\s*flex:\s*none\s*(;|$)/);
+      expect(cssRule(".answer-pane-composer")).toMatch(/(^|;)\s*flex:\s*none\s*(;|$)/);
+
+      // And the fade is gone with the reason for it. design.md masked the
+      // body's bottom edge so the terminal showing through read as implied;
+      // there is no terminal showing through any more, and a mask over the
+      // last line of an answer that now runs to the composer would simply be
+      // dimming the text.
+      expect(body).not.toMatch(/mask/);
+    });
+
+    it("lays the body out above the rows it is pinned by", () => {
+      const h = harness();
+      render(
+        <MemoryRouter>
+          <AnswerPane
+            sessionId="cell-a"
+            speech={makeSpeech(h)}
+            onClose={() => {}}
+            send={NO_SEND}
+            autoOpen={false}
+            onAutoOpenChange={() => {}}
+          />
+        </MemoryRouter>,
+      );
+
+      // The CSS above only decides how the column shares its height; this is
+      // the order it shares it in. The body is the column's FIRST row, so the
+      // slack it claims sits above everything else rather than below it.
+      const root = screen.getByTestId("answer-pane-cell-a");
+      const body = screen.getByTestId("answer-pane-body-cell-a");
+      expect(body.parentElement).toBe(root);
+      expect(root.firstElementChild).toBe(body);
+      // …and every other row of the pane is a sibling BELOW it, pinned to the
+      // bottom of the terminal area by the slack the body is taking above
+      // them. Which of them comes last is the next commit's business; that
+      // they all come after the body is this one's.
+      const rows = Array.from(root.children);
+      expect(rows.length).toBeGreaterThan(1);
+      expect(rows.indexOf(body)).toBe(0);
+      expect(rows.some((row) => row.classList.contains("answer-pane-meta"))).toBe(true);
+    });
+
+    it("the meta row paints nothing of its own", () => {
+      // The switch row paints nothing of its own — it never did — so what it
+      // shows is the pane it sits in. What changed is the conclusion: the body
+      // used to declare a darker ground so the two would read as two surfaces,
+      // and that split was the card. One ground now, both of them the row's.
+      //
+      // The composer is the exception, and deliberately so: it declares the
+      // third ground of design.md's three, because what YOU type is neither
+      // agent nor shell. It is darker than both of the other two rather than
+      // merely different, and `AnswerComposer.test.tsx` is where that is read
+      // out of the stylesheet.
+      const surface = background(".answer-pane");
+      expect(surface).not.toBeNull();
+      expect(cssRule(".answer-pane-meta")).not.toMatch(/background/);
+      expect(shows(".answer-pane-meta")).toBe(surface);
+
+      expect(shows(".answer-pane-body")).toBe(shows(".answer-pane-meta"));
     });
   });
 });

@@ -343,22 +343,21 @@ function TerminalCell({
   const [snapshot, setSnapshot] = useState<BufferSnapshot | null>(null);
   const [editingName, setEditingName] = useState(false);
   /**
-   * The user's standing answer for THIS cell's speech bar, or `null` while they
-   * have not given one. `null` is the state every cell starts in, and it is the
-   * only state in which the CELL decides.
+   * The user's standing answer for THIS cell's speech row, or `null` while they
+   * have not given one. `null` means shown: the row is a standing part of the
+   * cell, not something to be found.
    *
-   * It decides on whether it has anything to play. A bar over a cell that has
-   * never spoken is a transport for nothing — and it lands on the top row,
-   * which on a fresh terminal is where the prompt is. So the default is: no
-   * utterance, no bar; the first utterance brings it out.
+   * It used to wait for the cell's first utterance — a bar over a cell that had
+   * never spoken was a transport for nothing, and it landed over the top row,
+   * which on a fresh terminal is where the prompt is. Both halves of that are
+   * gone. The row is now IN FLOW, so it covers nothing; and its height has to
+   * be spent at mount or the first utterance would resize the terminal, which
+   * is the whole point of `speech-surface-in-flow`. The emptiness the old rule
+   * answered is answered inside the row instead, by what it renders.
    *
-   * `stateFor(...) !== "empty"` is already the panel's one answer to "does this
-   * cell hold something speakable" — the same value the header speak control
-   * renders — so the bar reads it rather than keeping a second notion of it.
-   *
-   * A toggle writes a BOOLEAN, never a flip of the derived value: from then on
-   * the choice outranks the cell in both directions, and no later arrival moves
-   * a bar the user has closed (or closes one they have opened).
+   * So nothing about the SESSION is read here any more — only the user's own
+   * choice, which is a boolean from the moment they make one and outranks
+   * everything in both directions from then on.
    *
    * Owned here because the two components that care sit on opposite sides of
    * the cell: the header icon toggles it and `TerminalView` renders it.
@@ -366,10 +365,10 @@ function TerminalCell({
    * Deliberately NOT persisted and NOT in the speech host: it is a view
    * preference of one cell in one surface, while the armed cell is one value
    * per browser. The panel mounts the same cell in two surfaces at once when
-   * the drawer is open, and each may reasonably show its own bar.
+   * the drawer is open, and each may reasonably show its own row.
    */
   const [barChoice, setBarChoice] = useState<boolean | null>(null);
-  const speechBarVisible = barChoice ?? (speech?.stateFor(session.id) ?? "empty") !== "empty";
+  const speechBarVisible = barChoice ?? true;
   // Escape and Enter both end the edit by unmounting the input, which can
   // fire a blur on the way out. Commit exactly once: whichever key handled
   // it raises this flag and the blur that follows is ignored.
@@ -555,9 +554,9 @@ function TerminalCell({
         <TerminalView
           sessionId={session.id}
           focused={focused}
-          // The speech bar is an overlay inside the view, pinned below this
-          // header — never a row in the cell's flexbox, which would refit the
-          // terminal and resize the PTY every time it appeared.
+          // The speech row lives inside the view, directly below this header
+          // and above the xterm. Its height is reserved from mount, so the
+          // terminal is never refit — nor the PTY resized — by an arrival.
           speech={speech}
           speechBarVisible={speechBarVisible}
           onExit={() => onExit(session.id)}

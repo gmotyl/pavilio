@@ -48,6 +48,27 @@ export interface TimeReportPrefs {
   detail: ReportDetail;
 }
 
+/** One button on the speech bar's launcher row: what it reads, and what it runs. */
+export interface TerminalLauncher {
+  name: string;
+  command: string;
+}
+
+/**
+ * The launcher row an empty workspace opens with — the three agents the panel
+ * is used to drive, each named after its own binary.
+ *
+ * Exported so the settings surface can offer "back to the defaults" without a
+ * second copy of the list. Treat it as frozen: `readPreference` hands the
+ * declared default back BY REFERENCE when nothing is stored, so an editor that
+ * pushes onto the value it read would rewrite the defaults for the session.
+ */
+export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
+  { name: "claude", command: "claude" },
+  { name: "codex", command: "codex" },
+  { name: "opencode", command: "opencode" },
+];
+
 /**
  * The voice the panel speaks with when nothing is stored. It lives here, not
  * in `features/speech/voices.ts`, because the registry is the lower layer:
@@ -292,6 +313,25 @@ export const preferences = {
   }),
 
   // ── Terminal ─────────────────────────────────────────────────────────────
+  /**
+   * The launcher row, one JSON value rather than a key per entry: the list is
+   * ordered and its length is the user's, so there is no stable per-entry key
+   * to scope by.
+   *
+   * Portable, though a command names a binary the other machine may not have —
+   * the same SHAPE of dangling reference as a `repos.json` path, and carried
+   * anyway because the failure mode differs: a missing binary is a
+   * `command not found` printed in the terminal the user is already looking at,
+   * where the repo path failed as an opaque 500 naming neither path nor reason.
+   * A launcher row is a habit, and habits travel with their owner.
+   */
+  terminalLaunchers: definePreference<TerminalLauncher[]>({
+    key: "terminal.launchers", // was: nothing — the row was a hardcoded array
+    scope: "global",
+    default: DEFAULT_TERMINAL_LAUNCHERS,
+    codec: json<TerminalLauncher[]>(),
+    portable: true,
+  }),
   terminalDrawerOpen: definePreference({
     key: "terminal.drawer.open", // was: panel:terminalDrawer:open
     scope: "global",
@@ -363,12 +403,45 @@ export const preferences = {
     codec: str,
     portable: true,
   }),
+  /**
+   * ON by default: an answer the user just asked for is the thing they are
+   * waiting for, so the pane that holds it opens itself rather than asking for
+   * a click on the eye. It stays a preference — the "Open on new answer" box
+   * clears it, and a cleared box is remembered, beating this default.
+   */
   answerPaneAutoOpen: definePreference({
     key: "speech.answerPane.autoOpen", // was: panel-answer-pane-auto-open
     scope: "global",
-    default: false,
+    default: true,
     codec: bool,
     portable: true,
+  }),
+  /** Whether the answer pane carries a composer at all. On, as the pane ships. */
+  answerComposerEnabled: definePreference({
+    key: "speech.answerComposer.on", // was: nothing — the composer is new
+    scope: "global",
+    default: true,
+    codec: bool,
+    portable: true,
+  }),
+  /**
+   * The composer's height, and the FIRST measurement declared non-portable.
+   *
+   * The pane widths above it all travel, and this one deliberately does not: a
+   * width is a reading habit, while this height is spent against the answer
+   * pane's own remaining space — how much of THIS window the user is willing to
+   * give a text box. Carried to a machine with a different screen it is not a
+   * habit reproduced, it is a pane sized for a window that is not there.
+   *
+   * `local`, not the session tier: a remembered height should survive closing
+   * the browser. 62 is the two-line box the composer opens at.
+   */
+  answerComposerHeight: definePreference({
+    key: "speech.answerComposer.height", // was: nothing — the composer is new
+    scope: "global",
+    default: 62,
+    codec: num,
+    portable: false,
   }),
   /** The one cell allowed to speak on its own — a session id. */
   speechArmedCell: definePreference<string | null>({
