@@ -3,10 +3,12 @@ import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { AnswerComposer } from "./AnswerComposer";
-import { AnswerWaiting } from "./AnswerWaiting";
-import { beginWaiting, useAnswerWaiting } from "./answerWaiting";
+import { AnswerWaiting, AnswerWaitingNext } from "./AnswerWaiting";
+import { beginWaiting, releaseAnswer, useAnswerHeld, useAnswerWaiting } from "./answerWaiting";
+import { useActivityState } from "./useTerminalActivityChannel";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
+import { unreadAnswerCount } from "../speech/unreadAnswers";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
 import { getStoredVoice } from "../speech/voices";
 import { type UnitToBlocks, layoutRail, matchableBlocks } from "./layoutRail";
@@ -200,7 +202,8 @@ export function AnswerPane({
   // for the weight of a shared block; mirrored next to the block map.
   const unitsRef = useRef<readonly SpeechUnit[]>([]);
 
-  const answer = utteranceUnderCursor(speech.queueFor(sessionId));
+  const queue = speech.queueFor(sessionId);
+  const answer = utteranceUnderCursor(queue);
   const units = speech.unitsFor(sessionId);
 
   // Unit index ONLY — see the note on the component. Null for every cell but
@@ -222,6 +225,22 @@ export function AnswerPane({
   // `waiting` is the body's business: `pending` is the bar's, and is what keeps
   // the mark on the play button after a transport press took the text back.
   const { waiting } = useAnswerWaiting(sessionId);
+  // The hold, and the agent's own state — the two halves of "the user stepped
+  // back and the agent is STILL working", which is the only situation the wave
+  // has somewhere else to be. Read as two separate facts rather than folded
+  // into the snapshot: see `isAnswerHeld` on why the body's four shared
+  // snapshots stay four.
+  const held = useAnswerHeld(sessionId);
+  const activity = useActivityState(sessionId);
+
+  /**
+   * How many of the answers this cell can still reach have never been played
+   * — a derivation over the `heard` set the channel already keeps, never a
+   * tally of its own. Computed here rather than inside the waiting state so
+   * the state stays a rendering of what it is handed, and so the count is
+   * definitively absent from every other body the pane can show.
+   */
+  const unread = unreadAnswerCount(queue, speech.heardFor(sessionId));
 
   // The handover, raised once per submit. The composer raises the send and
   // knows nothing about the pane above it; the pane knows what the body was
@@ -438,9 +457,19 @@ export function AnswerPane({
         }}
       >
         {waiting ? (
-          <AnswerWaiting sessionId={sessionId} />
+          <AnswerWaiting sessionId={sessionId} unread={unread} />
         ) : (
           <>
+          {/* The wave, moved: the user asked for the text and got it, and the
+              agent is still working, so the one thing the pane must not do is
+              go quiet about that. Pressing it releases the hold and the body
+              goes back to the agent. */}
+          {held && activity === "busy" ? (
+            <AnswerWaitingNext
+              sessionId={sessionId}
+              onActivate={() => releaseAnswer(sessionId)}
+            />
+          ) : null}
           {/* The scrubber turned vertical: a pointer affordance, not a row of
               buttons — see the note on the component. Each segment is placed by
               `layoutRail` to span its unit's blocks. */}

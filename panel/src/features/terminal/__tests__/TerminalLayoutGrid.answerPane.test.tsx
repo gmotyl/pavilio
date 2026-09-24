@@ -102,6 +102,10 @@ const MARKDOWN = "# Deploy plan\n\nThe first paragraph explains why the deploy w
 const utterance: Utterance = { id: "u-1", sessionId: "cell-a", text: MARKDOWN, at: 1 };
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(): GridSpeech {
   const queue = utteranceQueueReducer(emptyUtteranceQueue, {
     type: "arrived",
@@ -112,6 +116,7 @@ function makeSpeech(): GridSpeech {
   return {
     stateFor: () => "ready",
     queueFor: () => queue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
     subscribeProgress: () => () => {},
     progressFor: () => null,

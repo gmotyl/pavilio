@@ -123,6 +123,10 @@ const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 const MARKDOWN = "The cell finally says something.";
 const utterance: Utterance = { id: "u-1", sessionId: "cell-a", text: MARKDOWN, at: 1 };
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 /** A speech host reporting one fixed reading of the cell. */
 function makeSpeech(
   state: CellSpeechState,
@@ -132,6 +136,7 @@ function makeSpeech(
   return {
     stateFor: () => state,
     queueFor: () => queue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
     subscribeProgress: () => () => {},
     progressFor: () => null,

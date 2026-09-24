@@ -51,10 +51,15 @@ vi.mock("../../markdown/MermaidDiagram", () => ({
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(): GridSpeech {
   return {
     stateFor: () => "ready",
     queueFor: () => emptyUtteranceQueue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => NO_UNITS,
     subscribeProgress: () => () => {},
     progressFor: () => null,

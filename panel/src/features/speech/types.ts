@@ -85,6 +85,21 @@ export interface GridSpeech {
    * not the caller's.
    */
   queueFor: (sessionId: string) => UtteranceQueue;
+  /**
+   * The ids of this cell's answers that have been played to their end.
+   *
+   * Per UTTERANCE and not per session, deliberately: a cell can hold a heard
+   * answer in its history and an unheard one under the cursor at the same
+   * time, which is the whole reason the pane can say how many answers are
+   * still unplayed. That count is a derivation over this set and the queue —
+   * see `unreadAnswers.ts` — never a tally kept beside them.
+   *
+   * Narrowed to what the queue can still reach, like the queue itself: an
+   * answer that fell off the far end of the history is gone from here too,
+   * because a count that promised a step the transport cannot take would be
+   * worse than no count. Empty for a cell that has played nothing.
+   */
+  heardFor: (sessionId: string) => ReadonlySet<string>;
   /** The single armed session in this browser, or `null`. */
   armedSessionId: string | null;
   /** Speak the cell's utterance from the start — or replay a heard one. */

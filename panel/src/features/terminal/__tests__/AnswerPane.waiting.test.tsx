@@ -83,6 +83,9 @@ const NEXT_ANSWER =
 const READERS = new Set([
   "stateFor",
   "queueFor",
+  // The `heard` set the unread count is derived from. A reader like every
+  // other one here: the pane asks it while it renders and never writes to it.
+  "heardFor",
   "unitsFor",
   "subscribeProgress",
   "progressFor",
@@ -117,10 +120,17 @@ const queueBehind = (older: Utterance, u: Utterance): UtteranceQueue => ({
   cursor: 0,
 });
 
-function makeSpeech(queueFor: () => UtteranceQueue): GridSpeech {
+/** Nothing has been played — referentially stable, like every other snapshot. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
+function makeSpeech(
+  queueFor: () => UtteranceQueue,
+  heardFor: () => ReadonlySet<string> = () => NOTHING_HEARD,
+): GridSpeech {
   return {
     stateFor: () => "ready",
     queueFor,
+    heardFor,
     unitsFor: () => NO_UNITS,
     subscribeProgress: () => () => {},
     progressFor: () => null,
@@ -280,6 +290,8 @@ const field = (): HTMLTextAreaElement =>
 const playButton = (): HTMLElement => screen.getByTestId(`speech-bar-playpause-${SESSION}`);
 
 const previousButton = (): HTMLElement => screen.getByTestId(`speech-bar-previous-${SESSION}`);
+
+const nextButton = (): HTMLElement => screen.getByTestId(`speech-bar-next-${SESSION}`);
 
 /**
  * An activity broadcast landing while the panel is mounted. Wrapped in `act`
@@ -791,5 +803,171 @@ describe("the marks on the answer that comes back", () => {
     expect(after[0]).toHaveAttribute("role", "button");
     expect(after[0]).toHaveAttribute("tabindex", "0");
     expect(after[0]).toHaveAttribute("data-speaking", "");
+  });
+});
+
+/**
+ * The count of what has not been played, and the way back out of a hold.
+ *
+ * Both live on the waiting state's own surface, and both are derivations —
+ * `unreadAnswerCount` over the `heard` set the channel already keeps, and the
+ * hold `answerWaiting` already owns. Nothing here records a new fact, which is
+ * why the fixtures can say what the cell holds and what has been heard and the
+ * assertions can be about what is on screen.
+ */
+
+/** The count the waiting state puts on screen, or `null` when it shows none. */
+const unreadCount = (): HTMLElement | null =>
+  screen.queryByTestId(`answer-pane-waiting-count-${SESSION}`);
+
+/** The *Next answer* control: the wave, moved out of the body onto a button. */
+const nextAnswerControl = (): HTMLElement | null =>
+  screen.queryByTestId(`answer-pane-waiting-next-${SESSION}`);
+
+/**
+ * A cell holding four answers the transport can reach: two steps of history,
+ * the one on screen, and one waiting behind it.
+ */
+const BACKLOG: UtteranceQueue = {
+  previous: [utterance("u-2", NEXT_ANSWER), utterance("u-1", NEXT_ANSWER)],
+  current: utterance("u-3", ANSWER),
+  pending: [utterance("u-4", NEXT_ANSWER)],
+  cursor: 0,
+};
+
+const heardOf = (...ids: string[]): ReadonlySet<string> => new Set(ids);
+
+describe("the waiting state counts what has not been played", () => {
+  it("shows how many answers have not been played", () => {
+    // Four reachable, one of them already played: three are still unheard.
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    const count = unreadCount();
+    expect(count).toBeInTheDocument();
+    expect(count?.textContent).toMatch(/\b3\b/);
+  });
+
+  it("shows no count when nothing is unread", () => {
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1", "u-2", "u-3", "u-4"))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    // A pip reading "0" is worse than no pip: it says there is a backlog and
+    // then says the backlog is empty.
+    expect(unreadCount()).toBeNull();
+  });
+
+  it("shows no count while the body is rendering an answer", () => {
+    render(paneTree(makeSpeech(() => BACKLOG)));
+
+    // Nothing sent, nothing busy — the body is the answer, and the count is
+    // the waiting state's, not the pane's.
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+    expect(unreadCount()).toBeNull();
+  });
+
+  it("names the count in text, not in the animation", () => {
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
+    sendReply();
+
+    // In the status region, as a sentence a screen reader reads out...
+    const status = screen.getByRole("status");
+    expect(status).toBe(waiting());
+    const count = unreadCount();
+    expect(count).not.toBeNull();
+    expect(status.contains(count)).toBe(true);
+    expect(count?.textContent?.trim()).not.toBe("");
+
+    // ...and NOT in the ornament, which stays silent: no text, no name, no
+    // role, exactly as the state's label already has it.
+    expect(wave()).toHaveAttribute("aria-hidden", "true");
+    expect(wave().textContent).toBe("");
+    expect(wave().contains(count)).toBe(false);
+
+    // A count the stylesheet hides is a count only the animation conveys.
+    expect(cssRule(".answer-pane-waiting-count")).not.toMatch(
+      /(^|;)\s*(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0)/,
+    );
+  });
+});
+
+describe("the way back out of a hold", () => {
+  /** The cell with a backlog, its agent at work, and the answer held on screen. */
+  function heldOnScreen(): void {
+    render(surfaceTree(makeSpeech(() => BACKLOG)));
+    activity("busy", 2);
+    expect(waiting()).toBeInTheDocument();
+
+    fireEvent.click(previousButton());
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+  }
+
+  it("offers a Next answer control while the answer is held", () => {
+    heldOnScreen();
+
+    const control = nextAnswerControl();
+    expect(control).toBeInTheDocument();
+    expect(control).toHaveAccessibleName(/next answer/i);
+
+    // It CARRIES THE ANIMATION: the wave did not disappear when the body went
+    // back to the text, it moved onto this control — so the fact that the
+    // agent is still working is never hidden, only made smaller.
+    const carried = Array.from(
+      control?.querySelectorAll<HTMLElement>(".answer-pane-wave-crest") ?? [],
+    );
+    expect(carried).toHaveLength(crestHeights().length);
+
+    // ...and the reduced-motion query reaches the crests HERE too. The rule
+    // was written for a wave that only ever sat in the body; a wave the body
+    // handed to a button would otherwise keep running under `reduce`.
+    const stopped = [...reducedMotion().matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter(([, , declarations]) => /(^|;)\s*animation\s*:\s*none/.test(declarations))
+      .map(([, selector]) => selector.trim());
+    expect(stopped.some((selector) => carried[0].matches(selector))).toBe(true);
+
+    // The ornament is still an ornament: the NAME is the button's, and nothing
+    // inside it claims one of its own.
+    for (const node of [
+      ...(control?.querySelectorAll("[data-testid^='answer-pane-wave']") ?? []),
+    ]) {
+      expect(node).toHaveAttribute("aria-hidden", "true");
+    }
+  });
+
+  it("returns to the waiting state when Next answer is activated", () => {
+    heldOnScreen();
+
+    fireEvent.click(nextAnswerControl() as HTMLElement);
+
+    // The hold is gone, so the agent has the body back.
+    expect(waiting()).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
+    expect(within(body()).queryByText(ANSWER)).toBeNull();
+  });
+
+  it("holds on previous and releases on next", () => {
+    heldOnScreen();
+
+    // The transport's own forward control says the same thing the pane's does.
+    fireEvent.click(nextButton());
+
+    expect(waiting()).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
+  });
+
+  it("shows no Next answer control while the body is already waiting", () => {
+    render(surfaceTree(makeSpeech(() => BACKLOG)));
+    activity("busy", 2);
+
+    // The wave has the body. A control carrying a second copy of it would be
+    // the same fact drawn twice, on the one surface that already says it.
+    expect(waiting()).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
   });
 });

@@ -18,10 +18,13 @@ import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
  *  literals per call — a new `Map` each time is an infinite render loop. */
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
+/** …and a cell that has played nothing has heard nothing. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 
 export const INERT_SPEECH: GridSpeech = {
   stateFor: () => "empty",
   queueFor: () => emptyUtteranceQueue,
+  heardFor: () => NOTHING_HEARD,
   armedSessionId: null,
   onSpeak: () => {},
   onPause: () => {},

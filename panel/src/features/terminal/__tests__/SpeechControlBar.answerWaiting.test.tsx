@@ -83,10 +83,15 @@ interface Cell {
   queue: UtteranceQueue;
 }
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(cell: Cell): GridSpeech {
   return {
     stateFor: () => cell.state,
     queueFor: () => cell.queue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => NO_UNITS,
     subscribeProgress: () => () => {},
     progressFor: () => null,

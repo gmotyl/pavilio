@@ -181,6 +181,10 @@ interface SpeechOverrides {
  *  render loop, which is exactly what this caught the first time. */
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
   const durations = over.durations ?? NO_DURATIONS;
   const progress = over.progress ?? null;
@@ -189,6 +193,7 @@ function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
   return {
     stateFor: () => over.state ?? "empty",
     queueFor: () => over.queue ?? emptyUtteranceQueue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units_,
     // Nothing here moves, so the store never notifies: the snapshots below are
     // read once and stay put.

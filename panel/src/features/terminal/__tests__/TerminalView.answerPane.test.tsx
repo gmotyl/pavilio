@@ -131,6 +131,10 @@ type Host = GridSpeech & {
   next: () => void;
 };
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(): Host {
   let queue: UtteranceQueue = utteranceQueueReducer(emptyUtteranceQueue, {
     type: "arrived",
@@ -154,6 +158,7 @@ function makeSpeech(): Host {
     },
     stateFor: () => "ready",
     queueFor: () => queue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
     subscribeProgress: () => () => {},
     progressFor: () => null,

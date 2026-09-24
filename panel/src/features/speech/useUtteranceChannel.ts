@@ -294,6 +294,12 @@ export interface Channel {
   utteranceFor(sessionId: string): Utterance | null;
   /** The cell's whole queue: its history, the cursor, and what waits. */
   queueFor(sessionId: string): UtteranceQueue;
+  /**
+   * The ids of the cell's answers that have been played to their end, narrowed
+   * to what the queue can still reach. Handed out so the unread count can be a
+   * derivation over it — see `unreadAnswers.ts`.
+   */
+  heardFor(sessionId: string): ReadonlySet<string>;
   /** Raise previous / next / finished on a cell's queue. */
   dispatchQueue(sessionId: string, command: QueueCommand): void;
   /**
@@ -526,6 +532,26 @@ export function useUtteranceChannel({
     [sessions],
   );
 
+  /**
+   * Which of the cell's answers have been played to their end.
+   *
+   * Handed out because the unread count is a DERIVATION over it and the queue
+   * — see `unreadAnswers.ts`. A surface that kept its own tally would have to
+   * decrement it on playback, on an answer falling off the far end of the
+   * history, on a pending answer dropped past the bound and on a re-broadcast,
+   * and missing any one of those leaves a pip on a cell with nothing behind
+   * it. Reading the set the channel already prunes to the queue's own reach
+   * cannot drift.
+   *
+   * The shared empty set for a cell that has played nothing, like every other
+   * "nothing here" here: a fresh `new Set()` per call would be a new snapshot
+   * on every render for every silent cell in the panel.
+   */
+  const heardFor = useCallback(
+    (sessionId: string): ReadonlySet<string> => sessions.get(sessionId)?.heard ?? NOTHING_HEARD,
+    [sessions],
+  );
+
   // Reads the mirror, so its identity never changes. It is only ever called
   // from the host's effects and callbacks — never rendered — so there is
   // nothing for a changing identity to refresh, and holding it still is what
@@ -622,6 +648,7 @@ export function useUtteranceChannel({
     stateFor,
     utteranceFor,
     queueFor,
+    heardFor,
     dispatchQueue,
     finishUtterance,
     languageFor,

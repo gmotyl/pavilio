@@ -431,6 +431,39 @@ export function getAnswerWaiting(sessionId: string): AnswerWaitingSnapshot {
   return entries.get(sessionId)?.snapshot ?? SETTLED;
 }
 
+/**
+ * Whether the user is holding the answer on screen — a READ of the hold, for
+ * the pane that has to draw the way out of it.
+ *
+ * Deliberately not a member of {@link AnswerWaitingSnapshot}. The snapshot says
+ * what the BODY does, and the four shared objects it is drawn from are what let
+ * an unchanged cell hand `useSyncExternalStore` the same reference on every
+ * read; the hold is a different question, asked by one surface, and widening
+ * the snapshot for it would put a fifth and a sixth object in that set for a
+ * fact the body has already accounted for.
+ *
+ * **Staleness.** A reader pairs this with {@link useAnswerWaiting} and with the
+ * session's activity state, and every transition that can put the *Next answer*
+ * control on screen or take it off moves one of those two: taking or releasing
+ * the hold while the session is busy flips the snapshot between
+ * `AGENT_HAS_THE_BODY`/`BODY_HANDED_OVER` and `SETTLED`/`MARK_ONLY`, and a hold
+ * dropped because the session left `busy` IS an activity change. A hold taken
+ * or released while the session is not busy moves neither — and draws nothing
+ * either, because that control belongs to a working agent.
+ */
+export function isAnswerHeld(sessionId: string): boolean {
+  return entries.get(sessionId)?.held ?? false;
+}
+
+/** {@link isAnswerHeld}, re-reading the caller when the cell's snapshot moves. */
+export function useAnswerHeld(sessionId: string): boolean {
+  return useSyncExternalStore(
+    subscribeAnswerWaiting,
+    () => isAnswerHeld(sessionId),
+    () => isAnswerHeld(sessionId),
+  );
+}
+
 export function subscribeAnswerWaiting(listener: () => void): () => void {
   listeners.add(listener);
   return () => {

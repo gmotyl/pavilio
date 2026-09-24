@@ -310,6 +310,7 @@ export function useSpeechHost(): SpeechHost {
     armedSessionId,
     dispatchQueue,
     finishUtterance,
+    heardFor,
     languageFor,
     markHeard,
     queueFor,
@@ -895,6 +896,7 @@ export function useSpeechHost(): SpeechHost {
     () => ({
       stateFor,
       queueFor,
+      heardFor,
       armedSessionId,
       onSpeak,
       onPause,
@@ -922,6 +924,7 @@ export function useSpeechHost(): SpeechHost {
     }),
     [
       armedSessionId,
+      heardFor,
       onArm,
       onJumpToUnit,
       onNewestAnswer,

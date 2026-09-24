@@ -1057,6 +1057,52 @@ input[type="checkbox"] {
   color: var(--text-secondary);
 }
 
+/* How many answers have never been played. A line of TEXT under the state's
+   name, not a number painted on the ornament: the wave is `aria-hidden`, so a
+   count drawn there would exist for sighted readers alone.
+
+   Dimmer and smaller than the label, because it is the second thing the state
+   says rather than a badge competing with the first — and left in normal flow
+   for the same reason, so nothing here may hide it. `--speech-seg` on the ink
+   ties it to the crests above it: the count is about the same backlog the wave
+   is running for. */
+.answer-pane-waiting-count {
+  color: color-mix(in srgb, var(--speech-seg) 75%, var(--text-muted));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* The wave with the body taken away from it.
+
+   Stepping back through the transport pins the answer on screen, and the agent
+   may still be working — so the wave does not disappear, it shrinks onto this
+   button and goes on running. A bare, borderless control: everything that says
+   "this is live" is already inside it, and a chrome box around the crests would
+   read as a second thing rather than as the same thing, smaller.
+
+   It spans both of the body's grid columns, like the waiting state it came
+   from, and sits above the answer it is holding — the position the wave would
+   have had if it still had the body. */
+.answer-pane-waiting-next {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 6px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.answer-pane-waiting-next:hover .answer-pane-halo,
+.answer-pane-waiting-next:focus-visible .answer-pane-halo {
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--speech-seg) 22%, transparent),
+    transparent
+  );
+}
+
 /* The halo: the ground the wave sits on, not a thing of its own. A closest-side
    wash in the segment colour, so the state reads as a soft patch of light in a
    dark body rather than five bars floating in the middle of an empty pane. It
@@ -1166,7 +1212,8 @@ input[type="checkbox"] {
    specificity rather than on source order, and `*` so a part of the ornament
    added later is stopped without anybody remembering to come back here. */
 @media (prefers-reduced-motion: reduce) {
-  .answer-pane-waiting .answer-pane-wave * {
+  .answer-pane-waiting .answer-pane-wave *,
+  .answer-pane-waiting-next .answer-pane-wave * {
     animation: none;
   }
 }

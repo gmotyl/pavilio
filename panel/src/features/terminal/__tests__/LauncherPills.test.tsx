@@ -61,12 +61,17 @@ interface SpeechOverrides {
   armedSessionId?: string | null;
 }
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
   const units = over.units ?? NO_UNITS;
 
   return {
     stateFor: () => over.state ?? "empty",
     queueFor: () => over.queue ?? emptyUtteranceQueue,
+    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
     subscribeProgress: () => () => {},
     progressFor: () => null,

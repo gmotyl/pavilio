@@ -187,10 +187,15 @@ interface Harness {
 
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
+/** A cell that has played nothing has heard nothing — shared, like every other
+ *  "nothing here" snapshot on a host. */
+const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+
 function makeSpeech(h: Harness): GridSpeech {
   return {
     stateFor: vi.fn(() => "ready" as const),
     queueFor: vi.fn(() => h.queue),
+    heardFor: () => NOTHING_HEARD,
     unitsFor: vi.fn(() => h.units),
     subscribeProgress: h.progress.subscribe,
     progressFor: vi.fn(() => h.progress.read()),
