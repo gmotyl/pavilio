@@ -57,10 +57,10 @@ function sessionStartCommand(sessionId: string): string {
  *
  * `onDelivered` exists because a refusal is only half of what a caller needs.
  * Marking the cell launched is a thing to do on the strength of a command that
- * WENT, and this function is the only place that knows whether one did — so it
- * hands the fact on rather than leaving the pill to ask the socket a second
- * time, which would be the delivery check written twice and answered at the
- * wrong moment. It is a callback and not a returned boolean because
+ * WENT, and `submitToPty` is the only place that knows whether one did — this
+ * function is simply where that report reaches the row. So the fact is handed
+ * on rather than left to the pill to ask the socket a second time, which would
+ * be the delivery check written twice and answered at the wrong moment. It is a callback and not a returned boolean because
  * `submitToPty` writes a queued submit a gap later (see `SubmitReport` on
  * `ptySubmit`): a value returned from the click would be a guess about a write
  * that had not happened yet.

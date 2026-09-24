@@ -266,6 +266,12 @@ describe("a submit on a dead socket", () => {
     const notice = failure();
     expect(notice).not.toBeNull();
     expect(notice?.textContent ?? "").toMatch(/not submitted/i);
+    // And the pane stays handed over. The body reached the TUI's prompt, so
+    // the reply really is on the far side and one keypress in the terminal
+    // runs it — a refused RETURN must therefore not take the wait back, which
+    // is the half of this case that lives only in prose on `AnswerComposer`
+    // and `ptySubmit` until it is pinned here.
+    expect(screen.getByTestId(`answer-pane-waiting-${SESSION}`)).toBeInTheDocument();
   });
 
   it("does not hand the pane over to the waiting state when nothing was sent", () => {

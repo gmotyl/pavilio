@@ -87,5 +87,3 @@ export function dismissAttentionOnArrival(sessionId: string): void {
   if (getActivityState(sessionId) !== "attention") return;
   sendDismiss(sessionId);
 }
-
-export default dismissAttentionOnArrival;
