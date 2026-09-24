@@ -206,6 +206,30 @@ describe("the bar tells the waiting store whether the voice is reading", () => {
     expect(bodyHandedOver()).toBe(true);
   });
 
+  it("keeps a deferral alive across speaking \u2192 stalled", () => {
+    const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
+    const speech = makeSpeech(cell);
+    const { rerender } = render(barTree(speech));
+
+    activity("busy", 2);
+    expect(bodyHandedOver()).toBe(false);
+
+    // Synthesis fell behind mid-answer. Same answer, same sentence, same
+    // listener inside it \u2014 so the question this store was asked ("is the
+    // voice reading?") has not changed its answer, and the deferral waiting on
+    // that sentence has to survive.
+    //
+    // This is what the effect's dependency list is for. Keyed on `state`
+    // rather than on the PREDICATE, the effect re-runs across this transition
+    // and its cleanup pushes a `false` first \u2014 which drops the deferral \u2014
+    // and the `true` that follows cannot put it back, because a deferral is
+    // armed at the busy transition and at no other moment.
+    cell.state = "stalled";
+    rerender(barTree(speech));
+
+    expect(bodyHandedOver()).toBe(false);
+  });
+
   it("pushes false when the bar unmounts while the voice is reading", () => {
     const { unmount } = render(barTree(makeSpeech({ state: "speaking", queue: WITH_HISTORY })));
 

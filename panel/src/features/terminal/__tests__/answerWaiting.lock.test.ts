@@ -97,9 +97,11 @@ import {
   forgetAnswerWaiting,
   getAnswerWaiting,
   holdAnswer,
+  isAnswerHeld,
   noteNewestAnswer,
   noteSpeaking,
   releaseAnswer,
+  subscribeAnswerWaiting,
   watchSessionActivity,
 } from "../answerWaiting";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
@@ -313,6 +315,54 @@ describe("the answer pane when the user steps back", () => {
     expect(handedOver()).toBe(false);
     activity("busy");
     expect(handedOver()).toBe(true);
+  });
+
+  it("tells its subscribers when the hold moves under an unchanged snapshot", () => {
+    watchSessionActivity(SESSION);
+
+    // Busy MID-SENTENCE: the handover is deferred, so the body keeps the
+    // answer — and keeps it whether or not a hold is standing. `derive` has
+    // one answer for both, which makes this the one configuration where the
+    // hold can move without the snapshot moving with it.
+    noteSpeaking(SESSION, true);
+    activity("busy");
+    expect(handedOver()).toBe(false);
+
+    const settled = getAnswerWaiting(SESSION);
+    let told = 0;
+    const stop = subscribeAnswerWaiting(() => {
+      told += 1;
+    });
+
+    // The hold is read through the SAME listener set as the snapshot — it is
+    // what draws the *Next answer* control — so a hold change that notifies
+    // nobody is a control that nobody can see appear, and, worse, one that
+    // cannot be seen to respond when it is pressed.
+    holdAnswer(SESSION);
+    expect(getAnswerWaiting(SESSION)).toBe(settled);
+    expect(isAnswerHeld(SESSION)).toBe(true);
+    expect(told).toBe(1);
+
+    releaseAnswer(SESSION);
+    expect(getAnswerWaiting(SESSION)).toBe(settled);
+    expect(isAnswerHeld(SESSION)).toBe(false);
+    expect(told).toBe(2);
+
+    // The arrival release takes the same way out, and has the same unchanged
+    // snapshot on either side of it.
+    holdAnswer(SESSION);
+    expect(told).toBe(3);
+    expect(noteNewestAnswer(SESSION, "u-1")).toBe(false);
+    expect(noteNewestAnswer(SESSION, "u-2")).toBe(true);
+    expect(isAnswerHeld(SESSION)).toBe(false);
+    expect(told).toBe(4);
+
+    // A hold that did not move tells nobody anything: the guards on both entry
+    // points stay guards.
+    releaseAnswer(SESSION);
+    expect(told).toBe(4);
+
+    stop();
   });
 
   it("schedules no timer to release the hold", () => {

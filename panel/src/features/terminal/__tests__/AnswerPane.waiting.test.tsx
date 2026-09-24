@@ -24,7 +24,7 @@ import { resolve } from "node:path";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
+import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { prepare } from "../../speech/prepare";
 import { type UtteranceQueue } from "../../speech/utteranceQueue";
 import { cssPx, cssRule } from "../../shell/__tests__/hamburgerGeometry";
@@ -883,6 +883,18 @@ describe("the waiting state counts what has not been played", () => {
     expect(status.contains(count)).toBe(true);
     expect(count?.textContent?.trim()).not.toBe("");
 
+    // ...and it is really IN that region as far as assistive tech is
+    // concerned. Sitting inside `role="status"` is not the same fact as being
+    // exposed: one `aria-hidden` on the count, or on anything between it and
+    // the region, takes the whole subtree back out of the accessibility tree
+    // and leaves the backlog conveyed by the animation alone — which is the
+    // one thing this criterion forbids. The wave beside it is `aria-hidden`
+    // by design, so the attribute is very much in reach here.
+    for (let node: HTMLElement | null = count; node !== null; node = node.parentElement) {
+      expect(node).not.toHaveAttribute("aria-hidden");
+      if (node === status) break;
+    }
+
     // ...and NOT in the ornament, which stays silent: no text, no name, no
     // role, exactly as the state's label already has it.
     expect(wave()).toHaveAttribute("aria-hidden", "true");
@@ -967,6 +979,72 @@ describe("the way back out of a hold", () => {
 
     // The wave has the body. A control carrying a second copy of it would be
     // the same fact drawn twice, on the one surface that already says it.
+    expect(waiting()).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
+  });
+
+  /**
+   * The same cell, with a voice that is READING when the agent goes to work.
+   *
+   * Everything above steps back against a silent cell, where taking the hold
+   * moves the body's snapshot — `AGENT_HAS_THE_BODY` to `SETTLED` — and the
+   * pane is told about it as a matter of course. Mid-sentence the handover is
+   * DEFERRED, so the body keeps the answer either way and held and not-held
+   * derive to the very same frozen snapshot. The hold is the only thing that
+   * moved, and it is exactly the fact this control draws.
+   */
+  const speakingCell = (voice: { state: CellSpeechState }): GridSpeech => ({
+    ...makeSpeech(() => BACKLOG),
+    stateFor: () => voice.state,
+  });
+
+  it("offers a Next answer control when the hold is taken mid-sentence", () => {
+    const voice = { state: "speaking" as CellSpeechState };
+    render(surfaceTree(speakingCell(voice)));
+
+    activity("busy", 2);
+
+    // The deferral: the agent went to work while the voice was reading, so the
+    // body keeps the text rather than pulling it out from under a sentence the
+    // listener is halfway through hearing.
+    expect(waiting()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+    expect(nextAnswerControl()).toBeNull();
+
+    fireEvent.click(previousButton());
+
+    // The body's snapshot did not move — it could not, the answer was already
+    // on screen — and the control still has to appear, because what changed is
+    // the hold and the hold is what this control is about.
+    expect(nextAnswerControl()).toBeInTheDocument();
+  });
+
+  it("takes the Next answer control away when it is activated mid-sentence", () => {
+    const voice = { state: "speaking" as CellSpeechState };
+    const speech = speakingCell(voice);
+    const { rerender } = render(surfaceTree(speech));
+
+    activity("busy", 2);
+    fireEvent.click(previousButton());
+
+    const control = nextAnswerControl();
+    expect(control).toBeInTheDocument();
+
+    fireEvent.click(control as HTMLElement);
+
+    // Pressing it releases the hold, and nothing else on the surface says so:
+    // the pane's own control calls `releaseAnswer` and no transport command,
+    // so if the release does not reach the pane by itself the one button whose
+    // entire job is to be pressable sits there dead until the playback ends.
+    expect(nextAnswerControl()).toBeNull();
+    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
+
+    // ...and the deferral it was released into is still the deferral: when the
+    // sentence finally ends, the body hands over to the agent that is by then
+    // still working, exactly as it would have without the detour.
+    voice.state = "heard";
+    rerender(surfaceTree(speech));
+
     expect(waiting()).toBeInTheDocument();
     expect(nextAnswerControl()).toBeNull();
   });

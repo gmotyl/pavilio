@@ -173,6 +173,8 @@ interface Entry {
    * every claim on the body until something releases it.
    */
   held: boolean;
+  /** The value of {@link Entry.held} the listeners were last told about. */
+  toldHeld: boolean;
   /**
    * The newest answer the cell holds, as the surface last pushed it — BOXED, so
    * that "I have never been told" (`null`) is a different fact from "the newest
@@ -209,13 +211,37 @@ function derive(entry: Entry): AnswerWaitingSnapshot {
   return agentHasTheBody ? AGENT_HAS_THE_BODY : SETTLED;
 }
 
-/** Re-reads the entry and tells the pane only when the snapshot actually moved. */
+/**
+ * Re-reads the entry and tells the listeners only when something they can see
+ * actually moved.
+ *
+ * TWO things are read through this one listener set, not one: the body's
+ * snapshot, and the hold ({@link useAnswerHeld}, which draws the way out of
+ * it). So "nothing moved" has to be asked about BOTH, and the two questions
+ * have genuinely different answers — with a deferral armed, `derive` hands
+ * back `SETTLED` for a held cell and for an unheld one alike, because the body
+ * keeps the answer either way. Asking only the snapshot there is a hold that
+ * changes and a subscriber that is never told: the *Next answer* control does
+ * not appear when the user steps back mid-sentence, and — the half nothing
+ * else masks — does not disappear when they press it, because `onActivate`
+ * calls `releaseAnswer` and nothing else. A control whose entire job is to be
+ * pressable sits dead until the playback ends.
+ *
+ * The check is HERE rather than a `notify()` bolted onto each of the entry
+ * points that move `held` — `holdAnswer`, `releaseAnswer`, `noteNewestAnswer`,
+ * `beginWaiting`, `onActivity` — because this is the one place all of them
+ * already funnel through, and the fifth one somebody adds next will funnel
+ * through it too. The snapshot's own discipline is untouched: an unchanged
+ * snapshot still notifies nobody on its own account.
+ */
 function publish(sessionId: string): void {
   const entry = entries.get(sessionId);
   if (!entry) return;
   const next = derive(entry);
-  if (next === entry.snapshot) return;
+  const heldMoved = entry.held !== entry.toldHeld;
+  if (next === entry.snapshot && !heldMoved) return;
   entry.snapshot = next;
+  entry.toldHeld = entry.held;
   notify();
 }
 
@@ -259,6 +285,7 @@ function ensureEntry(sessionId: string): Entry {
     speaking: false,
     deferred: false,
     held: false,
+    toldHeld: false,
     newest: null,
     snapshot: SETTLED,
     unsubscribe: () => {},
@@ -443,13 +470,16 @@ export function getAnswerWaiting(sessionId: string): AnswerWaitingSnapshot {
  * fact the body has already accounted for.
  *
  * **Staleness.** A reader pairs this with {@link useAnswerWaiting} and with the
- * session's activity state, and every transition that can put the *Next answer*
- * control on screen or take it off moves one of those two: taking or releasing
- * the hold while the session is busy flips the snapshot between
- * `AGENT_HAS_THE_BODY`/`BODY_HANDED_OVER` and `SETTLED`/`MARK_ONLY`, and a hold
- * dropped because the session left `busy` IS an activity change. A hold taken
- * or released while the session is not busy moves neither — and draws nothing
- * either, because that control belongs to a working agent.
+ * session's activity state, and it must NOT be left leaning on either of them
+ * to be told about a hold. Usually the snapshot does move with it — taking or
+ * releasing a hold on a busy session flips the body between
+ * `AGENT_HAS_THE_BODY`/`BODY_HANDED_OVER` and `SETTLED`/`MARK_ONLY` — but a
+ * session that went busy MID-SENTENCE has its handover deferred, and then
+ * `derive` answers held and unheld with the same frozen `SETTLED`: the body
+ * keeps the answer either way, while the control this hook draws has to appear
+ * and disappear all the same. So {@link publish} notifies on a hold change in
+ * its own right, and this hook is a first-class reader of that listener set
+ * rather than a passenger on the snapshot's.
  */
 export function isAnswerHeld(sessionId: string): boolean {
   return entries.get(sessionId)?.held ?? false;
