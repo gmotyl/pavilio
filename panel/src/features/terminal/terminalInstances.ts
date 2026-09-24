@@ -19,7 +19,7 @@ import { speechTransportKeyFor } from "../speech/useSpeechKeys";
 // the xterm does (layout changes remount the cell); a destroyed session takes
 // its entry with it so the store does not leak.
 import { forgetAnswerPane } from "./answerPaneState";
-import { forgetAnswerWaiting } from "./answerWaiting";
+import { forgetAnswerWaiting, watchSessionActivity } from "./answerWaiting";
 import { forgetLauncherUse } from "./launcherUse";
 
 // Shared cache of live xterm instances, keyed by sessionId.
@@ -950,6 +950,12 @@ function createInstance(sessionId: string): InternalInstance {
   //     wait.
   instances.set(sessionId, inst);
 
+  // The answer pane follows the agent, not only the user's last send: the
+  // session's activity watch opens with the session and lives as long as it
+  // does, so a cell that goes busy with nothing typed into it still hands the
+  // pane's body over. Released in destroyTerminal, below.
+  watchSessionActivity(sessionId);
+
   connectWs(sessionId, inst);
 
   return inst;
@@ -1083,8 +1089,9 @@ export function destroyTerminal(sessionId: string): void {
   // getConnectionState() from inside a listener already reads "unattached".
   instances.delete(sessionId);
   forgetAnswerPane(sessionId);
-  // The wait holds an activity subscription open; a destroyed session has
-  // nothing left to wait for and nobody left to tell.
+  // ...and the session's activity watch with it: a destroyed session has
+  // nothing left to wait for, nobody left to tell, and no reason to keep a
+  // channel subscription open under its name.
   forgetAnswerWaiting(sessionId);
   // …and the "a launcher was used here" flag with it: the session id is gone,
   // and a cell that reuses it later is a different cell with nothing running.
