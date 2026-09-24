@@ -5,6 +5,7 @@ import { TerminalDrawerProvider } from "../useTerminalDrawer";
 import TerminalDrawer from "../TerminalDrawer";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
+import { MOBILE_QUERY } from "../../../lib/breakpoints";
 
 /**
  * The drawer's open intent, width and side are PORTABLE: the shape of the
@@ -434,5 +435,40 @@ describe("TerminalDrawer", () => {
 
     expect(screen.getByTestId("terminal-drawer")).toBe(before);
     expect(before).toHaveAttribute("data-side", "left");
+  });
+
+  /**
+   * The drawer's body is desktop-only code, and the hamburger reservation reads
+   * that way: it asks whether the sidebar is expanded, full stop, with no term
+   * for the phone — where `.sidebar` is a fixed overlay that displaces nothing
+   * and the answer would be different. What makes the missing term correct
+   * rather than a bug is that this component cannot render on a phone at all.
+   * That is the fact under test here: the intent is open, the route hosts the
+   * drawer, the dock is LEFT — every condition the reservation cares about —
+   * and still nothing mounts. Should the drawer ever come back on a narrow
+   * viewport, this fails first and sends the reader to that comment.
+   */
+  it("stands down entirely on a phone", () => {
+    const native = Object.getOwnPropertyDescriptor(window, "matchMedia");
+    const mql = {
+      matches: true,
+      media: MOBILE_QUERY,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+    };
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: () => mql,
+    });
+    try {
+      renderAt("/project/vector/memo", true, 480, "left");
+      expect(screen.queryByTestId("terminal-drawer")).not.toBeInTheDocument();
+    } finally {
+      if (native) Object.defineProperty(window, "matchMedia", native);
+      else delete (window as { matchMedia?: unknown }).matchMedia;
+    }
   });
 });

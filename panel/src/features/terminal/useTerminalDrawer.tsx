@@ -43,17 +43,6 @@ interface DrawerCtx {
   /** Current route cannot host the drawer. Derived every render, never stored. */
   suppressed: boolean;
   /**
-   * The viewport is too narrow to share with a drawer. On a phone the terminal
-   * has a tab of its own — it is what the panel is open for there — and the
-   * drawer has nothing left to sit beside.
-   *
-   * A term of its own rather than a fourth condition folded into `suppressed`,
-   * because `suppressed` answers a different question — whether the ROUTE can
-   * host the drawer — and a consumer asking it is asking about the route. Both
-   * are derived every render and neither is ever stored.
-   */
-  narrowViewport: boolean;
-  /**
    * A conflicting overlay (the Cmd+O quick-terminal modal) is up and owns the
    * single pooled xterm holder. Session-only — never persisted, so a conflict
    * cannot outlive itself or a reload.
@@ -61,7 +50,13 @@ interface DrawerCtx {
   overlayActive: boolean;
   /**
    * open && !suppressed && !overlayActive && !narrowViewport — what the drawer
-   * actually renders on.
+   * actually renders on. The narrow-viewport term has no field of its own on
+   * this context: nothing outside the provider ever needed to tell the reasons
+   * apart, and a published fact with no reader is a promise the next change
+   * has to keep for nobody. The distinction it was there to make — that the
+   * ROUTE is still perfectly able to host the drawer on a phone — is carried
+   * by `suppressed` staying false while this is false, which is what the
+   * drawer suite asserts.
    */
   visible: boolean;
   width: number;
@@ -91,6 +86,15 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   // this session, not a preference.
   const [overlayActive, setOverlayActive] = useState(false);
   /**
+   * The viewport is too narrow to share with a drawer. On a phone the terminal
+   * has a tab of its own — it is what the panel is open for there — and the
+   * drawer has nothing left to sit beside.
+   *
+   * A term of its own rather than a fourth condition folded into `suppressed`,
+   * because `suppressed` answers a different question — whether the ROUTE can
+   * host the drawer — and a consumer asking it is asking about the route. Both
+   * are derived every render and neither is ever stored.
+   *
    * Kept live across a resize or a rotation rather than read once at mount, so
    * a window dragged back out to a desktop width brings the drawer back with
    * it. `useIsMobile` is the shared subscription the rest of the shell already
@@ -165,7 +169,6 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
       value={{
         open,
         suppressed,
-        narrowViewport,
         overlayActive,
         visible,
         width,

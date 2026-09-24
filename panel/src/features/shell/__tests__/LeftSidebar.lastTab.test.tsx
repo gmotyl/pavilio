@@ -20,8 +20,29 @@ import {
  * The factory is hoisted above the imports, so the array it closes over has to
  * be hoisted with it.
  */
-const { writes } = vi.hoisted(() => ({
+const { writes, SESSION, projectName } = vi.hoisted(() => ({
   writes: [] as Array<{ key: string; value: unknown; scope?: string }>,
+  /**
+   * The single project the sidebar is given, in a box so a test can swap it
+   * without re-mocking the module. Most of this file works with a plain name;
+   * the encoding tests need one that a URL cannot carry verbatim.
+   */
+  projectName: { current: "vector" },
+  /**
+   * One open session on the project, so the sidebar has a SESSION row to tap as
+   * well as a project name. The two rows are meant to obey one rule about where
+   * a tap lands, and a suite that only ever rendered the project name could not
+   * tell whether they still do. Hoisted with `writes` because the
+   * `useAllTerminalSessions` factory below closes over it.
+   */
+  SESSION: {
+    id: "s-vector-1",
+    name: "vector-1",
+    project: "vector",
+    cwd: "/p/vector",
+    pid: 4242,
+    createdAt: "2026-09-24T09:00:00.000Z",
+  },
 }));
 
 vi.mock("../../../preferences/store", async (importOriginal) => {
@@ -64,7 +85,7 @@ import { preferences } from "../../../preferences/declarations";
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
 
 vi.mock("../../projects/useProjects", () => ({
-  useProjects: () => [{ name: "vector", repos: [] }],
+  useProjects: () => [{ name: projectName.current, repos: [] }],
 }));
 vi.mock("../../projects/useArchivedProjects", () => ({
   useArchivedProjects: () => ({ archive: [], archivedNames: new Set() }),
@@ -77,7 +98,7 @@ vi.mock("../../projects/useFavorites", () => ({
   }),
 }));
 vi.mock("../../terminal/useAllTerminalSessions", () => ({
-  useAllTerminalSessions: () => ({ sessions: [], refresh: () => {} }),
+  useAllTerminalSessions: () => ({ sessions: [SESSION], refresh: () => {} }),
 }));
 vi.mock("../../mobile-access/useMobileAccessStatus", () => ({
   useMobileAccessStatus: () => ({ enabled: false }),
@@ -110,6 +131,14 @@ function installMatchMedia(mobile: boolean) {
     addEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
       listeners.add(cb),
     removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
+      listeners.delete(cb),
+    // The deprecated pair, feeding the same listener set. `useIsMobile` reaches
+    // only for the modern one today, but a stub that omits these answers
+    // `undefined` to a caller that uses the legacy form — a silent no-op rather
+    // than a failure, which is exactly the shape of bug a stub should not be
+    // able to hide.
+    addListener: (cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
+    removeListener: (cb: (e: MediaQueryListEvent) => void) =>
       listeners.delete(cb),
   };
   Object.defineProperty(window, "matchMedia", {
@@ -151,6 +180,9 @@ function Landing() {
   return (
     <div>
       <span data-testid="landed">{location.pathname}</span>
+      {/* The route param as the page sees it — decoded by the router, which is
+          the form every preference scope downstream is keyed on. */}
+      <span data-testid="landed-name">{name}</span>
       <button
         data-testid="to-memo"
         onClick={() => navigate("/project/vector/memo")}
@@ -184,6 +216,19 @@ function renderShell(initial = "/") {
 }
 
 const projectLink = () => screen.getByRole("link", { name: "vector" });
+
+/**
+ * The project's session rows are behind the disclosure triangle, and the stored
+ * expand preference defaults to collapsed — so a suite that wants to tap a
+ * session has to open the project first, exactly as a user would.
+ */
+function expandProject() {
+  act(() => {
+    fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
+  });
+}
+
+const sessionRow = () => screen.getByTestId(`sidebar-session-${SESSION.id}`);
 
 describe("LeftSidebar project link", () => {
   beforeEach(() => {
@@ -309,6 +354,136 @@ describe("LeftSidebar project link", () => {
       renderShell("/project/vector");
       expect(screen.getByTestId("landed")).toHaveTextContent(
         "/project/vector/memo",
+      );
+    });
+
+    /**
+     * One rule for both rows. The rationale above never mentions which row the
+     * thumb landed on — it is about what is worth arriving at on a phone — so a
+     * session row that still went through the bookmark could drop the user on
+     * notes from a tap whose whole meaning was "take me to that terminal".
+     */
+    it("sends a phone tap on a session row to the terminal too", () => {
+      writeLastPath("vector", "/project/vector/memo");
+      installMatchMedia(true);
+      renderShell();
+      expandProject();
+
+      act(() => {
+        fireEvent.click(sessionRow());
+      });
+      expect(screen.getByTestId("landed")).toHaveTextContent(
+        "/project/vector/iterm",
+      );
+    });
+
+    it("leaves a session row's desktop destination alone", () => {
+      writeLastPath("vector", "/project/vector/memo");
+      installMatchMedia(false);
+      renderShell();
+      expandProject();
+
+      act(() => {
+        fireEvent.click(sessionRow());
+      });
+      // The bare route, resolved through the bookmark by `ProjectRedirect` —
+      // the deeper view is restored, exactly as before.
+      expect(screen.getByTestId("landed")).toHaveTextContent(
+        "/project/vector/memo",
+      );
+    });
+
+    /**
+     * The destination is derived from the LIVE media query, not from a reading
+     * taken once at mount — so a phone turned on its side, or a desktop window
+     * dragged narrow, moves both rows' destinations with it while the tree
+     * stays mounted. Replacing `useIsMobile()` with a one-shot mount read
+     * leaves every other test in this file green; this is the one that fails.
+     */
+    it("follows a rotation under a mounted tree", () => {
+      writeLastPath("vector", "/project/vector/memo");
+      const media = installMatchMedia(false);
+      renderShell();
+      expandProject();
+      expect(projectLink()).toHaveAttribute("href", "/project/vector");
+
+      media.setMobile(true);
+      expect(projectLink()).toHaveAttribute("href", "/project/vector/iterm");
+      act(() => {
+        fireEvent.click(sessionRow());
+      });
+      expect(screen.getByTestId("landed")).toHaveTextContent(
+        "/project/vector/iterm",
+      );
+
+      // …and back again: widening restores the bookmark-resolving route on
+      // both rows. The bookmark now holds the terminal — the phone's landing
+      // recorded it like any other view — so it is moved off it first, which
+      // is what makes the next assertion about resolution rather than about
+      // the destination the phone had just used.
+      media.setMobile(false);
+      expect(projectLink()).toHaveAttribute("href", "/project/vector");
+      act(() => {
+        fireEvent.click(screen.getByTestId("to-memo"));
+      });
+      act(() => {
+        fireEvent.click(sessionRow());
+      });
+      expect(screen.getByTestId("landed")).toHaveTextContent(
+        "/project/vector/memo",
+      );
+    });
+  });
+
+  /**
+   * `QuickTerminalModal` builds the identical `/project/<name>/iterm` target
+   * with `encodeURIComponent`, and for a while the sidebar built it without —
+   * two spellings of one destination, differing only for the names that need
+   * encoding. These pin the encoded spelling end to end: the route still
+   * matches it, and `ProjectRedirect` still resolves the bookmark under the
+   * DECODED name that `useParams` hands the page.
+   */
+  describe("a project name that needs encoding", () => {
+    beforeEach(() => {
+      projectName.current = "my proj#1";
+    });
+    afterEach(() => {
+      projectName.current = "vector";
+    });
+
+    const oddLink = () => screen.getByRole("link", { name: "my proj#1" });
+
+    it("encodes the project name into the phone's terminal destination", () => {
+      installMatchMedia(true);
+      renderShell();
+
+      expect(oddLink()).toHaveAttribute(
+        "href",
+        "/project/my%20proj%231/iterm",
+      );
+      act(() => {
+        fireEvent.click(oddLink());
+      });
+      expect(screen.getByTestId("landed")).toHaveTextContent(
+        "/project/my%20proj%231/iterm",
+      );
+      // The page sees the decoded name, which is what the bookmark is scoped
+      // under — so the encoding never leaks into the preference key.
+      expect(screen.getByTestId("landed-name")).toHaveTextContent("my proj#1");
+      expect(readLastPath("my proj#1")).toBe("/project/my%20proj%231/iterm");
+    });
+
+    it("resolves the bookmark from the encoded bare route on a desktop", () => {
+      writeLastPath("my proj#1", "/project/my%20proj%231/memo");
+      installMatchMedia(false);
+      renderShell();
+
+      expect(oddLink()).toHaveAttribute("href", "/project/my%20proj%231");
+      act(() => {
+        fireEvent.click(oddLink());
+      });
+      expect(screen.getByTestId("landed")).toHaveTextContent(
+        "/project/my%20proj%231/memo",
       );
     });
   });

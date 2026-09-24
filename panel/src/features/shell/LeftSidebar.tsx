@@ -245,7 +245,11 @@ export default function LeftSidebar() {
   }, [sessions]);
 
   /**
-   * Where tapping a project's name goes.
+   * Where tapping a project goes — from its NAME or from any of its session
+   * rows. One function for both, because the reason below is about what is
+   * worth arriving at on a phone and says nothing about which row the thumb
+   * landed on; two copies of it would be one edit away from disagreeing, and
+   * did disagree until the session rows were brought in with it.
    *
    * On a desktop it is the bare project route, which `ProjectRedirect` resolves
    * through the Last-open-view bookmark — the user is returned to whichever view
@@ -265,9 +269,19 @@ export default function LeftSidebar() {
    * once at mount, so a rotation moves the destination with it — and never
    * stored, because being on a phone is a fact about the viewport, not a
    * preference the user expressed.
+   *
+   * The name is percent-encoded, matching `QuickTerminalModal`, which builds
+   * this same `/project/<name>/iterm` target. A project may be named with a
+   * space or a `#`, and unencoded those do not survive the trip: a `#` starts
+   * the fragment, so the route would see a truncated name. Encoding is safe on
+   * the far side — `matchProjectFromPath` decodes the segment itself, and the
+   * router hands `useParams` the decoded form, which is what every preference
+   * scope downstream (the bookmark, the expand state) is keyed on.
    */
   const projectHref = (name: string) =>
-    isMobile ? `/project/${name}/iterm` : `/project/${name}`;
+    isMobile
+      ? `/project/${encodeURIComponent(name)}/iterm`
+      : `/project/${encodeURIComponent(name)}`;
 
   const renderProjectRow = (project: { name: string }) => {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
@@ -399,11 +413,15 @@ export default function LeftSidebar() {
                       // listener above for why that order is load-bearing.
                       writeTerminalFocus(s.project, s.id);
                       dispatchTerminalFocus(s.project, s.id);
-                      // Bare project route — same as the project-name link.
-                      // ProjectRedirect resolves the destination via the
+                      // The same destination as the project-name link, from
+                      // the same function: the bare project route on a
+                      // desktop, where `ProjectRedirect` resolves it via the
                       // Last-open-view bookmark (or falls through to the
-                      // default section when there is none).
-                      navigate(`/project/${s.project}`);
+                      // default section when there is none), and the terminal
+                      // tab on a phone. Tapping a SESSION and landing on notes
+                      // was the sharpest form of the problem the phone rule
+                      // exists to solve.
+                      navigate(projectHref(s.project));
                     }}
                     className="w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left"
                     style={{

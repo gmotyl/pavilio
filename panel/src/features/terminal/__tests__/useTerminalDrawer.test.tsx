@@ -132,6 +132,14 @@ function installMatchMedia(mobile: boolean) {
       listeners.add(cb),
     removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
       listeners.delete(cb),
+    // The deprecated pair, feeding the same listener set. `useIsMobile` reaches
+    // only for the modern one today, but a stub that omits these answers
+    // `undefined` to a caller that uses the legacy form — a silent no-op rather
+    // than a failure, which is exactly the shape of bug a stub should not be
+    // able to hide.
+    addListener: (cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
+    removeListener: (cb: (e: MediaQueryListEvent) => void) =>
+      listeners.delete(cb),
   };
   Object.defineProperty(window, "matchMedia", {
     writable: true,
