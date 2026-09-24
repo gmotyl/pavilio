@@ -403,10 +403,16 @@ export const preferences = {
     codec: str,
     portable: true,
   }),
+  /**
+   * ON by default: an answer the user just asked for is the thing they are
+   * waiting for, so the pane that holds it opens itself rather than asking for
+   * a click on the eye. It stays a preference — the "Open on new answer" box
+   * clears it, and a cleared box is remembered, beating this default.
+   */
   answerPaneAutoOpen: definePreference({
     key: "speech.answerPane.autoOpen", // was: panel-answer-pane-auto-open
     scope: "global",
-    default: false,
+    default: true,
     codec: bool,
     portable: true,
   }),

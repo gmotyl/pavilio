@@ -35,6 +35,7 @@ import {
   type UtteranceQueue,
 } from "../../speech/utteranceQueue";
 import { forgetAnswerPane } from "../answerPaneState";
+import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import type { SessionMeta } from "../useTerminalSessions";
 
 /**
@@ -302,6 +303,12 @@ describe("the speech row", () => {
   });
 
   it("does not refit the terminal when the first utterance arrives", async () => {
+    // The subject here is the ROW, so the pane is held shut explicitly rather
+    // than left to the default — which is now ON, and would put the pane in
+    // the flow on the very arrival this test measures. A pane the user asked
+    // to open is a deliberate act, like the hide toggle below; what must cost
+    // nothing is the arrival ITSELF.
+    setStoredAutoOpenAnswer(false);
     const view = render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
     await settle();
 

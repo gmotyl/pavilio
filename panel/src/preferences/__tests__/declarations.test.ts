@@ -107,7 +107,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["shell.rightSidebar.width", 264, "global"],
   ["speech.answerComposer.height", 62, "global"],
   ["speech.answerComposer.on", true, "global"],
-  ["speech.answerPane.autoOpen", false, "global"],
+  ["speech.answerPane.autoOpen", true, "global"],
   ["speech.armedCell", null, "global"],
   ["speech.voice", "en-US-AndrewMultilingualNeural", "global"],
   ["terminal.drawer.open", false, "global"],

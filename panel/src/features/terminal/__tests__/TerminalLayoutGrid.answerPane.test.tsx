@@ -20,6 +20,7 @@ import type { GridSpeech, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, utteranceQueueReducer } from "../../speech/utteranceQueue";
 import type { SessionMeta } from "../useTerminalSessions";
 import { forgetAnswerPane } from "../answerPaneState";
+import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 
 vi.mock("../terminalInstances", () => {
   const holders = new Map<string, HTMLDivElement>();
@@ -166,6 +167,10 @@ beforeEach(() => {
 
 describe("TerminalLayoutGrid — the answer pane across a layout change", () => {
   it("MAX and back leaves the pane open with its footer switch unchanged", async () => {
+    // Seed the switch OFF, against the ON default: what has to survive MAX is
+    // a switch the user MOVED, and a switch left where the default put it
+    // would survive a remount that rebuilt it from scratch.
+    setStoredAutoOpenAnswer(false);
     const speech = makeSpeech();
     const view = render(grid(speech, false));
     await settle();

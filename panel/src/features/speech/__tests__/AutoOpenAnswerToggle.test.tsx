@@ -63,10 +63,14 @@ describe("AutoOpenAnswerToggle", () => {
     delete globals.__PAVILIO_PREFS__;
 
     render(<AutoOpenAnswerToggle />);
+    // The box opens on the declared default, ON, and the click clears it —
+    // the click has to move it AWAY from the default, or a dropped write and
+    // a landed one would read back the same and this would prove nothing.
+    expect(toggle()).toBeChecked();
     await user.click(toggle());
 
-    expect(toggle()).toBeChecked();
-    expect(getStoredAutoOpenAnswer()).toBe(false);
+    expect(toggle()).not.toBeChecked();
+    expect(getStoredAutoOpenAnswer()).toBe(true);
   });
 
   it("sits in the Settings page's Speech section, under the voice", async () => {

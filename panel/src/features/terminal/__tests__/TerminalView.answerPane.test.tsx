@@ -15,6 +15,8 @@ import {
   setStoredAutoOpenAnswer,
 } from "../../speech/autoOpenAnswer";
 import { prepare } from "../../speech/prepare";
+import { preferences } from "../../../preferences/declarations";
+import { storageKey } from "../../../preferences/types";
 import type { GridSpeech, Utterance } from "../../speech/types";
 import {
   emptyUtteranceQueue,
@@ -192,6 +194,10 @@ const footerBox = (): HTMLInputElement =>
 const storeDefault = (on: boolean): void => {
   setStoredAutoOpenAnswer(on);
 };
+
+/** The injected preferences document, to survive a simulated reload. */
+type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
+const globals = globalThis as unknown as PrefGlobals;
 
 beforeEach(() => {
   term.fit.mockClear();
@@ -470,6 +476,49 @@ describe("TerminalView opens the pane on a new answer", () => {
     expect(eye()).toHaveAttribute("aria-pressed", "true");
     // Focus lands on the pane so Escape works at once.
     expect(document.activeElement).toBe(opened);
+  });
+
+  it("a new answer opens the pane with nothing stored at all", async () => {
+    // No `storeDefault` here, on purpose: the document is empty, exactly as it
+    // is for a user who has never touched the box. The declared default is ON,
+    // so the answer this cell has just produced opens its own pane with no
+    // click on the eye — the correction this default exists for.
+    const speech = makeSpeech();
+    const view = render(cell(speech));
+    await settleTerminal();
+    expect(pane()).toBeNull();
+
+    speech.arrive("u-2");
+    view.rerender(cell(speech));
+
+    expect(pane()).not.toBeNull();
+    expect(eye()).toHaveAttribute("aria-pressed", "true");
+    // And the meta row's box shows the value that did it.
+    expect(footerBox()).toBeChecked();
+  });
+
+  it("a box the user cleared still governs after a reload", async () => {
+    // Cleared once, in Settings. A reload re-injects the stored document and
+    // drops every cell's in-memory entry, so the fresh cell seeds from the
+    // STORED false rather than from the declared true: the choice outranks
+    // the default, which is why the box is still a box.
+    storeDefault(false);
+    const reloaded = { ...globals.__PAVILIO_PREFS__! };
+    expect(reloaded[storageKey(preferences.answerPaneAutoOpen)]).toBe(false);
+    delete globals.__PAVILIO_PREFS__;
+    globals.__PAVILIO_PREFS__ = reloaded;
+    forgetAnswerPane("cell-a");
+
+    const speech = makeSpeech();
+    const view = render(cell(speech));
+    await settleTerminal();
+
+    speech.arrive("u-2");
+    view.rerender(cell(speech));
+    expect(pane()).toBeNull();
+
+    fireEvent.click(eye());
+    expect(footerBox()).not.toBeChecked();
   });
 
   it("the utterance a fresh tab is handed does not open the pane", async () => {

@@ -9,14 +9,20 @@
  * `localStorage` grep counted this module clean while it was reaching storage
  * all along.
  *
- * The default is OFF. It is a DEFAULT: each `TerminalView` seeds its own switch
- * from it once, at mount, and never writes back — so a cell flipped mid-session
- * keeps its choice, and a change here reaches only cells mounted afterwards.
+ * The default is ON: an answer the user just asked for is the thing they are
+ * waiting for, so the pane that holds it opens itself rather than waiting on
+ * the eye. It is a DEFAULT, not a behavior: clearing the box stores `false`,
+ * and the stored `false` is what every later read gets back.
+ *
+ * And it is a default in the narrower sense too — each `TerminalView` seeds
+ * its own switch from it once, at mount, and never writes back, so a cell
+ * flipped mid-session keeps its choice and a change here reaches only cells
+ * mounted afterwards.
  */
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
 
-/** False when nothing is stored, and when the stored value is malformed. */
+/** True when nothing is stored, and when the stored value is malformed. */
 export function getStoredAutoOpenAnswer(): boolean {
   return readPreference(preferences.answerPaneAutoOpen);
 }
