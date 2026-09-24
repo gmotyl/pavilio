@@ -31,6 +31,7 @@ import { cssPx, cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { AnswerPane } from "../AnswerPane";
 import { SpeechControlBar } from "../SpeechControlBar";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
+import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
 
 // The activity channel opens a WebSocket at import time and re-arms a 2s
@@ -285,6 +286,7 @@ beforeEach(() => {
   send.mockClear();
   _resetForTests();
   __resetAnswerWaitingForTests();
+  __resetPtySubmitForTests();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   installMatchMedia();
 });
@@ -292,6 +294,7 @@ beforeEach(() => {
 afterEach(() => {
   _resetForTests();
   __resetAnswerWaitingForTests();
+  __resetPtySubmitForTests();
   vi.useRealTimers();
 });
 
@@ -302,9 +305,10 @@ describe("the answer pane while a reply is pending", () => {
 
     sendReply();
 
-    // The draft reached the PTY, and the body stopped showing the answer that
+    // The draft reached the PTY — its body now, its submitting return on a
+    // later turn (`ptySubmit`) — and the body stopped showing the answer that
     // is now the question's predecessor rather than its reply.
-    expect(send).toHaveBeenCalledWith("ship it\r");
+    expect(send).toHaveBeenCalledWith("ship it");
     expect(waiting()).toBeInTheDocument();
     expect(within(body()).queryByText(ANSWER)).toBeNull();
   });
@@ -386,9 +390,13 @@ describe("the answer pane while a reply is pending", () => {
     sendReply();
     expect(waiting()).toBeInTheDocument();
 
-    // Nothing was armed on the way in...
-    expect(timeout).not.toHaveBeenCalled();
+    // Nothing the WAIT owns was armed on the way in. The one timeout scheduled
+    // belongs to the write, not to this state: `ptySubmit` gives the
+    // submitting return a turn of its own so a TUI does not read it as part of
+    // the pasted body. It writes `\r` to the pty and touches nothing here —
+    // and the ten minutes below are what proves that.
     expect(interval).not.toHaveBeenCalled();
+    expect(timeout.mock.calls.map(([, delay]) => delay)).toEqual([SUBMIT_RETURN_MS]);
 
     // ...and ten minutes of clock changes nothing: the session is still busy,
     // so the only thing that could end this wait has not happened.

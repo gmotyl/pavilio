@@ -13,12 +13,13 @@
  * of the branch, and `autoplay.integration.test.tsx` proves it against the real
  * host; what this file pins is that the pills branch did not drop it.
  */
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { SpeechControlBar } from "../SpeechControlBar";
+import { __resetPtySubmitForTests } from "../ptySubmit";
 import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
 import { preferences } from "../../../preferences/declarations";
@@ -31,6 +32,27 @@ import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utterance
  *  render loop. */
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
+
+/**
+ * The writes ONE pill press makes: the command, and then the return that runs
+ * it as a separate write.
+ *
+ * A pill used to send `` `${command}\r` `` in one go. That is the shape the
+ * answer composer's stuck sends came from — a single burst whose trailing `\r`
+ * a TUI with bracketed paste reads as part of the pasted body — and the split
+ * lives in `ptySubmit`, so every caller gets it and a short command has to keep
+ * working under it. `waitFor` because the return is scheduled, not inline.
+ */
+const expectRan = async (send: Mock, ...commands: string[]): Promise<void> => {
+  const expected = commands.flatMap((command) => [[command], ["\r"]]);
+  await waitFor(() => expect(send.mock.calls).toEqual(expected));
+};
+
+/** Drops any return still queued, so the next press starts from nothing. */
+const resetSends = (send: Mock): void => {
+  __resetPtySubmitForTests();
+  send.mockClear();
+};
 
 interface SpeechOverrides {
   state?: CellSpeechState;
@@ -124,7 +146,14 @@ function startPill(sessionId = "cell-a"): HTMLButtonElement | null {
 
 // `seedSessions` stubs `fetch`; vitest is not configured to unstub globals, and
 // a stub left behind would answer the next file's session load.
+beforeEach(() => {
+  // The submit queue is module state keyed by session: a return still queued
+  // from the previous test would fire into this one's `send`.
+  __resetPtySubmitForTests();
+});
+
 afterEach(() => {
+  __resetPtySubmitForTests();
   vi.unstubAllGlobals();
 });
 
@@ -167,10 +196,9 @@ describe("LauncherPills", () => {
 
     await user.click(screen.getByRole("button", { name: "claude" }));
 
-    // Exactly the command, exactly one carriage return, exactly one send: a
+    // Exactly the command and exactly one return, from exactly one press: a
     // pill that fired twice would run the agent twice.
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith("claude\r");
+    await expectRan(send, "claude");
   });
 
   it("labels the pill with the name and sends the command", async () => {
@@ -189,8 +217,7 @@ describe("LauncherPills", () => {
     await user.click(screen.getByRole("button", { name: "resume" }));
 
     // …and the command is what the PTY receives, verbatim.
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith("claude --resume\r");
+    await expectRan(send, "claude --resume");
   });
 
   it("swaps the pills for the transport once the cell has spoken", () => {
@@ -264,9 +291,8 @@ describe("LauncherPills", () => {
 
       await user.click(screen.getByRole("button", { name: "claude" }));
 
-      // The launch itself is unchanged — one send, the command and its return.
-      expect(send).toHaveBeenCalledTimes(1);
-      expect(send).toHaveBeenCalledWith("claude\r");
+      // The launch itself is unchanged — the command, and its return after it.
+      await expectRan(send, "claude");
 
       // And the row's whole offer changes: not `codex` greyed out beside a
       // spent `claude`, but one live pill for the step that actually follows.
@@ -289,15 +315,14 @@ describe("LauncherPills", () => {
       renderBar(makeSpeech({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
-      send.mockClear();
+      resetSends(send);
 
       await user.click(screen.getByRole("button", { name: "start" }));
 
       // Verbatim, with no leading slash: this is prompt text typed into a
       // running agent, not a client-side slash command. The project is this
       // cell's, resolved by session id — `cell-b`'s would load the wrong one.
-      expect(send).toHaveBeenCalledTimes(1);
-      expect(send).toHaveBeenCalledWith("pavilio-session-start my-blog\r");
+      await expectRan(send, "pavilio-session-start my-blog");
     });
 
     it("sends the bare command when the cell's project is unknown", async () => {
@@ -308,15 +333,14 @@ describe("LauncherPills", () => {
       renderBar(makeSpeech({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
-      send.mockClear();
+      resetSends(send);
 
       await user.click(screen.getByRole("button", { name: "start" }));
 
       // The bare command, which is a valid invocation. Not a trailing space,
       // and not the word `undefined` — both of which would be typed into the
       // prompt exactly as written.
-      expect(send).toHaveBeenCalledTimes(1);
-      expect(send).toHaveBeenCalledWith("pavilio-session-start\r");
+      await expectRan(send, "pavilio-session-start");
     });
 
     it("sends the bare command when the session carries an empty project", async () => {
@@ -329,12 +353,11 @@ describe("LauncherPills", () => {
       renderBar(makeSpeech({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
-      send.mockClear();
+      resetSends(send);
 
       await user.click(screen.getByRole("button", { name: "start" }));
 
-      expect(send).toHaveBeenCalledTimes(1);
-      expect(send).toHaveBeenCalledWith("pavilio-session-start\r");
+      await expectRan(send, "pavilio-session-start");
     });
 
     it("keeps the start pill live for a second press", async () => {
@@ -344,7 +367,7 @@ describe("LauncherPills", () => {
       renderBar(makeSpeech({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
-      send.mockClear();
+      resetSends(send);
 
       await user.click(screen.getByRole("button", { name: "start" }));
       await user.click(screen.getByRole("button", { name: "start" }));
@@ -352,9 +375,9 @@ describe("LauncherPills", () => {
       // Not one-shot, unlike the launchers: re-loading a project's context into
       // the agent is a legitimate thing to ask for twice, and its effect is
       // visible in the prompt either way.
-      expect(send).toHaveBeenCalledTimes(2);
-      expect(send).toHaveBeenNthCalledWith(1, "pavilio-session-start pavilio\r");
-      expect(send).toHaveBeenNthCalledWith(2, "pavilio-session-start pavilio\r");
+      // Two presses, two submits — and the second command is not written
+      // until the first has been submitted.
+      await expectRan(send, "pavilio-session-start pavilio", "pavilio-session-start pavilio");
       expect(startPill()).toBeEnabled();
     });
 
@@ -382,9 +405,8 @@ describe("LauncherPills", () => {
       for (const pill of pills("cell-b")) expect(pill).toBeEnabled();
 
       await user.click(screen.getAllByRole("button", { name: "codex" })[0]);
-      expect(sendB).toHaveBeenCalledTimes(1);
-      expect(sendB).toHaveBeenCalledWith("codex\r");
-      expect(sendA).toHaveBeenCalledTimes(1);
+      await expectRan(sendB, "codex");
+      await expectRan(sendA, "claude");
     });
 
     it("lifts every pill under the pointer, with no disabled state to withhold it from", () => {

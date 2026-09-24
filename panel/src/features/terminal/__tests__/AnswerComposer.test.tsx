@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { useState } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +28,7 @@ import type { GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
+import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
 
 // The synthesis cache the rail peeks into. Nothing is warm and nothing
 // subscribes: this file draws no units at all.
@@ -96,6 +97,22 @@ function installMatchMedia(mobile: boolean): void {
 }
 
 const send = vi.fn();
+
+/**
+ * The two writes ONE submit makes: the body, and then the return that runs it
+ * on a turn of its own.
+ *
+ * A submit is no longer a single `` `${text}\r` `` write, and the split is the
+ * point rather than an implementation detail. Concatenated, the trailing `\r`
+ * arrives as part of the pasted body — a TUI with bracketed paste enabled
+ * inserts it as a newline in its editor instead of submitting on it, which is
+ * the "the text landed in the prompt but never ran" bug. `waitFor` because the
+ * return is scheduled, not written inline.
+ */
+const expectSubmitted = async (body: string): Promise<void> => {
+  await waitFor(() => expect(send.mock.calls).toEqual([[body], ["\r"]]));
+};
+
 const onClose = vi.fn();
 /** An ancestor of the pane — the cell, as far as a bubbling key is concerned. */
 const cellKeys = vi.fn();
@@ -169,6 +186,9 @@ beforeEach(() => {
   // one case would otherwise still be "waiting" in the next, and the pane no
   // longer clears it on mount — the row does.
   __resetAnswerWaitingForTests();
+  // Same reason, one module along: a queued return from the previous test
+  // would fire into this one's `send`.
+  __resetPtySubmitForTests();
   onClose.mockClear();
   cellKeys.mockClear();
   documentKeys.mockClear();
@@ -185,10 +205,52 @@ describe("AnswerComposer", () => {
     await user.keyboard("yes, both scopes");
     await user.keyboard("{Enter}");
 
-    // Once, and with the return that runs it — a send without the `\r` leaves
-    // the agent waiting on a line that was never submitted.
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith("yes, both scopes\r");
+    // The body, and the return that runs it as a SEPARATE write — a send
+    // without the `\r` leaves the agent waiting on a line that was never
+    // submitted, and a send that carries the `\r` inside the same write leaves
+    // the line sitting in the prompt with a newline in it.
+    await expectSubmitted("yes, both scopes");
+  });
+
+  it("sends a multi-line reply as one body and one separate return", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    // Shift+Enter is the textarea's own newline — the same key Greg uses to
+    // write the long, multi-paragraph replies the send used to stall on.
+    await user.keyboard("first paragraph{Shift>}{Enter}{/Shift}second paragraph");
+    expect(field().value).toBe("first paragraph\nsecond paragraph");
+
+    await user.keyboard("{Enter}");
+
+    // Every line in the ONE body write, and the submitting return after it.
+    // Splitting the body per line would submit each paragraph on its own.
+    await expectSubmitted("first paragraph\nsecond paragraph");
+  });
+
+  it("does not interleave two replies sent in quick succession", () => {
+    vi.useFakeTimers();
+    try {
+      renderPane();
+
+      fireEvent.change(field(), { target: { value: "first" } });
+      fireEvent.keyDown(field(), { key: "Enter" });
+      fireEvent.change(field(), { target: { value: "second" } });
+      fireEvent.keyDown(field(), { key: "Enter" });
+
+      // The second body is withheld until the first has been submitted:
+      // `first second \r \r` would put both replies on one prompt line.
+      expect(send.mock.calls).toEqual([["first"]]);
+
+      vi.advanceTimersByTime(SUBMIT_RETURN_MS);
+      expect(send.mock.calls).toEqual([["first"], ["\r"], ["second"]]);
+
+      vi.advanceTimersByTime(SUBMIT_RETURN_MS);
+      expect(send.mock.calls).toEqual([["first"], ["\r"], ["second"], ["\r"]]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("clears the field after sending", async () => {
@@ -298,7 +360,7 @@ describe("AnswerComposer", () => {
     // a pasted snippet is part of the snippet, and a trailing space is how a
     // CLI is told the next token is an argument. Whitespace decides only
     // whether there is anything to send at all — never what is sent.
-    expect(send).toHaveBeenCalledWith("  indented  \r");
+    await expectSubmitted("  indented  ");
   });
 
   it("opens at the declared default when nothing has been stored", () => {
@@ -436,7 +498,7 @@ describe("AnswerComposer", () => {
 
       await user.click(field());
       await user.keyboard("{Enter}");
-      expect(send).toHaveBeenCalledWith("ship it\r");
+      await expectSubmitted("ship it");
 
       // Sent, so consumed: reopening offers an empty field rather than the
       // reply the agent already has.
@@ -550,10 +612,9 @@ describe("AnswerComposer", () => {
       await user.keyboard("both scopes");
       await user.click(sendButton());
 
-      // Identical to Enter, down to the return that submits the line, and the
-      // field is consumed the same way.
-      expect(send).toHaveBeenCalledTimes(1);
-      expect(send).toHaveBeenCalledWith("both scopes\r");
+      // Identical to Enter, down to the return that submits the line on its
+      // own turn, and the field is consumed the same way.
+      await expectSubmitted("both scopes");
       expect(field().value).toBe("");
     });
 
