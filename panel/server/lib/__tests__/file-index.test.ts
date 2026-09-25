@@ -54,8 +54,12 @@ describe("file-index indexed extensions", () => {
   it("still skips .css and .js files", () => {
     seed("alpha/mockups/x.css");
     seed("alpha/mockups/x.js");
+    // Positive control: with only skipped extensions seeded, the index is `[]`
+    // and the two negative assertions would also hold if the walk never ran.
+    seed("alpha/mockups/x.md");
     rebuildIndex();
     const paths = getFileIndex().map((e) => e.relativePath);
+    expect(paths).toContain("alpha/mockups/x.md");
     expect(paths).not.toContain("alpha/mockups/x.css");
     expect(paths).not.toContain("alpha/mockups/x.js");
   });
