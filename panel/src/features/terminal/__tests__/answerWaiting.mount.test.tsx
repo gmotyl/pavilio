@@ -17,13 +17,25 @@
  * snapshot, mounts the cell, and never sees another transition. No transition,
  * no window, no wave — for the entire run.
  *
- * The second half of this file is the other end of the same window: an answer
- * landing inside one. Cancelling it is right — the answer is the better
- * outcome and deserves an uninterrupted moment on screen — but a session that
- * is STILL busy afterwards is an agent that is genuinely still working, and
- * the server will not re-broadcast a state it never left. So the arrival opens
- * a FRESH window rather than spending the spell: the answer gets its moment,
- * and the wave comes back one window later.
+ * The rest of this file is the other end of the same window: the TWO things
+ * that cancel one, and what each of them owes afterwards.
+ *
+ * An answer landing inside a window cancels it, and that is right — the answer
+ * is the better outcome and deserves an uninterrupted moment on screen. But a
+ * session that is STILL busy afterwards is an agent that is genuinely still
+ * working, and the server will not re-broadcast a state it never left. So the
+ * arrival opens a FRESH window rather than spending the spell: the answer gets
+ * its moment, and the wave comes back one window later.
+ *
+ * A SEND inside a window cancels it too, for its own reason — the user's
+ * decision is a better answer to "is this real?" than any clock — and owes the
+ * same thing at the same moment. The send's wait ends (the reply lands, or the
+ * agent goes idle); if the agent is still busy at that point, the spell it
+ * overtook was real work all along, nothing will re-announce it, and the wave
+ * would otherwise be gone for the rest of the run. So the END of a send
+ * re-opens a window exactly as an arrival does. "Type a reply while the agent
+ * is working" is an ordinary path, which is the whole reason the symmetry
+ * matters.
  *
  * ## Why the effect-order test mounts a tree
  *
@@ -58,7 +70,10 @@ import {
   __resetAnswerWaitingForTests,
   beginWaiting,
   getAnswerWaiting,
+  holdAnswer,
   noteNewestAnswer,
+  noteUtterance,
+  releaseAnswer,
   watchSessionActivity,
 } from "../answerWaiting";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
@@ -164,6 +179,37 @@ describe("the window a cell gets when it mounts onto a busy agent", () => {
     expect(handedOver()).toBe(true);
     expect(getAnswerWaiting(SESSION).pending).toBe(true);
   });
+
+  it("a second watch on the same busy session does not stack a window", () => {
+    // The real tree opens this watch from an effect, and effects re-run: a
+    // remount from a layout change, a preset swap, a drag placement. Every one
+    // of those calls `watchSessionActivity` again on a session that is still
+    // busy and still unarmed, which is exactly the shape the "already busy"
+    // branch answers — so without the guard inside `openDebounceWindow` each
+    // call would schedule its own timer.
+    //
+    // `answerWaiting.debounce`'s own "repeated busy events do not stack timers"
+    // does NOT reach this: repeated busy EVENTS are stopped one level earlier,
+    // by `onActivity`'s transition check, and never get as far as the window.
+    activity("busy");
+    watchSessionActivity(SESSION);
+    expect(vi.getTimerCount()).toBe(1);
+
+    vi.advanceTimersByTime(500);
+    watchSessionActivity(SESSION);
+    watchSessionActivity(SESSION);
+
+    // One spell, one window.
+    expect(vi.getTimerCount()).toBe(1);
+
+    // ...and it is the FIRST call's window, running on the first call's clock
+    // rather than pushed back by every remount. A stacked window would also
+    // outlive this moment, so the empty table afterwards is the other half of
+    // the same guard.
+    vi.advanceTimersByTime(DEBOUNCE - 500);
+    expect(handedOver()).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
 
 describe("an answer landing inside the window", () => {
@@ -205,5 +251,116 @@ describe("an answer landing inside the window", () => {
 
     vi.advanceTimersByTime(10 * 60 * 1000);
     expect(handedOver()).toBe(false);
+  });
+});
+
+/**
+ * The same hole as the arrival's, on the other path that cancels a window.
+ *
+ * The agent is already working, so a window is pending. The user types a reply
+ * — ordinary, not exotic — and `beginWaiting` cancels that window, rightly: it
+ * hands the body over on the frame of the keypress, and the clock it replaced
+ * has nothing left to decide. Then the reply lands, the send's wait ends, and
+ * the agent carries straight on working.
+ *
+ * Nothing re-broadcasts `busy`: the server emits on a TRANSITION, and the
+ * session never left the state. So before the fix the cell sat busy with
+ * `waiting === false` for the rest of the run — the wave gone, on a path the
+ * user reaches by doing the most obvious thing there is.
+ */
+describe("a send inside the window", () => {
+  it("a send inside the window returns the wave when the reply lands on a still-busy agent", () => {
+    watchSessionActivity(SESSION);
+    noteNewestAnswer(SESSION, "u-0");
+
+    activity("busy");
+    vi.advanceTimersByTime(500);
+
+    // The user types into a cell whose agent is already working. The body is
+    // theirs at once, and the window they overtook is spent.
+    beginWaiting(SESSION, "u-0");
+    expect(handedOver()).toBe(true);
+    expect(getAnswerWaiting(SESSION).pending).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+
+    // The reply lands. The send's wait is over — and the agent is STILL busy,
+    // which is the fact the cancelled window was in the middle of weighing.
+    noteUtterance(SESSION, "u-1");
+    expect(getAnswerWaiting(SESSION).pending).toBe(false);
+    expect(handedOver()).toBe(false);
+
+    // So the end of the send re-opens a window, exactly as an arrival does:
+    // the answer gets its uninterrupted moment on screen...
+    vi.advanceTimersByTime(DEBOUNCE - 1);
+    expect(handedOver()).toBe(false);
+
+    // ...and one window later the working agent has the body back.
+    vi.advanceTimersByTime(1);
+    expect(handedOver()).toBe(true);
+    // Nothing of the user's is outstanding any more, so the play button
+    // carries no mark: this is the agent's own trigger, re-earned.
+    expect(getAnswerWaiting(SESSION).pending).toBe(false);
+
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    expect(handedOver()).toBe(true);
+  });
+
+  it("a send inside the window leaves no wave if the agent stops", () => {
+    watchSessionActivity(SESSION);
+    noteNewestAnswer(SESSION, "u-0");
+
+    activity("busy");
+    vi.advanceTimersByTime(500);
+    beginWaiting(SESSION, "u-0");
+
+    noteUtterance(SESSION, "u-1");
+
+    // The agent answered and finished. The window the send's end opened must
+    // die with the spell it was weighing — the re-open is "the agent is still
+    // working", never "a send happened once".
+    activity("idle");
+
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    expect(handedOver()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a send on an idle agent opens no window when it ends", () => {
+    watchSessionActivity(SESSION);
+    noteNewestAnswer(SESSION, "u-0");
+
+    // No busy spell at all: nothing was cancelled, so nothing is owed. The
+    // re-open is a DEBT the send took on by overtaking the agent's trigger,
+    // not a thing every send does on its way out.
+    beginWaiting(SESSION, "u-0");
+    expect(handedOver()).toBe(true);
+
+    noteUtterance(SESSION, "u-1");
+    expect(handedOver()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    expect(handedOver()).toBe(false);
+  });
+
+  it("a hold still outranks the window the send's end re-opened", () => {
+    watchSessionActivity(SESSION);
+    noteNewestAnswer(SESSION, "u-0");
+
+    activity("busy");
+    beginWaiting(SESSION, "u-0");
+    noteUtterance(SESSION, "u-1");
+
+    // The user steps back to re-read while the re-opened window runs. The hold
+    // is ONE term at the top of `derive`, ahead of both triggers, so the wave
+    // the window is about to raise never reaches the body.
+    holdAnswer(SESSION);
+    vi.advanceTimersByTime(DEBOUNCE);
+    expect(handedOver()).toBe(false);
+
+    // And it is the hold doing it, not the window having been lost: releasing
+    // hands the body straight to the agent that has been working all along.
+    releaseAnswer(SESSION);
+    expect(handedOver()).toBe(true);
   });
 });

@@ -114,6 +114,14 @@ describe("the debounce on the agent's claim to the body", () => {
     // ...and the window that was still pending is gone with it: an idle
     // session has nothing left to prove, so no later tick may hand the body to
     // an agent that has already stopped.
+    //
+    // Asserted on the TIMER TABLE, not only on the body. A window left running
+    // behind an idle session happens to be harmless on the way out — the fired
+    // callback re-reads `activity` and returns — so a purely behavioural
+    // assertion here goes on passing with the cancellation deleted, and the
+    // half of the rule that keeps stale timers out of the table would be
+    // pinned by nothing at all.
+    expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(10 * 60 * 1000);
     expect(handedOver()).toBe(false);
   });
