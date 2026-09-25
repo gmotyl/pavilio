@@ -35,4 +35,20 @@ describe("workspaceRelativePath", () => {
       workspaceRelativePath("C:\\w\\notes\\p\\memo\\a.md", "p/memo/a.md"),
     ).toBe("notes/p/memo/a.md");
   });
+
+  it("matches only on a whole-segment boundary, not mid-segment", () => {
+    // "bba/x.md" ends with "a/x.md" as text but not as a path — accepting it
+    // would slice the projects dir out of the middle of a directory name.
+    expect(workspaceRelativePath("/w/bba/x.md", "a/x.md")).toBe("/w/bba/x.md");
+  });
+
+  it("falls back when there is no projects-directory name to recover", () => {
+    // The file sits at the filesystem root, so the head is empty and there is
+    // no directory name to prefix the relative path with.
+    expect(workspaceRelativePath("/x.html", "x.html")).toBe("/x.html");
+    // A double slash reaches the same guard, and unlike the root-level case it
+    // tells the two branches apart: without the guard this would return
+    // "/x.html" and silently drop a path segment.
+    expect(workspaceRelativePath("/w//x.html", "x.html")).toBe("/w//x.html");
+  });
 });
