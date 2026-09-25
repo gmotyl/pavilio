@@ -54,7 +54,7 @@ Every mockup, whichever shape:
 - **Accessible contrast** on body text and on any state you are asking the reader to judge.
 - **Body text at a sane measure** — cap it (`max-width: ~70–80ch`); do not let a paragraph run the full pane.
 
-**Watch flat selectors.** One hand-written stylesheet in one file grows selectors that cancel each other out — a type-based `.section` and an element-based `.cta` setting the same property, where source order wins instead of intent. It bites most often on padding and margin between sections. Keep one owner per property per element, and confirm the spacing you meant is the spacing that rendered.
+**Watch flat selectors.** Keep one owner per property per element, and confirm the spacing you meant is the spacing that rendered. One hand-written stylesheet in one file grows selectors that cancel each other out — a type-based `.section` and an element-based `.cta` setting the same property, where source order wins instead of intent. It bites most often on padding and margin between sections.
 
 ## Which shape: one design, or a comparison
 
@@ -64,11 +64,11 @@ Two call paths. They are distinct; never blur them.
 - a **direct invocation that names one concrete design** (`/pavilio-mockup show the sidebar collapsed`) — the caller plainly knows what they want, and that *is* the direction being stated as settled;
 - a **[[pavilio-ui-design]] handoff stating `single, direction settled by the user`**.
 
-**A comparison of two to four options** — see the shape below:
+**A comparison of two or three options** — see the shape below:
 - a **direct invocation asking for alternatives** ("show me options for …", "compare a few ways to …");
 - a **[[pavilio-ui-design]] handoff stating `comparison, options A/B/C`**, which arrives with the options already worked out.
 
-[[pavilio-ui-design]] always states its mode in those words. **Never infer the mode from a handoff, and never invent the alternatives yourself** — choosing what the alternatives are is design judgment, and this skill makes none. If a *direct* invocation is genuinely ambiguous — neither one concrete design nor a request for alternatives — build the comparison.
+[[pavilio-ui-design]] always states its mode in those words, and the **leading keyword** — `comparison` or `single` — is what binds: a handoff carrying only two options is still `comparison`, not a mismatch. **Never infer the mode from a handoff.** On a **handoff**, never add or substitute options [[pavilio-ui-design]] did not give you — it chose them, and it states them. On a **direct invocation** there is no design skill in the loop, so the alternatives are yours to choose — choose them *structurally* (genuinely different approaches), never three palettes of one layout. If a *direct* invocation is genuinely ambiguous — neither one concrete design nor a request for alternatives — build the comparison.
 
 ### The comparison shape
 
@@ -108,7 +108,7 @@ File path, plus: viewable in the project's **Mockups tab** in the panel. If the 
 
 ## Non-goals
 
-- **Makes no design judgments.** Colour, type, layout, copy voice, what the alternatives are, what is worth designing at all — that is [[pavilio-ui-design]]'s job. This skill renders the direction it is given.
+- **Makes no design judgments.** Colour, type, layout, copy voice, what is worth designing at all — that is [[pavilio-ui-design]]'s job. This skill renders the direction it is given. **What the alternatives are** is [[pavilio-ui-design]]'s call on a handoff, never this skill's; only a direct invocation, with no design skill in the loop, leaves that choice here.
 - Does not interview the user about the design. The only question it ever asks is which project.
 - Does not edit application code, `PROJECT.md`, `STATUS.md`, or specs.
 - Does not commit — it writes the file and reports.

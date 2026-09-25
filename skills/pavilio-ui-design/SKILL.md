@@ -12,7 +12,7 @@ Carries the substance of the official `frontend-design` skill. That plugin does 
 **Announce at start:** "Using pavilio-ui-design to settle the direction before drawing it."
 
 <DEFINITION-OF-DONE>
-Done only when an HTML file exists on disk, written by [[pavilio-mockup]], and its path has been reported. A plan posted in the chat with no file is an unfinished run of this skill — the mirror of [[pavilio-grill]]'s "a change dir without `tasks.md`". There is no approval gate anywhere in between.
+Done only when an HTML file exists on disk, written by [[pavilio-mockup]], and its path has been reported — unless §0's one question was asked, which ends the turn legitimately. A plan posted in the chat with no file is an unfinished run of this skill — the mirror of [[pavilio-grill]]'s "a change dir without `tasks.md`". There is no approval gate anywhere in between.
 </DEFINITION-OF-DONE>
 
 ## Usage
@@ -42,7 +42,7 @@ The low interrogation level is a decision, not an oversight. Interviewing is [[p
 Write each plan compactly, in the chat, ~15 lines:
 
 - **Color** — 4–6 named hex values: ground, ink, one accent, and the states the surface actually needs. Name them for their role (`ground`, `ink`, `rail`, `live`), not for the hue.
-- **Type** — the typefaces and their roles. One family, or two that are clearly distinct. Mockups are restricted to system stacks (see [[pavilio-mockup]]), so the personality has to come from **scale, weight, width and spacing**, not from a font download. Set a real type scale; give body text a line length under ~80 characters — a serif body face takes more line-height and tolerates a longer line than a sans does. Treat the headline as an active part of the design, not a neutral vehicle for delivering the words.
+- **Type** — the typefaces and their roles. One family, or two that are clearly distinct. Mockups are restricted to system stacks (see [[pavilio-mockup]]), so the personality has to come from **scale, weight, width and spacing**, not from a font download. Set a real type scale; a serif body face takes more line-height and tolerates a longer line than a sans does, inside [[pavilio-mockup]]'s measure floor. Treat the headline as an active part of the design, not a neutral vehicle for delivering the words.
 - **Layout** — a one-sentence concept plus a small ASCII wireframe. Say the alignment. Say what the eye hits first.
 - **Principles** — 2–4 lines on what makes *this* surface this surface. Structural devices (rules, borders, numbering, dividers, labels) must encode information; if a device is decoration, cut it.
 
@@ -86,7 +86,7 @@ Not a handoff to the user — this skill performs the step itself, in the same t
    - `comparison, options A/B/C` — and with it, per option, its structural idea and what it trades off, plus which one you recommend and why, in terms of the decision. The options are yours to invent, never [[pavilio-mockup]]'s.
    - `single, direction settled by the user` — one plan, no alternatives to draw.
 
-   Announce it: "Direction settled — handing the file to pavilio-mockup (comparison, options A/B/C)." — or "(single, direction settled by the user)."
+   Announce it: "Plans settled — handing the file to pavilio-mockup (comparison, options A/B/C)." — or "(single, direction settled by the user)."
 2. That skill owns destination, filename, self-containment, the quality floor and the comparison shape. **Do not restate its rules and do not write the HTML yourself** — including "just a quick draft".
 3. Mirror of [[pavilio-grill]] §6: stopping after §3 with a plan and no file is a failure of this skill.
 
