@@ -4,11 +4,17 @@
  * ## Why this file exists at all
  *
  * A cell that has never spoken cannot show that its agent is working. The pane
- * starts closed, its only auto-opener is an arriving utterance, and the bar
- * renders launcher pills where the eye would be until the cell HAS spoken — so
- * for the whole of an agent's boot there is no control that opens the pane and
- * nothing that opens it on the cell's behalf. Pressing a launcher pill is the
- * user asking the agent to start, so the press is the second opener.
+ * starts closed and its only auto-opener is an arriving utterance, so for the
+ * whole of an agent's boot nothing opens it on the cell's behalf. Pressing a
+ * launcher pill is the user asking the agent to start, so the press is the
+ * second opener.
+ *
+ * The bar used to hide the eye until the cell had spoken, which made the press
+ * the ONLY opener in that window — and left the pane with no way back once
+ * Escape had closed it. The eye is on the row from mount now
+ * (`SpeechControlBar.alwaysTransport.test.tsx`), so the press is no longer the
+ * only way in; it is still an opener, because a user who pressed a button
+ * should be shown what it did rather than having to go and ask.
  *
  * ## Why it is driven through the whole cell
  *
@@ -238,10 +244,14 @@ afterEach(() => {
 describe("a launcher press opens the answer pane", () => {
   it("a delivered launcher press opens the pane on the waiting state", async () => {
     render(cell(makeSpeech()));
-    // The cell has never spoken: the pane is closed, and there is no eye on the
-    // row to open it with — which is the whole reason the press has to.
+    // The cell has never spoken, so the pane is closed. The eye is on the row
+    // — it has been since the strip stopped being conditional — but nothing
+    // has pressed it, which is what makes the press below the opener.
     expect(pane()).toBeNull();
-    expect(screen.queryByTestId(`speech-bar-eye-${SESSION}`)).toBeNull();
+    expect(screen.getByTestId(`speech-bar-eye-${SESSION}`)).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
 
     fireEvent.click(launcher());
     await settleSubmit();

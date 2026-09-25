@@ -789,6 +789,28 @@ input[type="checkbox"] {
   padding: 0 1px;
 }
 
+/* ...but not before the cell has spoken. The transport strip is on the row
+   from mount now — the eye has a pane to open from the first launcher press,
+   so hiding the strip left that pane with no way back — and the launcher pills
+   share the line with it until the first answer lands. Two `flex: 1` boxes in
+   one 56px row is one too many, and the scrubber is the one with nothing in
+   it: no units, so no segments, so its `min-width` would hold a blank gap open
+   in exactly the space the pills are for.
+
+   LONGHANDS, not the `flex` shorthand. `flex: 0 0 0` would be shorter and
+   would also reset `flex-shrink`, which is not this rule's business; spelling
+   out the two parts that change says that the strip keeps shrinking like any
+   other item and simply stops CLAIMING width. The padding goes with them
+   because a 2px box between the transport and the pills is a gap nobody asked
+   for. Nothing here touches height — the row is a fixed 56px spent at mount,
+   and this rule must never be a reason it moves. */
+.speech-bar-scrub[data-empty="1"] {
+  flex-grow: 0;
+  flex-basis: 0;
+  min-width: 0;
+  padding: 0;
+}
+
 /* One segment per speech unit. The axis is UNITS, not seconds: a response is
    many synthesized files, so there is no single timeline to scrub. */
 .speech-bar-seg {
