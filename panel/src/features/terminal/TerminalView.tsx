@@ -7,11 +7,14 @@ import {
 } from "./terminalInstances";
 import { AnswerPane } from "./AnswerPane";
 import {
+  closeAnswerPaneOpenedForWait,
+  keepAnswerPaneOpen,
   markSeenUtterances,
   setAnswerPaneAutoOpen,
   setAnswerPaneOpen,
   useAnswerPaneState,
 } from "./answerPaneState";
+import { useAnswerWaiting } from "./answerWaiting";
 import { captureBufferSnapshot } from "./bufferSnapshot";
 import { SpeechControlBar } from "./SpeechControlBar";
 import { useMobileReconnect } from "./useMobileReconnect";
@@ -130,10 +133,44 @@ export function TerminalView({
       .filter((u) => u !== null)
       .map((u) => u.id);
     const arrived = markSeenUtterances(sessionId, ids).length > 0;
+    // There is something behind the wave now. Said on EVERY arrival, ahead of
+    // the switch and of the bar alike, because it is a fact about the cell and
+    // not a decision about the pane: a pane a launcher press opened is no
+    // longer the press's to close once the agent it asked for has spoken, and
+    // the effect below must not take the answer away when that agent later
+    // goes quiet. Unconditional for the same reason the recording above is —
+    // the answer exists whether or not this cell is currently showing it.
+    if (arrived) keepAnswerPaneOpen(sessionId);
     // The bar's visibility outranks the switch, as it outranks the eye. The
     // arrival is still recorded above: it is not held back for the bar's return.
     if (arrived && autoOpen && speechBarVisible) setAnswerPaneOpen(sessionId, true);
   }, [sessionId, queue, autoOpen, speechBarVisible]);
+
+  // The press's opener has no closer of its own, and needs one. A pane opened
+  // by a launcher press was opened to show the wave and nothing else, so when
+  // the wave goes with no answer behind it — the agent booted, worked and
+  // finished without ever speaking, which is the exit `answerWaiting` calls
+  // the silent-agent one — what is left is an empty box over a terminal the
+  // user wants to see.
+  //
+  // It is OBSERVED here rather than driven from the state machine, and that is
+  // the whole reason it lives in this file. `answerWaiting` owns when a wait
+  // ends and `answerPaneState` owns whether the pane is open; neither may
+  // reach into the other (see the header of `answerWaiting`, where every arrow
+  // points the same way), and this view is the one place that reads both. So
+  // the end of a wait arrives here as an ordinary render and the pane is put
+  // back exactly as the press found it.
+  //
+  // `closeAnswerPaneOpenedForWait` is a no-op for every pane the press did not
+  // open, which is what keeps this from closing a pane the user opened with
+  // the eye, or one showing an answer that has since landed. Declared AFTER
+  // the arrival effect above so that, in a commit carrying both, the arrival
+  // has already said the pane is no longer the press's.
+  const { waiting } = useAnswerWaiting(sessionId);
+  useEffect(() => {
+    if (waiting) return;
+    closeAnswerPaneOpenedForWait(sessionId);
+  }, [sessionId, waiting]);
 
   // Escape in the pane: close it and put the keyboard back in the terminal,
   // so the next question can be typed at once. `LiveTerminal.terminal` is the

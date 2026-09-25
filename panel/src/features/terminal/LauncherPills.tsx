@@ -1,6 +1,8 @@
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { toast } from "../../lib/toast";
+import { openAnswerPaneForWait } from "./answerPaneState";
+import { noteAgentStarting } from "./answerWaiting";
 import { noteLauncherUsed, useLauncherUsed } from "./launcherUse";
 import { submitToPty } from "./ptySubmit";
 import { getSessions } from "./sessionStore";
@@ -64,6 +66,41 @@ function sessionStartCommand(sessionId: string): string {
  * `submitToPty` writes a queued submit a gap later (see `SubmitReport` on
  * `ptySubmit`): a value returned from the click would be a guess about a write
  * that had not happened yet.
+ *
+ * ## Why a delivered press also takes the pane
+ *
+ * A press is the user asking this cell's agent to start, and until now the
+ * cell had no way to show that it had. A cell that has never spoken starts
+ * with the pane closed and these very pills where the eye would be, so there
+ * is no control that opens the pane and no arriving utterance to open it
+ * either — the panel's whole answer to "is anything happening in here?" was
+ * the terminal itself. So a press that LANDED hands the body over
+ * ({@link noteAgentStarting}) and opens the pane on the wave it produces.
+ *
+ * Both are hung on delivery rather than on the click, for the reason the row
+ * swap already is: a command the socket refused advances nothing, and a pane
+ * that opened anyway would be claiming an agent had been asked for when the
+ * frame never left the browser.
+ *
+ * The ORDER is load-bearing and not cosmetic. The wait is begun first so that
+ * no render can ever observe an open pane with no wait behind it — which is
+ * exactly the state `TerminalView`'s closer reads as "the agent finished
+ * without speaking" and would answer by closing the pane on the frame it was
+ * opened.
+ *
+ * It is unconditional in one respect that is easy to misread as a bug: it does
+ * NOT consult the cell's "Open on new answer" switch. That switch means *open
+ * the pane when a new answer arrives*; a press is a different event, and a
+ * user pressing a button and being shown the result of pressing it needs no
+ * separate opt-in. The bar's visibility does still outrank it, in the most
+ * literal way available — these pills are IN the bar, so a hidden bar has no
+ * pill to press, and `TerminalView` closes the pane if the bar goes away while
+ * the wave is up.
+ *
+ * The `start` pill goes through here too, deliberately. It only ever shows in
+ * the same window — an agent that has launched and not yet spoken — and
+ * re-issuing `pavilio-session-start` into it is the same request, so it earns
+ * the same wave.
  */
 function runCommand(
   sessionId: string,
@@ -72,7 +109,11 @@ function runCommand(
   onDelivered?: () => void,
 ): void {
   submitToPty(sessionId, send, command, {
-    onDelivered,
+    onDelivered: () => {
+      noteAgentStarting(sessionId);
+      openAnswerPaneForWait(sessionId);
+      onDelivered?.();
+    },
     onFailed: (stage) => {
       toast.error(
         stage === "body"
