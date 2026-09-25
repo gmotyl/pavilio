@@ -48,9 +48,19 @@ let exited = false;
  */
 let reopenThrows = false;
 
-/** Hand a connection verdict to everything subscribed for that session. */
+/**
+ * Hand a connection verdict to everything subscribed for that session.
+ *
+ * Over a COPY of the set, because that is what production does:
+ * `emitConnectionState` iterates `[...listeners]`. A listener added DURING an
+ * emit is therefore visited by a naive mock and never by the real thing — and
+ * this emit is precisely where one is added, because a queued submit
+ * subscribes from inside the settle of the submit ahead of it. A double more
+ * forgiving than production masks exactly the re-entrancy these tests exist to
+ * find.
+ */
 function emit(sessionId: string, state: ConnectionState): void {
-  for (const cb of listeners.get(sessionId) ?? []) cb(state);
+  for (const cb of [...(listeners.get(sessionId) ?? [])]) cb(state);
 }
 
 vi.mock("../terminalInstances", () => ({

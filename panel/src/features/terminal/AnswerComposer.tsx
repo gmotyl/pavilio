@@ -278,18 +278,34 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    */
   const [failure, setFailure] = useState<SubmitFailure | null>(null);
   /**
-   * Whether a submit made from this field is still in flight.
+   * How many submits made from this field are still unsettled.
    *
-   * A boolean rather than a count, for the same reason {@link failure} is not
-   * a history: at most one submit can be unsettled here at a time — a second
-   * Enter starts a second submit, and what the row says is about the latest.
+   * A COUNT and not a boolean, and the boolean it replaces carried a comment
+   * saying "at most one submit can be unsettled here at a time" that was
+   * simply untrue. {@link submit} has no guard: a second Enter on a socket
+   * that is flapping enqueues a second submit inside `ptySubmit`'s per-session
+   * queue, and the two are then unsettled together. With a boolean, the FIRST
+   * one to settle cleared it — so the second spent its whole three-second
+   * reconnect wait with no row at all, which is an empty box and a send that
+   * visibly did nothing: the exact symptom this row was added to remove.
    *
-   * On a live socket this is set and cleared inside one event handler, so it
-   * is batched away and the user never sees it. It becomes visible exactly
+   * Nothing else needed to change with it. Each submit raises exactly one of
+   * `onDelivered`/`onFailed` ({@link SubmitReport}), so every increment has
+   * exactly one decrement, and a refused RETURN — the one case that raises
+   * both — is raised for a submit whose delivery already decremented.
+   *
+   * {@link failure} stays a single value rather than a history for its own
+   * reason: what the user needs is the standing of the reply in front of them,
+   * not a log. A count is not a history; it is how many answers are still
+   * owed.
+   *
+   * On a live socket this is raised and lowered inside one event handler, so
+   * it is batched away and the user never sees it. It becomes visible exactly
    * where it is needed: a submit queued behind another, and the three-second
    * reconnect wait.
    */
-  const [pending, setPending] = useState(false);
+  const [unsettled, setUnsettled] = useState(0);
+  const pending = unsettled > 0;
   const { height, isMobile, handleProps } = useResizableRow(
     preferences.answerComposerHeight,
     BOUNDS,
@@ -333,7 +349,10 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // The last submit's verdict is spent the moment a new one is made, and
     // this one has no verdict yet.
     setFailure(null);
-    setPending(true);
+    // One more answer owed. Raised with an updater rather than from `pending`,
+    // because a settle that lands between this render and this call would
+    // otherwise be written back out of existence.
+    setUnsettled((n) => n + 1);
     // Nothing is cleared here. The draft is spent by DELIVERY, in the callback
     // below — see the note on this component: a clear made on the strength of
     // an Enter is a clear made before anything is known, and the verdict can
@@ -351,7 +370,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
       // it was read, and a reply the socket went on to refuse put the pane
       // into a wait for an answer to something the agent had never been told.
       onDelivered: () => {
-        setPending(false);
+        setUnsettled((n) => n - 1);
         // The frame is on the socket, which is the first moment this reply
         // exists anywhere but in this browser — so this is the moment it stops
         // being a draft.
@@ -359,7 +378,11 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         onSubmitted();
       },
       onFailed: (stage) => {
-        setPending(false);
+        // A refused RETURN comes after a delivery that already lowered this,
+        // which is why the decrement is here rather than shared: each submit
+        // raises exactly one of these two callbacks, and the return's refusal
+        // is raised on the same report object as its own body's delivery was.
+        if (stage === "body") setUnsettled((n) => n - 1);
         setFailure(stage);
         // Nothing to put back on EITHER half now. A refused body never cleared
         // the field in the first place, so the reply is simply still there,
@@ -563,10 +586,12 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           the hint — a phone is exactly where a socket drops, and there is no
           second place there to notice it.
 
-          ONE row for both, replaced in place: "sending" and "not sent" are the
-          same question answered at two moments, and a pending line above a
-          failure line would leave the user reading two notices about one
-          Enter. It is taken down on either outcome, because both settle it.
+          ONE row for both, in one place: "sending" and "not sent" are the same
+          question answered at two moments, and a pending line above a failure
+          line would leave the user reading two notices about one Enter. It is
+          taken down on either outcome, because both settle it — and while more
+          than one submit is unsettled it stays up until the LAST of them
+          settles, which is what the count behind `pending` is for.
 
           The verdict is announced and the wait is not: `role="alert"` is
           assertive and interrupts, which is right for news the user cannot see
@@ -574,18 +599,22 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           a progress note that will be replaced within three seconds. The wait
           gets `role="status"`, the polite half of the same pair.
 
-          The pending ink is inline because the row's own colour is `--red`,
-          which is the right colour for a refusal and a lie about a send that
-          is merely in progress. The stylesheet is out of this change's scope;
-          a `.answer-pane-send-failed[data-state="pending"]` rule there is
-          where this belongs the moment that scope opens. */}
+          The `key` is what makes that pair take effect. A live region's
+          politeness is computed when the region is ATTACHED, so a role swapped
+          on a node that stayed in the document is not reliably re-evaluated —
+          and one row for two states is exactly such a node: React would reuse
+          it, and the assertive verdict would most likely be announced
+          politely. A key that changes with the state makes React unmount the
+          old region and attach a new one with the role it is meant to have.
+          Same position, same class, same testid — one element in the layout,
+          two regions over its life. */}
       {failure === null && !pending ? null : (
         <div
+          key={failure === null ? "pending" : "failed"}
           className="answer-pane-send-failed"
           data-testid={`answer-pane-send-failed-${sessionId}`}
           data-state={failure === null ? "pending" : "failed"}
           role={failure === null ? "status" : "alert"}
-          style={failure === null ? { color: "var(--text-tertiary)" } : undefined}
         >
           {failure === null ? PENDING_TEXT : FAILURE_TEXT[failure]}
         </div>

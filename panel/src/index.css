@@ -1433,6 +1433,21 @@ input[type="checkbox"] {
   color: var(--red);
 }
 
+/* The same row before there is a verdict: a send is in flight and may be up to
+   three seconds from an answer. `--red` would be a lie about a submit that has
+   not failed, so the wait gets an ink of its own — quieter than the refusal,
+   and quieter than the answer above it, without being unreadable.
+
+   `--text-secondary` and NOT `--text-tertiary`, which is what this row wore
+   while the colour lived in an inline style. Tertiary (#6d6b67) on this row's
+   #17171d is 3.36:1, and WCAG AA asks 4.5:1 of normal text — which 10px
+   JetBrains Mono emphatically is. Secondary (#9d9b97) is 6.43:1.
+   `AnswerComposer.pendingRow.test.tsx` computes both ratios rather than
+   trusting this comment. */
+.answer-pane-send-failed[data-state="pending"] {
+  color: var(--text-secondary);
+}
+
 /* What the three keys do, in the pane's dimmest ink. Desktop only — two of
    them do not exist on a phone — so nothing here has a mobile case. */
 .answer-pane-hint {
