@@ -1068,11 +1068,23 @@ describe("the keyboard transport, mounted", () => {
     await pressTransport("ArrowRight");
     expect(played).toEqual(["blob:The first answer.", "blob:The second answer."]);
 
+    // Back is NAVIGATION and makes no sound — the asymmetry with the arrow
+    // above is deliberate, so the backlog can be skimmed without every step
+    // talking over the last. The chord still has to reach `onPrevious`, though,
+    // and silence alone cannot tell "the cursor moved quietly" apart from "the
+    // key did nothing at all".
     await pressTransport("ArrowLeft");
+    expect(played).toEqual(["blob:The first answer.", "blob:The second answer."]);
+
+    // So the forward chord is what reads the cursor back out: coming out of
+    // history it speaks the answer it returns onto. With the cursor still at
+    // the front and nothing pending, `next` would have had nothing to step to
+    // and this would have stayed silent.
+    await pressTransport("ArrowRight");
     expect(played).toEqual([
       "blob:The first answer.",
       "blob:The second answer.",
-      "blob:The first answer.",
+      "blob:The second answer.",
     ]);
   });
 });
