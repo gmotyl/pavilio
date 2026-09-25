@@ -69,7 +69,12 @@ export default function MarkdownViewer() {
     filePath.endsWith(".md") ||
     (filePath.startsWith("_skills/") && !filePath.includes("."));
   const isJson = filePath.endsWith(".json");
-  const isHtml = filePath.endsWith(".html");
+  // A mockup frame is only honest for a path the raw route can actually serve.
+  // `/raw/*path` resolves against the projects dir (with a repo-root fallback)
+  // and takes no `root` query, so a cross-root `_root/<rootId>/…` path would
+  // load an empty frame with no error. Those fall through to the source text.
+  const isCrossRoot = filePath.split("/")[0] === "_root";
+  const isHtml = filePath.endsWith(".html") && !isCrossRoot;
 
   // The toolbar above an open file is `ViewerActions`, the same component the
   // project file viewer and the plans tab mount — VS Code, copy-path and

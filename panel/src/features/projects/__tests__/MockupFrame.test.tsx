@@ -109,6 +109,27 @@ describe("MockupFrame", () => {
     expect(frame().style.width).toBe("100%");
   });
 
+  it("reports the selected width through aria-pressed", () => {
+    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+
+    // Colour alone does not reach assistive tech, so the pressed state is the
+    // only signal of which width is active — and it has to follow the selection.
+    const pressed = () =>
+      ["full", "tablet", "phone"].map((id) =>
+        screen
+          .getByTestId(`mockup-viewer-width-${id}`)
+          .getAttribute("aria-pressed"),
+      );
+
+    expect(pressed()).toEqual(["true", "false", "false"]);
+
+    fireEvent.click(screen.getByTestId("mockup-viewer-width-phone"));
+    expect(pressed()).toEqual(["false", "false", "true"]);
+
+    fireEvent.click(screen.getByTestId("mockup-viewer-width-tablet"));
+    expect(pressed()).toEqual(["false", "true", "false"]);
+  });
+
   it("wraps the frame in a row that centers it horizontally", () => {
     render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
 

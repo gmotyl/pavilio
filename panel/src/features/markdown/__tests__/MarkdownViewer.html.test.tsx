@@ -108,6 +108,18 @@ describe("MarkdownViewer html handling", () => {
     expect(screen.queryByText(/doctype html/)).toBeNull();
   });
 
+  it("renders a cross-root html file as source, not in a frame", async () => {
+    // `/view/_root/<rootId>/<path>` is how the explorer links a file outside the
+    // projects root. The raw route the frame points at has no `root` support, so
+    // the iframe would load nothing — the source text is the honest fallback.
+    stubRead(MOCKUP_SOURCE, "/root/git/prv/projects/skills/tdd/mock.html");
+    const { container } = renderViewer("_root/skills/tdd/mock.html");
+
+    await waitFor(() => expect(container.querySelector("pre")).not.toBeNull());
+    expect(container.querySelector("pre")).toHaveTextContent("doctype html");
+    expect(screen.queryByTestId("markdown-viewer-frame")).toBeNull();
+  });
+
   it("still renders markdown with the markdown renderer", async () => {
     stubRead("# Hello", "/root/git/prv/projects/projects/pavilio/notes/a.md");
     renderViewer("pavilio/notes/a.md");
