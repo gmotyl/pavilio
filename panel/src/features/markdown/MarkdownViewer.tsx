@@ -1,6 +1,7 @@
 import { useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useActiveFile } from "../explorer/useActiveFile";
+import MockupFrame from "../projects/MockupFrame";
 import ViewerActions from "../projects/ViewerActions";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
@@ -62,21 +63,37 @@ export default function MarkdownViewer() {
     }
   }, [lastMessage]);
 
+  // _skills/<name> resolves to skills/<name>/SKILL.md on the server; _help/<x.md> is markdown.
+  // Treat these virtual paths as markdown even without a .md suffix in the URL.
+  const isMarkdown =
+    filePath.endsWith(".md") ||
+    (filePath.startsWith("_skills/") && !filePath.includes("."));
+  const isJson = filePath.endsWith(".json");
+  // A mockup frame is only honest for a path the raw route can actually serve.
+  // `/raw/*path` resolves against the projects dir (with a repo-root fallback)
+  // and takes no `root` query, so a cross-root `_root/<rootId>/…` path would
+  // load an empty frame with no error. Those fall through to the source text.
+  const isCrossRoot = filePath.split("/")[0] === "_root";
+  const isHtml = filePath.endsWith(".html") && !isCrossRoot;
+
   // The toolbar above an open file is `ViewerActions`, the same component the
   // project file viewer and the plans tab mount — VS Code, copy-path and
   // copy-content, with one shared revert timer so only one confirms at a time.
   // The prefix keeps this screen's published `markdown-viewer-*` test ids.
   // While a file switch is in flight `content` still holds the previous file's
   // text, so it is withheld until this one has loaded.
+  // A mockup is the exception: `MockupFrame` brings its own toolbar above the
+  // frame (the width picker belongs next to it), so the breadcrumb slot stays
+  // empty rather than mounting a second copy of the same buttons.
   useBreadcrumbActions(
-    absolutePath ? (
+    absolutePath && !isHtml ? (
       <ViewerActions
         absolutePath={absolutePath}
         content={loading ? null : content}
         testIdPrefix="markdown-viewer"
       />
     ) : null,
-    [absolutePath, content, loading],
+    [absolutePath, content, loading, isHtml],
   );
 
   useFloatingAction(<WideToggle wide={wide} onToggle={toggleWide} />, [
@@ -91,12 +108,20 @@ export default function MarkdownViewer() {
       </div>
     );
 
-  // _skills/<name> resolves to skills/<name>/SKILL.md on the server; _help/<x.md> is markdown.
-  // Treat these virtual paths as markdown even without a .md suffix in the URL.
-  const isMarkdown =
-    filePath.endsWith(".md") ||
-    (filePath.startsWith("_skills/") && !filePath.includes("."));
-  const isJson = filePath.endsWith(".json");
+  // An html file is a mockup: render it, do not show its source. Same frame
+  // component the mockups tab mounts, so both copy the same workspace-relative
+  // path. It owns the full pane height and skips the image drop zone, which
+  // only means something for markdown.
+  if (isHtml)
+    return (
+      <div className="p-6 h-full min-h-0">
+        <MockupFrame
+          filePath={filePath}
+          absolutePath={absolutePath}
+          testIdPrefix="markdown-viewer"
+        />
+      </div>
+    );
 
   return (
     <div className={`p-6 ${wide ? "" : "max-w-5xl"}`}>

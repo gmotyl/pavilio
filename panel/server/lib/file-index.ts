@@ -25,7 +25,8 @@ function walk(dir: string, projectsDir: string): FileEntry[] {
     } else if (
       item.name.endsWith(".md") ||
       item.name.endsWith(".txt") ||
-      item.name.endsWith(".json")
+      item.name.endsWith(".json") ||
+      item.name.endsWith(".html")
     ) {
       // POSIX separators everywhere: relativePath is split on "/" here and
       // used verbatim in API responses and URLs by the frontend

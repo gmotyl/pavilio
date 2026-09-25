@@ -10,6 +10,8 @@ import SectionFilesList, { visibleSectionRows } from "./SectionFilesList";
 import { useFileListControls } from "./fileListControls";
 import { useAutoSelectNewest } from "./useAutoSelectNewest";
 import FileListSidebar from "./FileListSidebar";
+import MockupFrame from "./MockupFrame";
+import MockupsEmptyState from "./MockupsEmptyState";
 import ContextTab from "./ContextTab";
 import PlansTab from "./PlansTab";
 import ReviewRules from "../qa/ReviewRules";
@@ -36,6 +38,13 @@ import { useTabScrollMemory } from "./useTabScrollMemory";
 import ProjectTerminalsSurface from "../terminal/ProjectTerminalsSurface";
 import { TimeTrackingLink } from "../time/TimeTrackingLink";
 import { useProjectTodayMinutes } from "../time/TimeTrackingProvider";
+
+/**
+ * The extension, not the section, picks the viewer: a `.md` file living under
+ * `mockups/` is still a document, and an `.html` file is a mockup wherever it
+ * was filed.
+ */
+const isHtml = (path: string) => path.endsWith(".html");
 
 /** Sidebar headings read like the sibling tabs ("Plans", "Context"). */
 const sectionTitle = (section: string) =>
@@ -144,6 +153,11 @@ export default function ProjectView() {
           })
           .sort((a, b) => b.modified - a.modified)
       : [];
+
+  // A project has no `mockups/` folder until something writes one, so the
+  // usual "No files in this section." would be the tab's first impression.
+  // Instead the list keeps quiet and the detail pane teaches how to fill it.
+  const mockupsEmpty = section === "mockups" && sectionFiles.length === 0;
 
   const sectionControls = useFileListControls();
   const visibleRows = useMemo(
@@ -328,7 +342,7 @@ export default function ProjectView() {
               label: sectionTitle(section),
               // Same helper the rows come from, so the badge counts what renders.
               count: visibleRows.length,
-              rows: (
+              rows: mockupsEmpty ? null : (
                 <SectionFilesList
                   projectName={name || ""}
                   section={section}
@@ -343,12 +357,21 @@ export default function ProjectView() {
           aboveList={section === "qa" ? <ReviewRules project={name || ""} /> : null}
           detail={
             selectedFile ? (
-              <FileViewer
-                filePath={selectedFile}
-                content={fileViewer.content}
-                absolutePath={fileViewer.absolutePath}
-                loading={fileViewer.loading}
-              />
+              isHtml(selectedFile) ? (
+                <MockupFrame
+                  filePath={selectedFile}
+                  absolutePath={fileViewer.absolutePath}
+                />
+              ) : (
+                <FileViewer
+                  filePath={selectedFile}
+                  content={fileViewer.content}
+                  absolutePath={fileViewer.absolutePath}
+                  loading={fileViewer.loading}
+                />
+              )
+            ) : mockupsEmpty ? (
+              <MockupsEmptyState projectName={name || ""} />
             ) : (
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
                 Select a file to view.
