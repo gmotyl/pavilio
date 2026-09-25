@@ -15,6 +15,9 @@ import {
   useAnswerPaneState,
 } from "./answerPaneState";
 import { useAnswerWaiting } from "./answerWaiting";
+import { BootLegend } from "./BootLegend";
+import { hasSeenBootLegend, markBootLegendSeen } from "./bootLegendSeen";
+import { useLauncherUsed } from "./launcherUse";
 import { captureBufferSnapshot } from "./bufferSnapshot";
 import { SpeechControlBar } from "./SpeechControlBar";
 import { useMobileReconnect } from "./useMobileReconnect";
@@ -108,6 +111,14 @@ export function TerminalView({
   // written back to it.
   const { open: answerOpen, autoOpen } = useAnswerPaneState(sessionId);
 
+  // Whether this cell is currently showing the boot legend. Declared up here,
+  // with the rest of the view's state, because three effects below turn it off
+  // — an answer arriving, the wait ending, and the legend's own dismissal —
+  // and the first of them is written before the effect that ever turns it ON.
+  // What ARMS it, and why it cannot be read off the waiting snapshot, is the
+  // long note further down.
+  const [legendUp, setLegendUp] = useState(false);
+
   // Hiding the bar CLOSES the pane rather than merely covering it — a pane
   // without its bar has no eye to close it, and one that came back unasked
   // when the bar returned would be a surprise.
@@ -144,6 +155,10 @@ export function TerminalView({
     // The bar's visibility outranks the switch, as it outranks the eye. The
     // arrival is still recorded above: it is not held back for the bar's return.
     if (arrived && autoOpen && speechBarVisible) setAnswerPaneOpen(sessionId, true);
+    // The legend stood in for a pane with nothing in it. There is something in
+    // it now, and a teaching overlay across the answer the user asked for is
+    // the legend outstaying the moment it was for.
+    if (arrived) setLegendUp(false);
   }, [sessionId, queue, autoOpen, speechBarVisible]);
 
   // The press's opener has no closer of its own, and needs one. A pane opened
@@ -166,11 +181,70 @@ export function TerminalView({
   // the eye, or one showing an answer that has since landed. Declared AFTER
   // the arrival effect above so that, in a commit carrying both, the arrival
   // has already said the pane is no longer the press's.
-  const { waiting } = useAnswerWaiting(sessionId);
+  const { waiting, pending } = useAnswerWaiting(sessionId);
   useEffect(() => {
     if (waiting) return;
     closeAnswerPaneOpenedForWait(sessionId);
+    // The wave is what the legend was drawn over. With the wait finished there
+    // is either an answer (dismissed by the arrival above) or an empty pane on
+    // its way closed, and a legend over either is an overlay with no subject.
+    setLegendUp(false);
   }, [sessionId, waiting]);
+
+  /**
+   * THE BOOT LEGEND'S TRIGGER — and why it is this signal and not the snapshot.
+   *
+   * The waiting state has three triggers and the legend must fire on exactly
+   * one: the user pressing a launcher pill on a cell whose controls they have
+   * never met. The snapshot cannot tell them apart. A send yields
+   * `{waiting: true, pending: true}` — distinguishable — but a launcher press
+   * and a debounced busy spell BOTH yield the one frozen `AGENT_HAS_THE_BODY`
+   * object, by construction (`answerWaiting`'s `derive` returns it for
+   * `entry.starting || agentHasTheBody`), and `starting` is deliberately not
+   * exported. `answerPaneState`'s `openedForWait` is not readable either.
+   *
+   * So the trigger is read from the module that owns the fact itself:
+   * `launcherUse` records a launcher command that was DELIVERED — it is set
+   * from `LauncherPills`' `onDelivered`, the same callback that calls
+   * `noteAgentStarting`. That is not a proxy for the press; it IS the press,
+   * reported by the only code that knows the frame landed.
+   *
+   * It is armed on the RISING EDGE rather than on the level, and that is
+   * load-bearing rather than tidy. The flag stays true for the life of the
+   * cell, so a level test would also be satisfied by a busy spell arming the
+   * body an hour later on the same cell — and it would then be `bootLegendSeen`
+   * alone stopping the legend from appearing on the wrong trigger. The
+   * discrimination must not lean on the seen flag: one of them decides WHICH
+   * event teaches, the other decides HOW OFTEN, and a rule that conflates them
+   * shows the legend on a busy transition the first time a browser meets one.
+   *
+   * `waiting && !pending` is asked as well, at the moment of the edge: a
+   * delivered press that somehow left no wait behind has nothing to draw over,
+   * and a press made while a draft is still outstanding belongs to the send.
+   *
+   * ON A REMOUNT MID-BOOT the legend does not come back, and that is the
+   * intended reading. `lastLauncherUsed` is seeded from the CURRENT value at
+   * mount, so a view remounted by a maximize or a preset while the agent is
+   * still booting sees no edge. The user made a gesture; the overlay goes, like
+   * it does for Escape. It could not return anyway — the browser was marked
+   * taught the moment it was first shown, which is the whole cost of the
+   * feature.
+   */
+  const launcherUsed = useLauncherUsed(sessionId);
+  const lastLauncherUsed = useRef(launcherUsed);
+  useEffect(() => {
+    const rose = launcherUsed && !lastLauncherUsed.current;
+    lastLauncherUsed.current = launcherUsed;
+    if (!rose || !waiting || pending) return;
+    if (hasSeenBootLegend()) return;
+    // Written on SHOWING, not on dismissing — see `bootLegendSeen`, where the
+    // reason lives: every way out of the legend is the user having seen it, and
+    // picking one of them as the real one would teach a maximized cell twice.
+    markBootLegendSeen();
+    setLegendUp(true);
+  }, [launcherUsed, waiting, pending]);
+
+  const dismissLegend = useCallback(() => setLegendUp(false), []);
 
   // Escape in the pane: close it and put the keyboard back in the terminal,
   // so the next question can be typed at once. `LiveTerminal.terminal` is the
@@ -349,6 +423,26 @@ export function TerminalView({
           onToggleAnswer={() => setAnswerPaneOpen(sessionId, !answerOpen)}
           send={send}
         />
+      ) : null}
+      {/* THE BOOT LEGEND — a SIBLING of the row above and of the terminal area
+          below, which is the entire reason it is mounted here rather than
+          inside the pane.
+
+          The pane is absolutely positioned inside the terminal-area wrapper
+          and cannot draw one pixel outside that box; both controls the legend
+          names — the eye and the transport — are in the row ABOVE that box. A
+          legend rendered as pane content would have its leader lines clipped at
+          the pane's own top edge, which is exactly where the row begins. At
+          this level the cell root's `relative` is what the overlay's `inset: 0`
+          resolves against, so the row is inside its coordinate space and a
+          leader can arrive on a control in it.
+
+          Gated on the bar the same way the pane is, and for a sharper reason
+          than the pane's: with the row hidden the two controls the legend
+          points at are not on screen at all, so the callouts would name
+          nothing and the leaders would end in the cell's own margin. */}
+      {speech && speechBarVisible && legendUp ? (
+        <BootLegend sessionId={sessionId} onDismiss={dismissLegend} />
       ) : null}
       {/* THE TERMINAL AREA: the column cell the xterm fills, and the pane's
           positioning context.

@@ -1246,6 +1246,20 @@ input[type="checkbox"] {
   .answer-pane-waiting-next .answer-pane-wave * {
     animation: none;
   }
+
+  /* The legend joins the SAME query rather than opening a second one. Two
+     queries for the same preference are two places to keep a rule in step, and
+     the note above is only true while there is one. `*` for the reason the
+     wave's selector carries it: the ornament may grow a part, and this must
+     stop that part too.
+
+     Same rule as the wave's, too: the movement goes, the SHAPE stays. The
+     leaders are how the legend says which control each callout is about — a
+     `display: none` here would leave two floating boxes naming nothing. */
+  .boot-legend,
+  .boot-legend * {
+    animation: none;
+  }
 }
 
 /* The reply, at the foot of the pane and under the two switches.
@@ -1544,3 +1558,121 @@ input[type="checkbox"] {
    nothing of its own: the rail's playing segment and playhead beside it are
    the mark, and a tinted block on top of them was too loud (smoke test,
    2026-09-16). */
+
+/* ── THE BOOT LEGEND ──────────────────────────────────────────────────────────
+
+   Two callouts over the cell, each on a leader line ending on the control it
+   names, shown once per browser while a cell waits for the agent it was just
+   asked to start.
+
+   A CELL-LEVEL overlay, and the geometry is why. It covers the whole cell —
+   `inset: 0` against the cell root's `relative` — because the two controls it
+   points at are in the speech row and the pane below that row cannot draw
+   outside its own box. `BootLegend.tsx`'s header carries the full argument.
+
+   IT MUST NOT EAT THE PRESS IT IS TEACHING. The overlay spans the row, so a
+   `pointer-events: auto` sheet here would swallow the click on the eye — the
+   legend would be pointing at a control it had itself made unclickable. The
+   root is therefore transparent to the pointer and only the callouts take it
+   back, which is also what leaves the terminal under it usable. */
+.boot-legend {
+  position: absolute;
+  inset: 0;
+  /* Above the answer pane's 4: the legend is drawn over the wave, and over the
+     row, which is the one thing in the cell it has to reach across. */
+  z-index: 6;
+  pointer-events: none;
+}
+
+/* `overflow: visible` because a leader leaves this box by construction: the
+   callouts sit below the row and the lines run UP into it. */
+.boot-legend-leads {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.boot-legend-leads path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  stroke-dasharray: 3 3;
+  opacity: 0.75;
+}
+
+.boot-legend-leads circle {
+  fill: var(--accent);
+}
+
+/* The callouts sit in a band under the row — 56px of row plus its hairline,
+   plus room for the line itself. Parked at the two ends on `data-leader`,
+   because that is the side each control is actually on: the transport is the
+   first thing after the arm switch, the eye is the last control on the line. */
+.boot-legend-callout {
+  position: absolute;
+  top: 82px;
+  max-width: 190px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  /* The one thing on this overlay a pointer may reach — see the root's note. */
+  pointer-events: auto;
+  animation: boot-legend-in 180ms ease-out both;
+}
+
+.boot-legend-callout[data-leader="transport"] {
+  left: 10px;
+}
+
+.boot-legend-callout[data-leader="eye"] {
+  right: 10px;
+}
+
+.boot-legend-callout b {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* A short arrival, once, so the pair reads as one thing appearing rather than
+   as two boxes that were always there. Stopped under `prefers-reduced-motion`
+   with the wave — see the single query above. */
+@keyframes boot-legend-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A narrow cell cannot carry two 190px boxes on one line. Below this the
+   legend keeps the callout for the EYE alone: it is the control with no other
+   way in — the transport is reachable by trying it, and does nothing harmful
+   when pressed early — and one callout that fits teaches more than two that
+   overlap. */
+@media (max-width: 520px) {
+  .boot-legend-callout[data-leader="transport"] {
+    display: none;
+  }
+
+  .boot-legend-callout[data-leader="eye"] {
+    max-width: none;
+    left: 10px;
+    right: 10px;
+  }
+}

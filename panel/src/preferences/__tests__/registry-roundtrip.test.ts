@@ -39,6 +39,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "git.commitsOpen": [true, false],
   "git.branchDiff.open": [true, false],
   "git.worktree.expanded": [true, false],
+  "terminal.bootLegend.seen": [true, false],
   "terminal.drawer.open": [true, false],
   "terminal.maximized": [true, false],
   "speech.answerPane.autoOpen": [true, false],
@@ -94,7 +95,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 38;
+const DECLARATION_COUNT = 39;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
