@@ -295,15 +295,30 @@ const previousButton = (): HTMLElement => screen.getByTestId(`speech-bar-previou
 
 const nextButton = (): HTMLElement => screen.getByTestId(`speech-bar-next-${SESSION}`);
 
+/** The debounce window these tests run under, pinned on the boot document. */
+const DEBOUNCE = 3000;
+
 /**
- * An activity broadcast landing while the panel is mounted. Wrapped in `act`
- * because it is the realtime channel's own listener that reaches React here —
- * the waiting store subscribes to the channel, not to anything a render did.
+ * An activity broadcast landing while the panel is mounted, followed — for a
+ * busy one — by the debounce window it opens. Wrapped in `act` because it is
+ * the realtime channel's own listener that reaches React here, and then the
+ * timer's: the waiting store subscribes to those, not to anything a render
+ * did, and only a flush turns either into the DOM these tests read.
+ *
+ * The window is elapsed here because `busy` is *the PTY emitted output* and
+ * the agent's trigger now waits it out before it may take the body. Every
+ * criterion in this file is about an ESTABLISHED busy spell; the window itself
+ * is pinned in `answerWaiting.debounce.test.ts`.
  */
 const activity = (state: "idle" | "busy" | "attention", at: number): void => {
   act(() => {
     _applyEventForTests({ sessionId: SESSION, state, at });
   });
+  if (state === "busy") {
+    act(() => {
+      vi.advanceTimersByTime(DEBOUNCE);
+    });
+  }
 };
 
 /** Type a reply and press Enter — the one gesture that starts a wait. */
@@ -317,6 +332,13 @@ beforeEach(() => {
   _resetForTests();
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
+  // The debounce on the agent's trigger is a clock, so the whole file runs on
+  // a controlled one, and on a window the file states rather than whatever the
+  // server-side default happens to be.
+  vi.useFakeTimers();
+  (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__ = {
+    answerWaveDebounceMs: DEBOUNCE,
+  };
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   installMatchMedia();
 });
@@ -326,6 +348,7 @@ afterEach(() => {
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
   vi.useRealTimers();
+  delete (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__;
 });
 
 describe("the answer pane while a reply is pending", () => {
@@ -341,6 +364,31 @@ describe("the answer pane while a reply is pending", () => {
     expect(send).toHaveBeenCalledWith("ship it");
     expect(waiting()).toBeInTheDocument();
     expect(within(body()).queryByText(ANSWER)).toBeNull();
+  });
+
+  /**
+   * The sentence names the AGENT, not a reply. The state has three triggers —
+   * a composer send, a launcher press and the session going busy on its own —
+   * and only the first of them is a reply to anybody: an agent that went to
+   * work by itself is answering no one, and a launcher press asked no
+   * question. So the label is asserted on the send trigger AND on the busy
+   * one, because the old wording was true of the first and false of the
+   * second.
+   */
+  it("the waiting state reads Waiting for agent", () => {
+    const sent = render(surfaceTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+
+    sendReply();
+    expect(within(waiting() as HTMLElement).getByText("Waiting for agent")).toBeInTheDocument();
+
+    sent.unmount();
+    __resetAnswerWaitingForTests();
+    _resetForTests();
+
+    render(surfaceTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    activity("busy", 2);
+
+    expect(within(waiting() as HTMLElement).getByText("Waiting for agent")).toBeInTheDocument();
   });
 
   it("touches nothing on the speech host when it starts waiting", () => {
@@ -716,8 +764,8 @@ describe("the waiting animation", () => {
     // whole of the state's name.
     const status = screen.getByRole("status");
     expect(status).toBe(waiting());
-    expect(status.textContent?.trim()).toMatch(/waiting for a reply/i);
-    expect(within(status).getByText(/waiting for a reply/i)).toHaveClass(
+    expect(status.textContent?.trim()).toMatch(/waiting for agent/i);
+    expect(within(status).getByText(/waiting for agent/i)).toHaveClass(
       "answer-pane-waiting-label",
     );
 
@@ -812,14 +860,14 @@ describe("the marks on the answer that comes back", () => {
  * The count of what has not been played, and the way back out of a hold.
  *
  * Both live on the waiting state's own surface, and both are derivations —
- * `unreadAnswerCount` over the `heard` set the channel already keeps, and the
- * hold `answerWaiting` already owns. Nothing here records a new fact, which is
+ * `unplayedSinceLastPlayed` over the `heard` set the channel already keeps,
+ * and the hold `answerWaiting` already owns. Nothing here records a new fact, which is
  * why the fixtures can say what the cell holds and what has been heard and the
  * assertions can be about what is on screen.
  */
 
 /** The count the waiting state puts on screen, or `null` when it shows none. */
-const unreadCount = (): HTMLElement | null =>
+const notPlayedCount = (): HTMLElement | null =>
   screen.queryByTestId(`answer-pane-waiting-count-${SESSION}`);
 
 /** The *Next answer* control: the wave, moved out of the body onto a button. */
@@ -829,6 +877,9 @@ const nextAnswerControl = (): HTMLElement | null =>
 /**
  * A cell holding four answers the transport can reach: two steps of history,
  * the one on screen, and one waiting behind it.
+ *
+ * `previous` is newest first, so the ARRIVAL order here is u-1, u-2, u-3, u-4
+ * — which is the order the count walks.
  */
 const BACKLOG: UtteranceQueue = {
   previous: [utterance("u-2", NEXT_ANSWER), utterance("u-1", NEXT_ANSWER)],
@@ -841,26 +892,65 @@ const heardOf = (...ids: string[]): ReadonlySet<string> => new Set(ids);
 
 describe("the waiting state counts what has not been played", () => {
   it("shows how many answers have not been played", () => {
-    // Four reachable, one of them already played: three are still unheard.
+    // The last played is the oldest of the four, so the three that arrived
+    // after it are the backlog.
     render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
 
-    const count = unreadCount();
+    const count = notPlayedCount();
     expect(count).toBeInTheDocument();
     expect(count?.textContent).toMatch(/\b3\b/);
   });
 
-  it("shows no count when nothing is unread", () => {
-    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1", "u-2", "u-3", "u-4"))));
+  it("a zero count renders no element", () => {
+    // The NEWEST answer played, and the three behind it never played. This is
+    // the case the positional rule exists for: the listener is caught up, so
+    // there is nothing to show, however much unplayed history is still
+    // reachable behind them.
+    const { unmount } = render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-4"))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
 
     // A pip reading "0" is worse than no pip: it says there is a backlog and
     // then says the backlog is empty.
-    expect(unreadCount()).toBeNull();
+    expect(notPlayedCount()).toBeNull();
+
+    unmount();
+    __resetAnswerWaitingForTests();
+    __resetPtySubmitForTests();
+    _resetForTests();
+
+    // ...and the same when every reachable answer has been played.
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1", "u-2", "u-3", "u-4"))));
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+    expect(notPlayedCount()).toBeNull();
+  });
+
+  it("the label is singular for one answer", () => {
+    // The last played is u-3, so exactly one answer arrived behind it.
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-3"))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    expect(notPlayedCount()?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "1 answer not played",
+    );
+  });
+
+  it("the label is plural for more than one", () => {
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    expect(notPlayedCount()?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "3 answers not played",
+    );
   });
 
   it("shows no count while the body is rendering an answer", () => {
@@ -870,7 +960,7 @@ describe("the waiting state counts what has not been played", () => {
     // the waiting state's, not the pane's.
     expect(waiting()).toBeNull();
     expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
-    expect(unreadCount()).toBeNull();
+    expect(notPlayedCount()).toBeNull();
   });
 
   it("names the count in text, not in the animation", () => {
@@ -880,7 +970,7 @@ describe("the waiting state counts what has not been played", () => {
     // In the status region, as a sentence a screen reader reads out...
     const status = screen.getByRole("status");
     expect(status).toBe(waiting());
-    const count = unreadCount();
+    const count = notPlayedCount();
     expect(count).not.toBeNull();
     expect(status.contains(count)).toBe(true);
     expect(count?.textContent?.trim()).not.toBe("");

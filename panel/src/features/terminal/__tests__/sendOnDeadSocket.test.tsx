@@ -18,6 +18,23 @@
  * between them leaves the reply sitting in the TUI's prompt, unsubmitted. Text
  * that reached the prompt must NOT come back into the composer — it would then
  * exist twice — but the user still has to be told the line never ran.
+ *
+ * ## Why a refusal is still the FIRST answer in this file
+ *
+ * A refused body is no longer reported on the spot everywhere: `ptySubmit` now
+ * rebuilds the cell's socket and offers the frame to it once before reporting
+ * anything. That repair is deliberately not attempted for a session this
+ * browser holds no terminal for — there is no socket to rebuild, so waiting for
+ * one would only stall the cell's queue before saying what is already known.
+ *
+ * Every session in this file is exactly that: the panes and bars here are
+ * rendered against a session id with no pooled instance behind it, so the
+ * reconnect path is not reached and these criteria read as they always have.
+ * They are also the right shape for what this file is about — what the USER is
+ * left with when a send does not go — and no assertion here is weakened by the
+ * retry existing. The retry itself is a timing shape rather than a rendering
+ * and is pinned in `ptySubmit.reconnect.test.ts`, where the connection can be
+ * driven by hand.
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -232,9 +249,12 @@ describe("a submit on a dead socket", () => {
     act(() => submit("no second attempt"));
 
     // The body was refused, so there is nothing for a return to submit and
-    // nothing to try again later. Queue-and-flush was weighed and rejected: an
+    // nothing to try again LATER. Queue-and-flush was weighed and rejected: an
     // answer that lands two minutes late replies to a prompt the agent has
-    // moved past, and a silent retry is worse than an honest refusal.
+    // moved past, and a silent retry is worse than an honest refusal. The
+    // reconnect-and-retry added since is not that and does not appear here:
+    // it happens inside this gesture, and only where there is a pooled socket
+    // to rebuild, which this session has not got.
     expect(send.mock.calls).toEqual([["no second attempt"]]);
 
     // Not one timer more than the pane had before it was pressed: the

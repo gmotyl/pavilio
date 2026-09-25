@@ -13,6 +13,7 @@
 
 import { Router } from "express";
 import { homedir } from "node:os";
+import { getConfig } from "../config.js";
 import { getPreferences, patchPreferences } from "../lib/preferences-store.js";
 import { broadcast } from "../watcher.js";
 
@@ -63,9 +64,23 @@ preferencesRouter.get("/preferences.js", (_req, res) => {
   // has no `process` to read it from: without it a `~`-spelled repo path and
   // its expanded form key two different preferences (see `normalizeRepoScope`
   // in src/preferences/types.ts).
+  //
+  // `__PAVILIO_TUNING__` is the third passenger and the odd one out: not a
+  // preference (nobody sets it from Settings, and it is never patched back) but
+  // a server-side TUNING KNOB the client needs before it runs. It rides this
+  // document rather than a `VITE_*` variable because a build-time value would
+  // need a rebuild to change, and the point of the knob is that an env var plus
+  // a panel restart is enough. Its own key, not a key inside the preferences
+  // document, so `PATCH /api/preferences` can never write to it — the patch
+  // path reaches the preferences document and nothing else. (It says nothing
+  // about unrecognized keys in general: `patchPreferences` keeps no allowlist
+  // and will write whatever key it is handed.)
   const body =
     `window.__PAVILIO_PREFS__ = ${toScriptLiteral(getPreferences())};\n` +
-    `window.__PAVILIO_HOME__ = ${toScriptLiteral(homedir())};\n`;
+    `window.__PAVILIO_HOME__ = ${toScriptLiteral(homedir())};\n` +
+    `window.__PAVILIO_TUNING__ = ${toScriptLiteral({
+      answerWaveDebounceMs: getConfig().answerWaveDebounceMs,
+    })};\n`;
 
   res.setHeader("Content-Type", "application/javascript; charset=utf-8");
   // The document changes on every patch and this script is the page's only

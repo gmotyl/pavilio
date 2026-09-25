@@ -188,11 +188,17 @@ describe("LauncherPills", () => {
     // …and nothing has been launched here, so the row does not yet offer to
     // start a session in it.
     expect(startPill()).toBeNull();
-    // …and the transport, which controls nothing yet, is not there at all.
-    expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
-    expect(screen.queryByTestId("speech-bar-previous-cell-a")).toBeNull();
-    expect(screen.queryByTestId("speech-bar-next-cell-a")).toBeNull();
-    expect(screen.queryByTestId("speech-bar-scrubber-cell-a")).toBeNull();
+    // …and the transport SHARES the line with them rather than waiting its
+    // turn. It used to be the other arm of a branch; the eye that travels with
+    // it has a pane to open from the first launcher press, so the strip is
+    // rendered always and the controls that cannot act yet say so by being
+    // disabled. See `SpeechControlBar.alwaysTransport.test.tsx`.
+    expect(screen.getByTestId("speech-bar-playpause-cell-a")).toBeDisabled();
+    expect(screen.getByTestId("speech-bar-previous-cell-a")).toBeDisabled();
+    expect(screen.getByTestId("speech-bar-next-cell-a")).toBeDisabled();
+    // The scrubber is present and collapsed: no segments, and no claim on the
+    // rail the pills are using.
+    expect(screen.getByTestId("speech-bar-scrubber-cell-a")).toHaveAttribute("data-empty", "1");
   });
 
   it("sends the command with a trailing return, once, on click", async () => {

@@ -603,10 +603,25 @@ export function useSpeechHost(): SpeechHost {
   );
 
   /**
-   * The cursor moved under the armed cell, and the move is about to be played
-   * here — so it is recorded as already autoplayed, or the effect below would
-   * see "the armed cell's utterance changed" and start the same thing twice.
-   * Only the armed cell has such a record to corrupt.
+   * The cursor moved under the armed cell, and whatever that move is owed has
+   * been settled HERE — so the utterance it landed on is recorded as already
+   * autoplayed, and the effect below does not act on it a second time.
+   *
+   * Two callers, for what reads as two different reasons and is really one. In
+   * `onNext` the move IS played here, so without this record the effect would
+   * see "the armed cell's utterance changed" and start the same answer twice.
+   * In `onPrevious` the move is deliberately NOT played — and the record is
+   * what makes that stick, because the effect watches the utterance under the
+   * cursor and a backward step changes it exactly as an arrival would. Drop the
+   * call there and the armed cell speaks the answer the user stepped back to
+   * read, through the autoplay path rather than the transport's; the press is
+   * silent everywhere except the one state Greg actually listens in.
+   *
+   * So this is not "mark it played". Nothing about `heard`, the unplayed count
+   * or the pips passes through here — those are `markHeard` / `finishUtterance`
+   * — and a silent step leaves every one of them alone. It is narrower than its
+   * name: *autoplay has no further business with this utterance*. Only the
+   * armed cell has such a record to corrupt.
    */
   const recordAutoplayed = useCallback(
     (sessionId: string, utteranceId: string): void => {
@@ -632,14 +647,40 @@ export function useSpeechHost(): SpeechHost {
       const target = utteranceUnderCursor({ ...queue, cursor: queue.cursor + 1 });
       if (!target) return;
 
+      // And the press is SILENT: the cursor moves and nothing else happens.
+      //
+      // Stepping back used to speak what it landed on, which made the backward
+      // control the one transport press you could not use to *look* at
+      // something. The case it fails is the ordinary one — walking the answers
+      // a cell is holding to find which of them matters. Every step talked over
+      // the last, so reading an older answer quietly meant not reaching it at
+      // all. The play control is how the answer under the cursor is heard now,
+      // which is exactly what it already did.
+      //
+      // `unlock()` STAYS, although this press no longer makes a sound, and the
+      // reason is that it is not about this press. The browser hands out the
+      // autoplay permission only from inside a gesture handler, and it attaches
+      // to the element for good; spending it here costs nothing, because
+      // `unlock` is guarded to run once per element and that once happens on a
+      // source-less element on purpose. What it buys is the next thing that
+      // wants to speak. A tab whose only interaction so far was stepping back
+      // is not unlocked, and the autoplay effect below does not merely defer an
+      // arrival in that state — it ABSORBS it, marking the utterance autoplayed
+      // so the cell stays quiet ever after. Skimming the backlog and then
+      // arming would silently eat the next answer. A free gesture is the
+      // cheaper side of that trade by some distance.
+      //
+      // `recordAutoplayed` stays for a related reason, and see its own comment:
+      // the autoplay effect watches the utterance under the cursor, so a
+      // backward step looks to it exactly like an arrival. Without the record
+      // the armed cell would speak the answer the user stepped back to read —
+      // the press silenced everywhere except the state it is listened to in.
+      // It records nothing about `heard`, so the unplayed count is untouched.
       unlock();
       dispatchQueue(sessionId, { type: "previous" });
       recordAutoplayed(sessionId, target.id);
-      // From its first unit: the transport steps onto a whole answer, never
-      // into the middle of the one it was cut off in.
-      speakUtterance(sessionId, target);
     },
-    [dispatchQueue, queueFor, recordAutoplayed, speakUtterance, unlock],
+    [dispatchQueue, queueFor, recordAutoplayed, unlock],
   );
 
   const onNext = useCallback(

@@ -988,15 +988,20 @@ describe("useSpeechHost — no budget, no resume point", () => {
 /**
  * The transport, seen from the host, now that the history is a list.
  *
- * The host is the half of `previous` / `next` that makes a sound: the reducer
- * moves the cursor and `onPrevious` plays what it moved onto. While history
- * was one slot those were the same utterance by construction — `previous` was
- * the only thing behind the cursor, so playing it could not be wrong. With a
- * list they part company, and reading the wrong step is silent: the bar still
- * moves, the cell still talks, and it talks about the wrong answer.
+ * The host is the half of `previous` / `next` that acts on the cursor the
+ * reducer moved. Stepping BACK is navigation and deliberately silent — the
+ * backlog can be skimmed without every step talking over the last — so what
+ * these tests read out of a backward press is where the cursor landed, and
+ * that it landed there quietly.
+ *
+ * Reading the wrong step is still the failure to guard against, and it is
+ * still silent in the bad sense: while history was one slot, `previous` was
+ * the only thing behind the cursor, so a careless port could not miss. With a
+ * list it can, and the bar moves onto the wrong answer with nothing to say so.
+ * `onNext` keeps its playback, which is also what makes the landing audible.
  */
 describe("useSpeechHost — the transport walks the whole history", () => {
-  it("plays the answer the cursor lands on when stepping back", async () => {
+  it("lands the cursor on the answer a step back, without speaking it", async () => {
     const first = unitsOf(response(2, "First"));
     const second = unitsOf(response(2, "Second"));
     const { result } = renderHook(() => useSpeechHost());
@@ -1011,28 +1016,36 @@ describe("useSpeechHost — the transport walks the whole history", () => {
       "u-1",
     ]);
 
-    // One step back is the answer immediately behind the cursor.
+    // One step back is the answer immediately behind the cursor — and the
+    // press is silent, so the play control is what reads the landing out.
     played.length = 0;
     await settle(() => result.current.onPrevious("cell-a"));
     expect(result.current.queueFor("cell-a").cursor).toBe(1);
+    expect(played).toEqual([]);
+    await clickControl(result.current, "cell-a");
     expect(played).toEqual([`blob:${second[0]}`]);
+    await settle(() => result.current.onStop("cell-a"));
 
     // Two steps back is the one behind THAT — the press a one-step history
-    // refused outright, and the press a careless port answers by replaying
+    // refused outright, and the press a careless port answers by landing on
     // `previous[0]` a second time.
     played.length = 0;
     await settle(() => result.current.onPrevious("cell-a"));
     expect(result.current.queueFor("cell-a").cursor).toBe(2);
+    expect(played).toEqual([]);
+    await clickControl(result.current, "cell-a");
     expect(played).toEqual([`blob:${first[0]}`]);
+    await settle(() => result.current.onStop("cell-a"));
 
-    // The oldest answer the cell holds: the cursor stops there and nothing is
-    // spoken, rather than falling off the end of the list.
+    // The oldest answer the cell holds: the cursor stops there rather than
+    // falling off the end of the list.
     played.length = 0;
     await settle(() => result.current.onPrevious("cell-a"));
     expect(result.current.queueFor("cell-a").cursor).toBe(2);
     expect(played).toEqual([]);
 
-    // Coming forward plays what it comes back onto, all the way to current.
+    // Coming forward plays what it comes back onto, all the way to current:
+    // the asymmetry is the point, and this is the arm that pins it.
     played.length = 0;
     await settle(() => result.current.onNext("cell-a"));
     expect(result.current.queueFor("cell-a").cursor).toBe(1);
@@ -1065,7 +1078,10 @@ describe("useSpeechHost — the transport walks the whole history", () => {
 
     // Step back onto u-1 and pause part-way into it, so a run that was
     // abandoned here would be audibly gone rather than coincidentally right.
+    // The step is silent now, so the play control is what starts the replay —
+    // two presses where there used to be one, and the same state after them.
     await settle(() => result.current.onPrevious("cell-a"));
+    await clickControl(result.current, "cell-a");
     await endCurrentUnit();
     expect(played).toEqual([`blob:${older[0]}`, `blob:${older[1]}`]);
     await clickControl(result.current, "cell-a");
@@ -1120,8 +1136,10 @@ describe("useSpeechHost — the transport walks the whole history", () => {
     await emitUtterance("cell-a", "u-2", response(3, "Newer"));
 
     // Step back onto u-1 and play part of it, so an abandoned run would be
-    // audibly gone rather than coincidentally right.
+    // audibly gone rather than coincidentally right. The step itself is silent;
+    // the play control is what starts the replay.
     await settle(() => result.current.onPrevious("cell-a"));
+    await clickControl(result.current, "cell-a");
     await endCurrentUnit();
     expect(played).toEqual([`blob:${older[0]}`, `blob:${older[1]}`]);
 
@@ -1169,10 +1187,14 @@ describe("useSpeechHost — the snap to the newest answer", () => {
     await emitUtterance("cell-a", "u-2", response(2, "Second"));
     await emitUtterance("cell-a", "u-3", response(2, "Third"));
 
-    // Two steps back, and reading aloud — the state a hold is made in.
+    // Two steps back, and reading aloud — the state a hold is made in. The
+    // steps are silent, so the play control is what puts the voice on the
+    // answer the listener walked to.
     await settle(() => result.current.onPrevious("cell-a"));
     await settle(() => result.current.onPrevious("cell-a"));
     expect(result.current.queueFor("cell-a").cursor).toBe(2);
+    await clickControl(result.current, "cell-a");
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
 
     played.length = 0;
     await settle(() => result.current.onNewestAnswer("cell-a"));

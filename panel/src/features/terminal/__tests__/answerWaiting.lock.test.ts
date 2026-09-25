@@ -111,11 +111,21 @@ const SESSION = "cell-a";
 /** The body's handover, as the pane reads it. */
 const handedOver = (sessionId = SESSION): boolean => getAnswerWaiting(sessionId).waiting;
 
-/** An activity broadcast for the cell, as the server sends it. */
+/** The debounce window these tests run under, pinned on the boot document. */
+const DEBOUNCE = 3000;
+
+/**
+ * An activity broadcast for the cell, as the server sends it — and, for a busy
+ * one, the debounce window that broadcast opens. The hold is a claim about an
+ * ESTABLISHED busy spell ("the agent has the body and the user wants the text
+ * back"), so every criterion here wants the spell the window already allowed;
+ * the window itself is pinned in `answerWaiting.debounce.test.ts`.
+ */
 let at = 0;
 const activity = (state: "idle" | "busy" | "attention", sessionId = SESSION): void => {
   at += 1;
   _applyEventForTests({ sessionId, state, at });
+  if (state === "busy") vi.advanceTimersByTime(DEBOUNCE);
 };
 
 beforeEach(() => {
@@ -123,12 +133,18 @@ beforeEach(() => {
   speechReach.length = 0;
   _resetForTests();
   __resetAnswerWaitingForTests();
+  // The debounce is a clock, so the whole file runs on a controlled one.
+  vi.useFakeTimers();
+  (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__ = {
+    answerWaveDebounceMs: DEBOUNCE,
+  };
 });
 
 afterEach(() => {
   _resetForTests();
   __resetAnswerWaitingForTests();
   vi.useRealTimers();
+  delete (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__;
   // The module's one standing discipline, asserted after every drive in this
   // file rather than in a test of its own: a hold that reached for the queue,
   // the player, the channel or the host would show up here.
@@ -154,6 +170,10 @@ describe("the answer pane when the user steps back", () => {
     // again afterwards is a session that is not still holding.
     forgetAnswerWaiting(SESSION);
     watchSessionActivity(SESSION);
+    // A watch that opens on an already-busy session gets a window like any
+    // other busy spell — "busy when we looked" is exactly the reading the
+    // debounce distrusts — so the spell has to be established here too.
+    vi.advanceTimersByTime(DEBOUNCE);
 
     expect(handedOver()).toBe(true);
   });
@@ -367,7 +387,6 @@ describe("the answer pane when the user steps back", () => {
 
   it("schedules no timer to release the hold", () => {
     watchSessionActivity(SESSION);
-    vi.useFakeTimers();
     const timeout = vi.spyOn(globalThis, "setTimeout");
     const interval = vi.spyOn(globalThis, "setInterval");
 
@@ -375,8 +394,13 @@ describe("the answer pane when the user steps back", () => {
     holdAnswer(SESSION);
     expect(handedOver()).toBe(false);
 
-    expect(timeout).not.toHaveBeenCalled();
+    // The one clock in the module is the debounce the busy transition opens,
+    // and it guards the way IN. Everything below is about the hold, which is
+    // the way out — so the spy is cleared here and must stay silent for the
+    // rest of the drive.
+    expect(timeout.mock.calls.map(([, delay]) => delay)).toEqual([DEBOUNCE]);
     expect(interval).not.toHaveBeenCalled();
+    timeout.mockClear();
 
     // ...and ten minutes of clock changes nothing. The session is still busy
     // and the user has not stepped forward, so the only things that could end

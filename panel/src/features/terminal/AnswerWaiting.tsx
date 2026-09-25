@@ -1,6 +1,7 @@
 /**
- * The answer pane's body while a reply is pending — and, when the user has
- * stepped back to re-read, the same wave moved out of the body onto a control.
+ * The answer pane's body while the cell is waiting for its agent — and, when
+ * the user has stepped back to re-read, the same wave moved out of the body
+ * onto a control.
  *
  * It replaces the text and the rail rather than sitting over them, because what
  * it is there to prevent is the previous answer being read as the reply — and a
@@ -62,14 +63,14 @@ function Wave({ sessionId }: { sessionId: string }) {
 export interface AnswerWaitingProps {
   sessionId: string;
   /**
-   * How many of the answers the queue can still reach have never been played.
-   * Zero shows nothing: a pip reading "0" says there is a backlog and then says
-   * the backlog is empty.
+   * How many answers arrived after the last one the cell played and have not
+   * themselves been played. Zero shows nothing: a pip reading "0" says there
+   * is a backlog and then says the backlog is empty.
    */
-  unread: number;
+  notPlayed: number;
 }
 
-export function AnswerWaiting({ sessionId, unread }: AnswerWaitingProps) {
+export function AnswerWaiting({ sessionId, notPlayed }: AnswerWaitingProps) {
   return (
     <div
       className="answer-pane-waiting"
@@ -77,7 +78,14 @@ export function AnswerWaiting({ sessionId, unread }: AnswerWaitingProps) {
       role="status"
     >
       <Wave sessionId={sessionId} />
-      <span className="answer-pane-waiting-label">Waiting for a reply…</span>
+      {/*
+        It names the AGENT, not a reply. The state has three triggers — a
+        composer send, a launcher press, and the session going busy on its own
+        — and only the first of them is a reply to anybody: an agent that went
+        to work by itself is answering no one, and pressing `start` asked no
+        question. "Waiting for a reply" was honest for one trigger in three.
+      */}
+      <span className="answer-pane-waiting-label">Waiting for agent</span>
       {/*
         In TEXT, inside the status region — never as a number painted onto the
         ornament. The wave is `aria-hidden`, so a count drawn there would exist
@@ -85,12 +93,12 @@ export function AnswerWaiting({ sessionId, unread }: AnswerWaitingProps) {
         name, which is what makes a backlog something a screen reader user can
         act on rather than something they are never told about.
       */}
-      {unread > 0 ? (
+      {notPlayed > 0 ? (
         <span
           className="answer-pane-waiting-count"
           data-testid={`answer-pane-waiting-count-${sessionId}`}
         >
-          {unread} {unread === 1 ? "answer" : "answers"} not played
+          {notPlayed} {notPlayed === 1 ? "answer" : "answers"} not played
         </span>
       ) : null}
     </div>

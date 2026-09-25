@@ -16,6 +16,9 @@ export interface PanelConfig {
   preferencesPath: string;
   /** File watching debounce in ms */
   watchDebounceMs: number;
+  /** How long a busy transition must persist before it may take the answer pane's body.
+   *  Override with PAVILIO_ANSWER_WAVE_DEBOUNCE_MS; panel restart, no rebuild. */
+  answerWaveDebounceMs: number;
   /** Glob patterns to ignore in file tree */
   ignorePatterns: string[];
   /** Absolute path to TLS certificate (.pem) — enables HTTPS when set together with tlsKey */
@@ -38,6 +41,36 @@ export interface PanelConfig {
   };
 }
 
+/**
+ * The debounce every malformed override lands on, and the value the client
+ * assumes when the boot document says nothing.
+ *
+ * It is spelt a second time in `src/features/terminal/answerWaveDebounce.ts`
+ * rather than imported: that module is browser code and this one is not —
+ * `tsconfig.json` covers `src` alone, `tsconfig.node.json` covers the server —
+ * and the client default exists for a case the server cannot reach anyway (a
+ * page whose boot document predates the key, or never loaded).
+ */
+const DEFAULT_ANSWER_WAVE_DEBOUNCE_MS = 3000;
+
+/**
+ * The debounce this process was started with.
+ *
+ * Read once, at import, which is the whole point of the knob: it changes with a
+ * panel restart and no rebuild, unlike a `VITE_*` variable that would be baked
+ * into the bundle. `Number` alone is not enough of a guard — `Number("")` is 0
+ * and `Number("-1")` is truthy — and both of those are worse than the default:
+ * a zero or negative delay is no debounce at all, which is exactly the
+ * reattach false positive the debounce exists to stop.
+ */
+function answerWaveDebounceMsFromEnv(): number {
+  const raw = process.env.PAVILIO_ANSWER_WAVE_DEBOUNCE_MS;
+  if (raw === undefined) return DEFAULT_ANSWER_WAVE_DEBOUNCE_MS;
+  const parsed = Number(raw.trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_ANSWER_WAVE_DEBOUNCE_MS;
+  return parsed;
+}
+
 const defaults: PanelConfig = {
   projectsDir: resolve(__dirname, "../projects"),
   port: 3010,
@@ -46,6 +79,7 @@ const defaults: PanelConfig = {
   // root in the rsync mirror where panel/ is itself a synced copy.
   preferencesPath: resolve(__dirname, "../.pavilio/preferences.json"),
   watchDebounceMs: 300,
+  answerWaveDebounceMs: answerWaveDebounceMsFromEnv(),
   ignorePatterns: [
     "**/node_modules/**",
     "**/.DS_Store",

@@ -19,7 +19,7 @@ import { projectOfSession } from "./sessionProject";
 import { useActivityState } from "./useTerminalActivityChannel";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
-import { unreadAnswerCount } from "../speech/unreadAnswers";
+import { unplayedSinceLastPlayed } from "../speech/unreadAnswers";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
 import { getStoredVoice } from "../speech/voices";
 import { type UnitToBlocks, layoutRail, matchableBlocks } from "./layoutRail";
@@ -327,13 +327,14 @@ export function AnswerPane({
   const activity = useActivityState(sessionId);
 
   /**
-   * How many of the answers this cell can still reach have never been played
-   * — a derivation over the `heard` set the channel already keeps, never a
-   * tally of its own. Computed here rather than inside the waiting state so
-   * the state stays a rendering of what it is handed, and so the count is
-   * definitively absent from every other body the pane can show.
+   * How many answers arrived after the last one this cell played and have not
+   * themselves been played — a derivation over the `heard` set the channel
+   * already keeps, never a tally of its own. Computed here rather than inside
+   * the waiting state so the state stays a rendering of what it is handed, and
+   * so the count is definitively absent from every other body the pane can
+   * show.
    */
-  const unread = unreadAnswerCount(queue, speech.heardFor(sessionId));
+  const notPlayed = unplayedSinceLastPlayed(queue, speech.heardFor(sessionId));
 
   // The handover, raised once per submit. The composer raises the send and
   // knows nothing about the pane above it; the pane knows what the body was
@@ -604,7 +605,7 @@ export function AnswerPane({
         }}
       >
         {waiting ? (
-          <AnswerWaiting sessionId={sessionId} unread={unread} />
+          <AnswerWaiting sessionId={sessionId} notPlayed={notPlayed} />
         ) : (
           <>
           {/* The wave, moved: the user asked for the text and got it, and the

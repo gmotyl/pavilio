@@ -124,11 +124,29 @@ const barTree = (speech: GridSpeech) => (
   />
 );
 
-/** An activity broadcast landing while the bar is mounted. */
+/** The debounce window these tests run under, pinned on the boot document. */
+const DEBOUNCE = 3000;
+
+/**
+ * An activity broadcast landing while the bar is mounted — and, for a busy one,
+ * the debounce window it opens. `busy` is *the PTY emitted output*, so the
+ * agent's trigger waits that window out before it may take the body; every
+ * criterion in this file is about an ESTABLISHED busy spell, and the window
+ * itself is pinned in `answerWaiting.debounce.test.ts`.
+ *
+ * Both halves run inside `act`: the store publishes on the channel's own
+ * listener AND on the timer's, and only a flush turns either into the DOM the
+ * assertions read.
+ */
 const activity = (state: "idle" | "busy" | "attention", at: number): void => {
   act(() => {
     _applyEventForTests({ sessionId: SESSION, state, at });
   });
+  if (state === "busy") {
+    act(() => {
+      vi.advanceTimersByTime(DEBOUNCE);
+    });
+  }
 };
 
 /** Whether the pane's BODY has handed over — what the store is asked for. */
@@ -150,6 +168,13 @@ beforeEach(() => {
   send.mockClear();
   _resetForTests();
   __resetAnswerWaitingForTests();
+  // The debounce on the agent's trigger is a clock, so the whole file runs on
+  // a controlled one, and on a window the file states rather than whatever the
+  // server-side default happens to be.
+  vi.useFakeTimers();
+  (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__ = {
+    answerWaveDebounceMs: DEBOUNCE,
+  };
   // What `terminalInstances` does when the session is created: the watch is
   // the session's, not the bar's, so it is already open before anything
   // renders.
@@ -159,6 +184,8 @@ beforeEach(() => {
 afterEach(() => {
   _resetForTests();
   __resetAnswerWaitingForTests();
+  vi.useRealTimers();
+  delete (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__;
 });
 
 describe("the bar tells the waiting store whether the voice is reading", () => {

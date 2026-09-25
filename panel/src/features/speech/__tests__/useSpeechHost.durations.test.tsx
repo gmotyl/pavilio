@@ -313,8 +313,10 @@ describe("the scrubber's durations belong to an utterance, not to a cell", () =>
 
     // Step back and play the older one right through. Its last unit ending
     // returns the cursor to the newest answer — onto the one nobody has
-    // played.
+    // played. Stepping back is silent, so the play control is the second half
+    // of "step back and play".
     await settle(() => host.onPrevious("cell-a"));
+    await settle(() => host.onSpeak("cell-a"));
     await loadDuration(2);
     await endCurrentUnit();
     await loadDuration(20);
@@ -432,7 +434,9 @@ describe("the scrubber's durations belong to an utterance, not to a cell", () =>
 
     await emitUtterance("cell-a", "u-1", MEASURED);
     await emitUtterance("cell-a", "u-2", ARRIVING);
+    // Silent step, then play: the replay is what takes the measurements.
     await settle(() => host.onPrevious("cell-a"));
+    await settle(() => host.onSpeak("cell-a"));
     await loadDuration(2);
     await endCurrentUnit();
     await loadDuration(20);

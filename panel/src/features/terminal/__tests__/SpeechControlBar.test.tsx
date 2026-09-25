@@ -632,10 +632,11 @@ describe("SpeechControlBar", () => {
       act(() => cacheChanged());
 
       expect(screen.queryAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(0);
-      // Nor a transport: a cell with nothing under the cursor carries the
-      // launchers instead, so the notification has no play button to reach
-      // even if it wanted one.
-      expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
+      // Nor a live transport. The strip is on the row from mount now — the eye
+      // beside it has a pane to open before the first answer — but a cell with
+      // nothing under the cursor has nothing for the cache notification to
+      // wake, so the play control stays disabled and the launchers stay put.
+      expect(screen.getByTestId("speech-bar-playpause-cell-a")).toBeDisabled();
       expect(screen.getByTestId("speech-bar-launchers-cell-a")).toBeInTheDocument();
     });
   });
@@ -957,18 +958,11 @@ describe("SpeechControlBar", () => {
           </>,
         );
 
-        // `empty` is the one state with no play button to agree with: the row
-        // carries the launchers there, and a control that is not rendered
-        // cannot drift from the header. The header still pulses for itself,
-        // and it is `0` — asserted here so the case is covered rather than
-        // quietly skipped.
-        if (state === "empty") {
-          expect(pulseOf("terminal-cell-speak-cell-a")).toBe("0");
-          expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
-          view.unmount();
-          continue;
-        }
-
+        // `empty` used to be the one state with no play button to agree with,
+        // because the row carried the launchers instead. The button is
+        // rendered in every state now — disabled, not absent — so the loop has
+        // no case to skip: `empty` is asked the same question as the rest, and
+        // both sides answer `0` from the one derivation.
         const headerPulse = pulseOf("terminal-cell-speak-cell-a");
         expect(headerPulse).toMatch(/^[01]$/);
         expect(pulseOf("speech-bar-playpause-cell-a")).toBe(headerPulse);
@@ -1022,28 +1016,41 @@ describe("SpeechControlBar", () => {
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
-  it("a cell with no utterance has no transport controls at all", () => {
-    // Was: the transport was rendered and every control disabled. A rail of
-    // dead buttons is not a control surface, and the row is in flow now, so
-    // the space it took is spent whether or not anything is in it — the
-    // launchers fill it instead. `LauncherPills.test.tsx` carries the pills;
-    // what stays here is that nothing of the transport survives beside them.
+  it("a cell with no utterance carries the transport, disabled", () => {
+    // Twice reversed, and the second reversal is the one that stands.
+    //
+    // First the transport was rendered with every control disabled; then it
+    // was hidden outright, on the grounds that a rail of dead buttons is not a
+    // control surface and the launchers were a better use of the width. That
+    // second version hid the EYE along with it — and the eye then acquired a
+    // pane to open, because a launcher press opens the answer pane on a
+    // waiting wave. Hiding it left a pane that Escape could close and nothing
+    // could reopen until the cell finally spoke.
+    //
+    // So the strip is back, and the honest split is: the eye is live, and the
+    // transport says *not yet* by being disabled rather than *never* by being
+    // absent. `SpeechControlBar.alwaysTransport.test.tsx` carries the whole
+    // contract, the pills' half included; what stays here is that an empty
+    // cell's rail is present and inert.
     const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
 
     render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
 
-    expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
-    expect(screen.queryByTestId("speech-bar-previous-cell-a")).toBeNull();
-    expect(screen.queryByTestId("speech-bar-next-cell-a")).toBeNull();
-    // The scrubber goes with them: an empty rail kept its shape for a row that
-    // could appear and disappear, and the row no longer does either.
-    expect(screen.queryByTestId("speech-bar-scrubber-cell-a")).toBeNull();
+    expect(screen.getByTestId("speech-bar-playpause-cell-a")).toBeDisabled();
+    expect(screen.getByTestId("speech-bar-previous-cell-a")).toBeDisabled();
+    expect(screen.getByTestId("speech-bar-next-cell-a")).toBeDisabled();
+    // The scrubber is there and empty — it yields its share of the rail rather
+    // than holding a blank strip open, which is what makes room for the pills.
+    expect(screen.getByTestId("speech-bar-scrubber-cell-a")).toHaveAttribute("data-empty", "1");
     expect(screen.queryAllByTestId(/^speech-bar-segment-cell-a-/)).toHaveLength(0);
-    // No eye either: the header toggle can force the bar onto an empty cell,
-    // and "unit 1 of 0" is not a position.
-    expect(screen.queryByTestId("speech-bar-eye-cell-a")).toBeNull();
-    // The arm switch is the one control that survives the branch — arming
-    // ahead of the first answer is why the row is reachable before it.
+    // The eye IS live, and its name is a sentence rather than "unit 1 of 0".
+    expect(screen.getByTestId("speech-bar-eye-cell-a")).not.toBeDisabled();
+    expect(screen.getByTestId("speech-bar-eye-cell-a")).toHaveAttribute(
+      "aria-label",
+      "Answer, nothing spoken yet",
+    );
+    // The arm switch is unchanged — arming ahead of the first answer is why
+    // the row was reachable before it even when nothing else here was.
     expect(screen.getByTestId("speech-bar-autoplay-cell-a")).toBeInTheDocument();
   });
   /**

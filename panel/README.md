@@ -41,6 +41,19 @@ const overrides: Partial<PanelConfig> = {
 export default overrides;
 ```
 
+### Environment variables
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `PAVILIO_ANSWER_WAVE_DEBOUNCE_MS` | `3000` | How long a session must stay busy before the agent may take the answer pane's body. Server-side, `busy` only means "the PTY emitted output in the last second", so a reattach repaint looks identical to an agent starting work; this window is what tells them apart. Anything that is not a finite number above zero (`abc`, `0`, `-1`, empty) falls back to the default — a zero or negative window is no debounce at all, not a shorter one. |
+| `PANEL_TOKEN` | unset | Shared secret for LAN access (see below). |
+| `PANEL_TLS_CERT` / `PANEL_TLS_KEY` | unset | Absolute paths to a certificate and its key; setting both serves the panel over HTTPS. |
+
+All of these are read by the server process at boot, so a change needs a panel
+**restart** — but no rebuild. `PAVILIO_ANSWER_WAVE_DEBOUNCE_MS` reaches the
+browser on `GET /api/preferences.js` rather than through the bundle, which is
+exactly why: a `VITE_*` variable would be baked in at build time and need one.
+
 ## Agent Tracking
 
 Use `scripts/cc` instead of `claude` and `scripts/oc` instead of `opencode`. The wrapper scripts register/deregister sessions in `~/.agent-registry.json`, which the panel sidebar reads to show live agent status.

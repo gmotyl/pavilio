@@ -30,6 +30,16 @@
  * - the timer test spies on `setTimeout`/`setInterval` under fake timers,
  *   drives the handover AND the deferral, and then advances ten minutes to
  *   show that a clock changes nothing.
+ *
+ * ## The debounce underneath every `activity("busy")` here
+ *
+ * The agent's trigger now waits out a window before it may take the body —
+ * `busy` is *the PTY emitted output*, and a reattach repaint is output nobody
+ * asked for (see `answerWaiting.debounce.test.ts`, which owns that guard). The
+ * criteria in THIS file are about what a busy spell means once it is
+ * established, so the `activity` helper below elapses that window for a busy
+ * broadcast and every test here reads as it always did. The one exception is
+ * the timer test, which now has a clock to account for and says so.
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
@@ -155,11 +165,19 @@ const SESSION = "cell-a";
 const handedOver = (sessionId = SESSION): boolean =>
   getAnswerWaiting(sessionId).waiting;
 
-/** An activity broadcast for the cell, as the server sends it. */
+/** The debounce window these tests run under, pinned on the boot document. */
+const DEBOUNCE = 3000;
+
+/**
+ * An activity broadcast for the cell, as the server sends it — and, for a busy
+ * one, the debounce window that broadcast opens. Every criterion in this file
+ * is about an ESTABLISHED busy spell; the window itself is pinned next door.
+ */
 let at = 0;
 const activity = (state: "idle" | "busy" | "attention", sessionId = SESSION): void => {
   at += 1;
   _applyEventForTests({ sessionId, state, at });
+  if (state === "busy") vi.advanceTimersByTime(DEBOUNCE);
 };
 
 class FakeWs {
@@ -181,6 +199,13 @@ beforeEach(() => {
   _resetForTests();
   __resetAnswerWaitingForTests();
   __setWebSocketCtorForTests(FakeWs as unknown as typeof WebSocket);
+  // The debounce is a clock, so the whole file runs on a controlled one — and
+  // on a window the file states rather than whatever the default happens to
+  // be, which is a server-side knob somebody may tune.
+  vi.useFakeTimers();
+  (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__ = {
+    answerWaveDebounceMs: DEBOUNCE,
+  };
 });
 
 afterEach(() => {
@@ -188,6 +213,7 @@ afterEach(() => {
   __resetAnswerWaitingForTests();
   __setWebSocketCtorForTests(null);
   vi.useRealTimers();
+  delete (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__;
 });
 
 describe("the answer pane while the session itself is working", () => {
@@ -286,7 +312,6 @@ describe("the answer pane while the session itself is working", () => {
 
   it("schedules no timer to leave the waiting state", () => {
     watchSessionActivity(SESSION);
-    vi.useFakeTimers();
     const timeout = vi.spyOn(globalThis, "setTimeout");
     const interval = vi.spyOn(globalThis, "setInterval");
 
@@ -298,13 +323,21 @@ describe("the answer pane while the session itself is working", () => {
     noteSpeaking(SESSION, false);
     expect(handedOver()).toBe(true);
 
-    expect(timeout).not.toHaveBeenCalled();
+    // ONE clock, and it is the debounce on the way IN: the busy transition
+    // opens its window and nothing else is scheduled. The deferral in
+    // particular armed and released on pushes alone, which is the claim this
+    // test exists to make and the one a "hand over in a second or two"
+    // implementation would break.
+    expect(timeout.mock.calls.map(([, delay]) => delay)).toEqual([DEBOUNCE]);
     expect(interval).not.toHaveBeenCalled();
 
     // ...and ten minutes of clock changes nothing: the session is still busy,
-    // so the only thing that could end this has not happened.
+    // so the only thing that could end this has not happened — and no second
+    // timer was left behind to decide otherwise.
+    timeout.mockClear();
     vi.advanceTimersByTime(10 * 60 * 1000);
     expect(handedOver()).toBe(true);
+    expect(timeout).not.toHaveBeenCalled();
   });
 
   it("releases the activity watch when the session is destroyed", () => {

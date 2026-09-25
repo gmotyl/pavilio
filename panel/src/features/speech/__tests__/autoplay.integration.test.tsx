@@ -1068,11 +1068,23 @@ describe("the keyboard transport, mounted", () => {
     await pressTransport("ArrowRight");
     expect(played).toEqual(["blob:The first answer.", "blob:The second answer."]);
 
+    // Back is NAVIGATION and makes no sound — the asymmetry with the arrow
+    // above is deliberate, so the backlog can be skimmed without every step
+    // talking over the last. The chord still has to reach `onPrevious`, though,
+    // and silence alone cannot tell "the cursor moved quietly" apart from "the
+    // key did nothing at all".
     await pressTransport("ArrowLeft");
+    expect(played).toEqual(["blob:The first answer.", "blob:The second answer."]);
+
+    // So the forward chord is what reads the cursor back out: coming out of
+    // history it speaks the answer it returns onto. With the cursor still at
+    // the front and nothing pending, `next` would have had nothing to step to
+    // and this would have stayed silent.
+    await pressTransport("ArrowRight");
     expect(played).toEqual([
       "blob:The first answer.",
       "blob:The second answer.",
-      "blob:The first answer.",
+      "blob:The second answer.",
     ]);
   });
 });
@@ -1121,10 +1133,10 @@ describe("the row is reserved from mount", () => {
     // state AND the pulse. A pulse that leaked across the grid is the failure
     // a single-cell reading cannot see.
     //
-    // Read off the HEADER control, not the bar. A silent cell's row carries
-    // the launchers now, so it has no play button to read — which is itself
-    // the strongest form of "the arrival did not reach this cell", and is
-    // asserted below.
+    // Read off the HEADER control, not the bar. The bar's play button is on
+    // every cell now — disabled until that cell's own first answer — so the
+    // header is where a silent cell's state and pulse are legible as values
+    // rather than as an absence. The bar's side of it is asserted below.
     const quiet = screen.getByTestId("terminal-cell-speak-cell-b");
     expect(quiet).toHaveAttribute("data-speech", "empty");
     expect(quiet).toHaveAttribute("data-pulse", "0");
@@ -1132,23 +1144,28 @@ describe("the row is reserved from mount", () => {
     expect(alsoQuiet).toHaveAttribute("data-speech", "empty");
     expect(alsoQuiet).toHaveAttribute("data-pulse", "0");
     // The row's contents followed the state, per cell: the cell that spoke
-    // swapped its launchers for the transport, and the two that did not still
-    // carry theirs.
+    // dropped its launchers, and the two that did not still carry theirs.
     expect(screen.queryByTestId("speech-bar-launchers-cell-a")).toBeNull();
     expect(screen.getByTestId("speech-bar-launchers-cell-b")).toBeInTheDocument();
     expect(screen.getByTestId("speech-bar-launchers-cell-c")).toBeInTheDocument();
-    expect(screen.queryByTestId("speech-bar-playpause-cell-b")).toBeNull();
-    expect(screen.queryByTestId("speech-bar-playpause-cell-c")).toBeNull();
+    // The transport is on all three rows from mount, so what separates the
+    // cell that spoke from the two that did not is enablement, not presence:
+    // theirs is still disabled, which is the bar's way of saying the arrival
+    // did not reach this cell.
+    expect(screen.getByTestId("speech-bar-playpause-cell-b")).toBeDisabled();
+    expect(screen.getByTestId("speech-bar-playpause-cell-c")).toBeDisabled();
     expect(screen.getByTestId(testIdFor("bar-autoplay", "cell-a"))).toBeInTheDocument();
   });
 
-  it("a cell that has never spoken carries launchers and a live switch", async () => {
+  it("a cell that has never spoken carries launchers, a disabled transport and a live switch", async () => {
     await renderProjectSurface();
 
-    // Was: an inert transport — the controls rendered and every one disabled.
-    // The row carries the launchers there now, and the transport is not
-    // rendered at all; what is unchanged is that nothing on it plays anything.
-    expect(screen.queryByTestId("speech-bar-playpause-cell-a")).toBeNull();
+    // The row carries BOTH before the first answer: the launchers, and the
+    // transport strip beside them saying *not yet* by being disabled rather
+    // than *never* by being absent — the strip is what the live eye hangs
+    // off, and the eye has a pane to open from a launcher press. Through all
+    // of that, the unchanged part is that nothing here plays anything.
+    expect(screen.getByTestId("speech-bar-playpause-cell-a")).toBeDisabled();
     expect(screen.getByTestId("speech-bar-launchers-cell-a")).toBeInTheDocument();
     // Launchers, live switch: arming ahead of the first answer is the reason
     // the row is reachable before it at all.
