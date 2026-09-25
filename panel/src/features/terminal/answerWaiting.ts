@@ -52,8 +52,11 @@
  * only clearing it: a send that overtook the agent's window owes that window
  * back if the agent is still working (see "Cancelling a window is never
  * spending the spell" below). The third takes the whole entry with it, so
- * there is nothing left to owe. A transport press is NOT on this list — it
- * shrinks the wait to its mark and the reply is still coming.
+ * there is nothing left to owe. {@link noteTransport} is NOT on this list — it
+ * shrinks the wait to its mark and the reply is still coming. Read that as the
+ * FUNCTION and not as the gesture: *Previous* and *Next* move the cursor as
+ * well as calling it, and a moved cursor is the first event on the list
+ * arriving by its ordinary route (see {@link endSend}).
  *
  * The activity trigger ends with the activity itself: the body is the agent's
  * for as long as the agent is busy.
@@ -472,9 +475,21 @@ function openDebounceWindow(sessionId: string, entry: Entry): void {
  *
  * Why HERE and not on the arrival alone: a send ends in more than one way, and
  * the one that matters most (`noteUtterance`) is not the one the send began
- * against. A transport press is deliberately NOT one of them — it SHRINKS the
- * wait to its mark rather than ending it (`markOnly`), the reply is still
+ * against. {@link noteTransport} is deliberately NOT one of them — it SHRINKS
+ * the wait to its mark rather than ending it (`markOnly`), the reply is still
  * coming, and the user has just asked for the text.
+ *
+ * That exclusion is about the FUNCTION, not about the gesture. Play/pause
+ * calls `noteTransport` and nothing else, so for it the two are the same
+ * thing. *Previous* and *Next* also MOVE THE CURSOR, and the moved cursor
+ * reaches this module as `noteUtterance` from `SpeechControlBar`'s own effect
+ * one commit later — with an id that is not the one the draft was sent on. So
+ * those two presses DO end the send, through the ordinary arrival path, and
+ * that is right rather than accidental: *Next* is enabled only when the cell
+ * has something newer to step onto, which is the "a new utterance arrives for
+ * the cell" this function exists for, and the wave it hands back one window
+ * later is a true statement about an agent that is still working. `answerWaiting.guards.test.ts`
+ * pins both presses.
  */
 function endSend(sessionId: string, entry: Entry): void {
   entry.send = null;
@@ -631,13 +646,32 @@ export function watchSessionActivity(sessionId: string): void {
   // entry — and an `entries.has` early return here is that case getting
   // nothing.
   //
-  // `send === null` is the one thing withheld from: `beginWaiting` is a user
-  // gesture that has already handed the body over, and a window opened behind
-  // it would only be deciding a question the user has answered. A hold needs
-  // no such guard — it OUTRANKS every claim in `derive`, so a window under it
-  // changes nothing until the user themselves releases it, at which point a
-  // still-working agent should indeed have the body.
-  if (entry.activity === "busy" && entry.send === null && !entry.agentArmed) {
+  // A USER GESTURE is the one thing withheld from, and BOTH of them count.
+  // `beginWaiting` and {@link noteAgentStarting} have each already handed the
+  // body over by the user's own decision, and a window opened behind either
+  // would only be deciding a question the user has answered.
+  //
+  // `starting` is checked here for the same reason `send` is, and the reason
+  // it has to be checked HERE rather than only at the press is that this
+  // function is called again on every REMOUNT. A layout change — maximize, a
+  // preset, a drag, a seam resize — rebuilds `TerminalView` and re-opens the
+  // watch, so a press whose window this cancelled a moment ago would get that
+  // window straight back; it fires, `agentArmed` becomes true, and the arrival
+  // that ends the starting wait then hands the body to the agent's claim
+  // instead of to the answer. The cell's first reply loses the uninterrupted
+  // moment the press bought it, and "a user gesture is never overtaken by a
+  // window" stops being durable across a layout change. The press's own debt
+  // is still paid where it always was, by {@link endStarting}.
+  //
+  // A hold needs no such guard — it OUTRANKS every claim in `derive`, so a
+  // window under it changes nothing until the user themselves releases it, at
+  // which point a still-working agent should indeed have the body.
+  if (
+    entry.activity === "busy" &&
+    entry.send === null &&
+    !entry.starting &&
+    !entry.agentArmed
+  ) {
     openDebounceWindow(sessionId, entry);
   }
   notify();
@@ -825,13 +859,28 @@ export function noteNewestAnswer(sessionId: string, newestId: string | null): bo
   // cursor moves for a transport press too, and this is the only push that
   // means something LANDED.
   //
-  // `hadWindow` is the load-bearing half: only an arrival that actually
-  // cancelled something owes a replacement. The `activity === "busy"` beside
-  // it discriminates NOTHING today — a pending window implies a busy session,
-  // because every transition out of `busy` cancels the window on its way — so
-  // read it as a belt-and-braces restatement of the rule the re-open is FOR,
-  // kept in step with `endSend`'s copy of the same condition, rather than as a
-  // case this line is here to catch.
+  // `hadWindow` was written to mean "only an arrival that actually cancelled
+  // something owes a replacement". In the real tree it no longer sees that,
+  // and the comment is kept honest rather than kept: `SpeechControlBar` pushes
+  // this from one effect and `noteUtterance` from another IN THE SAME COMMIT,
+  // so on the ordinary path — a reply landing for a send — `endSend` has
+  // already run and the window this reads is usually the one `endSend` itself
+  // just opened, not a genuine agent window this arrival is cancelling.
+  //
+  // The net effect is zero and it does not depend on which effect runs first.
+  // Cancelling a window that is one line old and re-opening it is the same
+  // window; and where `endSend` opened none (an idle session, or a claim
+  // already granted) this reads `false` and declines, which is the outcome the
+  // original reading wanted anyway. It still bites on the paths `endSend` is
+  // not on at all — an arrival for a cell with no send outstanding, which is
+  // every answer an agent volunteers.
+  //
+  // The `activity === "busy"` beside it discriminates NOTHING today — a
+  // pending window implies a busy session, because every transition out of
+  // `busy` cancels the window on its way — so read it as a belt-and-braces
+  // restatement of the rule the re-open is FOR, kept in step with `endSend`'s
+  // copy of the same condition, rather than as a case this line is here to
+  // catch.
   const hadWindow = entry.debounce !== null;
   cancelDebounce(entry);
   if (hadWindow && entry.activity === "busy") openDebounceWindow(sessionId, entry);
