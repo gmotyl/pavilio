@@ -102,12 +102,67 @@ interface Leader {
   readonly end: { x: number; y: number } | null;
 }
 
+/**
+ * How far below a control its line starts, in px.
+ *
+ * The callouts sit under the row and the lines go UP into it, so a leader is a
+ * short vertical run from the callout's own top edge to the control's centre.
+ * One constant rather than two: the drop is the same on both sides, and the
+ * horizontal position is the control's own.
+ *
+ * It is also where the CALLOUT goes. The box's `top` is written inline from
+ * this same number, so the line starts exactly at the edge of the box it
+ * leaves — the connection is arithmetic rather than agreement between two
+ * files. It was agreement, and they disagreed by 18px at every width: the
+ * stylesheet parked the box at 82px from a comment that reasoned "56px of row
+ * plus its hairline" as though the row's padding were outside its declared
+ * height. Preflight makes every box `border-box`, so it is not: the row is 56px
+ * in total and a control centred in it is 28px down. `index.css` carries the
+ * corrected arithmetic beside the fallback it still needs.
+ */
+const LEADER_DROP = 26;
+
+/**
+ * The three numbers `index.css` parks the callouts with, and the narrowest cell
+ * that can hold both of them.
+ *
+ * WHY THIS IS MEASURED AND NOT A MEDIA QUERY. It was `@media (max-width: 520px)`
+ * and that could never work, because a media query asks about the WINDOW and
+ * the thing that has to hold two boxes is the CELL. A 2x2 grid on a 2560px
+ * monitor gives each cell ~600px; a 3x2 gives ~420px — narrow cells at a
+ * viewport no `max-width` fires on. Measured in Chrome at a wide viewport with
+ * the cell narrowed, the two callouts overlapped by 4px at 440, 44px at 400 and
+ * 124px at 320, both still `display: block`, sitting on top of each other.
+ *
+ * So the legend measures its own root. The root IS the cell — `inset: 0`
+ * against the cell's positioning context — so its width is the number the
+ * question is actually about, and below the threshold the transport callout is
+ * not RENDERED rather than hidden by a rule that may or may not apply.
+ *
+ * The gutter is the only free number here: two boxes that merely touch read as
+ * one wide box, and 16px is the smallest gap that still reads as two.
+ */
+const CALLOUT_INSET = 10;
+const CALLOUT_MAX_WIDTH = 190;
+const CALLOUT_GUTTER = 16;
+export const BOTH_CALLOUTS_MIN_CELL =
+  CALLOUT_INSET * 2 + CALLOUT_MAX_WIDTH * 2 + CALLOUT_GUTTER;
+
 export function BootLegend({ sessionId, onDismiss }: BootLegendProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const callouts = calloutsFor(sessionId);
   const [leaders, setLeaders] = useState<readonly Leader[]>(() =>
     callouts.map((callout) => ({ key: callout.key, target: callout.target, end: null })),
   );
+  /**
+   * How wide the cell is, or 0 for "not measured".
+   *
+   * Zero is the honest answer and not a narrow cell: it is what every rect is
+   * in an environment that lays nothing out, and it is the state this starts in
+   * for the one frame before the layout effect runs. Both callouts are shown
+   * for it — see `roomForBoth`.
+   */
+  const [cellWidth, setCellWidth] = useState(0);
 
   /**
    * Where each named control is, in this overlay's own coordinates.
@@ -128,6 +183,10 @@ export function BootLegend({ sessionId, onDismiss }: BootLegendProps) {
     const root = rootRef.current;
     if (!root) return;
     const origin = root.getBoundingClientRect();
+    // The cell's width, from the box that IS the cell. Taken in the same pass
+    // as the endpoints because it is the same question — where things are —
+    // and a second observer for it would be a second chance to disagree.
+    setCellWidth(origin.width);
     setLeaders(
       callouts.map((callout) => {
         const control = document.querySelector(`[data-testid="${callout.target}"]`);
@@ -151,10 +210,27 @@ export function BootLegend({ sessionId, onDismiss }: BootLegendProps) {
   // Before paint, so the first frame the user sees already has its lines: a
   // legend that drew its callouts and then snapped its leaders into place one
   // frame later would read as a glitch on the very surface it is teaching.
+  //
+  // A `ResizeObserver` on the root as well as the window's `resize`, and the
+  // two are not the same event. The CELL resizes without the window: a seam
+  // drag, a maximize, a layout preset, a sibling cell closing. Those are
+  // exactly the moments the legend's answer to "is there room for both
+  // callouts" changes, and a window listener hears none of them. `TerminalView`
+  // already runs an observer, but on the terminal container — a different box,
+  // and one this component has no business reaching into.
   useLayoutEffect(() => {
     measure();
     window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    const root = rootRef.current;
+    // Guarded because the constructor is not in every environment the suite
+    // renders this in, and a legend that throws on mount teaches nothing.
+    const observer =
+      root && typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(root!);
+    return () => {
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
   }, [measure]);
 
   /**
@@ -216,6 +292,21 @@ export function BootLegend({ sessionId, onDismiss }: BootLegendProps) {
     };
   }, [sessionId, onDismiss]);
 
+  /**
+   * Whether this cell can carry both boxes side by side.
+   *
+   * An UNMEASURED cell (`0`) counts as roomy. That is the safe way round: a
+   * zero width means no layout has happened — the first frame, or an
+   * environment that lays nothing out — and dropping a callout there would hide
+   * it everywhere rather than only where it does not fit.
+   */
+  const roomForBoth = cellWidth === 0 || cellWidth >= BOTH_CALLOUTS_MIN_CELL;
+  // The eye is the one that stays. It is the control with no other way in; the
+  // transport is reachable by trying it, and does nothing harmful pressed early.
+  const shown = roomForBoth ? callouts : callouts.filter((callout) => callout.key === "eye");
+  const leaderFor = (key: Callout["key"]): Leader | undefined =>
+    leaders.find((leader) => leader.key === key);
+
   return (
     <div
       ref={rootRef}
@@ -232,7 +323,10 @@ export function BootLegend({ sessionId, onDismiss }: BootLegendProps) {
           construction — the row is ABOVE the overlay's content area and the
           line has to be allowed out. */}
       <svg className="boot-legend-leads" aria-hidden="true">
-        {leaders.map((leader, index) => {
+        {leaders.map((leader) => {
+          // A leader for a callout that is not on screen would be a line from
+          // nowhere to a control nothing names.
+          if (!shown.some((callout) => callout.key === leader.key)) return null;
           // The callout's own anchor: the corner of the box the line leaves
           // from, in the same coordinates the end is measured in. Kept beside
           // the end rather than in the stylesheet so that one function owns
@@ -261,42 +355,48 @@ export function BootLegend({ sessionId, onDismiss }: BootLegendProps) {
                 cx={leader.end?.x ?? 0}
                 cy={leader.end?.y ?? 0}
                 r={3}
-                // Index only decides the dash phase, so the two lines do not
-                // animate in lockstep; it is not identity.
-                style={{ animationDelay: `${index * 60}ms` }}
+                // No `animationDelay` here. There was one — staggering two
+                // arrivals "so the two lines do not animate in lockstep" — and
+                // it was dead: no rule gives `.boot-legend-leads circle` an
+                // animation-name, so there was nothing to delay. The legend's
+                // one animation is the callouts' arrival, which already reads
+                // as the pair appearing together.
               />
             </g>
           );
         })}
       </svg>
 
-      {callouts.map((callout) => (
-        <div
-          key={callout.key}
-          className="boot-legend-callout"
-          data-testid={`boot-legend-callout-${sessionId}-${callout.key}`}
-          // The stylesheet parks the two boxes at the ends of the row on this
-          // attribute — left for the transport, right for the eye — which is
-          // the side each control is actually on.
-          data-leader={callout.key}
-          data-leads-to={callout.target}
-        >
-          <b>{callout.title}</b>
-          {callout.body}
-        </div>
-      ))}
+      {shown.map((callout) => {
+        const end = leaderFor(callout.key)?.end ?? null;
+        return (
+          <div
+            key={callout.key}
+            className="boot-legend-callout"
+            data-testid={`boot-legend-callout-${sessionId}-${callout.key}`}
+            // The stylesheet parks the two boxes at the ends of the row on this
+            // attribute — left for the transport, right for the eye — which is
+            // the side each control is actually on.
+            data-leader={callout.key}
+            data-leads-to={callout.target}
+            // ...and this is the eye's callout standing alone in a cell too
+            // narrow for two, which the stylesheet answers by letting it span.
+            data-solo={roomForBoth ? undefined : "1"}
+            // WHERE THE BAND IS, from the measurement rather than from a
+            // constant in the stylesheet. The box's top edge is the leader's
+            // start point, so the line always arrives at the box — see
+            // `LEADER_DROP`, and the 18px gap that made this necessary. An
+            // unmeasured control leaves the stylesheet's fallback in place,
+            // which is the only case where the two can be written down apart.
+            style={end ? { top: end.y + LEADER_DROP } : undefined}
+          >
+            <b>{callout.title}</b>
+            {callout.body}
+          </div>
+        );
+      })}
     </div>
   );
 }
-
-/**
- * How far below a control its line starts, in px.
- *
- * The callouts sit under the row and the lines go UP into it, so a leader is a
- * short vertical run from the callout's own band to the control's centre. One
- * constant rather than two: the drop is the same on both sides, and the
- * horizontal position is the control's own.
- */
-const LEADER_DROP = 26;
 
 export default BootLegend;

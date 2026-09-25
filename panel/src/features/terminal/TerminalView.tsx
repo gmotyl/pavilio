@@ -122,8 +122,18 @@ export function TerminalView({
   // Hiding the bar CLOSES the pane rather than merely covering it — a pane
   // without its bar has no eye to close it, and one that came back unasked
   // when the bar returned would be a surprise.
+  //
+  // ...and it puts the legend away for the same reason, which the render gate
+  // alone did not do. The gate reads `speech && speechBarVisible && legendUp`,
+  // so hiding the bar only STOPPED DRAWING the overlay while `legendUp` stayed
+  // true underneath; showing the bar again mid-boot brought it back, which
+  // "shown once" does not intend. Clearing the flag makes the hide a dismissal,
+  // which is what it is: the user took the two controls the legend names off
+  // the screen.
   useEffect(() => {
-    if (!speechBarVisible) setAnswerPaneOpen(sessionId, false);
+    if (speechBarVisible) return;
+    setAnswerPaneOpen(sessionId, false);
+    setLegendUp(false);
   }, [sessionId, speechBarVisible]);
 
   // Arrival detection. Every utterance id the queue has ever shown this cell
@@ -233,9 +243,31 @@ export function TerminalView({
   const launcherUsed = useLauncherUsed(sessionId);
   const lastLauncherUsed = useRef(launcherUsed);
   useEffect(() => {
-    const rose = launcherUsed && !lastLauncherUsed.current;
-    lastLauncherUsed.current = launcherUsed;
-    if (!rose || !waiting || pending) return;
+    // A FALL is recorded at once — the cell was forgotten and re-registered,
+    // and a fall that went unrecorded would make the next rise no edge at all.
+    if (!launcherUsed) {
+      lastLauncherUsed.current = false;
+      return;
+    }
+    if (lastLauncherUsed.current) return;
+
+    // THE EDGE IS NOT CONSUMED UNTIL THERE IS A WAIT TO ACT ON, and the order
+    // of these two lines is the whole of it. The ref used to be written above
+    // this guard, which meant an edge arriving one commit AHEAD of `waiting`
+    // was swallowed and the legend never appeared. It worked only because
+    // `LauncherPills` happens to call `noteAgentStarting` before `onDelivered`
+    // — the two facts come from two different stores, and nothing made that
+    // order a rule. Swapping those two lines would have killed the legend in
+    // silence, with every test still green. Now the edge simply waits for the
+    // wait it belongs to; `BootLegend.test.tsx` drives the two in the other
+    // order and holds this.
+    if (!waiting) return;
+    lastLauncherUsed.current = true;
+
+    // ...and a press made while a draft is still outstanding belongs to the
+    // send, which has a pane the user already opened and typed into. Consumed
+    // above rather than left armed: the press has had its answer.
+    if (pending) return;
     if (hasSeenBootLegend()) return;
     // Written on SHOWING, not on dismissing — see `bootLegendSeen`, where the
     // reason lives: every way out of the legend is the user having seen it, and

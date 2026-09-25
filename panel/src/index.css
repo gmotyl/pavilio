@@ -588,8 +588,8 @@ input[type="checkbox"] {
    The answer pane's waiting wave DOES carry one, and that is not this rule
    quietly losing its argument: the wave is a row of bars moving continuously in
    the middle of the pane's body for as long as an answer takes, where these are
-   a tint on a 24px control. The note above `@media (prefers-reduced-motion)`
-   further down spells the distinction out. */
+   a tint on a 24px control. The note above the `@media (prefers-reduced-motion)`
+   query at the FOOT of this file spells the distinction out. */
 .terminal-speak[data-pulse="1"],
 .speech-bar-primary[data-pulse="1"] {
   animation: terminal-led-pulse-attention 0.8s ease-in-out infinite;
@@ -1225,43 +1225,6 @@ input[type="checkbox"] {
   }
 }
 
-/* The one `prefers-reduced-motion` query in this stylesheet — and the note on
-   `.terminal-speak[data-pulse]` says why the pulses still have none. Those are
-   a 0.8s tint on a 24px control, the same rule in the header and the row, and a
-   query for one of them would be the two disagreeing. This is not that: it is a
-   row of bars moving continuously in the middle of the pane's body, in the
-   reader's line of sight, for as long as the agent takes to answer. It is the
-   one animation in the panel asked to run for minutes.
-
-   `animation: none`, NEVER `display: none`. The wave IS how the pane says it is
-   waiting, so taking the movement away has to leave the shape — which is what
-   the per-crest heights above are for, and why the keyframes produce no height
-   of their own.
-
-   Two classes in the selector so it outranks `.answer-pane-wave-crest` on
-   specificity rather than on source order, and `*` so a part of the ornament
-   added later is stopped without anybody remembering to come back here. */
-@media (prefers-reduced-motion: reduce) {
-  .answer-pane-waiting .answer-pane-wave *,
-  .answer-pane-waiting-next .answer-pane-wave * {
-    animation: none;
-  }
-
-  /* The legend joins the SAME query rather than opening a second one. Two
-     queries for the same preference are two places to keep a rule in step, and
-     the note above is only true while there is one. `*` for the reason the
-     wave's selector carries it: the ornament may grow a part, and this must
-     stop that part too.
-
-     Same rule as the wave's, too: the movement goes, the SHAPE stays. The
-     leaders are how the legend says which control each callout is about — a
-     `display: none` here would leave two floating boxes naming nothing. */
-  .boot-legend,
-  .boot-legend * {
-    animation: none;
-  }
-}
-
 /* The reply, at the foot of the pane and under the two switches.
 
    The third ground of the three lives on the FIELD inside this row, not on the
@@ -1622,13 +1585,34 @@ input[type="checkbox"] {
   fill: var(--accent);
 }
 
-/* The callouts sit in a band under the row — 56px of row plus its hairline,
-   plus room for the line itself. Parked at the two ends on `data-leader`,
-   because that is the side each control is actually on: the transport is the
-   first thing after the arm switch, the eye is the last control on the line. */
+/* The callouts sit in a band under the row, and WHERE that band is comes from
+   the component, not from here: `BootLegend` writes each box's `top` inline,
+   at its own leader's start point, so the line and the box it leaves cannot
+   disagree. They did. The line ran from `centre + LEADER_DROP` = 54px up to
+   the control, while this rule parked the box at 82px — an 18px gap at every
+   width, a leader floating clear of the thing it named.
+
+   The 82 came from arithmetic that had gone false. It reasoned "56px of row
+   plus its hairline" as though the padding were outside the 56 — but Tailwind's
+   preflight sets `box-sizing: border-box` on everything, so `.speech-bar-row`'s
+   `height: 56px` with `padding: 6px 8px` IS 56px in total, and `.speech-bar`'s
+   1px `border-bottom` sits BELOW the row rather than inside it. The row is 56
+   and the bar 57. A control is centred in the row, so its centre is 28px down,
+   and the band starts a `LEADER_DROP` below that.
+
+   The 54px here is therefore the fallback and nothing else: it is what an
+   UNMEASURED callout uses — a control not in the document, which yields a null
+   endpoint and so a leaderless box. Keeping it right anyway is the point of
+   writing the arithmetic down.
+
+   Parked at the two ends on `data-leader`, because that is the side each
+   control is actually on: the transport is the first thing after the arm
+   switch, the eye is the last control on the line. The `left`/`right` insets
+   and the `max-width` are the three numbers `BOTH_CALLOUTS_MIN_CELL` in
+   `BootLegend.tsx` is built from — see the note on the solo rule below. */
 .boot-legend-callout {
   position: absolute;
-  top: 82px;
+  top: 54px;
   max-width: 190px;
   padding: 6px 10px;
   border-radius: 6px;
@@ -1663,7 +1647,8 @@ input[type="checkbox"] {
 
 /* A short arrival, once, so the pair reads as one thing appearing rather than
    as two boxes that were always there. Stopped under `prefers-reduced-motion`
-   with the wave — see the single query above. */
+   with the wave — see the single query at the FOOT of this file, which is where
+   it has to be to beat this rule. */
 @keyframes boot-legend-in {
   from {
     opacity: 0;
@@ -1675,19 +1660,78 @@ input[type="checkbox"] {
   }
 }
 
-/* A narrow cell cannot carry two 190px boxes on one line. Below this the
-   legend keeps the callout for the EYE alone: it is the control with no other
-   way in — the transport is reachable by trying it, and does nothing harmful
-   when pressed early — and one callout that fits teaches more than two that
-   overlap. */
-@media (max-width: 520px) {
-  .boot-legend-callout[data-leader="transport"] {
-    display: none;
+/* A narrow cell cannot carry two 190px boxes on one line, and WHICH cell is
+   narrow is not a question this stylesheet can answer.
+
+   This was `@media (max-width: 520px)`, and that was wrong in the way a media
+   query is always wrong about a cell: the query asks about the WINDOW. A cell
+   is narrow long before the window is — a 2x2 grid on a 2560px monitor gives
+   each cell ~600px and a 3x2 gives ~420px — so the fallback fired on a phone
+   and never on the desktop layouts that need it. Measured in Chrome at a wide
+   viewport with the cell narrowed: at 320px the two boxes sat on top of each
+   other by 124px, both still `display: block`.
+
+   So the decision moved into `BootLegend.tsx`, which measures its own root —
+   the root IS the cell, `inset: 0` — and simply does not RENDER the transport
+   callout when the two cannot both fit. `BOTH_CALLOUTS_MIN_CELL` there is
+   derived from the three numbers below, so changing one of them without
+   changing that constant is a drift a test catches.
+
+   What is left here is the shape of the one that stays: the eye's callout
+   spans the cell instead of keeping the width it would have shared. The eye is
+   the one kept because it is the control with no other way in — the transport
+   is reachable by trying it, and does nothing harmful when pressed early. */
+.boot-legend-callout[data-solo="1"] {
+  max-width: none;
+  left: 10px;
+  right: 10px;
+}
+
+/* ── REDUCED MOTION, LAST IN THE FILE ─────────────────────────────────────────
+
+   The one `prefers-reduced-motion` query in this stylesheet — and the note on
+   `.terminal-speak[data-pulse]` says why the pulses still have none. Those are
+   a 0.8s tint on a 24px control, the same rule in the header and the row, and a
+   query for one of them would be the two disagreeing. This is not that: the
+   wave is a row of bars moving continuously in the middle of the pane's body,
+   in the reader's line of sight, for as long as the agent takes to answer, and
+   the legend is an overlay that arrives over a surface the user is reading.
+
+   `animation: none`, NEVER `display: none`. The wave IS how the pane says it is
+   waiting, so taking the movement away has to leave the shape — which is what
+   the per-crest heights are for, and why the keyframes produce no height of
+   their own. The legend's leaders are how it says which control each callout is
+   about, so the same rule holds there.
+
+   WHY IT IS AT THE FOOT OF THE FILE, and why this block must stay here.
+
+   A media query adds NO specificity. `.boot-legend *` is (0,1,0) and so is
+   `.boot-legend-callout`, so when this block sat 350 lines above the legend's
+   own rules the tie went to source order and the LATER rule won: measured in
+   headless Chrome under `--force-prefers-reduced-motion`, the callouts animated
+   with `boot-legend-in` at 180ms, which is the only animated part the legend
+   has. The old test could not see it, because it read the stylesheet as text
+   and text has no cascade.
+
+   Last in the file is the fix that keeps `*` meaning what it says. Raising the
+   specificity here would have to be raised AGAIN for every `.boot-legend-…` or
+   `.answer-pane-…` rule that grows an animation later; being last covers the
+   parts nobody has written yet — the same argument the `*` itself makes. The
+   two arms stay in ONE query for the same reason they always did: two queries
+   for one preference are two places to keep in step by hand.
+
+   The wave's arm does not need the position — `.answer-pane-waiting
+   .answer-pane-wave *` is (0,2,0) and outranks `.answer-pane-wave-crest` on
+   specificity, as its own note always said. It moves because the query moves,
+   and it loses nothing by being later. */
+@media (prefers-reduced-motion: reduce) {
+  .answer-pane-waiting .answer-pane-wave *,
+  .answer-pane-waiting-next .answer-pane-wave * {
+    animation: none;
   }
 
-  .boot-legend-callout[data-leader="eye"] {
-    max-width: none;
-    left: 10px;
-    right: 10px;
+  .boot-legend,
+  .boot-legend * {
+    animation: none;
   }
 }

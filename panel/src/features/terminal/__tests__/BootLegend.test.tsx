@@ -37,6 +37,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { prepare } from "../../speech/prepare";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
@@ -111,10 +112,13 @@ vi.mock("../../speech/synth", async (importOriginal) => ({
 // Imported after the mocks so they pick them up.
 const { TerminalView } = await import("../TerminalView");
 const { forgetAnswerPane } = await import("../answerPaneState");
-const { __resetAnswerWaitingForTests, getAnswerWaiting } = await import("../answerWaiting");
+const { __resetAnswerWaitingForTests, getAnswerWaiting, noteAgentStarting } = await import(
+  "../answerWaiting"
+);
 const { __resetPtySubmitForTests } = await import("../ptySubmit");
 const { _applyEventForTests, _resetForTests } = await import("../useTerminalActivityChannel");
 const { hasSeenBootLegend } = await import("../bootLegendSeen");
+const { noteLauncherUsed } = await import("../launcherUse");
 
 const SESSION = "cell-a";
 const OTHER = "cell-b";
@@ -216,6 +220,136 @@ type TuningGlobals = { __PAVILIO_TUNING__?: { answerWaveDebounceMs?: number } };
 const globals = globalThis as unknown as TuningGlobals;
 
 const CSS = readFileSync(resolve("src/index.css"), "utf8");
+
+// ---------------------------------------------------------------------------
+// THE CASCADE RIG — the real stylesheet, in the document, over real elements.
+//
+// A regex over `index.css` cannot fail the way this feature failed. The
+// reduced-motion rule for the legend WAS in the file, in the one query, saying
+// `animation: none` — and the callouts animated anyway, because a rule 350
+// lines further down said `animation: boot-legend-in 180ms` at the very same
+// specificity and source order broke the tie. Every assertion that matters
+// below therefore goes through `getComputedStyle` on a rendered node with the
+// shipped sheet loaded, which is the only form that reads the cascade rather
+// than the text.
+// ---------------------------------------------------------------------------
+
+/** The shipped stylesheet in the document, and a handle to take it out again. */
+function injectStylesheet(css: string = CSS): () => void {
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.append(style);
+  return () => style.remove();
+}
+
+/**
+ * The same stylesheet with the reduced-motion query asking something jsdom
+ * answers YES to.
+ *
+ * jsdom evaluates no media CONDITION except `screen` — a rule inside
+ * `@media (prefers-reduced-motion: reduce)` is dropped entirely, whatever the
+ * preference, and there is no `matchMedia` to set. So the condition is
+ * rewritten and NOTHING else is: the block keeps its contents, its selectors
+ * and — the whole point — its POSITION in the file, which is the axis the bug
+ * lived on. jsdom's cascade is source-order, so a block that has been moved
+ * below the rules it must beat wins here exactly as it does in a browser.
+ *
+ * The rewrite is asserted to have found its one query rather than assumed: a
+ * silent miss would leave the block inert and the test green for the wrong
+ * reason... except that inert is also what the BUG looks like, so a miss fails
+ * loudly here. The count is pinned anyway, because one query is what keeps the
+ * two arms of it in step by construction.
+ */
+function stylesheetWithReducedMotionOn(): string {
+  const query = "@media (prefers-reduced-motion: reduce)";
+  const occurrences = CSS.split(query).length - 1;
+  expect(occurrences, "index.css must hold exactly one reduced-motion query").toBe(1);
+  return CSS.replace(query, "@media screen");
+}
+
+/**
+ * A cell laid out, for a component that measures.
+ *
+ * jsdom lays nothing out and every rect is zero, so the legend's own
+ * measurement — which is how it finds its controls AND, now, how wide its cell
+ * is — has nothing to read. This hands it a plausible cell: the overlay is the
+ * cell, `inset: 0`, and the two named controls sit in the row at its top.
+ *
+ * `top: 6` and `height: 44` are the row's own numbers: `.speech-bar-row` is
+ * 56px tall with `padding: 6px 8px` and `align-items: center`, and
+ * `.speech-bar-btn` is a 44px square — 6 + 44 + 6 = 56. A control's centre is
+ * therefore 28px down, which one of the tests below re-derives from the
+ * stylesheet rather than trusting this comment.
+ */
+const CONTROL_TOP = 6;
+const CONTROL_SIZE = 44;
+const CONTROL_CENTRE_Y = CONTROL_TOP + CONTROL_SIZE / 2;
+
+function stubLayout(cellWidth: number, cellHeight = 400): void {
+  const box = (left: number, top: number, width: number, height: number): DOMRect =>
+    ({
+      left,
+      top,
+      width,
+      height,
+      right: left + width,
+      bottom: top + height,
+      x: left,
+      y: top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: Element,
+  ): DOMRect {
+    if (this.classList.contains("boot-legend")) return box(0, 0, cellWidth, cellHeight);
+    const testId = this.getAttribute("data-testid") ?? "";
+    if (testId === `speech-bar-playpause-${SESSION}`) {
+      return box(120, CONTROL_TOP, CONTROL_SIZE, CONTROL_SIZE);
+    }
+    if (testId === `speech-bar-eye-${SESSION}`) {
+      return box(cellWidth - 52, CONTROL_TOP, CONTROL_SIZE, CONTROL_SIZE);
+    }
+    return box(0, 0, 0, 0);
+  });
+}
+
+/** Which controls the legend is currently carrying a callout for. */
+const calloutTargets = (): string[] =>
+  callouts()
+    .map((c) => c.getAttribute("data-leads-to") ?? "")
+    .sort();
+
+const calloutFor = (key: "transport" | "eye"): HTMLElement | null =>
+  screen.queryByTestId(`boot-legend-callout-${SESSION}-${key}`);
+
+/** A leader path's start point, parsed out of the `d` it was drawn with. */
+function leaderStart(key: "transport" | "eye"): { x: number; y: number } {
+  const path = screen.getByTestId(`boot-legend-lead-${SESSION}-${key}`);
+  const d = path.getAttribute("d") ?? "";
+  const found = d.match(/^M\s+(-?[\d.]+)\s+(-?[\d.]+)\s+L\s+(-?[\d.]+)\s+(-?[\d.]+)$/);
+  if (!found) throw new Error(`unreadable leader path: ${d}`);
+  return { x: Number(found[1]), y: Number(found[2]) };
+}
+
+/** ...and its end point, the control's own centre. */
+function leaderEnd(key: "transport" | "eye"): { x: number; y: number } {
+  const path = screen.getByTestId(`boot-legend-lead-${SESSION}-${key}`);
+  const d = path.getAttribute("d") ?? "";
+  const found = d.match(/^M\s+(-?[\d.]+)\s+(-?[\d.]+)\s+L\s+(-?[\d.]+)\s+(-?[\d.]+)$/);
+  if (!found) throw new Error(`unreadable leader path: ${d}`);
+  return { x: Number(found[3]), y: Number(found[4]) };
+}
+
+const px = (value: string): number => Number.parseFloat(value);
+
+/** Everything the legend puts on screen, so a boot can be driven in one line. */
+async function boot(cellWidth?: number): Promise<void> {
+  if (cellWidth !== undefined) stubLayout(cellWidth);
+  render(cell(makeSpeech(SESSION)));
+  fireEvent.click(launcher());
+  await settleSubmit();
+}
 
 beforeEach(() => {
   at = 0;
@@ -453,20 +587,226 @@ describe("the boot legend", () => {
     expect(legend()).toBeNull();
   });
 
-  it("a reduced-motion preference stops the legend animating", () => {
-    // Read out of the stylesheet, because jsdom loads none: the assertion is
-    // that the rule EXISTS and lives in the stylesheet's single
-    // `prefers-reduced-motion` query, not a second one that would have to be
-    // kept in step with the first by hand.
-    const queries = [...CSS.matchAll(/@media \(prefers-reduced-motion: reduce\) \{/g)];
-    expect(queries).toHaveLength(1);
+  it("a reduced-motion preference stops the legend animating", async () => {
+    // The CALLOUT is the only animated part of the legend, and it is the part
+    // the old spelling of this test could not see: a regex found
+    // `.boot-legend { animation: none }` inside the query, ticked, and missed
+    // that `.boot-legend-callout { animation: boot-legend-in 180ms }` — equal
+    // specificity, 350 lines later — took the tie on source order. Measured in
+    // headless Chrome under `--force-prefers-reduced-motion`, the callouts
+    // animated. So the assertion is on the CASCADE, over the rendered box.
+    const drop = injectStylesheet(stylesheetWithReducedMotionOn());
+    try {
+      await boot(720);
 
-    const block = CSS.slice(queries[0].index!);
-    const end = block.indexOf("\n}");
-    expect(end).toBeGreaterThan(0);
-    const inside = block.slice(0, end);
+      for (const key of ["transport", "eye"] as const) {
+        const callout = calloutFor(key);
+        expect(callout, `no ${key} callout`).not.toBeNull();
+        expect(
+          getComputedStyle(callout!).animation,
+          `the ${key} callout still animates under reduced motion`,
+        ).toBe("none");
+      }
 
-    expect(inside).toContain(".boot-legend");
-    expect(inside).toMatch(/animation:\s*none/);
+      // ...and the overlay and its leaders with them. `*` in the rule is meant
+      // to cover a part of the ornament added later; these are the parts there
+      // are today.
+      expect(getComputedStyle(legend()!).animation).toBe("none");
+      for (const node of Array.from(legend()!.querySelectorAll(".boot-legend-leads *"))) {
+        expect(getComputedStyle(node).animation).toBe("none");
+      }
+    } finally {
+      drop();
+    }
+  });
+
+  it("the legend animates when nothing asks it not to", async () => {
+    // The other half, so "nothing animates" cannot pass by the arrival having
+    // been deleted: with the query's condition left as shipped — one jsdom
+    // never matches — the callout carries its arrival.
+    const drop = injectStylesheet();
+    try {
+      await boot(720);
+      expect(getComputedStyle(calloutFor("eye")!).animation).toMatch(/boot-legend-in/);
+    } finally {
+      drop();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // The CELL is what the legend has to fit in, and it is not the window.
+  // -------------------------------------------------------------------------
+
+  it.each([320, 360, 400])(
+    "a %ipx cell carries the eye callout alone",
+    async (cellWidth) => {
+      const drop = injectStylesheet();
+      try {
+        await boot(cellWidth);
+
+        // Two 190px boxes, each 10px in from its own edge, do not fit here —
+        // and the fallback used to be keyed to `@media (max-width: 520px)`, a
+        // VIEWPORT query, so a 320px cell on a 2560px monitor showed both and
+        // they lay on top of each other by 124px. The eye is the one kept: it
+        // is the control with no other way in.
+        expect(calloutTargets()).toEqual([`speech-bar-eye-${SESSION}`]);
+        expect(calloutFor("transport")).toBeNull();
+        // ...and the one that stays spans the cell rather than keeping the
+        // width it would have shared.
+        expect(calloutFor("eye")!.getAttribute("data-solo")).toBe("1");
+      } finally {
+        drop();
+      }
+    },
+  );
+
+  it.each([440, 720, 1200])("a %ipx cell carries both, clear of each other", async (cellWidth) => {
+    const drop = injectStylesheet();
+    try {
+      await boot(cellWidth);
+
+      expect(calloutTargets()).toEqual(
+        [`speech-bar-playpause-${SESSION}`, `speech-bar-eye-${SESSION}`].sort(),
+      );
+
+      // ...and they cannot be touching. Read off the rendered boxes rather
+      // than out of the file, so the numbers are the ones the cascade actually
+      // gives these two elements at this width.
+      const transport = getComputedStyle(calloutFor("transport")!);
+      const eye = getComputedStyle(calloutFor("eye")!);
+      const widest = px(transport.maxWidth);
+      const transportRight = px(transport.left) + widest;
+      const eyeLeft = cellWidth - px(eye.right) - widest;
+      expect(
+        transportRight,
+        `the two callouts overlap by ${transportRight - eyeLeft}px in a ${cellWidth}px cell`,
+      ).toBeLessThanOrEqual(eyeLeft);
+    } finally {
+      drop();
+    }
+  });
+
+  it("the cell the legend measures is its own, not the window", async () => {
+    // The distinction the viewport query could not make: a WIDE window with a
+    // NARROW cell in it, which is what every 2x2 and 3x2 grid is. The window
+    // here is jsdom's default 1024 and never changes.
+    expect(window.innerWidth).toBeGreaterThan(520);
+    const drop = injectStylesheet();
+    try {
+      await boot(320);
+      expect(calloutTargets()).toEqual([`speech-bar-eye-${SESSION}`]);
+    } finally {
+      drop();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // A leader is a LINE BETWEEN TWO THINGS, and both ends have to land.
+  // -------------------------------------------------------------------------
+
+  it("each leader runs from its callout's edge to the control's centre", async () => {
+    const drop = injectStylesheet();
+    try {
+      await boot(720);
+
+      for (const key of ["transport", "eye"] as const) {
+        const callout = calloutFor(key)!;
+        const top = px(getComputedStyle(callout).top);
+        const start = leaderStart(key);
+        const end = leaderEnd(key);
+
+        // The BOX end. This is the one that was wrong: the line started 60px
+        // down and the box sat at 82px, so every leader was a stub floating
+        // 18px clear of the thing it was supposed to name, at every width.
+        expect(
+          Math.abs(top - start.y),
+          `the ${key} leader stops ${Math.abs(top - start.y)}px short of its callout`,
+        ).toBeLessThanOrEqual(1);
+
+        // The CONTROL end, which was already right and stays right.
+        expect(end.y).toBeCloseTo(CONTROL_CENTRE_Y, 5);
+        expect(start.x).toBeCloseTo(end.x, 5);
+        // ...and it runs UP from the box into the row, not down.
+        expect(start.y).toBeGreaterThan(end.y);
+      }
+    } finally {
+      drop();
+    }
+  });
+
+  it("the row's own numbers are what the leader arithmetic assumes", async () => {
+    // The drift guard for the comment the geometry reasons from. Preflight
+    // makes every box `border-box`, so `.speech-bar-row`'s 56px is the WHOLE
+    // row, padding included — a control centred in it is 28px down, and the
+    // bar's hairline is below the row rather than inside it.
+    const drop = injectStylesheet();
+    try {
+      await boot(720);
+      const barRow = row().querySelector(".speech-bar-row") as HTMLElement;
+      const style = getComputedStyle(barRow);
+      const control = getComputedStyle(eye());
+
+      // The proof that the padding is INSIDE the declared height, which is
+      // where the old "56px of row plus its hairline" went wrong: the row's own
+      // 56 is already its 6px padding, its 44px control and its 6px padding.
+      expect(px(style.height)).toBe(
+        px(style.paddingTop) + px(control.height) + px(style.paddingBottom),
+      );
+      // ...so a control centred in it sits at half of that.
+      expect(px(style.height) / 2).toBe(CONTROL_CENTRE_Y);
+
+      // And the hairline is the BAR's, below the row rather than inside it —
+      // read as a declaration because jsdom computes no shorthand carrying a
+      // `var()`, and there is no cascade question here to get wrong.
+      expect(cssRule(".speech-bar")).toMatch(/border-bottom:\s*1px solid/);
+    } finally {
+      drop();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // The two orderings the arming effect must survive.
+  // -------------------------------------------------------------------------
+
+  it("a launcher edge seen a commit before the wait is not lost", async () => {
+    render(cell(makeSpeech(SESSION)));
+
+    // The delivery flag on its own. `LauncherPills` calls `noteAgentStarting`
+    // before `onDelivered` today, so this order does not occur in the product
+    // — which is the problem: swapping those two lines is a one-line edit that
+    // used to kill the legend with nothing failing, because the effect wrote
+    // its `lastLauncherUsed` ref BEFORE the `!waiting` guard and consumed the
+    // edge it then refused to act on.
+    act(() => {
+      noteLauncherUsed(SESSION);
+    });
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
+    expect(legend()).toBeNull();
+
+    // ...and the wait behind it.
+    act(() => {
+      noteAgentStarting(SESSION);
+    });
+    await waitFor(() => expect(legend()).not.toBeNull());
+    expect(hasSeenBootLegend()).toBe(true);
+  });
+
+  it("hiding the bar mid-boot puts the legend away for good", async () => {
+    const speech = makeSpeech(SESSION);
+    const view = render(cell(speech));
+    fireEvent.click(launcher());
+    await settleSubmit();
+    expect(legend()).not.toBeNull();
+
+    // The bar goes. The two controls the legend names go with it, so there is
+    // nothing left for the callouts to point at.
+    view.rerender(cell(speech, SESSION, false));
+    expect(legend()).toBeNull();
+
+    // ...and bringing the bar back does not bring the legend back. Shown once
+    // is shown: the browser was marked taught the moment it first appeared.
+    view.rerender(cell(speech, SESSION, true));
+    expect(legend()).toBeNull();
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
   });
 });
