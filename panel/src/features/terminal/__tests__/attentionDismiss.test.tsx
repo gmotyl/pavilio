@@ -69,12 +69,24 @@ import {
 } from "../useTerminalActivityChannel";
 
 const sendDismiss = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
+const reconnectOnActivate = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
 
-// The pool is somebody else's subject. Only the one entry point these two
-// gestures reach is replaced, so the assertion is on the frame being asked
-// for rather than on a socket jsdom does not have.
+// The pool is somebody else's subject. Only the entry points these gestures
+// reach are replaced, so the assertion is on the frame being asked for rather
+// than on a socket jsdom does not have.
+//
+// `reconnectOnActivate` is the second of those entry points. The composer's
+// focus now repairs that cell's socket as well as clearing its LED, so a mock
+// that knows only `sendDismiss` makes every focus below throw. It is a spy
+// rather than a bare no-op because the repair is part of the same arrival
+// gesture this file is about: the focus tests can then pin that it is asked
+// for, and asked for THIS session. What the real one REFUSES to do — a
+// healthy socket, an exited session, a second ask mid-handshake — is a
+// property of the pool, invisible through a spy, and is pinned against the
+// real pool in `AnswerComposer.focusReconnect.test.tsx`.
 vi.mock("../terminalInstances", () => ({
   sendDismiss: (sessionId: string) => sendDismiss(sessionId),
+  reconnectOnActivate: (sessionId: string) => reconnectOnActivate(sessionId),
 }));
 
 // Nothing is synthesized in this file: the bar draws no segments and the
@@ -165,7 +177,7 @@ const field = (sessionId: string): HTMLElement =>
   screen.getByTestId(`answer-pane-composer-${sessionId}`);
 
 /**
- * The activity channel, the waiting store and the dismiss spy, back to nothing.
+ * The activity channel, the waiting store and the pool spies, back to nothing.
  *
  * Shared by all three describes below rather than written out again in each:
  * the last two drive the same rule through hooks instead of components, and a
@@ -176,6 +188,7 @@ function resetArrivalHarness(): void {
   _resetForTests();
   __resetAnswerWaitingForTests();
   installMatchMedia(false);
+  reconnectOnActivate.mockReset();
   sendDismiss.mockReset();
   // The server's half of the round trip — see the note on this file.
   sendDismiss.mockImplementation((sessionId: string) => {
@@ -216,7 +229,14 @@ describe("attention clears when the user actually arrives", () => {
     expect(getActivityState("cell-a")).toBe("idle");
   });
 
-  it("dismisses attention when the composer takes focus", () => {
+  /**
+   * The caret landing in the composer is one arrival that says two things, and
+   * both are asserted here so the pair cannot be split by accident: the user
+   * is looking (clear the LED) and is about to send (repair the socket). They
+   * share a handler and neither is conditional on the other — which is why the
+   * reconnect is asked for by session id, not for the pool.
+   */
+  it("dismisses attention and asks for a reconnect when the composer takes focus", () => {
     setActivity("cell-a", "attention");
     renderComposer("cell-a");
 
@@ -224,6 +244,8 @@ describe("attention clears when the user actually arrives", () => {
 
     expect(sendDismiss).toHaveBeenCalledWith("cell-a");
     expect(getActivityState("cell-a")).toBe("idle");
+    expect(reconnectOnActivate).toHaveBeenCalledWith("cell-a");
+    expect(reconnectOnActivate).toHaveBeenCalledTimes(1);
   });
 
   // Busy is the AGENT's state, not a notification to the user. Clearing it on
@@ -238,6 +260,9 @@ describe("attention clears when the user actually arrives", () => {
 
     expect(sendDismiss).not.toHaveBeenCalled();
     expect(getActivityState("cell-a")).toBe("busy");
+    // …but the socket repair is not the LED's business: somebody typing into a
+    // busy cell still wants a live socket waiting when they press Enter.
+    expect(reconnectOnActivate).toHaveBeenCalledWith("cell-a");
   });
 
   it("sends no dismiss for a session that is already idle", () => {
@@ -251,6 +276,20 @@ describe("attention clears when the user actually arrives", () => {
     expect(sendDismiss).not.toHaveBeenCalled();
   });
 
+  /**
+   * The caret leaving and coming back — routine while a reply is being typed.
+   *
+   * The two halves of the gesture answer a repeat differently, and that is the
+   * point of asserting both here. The dismiss is decided HERE, by the rule
+   * reading the cell's state: the first focus took the session to `idle`, so
+   * the second raises no frame at all. The reconnect is decided in the POOL:
+   * the composer asks again, unconditionally, and `reconnectOnActivate` drops
+   * the ask because the handshake it started is still in flight. So the count
+   * below is 2 rather than 1 — the second ask costs nothing, and that it costs
+   * nothing is `AnswerComposer.focusReconnect.test.tsx`'s claim, made against
+   * the real pool where the sockets it did or did not open can be counted.
+   * Were this file to stub that refusal in, it would be asserting its own mock.
+   */
   it("does not re-send a dismiss on a second focus", () => {
     setActivity("cell-a", "attention");
     renderComposer("cell-a");
@@ -260,6 +299,7 @@ describe("attention clears when the user actually arrives", () => {
     fireEvent.focus(field("cell-a"));
 
     expect(sendDismiss).toHaveBeenCalledTimes(1);
+    expect(reconnectOnActivate.mock.calls).toEqual([["cell-a"], ["cell-a"]]);
   });
 
   /**
