@@ -17,16 +17,28 @@
  * reply arrived, so the mark moves to the bar's play button and the wait shrinks
  * rather than ending.
  *
- * There are TWO triggers, and they are independent:
+ * There are THREE triggers, and they are independent:
  *
  * - **a draft was sent** (`beginWaiting`) — the body hands over at once,
+ * - **the agent was asked to start** ({@link noteAgentStarting}) — a launcher
+ *   pill was pressed, and the body hands over at once,
  * - **the session went busy** — the agent started working on its own.
  *
  * `pending` belongs to the first of them only: it is the mark that says *the
- * reply to what you sent has not landed yet*, and an agent working on nothing
- * you asked for has not been asked anything. The wave on the body already says
- * the session is busy; a mark on the play button as well would be the same fact
- * told twice, in a place that means something narrower.
+ * reply to what you sent has not landed yet*, and neither an agent working on
+ * nothing you asked for nor a `start` press is a question anybody is owed an
+ * answer to. The wave on the body already says the session is busy; a mark on
+ * the play button as well would be the same fact told twice, in a place that
+ * means something narrower.
+ *
+ * The third trigger exists because the other two both assume a cell that has
+ * already SPOKEN. One that never has cannot show that its agent is working at
+ * all: the pane starts closed, and the bar shows launcher pills where the eye
+ * would be, so there is no control that opens it. Pressing a pill is the user
+ * asking the agent to start, and it is a user gesture like a send — so it is
+ * immediate, it cancels a pending window, and it releases a standing hold,
+ * exactly as `beginWaiting` does. What it does NOT inherit is the `pending`
+ * mark, for the reason just given.
  *
  * Three events end a SEND wait outright, and every one of them is something
  * that HAPPENED:
@@ -46,6 +58,17 @@
  * The activity trigger ends with the activity itself: the body is the agent's
  * for as long as the agent is busy.
  *
+ * A STARTING wait ends on the same three events, and funnels through
+ * {@link endStarting} for the same reason a send funnels through `endSend` —
+ * see there for the one asymmetry between them. The events read a little
+ * differently: an ARRIVAL is what the press was waiting for (the agent spoke,
+ * so there is a body to show and no wave is needed to stand in for it), and
+ * leaving `busy` is the agent that was asked to start having finished, or never
+ * having come up at all. The arrival is read on {@link noteNewestAnswer}, not
+ * `noteUtterance`: a starting wait has no `sentOn` to compare against, and the
+ * cursor `noteUtterance` reports moves for a transport press too, which would
+ * make a press that only asked for the text look like the answer landing.
+ *
  * ## The debounce on the agent's trigger
  *
  * `busy` does not mean *the agent is working*. Server-side it is
@@ -64,12 +87,12 @@
  * and only then does the agent get a claim on the body ({@link Entry.agentArmed}
  * — which is what `derive` reads, never `activity === "busy"` on its own).
  *
- * It applies to the AGENT's trigger only. A send is the user's own action and
- * delaying its feedback would make the panel feel broken, so `beginWaiting`
- * hands over on the frame it is called and CANCELS any pending window: the
- * user's decision is a better answer to *is this real?* than any clock. The
- * window it spends is owed back when the send itself ends, which is the next
- * section.
+ * It applies to the AGENT's trigger only. A send and a launcher press are the
+ * user's own action and delaying their feedback would make the panel feel
+ * broken, so `beginWaiting` and {@link noteAgentStarting} hand over on the
+ * frame they are called and CANCEL any pending window: the user's decision is a
+ * better answer to *is this real?* than any clock. The window each of them
+ * spends is owed back when its own wait ends, which is the next section.
  *
  * The debounce composes BEFORE the playback deferral below, and the two are
  * independent: the debounce asks *is this real?*, the deferral asks *is now a
@@ -79,21 +102,23 @@
  *
  * ## Cancelling a window is never spending the spell
  *
- * TWO things cancel a pending window, for two different reasons, and both owe
- * the same thing afterwards.
+ * THREE things cancel a pending window, for two different reasons, and all
+ * three owe the same thing afterwards.
  *
  * An ANSWER arriving cancels one ({@link noteNewestAnswer}) — the answer is
  * the better outcome, and an uninterrupted moment on screen is what it is
- * owed. A SEND cancels one ({@link beginWaiting}) — the user's own decision is
- * a better answer to *is this real?* than any clock.
+ * owed. A SEND cancels one ({@link beginWaiting}) and a LAUNCHER PRESS cancels
+ * one ({@link noteAgentStarting}) — the user's own decision is a better answer
+ * to *is this real?* than any clock.
  *
- * Neither is the end of the spell. If the session is still busy afterwards the
- * agent is genuinely still working, and the server will not re-broadcast a
+ * None of them is the end of the spell. If the session is still busy afterwards
+ * the agent is genuinely still working, and the server will not re-broadcast a
  * state it never left: it emits on a TRANSITION into busy, and there was none.
  * So each cancellation re-opens a FRESH window at the moment its own claim is
- * over — the arrival at once, the send when the send ENDS ({@link endSend}) —
- * and the wave returns one window later, which is the shipped rule that a
- * working agent owns the answer pane's body.
+ * over — the arrival at once, the send when the send ENDS ({@link endSend}),
+ * the press when the starting wait ends ({@link endStarting}) — and the wave
+ * returns one window later, which is the shipped rule that a working agent owns
+ * the answer pane's body.
  *
  * The send's half is the less obvious one and the more ordinary: *type a reply
  * while the agent is working* opens with a window pending, spends it on the
@@ -257,6 +282,16 @@ interface Entry {
   send: { sentOn: string | null } | null;
   /** A transport press took the body back while the send wait was still live. */
   markOnly: boolean;
+  /**
+   * The user pressed a launcher pill and the agent it asked for has not spoken
+   * yet. Its own flag rather than a reuse of {@link Entry.agentArmed}, because
+   * the two have different ways OUT: the agent's claim survives an answer
+   * landing (an agent that answers and carries on is still working and still
+   * owns the body), while a starting wait is exactly what that answer ends. It
+   * carries no `pending` mark — nothing was asked — which is the one thing it
+   * does not inherit from a send.
+   */
+  starting: boolean;
   /** The last activity state seen; a CHANGE into `idle` is the silent-agent exit. */
   activity: ActivityState;
   /**
@@ -329,7 +364,13 @@ function derive(entry: Entry): AnswerWaitingSnapshot {
   // deferral is asked SECOND, and only of a claim the window already allowed.
   const agentHasTheBody = entry.agentArmed && !entry.deferred;
   if (entry.send !== null) return sendHasTheBody || agentHasTheBody ? BODY_HANDED_OVER : MARK_ONLY;
-  return agentHasTheBody ? AGENT_HAS_THE_BODY : SETTLED;
+  // The launcher press sits beside the agent's own claim and yields the same
+  // snapshot, because it IS the same fact told one moment earlier: work is
+  // coming and the body has nothing to show. It is deliberately NOT subject to
+  // `deferred` — the deferral is politeness towards a sentence the agent
+  // interrupted, and this trigger is the user's own press, which is never the
+  // rude party.
+  return entry.starting || agentHasTheBody ? AGENT_HAS_THE_BODY : SETTLED;
 }
 
 /**
@@ -442,6 +483,48 @@ function endSend(sessionId: string, entry: Entry): void {
   openDebounceWindow(sessionId, entry);
 }
 
+/**
+ * The launcher press's wait is over — the agent spoke, or the session stopped —
+ * and, like {@link endSend}, clearing the flag is only half of what that owes.
+ *
+ * **Why this re-opens a window at all**, which is the question this trigger
+ * does not answer by analogy. The tempting reading is that it never needs to:
+ * the press's own output puts the session busy, that transition opens a window
+ * on its own account, and the two exits both look covered — an ARRIVAL goes
+ * through `noteNewestAnswer`, which re-opens a window itself, and going IDLE
+ * leaves nothing to wait for. Both halves of that are true and neither is
+ * enough:
+ *
+ * - `noteNewestAnswer`'s re-open is guarded on `hadWindow` — only an arrival
+ *   that actually cancelled something owes a replacement — and by the time the
+ *   answer lands, the window the PRESS cancelled is long gone. So that path
+ *   declines, correctly, for its own debt and not for this one,
+ * - "the press's own output opens a window" holds only when the session was
+ *   IDLE when it was pressed. Pressed on a session that was already busy — a
+ *   reattach repaint is the ordinary way that happens — the agent's output
+ *   merely continues that spell, the server broadcasts on a TRANSITION and
+ *   there is none, and the only window the whole run would ever have seen is
+ *   the one the press cancelled. Without this, such a cell sits busy with
+ *   `waiting === false` from the first answer to the end of the run.
+ *
+ * So the same rule as `endSend`, conditioned identically: `activity === "busy"`
+ * is the debt, a press on an idle session took none on, and `agentArmed` is a
+ * claim already granted that needs no window to grant it again.
+ *
+ * The one asymmetry with `endSend` is the guard on the way in. A send always
+ * ends through a site that knows a send was outstanding (`entry.send !== null`
+ * is checked by every caller); the arrival path here has no such check to lean
+ * on, so it is made here rather than at each call site — an arrival for a cell
+ * that never pressed anything must not schedule a window on the press's
+ * account.
+ */
+function endStarting(sessionId: string, entry: Entry): void {
+  if (!entry.starting) return;
+  entry.starting = false;
+  if (entry.activity !== "busy" || entry.agentArmed) return;
+  openDebounceWindow(sessionId, entry);
+}
+
 function onActivity(sessionId: string, state: ActivityState): void {
   const entry = entries.get(sessionId);
   // The transition, not the reading: a server re-broadcast of the state a
@@ -465,6 +548,14 @@ function onActivity(sessionId: string, state: ActivityState): void {
     // answer for the next thing the agent does.
     entry.deferred = false;
     entry.held = false;
+    // The agent the user asked for has stopped — finished without speaking, or
+    // never came up. Cleared on EVERY non-busy state rather than on `idle`
+    // alone: `attention` is the agent up and asking the user something, which
+    // is the start over just as surely. Its re-open can never fire from here
+    // (this branch has just left `busy`), and it is routed through the funnel
+    // anyway for the same reason `endSend` is — one function says what the end
+    // of a starting wait does.
+    endStarting(sessionId, entry);
     // Through `endSend` like every other end of a send, although the re-open
     // it carries can never fire from here: this branch has just left `busy`,
     // which is the one condition the re-open asks about. Routed through it
@@ -486,6 +577,7 @@ function ensureEntry(sessionId: string): Entry {
   const entry: Entry = {
     send: null,
     markOnly: false,
+    starting: false,
     activity: getActivityState(sessionId),
     agentArmed: false,
     debounce: null,
@@ -578,6 +670,41 @@ export function beginWaiting(sessionId: string, sentOn: string | null): void {
   // user moving on from the answer they had stepped back to read. Leaving the
   // hold up here would let `derive` answer the send with MARK_ONLY — the old
   // answer on the body, no wave, for the whole reply.
+  entry.held = false;
+  publish(sessionId);
+}
+
+/** The user asked this cell's agent to start. Hands the body over at once,
+ *  with NO pending mark: nothing was asked, so no reply is outstanding.
+ *
+ * A launcher press IS a send in every respect but that one, so everything below
+ * is `beginWaiting`'s reasoning applied to the same kind of event — a decision
+ * the user made, rather than a reading that might be noise.
+ *
+ * Why it needs a trigger of its own at all: the other two both assume a cell
+ * that has already spoken. One that never has starts with the pane closed and
+ * launcher pills where the eye would be, so there is no way in and nothing on
+ * the body to hand over. This is the way in.
+ */
+export function noteAgentStarting(sessionId: string): void {
+  const entry = ensureEntry(sessionId);
+  entry.starting = true;
+  // The body has handed over by the user's own decision, so there is nothing
+  // left for the activity trigger to be patient about — the deferral protects
+  // a sentence an AGENT interrupted, and the user interrupting themselves is
+  // not that.
+  entry.deferred = false;
+  // ...nor anything left for it to be suspicious about. A user gesture is
+  // never debounced, and a window it overtakes is SPENT rather than left to
+  // fire behind a question already answered. Spent, not forgiven: see
+  // `endStarting`, which pays it back at the moment this press's claim on the
+  // body is over.
+  cancelDebounce(entry);
+  // ...and nothing left for a standing hold to protect either. The hold is the
+  // user saying *I want the text*; asking the agent to start is that same user
+  // moving on, exactly as sending is. Leaving it up would let `derive` answer
+  // the press with SETTLED — the old answer on the body, no wave — for the
+  // whole run.
   entry.held = false;
   publish(sessionId);
 }
@@ -708,7 +835,19 @@ export function noteNewestAnswer(sessionId: string, newestId: string | null): bo
   const hadWindow = entry.debounce !== null;
   cancelDebounce(entry);
   if (hadWindow && entry.activity === "busy") openDebounceWindow(sessionId, entry);
-  if (!entry.held) return false;
+  // The arrival is what a launcher press was waiting for: the wave stood in
+  // for a body with nothing in it, and now there is something to show. Its own
+  // debt is settled separately from `hadWindow` above — the window the PRESS
+  // cancelled was cancelled long before this answer landed, so that guard has
+  // nothing to say about it (see `endStarting`).
+  endStarting(sessionId, entry);
+  if (!entry.held) {
+    // Published even with no hold to release: ending a starting wait moves the
+    // body on its own account, and this is the only path that does so without
+    // going through `onActivity`.
+    publish(sessionId);
+    return false;
+  }
   entry.held = false;
   publish(sessionId);
   return true;
