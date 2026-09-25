@@ -135,4 +135,76 @@ describe("terminalActivity", () => {
     expect(typeof attentionEv.attentionSinceAt).toBe("number");
     expect(busyEv.attentionSinceAt).toBeUndefined();
   });
+  /**
+   * The flap this file exists to name.
+   *
+   * `attention` is not "the agent stopped". It is "this session was busy for
+   * longer than {@link BUSY_THRESHOLD_MS} and has now been quiet for
+   * {@link IDLE_DEBOUNCE_MS}" — which for an agent that thinks between bursts
+   * of output is simply the gap between two bursts. And once a session has
+   * reached `attention`, `recordOutput` BACKDATES `busyStartedAt` past the
+   * threshold on purpose (so an async shell prompt cannot silently clear the
+   * LED), which means every later gap resolves to `attention` again and never
+   * to `idle`.
+   *
+   * So a working agent does not sit in one state. It oscillates
+   * busy → attention → busy → attention for the whole run, broadcasting each
+   * flip, and only an input or a dismiss ever reaches `idle`. Any consumer that
+   * reads "not busy" as "the agent let go" sees the agent let go every couple
+   * of seconds. `answerWaiting` was that consumer; this test is the fact it is
+   * now written against.
+   */
+  it("a long-running bursty agent oscillates busy<->attention and never reaches idle", () => {
+    const seen: string[] = [];
+    subscribe((ev) => seen.push(ev.state));
+
+    // A long first run: the agent works for longer than the busy threshold.
+    recordOutput("s1");
+    stayBusyFor("s1", BUSY_THRESHOLD_MS + 100);
+
+    // Then it thinks. Four bursts of output, each separated by a gap longer
+    // than the idle debounce — the ordinary shape of an agent that emits a
+    // tool call, pauses, emits a result, pauses.
+    for (let i = 0; i < 4; i += 1) {
+      vi.advanceTimersByTime(IDLE_DEBOUNCE_MS + 200);
+      recordOutput("s1");
+    }
+    vi.advanceTimersByTime(IDLE_DEBOUNCE_MS + 200);
+
+    expect(seen).toEqual([
+      "busy",
+      "attention",
+      "busy",
+      "attention",
+      "busy",
+      "attention",
+      "busy",
+      "attention",
+      "busy",
+      "attention",
+    ]);
+    // Not once: the agent is still working, and nothing here is an input.
+    expect(seen).not.toContain("idle");
+  });
+
+  /**
+   * The other half of the same fact: `attention` is a terminal state as far as
+   * the agent is concerned. Nothing the AGENT does moves it to `idle` — only
+   * the user typing ({@link recordInput}) or dismissing it does. So a consumer
+   * that waits for `idle` before it stops treating the session as the agent's
+   * is waiting for an event the agent will never send.
+   */
+  it("only a user gesture moves attention to idle", () => {
+    recordOutput("s1");
+    stayBusyFor("s1", BUSY_THRESHOLD_MS + 100);
+    vi.advanceTimersByTime(IDLE_DEBOUNCE_MS);
+    expect(getState("s1")).toBe("attention");
+
+    // Ten more minutes of silence change nothing.
+    vi.advanceTimersByTime(600_000);
+    expect(getState("s1")).toBe("attention");
+
+    recordInput("s1");
+    expect(getState("s1")).toBe("idle");
+  });
 });
