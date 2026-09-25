@@ -517,6 +517,83 @@ describe("the boot legend", () => {
     expect(hasSeenBootLegend()).toBe(false);
   });
 
+  /**
+   * DEFENDS `if (pending) return;` in the arming effect — the clause that
+   * keeps a send's wait from being taught over.
+   *
+   * `a composer send shows no legend` above does NOT defend it. That test
+   * never presses a pill, so `launcherUsed` is false and the effect leaves at
+   * the FIRST guard; the `pending` clause is never reached and deleting it
+   * changes nothing there. The only state that reaches it is the one below —
+   * a launcher edge arriving while a draft's reply is still outstanding —
+   * which the suite had no test for.
+   */
+  it("a launcher press made while a send is outstanding shows no legend", async () => {
+    render(cell(makeSpeech(SESSION)));
+
+    // The draft goes first: the pane is open, typed into, and its reply is
+    // expected. That is the pane the legend would be teaching over.
+    fireEvent.click(eye());
+    const field = screen.getByTestId(`answer-pane-composer-${SESSION}`);
+    fireEvent.change(field, { target: { value: "yes, both scopes" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await settleSubmit();
+    await waitFor(() =>
+      expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: true }),
+    );
+
+    // ...and NOW a pill is pressed. The cell is still `empty`, so the pills
+    // are still on the row and the press lands and is delivered — a rising
+    // edge, on a live wait, with the send's mark still up.
+    fireEvent.click(launcher());
+    await settleSubmit();
+
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: true });
+    // The press belongs to the send, which has a pane the user opened and
+    // typed into. Nothing to teach, and the browser's one shot is not spent.
+    expect(legend()).toBeNull();
+    expect(hasSeenBootLegend()).toBe(false);
+  });
+
+  /**
+   * DEFENDS `if (lastLauncherUsed.current) return;` — the rising-edge test the
+   * long comment in `TerminalView` calls "load-bearing rather than tidy".
+   *
+   * `a busy transition shows no legend` above does NOT defend it: that cell
+   * has never launched, so `!launcherUsed` turns the effect back one guard
+   * earlier and the edge test is never reached. This is the case the comment
+   * actually argues about — a cell whose flag is ALREADY up (it launched, and
+   * a maximize or a preset remounted the view, which seeds the ref from the
+   * current value) meeting a busy spell of the agent's own making later on.
+   * A LEVEL test would arm there; only the edge test refuses.
+   *
+   * And the refusal must not come from `bootLegendSeen`: this browser has
+   * never been shown the legend, which is exactly the first-meeting case where
+   * conflating "which event teaches" with "how often" shows it on the wrong
+   * trigger. So the seen flag is asserted still false, before and after.
+   */
+  it("a busy transition on a cell that already launched shows no legend", async () => {
+    globals.__PAVILIO_TUNING__ = { answerWaveDebounceMs: 20 };
+    // The earlier press, made before this view existed — the flag outlives the
+    // component on purpose (`launcherUse`), so a remounted cell mounts with it
+    // already true and `lastLauncherUsed` seeded from it.
+    noteLauncherUsed(SESSION);
+    render(cell(makeSpeech(SESSION)));
+    expect(legend()).toBeNull();
+    expect(hasSeenBootLegend()).toBe(false);
+
+    // An hour later the agent goes to work on its own account, past the
+    // debounce. Same snapshot a launcher press yields, same flag still true.
+    activity("busy");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
+    expect(legend()).toBeNull();
+    expect(hasSeenBootLegend()).toBe(false);
+  });
+
   it("an arriving utterance dismisses it", async () => {
     const speech = makeSpeech(SESSION);
     const view = render(cell(speech));
@@ -530,6 +607,51 @@ describe("the boot legend", () => {
     view.rerender(cell(speech));
 
     await waitFor(() => expect(legend()).toBeNull());
+    expect(pane()).not.toBeNull();
+  });
+
+  /**
+   * DEFENDS `if (arrived) setLegendUp(false);` in the arrival effect.
+   *
+   * `an arriving utterance dismisses it` above does NOT defend it. There the
+   * cell is idle, so the arrival ENDS the wait (`endStarting` finds no busy
+   * spell to hand the body back to) and the wait-ending effect's own
+   * `setLegendUp(false)` reaches the same end state one commit later —
+   * deleting the arrival's line leaves that test green.
+   *
+   * This is the reachable state where the two come apart: the agent answered
+   * and CARRIED ON WORKING. `noteNewestAnswer` calls `endStarting`, which
+   * clears the press's flag and then returns early because the session is
+   * still busy with a claim already granted (`agentArmed`), so `derive` keeps
+   * handing back `AGENT_HAS_THE_BODY`. `waiting` never goes false, the
+   * wait-ending effect never re-runs, and the arrival's own line is the only
+   * thing that takes the overlay off the answer the user asked for.
+   */
+  it("an answer on an agent still at work dismisses it with no wait ending", async () => {
+    globals.__PAVILIO_TUNING__ = { answerWaveDebounceMs: 20 };
+    const speech = makeSpeech(SESSION);
+    const view = render(cell(speech));
+    fireEvent.click(launcher());
+    await settleSubmit();
+    expect(legend()).not.toBeNull();
+
+    // The launched agent's own output puts the session busy, and the window
+    // elapses: from here the agent holds the body on its own account, beside
+    // the press's flag rather than instead of it.
+    activity("busy");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
+
+    // It speaks — and keeps working.
+    speech.arrive();
+    view.rerender(cell(speech));
+
+    await waitFor(() => expect(legend()).toBeNull());
+    // The wait is STILL LIVE, which is the whole point of this case: there was
+    // no wait-ending commit for the other dismissal to ride.
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
     expect(pane()).not.toBeNull();
   });
 

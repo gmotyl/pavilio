@@ -376,4 +376,53 @@ describe("a launcher press opens the answer pane", () => {
       "the deploy is unblocked",
     );
   });
+
+  /**
+   * DEFENDS `keepAnswerPaneOpen(sessionId)` in `TerminalView`'s arrival effect
+   * — the line that takes the pane out of the press's hands once there is a
+   * real answer behind the wave.
+   *
+   * The test above does NOT defend it, and could not: the auto-open switch is
+   * ON by default there, so the arrival also calls `setAnswerPaneOpen(…, true)`
+   * — which clears `openedForWait` on its way past, before its own no-change
+   * return (see `answerPaneState`). Two lines reach the same mark and deleting
+   * either leaves the other doing the work.
+   *
+   * With the switch OFF nothing else touches the mark, so the whole sequence
+   * hangs on this one line: press opens the pane for the wait, the answer
+   * lands, and the wait ends afterwards. Without it
+   * `closeAnswerPaneOpenedForWait` still believes the pane is the press's and
+   * closes an answer the user is reading.
+   */
+  it("an answer with auto-open off survives the wait ending", async () => {
+    // The browser-wide default Settings keeps, off — and the cell's entry
+    // dropped afterwards so it seeds from it.
+    setStoredAutoOpenAnswer(false);
+    forgetAnswerPane(SESSION);
+    const speech = makeSpeech();
+    const view = render(cell(speech));
+
+    fireEvent.click(launcher());
+    await settleSubmit();
+    expect(wave()).toBeInTheDocument();
+    // The switch really is off, so no auto-open runs on the arrival below.
+    expect(screen.getByTestId(`answer-pane-auto-open-${SESSION}`)).not.toBeChecked();
+
+    // The answer the press was waiting for.
+    speech.arrive();
+    view.rerender(cell(speech));
+    await waitFor(() => expect(wave()).toBeNull());
+
+    // The agent stops. The wait the press opened the pane for is over — but
+    // the pane is not the press's to close any more.
+    activity("busy");
+    activity("idle");
+    await waitFor(() =>
+      expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false }),
+    );
+    expect(pane()).not.toBeNull();
+    expect(screen.getByTestId(`answer-pane-body-${SESSION}`)).toHaveTextContent(
+      "the deploy is unblocked",
+    );
+  });
 });

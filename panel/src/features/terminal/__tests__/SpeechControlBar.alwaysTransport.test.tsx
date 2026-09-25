@@ -446,6 +446,30 @@ describe("the bar always carries the eye and the transport", () => {
       dropStylesheet();
     });
 
+    /**
+     * Nothing in the row's flex line is taller than the row's content box.
+     *
+     * `.speech-bar-row` is 56px with `padding: 6px 8px`, and Tailwind's
+     * preflight — `index.css` line 3 is `@import "tailwindcss"` — sets
+     * `box-sizing: border-box` on everything, so that 56 INCLUDES the padding
+     * and the content box is 56 - 6 - 6 = 44px, one `.speech-bar-btn` tall.
+     *
+     * DEFENDS THE EMPTY STATE. This loop used to live at the end of the test
+     * below and therefore ran only AFTER the rerender into the spoken row — so
+     * a 60x60 child injected into the EMPTY row left all nine tests in this
+     * file green. The empty row is the one this branch changed: it now carries
+     * the launcher pills AND a disabled transport on the same rail, which is
+     * precisely where a child that does not fit would be introduced.
+     */
+    function expectNothingTallerThanTheContentBox(): void {
+      const contentHeight = 56 - 6 - 6;
+      for (const child of [...rowOf().children] as HTMLElement[]) {
+        const height = px(getComputedStyle(child).height);
+        if (height === null) continue;
+        expect(height).toBeLessThanOrEqual(contentHeight);
+      }
+    }
+
     it("the row's height is the same before and after the first answer", () => {
       const view = renderBar(makeSpeech());
       const empty = getComputedStyle(rowOf());
@@ -457,6 +481,9 @@ describe("the bar always carries the eye and the transport", () => {
       // And the line cannot wrap onto a second one, which is the only other
       // way a fixed-height row grows its content past its box.
       expect(empty.flexWrap).toBe("nowrap");
+      // No child of the EMPTY row can push the height from inside — asked
+      // here, before anything is swapped out, and again after the rerender.
+      expectNothingTallerThanTheContentBox();
 
       view.rerender(
         <SpeechControlBar
@@ -472,14 +499,9 @@ describe("the bar always carries the eye and the transport", () => {
       expect(spoken.height).toBe(emptyHeight);
       expect(spoken.flexWrap).toBe("nowrap");
 
-      // Nothing in the line is taller than the row's content box, in either
-      // state, so no child can push the height from inside.
-      const contentHeight = 56 - 6 - 6;
-      for (const child of [...rowOf().children] as HTMLElement[]) {
-        const height = px(getComputedStyle(child).height);
-        if (height === null) continue;
-        expect(height).toBeLessThanOrEqual(contentHeight);
-      }
+      // ...and the same of the spoken row, whose children are not the same
+      // boxes: the scrubber has segments now and the pills are gone.
+      expectNothingTallerThanTheContentBox();
     });
 
     it("the empty row's line is no wider than the one the cell already carries", () => {
