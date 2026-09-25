@@ -165,10 +165,22 @@ describe("the debounce on the agent's claim to the body", () => {
     vi.advanceTimersByTime(1000);
 
     // The answer landed inside the window. It is the better outcome than a
-    // wave, and the wave was never needed: the window is spent, not merely
-    // postponed.
+    // wave — one raised now would cover the very thing it announces — so the
+    // window that was about to raise one is cancelled and the answer gets the
+    // screen to itself.
     noteNewestAnswer(SESSION, "u-1");
 
+    // The cancellation, pinned on the clock: the window this spell opened
+    // would have fired on this tick, and nothing does.
+    vi.advanceTimersByTime(DEBOUNCE - 1000);
+    expect(handedOver()).toBe(false);
+
+    // What happens after that moment depends on whether the agent is still
+    // working, and belongs to `answerWaiting.mount` ("an answer landing inside
+    // the window"): a still-busy session gets a FRESH window, because an agent
+    // that answered and carried on is still working and the server will not
+    // say so twice. Here it stops, so the answer keeps the body for good.
+    activity("idle");
     vi.advanceTimersByTime(10 * 60 * 1000);
     expect(handedOver()).toBe(false);
   });

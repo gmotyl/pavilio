@@ -68,10 +68,32 @@
  * against the playback running at that moment, not against the one running at
  * the transition.
  *
- * A window still pending when an answer arrives is simply dropped
- * ({@link noteNewestAnswer}) — the answer is the better outcome, and the wave
- * was never needed. Dropped means SPENT, not postponed: that busy spell gets no
- * second window, only a later transition does.
+ * A window still pending when an answer arrives is CANCELLED
+ * ({@link noteNewestAnswer}) — the answer is the better outcome, and an
+ * uninterrupted moment on screen is what it is owed. But cancelled is not the
+ * end of the spell: if the session is still busy after the arrival, the agent
+ * is genuinely still working, and the server will not re-broadcast a state it
+ * never left. So the arrival opens a FRESH window — the answer gets its moment,
+ * and the wave returns one window later, which is the shipped rule that a
+ * working agent owns the answer pane's body.
+ *
+ * ## Which entry points open a window
+ *
+ * A busy TRANSITION is one ({@link onActivity}). The other is a session that
+ * was ALREADY busy before this tab looked — a panel reloaded while an agent
+ * works gets a full snapshot on connect and no transition afterwards, so
+ * without this the wave would never appear for that entire run. That reading is
+ * exactly the one the debounce distrusts, so it gets a WINDOW rather than the
+ * claim it used to get outright.
+ *
+ * The already-busy case is asked on {@link watchSessionActivity} and NOT gated
+ * on the entry being new, because in the real tree it never is: `TerminalView`
+ * opens the watch from its own effect while its child `SpeechControlBar` pushes
+ * {@link noteNewestAnswer} from a child effect, and React runs child effects
+ * first. A queue push on render is not a claim on the body; the one thing that
+ * must not be overtaken is a USER GESTURE, so the window is withheld only while
+ * a send is outstanding — `beginWaiting` has already handed the body over by
+ * the user's own decision, and a window behind it would decide nothing.
  *
  * This is the ONE clock in this module, and it decides one thing: whether a
  * busy spell was real. Every other transition here stays event-driven (see the
@@ -209,9 +231,9 @@ interface Entry {
    * session can be busy with a repaint nobody asked for, and the whole point of
    * the window is that such a spell never gets this far.
    *
-   * Cleared the moment the session stops being busy, and by an answer arriving
-   * inside the window: that spell is then SPENT, and only a later transition
-   * opens another one.
+   * Cleared the moment the session stops being busy. An answer arriving inside
+   * the window never granted it in the first place — that arrival restarts the
+   * window instead, so the claim is re-earned one window later.
    */
   agentArmed: boolean;
   /**
@@ -429,19 +451,30 @@ function drop(sessionId: string): void {
  * created, and `forgetAnswerWaiting` releases it when the session is destroyed.
  */
 export function watchSessionActivity(sessionId: string): void {
-  if (entries.has(sessionId)) return;
   const entry = ensureEntry(sessionId);
   // A session that is ALREADY busy when its watch opens gets a WINDOW, not the
   // claim it used to get outright from the first read. "Busy when we looked"
   // is the very reading the debounce exists to distrust — a reattach repaint
   // is exactly that — and a session genuinely working will still be working
-  // one window later.
+  // one window later. Without this the already-busy case has no trigger at
+  // all: the server broadcasts on a TRANSITION into busy and sends a snapshot
+  // on connect, so a panel reloaded mid-run would never see one.
   //
-  // Here rather than in `ensureEntry`, because this is the session-creation
-  // path: `terminalInstances` calls it once per session, whereas an entry
-  // conjured by `beginWaiting` or `holdAnswer` is a user gesture, and a
-  // gesture must not open a window it is about to overtake anyway.
-  if (entry.activity === "busy") openDebounceWindow(sessionId, entry);
+  // Asked of every call, not only the one that created the entry. In the real
+  // tree this is ALWAYS the second caller — `TerminalView`'s effect runs after
+  // its child `SpeechControlBar`'s, whose `noteNewestAnswer` conjured the
+  // entry — and an `entries.has` early return here is that case getting
+  // nothing.
+  //
+  // `send === null` is the one thing withheld from: `beginWaiting` is a user
+  // gesture that has already handed the body over, and a window opened behind
+  // it would only be deciding a question the user has answered. A hold needs
+  // no such guard — it OUTRANKS every claim in `derive`, so a window under it
+  // changes nothing until the user themselves releases it, at which point a
+  // still-working agent should indeed have the body.
+  if (entry.activity === "busy" && entry.send === null && !entry.agentArmed) {
+    openDebounceWindow(sessionId, entry);
+  }
   notify();
 }
 
@@ -572,15 +605,22 @@ export function noteNewestAnswer(sessionId: string, newestId: string | null): bo
   // the surface says is where it stands, not an answer landing.
   if (told === null || newestId === told.id) return false;
   // An answer landed inside a pending debounce window. The wave that window
-  // was deciding about is no longer wanted at all — the answer is the better
-  // outcome, and a wave raised now would cover the thing it was supposed to
-  // announce — so that busy spell is spent. Only a LATER transition opens
-  // another window.
+  // was about to raise would cover the thing it was supposed to announce, so
+  // the window goes: the answer gets its uninterrupted moment on screen.
+  //
+  // But the spell is NOT spent. If the session is still busy the agent is
+  // genuinely still working — it answered and carried on — and the server will
+  // not broadcast a transition it never made, so leaving it there is a wave
+  // that never comes back for the rest of the run. A FRESH window is the whole
+  // answer: the arrival is read on screen, and one window later the working
+  // agent owns the body again, which is what the pane promises.
   //
   // The arrival is read here rather than in `noteUtterance` on purpose: the
   // cursor moves for a transport press too, and this is the only push that
   // means something LANDED.
+  const hadWindow = entry.debounce !== null;
   cancelDebounce(entry);
+  if (hadWindow && entry.activity === "busy") openDebounceWindow(sessionId, entry);
   if (!entry.held) return false;
   entry.held = false;
   publish(sessionId);
