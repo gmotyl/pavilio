@@ -71,8 +71,10 @@ preferencesRouter.get("/preferences.js", (_req, res) => {
   // document rather than a `VITE_*` variable because a build-time value would
   // need a rebuild to change, and the point of the knob is that an env var plus
   // a panel restart is enough. Its own key, not a key inside the preferences
-  // document, so `PATCH /api/preferences` can never write to it and an
-  // unrecognized key never reaches the preferences file.
+  // document, so `PATCH /api/preferences` can never write to it — the patch
+  // path reaches the preferences document and nothing else. (It says nothing
+  // about unrecognized keys in general: `patchPreferences` keeps no allowlist
+  // and will write whatever key it is handed.)
   const body =
     `window.__PAVILIO_PREFS__ = ${toScriptLiteral(getPreferences())};\n` +
     `window.__PAVILIO_HOME__ = ${toScriptLiteral(homedir())};\n` +
