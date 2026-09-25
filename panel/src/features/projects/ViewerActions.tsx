@@ -13,11 +13,14 @@ type Feedback = "path" | "content" | null;
 export function ViewerActions({
   absolutePath,
   content,
+  copyPathText,
   testIdPrefix = "file-viewer",
 }: {
   absolutePath: string;
   /** Open file's source. Null/undefined/empty means nothing to copy — the button is disabled. */
   content?: string | null;
+  /** Text the copy-path button puts on the clipboard. Defaults to `absolutePath`. */
+  copyPathText?: string;
   /**
    * Stem of the buttons' `data-testid`s. It exists so the standalone `/view/*`
    * viewer can compose this toolbar without renaming the `markdown-viewer-*`
@@ -80,7 +83,7 @@ export function ViewerActions({
       </button>
       <button
         data-testid={`${testIdPrefix}-copy-path`}
-        onClick={() => copy("path", absolutePath)}
+        onClick={() => copy("path", copyPathText ?? absolutePath)}
         className={BUTTON_CLASS}
         style={{
           color: copied === "path" ? "var(--green)" : "var(--text-secondary)",
