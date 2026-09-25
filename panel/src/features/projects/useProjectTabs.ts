@@ -16,7 +16,16 @@ interface Options {
   hasRepos: boolean;
 }
 
-const SECTIONS = ["iterm", "plans", "context", "notes", "memo", "progress", "qa"];
+const SECTIONS = [
+  "iterm",
+  "plans",
+  "context",
+  "notes",
+  "memo",
+  "progress",
+  "qa",
+  "mockups",
+];
 
 export function useProjectTabs({
   projectName,
