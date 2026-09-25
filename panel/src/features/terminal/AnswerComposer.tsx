@@ -7,6 +7,7 @@ import { clearDraft, getDraft, setDraft } from "./composerDrafts";
 import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
 import { submitToPty, type SubmitFailure } from "./ptySubmit";
 import { projectOfSession } from "./sessionProject";
+import { reconnectOnActivate } from "./terminalInstances";
 import { dismissAttentionOnArrival } from "./attentionArrival";
 
 /**
@@ -403,7 +404,30 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
             // is demonstrably answering has already served its purpose. Focus
             // repeats freely while a reply is written, which is the case that
             // rule's `attention`-only guard exists for.
-            onFocus={() => dismissAttentionOnArrival(sessionId)}
+            //
+            // The same reasoning, one step further, is why the SOCKET is
+            // repaired here too. The caret landing in this field is the user
+            // saying they are about to send something, and that — not the
+            // Enter at the end of it — is the moment to reopen a dead socket:
+            // a reconnect started while the reply is still being typed has the
+            // whole draft's worth of time to finish, so the send finds a live
+            // socket and the refusal path above is never reached. ADR 0010 is
+            // what permits it: activation IS the consent, exactly as a click
+            // on the disconnected badge is, and `reconnectOnActivate` carries
+            // the guards — a healthy session, an exited one and a second focus
+            // during the handshake all fall straight back out of it, which is
+            // why a focus that repeats per keystroke-pause costs nothing.
+            //
+            // It is safe here only because this field has NO autofocus: a
+            // focus event is always a real user action, so the pane opening
+            // itself on an arriving answer never reaches this. Adding
+            // `autoFocus` would turn an answer LANDING into a reconnect, which
+            // is the "reopened unasked" case the living terminal forbids —
+            // `AnswerComposer.focusReconnect.test.tsx` guards that.
+            onFocus={() => {
+              dismissAttentionOnArrival(sessionId);
+              reconnectOnActivate(sessionId);
+            }}
             onPaste={onPaste}
           />
         </div>
