@@ -63,14 +63,14 @@ function Wave({ sessionId }: { sessionId: string }) {
 export interface AnswerWaitingProps {
   sessionId: string;
   /**
-   * How many of the answers the queue can still reach have never been played.
-   * Zero shows nothing: a pip reading "0" says there is a backlog and then says
-   * the backlog is empty.
+   * How many answers arrived after the last one the cell played and have not
+   * themselves been played. Zero shows nothing: a pip reading "0" says there
+   * is a backlog and then says the backlog is empty.
    */
-  unread: number;
+  notPlayed: number;
 }
 
-export function AnswerWaiting({ sessionId, unread }: AnswerWaitingProps) {
+export function AnswerWaiting({ sessionId, notPlayed }: AnswerWaitingProps) {
   return (
     <div
       className="answer-pane-waiting"
@@ -93,12 +93,12 @@ export function AnswerWaiting({ sessionId, unread }: AnswerWaitingProps) {
         name, which is what makes a backlog something a screen reader user can
         act on rather than something they are never told about.
       */}
-      {unread > 0 ? (
+      {notPlayed > 0 ? (
         <span
           className="answer-pane-waiting-count"
           data-testid={`answer-pane-waiting-count-${sessionId}`}
         >
-          {unread} {unread === 1 ? "answer" : "answers"} not played
+          {notPlayed} {notPlayed === 1 ? "answer" : "answers"} not played
         </span>
       ) : null}
     </div>

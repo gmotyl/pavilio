@@ -860,14 +860,14 @@ describe("the marks on the answer that comes back", () => {
  * The count of what has not been played, and the way back out of a hold.
  *
  * Both live on the waiting state's own surface, and both are derivations —
- * `unreadAnswerCount` over the `heard` set the channel already keeps, and the
- * hold `answerWaiting` already owns. Nothing here records a new fact, which is
+ * `unplayedSinceLastPlayed` over the `heard` set the channel already keeps,
+ * and the hold `answerWaiting` already owns. Nothing here records a new fact, which is
  * why the fixtures can say what the cell holds and what has been heard and the
  * assertions can be about what is on screen.
  */
 
 /** The count the waiting state puts on screen, or `null` when it shows none. */
-const unreadCount = (): HTMLElement | null =>
+const notPlayedCount = (): HTMLElement | null =>
   screen.queryByTestId(`answer-pane-waiting-count-${SESSION}`);
 
 /** The *Next answer* control: the wave, moved out of the body onto a button. */
@@ -877,6 +877,9 @@ const nextAnswerControl = (): HTMLElement | null =>
 /**
  * A cell holding four answers the transport can reach: two steps of history,
  * the one on screen, and one waiting behind it.
+ *
+ * `previous` is newest first, so the ARRIVAL order here is u-1, u-2, u-3, u-4
+ * — which is the order the count walks.
  */
 const BACKLOG: UtteranceQueue = {
   previous: [utterance("u-2", NEXT_ANSWER), utterance("u-1", NEXT_ANSWER)],
@@ -889,26 +892,65 @@ const heardOf = (...ids: string[]): ReadonlySet<string> => new Set(ids);
 
 describe("the waiting state counts what has not been played", () => {
   it("shows how many answers have not been played", () => {
-    // Four reachable, one of them already played: three are still unheard.
+    // The last played is the oldest of the four, so the three that arrived
+    // after it are the backlog.
     render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
 
-    const count = unreadCount();
+    const count = notPlayedCount();
     expect(count).toBeInTheDocument();
     expect(count?.textContent).toMatch(/\b3\b/);
   });
 
-  it("shows no count when nothing is unread", () => {
-    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1", "u-2", "u-3", "u-4"))));
+  it("a zero count renders no element", () => {
+    // The NEWEST answer played, and the three behind it never played. This is
+    // the case the positional rule exists for: the listener is caught up, so
+    // there is nothing to show, however much unplayed history is still
+    // reachable behind them.
+    const { unmount } = render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-4"))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
 
     // A pip reading "0" is worse than no pip: it says there is a backlog and
     // then says the backlog is empty.
-    expect(unreadCount()).toBeNull();
+    expect(notPlayedCount()).toBeNull();
+
+    unmount();
+    __resetAnswerWaitingForTests();
+    __resetPtySubmitForTests();
+    _resetForTests();
+
+    // ...and the same when every reachable answer has been played.
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1", "u-2", "u-3", "u-4"))));
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+    expect(notPlayedCount()).toBeNull();
+  });
+
+  it("the label is singular for one answer", () => {
+    // The last played is u-3, so exactly one answer arrived behind it.
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-3"))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    expect(notPlayedCount()?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "1 answer not played",
+    );
+  });
+
+  it("the label is plural for more than one", () => {
+    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
+
+    sendReply();
+    expect(waiting()).toBeInTheDocument();
+
+    expect(notPlayedCount()?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "3 answers not played",
+    );
   });
 
   it("shows no count while the body is rendering an answer", () => {
@@ -918,7 +960,7 @@ describe("the waiting state counts what has not been played", () => {
     // the waiting state's, not the pane's.
     expect(waiting()).toBeNull();
     expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
-    expect(unreadCount()).toBeNull();
+    expect(notPlayedCount()).toBeNull();
   });
 
   it("names the count in text, not in the animation", () => {
@@ -928,7 +970,7 @@ describe("the waiting state counts what has not been played", () => {
     // In the status region, as a sentence a screen reader reads out...
     const status = screen.getByRole("status");
     expect(status).toBe(waiting());
-    const count = unreadCount();
+    const count = notPlayedCount();
     expect(count).not.toBeNull();
     expect(status.contains(count)).toBe(true);
     expect(count?.textContent?.trim()).not.toBe("");
