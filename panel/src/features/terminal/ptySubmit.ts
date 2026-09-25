@@ -71,6 +71,58 @@
  * prompt the agent has moved past, and a silent retry is a worse failure than
  * an honest refusal.
  *
+ * ## Why a refused BODY is nevertheless offered the socket a second time
+ *
+ * That paragraph rules out remembering a refused submit. It does not rule out
+ * finishing the gesture the user is still in the middle of. A refused body
+ * almost always means one thing — the socket under this cell died while nobody
+ * was looking — and the repair for it already exists and is already permitted:
+ * ADR 0010 holds that activating a session is consent to reopen it, and a send
+ * is as explicit an activation as there is. So a refused body reconnects the
+ * session and offers the SAME frame to the replacement socket ONCE, inside the
+ * same gesture, before reporting anything.
+ *
+ * This is emphatically not the rejected retry queue. Nothing is remembered
+ * across the gesture, nothing is re-attempted on a later reconnect this module
+ * did not ask for, there is no second retry, and {@link RECONNECT_WAIT_MS}
+ * bounds the whole thing. What changes for the user is only which answer comes
+ * first: the socket is repaired first, and the refusal text is the second
+ * resort rather than the first response.
+ *
+ * Three cases are deliberately NOT reconnected, because in each of them a
+ * reopen would repair nothing and the wait would only delay the truth:
+ *
+ * - the session has EXITED — a dead agent is not a dead socket, and reattaching
+ *   to a process that is gone says nothing about why the send failed;
+ * - the session is UNATTACHED — this browser holds no terminal for it, so
+ *   `reconnectSession` is a no-op and there is no handshake to wait on;
+ * - the send SUCCEEDED — a live socket has nothing to repair, which is why a
+ *   healthy submit never reaches any of this.
+ *
+ * ## Why the retry cannot be a straight-line one
+ *
+ * `send` is synchronous and a reconnect is not: a fresh WebSocket has to open,
+ * which happens turns later and may not happen at all. So the retry is parked
+ * on the session's connection state and woken by it — `onConnectionChange`
+ * reports "connected" when the replacement socket's handshake lands, and
+ * "disconnected" when it fails, and those are exactly the two answers the retry
+ * is waiting for.
+ *
+ * The subscription is taken AFTER the reconnect, and that ordering is
+ * load-bearing. `connectWs` emits an optimistic "connected" at the ws identity
+ * swap, synchronously inside `reopen()`, while the new socket is still
+ * CONNECTING — a retry woken by THAT emit would write into a socket that is not
+ * open yet and report a refusal for a reconnect that was about to succeed.
+ * Subscribing after the reconnect steps over it, so the first event this hears
+ * is the handshake's own.
+ *
+ * And the wait is bounded by a timer, because a handshake that neither opens
+ * nor errors emits nothing at all. A submit that never finishes never calls
+ * {@link advance}, and `advance` is what hands on the session's turn — so an
+ * unbounded wait would not merely lose this reply, it would freeze every later
+ * submit on the cell behind a submit that can never complete. The bound turns
+ * the worst case back into the failure the user already understands.
+ *
  * A refused body does not strand the submits behind it either. There is no
  * return to wait for — nothing was written that a return could submit — so the
  * queue advances immediately instead of after {@link SUBMIT_RETURN_MS}, and
@@ -105,6 +157,13 @@
  * the very class of defect the rest of this file exists to undo.
  */
 
+import {
+  getConnectionState,
+  hasExited,
+  onConnectionChange,
+  reconnectSession,
+} from "./terminalInstances";
+
 /** The submitting return itself — the key the TUI runs a line on. */
 const RETURN = "\r";
 
@@ -116,6 +175,24 @@ const RETURN = "\r";
  * would make the send feel lagged.
  */
 export const SUBMIT_RETURN_MS = 40;
+
+/**
+ * How long a refused body waits for the socket it just asked to be rebuilt.
+ *
+ * Three seconds, and the number is chosen from both ends. A ws handshake to
+ * the panel is milliseconds on a LAN and well under a second over a tunnel to
+ * a phone, so three seconds is several times the worst honest case — a
+ * reconnect that has not landed by then is not slow, it is not coming. And it
+ * is the longest the session's queue can be stalled by one refused submit
+ * (see "Why the retry cannot be a straight-line one" above), which is the cost
+ * side: three seconds of a launcher pill or a second reply waiting its turn is
+ * a pause, where thirty would read as the cell having died.
+ *
+ * It is a ceiling and not a delay: the common outcomes — handshake open,
+ * handshake failed — both arrive as events and settle the wait the moment they
+ * do, so this timer only ever fires for a socket that has gone silent.
+ */
+export const RECONNECT_WAIT_MS = 3000;
 
 /**
  * Which half of a submit was refused.
@@ -175,6 +252,16 @@ const queues = new Map<string, Submission[]>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
+ * How to abandon the reconnect wait a session is sitting in, per session.
+ *
+ * At most one entry per session by construction: a session waiting on a
+ * reconnect has a submit in flight, and the queue lets it have only one.
+ * Exists so {@link __resetPtySubmitForTests} can drop a wait's subscription
+ * and its timer, the same way it drops a pending return.
+ */
+const reconnectWaits = new Map<string, () => void>();
+
+/**
  * Hand the session's turn to whatever is queued behind the submit that has
  * just finished — delivered or refused — and forget the session when nothing
  * is.
@@ -189,23 +276,19 @@ function advance(sessionId: string): void {
   write(sessionId, next);
 }
 
-function write(sessionId: string, submission: Submission): void {
-  if (!submission.send(submission.body)) {
-    // Nothing was written, so there is nothing for a return to submit and no
-    // reason to make the next submit wait a gap that only exists to separate a
-    // paste from a keypress. The handing on of the session's turn is owed
-    // whatever the caller's own code does with the news — see "Why the
-    // bookkeeping sits in a `finally`" above.
-    try {
-      submission.onFailed?.("body");
-    } finally {
-      advance(sessionId);
-    }
-    return;
-  }
+/**
+ * The body reached the socket: tell the caller, and owe the return.
+ *
+ * Reached from the first attempt and from the retry alike, because a body
+ * delivered after a reconnect is a delivery in every way that matters — it is
+ * on the far side, the caller may move its UI on, and the line still needs the
+ * keypress that runs it.
+ */
+function deliver(sessionId: string, submission: Submission): void {
   // The body is on the socket. Said HERE rather than where the submit was
   // asked for, because this line is the first moment it is true — for an
-  // enqueued submit it runs a gap after the caller's own code did.
+  // enqueued submit it runs a gap after the caller's own code did, and for a
+  // retried one a reconnect after that.
   //
   // The return is scheduled in the `finally` because from this line on the body
   // exists on the far side: a caller that throws out of `onDelivered` must
@@ -229,6 +312,109 @@ function write(sessionId: string, submission: Submission): void {
       }, SUBMIT_RETURN_MS),
     );
   }
+}
+
+/**
+ * Nothing reached the PTY, and nothing is going to. Report it and hand on the
+ * session's turn.
+ *
+ * There is nothing for a return to submit and no reason to make the next
+ * submit wait a gap that only exists to separate a paste from a keypress. The
+ * handing on of the session's turn is owed whatever the caller's own code does
+ * with the news — see "Why the bookkeeping sits in a `finally`" above.
+ */
+function reportBodyRefused(sessionId: string, submission: Submission): void {
+  try {
+    submission.onFailed?.("body");
+  } finally {
+    advance(sessionId);
+  }
+}
+
+/**
+ * Is there a socket here worth rebuilding?
+ *
+ * The same predicate `reconnectOnActivate` guards itself with, minus its
+ * "already connected" arm: a send has just been refused, so whatever the pool
+ * last announced, this cell's socket is not usable right now — a CLOSING one,
+ * or one still mid-handshake, both read as "connected" and both refuse writes.
+ * What is left to rule out is the two states a reopen genuinely cannot help.
+ */
+function canRepairSocket(sessionId: string): boolean {
+  if (hasExited(sessionId)) return false;
+  return getConnectionState(sessionId) !== "unattached";
+}
+
+/**
+ * Rebuild the session's socket and offer the body to it once.
+ *
+ * The submit stays in flight for the whole of this — the session's entry in
+ * {@link queues} is untouched — so anything submitted meanwhile is enqueued
+ * behind it rather than written past it or dropped.
+ */
+function reconnectAndRetry(sessionId: string, submission: Submission): void {
+  // `auto-activate` is the reconnect log's own name for "reconnected because
+  // the user activated this session". A send is that, from a narrower control
+  // than a focus; sharing the trigger keeps the two halves of ADR 0010's
+  // consent legible as one line in the log rather than two vocabularies.
+  //
+  // Called BEFORE the subscription below on purpose: the optimistic
+  // "connected" this emits at the ws identity swap must not be mistaken for
+  // the handshake landing. See the module header.
+  reconnectSession(sessionId, "auto-activate");
+
+  let unsubscribe: (() => void) | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
+
+  /** Stop listening and stop counting; safe to call more than once. */
+  const stopWaiting = (): void => {
+    settled = true;
+    unsubscribe?.();
+    unsubscribe = null;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+
+  /**
+   * The one retry, or the refusal — whichever the wait ended in. Guarded by
+   * `settled` because the timer and the connection event race each other, and
+   * a second entry here would be the second attempt this must not make.
+   */
+  const settle = (socketIsBack: boolean): void => {
+    if (settled) return;
+    stopWaiting();
+    reconnectWaits.delete(sessionId);
+    if (socketIsBack && submission.send(submission.body)) {
+      deliver(sessionId, submission);
+      return;
+    }
+    // Either the reconnect failed, or it succeeded and the frame was refused
+    // anyway. Both are the end of it: the user is told, the draft is still
+    // theirs, and the queue moves on.
+    reportBodyRefused(sessionId, submission);
+  };
+
+  unsubscribe = onConnectionChange(sessionId, (state) => {
+    settle(state === "connected");
+  });
+  timer = setTimeout(() => settle(false), RECONNECT_WAIT_MS);
+  reconnectWaits.set(sessionId, stopWaiting);
+}
+
+function write(sessionId: string, submission: Submission): void {
+  if (submission.send(submission.body)) {
+    deliver(sessionId, submission);
+    return;
+  }
+  // Refused. Almost always a socket that died while nobody was looking, and
+  // the user pressing send is the consent to rebuild it (ADR 0010) — so the
+  // refusal text is the second resort, not the first response.
+  if (canRepairSocket(sessionId)) {
+    reconnectAndRetry(sessionId, submission);
+    return;
+  }
+  reportBodyRefused(sessionId, submission);
 }
 
 /**
@@ -264,9 +450,16 @@ export function submitToPty(
   write(sessionId, { send, body, ...report });
 }
 
-/** Drops every queued submit and the returns still scheduled for them. */
+/**
+ * Drops every queued submit, the returns still scheduled for them, and any
+ * reconnect a refused body is still waiting on — a wait left behind would keep
+ * a connection subscription and a timer alive into the next test and settle
+ * against a submission that file has forgotten about.
+ */
 export function __resetPtySubmitForTests(): void {
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
+  for (const stopWaiting of reconnectWaits.values()) stopWaiting();
+  reconnectWaits.clear();
   queues.clear();
 }
