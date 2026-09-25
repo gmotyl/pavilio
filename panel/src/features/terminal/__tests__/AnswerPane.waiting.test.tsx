@@ -366,6 +366,31 @@ describe("the answer pane while a reply is pending", () => {
     expect(within(body()).queryByText(ANSWER)).toBeNull();
   });
 
+  /**
+   * The sentence names the AGENT, not a reply. The state has three triggers —
+   * a composer send, a launcher press and the session going busy on its own —
+   * and only the first of them is a reply to anybody: an agent that went to
+   * work by itself is answering no one, and a launcher press asked no
+   * question. So the label is asserted on the send trigger AND on the busy
+   * one, because the old wording was true of the first and false of the
+   * second.
+   */
+  it("the waiting state reads Waiting for agent", () => {
+    const sent = render(surfaceTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+
+    sendReply();
+    expect(within(waiting() as HTMLElement).getByText("Waiting for agent")).toBeInTheDocument();
+
+    sent.unmount();
+    __resetAnswerWaitingForTests();
+    _resetForTests();
+
+    render(surfaceTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    activity("busy", 2);
+
+    expect(within(waiting() as HTMLElement).getByText("Waiting for agent")).toBeInTheDocument();
+  });
+
   it("touches nothing on the speech host when it starts waiting", () => {
     const host = makeSpeech(() => queueOf(utterance("u-1", ANSWER)));
     const { speech, arm } = armable(host);
@@ -739,8 +764,8 @@ describe("the waiting animation", () => {
     // whole of the state's name.
     const status = screen.getByRole("status");
     expect(status).toBe(waiting());
-    expect(status.textContent?.trim()).toMatch(/waiting for a reply/i);
-    expect(within(status).getByText(/waiting for a reply/i)).toHaveClass(
+    expect(status.textContent?.trim()).toMatch(/waiting for agent/i);
+    expect(within(status).getByText(/waiting for agent/i)).toHaveClass(
       "answer-pane-waiting-label",
     );
 
