@@ -25,7 +25,7 @@ const BOUNDS: RowBounds = { min: 40, max: 320, step: 12 };
  *
  * Two sentences, because the two failures leave the reply in two different
  * places and the user's next move differs. A refused BODY never left the
- * browser, so the text is back in the field and the whole of the news is that
+ * browser, so the text is still in the field and the whole of the news is that
  * it did not go. A refused RETURN left the body in the TUI's prompt with
  * nobody having pressed Enter on it — the field is legitimately empty, and
  * saying "not sent" there would be a lie that sent the user looking for text
@@ -35,6 +35,24 @@ const FAILURE_TEXT: Record<SubmitFailure, string> = {
   body: "Not sent — the terminal is not connected. Your reply is still here.",
   return: "Sent but not submitted — the terminal disconnected. The line is in the prompt below.",
 };
+
+/**
+ * What the pane says while a submit is still in flight.
+ *
+ * A verdict is no longer always immediate. A refused body now rebuilds the
+ * cell's socket and offers the frame to the replacement, and `ptySubmit`
+ * bounds that wait at `RECONNECT_WAIT_MS` — three seconds. For those three
+ * seconds the reply sits in a full field with nothing visibly happening, and a
+ * full field after Enter is precisely what a SWALLOWED keystroke looks like:
+ * the user's obvious next move is to press Enter again, which is the double
+ * send this would rather not invite.
+ *
+ * So the wait is named, and it takes the same row the verdict will. That row
+ * is the same fact at an earlier moment — this submit's standing — and a
+ * second surface saying "sending" one line above where "not sent" appears
+ * would be two places to look for one answer.
+ */
+const PENDING_TEXT = "Sending… waiting for the terminal.";
 
 /** The file a path ends in — the chip's whole text. */
 function basename(path: string): string {
@@ -128,10 +146,47 @@ export interface AnswerComposerProps {
  * answer is the honest refusal rather than a queue: the text stays here, the
  * pane says it did not go, and the user resends it when the cell is back.
  *
- * Nothing is retried. `reconnectOnActivate` already repairs a dead socket the
- * moment the user goes near the cell (ADR 0010), so the resend costs a second
- * keypress — whereas a reply flushed on reconnect would arrive at whatever the
- * agent had moved on to, answering a prompt that is no longer on screen.
+ * Nothing is retried LATER. `reconnectOnActivate` already repairs a dead
+ * socket the moment the user goes near the cell (ADR 0010), so the resend
+ * costs a second keypress — whereas a reply flushed on some future reconnect
+ * would arrive at whatever the agent had moved on to, answering a prompt that
+ * is no longer on screen. What `ptySubmit` does offer is narrower: the socket
+ * is rebuilt and the same frame offered to it once, inside this gesture.
+ *
+ * ## Why the draft is consumed by DELIVERY and not by pressing Enter
+ *
+ * That retry is why. The field used to be emptied before the submit and
+ * refilled from `onFailed`, which was fair while a refusal was reported
+ * synchronously — the clear and the restore happened in the same frame and
+ * neither was ever seen. The reconnect made that callback up to three seconds
+ * late, and the shortcut became two bugs at once.
+ *
+ * For those three seconds the user had an empty box, no failure notice and no
+ * sign a send was in flight: the pane had thrown their reply away and said
+ * nothing, which is the exact outcome this whole file exists to prevent. And
+ * anyone who used the wait to type a NEW reply had it overwritten when the
+ * late restore ran — the composer destroying text the user could see.
+ *
+ * So the draft is kept until the frame is DELIVERED, which is what the design
+ * said all along: `onDelivered` is where the clear belongs, because it is the
+ * first moment the reply exists anywhere but here. On a live socket that
+ * callback runs inside the same event handler the Enter did, so nothing about
+ * the ordinary send feels any slower; only the reconnect path lags, and
+ * lagging is the truth there.
+ *
+ * The clear is CONDITIONAL, for the case above: it happens only if the field
+ * still holds exactly the text that was submitted. A user who typed on during
+ * the wait has a reply of their own in there, and a delivery three seconds
+ * later has no claim on it — the frame that went was the old text, so the new
+ * text is an unsent draft like any other. Compared with the alternatives —
+ * clearing unconditionally (destroys it), or locking the field for the
+ * duration (takes the box away for three seconds over a send that usually
+ * succeeds) — leaving a moved-on field alone is the only option that never
+ * loses a character.
+ *
+ * A refused RETURN still clears, because the body reached the prompt: the
+ * clear happened at delivery, one turn earlier, and putting the text back now
+ * would give the user two copies of one reply.
  *
  * The notice is a row of the pane, not a toast, and it carries `role="alert"`.
  * A refusal is about the text still in this field, so it belongs beside the
@@ -222,6 +277,19 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    * is in front of them now.
    */
   const [failure, setFailure] = useState<SubmitFailure | null>(null);
+  /**
+   * Whether a submit made from this field is still in flight.
+   *
+   * A boolean rather than a count, for the same reason {@link failure} is not
+   * a history: at most one submit can be unsettled here at a time — a second
+   * Enter starts a second submit, and what the row says is about the latest.
+   *
+   * On a live socket this is set and cleared inside one event handler, so it
+   * is batched away and the user never sees it. It becomes visible exactly
+   * where it is needed: a submit queued behind another, and the three-second
+   * reconnect wait.
+   */
+  const [pending, setPending] = useState(false);
   const { height, isMobile, handleProps } = useResizableRow(
     preferences.answerComposerHeight,
     BOUNDS,
@@ -230,20 +298,47 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     projectOfSession(sessionId),
   );
 
-  /** The one way out of this field, whichever control asked for it. */
-  const submit = (): void => {
-    if (text.trim() === "") return;
-    // The reply this submit is made of, held across the clear below so a
-    // refusal has something to put back. `text` itself is the render's value
-    // and would still be right here, but naming it says what it is for.
-    const reply = text;
+  /**
+   * The draft this submit was made of is on the far side now, so spend it —
+   * unless the field has moved on.
+   *
+   * The guard is the edit-during-wait case. A delivery can be up to three
+   * seconds after the Enter that asked for it (the reconnect retry), and the
+   * field stayed live and editable across that wait on purpose. If what is in
+   * it now is no longer what went, it is a reply of the user's own that no
+   * frame has been written for, and emptying it would be the composer
+   * destroying text the user is looking at.
+   *
+   * The store is what "now" is read from rather than a `setText` updater's
+   * `prev`: every keystroke writes it, so it holds the same characters the
+   * field does, and an updater that read state to decide a side effect would
+   * be doing it inside a function React double-invokes under StrictMode.
+   */
+  const consumeDraft = (submitted: string): void => {
+    if (getDraft(sessionId) !== submitted) return;
     // The one thing that consumes a draft. Nothing else in this file — or in
     // the pane above it — calls `clearDraft`.
     clearDraft(sessionId);
     setText("");
     setPasted([]);
-    // The last submit's verdict is spent the moment a new one is made.
+  };
+
+  /** The one way out of this field, whichever control asked for it. */
+  const submit = (): void => {
+    if (text.trim() === "") return;
+    // The reply this submit is made of, captured because the field it came
+    // from goes on being editable while the submit is in flight — this string
+    // is what was actually written, and what the clear below is conditional on.
+    const reply = text;
+    // The last submit's verdict is spent the moment a new one is made, and
+    // this one has no verdict yet.
     setFailure(null);
+    setPending(true);
+    // Nothing is cleared here. The draft is spent by DELIVERY, in the callback
+    // below — see the note on this component: a clear made on the strength of
+    // an Enter is a clear made before anything is known, and the verdict can
+    // now be three seconds away.
+    //
     // The body now, its submitting return on a later turn — never one write.
     submitToPty(sessionId, send, reply, {
       // The waiting state means "the agent is working on what I just said", so
@@ -255,23 +350,31 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
       // and written a gap later, so the flag was still saying "delivered" when
       // it was read, and a reply the socket went on to refuse put the pane
       // into a wait for an answer to something the agent had never been told.
-      onDelivered: onSubmitted,
+      onDelivered: () => {
+        setPending(false);
+        // The frame is on the socket, which is the first moment this reply
+        // exists anywhere but in this browser — so this is the moment it stops
+        // being a draft.
+        consumeDraft(reply);
+        onSubmitted();
+      },
       onFailed: (stage) => {
+        setPending(false);
         setFailure(stage);
-        if (stage !== "body") return;
-        // Nothing left the browser, so the reply is this field's again. Written
-        // back to the store as well as the state: the store is what the field is
-        // rebuilt from, and a refusal must survive the pane being closed exactly
-        // as an unsent draft does.
-        setDraft(sessionId, reply);
-        setText(reply);
+        // Nothing to put back on EITHER half now. A refused body never cleared
+        // the field in the first place, so the reply is simply still there,
+        // still in the store, and still an unsent draft — which is also why a
+        // user who typed on during the wait keeps what they typed. A refused
+        // return comes after a delivery that already spent the draft, and the
+        // text it is about is in the TUI's prompt: restoring it here would
+        // give the user two copies of one reply.
       },
     });
-    // A refused RETURN is deliberately not undone here. It arrives after the
-    // handover above — the return is written a turn later — and that is fair:
-    // the reply IS on the far side, it simply has not been run, so the wait is
-    // about something the agent can still be given with one keypress in the
-    // terminal, and the notice says exactly that.
+    // A refused RETURN is deliberately not undone here either. It arrives
+    // after the handover above — the return is written a turn later — and that
+    // is fair: the reply IS on the far side, it simply has not been run, so
+    // the wait is about something the agent can still be given with one
+    // keypress in the terminal, and the notice says exactly that.
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -454,19 +557,37 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           </svg>
         </button>
       </div>
-      {/* The refusal, in the pane rather than in a toast that floats over the
-          corner of the window: it is about the text in the field above it. On
-          every viewport, unlike the hint — a phone is exactly where a socket
-          drops, and there is no second place there to notice it. `role="alert"`
-          because the colour is what tells a sighted user, and a screen reader
-          is not looking at the pane when a send is refused. */}
-      {failure === null ? null : (
+      {/* This submit's standing: in flight, or refused. In the pane rather
+          than in a toast that floats over the corner of the window, because it
+          is about the text in the field above it. On every viewport, unlike
+          the hint — a phone is exactly where a socket drops, and there is no
+          second place there to notice it.
+
+          ONE row for both, replaced in place: "sending" and "not sent" are the
+          same question answered at two moments, and a pending line above a
+          failure line would leave the user reading two notices about one
+          Enter. It is taken down on either outcome, because both settle it.
+
+          The verdict is announced and the wait is not: `role="alert"` is
+          assertive and interrupts, which is right for news the user cannot see
+          any other way — the colour is all a sighted user gets — and wrong for
+          a progress note that will be replaced within three seconds. The wait
+          gets `role="status"`, the polite half of the same pair.
+
+          The pending ink is inline because the row's own colour is `--red`,
+          which is the right colour for a refusal and a lie about a send that
+          is merely in progress. The stylesheet is out of this change's scope;
+          a `.answer-pane-send-failed[data-state="pending"]` rule there is
+          where this belongs the moment that scope opens. */}
+      {failure === null && !pending ? null : (
         <div
           className="answer-pane-send-failed"
           data-testid={`answer-pane-send-failed-${sessionId}`}
-          role="alert"
+          data-state={failure === null ? "pending" : "failed"}
+          role={failure === null ? "status" : "alert"}
+          style={failure === null ? { color: "var(--text-tertiary)" } : undefined}
         >
-          {FAILURE_TEXT[failure]}
+          {failure === null ? PENDING_TEXT : FAILURE_TEXT[failure]}
         </div>
       )}
       {/* Desktop only: two of the three keys it names do not exist on a phone. */}

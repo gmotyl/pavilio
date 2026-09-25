@@ -41,12 +41,33 @@ const listeners = new Map<string, Set<(state: ConnectionState) => void>>();
 
 let connectionState: ConnectionState = "disconnected";
 let exited = false;
+/**
+ * Whether `reopen()` blows up. The pool treats a throwing reopen as a real
+ * possibility — `reconnectAllDisconnected` wraps the same call in a try/catch
+ * and carries on — so a submit that reconnects has to survive one too.
+ */
+let reopenThrows = false;
+
+/** Hand a connection verdict to everything subscribed for that session. */
+function emit(sessionId: string, state: ConnectionState): void {
+  for (const cb of listeners.get(sessionId) ?? []) cb(state);
+}
 
 vi.mock("../terminalInstances", () => ({
   getConnectionState: () => connectionState,
   hasExited: () => exited,
   reconnectSession: (sessionId: string, trigger?: string) => {
     reconnects.push([sessionId, trigger]);
+    if (reopenThrows) throw new Error("reopen blew up");
+    // The OPTIMISTIC "connected" the real `connectWs` emits at the ws identity
+    // swap — synchronously, inside `reopen()`, with the replacement socket
+    // still CONNECTING. It is emitted here because the retry's
+    // subscribe-AFTER-reconnect ordering is load-bearing and was pinned by
+    // NOTHING: a retry woken by this emit writes into a socket that is not
+    // open yet and reports a refusal for a reconnect that was about to
+    // succeed. With a mock that emitted nothing the two lines could be swapped
+    // and the entire terminal suite stayed green.
+    emit(sessionId, "connected");
   },
   onConnectionChange: (
     sessionId: string,
@@ -67,19 +88,20 @@ vi.mock("../terminalInstances", () => ({
 const SESSION = "cell-a";
 
 /**
- * What the real pool emits when the replacement socket finishes its handshake.
+ * What the real pool emits when the replacement socket finishes its HANDSHAKE.
  *
- * Deliberately NOT the optimistic emit `connectWs` makes at the ws identity
- * swap: that one goes out synchronously inside the reconnect itself, before
- * the retry has subscribed, and the socket is still CONNECTING when it does.
+ * Distinct from the optimistic emit the mocked `reconnectSession` above makes:
+ * that one goes out synchronously inside the reconnect itself, before the
+ * retry has subscribed, and the socket is still CONNECTING when it does. This
+ * one is the answer the retry is actually waiting for.
  */
 function socketCameBack(): void {
-  for (const cb of listeners.get(SESSION) ?? []) cb("connected");
+  emit(SESSION, "connected");
 }
 
 /** What the pool emits when the replacement socket fails to open. */
 function socketStayedDown(): void {
-  for (const cb of listeners.get(SESSION) ?? []) cb("disconnected");
+  emit(SESSION, "disconnected");
 }
 
 beforeEach(() => {
@@ -88,6 +110,7 @@ beforeEach(() => {
   listeners.clear();
   connectionState = "disconnected";
   exited = false;
+  reopenThrows = false;
   vi.useFakeTimers();
 });
 
@@ -289,5 +312,80 @@ describe("a refused send repairs the socket", () => {
     // known.
     expect(reconnects).toEqual([]);
     expect(onFailed.mock.calls).toEqual([["body"]]);
+  });
+
+  it("ignores the optimistic connected the reconnect itself emits", () => {
+    let open = false;
+    const send = vi.fn((_data: string) => open);
+    const onDelivered = vi.fn();
+    const onFailed = vi.fn();
+
+    submitToPty(SESSION, send, "ship it", { onDelivered, onFailed });
+
+    // `reconnectSession` has already emitted "connected" by now — the
+    // optimistic one, at the ws identity swap, with the socket still
+    // CONNECTING. The retry must not have been woken by it: one body write so
+    // far and no verdict at all. Woken early, the frame goes into a socket
+    // that cannot take it and the user is told a reconnect failed that was
+    // about to land.
+    expect(send.mock.calls).toEqual([["ship it"]]);
+    expect(onDelivered).not.toHaveBeenCalled();
+    expect(onFailed).not.toHaveBeenCalled();
+
+    // The handshake's own event is the one that settles it.
+    open = true;
+    socketCameBack();
+
+    expect(send.mock.calls).toEqual([["ship it"], ["ship it"]]);
+    expect(onDelivered).toHaveBeenCalledTimes(1);
+    expect(onFailed).not.toHaveBeenCalled();
+  });
+
+  it("a throwing reconnect still advances the queue", () => {
+    reopenThrows = true;
+    const send = vi.fn((_data: string) => false);
+    const onFailed = vi.fn();
+
+    // The error is not swallowed — the caller is the one with the bug to fix,
+    // and an error quietly eaten in the submit path is the class of defect
+    // this module exists to undo.
+    expect(() =>
+      submitToPty(SESSION, send, "did this go?", { onFailed }),
+    ).toThrow(/reopen blew up/);
+
+    // But the bookkeeping that was owed happened anyway. Nothing reached the
+    // agent, so the user is told exactly that.
+    expect(onFailed.mock.calls).toEqual([["body"]]);
+
+    // And the session's turn came back. Without it, this cell's entry in the
+    // queue map stands forever with no return scheduled and no `advance` to
+    // come: every later submit on the cell is pushed onto an array nothing
+    // will ever drain, and the composer and launcher pills are dead until the
+    // page is reloaded.
+    const later = vi.fn((_data: string) => true);
+    submitToPty(SESSION, later, "try again");
+    expect(later.mock.calls).toEqual([["try again"]]);
+  });
+
+  it("a throwing retry still advances the queue", () => {
+    // The first write is refused; the one offered to the replacement socket
+    // blows up. Worse than the reconnect case in the real panel: this throw
+    // happens inside a connection listener, where `emitConnectionState`
+    // catches and warns it — so a wedge here would be permanent AND silent.
+    const send = vi.fn((_data: string) => {
+      if (send.mock.calls.length > 1) throw new Error("socket write blew up");
+      return false;
+    });
+    const onFailed = vi.fn();
+
+    submitToPty(SESSION, send, "did this go?", { onFailed });
+
+    expect(() => socketCameBack()).toThrow(/socket write blew up/);
+
+    expect(onFailed.mock.calls).toEqual([["body"]]);
+
+    const later = vi.fn((_data: string) => true);
+    submitToPty(SESSION, later, "try again");
+    expect(later.mock.calls).toEqual([["try again"]]);
   });
 });

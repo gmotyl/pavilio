@@ -116,6 +116,11 @@
  * Subscribing after the reconnect steps over it, so the first event this hears
  * is the handshake's own.
  *
+ * That ordering is pinned rather than merely described: `ptySubmit.reconnect`'s
+ * mocked `reconnectSession` makes the optimistic emit exactly as `connectWs`
+ * does, so swapping these two lines fails the suite. A mock that emitted
+ * nothing let the inversion pass every test in the terminal tree.
+ *
  * And the wait is bounded by a timer, because a handshake that neither opens
  * nor errors emits nothing at all. A submit that never finishes never calls
  * {@link advance}, and `advance` is what hands on the session's turn — so an
@@ -155,6 +160,15 @@
  * The bookkeeping happens and the error goes on propagating to the caller, who
  * is the one with the bug to fix. An error quietly eaten in the submit path is
  * the very class of defect the rest of this file exists to undo.
+ *
+ * The reconnect path is held to the same rule, and for a sharper reason. Both
+ * of the calls it makes into code this module does not own — the `reopen` and
+ * the retried `send` — can throw, and NEITHER throw reaches a place that could
+ * report it: the reopen's escapes `submitToPty` itself, and the retry's is
+ * raised inside a connection listener, where `emitConnectionState` catches it
+ * and `console.warn`s. A wedge taken there would be permanent, silent, and
+ * invisible to the user. So both sit in a `try` whose `finally` reports the
+ * refusal and hands on the turn.
  */
 
 import {
@@ -258,6 +272,17 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
  * reconnect has a submit in flight, and the queue lets it have only one.
  * Exists so {@link __resetPtySubmitForTests} can drop a wait's subscription
  * and its timer, the same way it drops a pending return.
+ *
+ * WARNING — what is stored here is `stopWaiting`, which unsubscribes and stops
+ * the clock and NOTHING else. It does not report, and it does not
+ * {@link advance}. That is exactly right for the one caller there is: the test
+ * reset drops the whole queue immediately afterwards, so there is no turn left
+ * to hand on. It is wrong for anything else. A future caller that abandons a
+ * wait on a LIVE queue — a session teardown, say, or a cancel button — leaves
+ * that session's entry in {@link queues} standing with no return scheduled and
+ * no `advance` to come, which wedges every later submit on the cell for the
+ * life of the tab. Such a caller needs a stop that reports and advances, not
+ * this one.
  */
 const reconnectWaits = new Map<string, () => void>();
 
@@ -339,6 +364,29 @@ function reportBodyRefused(sessionId: string, submission: Submission): void {
  * last announced, this cell's socket is not usable right now — a CLOSING one,
  * or one still mid-handshake, both read as "connected" and both refuse writes.
  * What is left to rule out is the two states a reopen genuinely cannot help.
+ *
+ * ## The double reconnect this knowingly accepts
+ *
+ * Dropping the "already connected" arm has a consequence worth stating rather
+ * than discovering. `getConnectionState` answers "connected" optimistically
+ * from the ws identity swap onward, so it says "connected" for a socket that
+ * is still CONNECTING — and a write into that socket is refused. This
+ * predicate then says yes, and the reconnect TEARS DOWN the handshake that was
+ * about to land and starts another.
+ *
+ * `8d178f7` — the composer's focus repairs the socket — makes that window a
+ * common one rather than a theoretical one: focus the composer, the reconnect
+ * starts, type a reply and press Enter before the handshake lands, and the
+ * send aborts the very repair the focus asked for. The visible trace is a
+ * spurious second `auto-activate` in the reconnect log for one gesture.
+ *
+ * The guard is nevertheless right as it stands and is deliberately NOT
+ * changed. The cost is bounded — one extra reconnect, and the submit still
+ * delivers on the socket that second handshake opens — whereas the arm that
+ * would avoid it is a guess: "connected" is precisely the answer that has just
+ * been contradicted by the refusal, so trusting it here would mean reporting a
+ * failure without attempting the repair, on the strength of a state the send
+ * has already disproved. An extra handshake is the cheaper mistake.
  */
 function canRepairSocket(sessionId: string): boolean {
   if (hasExited(sessionId)) return false;
@@ -361,7 +409,27 @@ function reconnectAndRetry(sessionId: string, submission: Submission): void {
   // Called BEFORE the subscription below on purpose: the optimistic
   // "connected" this emits at the ws identity swap must not be mistaken for
   // the handshake landing. See the module header.
-  reconnectSession(sessionId, "auto-activate");
+  //
+  // And called inside a `try` for the reason every other report here is: a
+  // reopen is entitled to throw, and the pool already treats that as real —
+  // `terminalInstances.reconnectAllDisconnected` wraps this same call in a
+  // catch so "a throwing reopen is warned about and the fan-out continues".
+  // A throw escaping from HERE escapes `submitToPty` with the session's entry
+  // in {@link queues} still standing and nothing left to drain it: the cell's
+  // composer and launcher pills are dead until the page is reloaded. So the
+  // bookkeeping that was owed is carried out on the way out — the refusal is
+  // reported and the turn is handed on — and the error goes on propagating to
+  // the caller, who is the one with the bug to fix.
+  let reopened = false;
+  try {
+    reconnectSession(sessionId, "auto-activate");
+    reopened = true;
+  } finally {
+    // Only on the throwing path. The reopen that worked has a wait to set up
+    // below, and reporting a refusal for it would be reporting a verdict
+    // nothing has reached yet.
+    if (!reopened) reportBodyRefused(sessionId, submission);
+  }
 
   let unsubscribe: (() => void) | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -385,14 +453,24 @@ function reconnectAndRetry(sessionId: string, submission: Submission): void {
     if (settled) return;
     stopWaiting();
     reconnectWaits.delete(sessionId);
-    if (socketIsBack && submission.send(submission.body)) {
-      deliver(sessionId, submission);
-      return;
+    // The retried write is the module's own `finally`-for-`advance` discipline
+    // again, and it matters MORE here than anywhere else in the file: this
+    // runs inside a connection listener, where `emitConnectionState` catches
+    // and `console.warn`s whatever escapes. A throw taken there is a wedge
+    // that is permanent, silent, and raises nothing the user can see — where
+    // at base a throwing `send` at least propagated out of the React handler.
+    // So the verdict is decided in the `finally`, from a flag a throw cannot
+    // have set, and the error is still not swallowed: it goes on propagating.
+    let retryDelivered = false;
+    try {
+      retryDelivered = socketIsBack && submission.send(submission.body);
+    } finally {
+      // Either the reconnect failed, or it succeeded and the frame was refused
+      // anyway, or the write blew up. All three are the end of it: the user is
+      // told, the draft is still theirs, and the queue moves on.
+      if (retryDelivered) deliver(sessionId, submission);
+      else reportBodyRefused(sessionId, submission);
     }
-    // Either the reconnect failed, or it succeeded and the frame was refused
-    // anyway. Both are the end of it: the user is told, the draft is still
-    // theirs, and the queue moves on.
-    reportBodyRefused(sessionId, submission);
   };
 
   unsubscribe = onConnectionChange(sessionId, (state) => {
