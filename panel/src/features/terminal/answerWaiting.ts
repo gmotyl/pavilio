@@ -157,10 +157,67 @@
  * a send is outstanding — `beginWaiting` has already handed the body over by
  * the user's own decision, and a window behind it would decide nothing.
  *
- * This is the ONE clock in this module, and it decides one thing: whether a
- * busy spell was real. Every other transition here stays event-driven (see the
- * "No timer decides any of it" note below, which is about the way OUT of the
- * waiting state and is untouched).
+ * ## The mirror window: whether a QUIET spell was real
+ *
+ * The server's activity model has THREE states, and `attention` is not "the
+ * agent stopped". `terminalActivity.ts` promotes a session to `attention` one
+ * second after its last byte whenever the busy run lasted longer than ten —
+ * and `recordOutput` then BACKDATES the run past that threshold on purpose, so
+ * every later gap resolves to `attention` again and never to `idle`. For an
+ * agent that thinks between bursts of output (a tool call, a pause, a result,
+ * a pause) that is not a state but an OSCILLATION: busy → attention → busy →
+ * attention for the whole run, one broadcast per flip.
+ *
+ * Reading every non-busy state as *the agent let go of the body* therefore
+ * made the pane flicker for the entire run — a few seconds of answer, a few
+ * seconds of wave, with the debounce window above setting the period — on a
+ * cell whose agent was plainly still working and whose activity light was
+ * plainly still lit. Worse, each blip destroyed the HOLD, so stepping back to
+ * re-read during a long run bought the user the text for one gap only.
+ *
+ * So a quiet spell gets the mirror of the busy spell's treatment: it must
+ * OUTLIVE a window before it counts as the agent letting go. If output returns
+ * first, nothing moved and the pane never flickered. If the window elapses
+ * with the session still quiet, the agent really has stopped and everything
+ * the old code did at once is done then.
+ *
+ * The two non-busy states are NOT treated alike, and that is the whole point:
+ *
+ * - `idle` is AUTHORITATIVE and is acted on immediately, exactly as before.
+ *   The server reaches it from a short run that ended, or from the user typing
+ *   into the terminal / dismissing the LED — never from an agent pausing,
+ * - `attention` is AMBIGUOUS. It is *this session was busy a long time and has
+ *   gone quiet for a second*, which is a finished agent asking a question and
+ *   a working agent between bursts, told in the same word.
+ *
+ * Only the ambiguous one gets the window. The cost is bounded and it is paid
+ * at the END of a run: an agent that finishes into `attention` keeps the wave
+ * for one window longer than it used to before the body comes back. The
+ * alternative — leaving `attention` to release the body at once — is the
+ * flicker this exists to end; and the alternative to THAT, letting only `idle`
+ * release it, is a wave that outstays every long run indefinitely, because a
+ * finished agent sitting at `attention` never reaches `idle` on its own: only
+ * `recordInput` and `dismiss` take it there.
+ *
+ * It reuses `answerWaveDebounceMs()` rather than taking a knob of its own: one
+ * number, two mirror questions, and nothing new for the server to serve.
+ *
+ * ### Why a user gesture does not cancel THIS window
+ *
+ * A send and a launcher press cancel the BUSY window, because the question
+ * that window asks — *is this output real work?* — is one the user's own
+ * decision answers better than any clock.
+ *
+ * The quiet window asks *has the agent stopped?*, and nothing the user does
+ * answers that. So it is cancelled by exactly one thing, the session going
+ * busy again, and by nothing else. Which also means it carries no debt: no
+ * gesture spends it, so there is nothing to owe back, and `endSend` /
+ * `endStarting` stay about the busy window alone.
+ *
+ * These are the TWO clocks in this module, and they decide one thing each:
+ * whether a busy spell was real, and whether a quiet spell was. Every other
+ * transition here stays event-driven (see the "No timer decides any of it"
+ * note below, which is about the way OUT of the waiting state).
  *
  * ## The hold
  *
@@ -180,12 +237,22 @@
  *   Without this the hold would outrank the send that follows it, and the most
  *   ordinary path there is — step back to re-read, then type a reply — would
  *   hand the reply no wave at all,
- * - the session leaving `busy` — a hold with nothing left to hold it against is
- *   not a hold, it is a pane stuck on an old answer.
+ * - the agent STOPPING — a hold with nothing left to hold it against is not a
+ *   hold, it is a pane stuck on an old answer.
  *
- * Nothing else releases it, and no clock does: every release above is an event
- * this module was TOLD about, and no timer is scheduled on either the setting
- * or the releasing side.
+ * That last one used to read "the session leaving `busy`", which was written
+ * when leaving busy meant finishing. It does not: a working agent leaves busy
+ * every time it pauses between bursts (see "The mirror window" above), and on
+ * that reading the user's explicit *I want the text* was revoked a second or
+ * two after they asked for it, by a state change that was not the agent
+ * finishing at all. So the release now waits for the quiet window that decides
+ * the same question for the body, and the hold and the body's handover end
+ * together — one decision, not two readings of one broadcast.
+ *
+ * Nothing else releases it: every release above is an event this module was
+ * TOLD about, and the only clock on the releasing side is the quiet window,
+ * which is the module deciding that one of those events — the agent
+ * stopping — actually happened.
  *
  * ### Why the arrival release hands a value BACK
  *
@@ -216,9 +283,12 @@
  * released when the playback ends — or dropped unused if the agent finishes
  * first, because then there is nothing left to wait for.
  *
- * **No timer decides the way OUT.** The debounce above is the only clock here,
- * and it guards the way IN; nothing schedules an exit. The activity state is
- * the server's, broadcast
+ * **No timer decides how long an agent ought to take.** The two clocks here
+ * both ask whether a BROADCAST meant what it said — was that output work, was
+ * that silence the end of it — and neither is a guess about the length of a
+ * run: an agent that works for an hour is waved over for an hour, and one that
+ * stops is given the body a window later whenever that is. The activity state
+ * is the server's, broadcast
  * on the terminal-activity channel for the activity dot, so the silent-agent
  * exit is as authoritative as the arrival of an answer — not a guess about how
  * long an agent ought to take. The subscription is opened per SESSION rather
@@ -303,9 +373,12 @@ interface Entry {
    * session can be busy with a repaint nobody asked for, and the whole point of
    * the window is that such a spell never gets this far.
    *
-   * Cleared the moment the session stops being busy. An answer arriving inside
-   * the window never granted it in the first place — that arrival restarts the
-   * window instead, so the claim is re-earned one window later.
+   * Cleared when the agent STOPS — which is `idle` at once, and `attention`
+   * only once the quiet window has elapsed on it, because a working agent
+   * passes through `attention` between every two bursts of output (see the
+   * header). An answer arriving inside the busy window never granted it in the
+   * first place — that arrival restarts the window instead, so the claim is
+   * re-earned one window later.
    */
   agentArmed: boolean;
   /**
@@ -316,6 +389,16 @@ interface Entry {
    * to stop.
    */
   debounce: ReturnType<typeof setTimeout> | null;
+  /**
+   * The pending QUIET window, or `null` when none is running: the mirror of
+   * {@link Entry.debounce}, asking whether a spell of silence is the agent
+   * having stopped rather than a gap between two bursts of its output.
+   *
+   * Only ever running while the session is in `attention` — `idle` is
+   * authoritative and is acted on without one — and cleared by the session
+   * going busy again, which is the answer *no, it was a gap*.
+   */
+  quiet: ReturnType<typeof setTimeout> | null;
   /** Whether this cell's voice is reading, as the speech surface last said. */
   speaking: boolean;
   /**
@@ -422,6 +505,18 @@ function cancelDebounce(entry: Entry): void {
 }
 
 /**
+ * Cancels a pending quiet window, if one is running. Idempotent, like
+ * {@link cancelDebounce}, and called from exactly two places: the session
+ * going busy again (the spell of silence was a gap, and the answer is *no*),
+ * and the entry being dropped.
+ */
+function cancelQuiet(entry: Entry): void {
+  if (entry.quiet === null) return;
+  clearTimeout(entry.quiet);
+  entry.quiet = null;
+}
+
+/**
  * Opens the debounce window for a busy spell: if the session is STILL busy when
  * it elapses, the output was work rather than a repaint and the agent gets its
  * claim on the body — subject to the playback deferral, which is armed here
@@ -445,6 +540,55 @@ function openDebounceWindow(sessionId: string, entry: Entry): void {
     if (live.activity !== "busy") return;
     live.agentArmed = true;
     live.deferred = live.speaking;
+    publish(sessionId);
+  }, answerWaveDebounceMs());
+}
+
+/**
+ * Everything a busy spell owns, given back: the agent's claim on the body, the
+ * deferral that was politeness towards a sentence it interrupted, the hold the
+ * user took against work in progress, and any launcher press still waiting for
+ * the agent it asked for.
+ *
+ * One function because it is ONE event — *the agent stopped* — reached by two
+ * routes with different amounts of proof behind them: `idle`, which says so
+ * outright, and a quiet window that elapsed on `attention`, which is this
+ * module deciding the same thing about a broadcast that does not say it.
+ *
+ * `endSend` is deliberately NOT here. A send's wait ends on the reply or on
+ * `idle`, and an agent that has gone quiet at `attention` has neither replied
+ * nor said it is done with the question you asked.
+ */
+function endBusySpell(sessionId: string, entry: Entry): void {
+  entry.agentArmed = false;
+  entry.deferred = false;
+  entry.held = false;
+  endStarting(sessionId, entry);
+}
+
+/**
+ * Opens the quiet window for a spell of silence: if the session is STILL not
+ * busy when it elapses, the silence was the agent stopping rather than a gap
+ * between two bursts, and everything the busy spell owned goes back to the
+ * user ({@link endBusySpell}).
+ *
+ * The mirror of {@link openDebounceWindow} down to the re-read in the callback
+ * — a timer already handed to the queue cannot be unscheduled in every
+ * runtime, so the fired callback trusts the map rather than its closure — and
+ * to the "a window already running is the window this spell gets" rule:
+ * nothing re-arms it, because nothing but output happens during silence.
+ */
+function openQuietWindow(sessionId: string, entry: Entry): void {
+  if (entry.quiet !== null) return;
+  entry.quiet = setTimeout(() => {
+    const live = entries.get(sessionId);
+    if (!live || live.quiet === null) return;
+    live.quiet = null;
+    // Output came back and went again? Then a later broadcast opened its own
+    // window and this one is stale; and a session that is busy right now never
+    // stopped at all.
+    if (live.activity === "busy") return;
+    endBusySpell(sessionId, live);
     publish(sessionId);
   }, answerWaveDebounceMs());
 }
@@ -547,36 +691,43 @@ function onActivity(sessionId: string, state: ActivityState): void {
   if (!entry || state === entry.activity) return;
   entry.activity = state;
   if (state === "busy") {
+    // The one thing that cancels a quiet window, and the only answer it was
+    // ever waiting for: the silence was a gap between bursts, so nothing about
+    // the body changes and the pane does not flicker.
+    cancelQuiet(entry);
     // Output happened; whether it is WORK is what the window is for. Nothing
     // is handed over here and the deferral is not armed here either — both
     // wait for the window to elapse.
     openDebounceWindow(sessionId, entry);
-  } else {
-    // Whatever the output was, it is over: a window still pending must not
-    // fire behind a session that has already stopped, and a claim already
-    // granted ends with the activity that earned it.
+  } else if (state === "idle") {
+    // AUTHORITATIVE. The server reaches `idle` from a short run that ended, or
+    // from the user typing into the terminal / dismissing the LED — never from
+    // an agent pausing. So it is acted on at once, with no window between the
+    // broadcast and the body: there is nothing left to decide.
+    cancelQuiet(entry);
+    // A busy window still pending must not fire behind a session that has
+    // already stopped.
     cancelDebounce(entry);
-    entry.agentArmed = false;
-    // Nothing left to defer to — and nothing left to hold the answer against
-    // either: the hold is a press made against work in progress, and work that
-    // is no longer in progress must not leave the pane pinned to an old
-    // answer for the next thing the agent does.
-    entry.deferred = false;
-    entry.held = false;
-    // The agent the user asked for has stopped — finished without speaking, or
-    // never came up. Cleared on EVERY non-busy state rather than on `idle`
-    // alone: `attention` is the agent up and asking the user something, which
-    // is the start over just as surely. Its re-open can never fire from here
-    // (this branch has just left `busy`), and it is routed through the funnel
-    // anyway for the same reason `endSend` is — one function says what the end
-    // of a starting wait does.
-    endStarting(sessionId, entry);
+    endBusySpell(sessionId, entry);
     // Through `endSend` like every other end of a send, although the re-open
     // it carries can never fire from here: this branch has just left `busy`,
     // which is the one condition the re-open asks about. Routed through it
     // anyway so that "what the end of a send does" stays one function rather
     // than a rule the arrival path remembers and this one does not.
-    if (state === "idle") endSend(sessionId, entry);
+    endSend(sessionId, entry);
+  } else {
+    // AMBIGUOUS, and the whole reason the quiet window exists. `attention` is
+    // *busy a long time, then quiet for a second*: a finished agent asking the
+    // user something, and a working agent between two bursts of output, told
+    // in the same word — and for the second of those the server flaps back and
+    // forth indefinitely (see the header). So NOTHING is given back here. The
+    // window decides, and if output returns first the flap is invisible.
+    //
+    // The busy window goes all the same: a spell that has stopped producing
+    // output has not earned a claim, and if it resumes the transition above
+    // opens a fresh one.
+    cancelDebounce(entry);
+    openQuietWindow(sessionId, entry);
   }
   publish(sessionId);
 }
@@ -596,6 +747,7 @@ function ensureEntry(sessionId: string): Entry {
     activity: getActivityState(sessionId),
     agentArmed: false,
     debounce: null,
+    quiet: null,
     speaking: false,
     deferred: false,
     held: false,
@@ -619,8 +771,10 @@ function drop(sessionId: string): void {
   if (!entry) return;
   // Before the entry leaves the map: a window left running would fire against
   // a session that no longer exists, and a session recreated under the same id
-  // would inherit a claim earned by the dead one.
+  // would inherit a claim earned by the dead one. BOTH windows — the quiet one
+  // would otherwise hand a dead session's body back to nobody.
   cancelDebounce(entry);
+  cancelQuiet(entry);
   entry.unsubscribe();
   entries.delete(sessionId);
 }
