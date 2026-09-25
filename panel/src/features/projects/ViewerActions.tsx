@@ -19,7 +19,13 @@ export function ViewerActions({
   absolutePath: string;
   /** Open file's source. Null/undefined/empty means nothing to copy — the button is disabled. */
   content?: string | null;
-  /** Text the copy-path button puts on the clipboard. Defaults to `absolutePath`. */
+  /**
+   * Text the copy-path button puts on the clipboard. Only `undefined` falls
+   * back to `absolutePath` — an explicit `""` is copied as an empty string.
+   * That asymmetry with `content` (where empty means nothing-to-copy) is
+   * deliberate: a path is always copyable, so a blank one is a caller bug
+   * worth seeing rather than silently rewriting into the absolute path.
+   */
   copyPathText?: string;
   /**
    * Stem of the buttons' `data-testid`s. It exists so the standalone `/view/*`

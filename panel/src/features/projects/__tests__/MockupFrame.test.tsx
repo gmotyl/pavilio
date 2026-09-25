@@ -109,6 +109,20 @@ describe("MockupFrame", () => {
     expect(frame().style.width).toBe("100%");
   });
 
+  it("centers the frame once a device width leaves it narrower than the pane", () => {
+    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+
+    fireEvent.click(screen.getByTestId("mockup-viewer-width-phone"));
+
+    // jsdom lays nothing out, so the centering can only be pinned where it is
+    // expressed: the flex row that wraps the frame. Both halves matter — a
+    // `justify-center` on a non-flex parent centers nothing.
+    const row = frame().parentElement as HTMLElement;
+    const classes = Array.from(row.classList);
+    expect(classes).toContain("flex");
+    expect(classes).toContain("justify-center");
+  });
+
   it("keeps the same iframe element across a width change", () => {
     render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
 

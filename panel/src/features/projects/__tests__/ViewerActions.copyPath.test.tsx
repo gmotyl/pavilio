@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import ViewerActions from "../ViewerActions";
 import { openInVSCode } from "../../shell/vscode";
@@ -22,13 +22,6 @@ beforeEach(() => {
   });
   writeText = vi.fn().mockResolvedValue(undefined);
   Object.assign(navigator, { clipboard: { writeText } });
-});
-
-afterEach(() => {
-  Object.defineProperty(window, "isSecureContext", {
-    value: true,
-    configurable: true,
-  });
 });
 
 describe("ViewerActions copy-path override", () => {
