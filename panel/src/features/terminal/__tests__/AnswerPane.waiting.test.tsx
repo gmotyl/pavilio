@@ -295,15 +295,30 @@ const previousButton = (): HTMLElement => screen.getByTestId(`speech-bar-previou
 
 const nextButton = (): HTMLElement => screen.getByTestId(`speech-bar-next-${SESSION}`);
 
+/** The debounce window these tests run under, pinned on the boot document. */
+const DEBOUNCE = 3000;
+
 /**
- * An activity broadcast landing while the panel is mounted. Wrapped in `act`
- * because it is the realtime channel's own listener that reaches React here —
- * the waiting store subscribes to the channel, not to anything a render did.
+ * An activity broadcast landing while the panel is mounted, followed — for a
+ * busy one — by the debounce window it opens. Wrapped in `act` because it is
+ * the realtime channel's own listener that reaches React here, and then the
+ * timer's: the waiting store subscribes to those, not to anything a render
+ * did, and only a flush turns either into the DOM these tests read.
+ *
+ * The window is elapsed here because `busy` is *the PTY emitted output* and
+ * the agent's trigger now waits it out before it may take the body. Every
+ * criterion in this file is about an ESTABLISHED busy spell; the window itself
+ * is pinned in `answerWaiting.debounce.test.ts`.
  */
 const activity = (state: "idle" | "busy" | "attention", at: number): void => {
   act(() => {
     _applyEventForTests({ sessionId: SESSION, state, at });
   });
+  if (state === "busy") {
+    act(() => {
+      vi.advanceTimersByTime(DEBOUNCE);
+    });
+  }
 };
 
 /** Type a reply and press Enter — the one gesture that starts a wait. */
@@ -317,6 +332,13 @@ beforeEach(() => {
   _resetForTests();
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
+  // The debounce on the agent's trigger is a clock, so the whole file runs on
+  // a controlled one, and on a window the file states rather than whatever the
+  // server-side default happens to be.
+  vi.useFakeTimers();
+  (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__ = {
+    answerWaveDebounceMs: DEBOUNCE,
+  };
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   installMatchMedia();
 });
@@ -326,6 +348,7 @@ afterEach(() => {
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
   vi.useRealTimers();
+  delete (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__;
 });
 
 describe("the answer pane while a reply is pending", () => {

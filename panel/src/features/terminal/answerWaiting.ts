@@ -39,6 +39,45 @@
  * The activity trigger ends with the activity itself: the body is the agent's
  * for as long as the agent is busy.
  *
+ * ## The debounce on the agent's trigger
+ *
+ * `busy` does not mean *the agent is working*. Server-side it is
+ * `recordOutput()` — *the PTY emitted output within the last second* — which is
+ * a good proxy mid-session and a bad one at attach time, when a repaint is
+ * guaranteed. Switching terminals or projects reattaches the session and
+ * repaints the screen, which IS output, so a switch produces a 1-2s busy window
+ * with no agent work in it, and that window was enough to cover an answer the
+ * user was still reading. The same false positive arrives by other routes the
+ * server already names — an async shell prompt finishing, a stray redraw — so
+ * the guard is a debounce on the trigger rather than a suppression of
+ * output-after-attach.
+ *
+ * So a busy transition does not hand anything over; it opens a WINDOW
+ * ({@link answerWaveDebounceMs}). Only output that outlives that window is work,
+ * and only then does the agent get a claim on the body ({@link Entry.agentArmed}
+ * — which is what `derive` reads, never `activity === "busy"` on its own).
+ *
+ * It applies to the AGENT's trigger only. A send is the user's own action and
+ * delaying its feedback would make the panel feel broken, so `beginWaiting`
+ * hands over on the frame it is called and CANCELS any pending window: the
+ * user's decision is a better answer to *is this real?* than any clock.
+ *
+ * The debounce composes BEFORE the playback deferral below, and the two are
+ * independent: the debounce asks *is this real?*, the deferral asks *is now a
+ * rude moment?*. The deferral is therefore armed when the window ELAPSES,
+ * against the playback running at that moment, not against the one running at
+ * the transition.
+ *
+ * A window still pending when an answer arrives is simply dropped
+ * ({@link noteNewestAnswer}) — the answer is the better outcome, and the wave
+ * was never needed. Dropped means SPENT, not postponed: that busy spell gets no
+ * second window, only a later transition does.
+ *
+ * This is the ONE clock in this module, and it decides one thing: whether a
+ * busy spell was real. Every other transition here stays event-driven (see the
+ * "No timer decides any of it" note below, which is about the way OUT of the
+ * waiting state and is untouched).
+ *
  * ## The hold
  *
  * Without one the feature eats itself. A busy session takes the body, so a user
@@ -93,7 +132,9 @@
  * released when the playback ends — or dropped unused if the agent finishes
  * first, because then there is nothing left to wait for.
  *
- * **No timer decides any of it.** The activity state is the server's, broadcast
+ * **No timer decides the way OUT.** The debounce above is the only clock here,
+ * and it guards the way IN; nothing schedules an exit. The activity state is
+ * the server's, broadcast
  * on the terminal-activity channel for the activity dot, so the silent-agent
  * exit is as authoritative as the arrival of an answer — not a guess about how
  * long an agent ought to take. The subscription is opened per SESSION rather
@@ -114,10 +155,12 @@
  * that already holds the host as a prop, exactly as `beginWaiting`,
  * `noteUtterance` and `noteTransport` are. Every arrow into this module points
  * the same way, and the module's own imports stay {react, the activity
- * channel} — a read of the speech host would be a coupling just as surely as a
- * command would.
+ * channel, the debounce leaf} — a read of the speech host would be a coupling
+ * just as surely as a command would. `answerWaveDebounce` is a leaf that
+ * imports nothing at all, so it drags no dependency in behind it.
  */
 import { useSyncExternalStore } from "react";
+import { answerWaveDebounceMs } from "./answerWaveDebounce";
 import {
   type ActivityState,
   getActivityState,
@@ -160,6 +203,25 @@ interface Entry {
   markOnly: boolean;
   /** The last activity state seen; a CHANGE into `idle` is the silent-agent exit. */
   activity: ActivityState;
+  /**
+   * The busy spell outlived the debounce window, so the agent has a claim on
+   * the body. This — not `activity === "busy"` — is what `derive` reads: a
+   * session can be busy with a repaint nobody asked for, and the whole point of
+   * the window is that such a spell never gets this far.
+   *
+   * Cleared the moment the session stops being busy, and by an answer arriving
+   * inside the window: that spell is then SPENT, and only a later transition
+   * opens another one.
+   */
+  agentArmed: boolean;
+  /**
+   * The pending debounce window, or `null` when none is running. Kept as a
+   * handle rather than a boolean because every way out of the window — going
+   * idle, an answer landing, a send, the session being destroyed — has to
+   * CLEAR it, and a fired-but-stale timer is exactly the bug this guard exists
+   * to stop.
+   */
+  debounce: ReturnType<typeof setTimeout> | null;
   /** Whether this cell's voice is reading, as the speech surface last said. */
   speaking: boolean;
   /**
@@ -206,7 +268,10 @@ function derive(entry: Entry): AnswerWaitingSnapshot {
   // the play button, exactly as a transport press leaves it.
   if (entry.held) return entry.send !== null ? MARK_ONLY : SETTLED;
   const sendHasTheBody = entry.send !== null && !entry.markOnly;
-  const agentHasTheBody = entry.activity === "busy" && !entry.deferred;
+  // `agentArmed`, not `activity === "busy"`: a busy spell has a claim on the
+  // body only once it has outlived the debounce window (see the header). The
+  // deferral is asked SECOND, and only of a claim the window already allowed.
+  const agentHasTheBody = entry.agentArmed && !entry.deferred;
   if (entry.send !== null) return sendHasTheBody || agentHasTheBody ? BODY_HANDED_OVER : MARK_ONLY;
   return agentHasTheBody ? AGENT_HAS_THE_BODY : SETTLED;
 }
@@ -245,6 +310,45 @@ function publish(sessionId: string): void {
   notify();
 }
 
+/**
+ * Cancels a pending debounce window, if one is running. Idempotent, and safe on
+ * an entry that never opened one — every exit from a busy spell funnels through
+ * here rather than each caller remembering the handle.
+ */
+function cancelDebounce(entry: Entry): void {
+  if (entry.debounce === null) return;
+  clearTimeout(entry.debounce);
+  entry.debounce = null;
+}
+
+/**
+ * Opens the debounce window for a busy spell: if the session is STILL busy when
+ * it elapses, the output was work rather than a repaint and the agent gets its
+ * claim on the body — subject to the playback deferral, which is armed here
+ * against the playback running at that moment rather than at the transition
+ * (the two questions are independent, and this is the order they are asked in).
+ *
+ * A window already running is the window this spell gets: re-arming on every
+ * further busy event would push the handover back by one window per byte the
+ * agent writes, which for a working agent is a wave that never appears at all.
+ */
+function openDebounceWindow(sessionId: string, entry: Entry): void {
+  if (entry.debounce !== null) return;
+  entry.debounce = setTimeout(() => {
+    // The entry may have been dropped, and `drop` clears this timer — but a
+    // timer that has already been handed to the queue cannot be unscheduled in
+    // every runtime, so the fired callback re-reads rather than trusting the
+    // closure.
+    const live = entries.get(sessionId);
+    if (!live || live.debounce === null) return;
+    live.debounce = null;
+    if (live.activity !== "busy") return;
+    live.agentArmed = true;
+    live.deferred = live.speaking;
+    publish(sessionId);
+  }, answerWaveDebounceMs());
+}
+
 function onActivity(sessionId: string, state: ActivityState): void {
   const entry = entries.get(sessionId);
   // The transition, not the reading: a server re-broadcast of the state a
@@ -252,10 +356,16 @@ function onActivity(sessionId: string, state: ActivityState): void {
   if (!entry || state === entry.activity) return;
   entry.activity = state;
   if (state === "busy") {
-    // Mid-sentence: hold the text until the sentence is over. Silent: take the
-    // body now.
-    entry.deferred = entry.speaking;
+    // Output happened; whether it is WORK is what the window is for. Nothing
+    // is handed over here and the deferral is not armed here either — both
+    // wait for the window to elapse.
+    openDebounceWindow(sessionId, entry);
   } else {
+    // Whatever the output was, it is over: a window still pending must not
+    // fire behind a session that has already stopped, and a claim already
+    // granted ends with the activity that earned it.
+    cancelDebounce(entry);
+    entry.agentArmed = false;
     // Nothing left to defer to — and nothing left to hold the answer against
     // either: the hold is a press made against work in progress, and work that
     // is no longer in progress must not leave the pane pinned to an old
@@ -282,6 +392,8 @@ function ensureEntry(sessionId: string): Entry {
     send: null,
     markOnly: false,
     activity: getActivityState(sessionId),
+    agentArmed: false,
+    debounce: null,
     speaking: false,
     deferred: false,
     held: false,
@@ -303,6 +415,10 @@ function ensureEntry(sessionId: string): Entry {
 function drop(sessionId: string): void {
   const entry = entries.get(sessionId);
   if (!entry) return;
+  // Before the entry leaves the map: a window left running would fire against
+  // a session that no longer exists, and a session recreated under the same id
+  // would inherit a claim earned by the dead one.
+  cancelDebounce(entry);
   entry.unsubscribe();
   entries.delete(sessionId);
 }
@@ -314,10 +430,18 @@ function drop(sessionId: string): void {
  */
 export function watchSessionActivity(sessionId: string): void {
   if (entries.has(sessionId)) return;
-  ensureEntry(sessionId);
-  // A session that is ALREADY busy when its watch opens has the body from the
-  // first read, so a cell attaching to a working agent is not told otherwise
-  // until the next broadcast.
+  const entry = ensureEntry(sessionId);
+  // A session that is ALREADY busy when its watch opens gets a WINDOW, not the
+  // claim it used to get outright from the first read. "Busy when we looked"
+  // is the very reading the debounce exists to distrust — a reattach repaint
+  // is exactly that — and a session genuinely working will still be working
+  // one window later.
+  //
+  // Here rather than in `ensureEntry`, because this is the session-creation
+  // path: `terminalInstances` calls it once per session, whereas an entry
+  // conjured by `beginWaiting` or `holdAnswer` is a user gesture, and a
+  // gesture must not open a window it is about to overtake anyway.
+  if (entry.activity === "busy") openDebounceWindow(sessionId, entry);
   notify();
 }
 
@@ -333,6 +457,12 @@ export function beginWaiting(sessionId: string, sentOn: string | null): void {
   // The body has handed over by the user's own decision, so there is nothing
   // left for the activity trigger to be patient about.
   entry.deferred = false;
+  // ...nor anything left for it to be suspicious about. A send is never
+  // debounced — three seconds before the panel acknowledges your own keypress
+  // reads as broken — and a window it overtakes is SPENT rather than left to
+  // fire behind it: the user's decision already answered the question that
+  // window was asking.
+  cancelDebounce(entry);
   // ...and nothing left for a standing hold to protect either: sending IS the
   // user moving on from the answer they had stepped back to read. Leaving the
   // hold up here would let `derive` answer the send with MARK_ONLY — the old
@@ -441,6 +571,16 @@ export function noteNewestAnswer(sessionId: string, newestId: string | null): bo
   // newest id — `holdAnswer` may well be what created it — so the first thing
   // the surface says is where it stands, not an answer landing.
   if (told === null || newestId === told.id) return false;
+  // An answer landed inside a pending debounce window. The wave that window
+  // was deciding about is no longer wanted at all — the answer is the better
+  // outcome, and a wave raised now would cover the thing it was supposed to
+  // announce — so that busy spell is spent. Only a LATER transition opens
+  // another window.
+  //
+  // The arrival is read here rather than in `noteUtterance` on purpose: the
+  // cursor moves for a transport press too, and this is the only push that
+  // means something LANDED.
+  cancelDebounce(entry);
   if (!entry.held) return false;
   entry.held = false;
   publish(sessionId);
