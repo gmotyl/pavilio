@@ -109,18 +109,23 @@ describe("MockupFrame", () => {
     expect(frame().style.width).toBe("100%");
   });
 
-  it("centers the frame once a device width leaves it narrower than the pane", () => {
+  it("wraps the frame in a row that centers it horizontally", () => {
     render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
 
+    // The wrapper's classes are static — the selected width lives in the
+    // iframe's `style` — so this holds at every width. The click is here to
+    // show that: switching to a device width must not cost the centering.
     fireEvent.click(screen.getByTestId("mockup-viewer-width-phone"));
 
     // jsdom lays nothing out, so the centering can only be pinned where it is
-    // expressed: the flex row that wraps the frame. Both halves matter — a
-    // `justify-center` on a non-flex parent centers nothing.
+    // expressed: the flex row that wraps the frame. All three halves matter — a
+    // `justify-center` on a non-flex parent centers nothing, and on a
+    // `flex-col` row it centers the frame vertically instead.
     const row = frame().parentElement as HTMLElement;
     const classes = Array.from(row.classList);
     expect(classes).toContain("flex");
     expect(classes).toContain("justify-center");
+    expect(classes).not.toContain("flex-col");
   });
 
   it("keeps the same iframe element across a width change", () => {

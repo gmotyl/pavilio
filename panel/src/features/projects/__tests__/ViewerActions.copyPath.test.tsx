@@ -41,6 +41,17 @@ describe("ViewerActions copy-path override", () => {
     expect(writeText).toHaveBeenCalledWith(OVERRIDE);
   });
 
+  it("copies an explicit empty override rather than falling back", async () => {
+    // `copyPathText ?? absolutePath`: only `undefined` falls back. With `||`
+    // an explicit "" would silently become the absolute path, and a blank
+    // override is a caller bug worth seeing rather than papering over.
+    render(<ViewerActions absolutePath={ABSOLUTE} copyPathText="" />);
+    fireEvent.click(screen.getByTestId("file-viewer-copy-path"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText).toHaveBeenCalledWith("");
+  });
+
   it("opens VS Code with the absolute path even when the copied path is overridden", async () => {
     render(<ViewerActions absolutePath={ABSOLUTE} copyPathText={OVERRIDE} />);
     fireEvent.click(screen.getByTestId("file-viewer-vscode"));

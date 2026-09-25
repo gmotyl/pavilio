@@ -13,7 +13,7 @@ const WIDTHS = [
   { id: "phone", label: "Phone", width: "390px" },
 ] as const;
 
-type WidthId = (typeof WIDTHS)[number]["id"];
+type Width = (typeof WIDTHS)[number];
 
 export interface MockupFrameProps {
   /** Index-relative path, e.g. "pavilio/mockups/x.html". Drives the iframe src. */
@@ -24,8 +24,11 @@ export interface MockupFrameProps {
 
 /**
  * The raw-file URL for a mockup. Each segment is encoded on its own so spaces
- * and `#` survive, while the separators stay literal slashes — the server's
- * `/raw/*path` wildcard matches on those, and encoding them breaks the route.
+ * and `#` survive, while the separators stay literal slashes. Express 5's splat
+ * decodes the captured path, so an encoded `%2F` would most likely still
+ * resolve — but it is fragile: a `#` ahead of it is stripped as a fragment
+ * before the request leaves the browser, and proxies normalise encoded slashes
+ * inconsistently. A literal slash is what every hop agrees on.
  */
 const rawSrc = (filePath: string) =>
   `/api/files/raw/${filePath.split("/").map(encodeURIComponent).join("/")}`;
@@ -39,8 +42,9 @@ export function MockupFrame({
   absolutePath,
   testIdPrefix = "mockup-viewer",
 }: MockupFrameProps) {
-  const [widthId, setWidthId] = useState<WidthId>("full");
-  const width = WIDTHS.find((w) => w.id === widthId)?.width ?? "100%";
+  // The selected entry itself, not its id: the width then needs no lookup and
+  // so no unreachable "not found" fallback.
+  const [selected, setSelected] = useState<Width>(WIDTHS[0]);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -59,15 +63,17 @@ export function MockupFrame({
           <button
             key={w.id}
             data-testid={`${testIdPrefix}-width-${w.id}`}
-            onClick={() => setWidthId(w.id)}
+            onClick={() => setSelected(w)}
+            // Colour alone does not reach assistive tech; this does.
+            aria-pressed={selected.id === w.id}
             className={BUTTON_CLASS}
             style={{
               color:
-                widthId === w.id
+                selected.id === w.id
                   ? "var(--text-primary)"
                   : "var(--text-secondary)",
               background:
-                widthId === w.id ? "var(--bg-hover)" : "transparent",
+                selected.id === w.id ? "var(--bg-hover)" : "transparent",
             }}
           >
             {w.label}
@@ -95,7 +101,7 @@ export function MockupFrame({
           sandbox="allow-scripts"
           className="rounded-lg"
           style={{
-            width,
+            width: selected.width,
             height: "100%",
             border: "1px solid var(--border-subtle)",
             background: "var(--bg-surface)",
