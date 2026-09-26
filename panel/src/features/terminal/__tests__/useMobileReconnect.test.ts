@@ -63,6 +63,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => false,
+        hasExited: () => false,
       }),
     );
     becomeVisible();
@@ -83,6 +84,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => true,
+        hasExited: () => false,
       }),
     );
     becomeVisible();
@@ -106,6 +108,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => false,
+        hasExited: () => false,
       }),
     );
     becomeVisible();
@@ -114,6 +117,49 @@ describe("useMobileReconnect", () => {
     expect(reportAutoReturnReopen).toHaveBeenCalledWith(ws);
     // Nothing goes out over a dead socket — send() on CLOSED throws.
     expect(sent).toEqual([]);
+  });
+
+  // A cleanly exited shell presents the same CLOSED socket as a frozen one,
+  // but nothing is broken: `[Process exited]` is on screen and the server has
+  // already dropped the session. Reopening it buys a socket the server closes
+  // again — and an `auto-return` row for a return that repaired nothing, in
+  // the log this rule will be reviewed against.
+  it("leaves a cleanly exited session alone on return with a CLOSED socket", () => {
+    const { ws, sent } = fakeWs(3); // CLOSED
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+        isViewportBlank: () => false,
+        hasExited: () => true,
+      }),
+    );
+    becomeVisible();
+    expect(reopen).not.toHaveBeenCalled();
+    expect(reportAutoReturnReopen).not.toHaveBeenCalled();
+    expect(reportAutoBlankReopen).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
+  });
+
+  // The stranded case reads the same way: no socket is not evidence of a fault
+  // when the process is the thing that ended.
+  it("leaves a cleanly exited session alone on return when there is no socket", () => {
+    const reopen = vi.fn();
+    renderHook(() =>
+      useMobileReconnect({
+        ws: null,
+        getDims: () => ({ cols: 100, rows: 30 }),
+        reopen,
+        isViewportBlank: () => false,
+        hasExited: () => true,
+      }),
+    );
+    becomeVisible();
+    expect(reopen).not.toHaveBeenCalled();
+    expect(reportAutoReturnReopen).not.toHaveBeenCalled();
+    expect(reportAutoBlankReopen).not.toHaveBeenCalled();
   });
 
   // The row must name the reason a reader would recognise. With a closed
@@ -128,6 +174,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => true,
+        hasExited: () => false,
       }),
     );
     becomeVisible();
@@ -147,6 +194,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => true,
+        hasExited: () => false,
       }),
     );
     becomeVisible();
@@ -164,6 +212,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => false,
+        hasExited: () => false,
       }),
     );
     becomeVisible();
@@ -196,6 +245,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => false,
+        hasExited: () => false,
       }),
     );
     becomeVisible();
@@ -216,6 +266,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => false,
+        hasExited: () => false,
       }),
     );
     // No "message" events pushed → lastMessageAt stays at init.
@@ -235,6 +286,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => true,
+        hasExited: () => false,
       }),
     );
     act(() => {
@@ -252,6 +304,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => false,
+        hasExited: () => false,
       }),
     );
     act(() => {
@@ -274,6 +327,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => true,
+        hasExited: () => false,
       }),
     );
     becomeVisible();
@@ -296,6 +350,7 @@ describe("useMobileReconnect", () => {
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
         isViewportBlank: () => true,
+        hasExited: () => false,
       }),
     );
     act(() => {
@@ -319,6 +374,7 @@ describe("useMobileReconnect", () => {
         reopen: vi.fn(),
         // Content on screen: the nudge path and the silent watchdog path.
         isViewportBlank: () => false,
+        hasExited: () => false,
       }),
     );
     becomeVisible();

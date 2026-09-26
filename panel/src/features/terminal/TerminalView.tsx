@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   acquireTerminal,
   followBottomAcrossResize,
+  hasExited,
   releaseTerminal,
   type LiveTerminal,
 } from "./terminalInstances";
@@ -343,7 +344,21 @@ export function TerminalView({
     return inst ? viewportLooksBlank(inst.terminal) : false;
   }, []);
 
-  useMobileReconnect({ ws, getDims, reopen, isViewportBlank });
+  /**
+   * The pool's exit flag, reached the same way `isViewportBlank` is: the hook
+   * holds a ws, not a session id, so the cell answers "is this session's
+   * process over?" on its behalf. A cleanly exited shell has a CLOSED socket
+   * and is not broken — nothing to reconnect, see ADR 0017.
+   */
+  const sessionHasExited = useCallback(() => hasExited(sessionId), [sessionId]);
+
+  useMobileReconnect({
+    ws,
+    getDims,
+    reopen,
+    isViewportBlank,
+    hasExited: sessionHasExited,
+  });
 
   return (
     // A COLUMN: the speech row first, the terminal area under it — the
