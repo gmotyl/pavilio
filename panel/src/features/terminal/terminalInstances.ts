@@ -74,13 +74,16 @@ export type ConnectionState = "connected" | "disconnected" | "unattached";
  * - `auto-activate` — reconnected because the user focused the session.
  * - `disconnect` — an attached session's socket died on its own.
  * - `auto-blank` — a blank-gated path reopened the session unasked.
+ * - `auto-return` — the user returned to the application and found a socket
+ *   that was not OPEN, so it was reopened unasked (ADR 0017).
  */
 export type ReconnectTrigger =
   | "manual"
   | "manual-all"
   | "auto-activate"
   | "disconnect"
-  | "auto-blank";
+  | "auto-blank"
+  | "auto-return";
 
 type ConnectionListener = (state: ConnectionState) => void;
 
@@ -206,9 +209,9 @@ function logReconnectMetric(
 }
 
 /**
- * Record a reopen that a blank-gated path performed on its own, identified by
- * the socket the caller holds — `useMobileReconnect` is handed a ws, not a
- * session id, and the pool is the only thing that can map one to the other.
+ * Record a reopen nobody asked for, identified by the socket the caller holds
+ * — `useMobileReconnect` is handed a ws, not a session id, and the pool is
+ * the only thing that can map one to the other.
  *
  * Call it BEFORE the reopen, so the metric describes the state that prompted
  * the reopen rather than the fresh socket. A ws belonging to no pooled
@@ -216,18 +219,38 @@ function logReconnectMetric(
  *
  * That no-op is a real, accepted gap: a null ws, or one already superseded by
  * a later reopen, matches no instance, so the reopen it precedes goes
- * UNLOGGED. The log therefore under-counts auto-blank reopens — it never
+ * UNLOGGED. The log therefore under-counts unasked reopens — it never
  * mis-attributes one to the wrong session, which is the trade this identity
- * lookup buys. Read the auto-blank count as a floor, not a total.
+ * lookup buys. Read these counts as a floor, not a total.
  */
-export function reportAutoBlankReopen(ws: WebSocket | null): void {
+function reportUnaskedReopen(
+  ws: WebSocket | null,
+  trigger: ReconnectTrigger,
+): void {
   if (!ws) return;
   for (const inst of instances.values()) {
     if (inst.ws === ws) {
-      logReconnectMetric(inst, "auto-blank");
+      logReconnectMetric(inst, trigger);
       return;
     }
   }
+}
+
+/** A blank viewport reopened the session on its own. See reportUnaskedReopen. */
+export function reportAutoBlankReopen(ws: WebSocket | null): void {
+  reportUnaskedReopen(ws, "auto-blank");
+}
+
+/**
+ * A return to the application found a socket that was not OPEN and reopened
+ * it. Kept apart from `auto-blank` because the viewport is incidental here —
+ * the return is the trigger ADR 0017 will be reviewed against.
+ *
+ * A null ws is the stranded case with nothing to identify: the reopen happens
+ * regardless, and goes unlogged like any unmatched socket.
+ */
+export function reportAutoReturnReopen(ws: WebSocket | null): void {
+  reportUnaskedReopen(ws, "auto-return");
 }
 
 /**

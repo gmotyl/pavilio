@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react"
-import { reportAutoBlankReopen } from "./terminalInstances"
+import {
+  reportAutoBlankReopen,
+  reportAutoReturnReopen,
+} from "./terminalInstances"
 import { WATCHDOG_STALE_MS } from "./watchdogConfig"
 
 interface Options {
@@ -48,17 +51,27 @@ export function useMobileReconnect({
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return
-      // Anything we could do from here repaints the screen, so the blank check
-      // gates every path — including a dead socket. Refocusing with content on
-      // screen used to reopen unconditionally, scrolling away live output; a
-      // socket that died is now reported as connection state instead (see
-      // onConnectionChange in terminalInstances.ts) and repaired on demand.
+      // Returning to the application is consent, and a socket that is CLOSED
+      // (or absent) produces no output — there is nothing arriving for the
+      // reopen to scroll away, so the blank gate was never protecting this
+      // case. Ahead of the gate on purpose; see ADR 0017.
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        // Reported before the reopen so the record describes the socket that
+        // prompted it, and as `auto-return` rather than `auto-blank`: what is
+        // on screen is incidental here, the return is the trigger.
+        reportAutoReturnReopen(ws)
+        reopenRef.current()
+        return
+      }
+      // Everything still live enough to produce output keeps the old gate: a
+      // repaint over content is the unasked interruption ADR 0010 rejected.
       if (!isViewportBlankRef.current()) return
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        // Blank, and there is no live socket to nudge over — rebuild it.
+      if (ws.readyState !== WebSocket.OPEN) {
+        // Blank, and the socket is mid-handshake (or closing), so there is
+        // nothing to nudge over — rebuild it.
         // Reported before the reopen so the record describes the state that
-        // prompted it; this is one of only two paths that reconnect without
-        // the user asking, and an unreported one is invisible in the log.
+        // prompted it; every path that reconnects without the user asking is
+        // invisible in the log unless it says so.
         reportAutoBlankReopen(ws)
         reopenRef.current()
         return
