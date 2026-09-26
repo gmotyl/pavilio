@@ -45,12 +45,10 @@
  * line, forty pixels under the field. A third callout would name, in a box that
  * has to be dismissed, what is already named in a line that does not.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 export interface BootLegendProps {
   sessionId: string;
-  /** Called by every gesture that counts as the legend having done its job. */
-  onDismiss: () => void;
 }
 
 /** One callout, and the control its leader ends on. */
@@ -148,7 +146,7 @@ const CALLOUT_GUTTER = 16;
 export const BOTH_CALLOUTS_MIN_CELL =
   CALLOUT_INSET * 2 + CALLOUT_MAX_WIDTH * 2 + CALLOUT_GUTTER;
 
-export function BootLegend({ sessionId, onDismiss }: BootLegendProps) {
+export function BootLegend({ sessionId }: BootLegendProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const callouts = calloutsFor(sessionId);
   const [leaders, setLeaders] = useState<readonly Leader[]>(() =>
@@ -232,65 +230,6 @@ export function BootLegend({ sessionId, onDismiss }: BootLegendProps) {
       observer?.disconnect();
     };
   }, [measure]);
-
-  /**
-   * Every way out of the legend, in one listener pair.
-   *
-   * Escape, and a press on either control it names. Both are on the WINDOW in
-   * the CAPTURE phase rather than on the elements, and each half of that is
-   * load-bearing.
-   *
-   * On the window, not the elements: the controls are outside this component's
-   * subtree — that is the whole point of it being an overlay — so attaching to
-   * them would mean holding references that go stale the moment the row
-   * re-renders, which it does on the first answer, the very event the legend is
-   * waiting for.
-   *
-   * On the WINDOW and not `document`, which is where this started and where it
-   * did not work. `AnswerPane` already listens for Escape in the window's
-   * capture phase and calls `stopPropagation()` on it — deliberately, so the
-   * key never reaches the xterm's own textarea (see the long note there). The
-   * capture phase at the window runs BEFORE the at-target phase at `document`,
-   * so a `document` listener here was killed by that call and Escape silently
-   * did nothing. `stopPropagation` does not stop other listeners on the SAME
-   * node, so a window listener is reached whichever of the two registered
-   * first — which is exactly what `AnswerPane`'s note predicts ("only another
-   * listener on `window` itself would need `stopImmediatePropagation`").
-   *
-   * Capture also means the dismissal is recorded before the control's own
-   * handler runs and possibly unmounts something. It does not preventDefault or
-   * stop anything: pressing the eye must still open the pane. Dismissing is a
-   * side effect of the user having used the control, not a replacement for
-   * using it.
-   *
-   * `closest` rather than an identity test, because a click lands on the lucide
-   * `<svg>` inside the button as often as on the button itself.
-   *
-   * THE TRANSPORT ARM IS BELT-AND-BRACES, and knowingly so: all three transport
-   * controls are `disabled` until the cell's first answer, so while the legend
-   * is up there is no press to catch there. It is kept because the rule is "the
-   * controls this legend names", not "the controls that happen to be live", and
-   * a strip that enables under a legend still standing must dismiss it.
-   */
-  useEffect(() => {
-    const targets = calloutsFor(sessionId).map((callout) => callout.target);
-
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") onDismiss();
-    };
-    const onClick = (event: MouseEvent): void => {
-      const node = event.target as Element | null;
-      if (!node || typeof node.closest !== "function") return;
-      if (targets.some((testId) => node.closest(`[data-testid="${testId}"]`))) onDismiss();
-    };
-
-    window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("click", onClick, true);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("click", onClick, true);
-    };
-  }, [sessionId, onDismiss]);
 
   /**
    * Whether this cell can carry both boxes side by side.

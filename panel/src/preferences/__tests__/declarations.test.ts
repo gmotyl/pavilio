@@ -41,17 +41,11 @@ const PORTABLE = [
 
 /**
  * Values that name something the other machine does not have — most of them a
- * live session id, with three exceptions. `speech.answerComposer.height` and
+ * live session id, with one exception. `speech.answerComposer.height` and
  * `speech.answerPane.height` name no session at all; they are the speech
  * surface's two measurements, kept per browser because each is read against
  * THIS window's viewport — the composer's against the pane it is spent from,
  * the pane's against the terminal area it covers.
- *
- * `terminal.bootLegend.seen` is the third, and is neither a session nor a
- * measurement: it records what a PERSON has been taught. Machine-local because
- * a browser where nobody has seen the boot legend must still show it, and a
- * value carried in the committed file would suppress it there — which is the
- * one failure that makes a teach-once overlay worthless.
  *
  * Both are `project`-scoped as well as machine-local, and the two axes are
  * independent: the scope says how many of these a browser keeps, the
@@ -67,7 +61,6 @@ const MACHINE_LOCAL = [
   "speech.answerComposer.height",
   "speech.answerPane.height",
   "speech.armedCell",
-  "terminal.bootLegend.seen",
   "terminal.focus",
   "terminal.grid",
   "terminal.order",
@@ -131,7 +124,6 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["speech.answerPane.height", 4000, "project"],
   ["speech.armedCell", null, "global"],
   ["speech.voice", "en-US-AndrewMultilingualNeural", "global"],
-  ["terminal.bootLegend.seen", false, "global"],
   ["terminal.drawer.open", false, "global"],
   ["terminal.drawer.side", "left", "global"],
   ["terminal.drawer.width", 480, "global"],

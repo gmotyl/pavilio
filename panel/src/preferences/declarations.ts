@@ -530,32 +530,6 @@ export const preferences = {
     codec: json<string | null>(),
     portable: false,
   }),
-  /**
-   * Whether this browser has been shown the boot legend — the two callouts a
-   * cell raises over the eye and the transport the first time a launcher press
-   * puts it into the waiting state.
-   *
-   * MACHINE LOCAL, and the one declaration on that tier that names neither a
-   * session nor a measurement. It records what a PERSON has been taught, and a
-   * person is taught once per browser they sit in front of: carrying it into
-   * the committed workspace file would suppress the legend on a machine where
-   * nobody has ever seen it, which is the one failure that makes the legend
-   * worthless. The opposite cost — a second browser teaching the same person
-   * twice — is a single dismissable overlay, and is the cheaper of the two.
-   *
-   * Declared rather than written raw because `no-direct-storage.test.ts` fences
-   * every tree under `src` off from browser storage, and because the registry
-   * is what owns the try/catch: a page with storage disabled reads the declared
-   * `false` and shows the legend again, rather than throwing inside a cell.
-   */
-  bootLegendSeen: definePreference({
-    key: "terminal.bootLegend.seen", // was: nothing — the legend is new
-    scope: "global",
-    default: false,
-    codec: bool,
-    portable: false,
-  }),
-
   // ── Navigation memory ────────────────────────────────────────────────────
   // Machine local, and narrower still: `sessionStorage`, not `localStorage`.
   // `features/shell/lastPath.ts` uses the session store on purpose, and

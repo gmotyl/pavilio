@@ -12,6 +12,30 @@
  * name what is already named, and one of the tests below is there to keep it
  * that way.
  *
+ * ## The legend is now a DERIVATION, not a flag
+ *
+ * `TerminalView` no longer arms or disarms anything: the legend is rendered
+ * whenever `answerOpen && !waiting && answer === null && speechBarVisible` —
+ * see the long note on `legendShown` there. That has one consequence this file
+ * has to get right that the old, flag-driven version did not: A LAUNCHER PRESS
+ * DOES NOT, BY ITSELF, SHOW THE LEGEND.
+ *
+ * `noteAgentStarting` (called from `LauncherPills`' `onDelivered`, in the same
+ * synchronous callback that opens the pane) hands the body to the wave AT
+ * ONCE — `answerWaiting.ts`'s own words — so `waiting` is already `true` by
+ * the time the pane's `open` flips `true` too; there is no commit in between
+ * where the pane is open, empty, and not waiting. The legend for a
+ * launcher-pressed cell therefore appears only later, once that wait ends with
+ * nothing having arrived (a silent boot) — a genuinely different moment from
+ * the press itself, and its own test below.
+ *
+ * The ACTIVITY trigger is different: a busy transition opens a debounce window
+ * before it earns a claim on the body (`answerWaveDebounceMs`), and reading
+ * `waiting` — never `activity` — is what lets the legend stand during that
+ * window on a cell whose pane is already open and empty by some other means
+ * (the eye). That is a real, observable gap, and it is what
+ * "the waiting state replaces the legend" drives.
+ *
  * ## Why it is driven through the whole cell
  *
  * The legend is a claim about the CELL's layering, not about a component: it
@@ -20,16 +44,8 @@
  * positioned inside the terminal-area wrapper — cannot draw outside its own
  * box. A test of the component alone would assert that two divs exist; what
  * has to hold is that the legend is mounted where its leaders can arrive, on a
- * cell driven by a real launcher press through a real socket.
- *
- * ## Why the press is the only trigger
- *
- * The waiting state has three, and only one of them is a user asking for an
- * agent they have never seen work. A composer send comes from a pane the user
- * already opened and typed into; a busy transition is the agent's own doing and
- * arrives on cells the user has been driving for hours. Both are pinned below
- * as things that show NOTHING, because a legend on either would be teaching a
- * surface already in use.
+ * cell driven by a real launcher press or a real eye press through a real
+ * socket.
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -39,13 +55,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { prepare } from "../../speech/prepare";
+import { ALL_PREFERENCES, preferences } from "../../../preferences/declarations";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 
 /**
  * The terminal instance stand-in. `send` reports delivery the way the real one
  * does — `true` only when the frame reached an OPEN socket — because the
- * legend follows a DELIVERED press and nothing else.
+ * legend's own launcher-press test follows a DELIVERED press and nothing else.
  */
 const term = vi.hoisted(() => ({ writes: [] as string[], accept: true }));
 
@@ -112,13 +129,9 @@ vi.mock("../../speech/synth", async (importOriginal) => ({
 // Imported after the mocks so they pick them up.
 const { TerminalView } = await import("../TerminalView");
 const { forgetAnswerPane } = await import("../answerPaneState");
-const { __resetAnswerWaitingForTests, getAnswerWaiting, noteAgentStarting } = await import(
-  "../answerWaiting"
-);
+const { __resetAnswerWaitingForTests, getAnswerWaiting } = await import("../answerWaiting");
 const { __resetPtySubmitForTests } = await import("../ptySubmit");
 const { _applyEventForTests, _resetForTests } = await import("../useTerminalActivityChannel");
-const { hasSeenBootLegend } = await import("../bootLegendSeen");
-const { noteLauncherUsed } = await import("../launcherUse");
 
 const SESSION = "cell-a";
 const OTHER = "cell-b";
@@ -193,11 +206,13 @@ const eye = (sessionId = SESSION): HTMLElement =>
 const row = (sessionId = SESSION): HTMLElement => screen.getByTestId(`speech-bar-${sessionId}`);
 const launcher = (sessionId = SESSION): HTMLElement =>
   screen.getByTestId(`speech-bar-launch-${sessionId}-0`);
+const composer = (sessionId = SESSION): HTMLTextAreaElement =>
+  screen.getByTestId(`answer-pane-composer-${sessionId}`) as HTMLTextAreaElement;
 
 /**
- * Lets the submit finish. The body is written inside the click, but the return
- * that runs it is a write of its own a gap later (`ptySubmit`), and a timer
- * left pending would fire into the next test's socket.
+ * Lets a launcher submit finish. The body is written inside the click, but the
+ * return that runs it is a write of its own a gap later (`ptySubmit`), and a
+ * timer left pending would fire into the next test's socket.
  */
 async function settleSubmit(): Promise<void> {
   await act(async () => {
@@ -271,8 +286,8 @@ function stylesheetWithReducedMotionOn(): string {
  * A cell laid out, for a component that measures.
  *
  * jsdom lays nothing out and every rect is zero, so the legend's own
- * measurement — which is how it finds its controls AND, now, how wide its cell
- * is — has nothing to read. This hands it a plausible cell: the overlay is the
+ * measurement — which is how it finds its controls AND how wide its cell is —
+ * has nothing to read. This hands it a plausible cell: the overlay is the
  * cell, `inset: 0`, and the two named controls sit in the row at its top.
  *
  * `top: 6` and `height: 44` are the row's own numbers: `.speech-bar-row` is
@@ -343,12 +358,18 @@ function leaderEnd(key: "transport" | "eye"): { x: number; y: number } {
 
 const px = (value: string): number => Number.parseFloat(value);
 
-/** Everything the legend puts on screen, so a boot can be driven in one line. */
-async function boot(cellWidth?: number): Promise<void> {
+/**
+ * The pane opened with the eye, on a cell that has never spoken and has no
+ * wait running — the plain "empty pane" case the derivation reads directly,
+ * with none of the launcher-press timing this file's header explains.
+ *
+ * `cellWidth`, when given, stubs the layout BEFORE the mount so the legend's
+ * own `useLayoutEffect` measures against it on the very first pass.
+ */
+function openLegend(cellWidth?: number, sessionId = SESSION): void {
   if (cellWidth !== undefined) stubLayout(cellWidth);
-  render(cell(makeSpeech(SESSION)));
-  fireEvent.click(launcher());
-  await settleSubmit();
+  render(cell(makeSpeech(sessionId), sessionId));
+  fireEvent.click(eye(sessionId));
 }
 
 beforeEach(() => {
@@ -374,29 +395,202 @@ afterEach(() => {
 });
 
 describe("the boot legend", () => {
-  it("a first delivered launcher press shows two callouts", async () => {
+  // -------------------------------------------------------------------------
+  // The trigger: an open, empty, not-waiting pane — however it got that way.
+  // -------------------------------------------------------------------------
+
+  it("a launcher press shows the legend until the wave takes the body", async () => {
     render(cell(makeSpeech(SESSION)));
     expect(legend()).toBeNull();
 
     fireEvent.click(launcher());
     await settleSubmit();
 
-    // The press landed and took the body, which is the state the legend rides.
+    // The press landed and opened the pane — but `noteAgentStarting` hands the
+    // body to the wave in the SAME callback that opens it (see the header), so
+    // there is no commit in between where the pane is open, empty and not
+    // waiting. The wave already has the body, and the legend defers to it.
     expect(term.writes).toEqual(["claude", "\r"]);
+    expect(pane()).not.toBeNull();
     expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
-
-    expect(legend()).not.toBeNull();
-    // TWO. Design A of the mockup drew three; the composer's own hint line is
-    // why the third one is not here.
-    expect(callouts()).toHaveLength(2);
-    // ...and the browser now carries the one fact this costs.
-    expect(hasSeenBootLegend()).toBe(true);
+    expect(legend()).toBeNull();
   });
 
-  it("the legend mounts outside the answer pane", async () => {
+  it("a silent boot leaves the pane open with the legend", async () => {
     render(cell(makeSpeech(SESSION)));
     fireEvent.click(launcher());
     await settleSubmit();
+    expect(legend()).toBeNull(); // the wave has the body, per the test above
+
+    // The launched agent boots, works, and finishes without ever speaking —
+    // the exit path Task 1 stopped closing the pane on.
+    activity("busy");
+    activity("idle");
+
+    await waitFor(() =>
+      expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false }),
+    );
+    // The pane stays open (Task 1), and its now-empty body falls through to
+    // exactly what the derivation reads as "nothing else to show".
+    expect(pane()).not.toBeNull();
+    expect(legend()).not.toBeNull();
+    expect(callouts()).toHaveLength(2);
+  });
+
+  it("the eye on an unspoken cell shows the legend", () => {
+    render(cell(makeSpeech(SESSION)));
+    expect(legend()).toBeNull();
+
+    // No press, no send, no wait — just the control that opens the pane.
+    fireEvent.click(eye());
+
+    expect(pane()).not.toBeNull();
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
+    expect(legend()).not.toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // The two things that replace it, and the two that close it with the pane.
+  // -------------------------------------------------------------------------
+
+  it("an arriving answer replaces the legend", async () => {
+    const speech = makeSpeech(SESSION);
+    const view = render(cell(speech));
+    fireEvent.click(eye());
+    expect(legend()).not.toBeNull();
+
+    // The answer the cell was opened for. There is something behind the
+    // (previously empty) body now, and a legend over it would be covering the
+    // thing the user opened the pane to see.
+    speech.arrive();
+    view.rerender(cell(speech));
+
+    await waitFor(() => expect(legend()).toBeNull());
+    expect(pane()).not.toBeNull();
+  });
+
+  it("the waiting state replaces the legend", async () => {
+    // The genuine window `design.md`'s "The waiting hook still matters" is
+    // about: unlike a launcher press or a send, a busy ACTIVITY transition
+    // opens a debounce window before it earns a claim on the body, so on a
+    // cell already open and empty by the eye there is a real gap where the
+    // session is busy but `waiting` has not flipped yet — and the legend
+    // stands through exactly that gap.
+    globals.__PAVILIO_TUNING__ = { answerWaveDebounceMs: 20 };
+    render(cell(makeSpeech(SESSION)));
+    fireEvent.click(eye());
+    expect(legend()).not.toBeNull();
+
+    activity("busy");
+    // Still inside the window: the activity changed, `waiting` has not.
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
+    expect(legend()).not.toBeNull();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
+    expect(legend()).toBeNull();
+    expect(pane()).not.toBeNull();
+  });
+
+  it("Escape closes the pane and the legend with it", async () => {
+    render(cell(makeSpeech(SESSION)));
+    fireEvent.click(eye());
+    expect(legend()).not.toBeNull();
+
+    // `AnswerPane` closes on Escape in the window's own capture-phase
+    // listener; the legend carries none of its own any more (see `BootLegend`)
+    // — a closed pane simply fails `answerOpen` and the derivation follows.
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(pane()).toBeNull());
+    expect(legend()).toBeNull();
+  });
+
+  it("hiding the bar closes the pane and the legend; showing it again reopens neither", () => {
+    const speech = makeSpeech(SESSION);
+    const view = render(cell(speech));
+    fireEvent.click(eye());
+    expect(legend()).not.toBeNull();
+    expect(pane()).not.toBeNull();
+
+    // The bar goes. `TerminalView` closes the pane rather than merely
+    // covering it — a pane without its bar has no eye to close it.
+    view.rerender(cell(speech, SESSION, false));
+    expect(pane()).toBeNull();
+    expect(legend()).toBeNull();
+
+    // ...and bringing the bar back does not reopen either. Nothing here
+    // remembers that the pane was open a moment ago, and there is no
+    // once-per-browser flag left to bring the legend back on its own account.
+    view.rerender(cell(speech, SESSION, true));
+    expect(pane()).toBeNull();
+    expect(legend()).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // No memory: not once-per-browser, not once-per-cell.
+  // -------------------------------------------------------------------------
+
+  it("the legend is shown again on a second cell after it has been shown once", () => {
+    const first = render(cell(makeSpeech(SESSION)));
+    fireEvent.click(eye());
+    expect(legend()).not.toBeNull();
+    first.unmount();
+
+    // Another cell, another agent, the same browser. There is no per-browser
+    // "already taught" preference left to consult — see the acceptance test
+    // below — so a second cell shows the legend exactly as the first one did.
+    render(cell(makeSpeech(OTHER), OTHER));
+    fireEvent.click(eye(OTHER));
+
+    expect(legend(OTHER)).not.toBeNull();
+
+    // And a THIRD mount of the very same session — a fresh store entry, as a
+    // reloaded tab would see, so this isolates "no boot-legend-seen memory"
+    // from `answerPaneState`'s own (unrelated, and deliberate) persistence
+    // across a remount — shows it again too. "Shown once" is not a fact any
+    // module here tracks any more.
+    forgetAnswerPane(SESSION);
+    render(cell(makeSpeech(SESSION), SESSION));
+    fireEvent.click(eye());
+    expect(legend()).not.toBeNull();
+  });
+
+  it("no boot-legend-seen preference is declared", () => {
+    expect(ALL_PREFERENCES.some((def) => def.key === "terminal.bootLegend.seen")).toBe(false);
+    expect(Object.keys(preferences)).not.toContain("bootLegendSeen");
+  });
+
+  // -------------------------------------------------------------------------
+  // The composer is not just visible under the legend — it works.
+  // -------------------------------------------------------------------------
+
+  it("the composer under the legend takes focus and text", () => {
+    render(cell(makeSpeech(SESSION)));
+    fireEvent.click(eye());
+    expect(legend()).not.toBeNull();
+
+    const field = composer();
+    field.focus();
+    expect(document.activeElement).toBe(field);
+
+    fireEvent.change(field, { target: { value: "still there?" } });
+    expect(field.value).toBe("still there?");
+    // Typing into the composer is not itself a gesture the derivation reads —
+    // no send has happened yet, so the legend is exactly where it was.
+    expect(legend()).not.toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Everything else about `BootLegend` — untouched, and still worth holding.
+  // -------------------------------------------------------------------------
+
+  it("the legend mounts outside the answer pane", () => {
+    render(cell(makeSpeech(SESSION)));
+    fireEvent.click(eye());
 
     const up = legend();
     expect(up).not.toBeNull();
@@ -420,14 +614,12 @@ describe("the boot legend", () => {
     expect(up!.contains(eye())).toBe(false);
   });
 
-  it("each leader ends on the control it names", async () => {
+  it("each leader ends on the control it names", () => {
     render(cell(makeSpeech(SESSION)));
-    fireEvent.click(launcher());
-    await settleSubmit();
+    fireEvent.click(eye());
 
-    // The transport strip and the eye are both on the row from mount now, so
-    // each leader has a real element to terminate on rather than a place a
-    // control will later appear.
+    // The transport strip and the eye are both on the row from mount, so each
+    // leader has a real element to terminate on.
     const named = [`speech-bar-playpause-${SESSION}`, `speech-bar-eye-${SESSION}`];
 
     for (const testId of named) {
@@ -450,10 +642,9 @@ describe("the boot legend", () => {
     );
   });
 
-  it("no callout names the composer, Enter or Esc", async () => {
+  it("no callout names the composer, Enter or Esc", () => {
     render(cell(makeSpeech(SESSION)));
-    fireEvent.click(launcher());
-    await settleSubmit();
+    fireEvent.click(eye());
 
     const text = legend()!.textContent ?? "";
     expect(text).not.toMatch(/\bcomposer\b/i);
@@ -464,252 +655,22 @@ describe("the boot legend", () => {
     expect(targets.some((t) => t.includes("composer"))).toBe(false);
   });
 
-  it("a second boot in the same browser shows nothing", async () => {
-    const first = render(cell(makeSpeech(SESSION)));
-    fireEvent.click(launcher());
-    await settleSubmit();
-    expect(legend()).not.toBeNull();
-    first.unmount();
-
-    // Another cell, another agent, the same browser. The fact is per-browser,
-    // not per-cell: the user has been taught, and teaching them again is noise.
-    render(cell(makeSpeech(OTHER), OTHER));
-    fireEvent.click(launcher(OTHER));
-    await settleSubmit();
-
-    expect(getAnswerWaiting(OTHER)).toEqual({ waiting: true, pending: false });
-    expect(legend(OTHER)).toBeNull();
-  });
-
-  it("a composer send shows no legend", async () => {
+  it("the transport it names cannot be pressed under it, and is named anyway", () => {
     render(cell(makeSpeech(SESSION)));
-    // The eye is live from mount now, so the pane opens without a press.
     fireEvent.click(eye());
-    const field = screen.getByTestId(`answer-pane-composer-${SESSION}`);
-    fireEvent.change(field, { target: { value: "yes, both scopes" } });
-    fireEvent.keyDown(field, { key: "Enter" });
-    await settleSubmit();
-
-    // The wait is real — and it is a SEND's, which carries the pending mark.
-    await waitFor(() => expect(getAnswerWaiting(SESSION)).toEqual({
-      waiting: true,
-      pending: true,
-    }));
-    // A user who typed into the pane has found the pane. Nothing to teach.
-    expect(legend()).toBeNull();
-    expect(hasSeenBootLegend()).toBe(false);
-  });
-
-  it("a busy transition shows no legend", async () => {
-    globals.__PAVILIO_TUNING__ = { answerWaveDebounceMs: 20 };
-    render(cell(makeSpeech(SESSION)));
-
-    activity("busy");
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
-    });
-
-    // The agent's own trigger, past its debounce: the body IS handed over...
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
-    // ...and it yields the very same snapshot a launcher press does, which is
-    // exactly why the legend cannot key off the snapshot alone.
-    expect(legend()).toBeNull();
-    expect(hasSeenBootLegend()).toBe(false);
-  });
-
-  /**
-   * DEFENDS `if (pending) return;` in the arming effect — the clause that
-   * keeps a send's wait from being taught over.
-   *
-   * `a composer send shows no legend` above does NOT defend it. That test
-   * never presses a pill, so `launcherUsed` is false and the effect leaves at
-   * the FIRST guard; the `pending` clause is never reached and deleting it
-   * changes nothing there. The only state that reaches it is the one below —
-   * a launcher edge arriving while a draft's reply is still outstanding —
-   * which the suite had no test for.
-   */
-  it("a launcher press made while a send is outstanding shows no legend", async () => {
-    render(cell(makeSpeech(SESSION)));
-
-    // The draft goes first: the pane is open, typed into, and its reply is
-    // expected. That is the pane the legend would be teaching over.
-    fireEvent.click(eye());
-    const field = screen.getByTestId(`answer-pane-composer-${SESSION}`);
-    fireEvent.change(field, { target: { value: "yes, both scopes" } });
-    fireEvent.keyDown(field, { key: "Enter" });
-    await settleSubmit();
-    await waitFor(() =>
-      expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: true }),
-    );
-
-    // ...and NOW a pill is pressed. The cell is still `empty`, so the pills
-    // are still on the row and the press lands and is delivered — a rising
-    // edge, on a live wait, with the send's mark still up.
-    fireEvent.click(launcher());
-    await settleSubmit();
-
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: true });
-    // The press belongs to the send, which has a pane the user opened and
-    // typed into. Nothing to teach, and the browser's one shot is not spent.
-    expect(legend()).toBeNull();
-    expect(hasSeenBootLegend()).toBe(false);
-  });
-
-  /**
-   * DEFENDS `if (lastLauncherUsed.current) return;` — the rising-edge test the
-   * long comment in `TerminalView` calls "load-bearing rather than tidy".
-   *
-   * `a busy transition shows no legend` above does NOT defend it: that cell
-   * has never launched, so `!launcherUsed` turns the effect back one guard
-   * earlier and the edge test is never reached. This is the case the comment
-   * actually argues about — a cell whose flag is ALREADY up (it launched, and
-   * a maximize or a preset remounted the view, which seeds the ref from the
-   * current value) meeting a busy spell of the agent's own making later on.
-   * A LEVEL test would arm there; only the edge test refuses.
-   *
-   * And the refusal must not come from `bootLegendSeen`: this browser has
-   * never been shown the legend, which is exactly the first-meeting case where
-   * conflating "which event teaches" with "how often" shows it on the wrong
-   * trigger. So the seen flag is asserted still false, before and after.
-   */
-  it("a busy transition on a cell that already launched shows no legend", async () => {
-    globals.__PAVILIO_TUNING__ = { answerWaveDebounceMs: 20 };
-    // The earlier press, made before this view existed — the flag outlives the
-    // component on purpose (`launcherUse`), so a remounted cell mounts with it
-    // already true and `lastLauncherUsed` seeded from it.
-    noteLauncherUsed(SESSION);
-    render(cell(makeSpeech(SESSION)));
-    expect(legend()).toBeNull();
-    expect(hasSeenBootLegend()).toBe(false);
-
-    // An hour later the agent goes to work on its own account, past the
-    // debounce. Same snapshot a launcher press yields, same flag still true.
-    activity("busy");
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
-    });
-
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
-    expect(legend()).toBeNull();
-    expect(hasSeenBootLegend()).toBe(false);
-  });
-
-  it("an arriving utterance dismisses it", async () => {
-    const speech = makeSpeech(SESSION);
-    const view = render(cell(speech));
-    fireEvent.click(launcher());
-    await settleSubmit();
     expect(legend()).not.toBeNull();
 
-    // The answer the press was waiting for. There is something behind the wave
-    // now, and a legend over it would be covering the thing it asked for.
-    speech.arrive();
-    view.rerender(cell(speech));
-
-    await waitFor(() => expect(legend()).toBeNull());
-    expect(pane()).not.toBeNull();
-  });
-
-  /**
-   * DEFENDS `if (arrived) setLegendUp(false);` in the arrival effect.
-   *
-   * `an arriving utterance dismisses it` above does NOT defend it. There the
-   * cell is idle, so the arrival ENDS the wait (`endStarting` finds no busy
-   * spell to hand the body back to) and the wait-ending effect's own
-   * `setLegendUp(false)` reaches the same end state one commit later —
-   * deleting the arrival's line leaves that test green.
-   *
-   * This is the reachable state where the two come apart: the agent answered
-   * and CARRIED ON WORKING. `noteNewestAnswer` calls `endStarting`, which
-   * clears the press's flag and then returns early because the session is
-   * still busy with a claim already granted (`agentArmed`), so `derive` keeps
-   * handing back `AGENT_HAS_THE_BODY`. `waiting` never goes false, the
-   * wait-ending effect never re-runs, and the arrival's own line is the only
-   * thing that takes the overlay off the answer the user asked for.
-   */
-  it("an answer on an agent still at work dismisses it with no wait ending", async () => {
-    globals.__PAVILIO_TUNING__ = { answerWaveDebounceMs: 20 };
-    const speech = makeSpeech(SESSION);
-    const view = render(cell(speech));
-    fireEvent.click(launcher());
-    await settleSubmit();
-    expect(legend()).not.toBeNull();
-
-    // The launched agent's own output puts the session busy, and the window
-    // elapses: from here the agent holds the body on its own account, beside
-    // the press's flag rather than instead of it.
-    activity("busy");
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
-    });
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
-
-    // It speaks — and keeps working.
-    speech.arrive();
-    view.rerender(cell(speech));
-
-    await waitFor(() => expect(legend()).toBeNull());
-    // The wait is STILL LIVE, which is the whole point of this case: there was
-    // no wait-ending commit for the other dismissal to ride.
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
-    expect(pane()).not.toBeNull();
-  });
-
-  it("Escape dismisses it", async () => {
-    render(cell(makeSpeech(SESSION)));
-    fireEvent.click(launcher());
-    await settleSubmit();
-    expect(legend()).not.toBeNull();
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(legend()).toBeNull());
-  });
-
-  it("activating the eye dismisses it", async () => {
-    render(cell(makeSpeech(SESSION)));
-    fireEvent.click(launcher());
-    await settleSubmit();
-    expect(legend()).not.toBeNull();
-
-    // Using the control the legend names is the legend having worked.
-    fireEvent.click(eye());
-    await waitFor(() => expect(legend()).toBeNull());
-  });
-
-  it("the transport it names cannot be pressed under it, and is named anyway", async () => {
-    render(cell(makeSpeech(SESSION)));
-    fireEvent.click(launcher());
-    await settleSubmit();
-    expect(legend()).not.toBeNull();
-
-    // The other half of "either control the legend names is activated", and
-    // the honest shape of it: the whole strip is `disabled` until the cell's
-    // first answer, so while the legend is up there is no transport press for
-    // it to catch. The callout still points there, because what it teaches is
-    // what the strip is FOR — and the dismissal arm is kept for a strip that
-    // enables under a legend still standing.
+    // The whole strip is `disabled` until the cell's first answer, so while
+    // the legend is up there is no transport press for it to catch. The
+    // callout still points there, because what it teaches is what the strip
+    // is FOR.
     for (const control of ["previous", "playpause", "next"]) {
       expect(screen.getByTestId(`speech-bar-${control}-${SESSION}`)).toBeDisabled();
     }
     expect(legend()).not.toBeNull();
   });
 
-  it("the wait ending takes the legend with it", async () => {
-    render(cell(makeSpeech(SESSION)));
-    fireEvent.click(launcher());
-    await settleSubmit();
-    expect(legend()).not.toBeNull();
-
-    // The agent booted, worked and finished without ever speaking. The pane
-    // closes again (Task 9's rule) and there is nothing left for the legend to
-    // sit over.
-    activity("busy");
-    activity("idle");
-    await waitFor(() => expect(pane()).toBeNull());
-    expect(legend()).toBeNull();
-  });
-
-  it("a reduced-motion preference stops the legend animating", async () => {
+  it("a reduced-motion preference stops the legend animating", () => {
     // The CALLOUT is the only animated part of the legend, and it is the part
     // the old spelling of this test could not see: a regex found
     // `.boot-legend { animation: none }` inside the query, ticked, and missed
@@ -719,7 +680,7 @@ describe("the boot legend", () => {
     // animated. So the assertion is on the CASCADE, over the rendered box.
     const drop = injectStylesheet(stylesheetWithReducedMotionOn());
     try {
-      await boot(720);
+      openLegend(720);
 
       for (const key of ["transport", "eye"] as const) {
         const callout = calloutFor(key);
@@ -742,13 +703,13 @@ describe("the boot legend", () => {
     }
   });
 
-  it("the legend animates when nothing asks it not to", async () => {
+  it("the legend animates when nothing asks it not to", () => {
     // The other half, so "nothing animates" cannot pass by the arrival having
     // been deleted: with the query's condition left as shipped — one jsdom
     // never matches — the callout carries its arrival.
     const drop = injectStylesheet();
     try {
-      await boot(720);
+      openLegend(720);
       expect(getComputedStyle(calloutFor("eye")!).animation).toMatch(/boot-legend-in/);
     } finally {
       drop();
@@ -761,10 +722,10 @@ describe("the boot legend", () => {
 
   it.each([320, 360, 400])(
     "a %ipx cell carries the eye callout alone",
-    async (cellWidth) => {
+    (cellWidth) => {
       const drop = injectStylesheet();
       try {
-        await boot(cellWidth);
+        openLegend(cellWidth);
 
         // Two 190px boxes, each 10px in from its own edge, do not fit here —
         // and the fallback used to be keyed to `@media (max-width: 520px)`, a
@@ -782,10 +743,10 @@ describe("the boot legend", () => {
     },
   );
 
-  it.each([440, 720, 1200])("a %ipx cell carries both, clear of each other", async (cellWidth) => {
+  it.each([440, 720, 1200])("a %ipx cell carries both, clear of each other", (cellWidth) => {
     const drop = injectStylesheet();
     try {
-      await boot(cellWidth);
+      openLegend(cellWidth);
 
       expect(calloutTargets()).toEqual(
         [`speech-bar-playpause-${SESSION}`, `speech-bar-eye-${SESSION}`].sort(),
@@ -795,10 +756,10 @@ describe("the boot legend", () => {
       // than out of the file, so the numbers are the ones the cascade actually
       // gives these two elements at this width.
       const transport = getComputedStyle(calloutFor("transport")!);
-      const eye = getComputedStyle(calloutFor("eye")!);
+      const eyeStyle = getComputedStyle(calloutFor("eye")!);
       const widest = px(transport.maxWidth);
       const transportRight = px(transport.left) + widest;
-      const eyeLeft = cellWidth - px(eye.right) - widest;
+      const eyeLeft = cellWidth - px(eyeStyle.right) - widest;
       expect(
         transportRight,
         `the two callouts overlap by ${transportRight - eyeLeft}px in a ${cellWidth}px cell`,
@@ -808,14 +769,14 @@ describe("the boot legend", () => {
     }
   });
 
-  it("the cell the legend measures is its own, not the window", async () => {
+  it("the cell the legend measures is its own, not the window", () => {
     // The distinction the viewport query could not make: a WIDE window with a
     // NARROW cell in it, which is what every 2x2 and 3x2 grid is. The window
     // here is jsdom's default 1024 and never changes.
     expect(window.innerWidth).toBeGreaterThan(520);
     const drop = injectStylesheet();
     try {
-      await boot(320);
+      openLegend(320);
       expect(calloutTargets()).toEqual([`speech-bar-eye-${SESSION}`]);
     } finally {
       drop();
@@ -826,10 +787,10 @@ describe("the boot legend", () => {
   // A leader is a LINE BETWEEN TWO THINGS, and both ends have to land.
   // -------------------------------------------------------------------------
 
-  it("each leader runs from its callout's edge to the control's centre", async () => {
+  it("each leader runs from its callout's edge to the control's centre", () => {
     const drop = injectStylesheet();
     try {
-      await boot(720);
+      openLegend(720);
 
       for (const key of ["transport", "eye"] as const) {
         const callout = calloutFor(key)!;
@@ -856,14 +817,14 @@ describe("the boot legend", () => {
     }
   });
 
-  it("the row's own numbers are what the leader arithmetic assumes", async () => {
+  it("the row's own numbers are what the leader arithmetic assumes", () => {
     // The drift guard for the comment the geometry reasons from. Preflight
     // makes every box `border-box`, so `.speech-bar-row`'s 56px is the WHOLE
     // row, padding included — a control centred in it is 28px down, and the
     // bar's hairline is below the row rather than inside it.
     const drop = injectStylesheet();
     try {
-      await boot(720);
+      openLegend(720);
       const barRow = row().querySelector(".speech-bar-row") as HTMLElement;
       const style = getComputedStyle(barRow);
       const control = getComputedStyle(eye());
@@ -884,51 +845,5 @@ describe("the boot legend", () => {
     } finally {
       drop();
     }
-  });
-
-  // -------------------------------------------------------------------------
-  // The two orderings the arming effect must survive.
-  // -------------------------------------------------------------------------
-
-  it("a launcher edge seen a commit before the wait is not lost", async () => {
-    render(cell(makeSpeech(SESSION)));
-
-    // The delivery flag on its own. `LauncherPills` calls `noteAgentStarting`
-    // before `onDelivered` today, so this order does not occur in the product
-    // — which is the problem: swapping those two lines is a one-line edit that
-    // used to kill the legend with nothing failing, because the effect wrote
-    // its `lastLauncherUsed` ref BEFORE the `!waiting` guard and consumed the
-    // edge it then refused to act on.
-    act(() => {
-      noteLauncherUsed(SESSION);
-    });
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
-    expect(legend()).toBeNull();
-
-    // ...and the wait behind it.
-    act(() => {
-      noteAgentStarting(SESSION);
-    });
-    await waitFor(() => expect(legend()).not.toBeNull());
-    expect(hasSeenBootLegend()).toBe(true);
-  });
-
-  it("hiding the bar mid-boot puts the legend away for good", async () => {
-    const speech = makeSpeech(SESSION);
-    const view = render(cell(speech));
-    fireEvent.click(launcher());
-    await settleSubmit();
-    expect(legend()).not.toBeNull();
-
-    // The bar goes. The two controls the legend names go with it, so there is
-    // nothing left for the callouts to point at.
-    view.rerender(cell(speech, SESSION, false));
-    expect(legend()).toBeNull();
-
-    // ...and bringing the bar back does not bring the legend back. Shown once
-    // is shown: the browser was marked taught the moment it first appeared.
-    view.rerender(cell(speech, SESSION, true));
-    expect(legend()).toBeNull();
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
   });
 });
