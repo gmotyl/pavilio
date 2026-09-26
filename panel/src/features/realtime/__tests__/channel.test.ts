@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetRealtimeChannelForTests,
+  REALTIME_RECONNECT_FRAME,
   type RealtimeFrame,
   realtimeSubscriberCount,
   subscribeRealtime,
@@ -290,17 +291,18 @@ describe("realtime channel", () => {
   });
 
   it("publishes the reconnect frame on the second connect, not the first", () => {
-    const listener = vi.fn();
-    subscribeRealtime(listener);
-    expect(listener).not.toHaveBeenCalled();
+    const frames: RealtimeFrame[] = [];
+    subscribeRealtime((frame) => {
+      frames.push(frame);
+    });
+    expect(frames).toHaveLength(0);
 
     vi.advanceTimersByTime(40_000); // watchdog closes the stale socket
     vi.advanceTimersByTime(2_000); // reconnect
 
-    expect(listener).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "file-change", event: "reconnect", path: "" }),
-    );
+    expect(frames.filter((frame) => frame.type === "file-change")).toEqual([
+      { type: "file-change", event: "reconnect", path: "" },
+    ]);
   });
 
   it("gives every reconnect frame its own object", () => {
@@ -316,11 +318,70 @@ describe("realtime channel", () => {
     vi.advanceTimersByTime(40_000);
     vi.advanceTimersByTime(2_000);
 
-    expect(frames).toHaveLength(2);
-    expect(frames[1]).toEqual(frames[0]);
+    const fileChanges = frames.filter((frame) => frame.type === "file-change");
+    expect(fileChanges).toHaveLength(2);
+    expect(fileChanges[1]).toEqual(fileChanges[0]);
     // Equal in value but never the same object: consumers key their effects off
     // `lastMessage` identity, so a shared one would skip the second refetch.
-    expect(frames[1]).not.toBe(frames[0]);
+    expect(fileChanges[1]).not.toBe(fileChanges[0]);
+  });
+
+  it("publishes the neutral reconnect frame on the second connection", () => {
+    const frames: RealtimeFrame[] = [];
+    subscribeRealtime((frame) => {
+      frames.push(frame);
+    });
+
+    vi.advanceTimersByTime(40_000); // watchdog closes the stale socket
+    vi.advanceTimersByTime(2_000); // reconnect
+
+    expect(frames).toContainEqual({ ...REALTIME_RECONNECT_FRAME });
+  });
+
+  it("publishes no reconnect frame on the first connection", () => {
+    const frames: RealtimeFrame[] = [];
+    subscribeRealtime((frame) => {
+      frames.push(frame);
+    });
+
+    expect(frames).toHaveLength(0);
+  });
+
+  it("still publishes the file-change reconnect frame alongside the neutral one", () => {
+    const frames: RealtimeFrame[] = [];
+    subscribeRealtime((frame) => {
+      frames.push(frame);
+    });
+
+    vi.advanceTimersByTime(40_000);
+    vi.advanceTimersByTime(2_000);
+
+    expect(frames).toHaveLength(2);
+    // The existing frame is untouched: its consumers still match on `path`.
+    expect(frames).toContainEqual({ type: "file-change", event: "reconnect", path: "" });
+    expect(frames).toContainEqual({ ...REALTIME_RECONNECT_FRAME });
+  });
+
+  it("a throwing subscriber does not stop the other reconnect frame reaching others", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Breaks on the file-change frame only; the neutral one must still land.
+    const throws = vi.fn((frame: RealtimeFrame) => {
+      if (frame.type === "file-change") throw new Error("subscriber boom");
+    });
+    const frames: RealtimeFrame[] = [];
+    subscribeRealtime(throws);
+    subscribeRealtime((frame) => {
+      frames.push(frame);
+    });
+
+    vi.advanceTimersByTime(40_000);
+    vi.advanceTimersByTime(2_000);
+
+    expect(frames).toContainEqual({ type: "file-change", event: "reconnect", path: "" });
+    expect(frames).toContainEqual({ ...REALTIME_RECONNECT_FRAME });
+    expect(warn).toHaveBeenCalled();
+
+    warn.mockRestore();
   });
 
   it("ignores a non-JSON message", () => {

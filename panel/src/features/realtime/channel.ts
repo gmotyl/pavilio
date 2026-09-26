@@ -24,6 +24,14 @@ const RECONNECT_MESSAGE: RealtimeFrame = {
   path: "",
 };
 
+/**
+ * Published alongside `RECONNECT_MESSAGE` and meaning only "the channel came
+ * back". A consumer that has nothing to do with files — speech catch-up, say —
+ * reads this one; keying it off a *file-change* frame would work today and be a
+ * trap for the next reader. See ADR 0017.
+ */
+export const REALTIME_RECONNECT_FRAME = { type: "realtime-reconnect" } as const;
+
 type Listener = (frame: RealtimeFrame) => void;
 
 const listeners = new Set<Listener>();
@@ -59,7 +67,15 @@ function connect(): void {
   socketCreatedAt = lastMessageAt;
   connections += 1;
   // Not on the first connect — nothing has been missed yet.
-  if (connections > 1) publish({ ...RECONNECT_MESSAGE });
+  if (connections > 1) {
+    // Neutral frame first: `useWebSocket` keeps only the newest frame, and React
+    // batches both of these into one render, so whichever is published last is
+    // the only one its consumers see. The file-change consumers predate this
+    // frame and must keep their reconnect refetch; a consumer that wants the
+    // neutral one subscribes to the channel directly.
+    publish({ ...REALTIME_RECONNECT_FRAME });
+    publish({ ...RECONNECT_MESSAGE });
+  }
 
   ws.onmessage = (event) => {
     lastMessageAt = Date.now();
