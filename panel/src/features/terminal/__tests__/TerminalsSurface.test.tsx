@@ -1,10 +1,12 @@
-import { beforeEach, describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { TerminalsSurface } from "../TerminalsSurface";
 import type { LayoutPreset, TileLayout } from "../tileLayout";
 import type { TerminalHandle } from "../TerminalView";
+import type { SessionMeta } from "../useTerminalSessions";
 import { INERT_SPEECH } from "./speech.harness";
+import { forgetAnswerPane, setAnswerPaneOpen } from "../answerPaneState";
 
 const gridProps = vi.fn();
 const toolbarProps = vi.fn();
@@ -42,7 +44,9 @@ vi.mock("../TerminalLayoutGrid", () => ({
     return <div data-testid="grid" />;
   },
 }));
-vi.mock("../TerminalShortcutBar", () => ({ TerminalShortcutBar: () => <div /> }));
+vi.mock("../TerminalShortcutBar", () => ({
+  TerminalShortcutBar: () => <div data-testid="shortcut-bar" />,
+}));
 vi.mock("../TerminalSpineDrawer", () => ({ TerminalSpineDrawer: () => <div /> }));
 
 function Harness({
@@ -50,18 +54,20 @@ function Harness({
   onPlace,
   onApplyPreset,
   focusedId = null,
+  sessions = [],
 }: {
   tiles?: TileLayout;
   onPlace?: (layout: TileLayout) => void;
   onApplyPreset?: (preset: LayoutPreset) => void;
   focusedId?: string | null;
+  sessions?: SessionMeta[];
 }) {
   const ref = useRef<Map<string, TerminalHandle>>(new Map());
   return (
     <TerminalsSurface
       currentProject="vector"
       repos={[]}
-      sessions={[]}
+      sessions={sessions}
       focusedId={focusedId}
       onFocus={() => {}}
       onDeleteSession={() => {}}
@@ -201,5 +207,47 @@ describe("TerminalsSurface reconnect wiring", () => {
 
     expect(reconnectAllDisconnected).toHaveBeenCalledTimes(1);
     expect(reconnectSession).not.toHaveBeenCalled();
+  });
+});
+
+function session(id: string): SessionMeta {
+  return { id, name: id, project: "vector", cwd: "/", pid: 1, createdAt: "" };
+}
+
+describe("TerminalsSurface shortcut bar visibility", () => {
+  afterEach(() => {
+    forgetAnswerPane("s1");
+    forgetAnswerPane("s2");
+    forgetAnswerPane("other");
+  });
+
+  it("the shortcut bar is absent while a rendered session's answer pane is open", () => {
+    setAnswerPaneOpen("s1", true);
+
+    render(<Harness sessions={[session("s1"), session("s2")]} />);
+
+    expect(screen.queryByTestId("shortcut-bar")).toBeNull();
+  });
+
+  it("the shortcut bar returns when the pane closes", () => {
+    setAnswerPaneOpen("s1", true);
+
+    const { rerender } = render(
+      <Harness sessions={[session("s1"), session("s2")]} />,
+    );
+    expect(screen.queryByTestId("shortcut-bar")).toBeNull();
+
+    setAnswerPaneOpen("s1", false);
+    rerender(<Harness sessions={[session("s1"), session("s2")]} />);
+
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  it("another surface's open pane does not hide this surface's bar", () => {
+    setAnswerPaneOpen("other", true);
+
+    render(<Harness sessions={[session("s1"), session("s2")]} />);
+
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
   });
 });
