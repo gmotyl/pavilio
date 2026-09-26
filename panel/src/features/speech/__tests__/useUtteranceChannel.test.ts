@@ -13,6 +13,31 @@ vi.mock("../../realtime/useWebSocket", () => ({
 }));
 
 /**
+ * The neutral reconnect frame cannot arrive through `useWebSocket`: the channel
+ * publishes it alongside the file-change one and React batches both into a
+ * single render, so only whichever was published last is ever visible in
+ * `lastMessage` — deliberately the file-change frame. The catch-up therefore
+ * subscribes to the realtime channel directly, and this stands in for that
+ * subscription, which would otherwise open a socket.
+ */
+const { realtimeListeners } = vi.hoisted(() => ({
+  realtimeListeners: new Set<(frame: Record<string, unknown>) => void>(),
+}));
+vi.mock("../../realtime/channel", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../realtime/channel")>("../../realtime/channel");
+  return {
+    ...actual,
+    subscribeRealtime: (listener: (frame: Record<string, unknown>) => void) => {
+      realtimeListeners.add(listener);
+      return () => {
+        realtimeListeners.delete(listener);
+      };
+    },
+  };
+});
+
+/**
  * Playback lives in `useSpeechPlayer` and synthesis in the host's warming
  * effect, not here, so all four are *inputs*: whatever the caller says.
  * `useSpeechHost` passes the player's `speakingSessionId`, `pausedSessionId`
@@ -26,6 +51,8 @@ let preparing: ReadonlySet<string> = new Set<string>();
 
 const { useUtteranceChannel } = await import("../useUtteranceChannel");
 const { setStoredArmedSession } = await import("../voices");
+const { unplayedSinceLastPlayed } = await import("../unreadAnswers");
+const { REALTIME_RECONNECT_FRAME } = await import("../../realtime/channel");
 const { preferences } = await import("../../../preferences/declarations");
 const { storageKey } = await import("../../../preferences/types");
 
@@ -70,12 +97,20 @@ function serveLatest(utterances: Utterance[]) {
   return fetchMock;
 }
 
-/** The four playback/synthesis inputs, as of whatever the variables now say. */
+/**
+ * The host's `recordAutoplayed`: an input like the four above, because
+ * `autoplayedRef` lives in `useSpeechHost` and the channel imports nothing from
+ * it. A catch-up calls it so an armed cell does not speak what it recovered.
+ */
+let recordAutoplayed = vi.fn();
+
+/** The playback/synthesis inputs, as of whatever the variables now say. */
 const options = () => ({
   speakingSessionId: speaking,
   pausedSessionId: paused,
   waitingForSynthesis: waiting,
   preparingSessionIds: preparing,
+  recordAutoplayed,
 });
 
 /** Renders the hook and lets the mount fetch settle, so no assertion races hydration. */
@@ -87,12 +122,25 @@ async function renderChannel() {
   return rendered;
 }
 
+/** What the channel sees when the socket comes back: the neutral frame, nothing else. */
+async function reconnected() {
+  await act(async () => {
+    for (const listener of [...realtimeListeners]) listener({ ...REALTIME_RECONNECT_FRAME });
+  });
+  // A macrotask, so the re-fetch and its `json()` have both settled.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 beforeEach(() => {
   lastMessage = null;
   speaking = null;
   paused = null;
   waiting = false;
   preparing = new Set<string>();
+  recordAutoplayed = vi.fn();
+  realtimeListeners.clear();
   serveLatest([]);
 });
 
@@ -954,5 +1002,177 @@ describe("useUtteranceChannel", () => {
     });
     expect(result.current.warmableUtterances).not.toBe(utterances);
     expect(result.current.warmableUtterances).toHaveLength(2);
+  });
+
+  it("re-fetches the retained utterances when the neutral reconnect frame arrives", async () => {
+    const onMount = serveLatest([]);
+    const { result } = await renderChannel();
+    expect(onMount).toHaveBeenCalledTimes(1);
+
+    // What the Stop hook posted while the tab was frozen. It was broadcast to a
+    // dead socket, and the server has been holding it ever since.
+    const onReturn = serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+
+    expect(onReturn).toHaveBeenCalledWith("/api/speech/latest");
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a1"));
+  });
+
+  it("still hydrates once on mount", async () => {
+    const fetchMock = serveLatest([utterance("cell-a", "a1")]);
+
+    const { result } = await renderChannel();
+
+    // The reconnect subscription must not turn the mount into two fetches.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/speech/latest");
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+  });
+
+  it("takes up a newer utterance for a session it already has a record for", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    // A returning tab ALWAYS has a record for the session — it is the state a
+    // freeze leaves behind — so a gate on the session id skips precisely the
+    // answer the user came back for.
+    serveLatest([utterance("cell-a", "a2", 2_000)]);
+    await reconnected();
+
+    await waitFor(() =>
+      expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000)),
+    );
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["a1"]);
+  });
+
+  it("does not append an utterance the queue already holds", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result, rerender } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    // Under the cursor: the server retains it and hands it back on every
+    // catch-up, so this is the case that repeats forever if it is not gated.
+    await reconnected();
+    expect(result.current.queueFor("cell-a").previous).toHaveLength(0);
+    expect(result.current.queueFor("cell-a").pending).toHaveLength(0);
+
+    // In `previous`: a newer answer superseded it, and a replay must not walk
+    // it back in front of the one the cell is on.
+    lastMessage = frame(utterance("cell-a", "a2", 2_000));
+    await act(async () => {
+      rerender();
+    });
+    serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["a1"]);
+
+    // In `pending`: it queued behind a live run and has not been reached yet.
+    speaking = "cell-a";
+    lastMessage = frame(utterance("cell-a", "a3", 3_000));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.queueFor("cell-a").pending.map((step) => step.id)).toEqual(["a3"]);
+
+    serveLatest([utterance("cell-a", "a3", 3_000)]);
+    await reconnected();
+    expect(result.current.queueFor("cell-a").pending.map((step) => step.id)).toEqual(["a3"]);
+  });
+
+  it("does not re-announce an utterance that was already heard", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    await reconnected();
+
+    // The server still retains it; the cell has already listened to it.
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+    expect(result.current.queueFor("cell-a").previous).toHaveLength(0);
+    expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("marks a caught-up utterance as autoplayed so an armed cell stays silent", async () => {
+    const { result } = await renderChannel();
+    await act(async () => {
+      result.current.setArmed("cell-a");
+    });
+
+    serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    // Returning to the app is not a user gesture, and an armed cell ABSORBS an
+    // arrival it cannot play rather than deferring it — the recovered answer
+    // would lose its spoken form for good. See ADR 0017.
+    expect(recordAutoplayed).toHaveBeenCalledWith("cell-a", "a1");
+  });
+
+  it("leaves a caught-up utterance unheard and counted as unread", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+
+    serveLatest([utterance("cell-a", "a2", 2_000)]);
+    await reconnected();
+
+    // Not spoken is not the same as listened to: the pip and the count are the
+    // only trace a silent recovery leaves.
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    expect(result.current.heardFor("cell-a").has("a2")).toBe(false);
+    expect(
+      unplayedSinceLastPlayed(result.current.queueFor("cell-a"), result.current.heardFor("cell-a")),
+    ).toBe(1);
+  });
+
+  it("seeds no pip for a caught-up utterance with nothing to say", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    // A pure-code answer prepares to zero units, so announcing it would be a
+    // notification that can never be met — on catch-up as on arrival.
+    serveLatest([codeOnly("cell-a", "c1", 2_000)]);
+    await reconnected();
+
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a1"));
+    expect(
+      unplayedSinceLastPlayed(result.current.queueFor("cell-a"), result.current.heardFor("cell-a")),
+    ).toBe(0);
+    expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("survives a failed catch-up fetch and still registers later live frames", async () => {
+    const { result, rerender } = await renderChannel();
+
+    global.fetch = vi.fn(async () => {
+      throw new Error("panel server unreachable");
+    }) as unknown as typeof fetch;
+    await reconnected();
+
+    // A failed catch-up is not an error state, it is the status quo ante.
+    expect(result.current.stateFor("cell-a")).toBe("empty");
+
+    lastMessage = frame(utterance("cell-a", "a1"));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("ready");
   });
 });

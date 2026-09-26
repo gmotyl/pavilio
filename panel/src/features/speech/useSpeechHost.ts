@@ -163,6 +163,13 @@ export function useSpeechHost(): SpeechHost {
   const preparedRef = useRef<Map<string, PreparedSpeech>>(new Map());
   /** The last utterance the armed cell autoplayed, so none is played twice. */
   const autoplayedRef = useRef<string | null>(null);
+  /**
+   * The armed cell, mirrored, so {@link recordAutoplayed} can be declared above
+   * the channel — which is where the armed cell comes from, and which needs the
+   * callback handed to it for its catch-up. Written in an EFFECT, so it can
+   * never be ahead of the commit the rest of the panel is looking at.
+   */
+  const armedSessionIdRef = useRef<string | null>(null);
   /** Utterance ids whose first unit has been warmed, so none is warmed twice. */
   const warmedRef = useRef<Set<string>>(new Set());
   /**
@@ -295,6 +302,38 @@ export function useSpeechHost(): SpeechHost {
     unlocked,
     waitingForSynthesis,
   } = player;
+  /**
+   * The cursor moved under the armed cell, and whatever that move is owed has
+   * been settled HERE — so the utterance it landed on is recorded as already
+   * autoplayed, and the autoplay effect does not act on it a second time.
+   *
+   * Three callers, for what read as three different reasons and are really one.
+   * In `onNext` the move IS played there, so without this record the effect
+   * would see "the armed cell's utterance changed" and start the same answer
+   * twice. In `onPrevious` the move is deliberately NOT played — and the record
+   * is what makes that stick, because the effect watches the utterance under
+   * the cursor and a backward step changes it exactly as an arrival would. Drop
+   * the call there and the armed cell speaks the answer the user stepped back
+   * to read, through the autoplay path rather than the transport's; the press
+   * is silent everywhere except the one state Greg actually listens in. And the
+   * channel's catch-up calls it for an answer recovered after a reconnect,
+   * where the effect would otherwise ABSORB the arrival — returning to the
+   * application is no gesture — and lose its spoken form for good (ADR 0017).
+   *
+   * So this is not "mark it played". Nothing about `heard`, the unplayed count
+   * or the pips passes through here — those are `markHeard` / `finishUtterance`
+   * — and a silent step leaves every one of them alone. It is narrower than its
+   * name: *autoplay has no further business with this utterance*. Only the
+   * armed cell has such a record to corrupt.
+   *
+   * Declared above the channel, which is where the armed cell comes from, so it
+   * reads the mirror rather than the value — and is stable for the whole life
+   * of the host, which is what keeps the channel's catch-up effect off it.
+   */
+  const recordAutoplayed = useCallback((sessionId: string, utteranceId: string): void => {
+    if (sessionId === armedSessionIdRef.current) autoplayedRef.current = utteranceId;
+  }, []);
+
   // The channel never observes playback or synthesis, so everything it needs to
   // know about either has to be handed to it on every render. Forgetting one of
   // these deletes that state from the grid.
@@ -305,6 +344,8 @@ export function useSpeechHost(): SpeechHost {
     // The warm this module owns, handed back so one function — `stateFor` —
     // answers the whole of the control's question.
     preparingSessionIds,
+    // A catch-up after a reconnect is SHOWN, never spoken: see ADR 0017.
+    recordAutoplayed,
   });
   const {
     armedSessionId,
@@ -319,6 +360,12 @@ export function useSpeechHost(): SpeechHost {
     utteranceFor,
     warmableUtterances,
   } = channel;
+
+  // Written in an EFFECT, never during render, so the mirror can never be newer
+  // than the commit the rest of the panel is looking at.
+  useEffect(() => {
+    armedSessionIdRef.current = armedSessionId;
+  }, [armedSessionId]);
 
   const preparedFor = useCallback(
     (utterance: Utterance, language: "pl" | "en"): PreparedSpeech => {
@@ -600,34 +647,6 @@ export function useSpeechHost(): SpeechHost {
       resumePlayback();
     },
     [pausedSessionId, resumePlayback],
-  );
-
-  /**
-   * The cursor moved under the armed cell, and whatever that move is owed has
-   * been settled HERE — so the utterance it landed on is recorded as already
-   * autoplayed, and the effect below does not act on it a second time.
-   *
-   * Two callers, for what reads as two different reasons and is really one. In
-   * `onNext` the move IS played here, so without this record the effect would
-   * see "the armed cell's utterance changed" and start the same answer twice.
-   * In `onPrevious` the move is deliberately NOT played — and the record is
-   * what makes that stick, because the effect watches the utterance under the
-   * cursor and a backward step changes it exactly as an arrival would. Drop the
-   * call there and the armed cell speaks the answer the user stepped back to
-   * read, through the autoplay path rather than the transport's; the press is
-   * silent everywhere except the one state Greg actually listens in.
-   *
-   * So this is not "mark it played". Nothing about `heard`, the unplayed count
-   * or the pips passes through here — those are `markHeard` / `finishUtterance`
-   * — and a silent step leaves every one of them alone. It is narrower than its
-   * name: *autoplay has no further business with this utterance*. Only the
-   * armed cell has such a record to corrupt.
-   */
-  const recordAutoplayed = useCallback(
-    (sessionId: string, utteranceId: string): void => {
-      if (sessionId === armedSessionId) autoplayedRef.current = utteranceId;
-    },
-    [armedSessionId],
   );
 
   const onPrevious = useCallback(
