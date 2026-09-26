@@ -163,10 +163,13 @@ export function TerminalView({
    * fact — *is the pane open with nothing in it?* — and reading the fact
    * directly means there is nothing left to arm, disarm or remember:
    *
-   * - **A launcher press** opens the pane (`LauncherPills`) and hands the body
-   *   to the wave (`waiting` goes true); the legend shows in the gap before
-   *   that commit lands, and the wave — not a flag this view tracks — takes it
-   *   from there.
+   * - **A launcher press** opens the pane and hands the body to the wave in
+   *   the very same commit (`LauncherPills`'s `onDelivered` calls
+   *   `noteAgentStarting` before `setAnswerPaneOpen`) — `open` and `waiting`
+   *   become true together, so the legend never appears at the moment of the
+   *   press itself. It can only show up later: if the session goes idle again
+   *   with nothing having been said (the next bullet), or via the eye opening
+   *   an unspoken cell (the bullet after that).
    * - **A silent boot** ends the wait on idle with no answer having arrived;
    *   `waiting` goes false, `answer` is still null, and the legend is exactly
    *   what the empty pane falls through to.
