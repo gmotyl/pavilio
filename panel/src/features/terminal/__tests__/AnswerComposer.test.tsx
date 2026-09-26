@@ -393,7 +393,7 @@ describe("AnswerComposer", () => {
     expect(grip()).toBeNull();
   });
 
-  it("drops the grip and uses a single row on a narrow viewport", () => {
+  it("drops the grip and starts at two rows on a narrow viewport", () => {
     installMatchMedia(true);
     writePreference(preferences.answerComposerHeight, 140, PROJECT);
     renderPane();
@@ -401,8 +401,9 @@ describe("AnswerComposer", () => {
     // No grip: an 8px rail on a phone sits under the thumb that is scrolling
     // the pane it borders.
     expect(grip()).toBeNull();
-    // And one row, laid out by the viewport rather than by the stored height.
-    expect(field().rows).toBe(1);
+    // Two rows to start — `MOBILE_COMPOSER_MIN_ROWS`, the auto-grow floor —
+    // laid out by the viewport rather than by the stored height.
+    expect(field().rows).toBe(2);
     expect(field().closest(".answer-pane-composer")).not.toHaveStyle({ height: "140px" });
   });
 
@@ -713,7 +714,7 @@ describe("AnswerComposer", () => {
         "answer-pane-composer",
       ]);
       expect(grip()).toBeNull();
-      expect(field().rows).toBe(1);
+      expect(field().rows).toBe(2);
       // The button is the one control that does NOT go away with the keyboard
       // affordances — it is the only way to send on a phone.
       expect(sendButton()).toBeInTheDocument();

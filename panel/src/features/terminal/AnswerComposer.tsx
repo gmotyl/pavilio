@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { preferences } from "../../preferences/declarations";
@@ -19,6 +19,39 @@ import { dismissAttentionOnArrival } from "./attentionArrival";
  * than the text above it has stopped being a reply to it.
  */
 const BOUNDS: RowBounds = { min: 40, max: 320, step: 12 };
+
+/**
+ * The mobile field's height floor and ceiling, in ROWS rather than pixels.
+ *
+ * There is no drag on a touch viewport — `isMobile` below renders no grip at
+ * all — so the field has no stored height to clamp between; what it has
+ * instead is a reply that keeps growing while it is typed. The floor is what
+ * `rows={MOBILE_COMPOSER_MIN_ROWS}` already draws before a single character
+ * has grown into it, so the field never reads as shrinking past its own
+ * starting size. The ceiling is short of the pane for the same reason the
+ * desktop bound is short of the answer above it: a reply tall enough to fill
+ * the screen has stopped being a REPLY, and six rows is where this pane draws
+ * that line — past it the field scrolls internally instead of pushing the
+ * send button off screen.
+ */
+const MOBILE_COMPOSER_MIN_ROWS = 2;
+const MOBILE_COMPOSER_MAX_ROWS = 6;
+
+/**
+ * The line height the cap falls back to when `getComputedStyle` cannot report
+ * one in pixels.
+ *
+ * `index.css` writes `.answer-pane-composer-field { line-height: 1.5; }` —
+ * unitless, which is the CSS author's way of saying "1.5 times whatever the
+ * font size is" rather than a fixed box. A real browser resolves that to a
+ * pixel `getComputedStyle` value; a host with no stylesheet loaded — jsdom in
+ * a test, most of all — reports `"normal"` or hands back the bare `"1.5"`
+ * with no unit, and either one is the wrong number of pixels to multiply six
+ * rows by. This is a plain guess at the field's actual line box (12px type at
+ * 1.5) rather than a derivation, so the cap stays a sane height instead of
+ * caching a `NaN`.
+ */
+const FALLBACK_LINE_HEIGHT_PX = 20;
 
 /**
  * What the pane says when the socket refused one half of a submit.
@@ -245,8 +278,9 @@ export interface AnswerComposerProps {
  * which is the only direction there is room in. The hook reports `isMobile` but
  * applies nothing — the consumer decides — and here that decision is the whole
  * of the mobile case: no grip (an 8px rail under the thumb that is scrolling
- * the pane), no hint, no stored height at all, and a single row laid out by the
- * viewport.
+ * the pane), no hint, no STORED height at all — instead the field grows itself
+ * from `scrollHeight`, up to six rows, and the mechanism for that is the
+ * `useLayoutEffect` above this component.
  *
  * ## Why the height's scope is looked up rather than passed in
  *
@@ -306,6 +340,8 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    */
   const [unsettled, setUnsettled] = useState(0);
   const pending = unsettled > 0;
+  /** The mobile auto-grow effect's own handle on the field — see below. */
+  const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   const { height, isMobile, handleProps } = useResizableRow(
     preferences.answerComposerHeight,
     BOUNDS,
@@ -313,6 +349,41 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // and a session id would be forgotten the next time the agent restarted.
     projectOfSession(sessionId),
   );
+
+  /**
+   * The mobile field grows with the reply instead of the pane scrolling to
+   * keep it in view.
+   *
+   * Desktop's height is the grip's (`handleProps` / `PaneResizer` above), and
+   * this effect leaves it alone entirely — on `isMobile === false` it returns
+   * before reading or writing anything, so `style.height` is never touched by
+   * it and the field goes on filling the row the desktop layout gives it.
+   *
+   * On mobile there is no grip to ask, so the field measures itself.
+   * `"auto"` first, because `scrollHeight` on a field already sized to its
+   * own last measurement reports THAT height back, never a smaller one — a
+   * shrinking reply (an edit, or the clear on send) would otherwise only
+   * ever grow. Collapsing first is what lets the field shrink as well as
+   * grow, and it is why sending returns the field to its minimum with no
+   * special case for it: the text clears, this effect reruns on the
+   * now-empty value, and an empty field's natural `scrollHeight` is
+   * `MOBILE_COMPOSER_MIN_ROWS` worth — the same floor `rows` already draws
+   * it at before a single character has grown into it.
+   *
+   * `useLayoutEffect` rather than `useEffect`: the measurement has to run
+   * against the DOM the keystroke that changed `text` just committed, and
+   * before the browser paints — a plain effect would let a grown line flash
+   * at the OLD height for a frame first.
+   */
+  useLayoutEffect(() => {
+    if (!isMobile) return;
+    const field = fieldRef.current;
+    if (!field) return;
+    field.style.height = "auto";
+    const parsedLineHeight = Number.parseFloat(getComputedStyle(field).lineHeight);
+    const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : FALLBACK_LINE_HEIGHT_PX;
+    field.style.height = `${Math.min(field.scrollHeight, MOBILE_COMPOSER_MAX_ROWS * lineHeight)}px`;
+  }, [text, isMobile]);
 
   /**
    * The draft this submit was made of is on the far side now, so spend it —
@@ -502,11 +573,12 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
             </div>
           ) : null}
           <textarea
+            ref={fieldRef}
             className="answer-pane-composer-field"
             data-testid={`answer-pane-composer-${sessionId}`}
             aria-label="Reply to this cell"
             placeholder="Reply to the terminal…"
-            rows={isMobile ? 1 : 2}
+            rows={isMobile ? MOBILE_COMPOSER_MIN_ROWS : 2}
             value={text}
             onChange={(e) => {
               // Every keystroke goes to both: the state the field renders from,
