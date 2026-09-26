@@ -399,7 +399,7 @@ describe("the boot legend", () => {
   // The trigger: an open, empty, not-waiting pane — however it got that way.
   // -------------------------------------------------------------------------
 
-  it("a launcher press shows the legend until the wave takes the body", async () => {
+  it("a launcher press goes straight to the wave, not the legend", async () => {
     render(cell(makeSpeech(SESSION)));
     expect(legend()).toBeNull();
 
