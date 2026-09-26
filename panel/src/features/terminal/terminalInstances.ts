@@ -75,7 +75,9 @@ export type ConnectionState = "connected" | "disconnected" | "unattached";
  * - `disconnect` — an attached session's socket died on its own.
  * - `auto-blank` — a blank-gated path reopened the session unasked.
  * - `auto-return` — the user returned to the application and found a socket
- *   that was not OPEN, so it was reopened unasked (ADR 0017).
+ *   that was CLOSED, or no socket at all, so it was reopened unasked (ADR
+ *   0017). Narrower than "not OPEN": a return that finds a CONNECTING socket
+ *   over a blank viewport still records `auto-blank`.
  */
 export type ReconnectTrigger =
   | "manual"
@@ -242,9 +244,12 @@ export function reportAutoBlankReopen(ws: WebSocket | null): void {
 }
 
 /**
- * A return to the application found a socket that was not OPEN and reopened
- * it. Kept apart from `auto-blank` because the viewport is incidental here —
- * the return is the trigger ADR 0017 will be reviewed against.
+ * A return to the application found a socket that was CLOSED — or no socket at
+ * all — and reopened it. Not every non-OPEN socket: a return that finds a
+ * CONNECTING one over a blank viewport still records `auto-blank`, so a query
+ * reading these rows as "all non-OPEN returns" misses those. Kept apart from
+ * `auto-blank` because the viewport is incidental here — the return is the
+ * trigger ADR 0017 will be reviewed against.
  *
  * A null ws is the stranded case with nothing to identify: the reopen happens
  * regardless, and goes unlogged like any unmatched socket.

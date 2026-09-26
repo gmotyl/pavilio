@@ -342,6 +342,16 @@ describe("realtime channel", () => {
     // Equal in value but never the same object: consumers key their effects off
     // `lastMessage` identity, so a shared one would skip the second refetch.
     expect(fileChanges[1]).not.toBe(fileChanges[0]);
+
+    // The neutral frame carries the same promise, and it is the easier one to
+    // lose: publishing the exported constant itself typechecks and reads fine.
+    const neutral = frames.filter(
+      (frame) => frame.type === REALTIME_RECONNECT_FRAME.type,
+    );
+    expect(neutral).toHaveLength(2);
+    expect(neutral[1]).toEqual(neutral[0]);
+    expect(neutral[1]).not.toBe(neutral[0]);
+    expect(neutral[0]).not.toBe(REALTIME_RECONNECT_FRAME);
   });
 
   it("publishes the neutral reconnect frame on the second connection", () => {
@@ -354,6 +364,10 @@ describe("realtime channel", () => {
     vi.advanceTimersByTime(2_000); // reconnect
 
     expect(frames).toContainEqual({ ...REALTIME_RECONNECT_FRAME });
+    // The literal, spelled out once: every other assertion here goes through
+    // the import, so renaming the string would leave the suite green while
+    // every consumer of the wire value stopped hearing the frame.
+    expect(frames).toContainEqual({ type: "realtime-reconnect" });
   });
 
   it("publishes no reconnect frame on the first connection", () => {

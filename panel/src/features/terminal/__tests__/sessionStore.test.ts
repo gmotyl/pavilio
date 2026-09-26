@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { REALTIME_RECONNECT_FRAME } from "../../realtime/channel";
 import type { SessionMeta } from "../useTerminalSessions";
 import {
   __resetSessionStoreForTests,
@@ -23,11 +24,34 @@ const realtime = vi.hoisted(() => {
   };
 });
 
-vi.mock("../../realtime/channel", () => ({
-  subscribeRealtime: realtime.subscribeRealtime,
-}));
+vi.mock("../../realtime/channel", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../realtime/channel")>(
+      "../../realtime/channel",
+    );
+  return {
+    // The real frame, not a copy of its shape: the store filters on this type,
+    // so a stub would keep the filter green after a rename of the wire value.
+    REALTIME_RECONNECT_FRAME: actual.REALTIME_RECONNECT_FRAME,
+    subscribeRealtime: realtime.subscribeRealtime,
+  };
+});
 
 function emitFrame(): void {
+  for (const listener of [...realtime.listeners]) {
+    listener({ type: "file-change" });
+  }
+}
+
+/**
+ * What one reconnect actually puts on the channel: the neutral frame, then the
+ * file-change one — each published to every listener in turn, as `connect`
+ * does it.
+ */
+function emitReconnect(): void {
+  for (const listener of [...realtime.listeners]) {
+    listener({ ...REALTIME_RECONNECT_FRAME });
+  }
   for (const listener of [...realtime.listeners]) {
     listener({ type: "file-change" });
   }
@@ -128,6 +152,18 @@ describe("terminal session store", () => {
     emitFrame();
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("one refetch per reconnect, not one per reconnect frame", async () => {
+    // A reconnect publishes two frames. Both reach this listener, and an
+    // unfiltered one would refetch the whole list twice for a single reconnect.
+    subscribeSessions(vi.fn());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    emitReconnect();
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("one refetch per poll tick", async () => {

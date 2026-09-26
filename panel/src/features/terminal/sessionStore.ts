@@ -1,4 +1,4 @@
-import { subscribeRealtime } from "../realtime/channel";
+import { REALTIME_RECONNECT_FRAME, subscribeRealtime } from "../realtime/channel";
 import type { SessionMeta } from "./useTerminalSessions";
 
 const ENDPOINT = "/api/terminal/sessions";
@@ -100,7 +100,13 @@ function start(): void {
   poll = setInterval(() => void load(), POLL_MS);
   // Covers sessions created or killed elsewhere, plus whatever was missed
   // while the socket was down.
-  stopRealtime = subscribeRealtime(() => void load());
+  stopRealtime = subscribeRealtime((frame) => {
+    // A reconnect publishes two frames — the neutral one and the file-change
+    // one — and the file-change frame already carries the refetch. Skipping
+    // the neutral one keeps a reconnect at the single GET it has always been.
+    if (frame.type === REALTIME_RECONNECT_FRAME.type) return;
+    void load();
+  });
 }
 
 /**

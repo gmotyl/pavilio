@@ -615,6 +615,28 @@ describe("terminalInstances", () => {
     expect(loggedMetrics()).toHaveLength(1);
   });
 
+  it("appends an auto-return line when a return reopens a stranded socket", async () => {
+    const mod = await import("../terminalInstances");
+    const inst = mod.acquireTerminal("test-session");
+
+    // What useMobileReconnect does on its return path: same identity lookup,
+    // but the row has to name the return — attributing it to `auto-blank`
+    // would hide the trigger ADR 0017 is reviewed against.
+    mod.reportAutoReturnReopen(inst.ws);
+
+    const logged = loggedMetrics();
+    expect(logged).toHaveLength(1);
+    expect(Object.keys(logged[0]).sort()).toEqual(METRIC_KEYS);
+    expect(logged[0].trigger).toBe("auto-return");
+    expect(logged[0].sessionId).toBe("test-session");
+
+    // The same accepted gap: a socket belonging to no pooled instance (and no
+    // socket at all) is a no-op rather than a line on the wrong session.
+    mod.reportAutoReturnReopen(null);
+    mod.reportAutoReturnReopen({ readyState: 3 } as unknown as WebSocket);
+    expect(loggedMetrics()).toHaveLength(1);
+  });
+
   it("a failing log request does not block the reconnect", async () => {
     const mod = await import("../terminalInstances");
     const inst = mod.acquireTerminal("test-session");

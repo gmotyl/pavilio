@@ -89,6 +89,9 @@ describe("useMobileReconnect", () => {
     expect(sent.some((m) => JSON.parse(m).type === "mobile-nudge")).toBe(true);
     expect(reopen).not.toHaveBeenCalled();
     expect(reportAutoReturnReopen).not.toHaveBeenCalled();
+    // Nothing was reopened here, so neither reporter may fire: a row on the
+    // nudge path would inflate the unasked-reopen counts with non-reopens.
+    expect(reportAutoBlankReopen).not.toHaveBeenCalled();
   });
 
   // ADR 0017: a CLOSED socket produces no output, so a reopen has nothing to
