@@ -138,10 +138,17 @@ async function reconnected() {
  * React's "am I inside a test?" flag. Switched off for the one test that has to
  * observe the browser's own scheduling: inside `act` an update made from an
  * effect is flushed synchronously, which closes the very window that test pins.
+ *
+ * Returns what it displaced, so the `finally` that puts it back restores the
+ * value that was actually there rather than a literal `true` — the flag is set
+ * by the test setup, not by this file, and writing a guess back into a global
+ * is how one test's cleanup starts deciding for the next.
  */
-function actEnvironment(enabled: boolean) {
-  (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    enabled;
+function actEnvironment(enabled: boolean | undefined): boolean | undefined {
+  const flags = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = flags.IS_REACT_ACT_ENVIRONMENT;
+  flags.IS_REACT_ACT_ENVIRONMENT = enabled;
+  return previous;
 }
 
 beforeEach(() => {
@@ -1187,7 +1194,7 @@ describe("useUtteranceChannel", () => {
       for (const listener of [...realtimeListeners]) listener({ ...REALTIME_RECONNECT_FRAME });
     });
 
-    actEnvironment(false);
+    const restoreActEnvironment = actEnvironment(false);
     try {
       afterCommit = land;
       lastMessage = frame(utterance("cell-a", "a1"));
@@ -1197,7 +1204,7 @@ describe("useUtteranceChannel", () => {
       }
     } finally {
       afterCommit = () => {};
-      actEnvironment(true);
+      actEnvironment(restoreActEnvironment);
     }
 
     // The socket was back and the answer arrived as an ordinary broadcast, so
@@ -1205,6 +1212,71 @@ describe("useUtteranceChannel", () => {
     // took nothing up, and must not record what it did not deliver.
     expect(result.current.stateFor("cell-a")).toBe("ready");
     expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("commits the catch-up ahead of a live frame landing in the same commit", async () => {
+    /**
+     * Pins the DECLARATION ORDER of the two arrival effects, which is
+     * load-bearing and which nothing else in this file discriminates: the test
+     * above lands its `setFetched` from an effect declared after the channel,
+     * so the fetch always commits in a LATER commit than the live frame and the
+     * same-commit interleave is never built.
+     *
+     * Here it is. `lastMessage` is a module variable read during render, so
+     * staging the frame and then resolving the catch-up puts BOTH changed
+     * dependencies in the one render `setFetched` triggers — the commit effect
+     * and the arrival effect run back to back in that commit, in declaration
+     * order.
+     *
+     * The commit effect is declared ABOVE the arrival effect, so the catch-up's
+     * updater is queued first and the arrival's own `queueHolds` gate finds the
+     * answer already in the queue and no-ops. Swap the two declarations and the
+     * arrival is queued first while the catch-up still decides against a
+     * `sessionsRef` that predates it — the mirror is written during render, so
+     * it says the same thing whichever effect asks — and its updater, which no
+     * longer re-checks `covers`, hands the same id to a reducer with no dedupe
+     * of its own and the cell ends up holding the answer twice.
+     */
+    const { result } = await renderChannel();
+    await act(async () => {
+      result.current.setArmed("cell-a");
+    });
+
+    // A catch-up held in flight, so the frame can be staged before it lands.
+    let land: () => void = () => {};
+    const body = new Promise<{ utterances: Utterance[] }>((resolve) => {
+      land = () => resolve({ utterances: [utterance("cell-a", "a1")] });
+    });
+    global.fetch = vi.fn(
+      async () => ({ ok: true, json: () => body }) as unknown as Response,
+    ) as unknown as typeof fetch;
+    await act(async () => {
+      for (const listener of [...realtimeListeners]) listener({ ...REALTIME_RECONNECT_FRAME });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The broadcast of the very same answer, staged but not yet rendered: the
+    // render `setFetched` triggers is the one that reads it, which is what puts
+    // the two arrivals in a single commit.
+    lastMessage = frame(utterance("cell-a", "a1"));
+    await act(async () => {
+      land();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const queue = result.current.queueFor("cell-a");
+    const held = [...queue.previous, ...(queue.current ? [queue.current] : []), ...queue.pending];
+    // Exactly one copy, anywhere in the queue. `utteranceQueueReducer` dedupes
+    // nothing, so the order these two effects commit in is the whole of what
+    // keeps the second copy out.
+    expect(held.filter((entry) => entry.id === "a1")).toHaveLength(1);
+    expect(queue.previous).toHaveLength(0);
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    // The catch-up committed first, so it is the path that actually delivered
+    // the answer and the one whose `recordAutoplayed` is honest — once, for the
+    // single entry the cell ends up holding.
+    expect(recordAutoplayed).toHaveBeenCalledTimes(1);
+    expect(recordAutoplayed).toHaveBeenCalledWith("cell-a", "a1");
   });
 
   it("leaves a caught-up utterance unheard and counted as unread", async () => {
