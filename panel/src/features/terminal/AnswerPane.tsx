@@ -13,7 +13,7 @@ import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { ANSWER_PANE_FULL_HEIGHT, preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { AnswerComposer } from "./AnswerComposer";
-import { AnswerWaiting, AnswerWaitingNext } from "./AnswerWaiting";
+import { AnswerWaiting, AnswerWaitingNext } from "./AnswerWaitingView";
 import { beginWaiting, releaseAnswer, useAnswerHeld, useAnswerWaiting } from "./answerWaiting";
 import { projectOfSession } from "./sessionProject";
 import { useActivityState } from "./useTerminalActivityChannel";
