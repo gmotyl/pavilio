@@ -43,23 +43,6 @@ interface Entry {
    * hands a fresh tab is old news, not an answer to the question just asked.
    */
   seen: Set<string> | null;
-  /**
-   * The pane is open ONLY to stand in for an answer that does not exist yet —
-   * a launcher press opened it to show the wave, and there is nothing behind
-   * that wave.
-   *
-   * It is the one fact that tells {@link closeAnswerPaneOpenedForWait} a pane
-   * it may close from a pane it may not, and it is kept HERE rather than in
-   * `TerminalView` for the reason the rest of this module exists: the view is
-   * remounted by every layout change, so a flag held in it would be lost by a
-   * maximize made mid-boot and the pane would then stay open over the terminal
-   * for the rest of the tab's life.
-   *
-   * It is deliberately NOT part of {@link AnswerPaneSnapshot}: nothing renders
-   * differently for it, and widening the snapshot would make a pane that only
-   * changed WHY it is open publish a change to every subscriber.
-   */
-  openedForWait: boolean;
 }
 
 const entries = new Map<string, Entry>();
@@ -75,7 +58,6 @@ function entryFor(sessionId: string): Entry {
     entry = {
       snapshot: { open: false, autoOpen: getStoredAutoOpenAnswer() },
       seen: null,
-      openedForWait: false,
     };
     entries.set(sessionId, entry);
   }
@@ -89,65 +71,8 @@ export function getAnswerPaneState(sessionId: string): AnswerPaneSnapshot {
 
 export function setAnswerPaneOpen(sessionId: string, open: boolean): void {
   const entry = entryFor(sessionId);
-  // Whoever calls this is deciding the pane's state outright — the eye, Escape,
-  // the bar going away, an answer landing on a cell whose switch is on — and
-  // that takes the pane out of the launcher press's hands. Cleared BEFORE the
-  // no-change return below, because the commonest case of this is precisely a
-  // caller asking for `true` on a pane the press has already opened: the state
-  // does not change, and the REASON does.
-  entry.openedForWait = false;
   if (entry.snapshot.open === open) return;
   entry.snapshot = { ...entry.snapshot, open };
-  notify();
-}
-
-/**
- * Open the pane to stand in for an answer that does not exist yet — the user
- * has pressed a launcher pill, and the wave is what the cell has to show for
- * it until the agent speaks.
- *
- * Unlike {@link setAnswerPaneOpen} this records WHY the pane is open, so that
- * {@link closeAnswerPaneOpenedForWait} can put it back exactly as it found it
- * if the agent finishes without ever saying anything.
- *
- * A pane that is ALREADY open is left entirely alone, mark included. It is
- * open for reasons of its own — the user's eye, an answer that landed — and a
- * press is not a licence to close it again afterwards.
- */
-export function openAnswerPaneForWait(sessionId: string): void {
-  const entry = entryFor(sessionId);
-  if (entry.snapshot.open) return;
-  entry.openedForWait = true;
-  entry.snapshot = { ...entry.snapshot, open: true };
-  notify();
-}
-
-/**
- * The pane has something behind the wave now, so it is no longer the press's
- * to close: an answer has landed for this cell.
- *
- * Only the mark moves — the pane's open state is untouched, because whether an
- * arrival OPENS a closed pane is the auto-open switch's question and is
- * answered elsewhere. A no-op for a pane no press opened.
- */
-export function keepAnswerPaneOpen(sessionId: string): void {
-  const entry = entries.get(sessionId);
-  if (!entry) return;
-  entry.openedForWait = false;
-}
-
-/**
- * Close a pane that was opened only to show a wave, now that the wave is gone.
- *
- * A no-op for every other pane, which is the point of the mark: the user's own
- * eye press and a pane showing a real answer both survive this untouched.
- */
-export function closeAnswerPaneOpenedForWait(sessionId: string): void {
-  const entry = entries.get(sessionId);
-  if (!entry || !entry.openedForWait) return;
-  entry.openedForWait = false;
-  if (!entry.snapshot.open) return;
-  entry.snapshot = { ...entry.snapshot, open: false };
   notify();
 }
 
@@ -197,5 +122,27 @@ export function useAnswerPaneState(sessionId: string): AnswerPaneSnapshot {
     subscribeAnswerPane,
     () => getAnswerPaneState(sessionId),
     () => getAnswerPaneState(sessionId),
+  );
+}
+
+/**
+ * Whether ANY of the listed sessions has its pane open.
+ *
+ * Read with a plain `entries.get`, never {@link entryFor}: a session that has
+ * never been given a pane is not open, and asking the question must not be
+ * what CREATES its entry — `TerminalsSurface` calls this over its whole
+ * session list on every render, and most of those sessions may never have
+ * had a cell mounted for them yet.
+ */
+export function anyAnswerPaneOpen(sessionIds: readonly string[]): boolean {
+  return sessionIds.some((id) => entries.get(id)?.snapshot.open ?? false);
+}
+
+/** {@link anyAnswerPaneOpen}, re-rendering the caller whenever any pane opens or closes. */
+export function useAnyAnswerPaneOpen(sessionIds: readonly string[]): boolean {
+  return useSyncExternalStore(
+    subscribeAnswerPane,
+    () => anyAnswerPaneOpen(sessionIds),
+    () => anyAnswerPaneOpen(sessionIds),
   );
 }

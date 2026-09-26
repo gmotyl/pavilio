@@ -242,7 +242,7 @@ afterEach(() => {
 });
 
 describe("a launcher press opens the answer pane", () => {
-  it("a delivered launcher press opens the pane on the waiting state", async () => {
+  it("a launcher press opens the pane and leaves no opened-for-wait mark", async () => {
     render(cell(makeSpeech()));
     // The cell has never spoken, so the pane is closed. The eye is on the row
     // — it has been since the strip stopped being conditional — but nothing
@@ -327,7 +327,7 @@ describe("a launcher press opens the answer pane", () => {
     expect(screen.getByTestId(`answer-pane-auto-open-${SESSION}`)).not.toBeChecked();
   });
 
-  it("an agent that boots and never speaks closes the pane again", async () => {
+  it("the wait ending on idle does not close a press-opened pane", async () => {
     render(cell(makeSpeech()));
 
     fireEvent.click(launcher());
@@ -340,12 +340,14 @@ describe("a launcher press opens the answer pane", () => {
     expect(wave()).toBeInTheDocument();
 
     // It finishes without ever speaking. The wait ends by the existing idle
-    // exit with no answer to show — so the pane, which was opened to show the
-    // wave, closes again rather than sitting there as an empty box over a
-    // terminal the user wants to see.
+    // exit with no answer to show — and `answerPaneState` keeps no memory of
+    // why the pane is open, so it is left open and empty over the terminal,
+    // exactly as the eye would have left it, rather than closing itself.
     activity("idle");
-    await waitFor(() => expect(pane()).toBeNull());
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
+    await waitFor(() =>
+      expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false }),
+    );
+    expect(pane()).not.toBeNull();
   });
 
   it("an answer arriving leaves the pane open on the answer", async () => {
@@ -378,21 +380,13 @@ describe("a launcher press opens the answer pane", () => {
   });
 
   /**
-   * DEFENDS `keepAnswerPaneOpen(sessionId)` in `TerminalView`'s arrival effect
-   * — the line that takes the pane out of the press's hands once there is a
-   * real answer behind the wave.
-   *
-   * The test above does NOT defend it, and could not: the auto-open switch is
-   * ON by default there, so the arrival also calls `setAnswerPaneOpen(…, true)`
-   * — which clears `openedForWait` on its way past, before its own no-change
-   * return (see `answerPaneState`). Two lines reach the same mark and deleting
-   * either leaves the other doing the work.
-   *
-   * With the switch OFF nothing else touches the mark, so the whole sequence
-   * hangs on this one line: press opens the pane for the wait, the answer
-   * lands, and the wait ends afterwards. Without it
-   * `closeAnswerPaneOpenedForWait` still believes the pane is the press's and
-   * closes an answer the user is reading.
+   * A regression guard for the same fact the two tests above already hold,
+   * exercised on the one path where a stray "put it back the way the press
+   * found it" behaviour would be hardest to notice: auto-open OFF, so the
+   * arrival does not also call `setAnswerPaneOpen(…, true)` on top of the
+   * press's own open. If the wait ending ever again closed a press-opened
+   * pane, this is the sequence — press, answer, idle — that would catch it
+   * closing an answer the user is reading.
    */
   it("an answer with auto-open off survives the wait ending", async () => {
     // The browser-wide default Settings keeps, off — and the cell's entry

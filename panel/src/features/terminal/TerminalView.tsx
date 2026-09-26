@@ -7,8 +7,6 @@ import {
 } from "./terminalInstances";
 import { AnswerPane } from "./AnswerPane";
 import {
-  closeAnswerPaneOpenedForWait,
-  keepAnswerPaneOpen,
   markSeenUtterances,
   setAnswerPaneAutoOpen,
   setAnswerPaneOpen,
@@ -16,14 +14,12 @@ import {
 } from "./answerPaneState";
 import { useAnswerWaiting } from "./answerWaiting";
 import { BootLegend } from "./BootLegend";
-import { hasSeenBootLegend, markBootLegendSeen } from "./bootLegendSeen";
-import { useLauncherUsed } from "./launcherUse";
 import { captureBufferSnapshot } from "./bufferSnapshot";
 import { SpeechControlBar } from "./SpeechControlBar";
 import { useMobileReconnect } from "./useMobileReconnect";
 import { viewportLooksBlank } from "./viewportBlank";
 import type { GridSpeech } from "../speech/types";
-import type { UtteranceQueue } from "../speech/utteranceQueue";
+import { utteranceUnderCursor, type UtteranceQueue } from "../speech/utteranceQueue";
 
 interface TerminalViewProps {
   sessionId: string;
@@ -111,29 +107,18 @@ export function TerminalView({
   // written back to it.
   const { open: answerOpen, autoOpen } = useAnswerPaneState(sessionId);
 
-  // Whether this cell is currently showing the boot legend. Declared up here,
-  // with the rest of the view's state, because three effects below turn it off
-  // — an answer arriving, the wait ending, and the legend's own dismissal —
-  // and the first of them is written before the effect that ever turns it ON.
-  // What ARMS it, and why it cannot be read off the waiting snapshot, is the
-  // long note further down.
-  const [legendUp, setLegendUp] = useState(false);
-
   // Hiding the bar CLOSES the pane rather than merely covering it — a pane
   // without its bar has no eye to close it, and one that came back unasked
   // when the bar returned would be a surprise.
   //
-  // ...and it puts the legend away for the same reason, which the render gate
-  // alone did not do. The gate reads `speech && speechBarVisible && legendUp`,
-  // so hiding the bar only STOPPED DRAWING the overlay while `legendUp` stayed
-  // true underneath; showing the bar again mid-boot brought it back, which
-  // "shown once" does not intend. Clearing the flag makes the hide a dismissal,
-  // which is what it is: the user took the two controls the legend names off
-  // the screen.
+  // The legend follows for free: it is a derivation over `answerOpen` among
+  // other stores (see `legendShown` below), and closing the pane here already
+  // makes that derivation false. There is nothing left here to put away
+  // separately, and showing the bar again does not bring the legend back on
+  // its own — it takes an open, empty pane, which this effect just closed.
   useEffect(() => {
     if (speechBarVisible) return;
     setAnswerPaneOpen(sessionId, false);
-    setLegendUp(false);
   }, [sessionId, speechBarVisible]);
 
   // Arrival detection. Every utterance id the queue has ever shown this cell
@@ -154,129 +139,55 @@ export function TerminalView({
       .filter((u) => u !== null)
       .map((u) => u.id);
     const arrived = markSeenUtterances(sessionId, ids).length > 0;
-    // There is something behind the wave now. Said on EVERY arrival, ahead of
-    // the switch and of the bar alike, because it is a fact about the cell and
-    // not a decision about the pane: a pane a launcher press opened is no
-    // longer the press's to close once the agent it asked for has spoken, and
-    // the effect below must not take the answer away when that agent later
-    // goes quiet. Unconditional for the same reason the recording above is —
-    // the answer exists whether or not this cell is currently showing it.
-    if (arrived) keepAnswerPaneOpen(sessionId);
     // The bar's visibility outranks the switch, as it outranks the eye. The
     // arrival is still recorded above: it is not held back for the bar's return.
     if (arrived && autoOpen && speechBarVisible) setAnswerPaneOpen(sessionId, true);
-    // The legend stood in for a pane with nothing in it. There is something in
-    // it now, and a teaching overlay across the answer the user asked for is
-    // the legend outstaying the moment it was for.
-    if (arrived) setLegendUp(false);
   }, [sessionId, queue, autoOpen, speechBarVisible]);
 
-  // The press's opener has no closer of its own, and needs one. A pane opened
-  // by a launcher press was opened to show the wave and nothing else, so when
-  // the wave goes with no answer behind it — the agent booted, worked and
-  // finished without ever speaking, which is the exit `answerWaiting` calls
-  // the silent-agent one — what is left is an empty box over a terminal the
-  // user wants to see.
-  //
-  // It is OBSERVED here rather than driven from the state machine, and that is
-  // the whole reason it lives in this file. `answerWaiting` owns when a wait
-  // ends and `answerPaneState` owns whether the pane is open; neither may
-  // reach into the other (see the header of `answerWaiting`, where every arrow
-  // points the same way), and this view is the one place that reads both. So
-  // the end of a wait arrives here as an ordinary render and the pane is put
-  // back exactly as the press found it.
-  //
-  // `closeAnswerPaneOpenedForWait` is a no-op for every pane the press did not
-  // open, which is what keeps this from closing a pane the user opened with
-  // the eye, or one showing an answer that has since landed. Declared AFTER
-  // the arrival effect above so that, in a commit carrying both, the arrival
-  // has already said the pane is no longer the press's.
-  const { waiting, pending } = useAnswerWaiting(sessionId);
-  useEffect(() => {
-    if (waiting) return;
-    closeAnswerPaneOpenedForWait(sessionId);
-    // The wave is what the legend was drawn over. With the wait finished there
-    // is either an answer (dismissed by the arrival above) or an empty pane on
-    // its way closed, and a legend over either is an overlay with no subject.
-    setLegendUp(false);
-  }, [sessionId, waiting]);
+  // A pane a launcher press opened is no longer put back the way the press
+  // found it once the wait ends: `answerPaneState` keeps no memory of why the
+  // pane is open, so an agent that boots, works and finishes without ever
+  // speaking — the exit `answerWaiting` calls the silent-agent one — simply
+  // leaves the pane sitting open and empty over the terminal, exactly as the
+  // eye would have left it. Nothing here closes it any more, and nothing has
+  // to: the pane sitting open and empty is exactly the state `legendShown`
+  // below reads as "show the legend".
+  const { waiting } = useAnswerWaiting(sessionId);
 
   /**
-   * THE BOOT LEGEND'S TRIGGER — and why it is this signal and not the snapshot.
+   * THE LEGEND, as a plain derivation over stores this view already
+   * subscribes to — no flag, no arming effect, no dismissal.
    *
-   * The waiting state has three triggers and the legend must fire on exactly
-   * one: the user pressing a launcher pill on a cell whose controls they have
-   * never met. The snapshot cannot tell them apart. A send yields
-   * `{waiting: true, pending: true}` — distinguishable — but a launcher press
-   * and a debounced busy spell BOTH yield the one frozen `AGENT_HAS_THE_BODY`
-   * object, by construction (`answerWaiting`'s `derive` returns it for
-   * `entry.starting || agentHasTheBody`), and `starting` is deliberately not
-   * exported. `answerPaneState`'s `openedForWait` is not readable either.
+   * `open AND NOT waiting AND no answer under the cursor AND the bar is
+   * visible.` Every one of the old flag's effects was a proxy for this one
+   * fact — *is the pane open with nothing in it?* — and reading the fact
+   * directly means there is nothing left to arm, disarm or remember:
    *
-   * So the trigger is read from the module that owns the fact itself:
-   * `launcherUse` records a launcher command that was DELIVERED — it is set
-   * from `LauncherPills`' `onDelivered`, the same callback that calls
-   * `noteAgentStarting`. That is not a proxy for the press; it IS the press,
-   * reported by the only code that knows the frame landed.
-   *
-   * It is armed on the RISING EDGE rather than on the level, and that is
-   * load-bearing rather than tidy. The flag stays true for the life of the
-   * cell, so a level test would also be satisfied by a busy spell arming the
-   * body an hour later on the same cell — and it would then be `bootLegendSeen`
-   * alone stopping the legend from appearing on the wrong trigger. The
-   * discrimination must not lean on the seen flag: one of them decides WHICH
-   * event teaches, the other decides HOW OFTEN, and a rule that conflates them
-   * shows the legend on a busy transition the first time a browser meets one.
-   *
-   * `waiting && !pending` is asked as well, at the moment of the edge: a
-   * delivered press that somehow left no wait behind has nothing to draw over,
-   * and a press made while a draft is still outstanding belongs to the send.
-   *
-   * ON A REMOUNT MID-BOOT the legend does not come back, and that is the
-   * intended reading. `lastLauncherUsed` is seeded from the CURRENT value at
-   * mount, so a view remounted by a maximize or a preset while the agent is
-   * still booting sees no edge. The user made a gesture; the overlay goes, like
-   * it does for Escape. It could not return anyway — the browser was marked
-   * taught the moment it was first shown, which is the whole cost of the
-   * feature.
+   * - **A launcher press** opens the pane and hands the body to the wave in
+   *   the very same commit (`LauncherPills`'s `onDelivered` calls
+   *   `noteAgentStarting` before `setAnswerPaneOpen`) — `open` and `waiting`
+   *   become true together, so the legend never appears at the moment of the
+   *   press itself. It can only show up later: if the session goes idle again
+   *   with nothing having been said (the next bullet), or via the eye opening
+   *   an unspoken cell (the bullet after that).
+   * - **A silent boot** ends the wait on idle with no answer having arrived;
+   *   `waiting` goes false, `answer` is still null, and the legend is exactly
+   *   what the empty pane falls through to.
+   * - **The eye**, on a cell with no answer and no wait running, opens the
+   *   pane straight onto the same empty state.
+   * - **An arriving utterance** moves the cursor onto it, so `answer` stops
+   *   being null and the legend and the answer trade places by construction —
+   *   no effect has to notice the arrival and turn anything off.
+   * - **Escape and the eye** already close the pane (`closeAnswer`,
+   *   `SpeechControlBar`'s toggle); a closed pane fails `open` and the legend
+   *   is gone with it.
+   * - **Hiding the bar** closes the pane above; showing it again reopens
+   *   neither the pane nor the legend, because nothing here reopens it.
+   * - **It is shown every time**, on every cell, because there is no
+   *   per-browser "already taught" preference left to consult.
    */
-  const launcherUsed = useLauncherUsed(sessionId);
-  const lastLauncherUsed = useRef(launcherUsed);
-  useEffect(() => {
-    // A FALL is recorded at once — the cell was forgotten and re-registered,
-    // and a fall that went unrecorded would make the next rise no edge at all.
-    if (!launcherUsed) {
-      lastLauncherUsed.current = false;
-      return;
-    }
-    if (lastLauncherUsed.current) return;
-
-    // THE EDGE IS NOT CONSUMED UNTIL THERE IS A WAIT TO ACT ON, and the order
-    // of these two lines is the whole of it. The ref used to be written above
-    // this guard, which meant an edge arriving one commit AHEAD of `waiting`
-    // was swallowed and the legend never appeared. It worked only because
-    // `LauncherPills` happens to call `noteAgentStarting` before `onDelivered`
-    // — the two facts come from two different stores, and nothing made that
-    // order a rule. Swapping those two lines would have killed the legend in
-    // silence, with every test still green. Now the edge simply waits for the
-    // wait it belongs to; `BootLegend.test.tsx` drives the two in the other
-    // order and holds this.
-    if (!waiting) return;
-    lastLauncherUsed.current = true;
-
-    // ...and a press made while a draft is still outstanding belongs to the
-    // send, which has a pane the user already opened and typed into. Consumed
-    // above rather than left armed: the press has had its answer.
-    if (pending) return;
-    if (hasSeenBootLegend()) return;
-    // Written on SHOWING, not on dismissing — see `bootLegendSeen`, where the
-    // reason lives: every way out of the legend is the user having seen it, and
-    // picking one of them as the real one would teach a maximized cell twice.
-    markBootLegendSeen();
-    setLegendUp(true);
-  }, [launcherUsed, waiting, pending]);
-
-  const dismissLegend = useCallback(() => setLegendUp(false), []);
+  const answer = queue ? utteranceUnderCursor(queue) : null;
+  const legendShown = answerOpen && !waiting && answer === null && speechBarVisible;
 
   // Escape in the pane: close it and put the keyboard back in the terminal,
   // so the next question can be typed at once. `LiveTerminal.terminal` is the
@@ -472,10 +383,9 @@ export function TerminalView({
           Gated on the bar the same way the pane is, and for a sharper reason
           than the pane's: with the row hidden the two controls the legend
           points at are not on screen at all, so the callouts would name
-          nothing and the leaders would end in the cell's own margin. */}
-      {speech && speechBarVisible && legendUp ? (
-        <BootLegend sessionId={sessionId} onDismiss={dismissLegend} />
-      ) : null}
+          nothing and the leaders would end in the cell's own margin. That gate
+          is folded into `legendShown` itself now, rather than repeated here. */}
+      {speech && legendShown ? <BootLegend sessionId={sessionId} /> : null}
       {/* THE TERMINAL AREA: the column cell the xterm fills, and the pane's
           positioning context.
 

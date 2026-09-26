@@ -1,7 +1,7 @@
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { toast } from "../../lib/toast";
-import { openAnswerPaneForWait } from "./answerPaneState";
+import { setAnswerPaneOpen } from "./answerPaneState";
 import { noteAgentStarting } from "./answerWaiting";
 import { noteLauncherUsed, useLauncherUsed } from "./launcherUse";
 import { submitToPty } from "./ptySubmit";
@@ -82,11 +82,12 @@ function sessionStartCommand(sessionId: string): string {
  * that opened anyway would be claiming an agent had been asked for when the
  * frame never left the browser.
  *
- * The ORDER is load-bearing and not cosmetic. The wait is begun first so that
- * no render can ever observe an open pane with no wait behind it — which is
- * exactly the state `TerminalView`'s closer reads as "the agent finished
- * without speaking" and would answer by closing the pane on the frame it was
- * opened.
+ * The wait is begun first, agent-starting ahead of the pane opening, so that
+ * a render never has to reconcile the two in the other order. `answerPaneState`
+ * keeps no memory of WHY the pane is open any more — the pane opened here
+ * stays open on its own terms, same as one opened by the eye — so nothing
+ * downstream reads this order as a signal; it is kept for the read, not
+ * because anything left would misbehave if it were reversed.
  *
  * It is unconditional in one respect that is easy to misread as a bug: it does
  * NOT consult the cell's "Open on new answer" switch. That switch means *open
@@ -111,7 +112,7 @@ function runCommand(
   submitToPty(sessionId, send, command, {
     onDelivered: () => {
       noteAgentStarting(sessionId);
-      openAnswerPaneForWait(sessionId);
+      setAnswerPaneOpen(sessionId, true);
       onDelivered?.();
     },
     onFailed: (stage) => {

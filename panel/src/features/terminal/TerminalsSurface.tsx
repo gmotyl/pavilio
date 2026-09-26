@@ -13,6 +13,7 @@ import {
 } from "./terminalInstances";
 import { writeTerminalFocus } from "./useTerminalSessions";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
+import { useAnyAnswerPaneOpen } from "./answerPaneState";
 import type { TerminalHandle } from "./TerminalView";
 import type { RepoEntry } from "../projects/useProjects";
 import type { LayoutPreset, TileLayout } from "./tileLayout";
@@ -124,6 +125,14 @@ export function TerminalsSurface({
     if (focusedId) reconnectSession(focusedId);
   };
 
+  // The mobile shortcut bar and an open answer pane both live in the row
+  // above the keyboard — on a phone there isn't room for both, and the pane
+  // (a live reply) wins. Scoped to this surface's own sessions: a pane open
+  // on another project's terminal must not blank this bar.
+  const shortcutBarYielded = useAnyAnswerPaneOpen(
+    sessions.map((session) => session.id),
+  );
+
   return (
     <div
       className={`flex flex-col relative ${
@@ -233,22 +242,24 @@ export function TerminalsSurface({
         )}
       </div>
 
-      {/* Mobile shortcut bar */}
-      <TerminalShortcutBar
-        onSend={(data) => {
-          const targetId = focusedId ?? sessions[0]?.id;
-          if (!targetId) return;
-          const handle = terminalHandlesRef.current.get(targetId);
-          handle?.send(data);
-          // Re-focus the xterm on the next frame so subsequent taps on
-          // the on-screen keyboard still go into the terminal.
-          requestAnimationFrame(() => handle?.focus());
-        }}
-        onToggleKeyboard={() => {
-          const targetId = focusedId ?? sessions[0]?.id;
-          if (targetId) terminalHandlesRef.current.get(targetId)?.focus();
-        }}
-      />
+      {/* Mobile shortcut bar — yields its row to an open answer pane */}
+      {!shortcutBarYielded && (
+        <TerminalShortcutBar
+          onSend={(data) => {
+            const targetId = focusedId ?? sessions[0]?.id;
+            if (!targetId) return;
+            const handle = terminalHandlesRef.current.get(targetId);
+            handle?.send(data);
+            // Re-focus the xterm on the next frame so subsequent taps on
+            // the on-screen keyboard still go into the terminal.
+            requestAnimationFrame(() => handle?.focus());
+          }}
+          onToggleKeyboard={() => {
+            const targetId = focusedId ?? sessions[0]?.id;
+            if (targetId) terminalHandlesRef.current.get(targetId)?.focus();
+          }}
+        />
+      )}
     </div>
   );
 }
