@@ -58,8 +58,42 @@ import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types"
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
 import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
-import { utteranceUnderCursor } from "./utteranceQueue";
+import { MAX_PENDING, MAX_PREVIOUS, utteranceUnderCursor } from "./utteranceQueue";
 import { getStoredVoice } from "./voices";
+
+/**
+ * How many utterances the armed cell's autoplay record keeps.
+ *
+ * The record is only ever asked about the utterance UNDER THE CURSOR, and the
+ * cursor can only ever land on an utterance the queue holds — its history, the
+ * answer it is on, and the ones waiting behind it. That is
+ * `MAX_PREVIOUS + 1 + MAX_PENDING` at its very widest, so an id older than the
+ * newest eleven recorded has fallen out of the queue's reach and can never be
+ * asked about again. The same argument bounds the channel's `heard` set, and
+ * for the same reason: unbounded, this would grow for as long as one cell
+ * stays armed.
+ *
+ * Derived from the queue's own constants rather than written as `11`, so a
+ * deeper history cannot silently make the record too short.
+ */
+const MAX_AUTOPLAYED = MAX_PREVIOUS + 1 + MAX_PENDING;
+
+/**
+ * Records that autoplay has no further business with this utterance, dropping
+ * the oldest record once the bound is reached.
+ *
+ * Re-recording moves an id to the newest end: a `Set` keeps insertion order,
+ * and an utterance the transport has just landed on again is the last one that
+ * should be forgotten.
+ */
+function rememberAutoplayed(remembered: Set<string>, utteranceId: string): void {
+  remembered.delete(utteranceId);
+  remembered.add(utteranceId);
+  for (const oldest of remembered) {
+    if (remembered.size <= MAX_AUTOPLAYED) break;
+    remembered.delete(oldest);
+  }
+}
 
 /**
  * How a playback ended. `"pending"` until something ends it early, and only a
@@ -161,8 +195,21 @@ export function useSpeechHost(): SpeechHost {
   // Keyed by utterance id: preparation is pure and the same utterance always
   // prepares the same way, so a replay must not pay for it twice.
   const preparedRef = useRef<Map<string, PreparedSpeech>>(new Map());
-  /** The last utterance the armed cell autoplayed, so none is played twice. */
-  const autoplayedRef = useRef<string | null>(null);
+  /**
+   * The armed cell's utterances that autoplay is done with, so none is played
+   * twice.
+   *
+   * A SET rather than the one slot it used to be, because the records are no
+   * longer all about the utterance under the cursor. A catch-up records the
+   * answer it RECOVERED, which a speaking or paused cell queues behind the live
+   * run and which a cursor parked in the history is not on — so a single slot
+   * was overwritten with an id the guard never compares against, leaving the
+   * cursor's own utterance unrecorded and the effect free to start it again:
+   * the live run restarted from unit 0, and a silent step back spoke the answer
+   * it had stepped onto. One record per utterance is the honest shape for a
+   * question asked per utterance. Bounded by {@link MAX_AUTOPLAYED}.
+   */
+  const autoplayedRef = useRef<Set<string>>(new Set());
   /**
    * The armed cell, mirrored, so {@link recordAutoplayed} can be declared above
    * the channel — which is where the armed cell comes from, and which needs the
@@ -320,6 +367,11 @@ export function useSpeechHost(): SpeechHost {
    * where the effect would otherwise ABSORB the arrival — returning to the
    * application is no gesture — and lose its spoken form for good (ADR 0017).
    *
+   * Those three callers name the utterance the cursor LANDED on; the catch-up
+   * names one that may be queued behind a live run or sitting in front of a
+   * cursor parked in the history. That is why the record is a set: it has to
+   * hold what the cursor is on and what was recovered at the same time.
+   *
    * So this is not "mark it played". Nothing about `heard`, the unplayed count
    * or the pips passes through here — those are `markHeard` / `finishUtterance`
    * — and a silent step leaves every one of them alone. It is narrower than its
@@ -331,7 +383,9 @@ export function useSpeechHost(): SpeechHost {
    * of the host, which is what keeps the channel's catch-up effect off it.
    */
   const recordAutoplayed = useCallback((sessionId: string, utteranceId: string): void => {
-    if (sessionId === armedSessionIdRef.current) autoplayedRef.current = utteranceId;
+    if (sessionId === armedSessionIdRef.current) {
+      rememberAutoplayed(autoplayedRef.current, utteranceId);
+    }
   }, []);
 
   // The channel never observes playback or synthesis, so everything it needs to
@@ -928,8 +982,13 @@ export function useSpeechHost(): SpeechHost {
 
   useEffect(() => {
     // Arming a cell does not speak what is already sitting in it: autoplay is
-    // for utterances that ARRIVE while the cell is armed.
-    autoplayedRef.current = armedSessionId ? (utteranceFor(armedSessionId)?.id ?? null) : null;
+    // for utterances that ARRIVE while the cell is armed. A fresh set, because
+    // the records belong to the cell that was armed and say nothing about this
+    // one.
+    const remembered = new Set<string>();
+    const under = armedSessionId ? utteranceFor(armedSessionId) : null;
+    if (under) remembered.add(under.id);
+    autoplayedRef.current = remembered;
     // `utteranceFor` deliberately not a dependency: this must run when the
     // armed cell changes, and only then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -937,18 +996,18 @@ export function useSpeechHost(): SpeechHost {
 
   useEffect(() => {
     if (!armedSessionId || !armedUtterance) return;
-    if (autoplayedRef.current === armedUtterance.id) return;
+    if (autoplayedRef.current.has(armedUtterance.id)) return;
 
     if (!unlocked) {
       // No gesture has reached the element yet, so the browser would refuse
       // this anyway — and a tab that has just hydrated `/api/speech/latest`
       // must not start talking on its own. Absorb it: it is old news by the
       // time the user does click something.
-      autoplayedRef.current = armedUtterance.id;
+      rememberAutoplayed(autoplayedRef.current, armedUtterance.id);
       return;
     }
 
-    autoplayedRef.current = armedUtterance.id;
+    rememberAutoplayed(autoplayedRef.current, armedUtterance.id);
     speak(armedSessionId);
   }, [armedSessionId, armedUtterance, speak, unlocked]);
 
