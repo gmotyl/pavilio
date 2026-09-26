@@ -29,9 +29,12 @@ describe("useMobileReconnect", () => {
   // The synthetic ws uses vi.fn() for addEventListener, so the hook's internal
   // "message" listener is stubbed; the watchdog tests exploit that fact to
   // simulate silence (no message events ever reach the ref).
+  // mockReset, not mockClear: a test that installs a mockImplementation on one
+  // of these must not leak it into the rest of the file if it throws before it
+  // can undo it. The shared restoreAllMocks does not reach a plain vi.fn().
   beforeEach(() => {
-    reportAutoBlankReopen.mockClear();
-    reportAutoReturnReopen.mockClear();
+    reportAutoBlankReopen.mockReset();
+    reportAutoReturnReopen.mockReset();
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -251,7 +254,6 @@ describe("useMobileReconnect", () => {
     becomeVisible();
     expect(order).toEqual(["report", "reopen"]);
     expect(seenReadyState).toEqual([3]);
-    reportAutoReturnReopen.mockReset();
   });
 
   it("still does not reopen a silent foregrounded socket with content on screen", () => {
