@@ -21,9 +21,32 @@ class FakeWebSocket {
   onerror: (() => void) | null = null;
   closed = false;
   closeCount = 0;
+  private openHandler: (() => void) | null = null;
 
   constructor(public url: string) {
     FakeWebSocket.instances.push(this);
+  }
+
+  /**
+   * A socket that opened immediately has already completed its handshake by
+   * the time the channel attaches its handler, so attaching runs it — that is
+   * what `initialReadyState = OPEN` means. One held at CONNECTING waits for
+   * `open()`.
+   */
+  set onopen(handler: (() => void) | null) {
+    this.openHandler = handler;
+    if (this.readyState === FakeWebSocket.OPEN) handler?.();
+  }
+
+  get onopen(): (() => void) | null {
+    return this.openHandler;
+  }
+
+  /** Finish a handshake that was held at CONNECTING. */
+  open(): void {
+    if (this.readyState !== FakeWebSocket.CONNECTING) return;
+    this.readyState = FakeWebSocket.OPEN;
+    this.openHandler?.();
   }
 
   close(): void {
@@ -398,6 +421,48 @@ describe("realtime channel", () => {
     // the import, so renaming the string would leave the suite green while
     // every consumer of the wire value stopped hearing the frame.
     expect(frames).toContainEqual({ type: "realtime-reconnect" });
+  });
+
+  it("publishes nothing for an attempt that never opens, then one pair for the connect that does", () => {
+    const frames: RealtimeFrame[] = [];
+    subscribeRealtime((frame) => {
+      frames.push(frame);
+    });
+
+    // The server goes down: the socket closes and the retry dies in the
+    // handshake. An attempt is not a reconnect — nothing was recovered, and a
+    // published frame here costs every consumer a refetch against a dead
+    // server, `/api/speech/latest` included.
+    last().close();
+    FakeWebSocket.initialReadyState = FakeWebSocket.CONNECTING;
+    vi.advanceTimersByTime(2_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(frames).toEqual([]);
+
+    last().close(); // the attempt fails without ever opening
+    expect(frames).toEqual([]);
+
+    // The server comes back. One reconnect, one pair of frames.
+    FakeWebSocket.initialReadyState = FakeWebSocket.OPEN;
+    vi.advanceTimersByTime(2_000);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+    expect(frames.map((frame) => frame.type)).toEqual(["realtime-reconnect", "file-change"]);
+  });
+
+  it("publishes the pair when a held handshake finally opens, not when it started", () => {
+    const frames: RealtimeFrame[] = [];
+    subscribeRealtime((frame) => {
+      frames.push(frame);
+    });
+
+    last().close();
+    FakeWebSocket.initialReadyState = FakeWebSocket.CONNECTING;
+    vi.advanceTimersByTime(2_000);
+    expect(frames).toEqual([]);
+
+    last().open();
+
+    expect(frames.map((frame) => frame.type)).toEqual(["realtime-reconnect", "file-change"]);
   });
 
   it("publishes no reconnect frame on the first connection", () => {

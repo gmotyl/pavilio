@@ -49,7 +49,7 @@ const listeners = new Set<Listener>();
 
 let socket: WebSocket | null = null;
 let started = false;
-let connections = 0;
+let connections = 0; // successful opens, not attempts
 let lastMessageAt = 0;
 // When the live socket was created, so a return can tell the reconnect it just
 // started from one that spent the whole freeze connecting.
@@ -77,17 +77,25 @@ function connect(): void {
   socket = ws;
   lastMessageAt = Date.now();
   socketCreatedAt = lastMessageAt;
-  connections += 1;
-  // Not on the first connect — nothing has been missed yet.
-  if (connections > 1) {
-    // Neutral frame first: `useWebSocket` keeps only the newest frame, and React
-    // batches both of these into one render, so whichever is published last is
-    // the only one its consumers see. The file-change consumers predate this
-    // frame and must keep their reconnect refetch; a consumer that wants the
-    // neutral one subscribes to the channel directly.
-    publish({ ...REALTIME_RECONNECT_FRAME });
-    publish({ ...RECONNECT_MESSAGE });
-  }
+
+  ws.onopen = () => {
+    // A socket a return already replaced recovered nothing: the tab is served
+    // by its successor, so its late handshake owes no catch-up.
+    if (socket !== ws) return;
+    connections += 1;
+    // Not on the first connection — nothing has been missed yet. Counted on
+    // `open` rather than on `new WebSocket`, so a run of failed attempts
+    // against a down server stays worth one reconnect, not one each.
+    if (connections > 1) {
+      // Neutral frame first: `useWebSocket` keeps only the newest frame, and
+      // React batches both of these into one render, so whichever is published
+      // last is the only one its consumers see. The file-change consumers
+      // predate this frame and must keep their reconnect refetch; a consumer
+      // that wants the neutral one subscribes to the channel directly.
+      publish({ ...REALTIME_RECONNECT_FRAME });
+      publish({ ...RECONNECT_MESSAGE });
+    }
+  };
 
   ws.onmessage = (event) => {
     lastMessageAt = Date.now();
