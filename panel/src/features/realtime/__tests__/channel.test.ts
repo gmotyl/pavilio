@@ -267,6 +267,24 @@ describe("realtime channel", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
+  it("a return inside the reconnect window disarms the pending reconnect", () => {
+    subscribeRealtime(vi.fn());
+    const ws = last();
+    ws.close(); // `onclose` was delivered, so the 2s reconnect is armed
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    vi.advanceTimersByTime(500); // the user comes back inside that window
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    // The armed timer must be gone: firing it would open a third socket and
+    // orphan the replacement, which stays OPEN but is no longer `socket`, so
+    // its own `onclose` is a no-op — a live socket nothing can ever close.
+    vi.advanceTimersByTime(5_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(last().closed).toBe(false);
+  });
+
   it("a replaced socket does not arm a reconnect", () => {
     subscribeRealtime(vi.fn());
     const stranded = last();
@@ -444,6 +462,33 @@ describe("realtime channel", () => {
 
     vi.advanceTimersByTime(120_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("the test reset leaves no return listener behind", () => {
+    const addSpy = vi.spyOn(window, "addEventListener");
+    subscribeRealtime(vi.fn());
+    const onPageshow = addSpy.mock.calls.find(([type]) => type === "pageshow")?.[1];
+    const onOnline = addSpy.mock.calls.find(([type]) => type === "online")?.[1];
+    expect(onPageshow).toBeTypeOf("function");
+    expect(onOnline).toBe(onPageshow); // one handler for all three return events
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+
+    __resetRealtimeChannelForTests();
+
+    // Asserted on the detach itself, and with the very handle that was added:
+    // the reset also nulls `socket` and clears `started`, which makes a
+    // surviving listener inert *in this file*. What it leaks is a handler into
+    // whichever file runs next, and only the removal call can prove that gone.
+    expect(removeSpy).toHaveBeenCalledWith("pageshow", onPageshow);
+    expect(removeSpy).toHaveBeenCalledWith("online", onOnline);
+
+    window.dispatchEvent(new Event("pageshow"));
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
   });
 
   it("the test reset closes the socket and clears subscribers and timers", () => {
