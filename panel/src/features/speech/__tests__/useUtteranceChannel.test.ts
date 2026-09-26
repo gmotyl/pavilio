@@ -1114,6 +1114,60 @@ describe("useUtteranceChannel", () => {
     expect(result.current.queueFor("cell-a").pending.map((step) => step.id)).toEqual(["a3"]);
   });
 
+  it("does not re-take a catch-up the cell has already moved past", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result, rerender } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    // Six newer answers push a1 off the far end of a five-deep history, so its
+    // id is nowhere in the queue any more — and the queue is the whole of a
+    // `queueHolds` dedupe's reach.
+    for (const step of [2, 3, 4, 5, 6, 7]) {
+      lastMessage = frame(utterance("cell-a", `a${step}`, step * 1_000));
+      await act(async () => {
+        rerender();
+      });
+    }
+    const history = ["a6", "a5", "a4", "a3", "a2"];
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(history);
+
+    // The server retains one utterance per session and hands it back on every
+    // catch-up. Aged out of the queue it would be taken as news: a duplicate in
+    // the history, a pip for an answer already heard, and the cell showing one
+    // the listener left behind six answers ago. What the cell is on is newer by
+    // the clock, which is a fact the queue window cannot express.
+    serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a7", 7_000));
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(history);
+    expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("does not append a snapshot entry a later utterance has overtaken", async () => {
+    const { result, rerender } = await renderChannel();
+
+    // The snapshot `/latest` will answer the catch-up with, taken before a2 was
+    // posted.
+    serveLatest([utterance("cell-a", "a1")]);
+
+    // a2 was posted after that snapshot and won the race home.
+    lastMessage = frame(utterance("cell-a", "a2", 2_000));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
+
+    await reconnected();
+
+    // The cell never held a1, so an id-only gate has nothing to compare against
+    // and appends the older answer over the newer one — the cell then shows the
+    // stale answer until the user presses next. Sub-second, and still wrong.
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
+    expect(result.current.queueFor("cell-a").previous).toHaveLength(0);
+    expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
   it("does not re-announce an utterance that was already heard", async () => {
     serveLatest([utterance("cell-a", "a1")]);
     const { result } = await renderChannel();

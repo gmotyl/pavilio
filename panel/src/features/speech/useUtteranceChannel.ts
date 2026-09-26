@@ -372,22 +372,45 @@ interface FetchedLatest {
 }
 
 /**
- * Whether what the cell already holds covers a `/latest` entry.
+ * Whether what the cell already holds covers a `/latest` entry. One rule, for
+ * the mount fetch and the catch-up alike:
  *
- * At MOUNT the gate is the SESSION: the only thing that can already be there is
- * a live frame that raced this fetch, and it is newer than anything `/latest`
- * can say — taking its session up would resurrect an older utterance and
- * un-hear a heard cell.
+ * > skip it when the queue already holds the id, **or** when what the cell is
+ * > showing is at least as new as the entry.
  *
- * On a CATCH-UP the record is the tab's pre-freeze past, and after a freeze the
- * session ALWAYS has one, so a session gate would skip precisely the answer the
- * user came back for. The gate there is the utterance id — `queueHolds`, the
- * same dedupe the live-frame path uses, which still keeps a re-delivery out of
- * the queue wherever the cell is holding it.
+ * The id half is `queueHolds`, the same dedupe the live-frame path uses: it
+ * keeps a re-delivery out of the queue wherever the cell is holding it. The
+ * CLOCK half is what the id half cannot say, and it covers three things the
+ * gate used to get wrong:
+ *
+ * - **Mount.** The only thing that can already be there is a live frame that
+ *   raced this fetch, and it is newer than anything `/latest` can say. It used
+ *   to be skipped by a gate on the SESSION, which is a mount-shaped assumption
+ *   and cost the catch-up the answer the user came back for; `at` says the same
+ *   thing without asking which fetch this is, so the split is gone.
+ * - **An aged-out entry.** The server retains one utterance per session and
+ *   hands it back on EVERY catch-up. Once more than `MAX_PREVIOUS` answers have
+ *   pushed it off the far end of the history its id is nowhere in the queue, so
+ *   the id half alone re-takes an answer the cell has moved past — a duplicate
+ *   in the history and a pip for something already heard.
+ * - **The socket race.** An utterance posted after the `/latest` snapshot can
+ *   win the race home, and the snapshot entry — an id the cell has never held —
+ *   would then append over it and leave the cell showing the older answer.
+ *
+ * `utteranceQueueReducer`'s `arrived` case orders nothing by time, so whatever
+ * passes this gate displaces what the cell is showing and un-hears it. This is
+ * the whole of the ordering.
+ *
+ * A record with nothing under `current` — a session that has only ever cast a
+ * language vote, or one whose single arrival queued behind a live run — is
+ * covered by neither half and the entry is taken up, which is right: there is
+ * nothing there for it to displace.
  */
-function covers(existing: SessionSpeech | undefined, id: string, catchUp: boolean): boolean {
+function covers(existing: SessionSpeech | undefined, utterance: Utterance): boolean {
   if (!existing) return false;
-  return catchUp ? queueHolds(existing.queue, id) : true;
+  if (queueHolds(existing.queue, utterance.id)) return true;
+  const showing = existing.queue.current;
+  return showing !== null && showing.at >= utterance.at;
 }
 
 /** Narrows a WS frame or a `/latest` entry onto the locked wire format. */
@@ -494,8 +517,8 @@ export function useUtteranceChannel({
 
   useEffect(() => {
     let cancelled = false;
-    // Mount and catch-up are the same fetch and differ in exactly one thing:
-    // what an existing record for the session means.
+    // Mount and catch-up are the same fetch, gated by the same rule, and differ
+    // in exactly one thing: only a catch-up is absorbed by `recordAutoplayed`.
     const catchUp = reconnects > 0;
 
     (async () => {
@@ -554,7 +577,7 @@ export function useUtteranceChannel({
     const taken: CaughtUp[] = [];
     for (const utterance of utterances) {
       const existing = sessionsRef.current.get(utterance.sessionId);
-      if (covers(existing, utterance.id, catchUp)) continue;
+      if (covers(existing, utterance)) continue;
       const language = advanceLanguage(existing?.language, utterance.text);
       taken.push({
         utterance,
