@@ -364,6 +364,32 @@ interface CaughtUp {
   speakable: boolean;
 }
 
+/** A parsed `/latest` response, waiting for the effect that commits it. */
+interface FetchedLatest {
+  utterances: Utterance[];
+  /** False for the mount fetch: only a catch-up is absorbed. */
+  catchUp: boolean;
+}
+
+/**
+ * Whether what the cell already holds covers a `/latest` entry.
+ *
+ * At MOUNT the gate is the SESSION: the only thing that can already be there is
+ * a live frame that raced this fetch, and it is newer than anything `/latest`
+ * can say — taking its session up would resurrect an older utterance and
+ * un-hear a heard cell.
+ *
+ * On a CATCH-UP the record is the tab's pre-freeze past, and after a freeze the
+ * session ALWAYS has one, so a session gate would skip precisely the answer the
+ * user came back for. The gate there is the utterance id — `queueHolds`, the
+ * same dedupe the live-frame path uses, which still keeps a re-delivery out of
+ * the queue wherever the cell is holding it.
+ */
+function covers(existing: SessionSpeech | undefined, id: string, catchUp: boolean): boolean {
+  if (!existing) return false;
+  return catchUp ? queueHolds(existing.queue, id) : true;
+}
+
 /** Narrows a WS frame or a `/latest` entry onto the locked wire format. */
 function toUtterance(raw: unknown): Utterance | null {
   if (!raw || typeof raw !== "object") return null;
@@ -460,29 +486,17 @@ export function useUtteranceChannel({
     [],
   );
 
+  /**
+   * What the newest `/latest` fetch read, waiting to be committed below. The
+   * fetch itself decides nothing: see the commit effect for why.
+   */
+  const [fetched, setFetched] = useState<FetchedLatest | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     // Mount and catch-up are the same fetch and differ in exactly one thing:
     // what an existing record for the session means.
     const catchUp = reconnects > 0;
-    /**
-     * Whether what the cell already holds covers this entry.
-     *
-     * At MOUNT the gate is the SESSION: the only thing that can already be
-     * there is a live frame that raced this fetch, and it is newer than
-     * anything `/latest` can say — taking its session up would resurrect an
-     * older utterance and un-hear a heard cell.
-     *
-     * On a CATCH-UP the record is the tab's pre-freeze past, and after a freeze
-     * the session ALWAYS has one, so a session gate would skip precisely the
-     * answer the user came back for. The gate there is the utterance id —
-     * `queueHolds`, the same dedupe the live-frame path uses, which still keeps
-     * a re-delivery out of the queue wherever the cell is holding it.
-     */
-    const covers = (existing: SessionSpeech | undefined, id: string): boolean => {
-      if (!existing) return false;
-      return catchUp ? queueHolds(existing.queue, id) : true;
-    };
 
     (async () => {
       try {
@@ -491,60 +505,12 @@ export function useUtteranceChannel({
 
         const body = (await res.json()) as { utterances?: unknown };
         const raw = Array.isArray(body?.utterances) ? body.utterances : [];
-        if (cancelled || raw.length === 0) return;
+        const utterances = raw
+          .map(toUtterance)
+          .filter((entry): entry is Utterance => entry !== null);
+        if (cancelled || utterances.length === 0) return;
 
-        // Decided against the rendered state before anything is set, so that
-        // `recordAutoplayed` can be called from here rather than from inside
-        // the updater — which writes the host's ref and has to stay pure.
-        const caughtUp: CaughtUp[] = [];
-        for (const entry of raw) {
-          const utterance = toUtterance(entry);
-          if (!utterance) continue;
-          const existing = sessionsRef.current.get(utterance.sessionId);
-          if (covers(existing, utterance.id)) continue;
-          const language = advanceLanguage(existing?.language, utterance.text);
-          caughtUp.push({
-            utterance,
-            language,
-            speakable: hasSomethingToSay(utterance.text, language.lang),
-          });
-        }
-        if (cancelled || caughtUp.length === 0) return;
-
-        setSessions((current) => {
-          const next = new Map(current);
-          for (const { utterance, language, speakable } of caughtUp) {
-            const existing = next.get(utterance.sessionId);
-            // Re-asked against the state this update actually applies to: a
-            // frame may have landed while the fetch was in flight, and it is
-            // newer than anything `/latest` can say.
-            if (covers(existing, utterance.id)) continue;
-            // Hydration is an arrival too, so it gets the same gate: a stored
-            // pure-code answer must not seed a pip either.
-            if (!speakable) {
-              next.set(utterance.sessionId, languageOnly(existing, language));
-              continue;
-            }
-            // A tab that was not there for the broadcast has not heard what it
-            // is being handed, so the cell it seeds is unheard and the answer
-            // counts towards the unread pip. A cell the user has PAUSED does
-            // not count as speaking, exactly as on the live-frame path.
-            const { speakingSessionId: live, pausedSessionId: held } = playbackRef.current;
-            const speaking = live === utterance.sessionId && held !== utterance.sessionId;
-            next.set(utterance.sessionId, withArrival(existing, utterance, language, speaking));
-          }
-          return next;
-        });
-
-        // Only a CATCH-UP is absorbed, never the mount fetch. A tab that has
-        // just loaded has had no gesture either, and the host already absorbs a
-        // hydrated arrival there for that reason; recording one from here would
-        // only clobber the armed cell's own bookkeeping with an id that may
-        // never reach the cursor.
-        if (!catchUp) return;
-        for (const { utterance, speakable } of caughtUp) {
-          if (speakable) recordAutoplayedRef.current(utterance.sessionId, utterance.id);
-        }
+        setFetched({ utterances, catchUp });
       } catch {
         // The panel server is unreachable (restarting, or the page was served
         // from a cache). Nothing is seeded and the channel stays usable — live
@@ -557,6 +523,78 @@ export function useUtteranceChannel({
       cancelled = true;
     };
   }, [reconnects]);
+
+  /**
+   * Commits what a fetch read, and records only what it actually took up.
+   *
+   * Deliberately not done in the fetch's own continuation. A promise callback
+   * can run while React is holding a live frame's `setSessions` QUEUED but not
+   * yet applied, so the state it reads off `sessionsRef` is older than the one
+   * the updater will be handed: React applies the frame first, the updater's
+   * re-check drops the entry, and `recordAutoplayed` has already absorbed an
+   * answer that arrived as a genuine live frame — silencing it for good, which
+   * ADR 0017 calls worse than not recovering it at all.
+   *
+   * An effect runs with everything React had queued already applied, and
+   * anything queued after it lands BEHIND this update, so what is decided here
+   * is exactly what the cell ends up holding — which is what makes the
+   * `recordAutoplayed` calls below honest.
+   *
+   * Declared ABOVE the arrival effect, for the same reason the playback mirror
+   * is: effects run in declaration order within a commit, so a frame landing in
+   * the same commit queues its update behind this one rather than in front.
+   */
+  useEffect(() => {
+    if (!fetched) return;
+    const { utterances, catchUp } = fetched;
+
+    // Decided against the rendered state before anything is set, so that
+    // `recordAutoplayed` can be called from here rather than from inside the
+    // updater — which writes the host's ref and has to stay pure.
+    const taken: CaughtUp[] = [];
+    for (const utterance of utterances) {
+      const existing = sessionsRef.current.get(utterance.sessionId);
+      if (covers(existing, utterance.id, catchUp)) continue;
+      const language = advanceLanguage(existing?.language, utterance.text);
+      taken.push({
+        utterance,
+        language,
+        speakable: hasSomethingToSay(utterance.text, language.lang),
+      });
+    }
+    if (taken.length === 0) return;
+
+    setSessions((current) => {
+      const next = new Map(current);
+      for (const { utterance, language, speakable } of taken) {
+        const existing = next.get(utterance.sessionId);
+        // Hydration is an arrival too, so it gets the same gate: a stored
+        // pure-code answer must not seed a pip either.
+        if (!speakable) {
+          next.set(utterance.sessionId, languageOnly(existing, language));
+          continue;
+        }
+        // A tab that was not there for the broadcast has not heard what it is
+        // being handed, so the cell it seeds is unheard and the answer counts
+        // towards the unread pip. A cell the user has PAUSED does not count as
+        // speaking, exactly as on the live-frame path.
+        const { speakingSessionId: live, pausedSessionId: held } = playbackRef.current;
+        const speaking = live === utterance.sessionId && held !== utterance.sessionId;
+        next.set(utterance.sessionId, withArrival(existing, utterance, language, speaking));
+      }
+      return next;
+    });
+
+    // Only a CATCH-UP is absorbed, never the mount fetch. A tab that has just
+    // loaded has had no gesture either, and the host already absorbs a hydrated
+    // arrival there for that reason; recording one from here would only clobber
+    // the armed cell's own bookkeeping with an id that may never reach the
+    // cursor.
+    if (!catchUp) return;
+    for (const { utterance, speakable } of taken) {
+      if (speakable) recordAutoplayedRef.current(utterance.sessionId, utterance.id);
+    }
+  }, [fetched]);
 
   useEffect(() => {
     if (lastMessage?.type !== "speech-utterance") return;

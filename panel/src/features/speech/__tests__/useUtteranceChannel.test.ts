@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { useEffect, useReducer } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Utterance } from "../types";
 
@@ -131,6 +132,16 @@ async function reconnected() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
+}
+
+/**
+ * React's "am I inside a test?" flag. Switched off for the one test that has to
+ * observe the browser's own scheduling: inside `act` an update made from an
+ * effect is flushed synchronously, which closes the very window that test pins.
+ */
+function actEnvironment(enabled: boolean) {
+  (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    enabled;
 }
 
 beforeEach(() => {
@@ -1114,6 +1125,72 @@ describe("useUtteranceChannel", () => {
     // arrival it cannot play rather than deferring it — the recovered answer
     // would lose its spoken form for good. See ADR 0017.
     expect(recordAutoplayed).toHaveBeenCalledWith("cell-a", "a1");
+  });
+
+  it("does not mark a catch-up autoplayed when a live frame beat it to the commit", async () => {
+    /**
+     * The window this pins is the browser's, not `act`'s. A live frame's
+     * `setSessions` is QUEUED, not applied, and the `/latest` continuation is a
+     * promise callback that can run in between — so it decides against a
+     * `sessionsRef` that predates the frame, React applies the frame first, and
+     * the updater's own re-check drops the entry while `recordAutoplayed` has
+     * already absorbed it. The answer then arrived as a genuine live frame on
+     * an awake tab and is silent for good, which ADR 0017 calls worse than not
+     * recovering it at all.
+     *
+     * `act` flushes an effect's update synchronously and so closes that window,
+     * which is why this one test renders outside it. `afterCommit` is an effect
+     * declared after the channel's own, so it runs in the same pass one line
+     * past the frame's queued update — the exact moment the fetch has to land.
+     */
+    let afterCommit: () => void = () => {};
+    let forceRender: () => void = () => {};
+    const { result } = renderHook(() => {
+      const [, bump] = useReducer((n: number) => n + 1, 0);
+      forceRender = bump;
+      const channel = useUtteranceChannel(options());
+      useEffect(() => {
+        afterCommit();
+      });
+      return channel;
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      result.current.setArmed("cell-a");
+    });
+
+    // A catch-up that stays in flight until the live frame has been queued.
+    let land: () => void = () => {};
+    const body = new Promise<{ utterances: Utterance[] }>((resolve) => {
+      land = () => resolve({ utterances: [utterance("cell-a", "a1")] });
+    });
+    global.fetch = vi.fn(
+      async () => ({ ok: true, json: () => body }) as unknown as Response,
+    ) as unknown as typeof fetch;
+    await act(async () => {
+      for (const listener of [...realtimeListeners]) listener({ ...REALTIME_RECONNECT_FRAME });
+    });
+
+    actEnvironment(false);
+    try {
+      afterCommit = land;
+      lastMessage = frame(utterance("cell-a", "a1"));
+      forceRender();
+      for (let pass = 0; pass < 3; pass += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    } finally {
+      afterCommit = () => {};
+      actEnvironment(true);
+    }
+
+    // The socket was back and the answer arrived as an ordinary broadcast, so
+    // it is the arrival path's to autoplay. A catch-up that lost the race to it
+    // took nothing up, and must not record what it did not deliver.
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    expect(recordAutoplayed).not.toHaveBeenCalled();
   });
 
   it("leaves a caught-up utterance unheard and counted as unread", async () => {
