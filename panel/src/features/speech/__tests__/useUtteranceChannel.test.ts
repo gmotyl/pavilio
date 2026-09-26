@@ -156,6 +156,30 @@ function actEnvironment(enabled: boolean | undefined): boolean | undefined {
   return previous;
 }
 
+/**
+ * `waitFor` for the one test that runs OUTSIDE `act`. RTL polls from inside its
+ * own `asyncWrapper`, which is `act` — precisely what that test switches off —
+ * so the wait is written out here: one macrotask per pass, the same drain as
+ * before, but bounded by a CONDITION instead of by a guessed number of passes.
+ * A scheduler that needs one more pass under load is then waited out rather
+ * than failing, and a real stall still fails, with a message that says what it
+ * was waiting for.
+ */
+async function drainUntil(
+  settled: () => boolean,
+  description: string,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (settled()) return;
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out after ${timeoutMs}ms of macrotasks waiting for ${description}`);
+    }
+  }
+}
+
 beforeEach(() => {
   lastMessage = null;
   speaking = null;
@@ -1222,6 +1246,16 @@ describe("useUtteranceChannel", () => {
      * which is why this one test renders outside it. `afterCommit` is an effect
      * declared after the channel's own, so it runs in the same pass one line
      * past the frame's queued update — the exact moment the fetch has to land.
+     *
+     * Nothing flushes for us out here, so the wait is a drain of the browser's
+     * own macrotask queue — bounded by the SETTLED STATE, the cell actually
+     * holding the answer, rather than by a fixed pass count, which had no
+     * margin left: `ready` arrived on the third of three passes. Draining
+     * longer cannot re-close the window; it was opened by `afterCommit` landing
+     * the fetch mid-commit and is shut long before the first pass returns. And
+     * the failure this pins is observed strictly EARLIER than what we wait on:
+     * a regression records the autoplay from the fetch's own continuation, a
+     * microtask, while `ready` needs React to commit the frame.
      */
     let afterCommit: () => void = () => {};
     let forceRender: () => void = () => {};
@@ -1258,9 +1292,10 @@ describe("useUtteranceChannel", () => {
       afterCommit = land;
       lastMessage = frame(utterance("cell-a", "a1"));
       forceRender();
-      for (let pass = 0; pass < 3; pass += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await drainUntil(
+        () => result.current.stateFor("cell-a") === "ready",
+        "the cell to take up the answer the live frame carried",
+      );
     } finally {
       afterCommit = () => {};
       actEnvironment(restoreActEnvironment);
