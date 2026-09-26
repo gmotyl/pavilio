@@ -1030,6 +1030,20 @@ describe("useUtteranceChannel", () => {
     expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a1"));
   });
 
+  it("unsubscribes from the realtime channel when the hook unmounts", async () => {
+    const { unmount } = await renderChannel();
+    expect(realtimeListeners.size).toBe(1);
+
+    // The effect RETURNS the unsubscribe, so a remount does not leave the
+    // previous mount's listener behind re-fetching `/latest` forever.
+    unmount();
+    expect(realtimeListeners.size).toBe(0);
+
+    const afterUnmount = serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+    expect(afterUnmount).not.toHaveBeenCalled();
+  });
+
   it("still hydrates once on mount", async () => {
     const fetchMock = serveLatest([utterance("cell-a", "a1")]);
 
@@ -1213,6 +1227,36 @@ describe("useUtteranceChannel", () => {
     ).toBe(1);
   });
 
+  it("queues a catch-up behind a live run, and supersedes a paused one", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    // An `online` event can land in the middle of a run the user is listening
+    // to. The recovered answer waits its turn there, exactly as a live frame
+    // would — the catch-up takes the rule from the playback inputs rather than
+    // assuming an arriving tab is idle.
+    speaking = "cell-a";
+    serveLatest([utterance("cell-a", "a2", 2_000)]);
+    await reconnected();
+
+    await waitFor(() =>
+      expect(result.current.queueFor("cell-a").pending.map((step) => step.id)).toEqual(["a2"]),
+    );
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a1"));
+
+    // A cell the user has PAUSED does not hold the next answer hostage, so the
+    // arrival supersedes the held run instead of queueing behind it.
+    paused = "cell-a";
+    serveLatest([utterance("cell-a", "a3", 3_000)]);
+    await reconnected();
+
+    await waitFor(() =>
+      expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a3", 3_000)),
+    );
+    expect(result.current.queueFor("cell-a").pending.map((step) => step.id)).toEqual(["a2"]);
+  });
+
   it("seeds no pip for a caught-up utterance with nothing to say", async () => {
     serveLatest([utterance("cell-a", "a1")]);
     const { result } = await renderChannel();
@@ -1233,6 +1277,33 @@ describe("useUtteranceChannel", () => {
       unplayedSinceLastPlayed(result.current.queueFor("cell-a"), result.current.heardFor("cell-a")),
     ).toBe(0);
     expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("surfaces no error when the catch-up fetch fails", async () => {
+    // The other half of the same requirement: a failed catch-up is swallowed,
+    // not merely survived. An unreachable panel server is the status quo ante,
+    // and the fetch runs in a floating promise — so anything thrown past the
+    // `catch` becomes an unhandled rejection with nobody to tell, which the
+    // channel's own state cannot show.
+    const rejected: unknown[] = [];
+    const onRejection = (reason: unknown) => rejected.push(reason);
+    process.on("unhandledRejection", onRejection);
+    try {
+      await renderChannel();
+
+      global.fetch = vi.fn(async () => {
+        throw new Error("panel server unreachable");
+      }) as unknown as typeof fetch;
+      await reconnected();
+      // A further macrotask, so a rejection has had its turn to surface.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(rejected).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
   });
 
   it("survives a failed catch-up fetch and still registers later live frames", async () => {
