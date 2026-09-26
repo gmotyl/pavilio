@@ -71,10 +71,21 @@ describe("appendReconnectMetric", () => {
     expect(normalizeTrigger("manual-all")).toBe("manual-all");
   });
 
-  it("still coerces an unknown trigger to manual", () => {
+  it("normalizeTrigger accepts auto-return", () => {
+    // The return-driven reopens this enum member names must stay apart from
+    // `manual`: a click and a reopen the user never asked for are the two
+    // things this column exists to tell apart.
+    expect(normalizeTrigger("auto-return")).toBe("auto-return");
+    appendReconnectMetric({ sessionId: "s1", trigger: "auto-return" });
+    const rec = JSON.parse(readFileSync(file(), "utf8").trim());
+    expect(rec.trigger).toBe("auto-return");
+  });
+
+  it("normalizeTrigger still coerces an unknown trigger to manual", () => {
     // Widening the enum must not turn the column into free text: an older or
     // hand-rolled client's stray value still lands as `manual`.
     expect(normalizeTrigger("auto-activated")).toBe("manual");
+    expect(normalizeTrigger("auto-returned")).toBe("manual");
     expect(normalizeTrigger("all")).toBe("manual");
   });
 
@@ -88,7 +99,7 @@ describe("appendReconnectMetric", () => {
     ]);
   });
 
-  it("leaves an absent trigger absent rather than defaulting it", () => {
+  it("an absent trigger stays absent in the written line", () => {
     // Old lines have no trigger field at all; inventing one on write would
     // make an unattributed record look like a click.
     appendReconnectMetric({ sessionId: "a" });
