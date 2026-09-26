@@ -123,6 +123,11 @@ async function renderChannel() {
   return rendered;
 }
 
+/** What a panel server that is simply down throws, and how a rejection names it. */
+const UNREACHABLE = "panel server unreachable";
+const reasonOf = (reason: unknown): string =>
+  reason instanceof Error ? reason.message : String(reason);
+
 /** What the channel sees when the socket comes back: the neutral frame, nothing else. */
 async function reconnected() {
   await act(async () => {
@@ -1415,10 +1420,10 @@ describe("useUtteranceChannel", () => {
     const onRejection = (reason: unknown) => rejected.push(reason);
     process.on("unhandledRejection", onRejection);
     try {
-      await renderChannel();
+      const { unmount } = await renderChannel();
 
       global.fetch = vi.fn(async () => {
-        throw new Error("panel server unreachable");
+        throw new Error(UNREACHABLE);
       }) as unknown as typeof fetch;
       await reconnected();
       // A further macrotask, so a rejection has had its turn to surface.
@@ -1426,7 +1431,20 @@ describe("useUtteranceChannel", () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
 
-      expect(rejected).toEqual([]);
+      // The teardown is INSIDE the window, not left to RTL's shared
+      // `cleanup()`: the fetch's continuation runs on the way down too, and a
+      // rejection raised there would surface after the `finally` below had
+      // already stopped listening — invisible to the one test that caused it.
+      await act(async () => {
+        unmount();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      // THIS test's own rejection, not an empty worker. Asserting the array is
+      // empty couples the test to every other one in the file — several install
+      // a throwing `global.fetch`, and one of those left pending fails this
+      // test for a reason that has nothing to do with it.
+      expect(rejected.map(reasonOf).filter((reason) => reason.includes(UNREACHABLE))).toEqual([]);
     } finally {
       process.off("unhandledRejection", onRejection);
     }
@@ -1436,7 +1454,7 @@ describe("useUtteranceChannel", () => {
     const { result, rerender } = await renderChannel();
 
     global.fetch = vi.fn(async () => {
-      throw new Error("panel server unreachable");
+      throw new Error(UNREACHABLE);
     }) as unknown as typeof fetch;
     await reconnected();
 
