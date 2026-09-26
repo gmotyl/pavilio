@@ -32,6 +32,8 @@ let socket: WebSocket | null = null;
 let started = false;
 let connections = 0;
 let lastMessageAt = 0;
+// A socket created at or after this return is the ordinary reconnect, not a strand.
+let socketCreatedAt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let watchdog: ReturnType<typeof setInterval> | null = null;
 
@@ -54,6 +56,7 @@ function connect(): void {
   const ws = new WebSocket(`${protocol}//${window.location.host}`);
   socket = ws;
   lastMessageAt = Date.now();
+  socketCreatedAt = lastMessageAt;
   connections += 1;
   // Not on the first connect — nothing has been missed yet.
   if (connections > 1) publish({ ...RECONNECT_MESSAGE });
@@ -91,10 +94,35 @@ function dropIfStale(): void {
   if (Date.now() - lastMessageAt > STALE_MS) ws.close();
 }
 
-function onVisible(): void {
-  // Background tabs have their timers throttled, so the interval below may
+/**
+ * Returning to the app is consent to repair the connection: a socket that is not
+ * OPEN owes no repaint protection, and the freeze that killed it also killed the
+ * `close` that would have armed the reconnect. See ADR 0017.
+ *
+ * One handler for three events — `visibilitychange`, `pageshow`, `online` — each
+ * of which fires in a case the others miss.
+ */
+function onReturn(): void {
+  // `visibilitychange` fires on the way out too; that is a leave, not a return.
+  if (document.visibilityState !== "visible") return;
+  const ws = socket;
+  if (!ws) return;
+  // Background tabs have their timers throttled, so the watchdog interval may
   // not have run during the gap that killed the socket.
-  if (document.visibilityState === "visible") dropIfStale();
+  if (ws.readyState === WebSocket.OPEN) {
+    dropIfStale();
+    return;
+  }
+  // A CONNECTING socket created by this very return is the ordinary reconnect
+  // finishing; only one that spent the whole freeze connecting is stranded.
+  if (ws.readyState === WebSocket.CONNECTING && socketCreatedAt >= Date.now()) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer); // we are reconnecting now; do not do it twice
+    reconnectTimer = null;
+  }
+  socket = null; // before close, so `onclose` does not arm a reconnect
+  ws.close();
+  connect();
 }
 
 /**
@@ -106,7 +134,9 @@ function start(): void {
   started = true;
   connect();
   watchdog = setInterval(dropIfStale, WATCHDOG_CHECK_MS);
-  document.addEventListener("visibilitychange", onVisible);
+  document.addEventListener("visibilitychange", onReturn);
+  window.addEventListener("pageshow", onReturn);
+  window.addEventListener("online", onReturn);
 }
 
 /**
@@ -143,12 +173,15 @@ export function __resetRealtimeChannelForTests(): void {
   started = false;
   connections = 0;
   lastMessageAt = Date.now();
+  socketCreatedAt = 0;
   listeners.clear();
   if (watchdog) clearInterval(watchdog);
   watchdog = null;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
-  document.removeEventListener("visibilitychange", onVisible);
+  document.removeEventListener("visibilitychange", onReturn);
+  window.removeEventListener("pageshow", onReturn);
+  window.removeEventListener("online", onReturn);
   const ws = socket;
   socket = null; // before close, so `onclose` does not arm a reconnect
   ws?.close();

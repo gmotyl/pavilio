@@ -8,10 +8,13 @@ import {
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
+  static CONNECTING = 0;
   static OPEN = 1;
   static CLOSED = 3;
+  /** What the next socket opens as; raise to CONNECTING to hold a handshake. */
+  static initialReadyState = 1;
 
-  readyState = 1; // treat as open immediately; the real one opens async
+  readyState = FakeWebSocket.initialReadyState; // open immediately by default; the real one opens async
   onmessage: ((ev: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
@@ -47,6 +50,7 @@ let visibility = "visible";
 
 beforeEach(() => {
   FakeWebSocket.instances = [];
+  FakeWebSocket.initialReadyState = FakeWebSocket.OPEN;
   vi.useFakeTimers();
   vi.stubGlobal("WebSocket", FakeWebSocket);
   visibility = "visible";
@@ -168,6 +172,121 @@ describe("realtime channel", () => {
     document.dispatchEvent(new Event("visibilitychange"));
 
     expect(FakeWebSocket.instances[0].closed).toBe(true);
+  });
+
+  it("reconnects a CLOSED socket on return when no close event was delivered", () => {
+    subscribeRealtime(vi.fn());
+    const ws = last();
+    // The frozen tab ran no JS: the socket died without ever firing `close`, so
+    // nothing armed the reconnect and the watchdog bails forever.
+    ws.readyState = FakeWebSocket.CLOSED;
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("replaces a CONNECTING socket that predates the return", () => {
+    subscribeRealtime(vi.fn());
+    const ws = last();
+    ws.readyState = FakeWebSocket.CONNECTING;
+    vi.setSystemTime(Date.now() + 60_000); // the freeze, spent mid-handshake
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(ws.closed).toBe(true);
+  });
+
+  it("leaves a CONNECTING socket created by the return itself alone", () => {
+    subscribeRealtime(vi.fn());
+    last().close(); // arms the 2s reconnect
+    FakeWebSocket.initialReadyState = FakeWebSocket.CONNECTING;
+    vi.advanceTimersByTime(2_000); // the ordinary reconnect, opened just now
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(last().closed).toBe(false);
+  });
+
+  it("leaves an OPEN socket within the freshness window untouched on return", () => {
+    subscribeRealtime(vi.fn());
+    const ws = last();
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(ws.closed).toBe(false);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("closes an OPEN socket silent past STALE_MS on return", () => {
+    subscribeRealtime(vi.fn());
+    const ws = last();
+    vi.setSystemTime(Date.now() + 60_000);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(ws.closed).toBe(true);
+    // Unchanged: the existing close handler owns the reconnect.
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(2_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("treats pageshow as a return", () => {
+    subscribeRealtime(vi.fn());
+    last().readyState = FakeWebSocket.CLOSED;
+
+    // Restored from the back/forward cache: no visibility change accompanies it.
+    window.dispatchEvent(new Event("pageshow"));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("treats online as a return", () => {
+    subscribeRealtime(vi.fn());
+    last().readyState = FakeWebSocket.CLOSED;
+
+    window.dispatchEvent(new Event("online"));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("creates exactly one socket when pageshow and visibilitychange land together", () => {
+    subscribeRealtime(vi.fn());
+    last().readyState = FakeWebSocket.CLOSED;
+    // The replacement is still mid-handshake when the second event lands.
+    FakeWebSocket.initialReadyState = FakeWebSocket.CONNECTING;
+
+    window.dispatchEvent(new Event("pageshow"));
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("a replaced socket does not arm a reconnect", () => {
+    subscribeRealtime(vi.fn());
+    const stranded = last();
+    stranded.readyState = FakeWebSocket.CONNECTING;
+    vi.setSystemTime(Date.now() + 60_000);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    vi.advanceTimersByTime(5_000); // past RECONNECT_MS
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("ignores a visibilitychange to hidden", () => {
+    subscribeRealtime(vi.fn());
+    last().readyState = FakeWebSocket.CLOSED;
+    visibility = "hidden";
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
   it("publishes the reconnect frame on the second connect, not the first", () => {
