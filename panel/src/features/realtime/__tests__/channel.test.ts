@@ -267,6 +267,36 @@ describe("realtime channel", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
+  it("creates exactly one socket when the return events land milliseconds apart", () => {
+    subscribeRealtime(vi.fn());
+    last().readyState = FakeWebSocket.CLOSED;
+    // The replacement is still mid-handshake when the second event lands.
+    FakeWebSocket.initialReadyState = FakeWebSocket.CONNECTING;
+
+    window.dispatchEvent(new Event("pageshow"));
+    // A bfcache restore fires its events in separate tasks, and `online` can
+    // trail a `visibilitychange` by a few ms. The clock moves between them.
+    vi.advanceTimersByTime(5);
+    window.dispatchEvent(new Event("online"));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(last().closed).toBe(false);
+  });
+
+  it("replaces a CONNECTING socket that predates a return after the clock jumps back", () => {
+    subscribeRealtime(vi.fn());
+    const ws = last();
+    ws.readyState = FakeWebSocket.CONNECTING;
+    // An NTP correction (or a user fixing the clock) during the freeze: the
+    // socket now reads as created in the future, but it is still stranded.
+    vi.setSystemTime(Date.now() - 60_000);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(ws.closed).toBe(true);
+  });
+
   it("a return inside the reconnect window disarms the pending reconnect", () => {
     subscribeRealtime(vi.fn());
     const ws = last();

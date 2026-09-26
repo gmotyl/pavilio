@@ -14,6 +14,17 @@ const WATCHDOG_CHECK_MS = 10_000;
 const RECONNECT_MS = 2_000;
 
 /**
+ * How long a socket counts as "created by this return". One return raises
+ * `pageshow`, `visibilitychange` and `online` in separate tasks, milliseconds
+ * to tens of milliseconds apart, so the second event must recognise the socket
+ * the first one just opened; a stranded handshake, by contrast, spent an entire
+ * freeze connecting (ADR 0017 measures the median at 10s). A second sits an
+ * order of magnitude above the burst and an order of magnitude below the
+ * shortest freeze, so neither case lands near the boundary.
+ */
+const RETURN_BURST_MS = 1_000;
+
+/**
  * Republished after a reconnect so every `file-change` consumer refetches what
  * it missed while the socket was down. `path: ""` on purpose: the viewers match
  * with `path.includes(theirFile)`, which stays false, so only the lists refresh.
@@ -40,7 +51,8 @@ let socket: WebSocket | null = null;
 let started = false;
 let connections = 0;
 let lastMessageAt = 0;
-// A socket created at or after this return is the ordinary reconnect, not a strand.
+// When the live socket was created, so a return can tell the reconnect it just
+// started from one that spent the whole freeze connecting.
 let socketCreatedAt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let watchdog: ReturnType<typeof setInterval> | null = null;
@@ -131,7 +143,10 @@ function onReturn(): void {
   }
   // A CONNECTING socket created by this very return is the ordinary reconnect
   // finishing; only one that spent the whole freeze connecting is stranded.
-  if (ws.readyState === WebSocket.CONNECTING && socketCreatedAt >= Date.now()) return;
+  // A negative age means the clock jumped backwards since the socket was
+  // stamped: not evidence of freshness, so it does not earn the exemption.
+  const age = Date.now() - socketCreatedAt;
+  if (ws.readyState === WebSocket.CONNECTING && age >= 0 && age < RETURN_BURST_MS) return;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer); // we are reconnecting now; do not do it twice
     reconnectTimer = null;
