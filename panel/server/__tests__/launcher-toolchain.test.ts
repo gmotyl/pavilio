@@ -56,7 +56,35 @@ const PORT = "39010";
 /** What the stub curl answers for /api/mobile-access/status. */
 const LAN_IP = "192.168.7.42";
 const TOKEN = "TESTTOKEN42";
-const STATUS_JSON = `{"lanIp":"${LAN_IP}","pairUrl":"http://${LAN_IP}:${PORT}/#mt=${TOKEN}"}`;
+const TS_HOST = "sandbox-host.tail1a2b3.ts.net";
+
+/**
+ * The real body of GET /api/mobile-access/status, as built by
+ * panel/server/routes/mobile-access.ts: `{ tailscale, lan, host }` in that
+ * order. The LAN address lives at `lan.lanIp` and every pair link is a `qrUrl`
+ * — there is no flat `pairUrl` anywhere in it.
+ *
+ * The ordering is load-bearing for the launcher, not decoration: `tailscale`
+ * comes first and carries a `#mt=` of its own, so the `head -n 1` the launcher
+ * uses to pull the token reads the tailscale link, not the LAN one. Both
+ * channels are stamped with the same pairing token, which is exactly why that
+ * is safe — this fixture pins it.
+ */
+const STATUS_JSON = JSON.stringify({
+  tailscale: {
+    state: "on",
+    selfHost: TS_HOST,
+    url: `https://${TS_HOST}`,
+    qrUrl: `https://${TS_HOST}/#mt=${TOKEN}`,
+  },
+  lan: {
+    state: "on",
+    lanIp: LAN_IP,
+    url: `http://${LAN_IP}:${PORT}`,
+    qrUrl: `http://${LAN_IP}:${PORT}/#mt=${TOKEN}`,
+  },
+  host: { wsl: false, wslVmIp: null, platform: "linux" },
+});
 
 let sandbox: string;
 let repo: string;
@@ -86,16 +114,31 @@ function writeLocalEnv(contents: string) {
   writeFileSync(join(repo, "scripts", "start-panel-windows.local.env"), `${contents}\n`);
 }
 
-/** A directory holding a `node` and a `pnpm` that exist but must never be run. */
+/** What the never-run stubs below shout on stderr if anything ever runs them. */
+const EXECUTED_MARKER = "was executed";
+
+/**
+ * A directory holding a `node` and a `pnpm` that exist but must never be run:
+ * the launcher only has to put them on PATH and hand over to scripts/panel.
+ * Both shout on stderr and exit 97, and `expectNoToolchainWasRun` asserts that
+ * neither ever happened — without it, a launcher that started shelling out to
+ * a bare `node`/`pnpm` again would pass every case here unnoticed.
+ */
 function writePinnedToolchain() {
   mkdirSync(nodeBin, { recursive: true });
   for (const name of ["node", "pnpm"]) {
     writeFileSync(
       join(nodeBin, name),
-      `#!/bin/sh\necho "stub ${name} was executed" >&2\nexit 97\n`,
+      `#!/bin/sh\necho "stub ${name} ${EXECUTED_MARKER}" >&2\nexit 97\n`,
       { mode: 0o755 },
     );
   }
+}
+
+/** Neither stub ran, and neither one's exit code leaked out of the run. */
+function expectNoToolchainWasRun(status: number | null, output: string) {
+  expect(output).not.toContain(EXECUTED_MARKER);
+  expect(status).not.toBe(97);
 }
 
 /** The lines the stub scripts/panel and any post-launch command recorded. */
@@ -206,6 +249,7 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(existsSync(panelPathLog)).toBe(false);
     expect(output).not.toContain("Pavilio panel ready");
     expect(existsSync(netshMarker)).toBe(false);
+    expectNoToolchainWasRun(status, output);
   }, 30000);
 
   it("starts the panel through scripts/panel once the pinned toolchain resolves", () => {
@@ -222,6 +266,8 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(readFileSync(panelPathLog, "utf8").trim().split(":")).toContain(nodeBin);
     expect(output).not.toContain("node/pnpm not found");
     expect(existsSync(netshMarker)).toBe(false);
+    // On PATH is all they were ever for: the launcher must not run them itself.
+    expectNoToolchainWasRun(status, output);
   }, 30000);
 
   it("skips the WSL block outside WSL and still prints the local link", () => {
@@ -242,6 +288,51 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(output).toContain(`Local browser:   http://localhost:${PORT}/#mt=${TOKEN}`);
     expect(output).toContain(`LAN devices:     http://${LAN_IP}:${PORT}/#mt=${TOKEN}`);
     expect(order()).toEqual(["panel start"]);
+
+    // The parting hint has to be a command that works on the host this ran on.
+    // `npm stop` is not: the shortcut exists precisely because such a machine
+    // may carry pnpm only, or no package manager on PATH at all.
+    expect(output).toContain("./scripts/panel stop");
+    expect(output).not.toMatch(/Stop with:\s*npm/);
+    expectNoToolchainWasRun(status, output);
+  }, 30000);
+
+  it("stops with a clear message when scripts/panel cannot start the panel", () => {
+    writePinnedToolchain();
+    writeLocalEnv(`PAVILIO_NODE_BIN="${nodeBin}"`);
+
+    // scripts/panel already prints the real reason (a failed panel/dist build,
+    // a port it cannot have) and exits non-zero. The launcher used to discard
+    // that status and carry on: ~15s of dots, then a "(Could not extract
+    // pairing token...)" line that blames the wrong thing entirely.
+    writeFileSync(
+      join(repo, "scripts", "panel"),
+      [
+        "#!/bin/sh",
+        `echo "panel $*" >> "${orderLog}"`,
+        'echo "Panel build failed — not starting. Fix the build above and re-run." >&2',
+        "exit 1",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const { status, output } = run();
+
+    expect(status).not.toBe(0);
+    // scripts/panel was asked exactly once, and its own diagnosis survives.
+    expect(order()).toEqual(["panel start"]);
+    expect(output).toContain("Panel build failed");
+    // ...with the launcher saying plainly that it is giving up.
+    expect(output).toMatch(/panel (did not|could not|failed to) start/i);
+
+    // And none of the misleading tail ran: no polling, no pairing links, no
+    // token line pinning the blame on a token that was never the problem.
+    expect(output).not.toContain("Waiting for panel");
+    expect(output).not.toContain("Could not extract pairing token");
+    expect(output).not.toContain("===== Pavilio panel ready =====");
+    expect(existsSync(netshMarker)).toBe(false);
+    expectNoToolchainWasRun(status, output);
   }, 30000);
 
   it("still runs PANEL_POST_LAUNCH_CMD last", () => {
@@ -260,5 +351,6 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     // Last, and after the panel was started — not instead of it.
     expect(order()).toEqual(["panel start", "post-launch"]);
     expect(existsSync(netshMarker)).toBe(false);
+    expectNoToolchainWasRun(status, output);
   }, 30000);
 });

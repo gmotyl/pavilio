@@ -76,7 +76,18 @@ pm_resolve || exit 1
 # it is missing. Called directly rather than through `npm start` — `npm` is the
 # thing that may not exist here, and the root script is only a wrapper around
 # this same file.
-"${SCRIPT_DIR}/panel" start
+#
+# Its exit status is the whole answer about whether there is a panel to talk to.
+# Discarding it used to buy fifteen seconds of dots against a port nothing was
+# ever going to open, and then a parting "(Could not extract pairing token...)"
+# blaming the token — while the real reason (a failed panel/dist build, a port
+# that is held) had already been printed by scripts/panel, scrolled away above.
+if ! "${SCRIPT_DIR}/panel" start; then
+  echo
+  echo "Panel failed to start — see the error above." >&2
+  echo "Fix it, then re-run this shortcut (or: ./scripts/panel start)." >&2
+  exit 1
+fi
 
 echo
 printf 'Waiting for panel'
@@ -249,7 +260,9 @@ if [ -n "${PANEL_EXTRA_PORTS}" ] && [ -n "${LAN_IP:-}" ]; then
   done
 fi
 echo
-echo "Stop with: npm stop"
+# scripts/panel, not `npm stop`: this host may carry pnpm only, or no package
+# manager on PATH at all — which is the reason this launcher exists.
+echo "Stop with: ./scripts/panel stop"
 echo
 
 # Optional foreground command to keep the terminal busy after the panel is up

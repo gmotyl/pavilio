@@ -312,6 +312,42 @@ describe("scripts/pm toolchain resolution", () => {
     expect(field(voltaOnly.output, "NODE_BIN_DIR")).toBe(voltaBin);
   }, 30000);
 
+  it("survives an nvm.sh that trips nounset and moves on to the next probe", () => {
+    // Every entry point that sources pm runs under `set -u`
+    // (scripts/panel, scripts/start-panel-windows.sh). A reference to an unbound
+    // variable inside a sourced file then aborts the *sourcing* shell outright —
+    // not the probe, the whole process — and on the double-clicked Windows
+    // shortcut that means the window closes with nothing on it at all. The
+    // source is redirected to /dev/null, so there is not even a message.
+    mkdirSync(join(home, ".nvm"), { recursive: true });
+    writeFileSync(
+      join(home, ".nvm", "nvm.sh"),
+      'echo "$PM_TEST_DEFINITELY_UNBOUND"\nnvm() { return 0; }\n',
+    );
+
+    // A perfectly good toolchain sits one probe further down the list.
+    const fnmNode = join(sandbox, "fnm-node");
+    stub(fnmNode, "node");
+    stub(fnmNode, "pnpm");
+    stub(stubBin, "fnm", `echo 'export PATH="${fnmNode}:$PATH"'`);
+
+    const { status, output } = runHarness(
+      [
+        "set -u",
+        DEFAULT_BODY,
+        // Still alive, and nounset is still in force for everything after the
+        // probe — the guard restores what it found rather than leaving it off.
+        'echo "SURVIVED=yes"',
+        'case "$-" in *u*) echo "NOUNSET=on" ;; *) echo "NOUNSET=off" ;; esac',
+      ].join("\n"),
+    );
+
+    expect(status).toBe(0);
+    expect(field(output, "SURVIVED")).toBe("yes");
+    expect(field(output, "NOUNSET")).toBe("on");
+    expect(field(output, "NODE_BIN_DIR")).toBe(fnmNode);
+  }, 30000);
+
   it("short-circuits every probe when node is already on PATH", () => {
     // Step 2 of the documented order: a normal terminal already carrying a
     // toolchain must be left alone, whatever the version managers would say.

@@ -115,8 +115,26 @@ pm_probe_pnpm_home() {
 pm_probe_nvm() {
   local nvm_sh="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
   [ -s "$nvm_sh" ] || return 0
+
+  # nvm.sh is somebody else's code, sourced into this shell, and every entry
+  # point that gets here runs under `set -u` (scripts/panel,
+  # scripts/start-panel-windows.sh). One reference to an unbound variable inside
+  # it therefore does not fail the probe — it terminates the whole
+  # non-interactive shell, and with the source redirected to /dev/null there is
+  # not even a message to go on. On the double-clicked Windows shortcut that is
+  # a window that opens and closes with nothing in it.
+  #
+  # So nounset is lifted across the source and restored to whatever it was
+  # afterwards: an unusable nvm.sh costs this probe and nothing else.
+  local pm_nounset=0
+  case "$-" in *u*) pm_nounset=1 ;; esac
+  set +u
   # shellcheck disable=SC1090
-  . "$nvm_sh" >/dev/null 2>&1 || return 0
+  . "$nvm_sh" >/dev/null 2>&1
+  local pm_sourced=$?
+  if [ "$pm_nounset" = 1 ]; then set -u; fi
+
+  [ "$pm_sourced" = 0 ] || return 0
   command -v nvm >/dev/null 2>&1 || return 0
   nvm use default >/dev/null 2>&1 || return 0
 }
