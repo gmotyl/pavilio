@@ -52,20 +52,25 @@ pm_have_node() {
 # Numeric, segment-by-segment version compare (`pm_version_gt 24.1.0 20.0.0`).
 # `sort -V` would be shorter but is an external, and not portable to BSD sort.
 pm_version_gt() {
-  local a="${1#v}" b="${2#v}" x y
+  local a="${1#v}" b="${2#v}" x y a_pre=0 b_pre=0
   while [ -n "$a" ] || [ -n "$b" ]; do
     x="${a%%.*}"
     y="${b%%.*}"
     if [ "$a" = "${a#*.}" ]; then a=""; else a="${a#*.}"; fi
     if [ "$b" = "${b#*.}" ]; then b=""; else b="${b#*.}"; fi
-    # Drop any prerelease suffix ("22.0.0-rc.1") so the compare stays numeric.
-    x="${x%%[!0-9]*}"
-    y="${y%%[!0-9]*}"
+    # A segment that is not all digits ends the numeric part: "22.0.0-rc.1" is
+    # 22.0.0 plus a prerelease tag. Everything after it is dropped too — keeping
+    # the "1" of "rc.1" as a further segment is how a release candidate used to
+    # come out *above* its own release.
+    case "$x" in *[!0-9]*) x="${x%%[!0-9]*}"; a=""; a_pre=1 ;; esac
+    case "$y" in *[!0-9]*) y="${y%%[!0-9]*}"; b=""; b_pre=1 ;; esac
     [ -n "$x" ] || x=0
     [ -n "$y" ] || y=0
     if [ "$x" -gt "$y" ]; then return 0; fi
     if [ "$x" -lt "$y" ]; then return 1; fi
   done
+  # Numerically equal: the one carrying a prerelease tag is the older of the two.
+  if [ "$a_pre" = 0 ] && [ "$b_pre" = 1 ]; then return 0; fi
   return 1
 }
 
@@ -75,10 +80,27 @@ pm_version_gt() {
 pm_probe_pinned() {
   local env_file pinned
   env_file="$(pm_local_env_path)"
-  [ -f "$env_file" ] || return 0
-  # Read in a subshell: the file is the launcher's config and sets other things
-  # (PANEL_EXTRA_PORTS, PANEL_POST_LAUNCH_CMD) that are none of our business.
-  pinned="$(. "$env_file" >/dev/null 2>&1; printf '%s' "${PAVILIO_NODE_BIN:-}")"
+  # An already-exported PAVILIO_NODE_BIN is honoured whether or not the env file
+  # exists — the caller asking for a specific interpreter should not depend on an
+  # unrelated file being present. The file, when it sets the pin, wins: that is
+  # the per-host value the setup scripts write.
+  pinned="${PAVILIO_NODE_BIN:-}"
+  if [ -f "$env_file" ]; then
+    # Read in a subshell: the file is the launcher's config and sets other things
+    # (PANEL_EXTRA_PORTS, PANEL_POST_LAUNCH_CMD) that are none of our business.
+    # It is read line by line and eval'd rather than sourced, because it is edited
+    # on the Windows side: an editor there may save CRLF line endings or a leading
+    # BOM, and either one would otherwise end up inside the value (or break the
+    # assignment outright) and drop the pin with no diagnostic at all.
+    pinned="$(
+      pm_contents="" pm_line=""
+      while IFS= read -r pm_line || [ -n "$pm_line" ]; do
+        pm_contents="$pm_contents${pm_line%$'\r'}"$'\n'
+      done <"$env_file"
+      eval "${pm_contents#$'\xef\xbb\xbf'}" >/dev/null 2>&1
+      printf '%s' "${PAVILIO_NODE_BIN:-}"
+    )"
+  fi
   [ -n "$pinned" ] && [ -d "$pinned" ] || return 0
   pm_prepend_path "$pinned"
 }

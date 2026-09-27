@@ -41,6 +41,26 @@ function writeLocalEnv(contents: string) {
   writeFileSync(join(repo, "scripts", "start-panel-windows.local.env"), `${contents}\n`);
 }
 
+/** The same file, byte for byte — for the CRLF/BOM cases a Windows editor writes. */
+function writeLocalEnvRaw(contents: string) {
+  writeFileSync(join(repo, "scripts", "start-panel-windows.local.env"), contents);
+}
+
+/**
+ * A fake ~/.nvm/nvm.sh: the real one defines `nvm` as a shell function, and
+ * scripts/pm sources it and then runs `nvm use default`. Nothing but a function
+ * definition is needed for the probe to be exercised.
+ */
+function writeNvmSh(nodeDir: string) {
+  mkdirSync(join(home, ".nvm"), { recursive: true });
+  writeFileSync(
+    join(home, ".nvm", "nvm.sh"),
+    ['nvm() {', '  [ "$1" = "use" ] || return 0', `  PATH="${nodeDir}:$PATH"`, "  export PATH", "}", ""].join(
+      "\n",
+    ),
+  );
+}
+
 const DEFAULT_BODY = [
   "pm_resolve || exit 1",
   'echo "PM=$PM"',
@@ -117,9 +137,17 @@ describe("scripts/pm toolchain resolution", () => {
 
   it("falls through a stale pin to the newest nvm version", () => {
     writeLocalEnv(`PAVILIO_NODE_BIN="${join(sandbox, "gone")}"`);
-    const old = join(home, ".nvm", "versions", "node", "v20.0.0", "bin");
-    const newest = join(home, ".nvm", "versions", "node", "v24.1.0", "bin");
-    for (const dir of [old, newest]) {
+    // The probe walks the glob, i.e. lexical order: v18.1.0, v20.0.0, v9.11.2.
+    // The numerically newest is v20.0.0, which is neither the first nor the last
+    // of those — so a comparator that always says "greater" lands on v9.11.2, one
+    // that never does lands on v18.1.0, a reversed one lands on v9.11.2, and a
+    // plain string compare picks v9.11.2 as well. Only a numeric, segment-wise
+    // compare picks v20.0.0.
+    const versions = ["v9.11.2", "v18.1.0", "v20.0.0"].map((v) =>
+      join(home, ".nvm", "versions", "node", v, "bin"),
+    );
+    const newest = join(home, ".nvm", "versions", "node", "v20.0.0", "bin");
+    for (const dir of versions) {
       stub(dir, "node");
       stub(dir, "pnpm");
     }
@@ -128,8 +156,55 @@ describe("scripts/pm toolchain resolution", () => {
 
     expect(status).toBe(0);
     expect(field(output, "NODE_BIN_DIR")).toBe(newest);
-    // Lexical ordering would have picked v20 last; the stale pin must be gone.
     expect(field(output, "PATH")).not.toContain(join(sandbox, "gone"));
+  }, 30000);
+
+  // pm_version_gt is hand-rolled (no `sort -V`: an external, and BSD sort has no
+  // -V), so it gets a table of its own rather than only the fixture above.
+  it("compares versions numerically, segment by segment", () => {
+    const cases: Array<[string, string, boolean]> = [
+      // Lexical order disagrees with numeric order.
+      ["v10.0.0", "v9.11.2", true],
+      ["v9.11.2", "v10.0.0", false],
+      ["v100.0.0", "v99.99.99", true],
+      ["v99.99.99", "v100.0.0", false],
+      // Later segments still count.
+      ["v20.0.10", "v20.0.0", true],
+      ["v20.0.0", "v20.0.10", false],
+      ["v22.1", "v22", true],
+      ["v22", "v22.1", false],
+      ["v20.0.0.1", "v20.0.0", true],
+      ["v20.0.0", "v20.0.0.1", false],
+      // Equal is not greater, with or without the `v` and leading zeros.
+      ["v20.0.0", "v20.0.0", false],
+      ["v08.0.0", "8.0.0", false],
+      ["v08.0.0", "v7.9.9", true],
+      // A prerelease sorts below its own release, never above it.
+      ["v22.0.0-rc.1", "v22.0.0", false],
+      ["v22.0.0", "v22.0.0-rc.1", true],
+      ["v22.0.0-rc.1", "v22.0.1", false],
+      ["v22.0.1", "v22.0.0-rc.1", true],
+      // Junk directory names sort below anything numeric, and never hang.
+      ["lts", "v20.0.0", false],
+      ["v20.0.0", "lts", true],
+      ["", "v1.0.0", false],
+      ["v1.0.0", "", true],
+    ];
+
+    const body = cases
+      .map(
+        ([a, b], i) => `if pm_version_gt "${a}" "${b}"; then echo "C${i}=yes"; else echo "C${i}=no"; fi`,
+      )
+      .join("\n");
+    const { status, output } = runHarness(body);
+
+    expect(status).toBe(0);
+    const actual = cases.map((_, i) => field(output, `C${i}`));
+    const expected = cases.map(([, , gt]) => (gt ? "yes" : "no"));
+    // Compared as a whole so a failure names every pair that moved.
+    expect(cases.map(([a, b], i) => `${a} > ${b} : ${actual[i]}`)).toEqual(
+      cases.map(([a, b], i) => `${a} > ${b} : ${expected[i]}`),
+    );
   }, 30000);
 
   it("prefers pnpm and falls back to npm with --prefix", () => {
@@ -170,30 +245,107 @@ describe("scripts/pm toolchain resolution", () => {
     expect(output).not.toContain("NODE_BIN_DIR=");
   }, 30000);
 
-  it("probes PNPM_HOME, fnm and volta in the documented order", () => {
+  it("probes PNPM_HOME, nvm, fnm and volta in the documented order", () => {
     const pnpmHome = join(sandbox, "pnpm-home");
+    const nvmNode = join(sandbox, "nvm-node");
     const fnmNode = join(sandbox, "fnm-node");
     const voltaBin = join(home, ".volta", "bin");
-    for (const dir of [pnpmHome, fnmNode, voltaBin]) {
+    for (const dir of [pnpmHome, nvmNode, fnmNode, voltaBin]) {
       stub(dir, "node");
       stub(dir, "pnpm");
     }
-    // `fnm env` prints the exports its shell should eval.
+    // ~/.nvm/nvm.sh is sourced, `fnm env` prints exports the caller should eval.
+    writeNvmSh(nvmNode);
     stub(stubBin, "fnm", `echo 'export PATH="${fnmNode}:$PATH"'`);
 
+    // Every one of the four is available: PNPM_HOME is the first of them.
     const all = runHarness(DEFAULT_BODY, { PNPM_HOME: pnpmHome });
     expect(all.status).toBe(0);
     expect(field(all.output, "NODE_BIN_DIR")).toBe(pnpmHome);
 
-    // Without PNPM_HOME, fnm is next.
+    // Without PNPM_HOME, nvm proper comes before fnm.
     const noPnpmHome = runHarness();
     expect(noPnpmHome.status).toBe(0);
-    expect(field(noPnpmHome.output, "NODE_BIN_DIR")).toBe(fnmNode);
+    expect(field(noPnpmHome.output, "NODE_BIN_DIR")).toBe(nvmNode);
 
-    // Without fnm either, volta is the last of the three.
+    // Without a sourceable nvm.sh, fnm is next.
+    rmSync(join(home, ".nvm", "nvm.sh"));
+    const noNvm = runHarness();
+    expect(noNvm.status).toBe(0);
+    expect(field(noNvm.output, "NODE_BIN_DIR")).toBe(fnmNode);
+
+    // Without fnm either, volta is the last of the four.
     rmSync(join(stubBin, "fnm"));
     const voltaOnly = runHarness();
     expect(voltaOnly.status).toBe(0);
     expect(field(voltaOnly.output, "NODE_BIN_DIR")).toBe(voltaBin);
+  }, 30000);
+
+  it("short-circuits every probe when node is already on PATH", () => {
+    // Step 2 of the documented order: a normal terminal already carrying a
+    // toolchain must be left alone, whatever the version managers would say.
+    stub(stubBin, "node");
+    stub(stubBin, "pnpm");
+    const pnpmHome = join(sandbox, "pnpm-home");
+    const nvmNode = join(sandbox, "nvm-node");
+    const voltaBin = join(home, ".volta", "bin");
+    for (const dir of [pnpmHome, nvmNode, voltaBin]) {
+      stub(dir, "node");
+      stub(dir, "pnpm");
+    }
+    writeNvmSh(nvmNode);
+
+    const { status, output } = runHarness(DEFAULT_BODY, { PNPM_HOME: pnpmHome });
+
+    expect(status).toBe(0);
+    expect(field(output, "PM")).toBe("pnpm");
+    expect(field(output, "NODE_BIN_DIR")).toBe(stubBin);
+    expect(field(output, "PATH")).toBe(stubBin);
+  }, 30000);
+
+  it("reads a pin written with CRLF line endings and a BOM", () => {
+    // scripts/start-panel-windows.local.env is edited on the Windows side, where
+    // an editor may well save CRLF and a leading BOM. Either one used to end up
+    // inside the value, fail the -d test, and drop the pin with no diagnostic.
+    const pinned = join(sandbox, "pinned-bin");
+    stub(pinned, "node");
+    stub(pinned, "pnpm");
+    writeLocalEnvRaw(`PAVILIO_NODE_BIN="${pinned}"\r\nPANEL_EXTRA_PORTS="4000"\r\n`);
+
+    const crlf = runHarness();
+    expect(crlf.status).toBe(0);
+    expect(field(crlf.output, "NODE_BIN_DIR")).toBe(pinned);
+
+    writeLocalEnvRaw(`\uFEFFPAVILIO_NODE_BIN="${pinned}"\r\n`);
+
+    const bom = runHarness();
+    expect(bom.status).toBe(0);
+    expect(field(bom.output, "NODE_BIN_DIR")).toBe(pinned);
+  }, 30000);
+
+  it("honours an exported PAVILIO_NODE_BIN whether or not the env file exists", () => {
+    const exported = join(sandbox, "exported-bin");
+    stub(exported, "node");
+    stub(exported, "pnpm");
+
+    // No env file at all.
+    const noFile = runHarness(DEFAULT_BODY, { PAVILIO_NODE_BIN: exported });
+    expect(noFile.status).toBe(0);
+    expect(field(noFile.output, "NODE_BIN_DIR")).toBe(exported);
+
+    // An env file that sets other things must not discard it either.
+    writeLocalEnv('PANEL_EXTRA_PORTS="4000"');
+    const otherVars = runHarness(DEFAULT_BODY, { PAVILIO_NODE_BIN: exported });
+    expect(otherVars.status).toBe(0);
+    expect(field(otherVars.output, "NODE_BIN_DIR")).toBe(exported);
+
+    // The file's own pin is the per-host one, so it wins over the environment.
+    const filePin = join(sandbox, "file-bin");
+    stub(filePin, "node");
+    stub(filePin, "pnpm");
+    writeLocalEnv(`PAVILIO_NODE_BIN="${filePin}"`);
+    const fileWins = runHarness(DEFAULT_BODY, { PAVILIO_NODE_BIN: exported });
+    expect(fileWins.status).toBe(0);
+    expect(field(fileWins.output, "NODE_BIN_DIR")).toBe(filePin);
   }, 30000);
 });
