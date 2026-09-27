@@ -769,14 +769,40 @@ export function useSpeechHost(): SpeechHost {
         : (queue.pending[0] ?? null);
       if (!returning && !target) return;
 
+      // And the press is SILENT, exactly as `onPrevious` is — see its comment
+      // for the reasoning, which holds in both directions and is only repeated
+      // here in outline.
+      //
+      // Forward used to speak what it landed on, and the asymmetry was written
+      // down as deliberate: forward was "the way into what is waiting". It is
+      // no longer only that. The unread count says an answer is waiting and the
+      // play control speaks it, while forward is also the one way back to the
+      // wave — so the carve-out made the gesture that RETURNS to the waiting
+      // state the loudest control on the row. Navigation moves the cursor;
+      // audio starts from the arm switch or the play button, and from nothing
+      // else.
+      //
+      // `unlock()` STAYS, although this press no longer makes a sound: it is
+      // the browser's autoplay grant, handed out only from inside a gesture
+      // handler and attached to the element for good. A tab whose only
+      // interaction was navigating is a tab the autoplay effect ABSORBS the
+      // next answer in — marking it autoplayed and staying quiet ever after —
+      // so skimming and then arming would silently eat an answer.
+      //
+      // `recordAutoplayed` STAYS for the same reason it does on the backward
+      // press, and it is what makes this silent on the ARMED cell too: the
+      // autoplay effect watches the utterance under the cursor, so a step looks
+      // exactly like an arrival to it. Without the record an armed cell would
+      // speak the answer the user merely stepped onto — the press silenced
+      // everywhere except the state it is listened to in. It records nothing
+      // about `heard`, so the unplayed count is untouched.
       unlock();
       dispatchQueue(sessionId, { type: "next" });
       if (!target) return;
 
       recordAutoplayed(sessionId, target.id);
-      speakUtterance(sessionId, target);
     },
-    [dispatchQueue, queueFor, recordAutoplayed, speakUtterance, unlock],
+    [dispatchQueue, queueFor, recordAutoplayed, unlock],
   );
 
   /**

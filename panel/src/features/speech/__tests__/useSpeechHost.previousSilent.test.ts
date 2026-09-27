@@ -12,10 +12,17 @@
  * So the press now moves the cursor and stops. The play control is how the
  * answer under the cursor is heard, which is exactly what it already did.
  *
- * The asymmetry with `onNext` is deliberate and is pinned here as well:
- * forward is the way *into* what is waiting and the gesture that releases the
- * pane's hold, so it is a different intent from stepping back to re-read. A
- * change that silenced both would pass every test in this file but one.
+ * `onNext` is now the same, and the file covers both directions. The asymmetry
+ * used to be pinned here as deliberate — forward was "the way into what is
+ * waiting and the gesture that releases the pane's hold". It is no longer only
+ * that: the unread count says an answer is waiting and the play control speaks
+ * it, while forward is also the single way back onto the wave, which made the
+ * gesture that RETURNS to the waiting state the loudest control on the row.
+ *
+ * So the rule is one sentence in both directions — navigation moves the cursor,
+ * and audio starts from the arm switch or the play button. Arming still governs
+ * ARRIVALS, which is what it is for; it does not turn a step into a playback,
+ * any more than it does for a backward one.
  */
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -283,8 +290,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
     expect(played).toEqual([`blob:${second[0]}`]);
   });
 
-  it("next still speaks", async () => {
-    const second = unitsOf(SECOND);
+  it("next moves the cursor and speaks nothing", async () => {
     const { result } = renderHook(() => useSpeechHost());
     await threeAnswers("cell-a");
 
@@ -292,11 +298,62 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
     await settle(() => result.current.onPrevious("cell-a"));
     expect(played).toEqual([]);
 
-    // Deliberately asymmetric. Forward is the way into what is waiting and the
-    // gesture that releases the pane's hold, so it keeps its playback: it comes
-    // back onto u-2 and starts it.
+    // Symmetric now. The step comes back onto u-2 and stays quiet; the play
+    // control is what speaks it, exactly as after a backward step.
     await settle(() => result.current.onNext("cell-a"));
     expect(result.current.queueFor("cell-a").cursor).toBe(1);
+    expect(played).toEqual([]);
+  });
+
+  it("next speaks nothing on the ARMED cell either", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+    await threeAnswers("cell-a");
+
+    await settle(() => result.current.onPrevious("cell-a"));
+    await settle(() => result.current.onPrevious("cell-a"));
+
+    // The armed cell is the one route by which a press with no `speakUtterance`
+    // in it can still make a sound — the autoplay effect watches the utterance
+    // under the cursor, so a forward step looks like an arrival to it. An
+    // `onNext` that merely dropped its own speak call would pass the test above
+    // and still talk over the skim in the state Greg actually listens in.
+    await settle(() => result.current.onArm("cell-a"));
+    played.length = 0;
+
+    await settle(() => result.current.onNext("cell-a"));
+
+    expect(result.current.queueFor("cell-a").cursor).toBe(1);
+    expect(played).toEqual([]);
+  });
+
+  it("next does not record the answer as played", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+    await threeAnswers("cell-a");
+
+    await settle(() => result.current.onPrevious("cell-a"));
+    await settle(() => result.current.onNext("cell-a"));
+
+    // `recordAutoplayed` is what keeps the armed cell quiet above, and it must
+    // not be mistaken for "the user heard this": `heard` is where the unplayed
+    // count comes from, and a walk that decremented it would hide the answers
+    // the walk was looking for.
+    expect([...result.current.heardFor("cell-a")]).toEqual([]);
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+
+  it("play speaks what a forward step navigated to", async () => {
+    const second = unitsOf(SECOND);
+    const { result } = renderHook(() => useSpeechHost());
+    await threeAnswers("cell-a");
+
+    await settle(() => result.current.onPrevious("cell-a"));
+    await settle(() => result.current.onPrevious("cell-a"));
+    await settle(() => result.current.onNext("cell-a"));
+    expect(played).toEqual([]);
+
+    // The other half of silencing a control: the answer it landed on is still
+    // reachable, from its first unit.
+    await settle(() => result.current.onSpeak("cell-a"));
     expect(played).toEqual([`blob:${second[0]}`]);
   });
 
