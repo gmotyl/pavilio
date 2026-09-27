@@ -103,6 +103,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
 
 import {
   __resetAnswerWaitingForTests,
+  beginWaiting,
   getAnswerWaiting,
   holdAnswer,
   isAnswerHeld,
@@ -485,5 +486,67 @@ describe("useSpeechHost — the wave is a position the transport stands on", () 
 
     expect(unlocks.length).toBeGreaterThan(0);
     expect(played).toEqual([]);
+  });
+});
+
+/**
+ * The two ways the host can get the wave step WRONG once it owns it, both found
+ * in review of the move rather than by the suite.
+ *
+ * They share a cause: a rule that used to be safe because the ROW enforced
+ * something around it. Moving the rule to the host kept the rule and left the
+ * enforcement behind — once in the shape of a read taken after the store had
+ * already been moved, once in the shape of a press the row's `disabled`
+ * attribute had made unreachable.
+ */
+describe("useSpeechHost — the wave step on the surfaces the row used to guard", () => {
+  it("steps off a SEND-owned wave without skipping the newest answer", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+    await threeAnswers("cell-a");
+
+    // The ordinary path: a draft was sent, the body handed over to the wave,
+    // and the user presses Previous to re-read the answer underneath it. The
+    // agent is NOT busy — this wave is the send's.
+    beginWaiting("cell-a", null);
+    expect(getAnswerWaiting("cell-a").waiting).toBe(true);
+
+    await settle(() => result.current.onPrevious("cell-a"));
+
+    // `noteTransport` collapses a send-owned handover to `MARK_ONLY` the moment
+    // it runs, so a `stepsOffTheWave` asked AFTER it answers no and the press
+    // holds and steps — skipping u-3, the answer the wave was covering. That is
+    // the very defect the wave step exists to prevent, on the most ordinary
+    // path there is.
+    expect(result.current.queueFor("cell-a").cursor).toBe(0);
+  });
+
+  it("takes no hold on a backward press the list refuses", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+
+    // One answer, no history, and no wave: there is nowhere to step back to.
+    // The row renders this press `disabled`; the chord and the OS media keys
+    // ask no button, so the host is what has to refuse it.
+    await emitUtterance("cell-a", "u-1", FIRST);
+    played.length = 0;
+
+    await settle(() => result.current.onPrevious("cell-a"));
+
+    // A hold set here would never be cleared in this run, and `derive` answers
+    // a standing hold with `SETTLED` — so the cell's pane would stop handing
+    // over to the wave for the rest of the session.
+    expect(isAnswerHeld("cell-a")).toBe(false);
+    expect(result.current.queueFor("cell-a").cursor).toBe(0);
+  });
+
+  it("still takes the hold on a backward press that moves", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+    await threeAnswers("cell-a");
+
+    await settle(() => result.current.onPrevious("cell-a"));
+
+    // The other half: moving the hold below the refusal must not lose it on
+    // the presses that do land.
+    expect(isAnswerHeld("cell-a")).toBe(true);
+    expect(result.current.queueFor("cell-a").cursor).toBe(1);
   });
 });

@@ -557,13 +557,12 @@ export function SpeechControlBar({
           className="speech-bar-btn"
           disabled={!hasPrevious}
           onClick={() => {
-            noteTransport(sessionId);
-            // UNCONDITIONAL, on purpose. The hold and the wave step both
-            // belong to `onPrevious` in the host, because the chord and the
-            // OS media keys raise the same callback and must behave the same
-            // way — a rule the row kept for itself would be a second
-            // transport. This handler's whole job is to say that the row's
-            // control was pressed.
+            // ONE CALL, on purpose. The hold, the wave step and the send
+            // wait's `noteTransport` all belong to `onPrevious` in the host,
+            // because the chord and the OS media keys raise the same callback
+            // and must behave the same way — a rule the row kept for itself
+            // would be a second transport. This handler's whole job is to say
+            // that the row's control was pressed.
             speech.onPrevious(sessionId);
           }}
         >
@@ -651,9 +650,8 @@ export function SpeechControlBar({
           className="speech-bar-btn"
           disabled={!hasNext}
           onClick={() => {
-            noteTransport(sessionId);
-            // Unconditional, like the backward control beside it: the release
-            // onto the wave is `onNext`'s, in the host.
+            // One call, like the backward control beside it: the release onto
+            // the wave is `onNext`'s, in the host.
             speech.onNext(sessionId);
           }}
         >

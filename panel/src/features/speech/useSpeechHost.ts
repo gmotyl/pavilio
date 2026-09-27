@@ -66,6 +66,7 @@ import {
   getAnswerWaiting,
   holdAnswer,
   isAnswerHeld,
+  noteTransport,
   releaseAnswer,
 } from "../terminal/answerWaiting";
 import { stepsOffTheWave, stepsOntoTheWave } from "./waveStep";
@@ -736,20 +737,30 @@ export function useSpeechHost(): SpeechHost {
       // about — is the single answer a backward walk never lands on. Invisible
       // on a cell with history; total on a reloaded tab, where the server's one
       // retained utterance is the only answer there is.
+      // READ BEFORE `noteTransport`, and that ordering is the whole of a bug
+      // this once had. `noteTransport` sets `markOnly`, and `derive` collapses
+      // a SEND-owned handover to `MARK_ONLY` the moment it is set — `waiting`
+      // goes false. Asked afterwards, `stepsOffTheWave` answers no on exactly
+      // the ordinary path "sent a draft, pressed Previous to re-read", and the
+      // press holds AND steps, skipping the newest answer. The row used to
+      // read its render-time snapshot, which is to say: before the press.
       const steppingOffTheWave = stepsOffTheWave(
         getAnswerWaiting(sessionId).waiting,
         isAnswerHeld(sessionId),
         utteranceUnderCursor(queue) !== null,
       );
 
-      // A backward press is the user saying *I want the text*, wherever it
-      // lands — including a press the list refuses at the oldest answer. The
-      // hold moves with the press rather than with the surface, so the chord
-      // and the media keys take it too; a hold that only the row could take was
-      // the same divergence in its other half.
-      holdAnswer(sessionId);
+      // The send wait's own rule: a transport press gives the body back and
+      // leaves the mark on the play button. It lives here rather than in the
+      // row for the same reason the step does — the chord and the media keys
+      // are transport presses too, and a row that kept this to itself left
+      // them unable to give the body back at all.
+      noteTransport(sessionId);
 
       if (steppingOffTheWave) {
+        // A backward press is the user saying *I want the text*, and this
+        // branch is a real move, so it takes the hold.
+        holdAnswer(sessionId);
         // The grant is spent even though the cursor did not move — see the
         // note on `unlock()` below. This branch is the one that most needs it:
         // on the reloaded cell it and the forward step back onto the wave are
@@ -772,6 +783,14 @@ export function useSpeechHost(): SpeechHost {
       // press from making a sound anyway.
       const target = utteranceUnderCursor({ ...queue, cursor: queue.cursor + 1 });
       if (!target) return;
+
+      // The hold is taken AFTER the refusal, not before it. Before, it was a
+      // rule the row's `disabled={!hasPrevious}` made unreachable — but the
+      // chord and the media keys ask no button whether it is enabled, so a
+      // `Ctrl+Shift+←` on a cell with no history would set a hold that nothing
+      // in that run clears. `derive` answers a standing hold with `SETTLED`,
+      // so the cell's pane would stop handing over to the wave altogether.
+      holdAnswer(sessionId);
 
       // And the press is SILENT: the cursor moves and nothing else happens.
       //
@@ -822,7 +841,18 @@ export function useSpeechHost(): SpeechHost {
       // the wave sits above the BACKLOG and forward from `current` steps into
       // it. Releasing here on a queued cell would spend the hold without
       // moving, and cost a second press to go one place.
-      if (stepsOntoTheWave(isAnswerHeld(sessionId), queue.cursor, queue.pending.length)) {
+      const steppingOntoTheWave = stepsOntoTheWave(
+        isAnswerHeld(sessionId),
+        queue.cursor,
+        queue.pending.length,
+      );
+
+      // The send wait's rule, as on the backward press — and read after the
+      // gate above for the same reason: `noteTransport` moves what `derive`
+      // reports, so anything asked of the store belongs before it.
+      noteTransport(sessionId);
+
+      if (steppingOntoTheWave) {
         unlock();
         releaseAnswer(sessionId);
         return;
