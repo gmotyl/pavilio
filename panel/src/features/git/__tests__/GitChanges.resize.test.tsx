@@ -100,9 +100,7 @@ describe("resizing the git-changes tree", () => {
     // drag from React state, never a measurement, so a class still winning the
     // cascade would leave the rendered tree disagreeing with the reported one.
     expect(tree().className).not.toMatch(/w-\[240px\]/);
-    expect(tree()).toHaveStyle({
-      width: `${preferences.repoTreePaneWidth.default}px`,
-    });
+    expect(tree()).toHaveStyle({ width: "280px" });
     // `shrink-0` is the same guarantee from the other side: it stops the flex
     // row squeezing the tree below the width the hook thinks it has.
     expect(tree().className).toMatch(/\bshrink-0\b/);
@@ -128,12 +126,8 @@ describe("resizing the git-changes tree", () => {
     await renderTree();
     dragBy(60);
 
-    expect(tree()).toHaveStyle({
-      width: `${preferences.repoTreePaneWidth.default + 60}px`,
-    });
-    expect(readPreference(preferences.repoTreePaneWidth)).toBe(
-      preferences.repoTreePaneWidth.default + 60,
-    );
+    expect(tree()).toHaveStyle({ width: "340px" });
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(340);
   });
 
   it("clamps the Changes tree to the shared bounds", async () => {
