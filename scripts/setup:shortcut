@@ -20,13 +20,44 @@ if ! command -v powershell.exe >/dev/null 2>&1 || [ -z "${WSL_DISTRO_NAME:-}" ];
 fi
 
 # The launcher lives next to this script. `dirname` is deliberately avoided so
-# this still works when setup runs on a minimal PATH.
+# this still works when setup runs on a minimal PATH. The redirect shields the
+# command substitution from an exported CDPATH, which both relocates the target
+# and echoes the directory it picked onto stdout.
 case "$0" in
   */*) script_dir="${0%/*}" ;;
   *) script_dir="." ;;
 esac
-script_dir="$(cd "$script_dir" && pwd)"
+script_dir="$(cd "$script_dir" >/dev/null 2>&1 && pwd)"
 launcher="$script_dir/start-panel-windows.sh"
+
+# If that cd failed, script_dir is empty and the shortcut would point at
+# /start-panel-windows.sh — a shortcut that writes fine and fails on every
+# click. The same guard catches a misplaced or unshipped launcher.
+if [ ! -f "$launcher" ]; then
+  echo "❌ Launcher not found at ${launcher} — run this from a complete checkout" >&2
+  exit 1
+fi
+
+# Three layers of quoting sit between this shell and the launcher, and each one
+# has to be satisfied separately:
+#
+#   1. `bash -lc` re-parses its argument as a shell command string, so a path
+#      with a space has to arrive already single-quoted.
+#   2. Windows splits the shortcut's Arguments into argv before wsl.exe sees
+#      them, so that single-quoted word has to sit inside double quotes.
+#   3. The whole thing is interpolated into a PowerShell single-quoted literal,
+#      where a literal ' is written '' — the same escape scripts/
+#      start-panel-windows.sh applies to its own payload.
+#
+# Without all three, a checkout under "C:\Users\Greg Motyl" or "C:\Users\O'Brien"
+# either breaks the PowerShell parse or produces a shortcut that writes
+# successfully and flashes "No such file or directory" on every double-click.
+SQ="'"
+SH_ESC="'\\''"
+launcher_sh="'${launcher//$SQ/$SH_ESC}'"
+
+ps_launcher="${launcher_sh//$SQ/$SQ$SQ}"
+ps_distro="${WSL_DISTRO_NAME//$SQ/$SQ$SQ}"
 
 # Windows resolves the shortcut's arguments, so the launcher has to be named by
 # absolute path — a relative one would resolve against wsl.exe's working
@@ -40,7 +71,7 @@ payload="\$ErrorActionPreference = 'Stop'
 # overwrites the same file instead of leaving a second, suffixed copy behind.
 \$shortcut = \$shell.CreateShortcut(\$lnk)
 \$shortcut.TargetPath = 'C:\\Windows\\System32\\wsl.exe'
-\$shortcut.Arguments = '~ -d ${WSL_DISTRO_NAME} -- bash -lc ${launcher}'
+\$shortcut.Arguments = '~ -d \"${ps_distro}\" -- bash -lc \"${ps_launcher}\"'
 \$shortcut.WorkingDirectory = 'C:\\Windows\\System32'
 \$shortcut.IconLocation = 'C:\\Windows\\System32\\wsl.exe,0'
 \$shortcut.Description = 'Start the Pavilio panel'

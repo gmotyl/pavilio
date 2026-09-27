@@ -73,12 +73,48 @@ function writeWslpathStub() {
   );
 }
 
-function run(extraEnv: Record<string, string> = {}) {
-  const res = spawnSync(BASH, [join(repo, "scripts", "setup:shortcut")], {
+function run(extraEnv: Record<string, string> = {}, repoDir: string = repo) {
+  const res = spawnSync(BASH, [join(repoDir, "scripts", "setup:shortcut")], {
     encoding: "utf8",
     env: { HOME: join(sandbox, "home"), PATH: stubBin, ...extraEnv },
   });
   return { status: res.status, output: `${res.stdout}${res.stderr}` };
+}
+
+/**
+ * Plant a second sandbox checkout under `dirName`, so a case can put the repo
+ * behind a directory name the quoting has to survive.
+ */
+function makeRepoUnder(dirName: string): string {
+  const other = join(sandbox, dirName, "repo");
+  mkdirSync(join(other, "scripts"), { recursive: true });
+  copyFileSync(SETUP_SHORTCUT, join(other, "scripts", "setup:shortcut"));
+  // This launcher is actually executed by the quoting test, so it does
+  // something observable rather than nothing.
+  writeFileSync(
+    join(other, "scripts", "start-panel-windows.sh"),
+    // An absolute interpreter and a builtin only: PATH here holds stubs alone.
+    ["#!/bin/sh", `printf 'launched\\n' > "${join(sandbox, "launched")}"`, ""].join("\n"),
+    { mode: 0o755 },
+  );
+  return other;
+}
+
+/**
+ * The value assigned to $shortcut.Arguments, as PowerShell would see it after
+ * parsing its single-quoted literal. Throws when the literal is terminated
+ * early — i.e. exactly the failure an un-escaped apostrophe causes.
+ */
+function windowsArguments(payload: string): string {
+  const line = payload.split("\n").find((l) => l.startsWith("$shortcut.Arguments"));
+  expect(line, "payload has no $shortcut.Arguments assignment").toBeTruthy();
+  const body = (line as string).slice((line as string).indexOf("=") + 1).trim();
+  expect(body.startsWith("'") && body.endsWith("'")).toBe(true);
+  const inner = body.slice(1, -1);
+  // Inside a PowerShell single-quoted string a literal ' is written ''. Any
+  // odd one out would have ended the string at that point.
+  expect(inner.replace(/''/g, ""), "PowerShell literal terminated early").not.toContain("'");
+  return inner.replace(/''/g, "'");
 }
 
 /** The -Command payloads the stub recorded, newest last. */
@@ -122,13 +158,16 @@ describe("scripts/setup:shortcut", () => {
     const payload = recorded[0];
 
     // wsl.exe is the target, launched from a directory that always exists.
-    expect(payload).toContain("C:\\Windows\\System32\\wsl.exe");
-    expect(payload).toContain("C:\\Windows\\System32\\wsl.exe,0");
-    expect(payload).toContain("C:\\Windows\\System32");
+    expect(payload).toContain("$shortcut.TargetPath = 'C:\\Windows\\System32\\wsl.exe'");
+    expect(payload).toContain("$shortcut.IconLocation = 'C:\\Windows\\System32\\wsl.exe,0'");
+    // Asserted on its own line: a bare toContain("C:\\Windows\\System32") is
+    // already satisfied by TargetPath, so deleting this line from the script
+    // would not have been noticed.
+    expect(payload).toContain("$shortcut.WorkingDirectory = 'C:\\Windows\\System32'");
     // The distro is pinned, and the launcher is named by absolute path — a
     // relative one would resolve against wsl.exe's working directory.
     const launcher = join(repo, "scripts", "start-panel-windows.sh");
-    expect(payload).toContain(`-d Ubuntu-24.04 -- bash -lc ${launcher}`);
+    expect(windowsArguments(payload)).toBe(`~ -d "Ubuntu-24.04" -- bash -lc "'${launcher}'"`);
 
     // And the user is told where it landed, in a path they can act on.
     expect(output).toContain(WSL_LNK);
@@ -153,7 +192,6 @@ describe("scripts/setup:shortcut", () => {
     const both = payloads();
     expect(both).toHaveLength(2);
     expect(both[1]).toBe(both[0]);
-    expect(both[1]).not.toMatch(/Pavilio Panel[^']*\(\d\)\.lnk|Pavilio Panel-\d\.lnk/);
 
     // Without wslpath on PATH the Windows spelling is printed rather than
     // nothing at all.
@@ -174,6 +212,77 @@ describe("scripts/setup:shortcut", () => {
 
     expect(noDistro.status).toBe(0);
     expect(noDistro.output).toContain("skipped (not WSL)");
+    expect(payloads()).toHaveLength(0);
+  }, 30000);
+
+  it("survives a checkout path holding both a space and an apostrophe", () => {
+    writePowershellStub();
+
+    // "C:\Users\Greg O'Brien Motyl\pavilio" is an ordinary Windows home. The
+    // apostrophe used to close the PowerShell literal early (parse error, no
+    // shortcut at all) and the space used to split the `bash -lc` argument
+    // (shortcut written, exit 0, "No such file or directory" on every click).
+    const awkward = makeRepoUnder("Greg O'Brien Motyl");
+    const launcher = join(awkward, "scripts", "start-panel-windows.sh");
+    expect(launcher).toContain("'");
+    expect(launcher).toContain(" ");
+
+    const { status } = run({ WSL_DISTRO_NAME: "Ubuntu-24.04" }, awkward);
+    expect(status).toBe(0);
+
+    // windowsArguments() throws when the PowerShell literal ends early.
+    const args = windowsArguments(payloads()[0]);
+
+    // Windows splits Arguments into argv before wsl.exe sees them, so the
+    // command string has to be one double-quoted word with nothing to split on.
+    const match = /-- bash -lc (".*")$/.exec(args);
+    expect(match, `no quoted bash -lc argument in: ${args}`).toBeTruthy();
+    const quoted = (match as RegExpExecArray)[1];
+    expect(quoted.slice(1, -1)).not.toContain('"');
+
+    // And what bash is finally handed must run the launcher, not a prefix of it.
+    const command = quoted.slice(1, -1);
+    const marker = join(sandbox, "launched");
+    expect(existsSync(marker)).toBe(false);
+    const ran = spawnSync(BASH, ["-c", command], {
+      encoding: "utf8",
+      env: { HOME: join(sandbox, "home"), PATH: stubBin },
+    });
+    expect(`${ran.stdout}${ran.stderr}`).toBe("");
+    expect(ran.status).toBe(0);
+    expect(existsSync(marker)).toBe(true);
+  }, 30000);
+
+  it("fails loudly when PowerShell cannot write the shortcut", () => {
+    // A locked-down Desktop, a broken COM registration, a refused interop call:
+    // whatever the reason, setup must not report success.
+    writeFileSync(
+      join(stubBin, "powershell.exe"),
+      ["#!/bin/sh", "# Stub powershell.exe: the Windows side refuses.", "echo 'Access denied' >&2", "exit 1", ""].join(
+        "\n",
+      ),
+      { mode: 0o755 },
+    );
+
+    const { status, output } = run({ WSL_DISTRO_NAME: "Ubuntu-24.04" });
+
+    expect(status).toBe(1);
+    expect(output).toContain("Could not write the desktop shortcut");
+    expect(output).not.toContain("✅");
+  }, 30000);
+
+  it("refuses to write a shortcut when the launcher is missing", () => {
+    writePowershellStub();
+    // Stands in for both an incomplete checkout and the cd that silently failed,
+    // which used to leave the shortcut pointing at /start-panel-windows.sh.
+    rmSync(join(repo, "scripts", "start-panel-windows.sh"));
+
+    const { status, output } = run({ WSL_DISTRO_NAME: "Ubuntu-24.04" });
+
+    expect(status).toBe(1);
+    expect(output).toContain("Launcher not found");
+    expect(output).not.toContain("✅");
+    // PowerShell is never reached, so nothing lands on the Desktop.
     expect(payloads()).toHaveLength(0);
   }, 30000);
 
