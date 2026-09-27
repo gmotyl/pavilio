@@ -1,0 +1,469 @@
+#!/usr/bin/env bash
+# One command that takes a fresh clone to a panel you can start.
+#
+#   pnpm setup                 # everything
+#   pnpm setup --no-speech     # skip the speech Stop hooks
+#   pnpm setup --no-shortcut   # skip the Windows desktop shortcut
+#   pnpm setup --yes           # never ask a question (CI, re-runs, scripts)
+#
+# It is a *report*, not a log: every step prints exactly one line —
+#
+#   ✓ <step>                        it is done
+#   – <step> skipped (<why>)        it did not apply here
+#   ✗ <step> failed — run: <cmd>    it did not work, and this is how to retry it
+#
+# Only the two package-manager steps are fatal. Everything after them is a
+# convenience that a user can redo by hand, so a failure there is reported with
+# the command to rerun and the run continues — a machine without codex, without
+# WSL, or with a locked-down home directory still ends up with a working panel.
+#
+# Re-running is the normal case, not the exception: nothing here overwrites a
+# file the user owns, and nothing adds a remote twice.
+#
+# The sub-scripts are executed as CHILD PROCESSES, never sourced. Each of them
+# ends its "nothing to do here" branch with `exit 0`, which sourced would end
+# this run at the first inapplicable step.
+
+set -u
+
+# The lowest Node the panel's dependencies (and this workspace's tooling) run on.
+MIN_NODE_MAJOR=22
+
+# The repository this script was shipped in, spelled the two ways a clone of it
+# is normally reached. Anything else in `origin` belongs to the user.
+CANONICAL_HTTPS="https://github.com/gmotyl/pavilio.git"
+
+# This script lives in <repo>/scripts/. `dirname` is deliberately avoided so this
+# still works on a minimal PATH, and the redirects shield the command
+# substitutions from an exported CDPATH, which both relocates the target and
+# echoes the directory it picked onto stdout.
+case "$0" in
+  */*) script_dir="${0%/*}" ;;
+  *) script_dir="." ;;
+esac
+script_dir="$(cd "$script_dir" >/dev/null 2>&1 && pwd)"
+repo_root="$(cd "$script_dir/.." >/dev/null 2>&1 && pwd)"
+
+if [ -z "$script_dir" ] || [ -z "$repo_root" ] || [ ! -d "$repo_root/scripts" ]; then
+  echo "❌ Could not work out the repository root from $0 — run this from a complete checkout" >&2
+  exit 1
+fi
+
+# Every step below assumes the repo root is the working directory: the seed
+# paths are relative to it, and setup:claude-code / setup:opencode look for
+# skills/ in their own cwd.
+cd "$repo_root" || exit 1
+
+usage() {
+  cat <<'EOF'
+Usage: pnpm setup [--no-speech] [--no-shortcut] [--yes]
+
+  --no-speech     do not install the speech Stop hooks
+  --no-shortcut   do not create the Windows desktop shortcut
+  --yes           never prompt; leave the notes remote unset
+EOF
+}
+
+do_speech=1
+do_shortcut=1
+assume_yes=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-speech) do_speech=0 ;;
+    --no-shortcut) do_shortcut=0 ;;
+    --yes | -y) assume_yes=1 ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+# ---------------------------------------------------------------------------
+# The report
+# ---------------------------------------------------------------------------
+
+step_ok() { printf '✓ %s\n' "$1"; }
+step_skip() { printf '– %s skipped (%s)\n' "$1" "$2"; }
+step_fail() { printf '✗ %s failed — run: %s\n' "$1" "$2"; }
+
+# A sub-script that had nothing to do says so on a line of its own, e.g.
+# "skipped (not WSL)". Lift that reason into this run's report rather than
+# claiming the step was done — and rather than printing the sub-script's own
+# output, which would break the one-line-per-step contract.
+skip_reason() {
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      'skipped ('*')'*)
+        line="${line#skipped (}"
+        printf '%s' "${line%%)*}"
+        return 0
+        ;;
+    esac
+  done <<<"$1"
+  return 1
+}
+
+# Run one sub-script as a child process and report it as a single line. Its
+# output is captured and shown only when it failed, so a good run stays a
+# report and a bad one still explains itself.
+#
+#   run_sub <label> <rerun-command> <script-path> [args...]
+run_sub() {
+  local label="$1" rerun="$2" cmd="$3"
+  shift 3
+  if [ ! -f "$cmd" ]; then
+    step_skip "$label" "${cmd##*/} not found"
+    return 0
+  fi
+  local out status reason
+  # stdin is closed for the child on purpose: a sub-script that stops to ask a
+  # question (setup:claude-code does, when its CLI is missing) must not be able
+  # to hang an otherwise unattended setup.
+  if [ -x "$cmd" ]; then
+    out="$("$cmd" "$@" </dev/null 2>&1)"
+  else
+    # A checkout on a filesystem that dropped the executable bit — a Windows
+    # share, an unzipped archive — is still a usable checkout.
+    out="$("${BASH:-bash}" "$cmd" "$@" </dev/null 2>&1)"
+  fi
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    [ -n "$out" ] && printf '%s\n' "$out" >&2
+    step_fail "$label" "$rerun"
+    return 1
+  fi
+  reason="$(skip_reason "$out")" || reason=""
+  if [ -n "$reason" ]; then
+    step_skip "$label" "$reason"
+  else
+    step_ok "$label"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# 1. toolchain
+# ---------------------------------------------------------------------------
+
+# Find node the same way every other entry point does — the launcher and the
+# panel scripts share this resolver, so a shortcut clicked with no dotfiles read
+# lands on the same interpreter this setup pinned.
+# shellcheck source=scripts/pm
+. "$script_dir/pm" || exit 1
+
+if ! pm_resolve; then
+  # pm_resolve also fails when node is present but neither pnpm nor npm is —
+  # and corepack, which ships with node, can still provide pnpm. Only a missing
+  # node is fatal here; the package-manager choice is made below.
+  if ! pm_have_node; then
+    step_fail "toolchain" "install Node.js $MIN_NODE_MAJOR or newer, then: pnpm setup"
+    exit 1
+  fi
+fi
+
+node_version="$(node --version 2>/dev/null)"
+node_major="${node_version#v}"
+node_major="${node_major%%.*}"
+case "$node_major" in
+  '' | *[!0-9]*) node_major=0 ;;
+esac
+
+if [ "$node_major" -lt "$MIN_NODE_MAJOR" ]; then
+  # Before anything is installed, built or seeded: an install under an old node
+  # half-succeeds and then fails somewhere far less legible than here.
+  echo "Node ${node_version:-(unknown)} is too old — Pavilio needs Node.js $MIN_NODE_MAJOR or newer." >&2
+  step_fail "toolchain" "install Node.js $MIN_NODE_MAJOR or newer, then: pnpm setup"
+  exit 1
+fi
+
+# pnpm is the workspace's package manager. corepack is the next best thing: it
+# ships with node and runs pnpm without installing anything globally. npm is the
+# floor — every node install has one.
+if command -v pnpm >/dev/null 2>&1; then
+  PM="pnpm"
+  pm_label="pnpm"
+elif command -v corepack >/dev/null 2>&1; then
+  # A shell function rather than a PATH shim: pm_install and pm_in call `pnpm`
+  # from *this* shell, so the function is what they find — no temp directory to
+  # create, chmod and clean up, and nothing left behind if this run is killed.
+  pnpm() { corepack pnpm "$@"; }
+  PM="pnpm"
+  pm_label="corepack pnpm"
+elif command -v npm >/dev/null 2>&1; then
+  PM="npm"
+  pm_label="npm"
+else
+  echo "No package manager found — install pnpm (or use the npm that ships with node)." >&2
+  step_fail "toolchain" "install Node.js $MIN_NODE_MAJOR or newer, then: pnpm setup"
+  exit 1
+fi
+export PM
+
+# How to spell the two fatal steps for a human who has to retry one. npm needs
+# `run` for a package script and `--prefix` instead of `-C`, so the two package
+# managers do not share a spelling.
+if [ "$PM" = "pnpm" ]; then
+  rerun_install="$pm_label -C panel install"
+  rerun_build="$pm_label -C panel build"
+else
+  rerun_install="npm --prefix panel install"
+  rerun_build="npm --prefix panel run build"
+fi
+
+# Record the interpreter for the Windows launcher, which starts bash without a
+# login shell and so has no version manager on PATH. The file belongs to the
+# host, not to this script: everything else in it is rewritten verbatim and only
+# the PAVILIO_NODE_BIN line is ours.
+pin_node_bin() {
+  local env_file tmp line found=0
+  env_file="$(pm_local_env_path)"
+  tmp="$env_file.pavilio-tmp.$$"
+  : >"$tmp" || return 1
+  if [ -f "$env_file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      # The file is also edited on the Windows side, where an editor may save
+      # CRLF; scripts/pm strips those on read, and so must this rewrite.
+      line="${line%$'\r'}"
+      case "$line" in
+        PAVILIO_NODE_BIN=* | 'export PAVILIO_NODE_BIN='*)
+          # Replaced in place, so the pin keeps the position the user gave it —
+          # and any duplicate left by an earlier hand-edit is dropped.
+          if [ "$found" = 0 ]; then
+            printf 'PAVILIO_NODE_BIN="%s"\n' "$NODE_BIN_DIR" >>"$tmp" || return 1
+            found=1
+          fi
+          ;;
+        *) printf '%s\n' "$line" >>"$tmp" || return 1 ;;
+      esac
+    done <"$env_file"
+  fi
+  if [ "$found" = 0 ]; then
+    printf 'PAVILIO_NODE_BIN="%s"\n' "$NODE_BIN_DIR" >>"$tmp" || return 1
+  fi
+  mv "$tmp" "$env_file"
+}
+
+if pin_node_bin; then
+  step_ok "toolchain — node $node_version, package manager: $pm_label"
+else
+  # Not fatal: the pin is only needed by the Windows launcher, and a normal
+  # terminal resolves node on its own.
+  step_fail "toolchain" "check that $(pm_local_env_path) is writable"
+fi
+
+# ---------------------------------------------------------------------------
+# 2. seed
+# ---------------------------------------------------------------------------
+
+seed_step() {
+  if ! mkdir -p "$repo_root/projects"; then
+    step_fail "seed" "mkdir -p projects"
+    return 1
+  fi
+  # `.projects.local.md` is the user's project registry the moment it exists.
+  # Only its absence is ours to fix — this is what makes a second run safe.
+  if [ -e "$repo_root/.projects.local.md" ]; then
+    step_ok "seed — projects/ and .projects.local.md already present"
+    return 0
+  fi
+  if [ ! -f "$repo_root/AGENTS.md.example" ]; then
+    step_skip "seed" "AGENTS.md.example not found"
+    return 0
+  fi
+  if ! cp "$repo_root/AGENTS.md.example" "$repo_root/.projects.local.md"; then
+    step_fail "seed" "cp AGENTS.md.example .projects.local.md"
+    return 1
+  fi
+  step_ok "seed — .projects.local.md created from AGENTS.md.example"
+}
+
+seed_step
+
+# ---------------------------------------------------------------------------
+# 3. panel install  (fatal)
+# ---------------------------------------------------------------------------
+
+# Output goes to stderr so stdout stays one line per step, while a first install
+# — which takes a while — still shows that something is happening.
+if pm_install "$repo_root/panel" >&2; then
+  step_ok "panel install"
+else
+  step_fail "panel install" "$rerun_install"
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 4. panel build  (fatal)
+# ---------------------------------------------------------------------------
+
+if pm_in "$repo_root/panel" build >&2; then
+  step_ok "panel build"
+else
+  step_fail "panel build" "$rerun_build"
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 5. remotes
+# ---------------------------------------------------------------------------
+
+is_canonical_remote() {
+  case "${1%.git}" in
+    https://github.com/gmotyl/pavilio | git@github.com:gmotyl/pavilio) return 0 ;;
+  esac
+  return 1
+}
+
+remotes_step() {
+  # "Clone mode" only: a checkout unpacked from an archive has no remotes to
+  # rearrange, and `git remote add` in a non-repository is an error, not a fix.
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    step_skip "remotes" "not a git clone"
+    return 0
+  fi
+
+  local origin_url upstream_url notes=""
+  origin_url="$(git remote get-url origin 2>/dev/null)" || origin_url=""
+  upstream_url="$(git remote get-url upstream 2>/dev/null)" || upstream_url=""
+
+  if [ -n "$origin_url" ] && is_canonical_remote "$origin_url"; then
+    if [ -n "$upstream_url" ]; then
+      # An upstream is already recorded — an interrupted earlier run, or a
+      # deliberate arrangement. Renaming over it would fail, and removing the
+      # user's remotes is not this script's call.
+      notes="upstream already set; origin left alone"
+    elif git remote rename origin upstream >/dev/null 2>&1; then
+      # `origin` is where git pushes by default, and nobody can push here. Make
+      # it `upstream` so the name matches what it is, and free `origin` for the
+      # private notes repo the user actually writes to.
+      upstream_url="$origin_url"
+      origin_url=""
+      notes="origin → upstream"
+    else
+      step_fail "remotes" "git remote rename origin upstream"
+      return 1
+    fi
+  elif [ -n "$origin_url" ]; then
+    # A fork, or a private remote from an earlier run: not ours to touch.
+    if [ -z "$upstream_url" ]; then
+      if git remote add upstream "$CANONICAL_HTTPS" >/dev/null 2>&1; then
+        upstream_url="$CANONICAL_HTTPS"
+        notes="upstream added"
+      else
+        step_fail "remotes" "git remote add upstream $CANONICAL_HTTPS"
+        return 1
+      fi
+    else
+      notes="origin and upstream already set"
+    fi
+  fi
+
+  # A push URL of `no_push` is git's own idiom for "fetch from here, never push
+  # here": a mistyped `git push upstream` fails immediately instead of asking
+  # for credentials to a repository the user cannot write.
+  if [ -n "$upstream_url" ]; then
+    git remote set-url --push upstream no_push >/dev/null 2>&1 || true
+  fi
+
+  if [ -z "$origin_url" ] && [ "$assume_yes" = 0 ]; then
+    local answer=""
+    printf 'Private repo URL for your notes (Enter to skip): '
+    # A closed or exhausted stdin (CI, a pipe, `pnpm setup </dev/null`) reads as
+    # "Enter to skip" rather than hanging the run.
+    if ! IFS= read -r answer; then
+      answer=""
+      printf '\n'
+    fi
+    if [ -n "$answer" ]; then
+      if ! git remote add origin "$answer" >/dev/null 2>&1; then
+        step_fail "remotes" "git remote add origin $answer"
+        return 1
+      fi
+      origin_url="$answer"
+      # Tracking is only set once the remote has actually answered: pointing
+      # main at an origin/main that does not exist breaks `git pull` with a
+      # message about a ref, not about the URL that was mistyped here.
+      if git fetch origin >&2 && git branch --set-upstream-to=origin/main main >/dev/null 2>&1; then
+        notes="${notes:+$notes; }origin added, main tracks origin/main"
+      else
+        notes="${notes:+$notes; }origin added, but main still tracks upstream — push once, then: git branch --set-upstream-to=origin/main main"
+      fi
+    else
+      notes="${notes:+$notes; }no origin (add one later: git remote add origin <url>)"
+    fi
+  fi
+
+  step_ok "remotes${notes:+ — $notes}"
+}
+
+remotes_step
+
+# ---------------------------------------------------------------------------
+# 6. skills
+# ---------------------------------------------------------------------------
+
+# Each agent's config directory is the one reliable "this agent is installed
+# here" signal — its CLI may be a shell alias, a shim, or absent from a
+# non-login PATH. Creating the directory instead would leave a config tree on a
+# machine that never asked for one.
+agent_step() {
+  local label="$1" present="$2" why="$3" script="$4"
+  if [ "$present" != "1" ]; then
+    step_skip "$label" "$why"
+    return 0
+  fi
+  run_sub "$label" "bash scripts/$script" "$script_dir/$script"
+}
+
+home_dir="${HOME:-}"
+
+claude_present=0
+[ -n "$home_dir" ] && [ -d "$home_dir/.claude" ] && claude_present=1
+agent_step "skills (claude-code)" "$claude_present" "~/.claude not found" "setup:claude-code"
+
+# Either the global opencode config or a per-repo .opencode/ counts: opencode is
+# usable from a checkout alone.
+opencode_present=0
+if { [ -n "$home_dir" ] && [ -d "$home_dir/.config/opencode" ]; } || [ -d "$repo_root/.opencode" ]; then
+  opencode_present=1
+fi
+agent_step "skills (opencode)" "$opencode_present" "~/.config/opencode not found" "setup:opencode"
+
+codex_home="${CODEX_HOME:-${home_dir:+$home_dir/.codex}}"
+codex_present=0
+[ -n "$codex_home" ] && [ -d "$codex_home" ] && codex_present=1
+agent_step "skills (codex)" "$codex_present" "~/.codex not found" "setup:codex"
+
+# ---------------------------------------------------------------------------
+# 7. speech
+# ---------------------------------------------------------------------------
+
+if [ "$do_speech" = 0 ]; then
+  step_skip "speech" "--no-speech"
+else
+  run_sub "speech" "bash scripts/install:speech" "$script_dir/install:speech"
+fi
+
+# ---------------------------------------------------------------------------
+# 8. shortcut
+# ---------------------------------------------------------------------------
+
+if [ "$do_shortcut" = 0 ]; then
+  step_skip "shortcut" "--no-shortcut"
+else
+  run_sub "shortcut" "bash scripts/setup:shortcut" "$script_dir/setup:shortcut"
+fi
+
+# ---------------------------------------------------------------------------
+
+printf 'Done. Start the panel: pnpm start  →  http://localhost:%s\n' "${PANEL_PORT:-3010}"
+exit 0
