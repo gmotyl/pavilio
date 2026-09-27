@@ -1,0 +1,188 @@
+# Pavilio toolchain resolver — sourced, never executed.
+#
+#   . "$SCRIPT_DIR/pm" && pm_resolve || exit 1
+#
+# After a successful pm_resolve:
+#   $PM           — "pnpm" or "npm", the package manager to drive
+#   $NODE_BIN_DIR — the directory holding the `node` that is now on PATH
+#
+# Why this exists: the Windows shortcut and the setup scripts run bash without a
+# login shell, so none of the dotfiles that normally put a version manager on
+# PATH have been read. Rather than ask the user to fix their shell, every entry
+# point sources this and lets it find the toolchain the same way, in the same
+# order, with the same message when it cannot.
+#
+# It deliberately uses nothing but bash builtins: it runs before a toolchain is
+# known to exist, and on a stripped PATH even coreutils may be missing.
+
+# The directory this file lives in, and the workspace above it. Taken from
+# BASH_SOURCE, not $0 — when sourced, $0 is still the calling script. Stripped
+# with parameter expansion rather than `dirname`, which is an external.
+PM_SELF="${BASH_SOURCE[0]:-$0}"
+case "$PM_SELF" in
+  */*) PM_SELF="${PM_SELF%/*}" ;;
+  *) PM_SELF="." ;;
+esac
+PM_SCRIPT_DIR="$(cd "$PM_SELF" >/dev/null 2>&1 && pwd)"
+PM_REPO_ROOT="$(cd "$PM_SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
+unset PM_SELF
+
+# The untracked per-host env file, shared with start-panel-windows.sh. Callers
+# use this to read or write PAVILIO_NODE_BIN without hard-coding the path.
+pm_local_env_path() {
+  printf '%s\n' "$PM_SCRIPT_DIR/start-panel-windows.local.env"
+}
+
+# Prepend a directory to PATH, at most once: the entry points source this file
+# more than once per run (the launcher, then the update script it calls), and a
+# PATH that grows a copy each time is how a stale pin outlives its removal.
+pm_prepend_path() {
+  case ":$PATH:" in
+    *":$1:"*) ;;
+    *) PATH="$1:$PATH" ;;
+  esac
+  export PATH
+}
+
+# Is a usable `node` on PATH yet? Every probe below is skipped once this is true.
+pm_have_node() {
+  command -v node >/dev/null 2>&1
+}
+
+# Numeric, segment-by-segment version compare (`pm_version_gt 24.1.0 20.0.0`).
+# `sort -V` would be shorter but is an external, and not portable to BSD sort.
+pm_version_gt() {
+  local a="${1#v}" b="${2#v}" x y
+  while [ -n "$a" ] || [ -n "$b" ]; do
+    x="${a%%.*}"
+    y="${b%%.*}"
+    if [ "$a" = "${a#*.}" ]; then a=""; else a="${a#*.}"; fi
+    if [ "$b" = "${b#*.}" ]; then b=""; else b="${b#*.}"; fi
+    # Drop any prerelease suffix ("22.0.0-rc.1") so the compare stays numeric.
+    x="${x%%[!0-9]*}"
+    y="${y%%[!0-9]*}"
+    [ -n "$x" ] || x=0
+    [ -n "$y" ] || y=0
+    if [ "$x" -gt "$y" ]; then return 0; fi
+    if [ "$x" -lt "$y" ]; then return 1; fi
+  done
+  return 1
+}
+
+# 1. The interpreter this host was pinned to, if it is still there. A pin that
+#    points at a removed nvm version is ignored rather than fatal — the probes
+#    below then find whatever replaced it.
+pm_probe_pinned() {
+  local env_file pinned
+  env_file="$(pm_local_env_path)"
+  [ -f "$env_file" ] || return 0
+  # Read in a subshell: the file is the launcher's config and sets other things
+  # (PANEL_EXTRA_PORTS, PANEL_POST_LAUNCH_CMD) that are none of our business.
+  pinned="$(. "$env_file" >/dev/null 2>&1; printf '%s' "${PAVILIO_NODE_BIN:-}")"
+  [ -n "$pinned" ] && [ -d "$pinned" ] || return 0
+  pm_prepend_path "$pinned"
+}
+
+# 3. pnpm's own global bin dir, which is where `pnpm env use` installs node.
+pm_probe_pnpm_home() {
+  [ -n "${PNPM_HOME:-}" ] && [ -d "$PNPM_HOME" ] || return 0
+  pm_prepend_path "$PNPM_HOME"
+}
+
+# 4. nvm proper, asked for whatever the user made default.
+pm_probe_nvm() {
+  local nvm_sh="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+  [ -s "$nvm_sh" ] || return 0
+  # shellcheck disable=SC1090
+  . "$nvm_sh" >/dev/null 2>&1 || return 0
+  command -v nvm >/dev/null 2>&1 || return 0
+  nvm use default >/dev/null 2>&1 || return 0
+}
+
+# 5. fnm, which prints the exports its shell is expected to eval.
+pm_probe_fnm() {
+  command -v fnm >/dev/null 2>&1 || return 0
+  local env_script
+  env_script="$(fnm env 2>/dev/null)" || return 0
+  [ -n "$env_script" ] || return 0
+  eval "$env_script" >/dev/null 2>&1 || return 0
+}
+
+# 6. volta, whose shims live in one fixed directory.
+pm_probe_volta() {
+  [ -d "$HOME/.volta/bin" ] || return 0
+  pm_prepend_path "$HOME/.volta/bin"
+}
+
+# 7. An nvm install whose nvm.sh could not be sourced (or was never there):
+#    take the newest version it has on disk.
+pm_probe_newest_nvm_version() {
+  local versions="${NVM_DIR:-$HOME/.nvm}/versions/node"
+  [ -d "$versions" ] || return 0
+  local candidate name best_dir="" best_name=""
+  for candidate in "$versions"/*/bin; do
+    [ -d "$candidate" ] || continue
+    name="${candidate%/bin}"
+    name="${name##*/}"
+    if [ -z "$best_dir" ] || pm_version_gt "$name" "$best_name"; then
+      best_dir="$candidate"
+      best_name="$name"
+    fi
+  done
+  [ -n "$best_dir" ] || return 0
+  pm_prepend_path "$best_dir"
+}
+
+pm_not_found() {
+  echo "node/pnpm not found. Open a normal terminal in $PM_REPO_ROOT and run: pnpm setup" >&2
+}
+
+# Find a toolchain and record it in $PM / $NODE_BIN_DIR. Returns 1, having said
+# what to do about it, when there is nothing to find.
+pm_resolve() {
+  PM=""
+  NODE_BIN_DIR=""
+
+  # 1. the pin, then 2. whatever the caller's PATH already carries (a normal
+  # terminal with pnpm on it needs no probing at all), then the managers.
+  pm_probe_pinned
+  pm_have_node || pm_probe_pnpm_home
+  pm_have_node || pm_probe_nvm
+  pm_have_node || pm_probe_fnm
+  pm_have_node || pm_probe_volta
+  pm_have_node || pm_probe_newest_nvm_version
+
+  if ! pm_have_node; then
+    pm_not_found
+    return 1
+  fi
+
+  # 8. pnpm is the workspace's package manager; npm is the fallback that every
+  #    node install brings with it.
+  if command -v pnpm >/dev/null 2>&1; then
+    PM="pnpm"
+  elif command -v npm >/dev/null 2>&1; then
+    PM="npm"
+  else
+    pm_not_found
+    return 1
+  fi
+
+  local node_path
+  node_path="$(command -v node)"
+  NODE_BIN_DIR="${node_path%/*}"
+  export PM NODE_BIN_DIR
+  return 0
+}
+
+# Run a package script in a subdirectory, spelled the way $PM wants it.
+# npm needs `run` and the `--` separator before any arguments; pnpm takes none.
+pm_in() {
+  local dir="$1" script="$2"
+  shift 2
+  if [ "${PM:-}" = "pnpm" ]; then
+    pnpm -C "$dir" "$script" "$@"
+  else
+    npm --prefix "$dir" run "$script" -- "$@"
+  fi
+}
