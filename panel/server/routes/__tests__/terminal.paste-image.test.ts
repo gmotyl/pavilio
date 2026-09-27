@@ -208,7 +208,14 @@ describe("POST /api/terminal/paste-image", () => {
 
     expect(res.status).toBe(200);
     created.push(res.body.path);
-    expect(existsSync(stale)).toBe(false);
+    // The sweep is FIRE-AND-FORGET by design — `terminal.ts` starts it without
+    // awaiting so an upload's response is never delayed by it — so the unlink
+    // may not have landed when the response resolves. Asserting straight away
+    // passes on a quiet machine and fails under suite load, which is what this
+    // test did: green in isolation, red in a full run, for reasons that had
+    // nothing to do with the branch under test. Waiting for the effect is the
+    // honest assertion; the timeout is what still fails if no sweep happens.
+    await expect.poll(() => existsSync(stale), { timeout: 5000 }).toBe(false);
     expect(existsSync(res.body.path)).toBe(true);
   });
 
