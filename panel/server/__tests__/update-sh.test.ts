@@ -20,11 +20,16 @@ import { join, resolve } from "node:path";
  */
 
 const UPDATE_SH = resolve(__dirname, "../../../scripts/update.sh");
+// update.sh sources its sibling scripts/pm for the toolchain, so the sandbox copy
+// needs it next to the script.
+const PM_SH = resolve(__dirname, "../../../scripts/pm");
 
 let sandbox: string;
 let upstream: string;
 let dest: string;
 let home: string;
+let origin: string;
+let stubBin: string;
 
 function git(cwd: string, ...args: string[]): string {
   const res = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", env: gitEnv() });
@@ -49,12 +54,23 @@ function currentBranch(): string {
   return git(upstream, "rev-parse", "--abbrev-ref", "HEAD");
 }
 
-function runUpdate(extraEnv: Record<string, string> = {}) {
-  const res = spawnSync("bash", [join(dest, "scripts", "update.sh"), upstream], {
+function runUpdate(extraEnv: Record<string, string> = {}, upstreamArg: string = upstream) {
+  const res = spawnSync("bash", [join(dest, "scripts", "update.sh"), upstreamArg], {
     encoding: "utf8",
-    env: { ...gitEnv(), ...extraEnv },
+    env: { ...gitEnv(), PATH: `${stubBin}:${process.env.PATH ?? ""}`, ...extraEnv },
   });
   return { status: res.status, output: `${res.stdout}${res.stderr}` };
+}
+
+/**
+ * Put a recording stand-in for an external command first on the run's PATH. The
+ * stub touches a marker file, so a test can assert the command was never reached
+ * rather than inferring it from output alone.
+ */
+function stubCommand(name: string): string {
+  const marker = join(sandbox, `${name}-invoked`);
+  writeFileSync(join(stubBin, name), `#!/bin/bash\necho "$@" >>"${marker}"\n`, { mode: 0o755 });
+  return marker;
 }
 
 /**
@@ -73,6 +89,26 @@ function initDestRepo() {
 
 function destStatus(): string {
   return git(dest, "status", "--porcelain");
+}
+
+/**
+ * Turn the destination into a pavilio *clone* — the same repo update.sh is run
+ * from — with `upstream` pointing at the bare origin. Clone mode is selected by
+ * the upstream directory resolving to the repo itself, so these runs pass `dest`
+ * as the argument. The script and pm are re-copied after the clone and stay
+ * untracked, which is what a real clone of a workspace-less checkout looks like
+ * here: origin's scripts/ never carries them, so they cannot collide on a rebase.
+ */
+function initCloneRepo() {
+  writePanelFixture(SUCCEEDING_BUILD);
+  commitUpstream("panel build succeeds");
+  rmSync(dest, { recursive: true, force: true });
+  git(sandbox, "clone", "--quiet", origin, dest);
+  git(dest, "remote", "rename", "origin", "upstream");
+  mkdirSync(join(dest, "scripts"), { recursive: true });
+  copyFileSync(UPDATE_SH, join(dest, "scripts", "update.sh"));
+  copyFileSync(PM_SH, join(dest, "scripts", "pm"));
+  writeFileSync(join(dest, ".git", "info", "exclude"), "scripts/update.sh\nscripts/pm\n");
 }
 
 // A build that fails on purpose. The sandbox has no node_modules, so the real
@@ -108,10 +144,12 @@ beforeEach(() => {
   home = join(sandbox, "home");
   upstream = join(sandbox, "upstream");
   dest = join(sandbox, "dest");
+  stubBin = join(sandbox, "stub-bin");
   mkdirSync(home, { recursive: true });
+  mkdirSync(stubBin, { recursive: true });
 
   // A bare repo standing in for origin — the script fetches from it.
-  const origin = join(sandbox, "origin.git");
+  origin = join(sandbox, "origin.git");
   mkdirSync(origin, { recursive: true });
   git(origin, "init", "--bare", "--quiet");
   git(origin, "symbolic-ref", "HEAD", "refs/heads/main");
@@ -137,6 +175,7 @@ beforeEach(() => {
   // The destination workspace: nothing but the script under test.
   mkdirSync(join(dest, "scripts"), { recursive: true });
   copyFileSync(UPDATE_SH, join(dest, "scripts", "update.sh"));
+  copyFileSync(PM_SH, join(dest, "scripts", "pm"));
 });
 
 afterEach(() => {
@@ -389,4 +428,93 @@ describe("scripts/update.sh sync commit", () => {
     expect(output).toMatch(/not a git repo/);
     expect(output).toMatch(/^Done\./m);
   }, 60000);
+});
+
+describe("scripts/update.sh clone mode", () => {
+  it("selects clone mode when the upstream directory is the repository itself", () => {
+    initCloneRepo();
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate({}, dest);
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/Updating in place \(clone mode\)/);
+    // A clone has nothing to mirror from: the sync path must not run at all.
+    expect(output).not.toMatch(/Syncing panel/);
+    expect(existsSync(rsyncCalled)).toBe(false);
+  }, 60000);
+
+  it("refuses clone mode without an upstream remote and names pnpm setup", () => {
+    initCloneRepo();
+    git(dest, "remote", "remove", "upstream");
+
+    const { status, output } = runUpdate({}, dest);
+
+    expect(status).toBe(1);
+    expect(output).toMatch(/No 'upstream' remote/);
+    expect(output).toMatch(/pnpm setup/);
+    expect(output).not.toMatch(/panel bundle built/);
+  }, 60000);
+
+  it("rebases the workspace's own commits on upstream/main and builds", () => {
+    initCloneRepo();
+    // The workspace's own notes commit — in a clone these are the user's commits,
+    // so the update replays them on top of upstream rather than committing for them.
+    mkdirSync(join(dest, "projects"), { recursive: true });
+    writeFileSync(join(dest, "projects", "note.md"), "my own note\n");
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "notes: my own work");
+    // Upstream moves on in the meantime.
+    writeFileSync(join(upstream, "panel", "src", "app.ts"), "export const app = 3;\n");
+    commitUpstream("upstream moves on");
+    const upstreamHead = git(upstream, "rev-parse", "HEAD");
+
+    const { status, output } = runUpdate({}, dest);
+
+    expect(status).toBe(0);
+    // The user's commit sits on top of upstream/main, unchanged and uncommitted-over.
+    expect(git(dest, "log", "-1", "--pretty=%s")).toBe("notes: my own work");
+    expect(git(dest, "rev-parse", "HEAD~1")).toBe(upstreamHead);
+    expect(output).toMatch(/panel bundle built/);
+    expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(true);
+  }, 120000);
+
+  it("stops on a rebase conflict with the path and continue/abort commands, without building", () => {
+    initCloneRepo();
+    writeFileSync(join(dest, "conflict.txt"), "mine\n");
+    git(dest, "commit", "-q", "-am", "my conflicting edit");
+    writeFileSync(join(upstream, "conflict.txt"), "theirs\n");
+    commitUpstream("upstream conflicting edit");
+
+    const { status, output } = runUpdate({}, dest);
+
+    expect(status).toBe(1);
+    expect(output).toMatch(/conflict\.txt/);
+    expect(output).toMatch(/rebase --continue/);
+    expect(output).toMatch(/rebase --abort/);
+    expect(output).not.toMatch(/panel bundle built/);
+    expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(false);
+  }, 60000);
+
+  it("ends clone mode with the restart hint and never restarts the panel", () => {
+    initCloneRepo();
+    // scripts/panel is the only thing that can stop or start the panel. update.sh
+    // must print the hint and leave the running process alone.
+    const panelInvoked = join(sandbox, "panel-invoked");
+    writeFileSync(
+      join(dest, "scripts", "panel"),
+      `#!/bin/bash\necho "$@" >>"${panelInvoked}"\n`,
+      { mode: 0o755 },
+    );
+    const sha = git(dest, "rev-parse", "--short", "HEAD");
+    const subject = git(dest, "log", "-1", "--pretty=%s");
+
+    const { status, output } = runUpdate({}, dest);
+
+    expect(status).toBe(0);
+    expect(output).toContain(`Updated to ${sha} ${subject}.`);
+    expect(output).toMatch(/The running panel still serves the old bundle — run: pnpm restart/);
+    expect(existsSync(panelInvoked)).toBe(false);
+    expect(output).not.toMatch(/\bkill\b/);
+  }, 120000);
 });
