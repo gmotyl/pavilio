@@ -90,9 +90,12 @@ function writePnpmStub(buildBody: string) {
     join(stubBin, "pnpm"),
     [
       "#!/bin/sh",
-      "# Stub pnpm: understands the `-C <dir> <script>` spelling pm_in uses.",
+      "# Stub pnpm: understands the `-C <dir> run <script>` spelling pm_in uses.",
       'dir="."',
       'if [ "$1" = "-C" ]; then dir="$2"; shift 2; fi',
+      '# pm_in always spells an explicit `run`, so pnpm cannot shadow a package',
+      '# script with a built-in subcommand of the same name.',
+      'if [ "$1" = "run" ]; then shift; fi',
       'case "$1" in',
       "  start)",
       '    echo "stub pnpm start in $dir"',

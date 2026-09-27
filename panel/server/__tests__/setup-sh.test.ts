@@ -298,7 +298,7 @@ describe("scripts/setup", () => {
 
     // The two fatal steps ran exactly once each, through the package manager.
     expect(countRecorded(`pnpm -C ${join(repo, "panel")} install`)).toBe(1);
-    expect(countRecorded(`pnpm -C ${join(repo, "panel")} build`)).toBe(1);
+    expect(countRecorded(`pnpm -C ${join(repo, "panel")} run build`)).toBe(1);
 
     // The seed landed.
     expect(existsSync(join(repo, "projects"))).toBe(true);
@@ -316,7 +316,7 @@ describe("scripts/setup", () => {
     const panelDir = join(repo, "panel");
     const order = [
       `pnpm -C ${panelDir} install`,
-      `pnpm -C ${panelDir} build`,
+      `pnpm -C ${panelDir} run build`,
       "setup:claude-code",
       "setup:opencode",
       "setup:codex",
@@ -404,7 +404,7 @@ describe("scripts/setup", () => {
     expect(viaCorepack.status, viaCorepack.output).toBe(0);
     expect(viaCorepack.stdout).toMatch(/^✓ toolchain\b.*package manager: corepack pnpm$/m);
     expect(countRecorded(`corepack pnpm -C ${join(repo, "panel")} install`)).toBe(1);
-    expect(countRecorded(`corepack pnpm -C ${join(repo, "panel")} build`)).toBe(1);
+    expect(countRecorded(`corepack pnpm -C ${join(repo, "panel")} run build`)).toBe(1);
 
     // Neither: the npm every node install brings with it.
     rmSync(join(stubBin, "corepack"));

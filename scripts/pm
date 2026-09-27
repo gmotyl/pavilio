@@ -216,12 +216,19 @@ pm_resolve() {
 }
 
 # Run a package script in a subdirectory, spelled the way $PM wants it.
-# npm needs `run` and the `--` separator before any arguments; pnpm takes none.
+# Both managers get an explicit `run`; npm additionally needs the `--` separator
+# before any arguments.
+#
+# `run` is not optional under pnpm either. The bare `pnpm -C <dir> <script>`
+# shorthand only reaches package.json for names pnpm does not claim itself:
+# `setup`, `update` and `restart` (among others) are pnpm's OWN subcommands, and
+# the shorthand silently runs those instead of the package script of the same
+# name. `pnpm run <script>` always means the package script.
 pm_in() {
   local dir="$1" script="$2"
   shift 2
   if [ "${PM:-}" = "pnpm" ]; then
-    pnpm -C "$dir" "$script" "$@"
+    pnpm -C "$dir" run "$script" "$@"
   else
     npm --prefix "$dir" run "$script" -- "$@"
   fi
@@ -230,11 +237,11 @@ pm_in() {
 # Install a subdirectory's dependencies, spelled the way $PM wants it.
 #
 # Deliberately not pm_in: `install` is the package manager's own command, not a
-# package script. Under pnpm the two spellings happen to coincide, which is how
-# `pm_in <dir> install` looked correct — but under npm pm_in expands to
-# `npm --prefix <dir> run install --`, and panel/package.json has no `install`
-# script, so it fails with "Missing script: install" on exactly the hosts the npm
-# fallback exists to serve.
+# package script. pm_in now spells an explicit `run` for both managers, so
+# `pm_in <dir> install` would ask for a package script named `install` —
+# `pnpm -C <dir> run install` / `npm --prefix <dir> run install --` — and
+# panel/package.json has no such script, so it fails with "Missing script:
+# install".
 pm_install() {
   local dir="$1"
   if [ "${PM:-}" = "pnpm" ]; then
