@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 /**
  * scripts/setup is the one command a fresh clone runs. It derives the repo root
@@ -132,6 +132,39 @@ function countRecorded(needle: string): number {
   return recorded().filter((l) => l.includes(needle)).length;
 }
 
+/**
+ * Like countRecorded, but anchored at the start of the recorded line, which is
+ * always "<tool> <args…>". `countRecorded("npm ")` also matches every
+ * `pnpm -C …` line; this one means what it reads.
+ */
+function countRecordedTool(tool: string): number {
+  return recorded().filter((l) => l === tool || l.startsWith(`${tool} `)).length;
+}
+
+/** Position of the first recorded line containing `needle`, or -1. */
+function indexOfRecorded(needle: string): number {
+  return recorded().findIndex((l) => l.includes(needle));
+}
+
+/** A literal string, safe to drop into a RegExp (sandbox paths carry dots). */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * The `run:` value of every `✗ … failed — run: <cmd>` line. The contract in
+ * scripts/setup's own header is that this is a command, not prose.
+ */
+function failureCommands(stdout: string): string[] {
+  return stdout
+    .split("\n")
+    .filter((l) => l.startsWith("✗"))
+    .map((l) => l.replace(/^✗ .* failed — run: /u, ""));
+}
+
+/** The first word of every failure command must be something you can run. */
+const RUNNABLE = /^(pnpm|npm|corepack|node|git|bash|sh|touch|mkdir|cp|chmod)\b/;
+
 function clearCalls() {
   writeFileSync(calls, "");
 }
@@ -199,6 +232,11 @@ function run(
   // developer's own home, checkout or PATH.
   if (!dir.startsWith(sandbox)) throw new Error(`refusing to run scripts/setup outside the sandbox: ${dir}`);
   if (!env.HOME.startsWith(sandbox)) throw new Error(`refusing to run scripts/setup with HOME=${env.HOME}`);
+  // CODEX_HOME overrides ~/.codex on its own, so it is a second way out of the
+  // sandbox and needs the same guard as HOME.
+  if (env.CODEX_HOME !== undefined && !env.CODEX_HOME.startsWith(sandbox)) {
+    throw new Error(`refusing to run scripts/setup with CODEX_HOME=${env.CODEX_HOME}`);
+  }
   for (const entry of env.PATH.split(":")) {
     if (!entry.startsWith(sandbox)) throw new Error(`refusing to run scripts/setup with ${entry} on PATH`);
   }
@@ -273,6 +311,23 @@ describe("scripts/setup", () => {
       expect(countRecorded(name), `${name} invocations`).toBe(1);
     }
 
+    // Order, not just presence: nothing that needs panel/node_modules may run
+    // before the install, and the build is what the tail steps see.
+    const panelDir = join(repo, "panel");
+    const order = [
+      `pnpm -C ${panelDir} install`,
+      `pnpm -C ${panelDir} build`,
+      "setup:claude-code",
+      "setup:opencode",
+      "setup:codex",
+      "install:speech",
+      "setup:shortcut",
+    ].map((needle) => [needle, indexOfRecorded(needle)] as const);
+    for (const [needle, at] of order) expect(at, `${needle} was never recorded`).toBeGreaterThanOrEqual(0);
+    for (let i = 1; i < order.length; i += 1) {
+      expect(order[i - 1][1], `${order[i - 1][0]} must precede ${order[i][0]}`).toBeLessThan(order[i][1]);
+    }
+
     // One line per step, in order, all of them done.
     expect(stdout).toMatch(/^✓ toolchain\b/m);
     expect(stdout).toMatch(/^✓ seed\b/m);
@@ -324,14 +379,18 @@ describe("scripts/setup", () => {
     writeNodeStub("v20.19.0");
     clearCalls();
 
-    const { status, output } = run(["--yes"]);
+    const { status, stdout, output } = run(["--yes"]);
 
     expect(status).toBe(1);
     expect(output).toContain("22");
     expect(output.toLowerCase()).toMatch(/node/);
+    // The report line carries a command, not a sentence: the "install Node.js"
+    // part is an explanation and belongs on stderr.
+    expect(failureCommands(stdout)).toEqual(["pnpm setup"]);
     // Nothing was installed, built, seeded or linked.
     expect(countRecorded("pnpm -C")).toBe(0);
-    expect(countRecorded("npm ")).toBe(0);
+    expect(countRecordedTool("npm")).toBe(0);
+    expect(countRecordedTool("pnpm")).toBe(0);
     expect(countRecorded("install:speech")).toBe(0);
     expect(existsSync(join(repo, ".projects.local.md"))).toBe(false);
   }, 60000);
@@ -481,5 +540,371 @@ describe("scripts/setup", () => {
       { encoding: "utf8", env: { HOME: home, PATH: sysBin }, cwd: repo },
     );
     expect(readBack.stdout.trim()).toBe(join(stubBin, "node"));
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // remotes: the user's own remotes are never collateral damage
+  // -------------------------------------------------------------------------
+
+  it("leaves a pre-existing upstream the user owns completely alone", () => {
+    // A team repo the user fetches *and pushes* to, under the name `upstream`,
+    // with a push URL deliberately different from the fetch URL.
+    const dir = join(sandbox, "repo-team");
+    makeRepo(dir, "git@github.com:someone-else/pavilio.git");
+    git(["remote", "add", "upstream", "https://github.com/acme/pavilio-team.git"], dir);
+    git(["remote", "set-url", "--push", "upstream", "git@github.com:acme/pavilio-team.git"], dir);
+
+    const { status, stdout, output } = run(["--yes"], { repoDir: dir });
+    expect(status, output).toBe(0);
+    expect(stdout).toMatch(/^[✓–] remotes\b/mu);
+
+    // Both URLs survived: nothing here is setup's to rewrite.
+    expect(git(["remote", "get-url", "upstream"], dir).stdout.trim()).toBe(
+      "https://github.com/acme/pavilio-team.git",
+    );
+    expect(git(["remote", "get-url", "--push", "upstream"], dir).stdout.trim()).toBe(
+      "git@github.com:acme/pavilio-team.git",
+    );
+    expect(git(["remote", "get-url", "origin"], dir).stdout.trim()).toBe(
+      "git@github.com:someone-else/pavilio.git",
+    );
+  }, 60000);
+
+  it("gives a repo with no remotes at all a canonical upstream on the first run", () => {
+    // An unzipped archive, a `gh repo create` from a local directory, a user who
+    // removed their remotes: `git init`'d, committed, no remotes.
+    const bare = join(sandbox, "repo-no-remotes");
+    makeRepo(bare);
+    expect(git(["remote"], bare).stdout.trim()).toBe("");
+
+    const { status, stdout, output } = run(["--yes"], { repoDir: bare });
+    expect(status, output).toBe(0);
+    expect(stdout).toMatch(/^✓ remotes\b/m);
+
+    // One run is enough — scripts/update.sh refuses to pull without this.
+    expect(git(["remote", "get-url", "upstream"], bare).stdout.trim()).toBe(CANONICAL_HTTPS);
+    expect(git(["remote", "get-url", "--push", "upstream"], bare).stdout.trim()).toBe("no_push");
+  }, 60000);
+
+  it("recognises every spelling of the canonical repo", () => {
+    const spellings = [
+      "ssh://git@github.com/gmotyl/pavilio.git",
+      "ssh://git@github.com/gmotyl/pavilio",
+      "https://github.com/gmotyl/pavilio.git/",
+      "https://github.com/GMotyl/Pavilio.git",
+      "https://user:token@github.com/gmotyl/pavilio.git",
+      "git@github.com:gmotyl/pavilio.git",
+      "https://github.com/gmotyl/pavilio",
+    ];
+    spellings.forEach((url, i) => {
+      const dir = join(sandbox, `repo-spelling-${i}`);
+      makeRepo(dir, url);
+      const { status, output } = run(["--yes"], { repoDir: dir });
+      expect(status, `${url}: ${output}`).toBe(0);
+      // Canonical ⇒ renamed out of the way, push disabled, origin freed.
+      expect(git(["remote", "get-url", "upstream"], dir).stdout.trim(), url).toBe(url);
+      expect(git(["remote", "get-url", "--push", "upstream"], dir).stdout.trim(), url).toBe("no_push");
+      expect(git(["remote", "get-url", "origin"], dir).status, url).not.toBe(0);
+    });
+  }, 120000);
+
+  it("does not mistake a repo that merely contains the canonical path for it", () => {
+    // Widening the match until ssh:// and case variants pass must not widen it
+    // into repositories that only *start* the same way.
+    const notCanonical = [
+      "https://github.com/gmotyl/pavilio-fork.git",
+      "https://github.com/gmotyl/pavilio-notes",
+      "git@github.com:gmotyl/pavilio-fork.git",
+      "https://github.com/gmotyl-mirror/pavilio.git",
+      "https://gitlab.com/gmotyl/pavilio.git",
+    ];
+    notCanonical.forEach((url, i) => {
+      const dir = join(sandbox, `repo-notcanon-${i}`);
+      makeRepo(dir, url);
+      const { status, output } = run(["--yes"], { repoDir: dir });
+      expect(status, `${url}: ${output}`).toBe(0);
+      // The user's remote stays exactly where it was, under its own name…
+      expect(git(["remote", "get-url", "origin"], dir).stdout.trim(), url).toBe(url);
+      expect(git(["remote", "get-url", "--push", "origin"], dir).stdout.trim(), url).toBe(url);
+      // …and the canonical repo arrives beside it.
+      expect(git(["remote", "get-url", "upstream"], dir).stdout.trim(), url).toBe(CANONICAL_HTTPS);
+    });
+  }, 120000);
+
+  it("reports a canonical origin next to an existing upstream as a skip with the fix", () => {
+    const dir = join(sandbox, "repo-both");
+    makeRepo(dir, CANONICAL_HTTPS);
+    git(["remote", "add", "upstream", "git@github.com:someone-else/pavilio.git"], dir);
+
+    const { status, stdout, output } = run(["--yes"], { repoDir: dir });
+    expect(status, output).toBe(0);
+
+    // Not a ✓: `git push` here targets a repo the user cannot write, the notes
+    // prompt is unreachable, and no number of re-runs changes either.
+    expect(stdout).not.toMatch(/^✓ remotes/m);
+    const skip = stdout.split("\n").find((l) => l.startsWith("– remotes skipped ("));
+    expect(skip, stdout).toBeTruthy();
+    expect(skip).toContain("git remote remove upstream && pnpm setup");
+
+    // …and nothing was changed behind that skip.
+    expect(git(["remote", "get-url", "origin"], dir).stdout.trim()).toBe(CANONICAL_HTTPS);
+    expect(git(["remote", "get-url", "upstream"], dir).stdout.trim()).toBe(
+      "git@github.com:someone-else/pavilio.git",
+    );
+    expect(git(["remote", "get-url", "--push", "upstream"], dir).stdout.trim()).toBe(
+      "git@github.com:someone-else/pavilio.git",
+    );
+  }, 60000);
+
+  it("adds a notes origin without letting git open a credential prompt", () => {
+    // A stub `ssh`, so the fetch of a freshly added remote is observable without
+    // leaving the sandbox. It fails, which is also the untested branch of the
+    // prompt: origin recorded, tracking not set, and the run says so.
+    writeExec(join(stubBin, "ssh"), [
+      "#!/bin/sh",
+      "# Stub ssh: record how git invoked us, then refuse.",
+      `printf '%s\\n' "ssh $*" >> "${calls}"`,
+      "exit 255",
+    ]);
+
+    const { status, stdout, output } = run([], { input: "ssh://git@example.invalid/notes.git\n" });
+    expect(status, output).toBe(0);
+
+    // BatchMode is what stops ssh asking for a passphrase mid-report.
+    const sshCalls = recorded().filter((l) => l.startsWith("ssh "));
+    expect(sshCalls.length, recorded().join("\n")).toBeGreaterThan(0);
+    for (const call of sshCalls) expect(call).toContain("BatchMode=yes");
+
+    expect(git(["remote", "get-url", "origin"]).stdout.trim()).toBe("ssh://git@example.invalid/notes.git");
+    // Not anchored: the prompt itself has no newline, so the report line that
+    // follows it shares a line with it.
+    expect(stdout).toMatch(/✓ remotes\b.*origin added, but main still tracks upstream/);
+    expect(stdout).toContain("git branch --set-upstream-to=origin/main main");
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // the fatal steps really are fatal
+  // -------------------------------------------------------------------------
+
+  it("stops the run when panel install fails, before any tail step", () => {
+    writeExec(join(stubBin, "pnpm"), [
+      "#!/bin/sh",
+      "# Stub pnpm: everything works except `install`.",
+      `printf '%s\\n' "pnpm $*" >> "${calls}"`,
+      'case " $* " in *" install "*) echo "ERESOLVE exploded" >&2; exit 1 ;; esac',
+      "exit 0",
+    ]);
+
+    const { status, stdout, output } = run(["--yes"]);
+
+    expect(status, output).toBe(1);
+    expect(stdout).toMatch(
+      new RegExp(`^✗ panel install failed — run: pnpm -C ${escapeRe(join(repo, "panel"))} install$`, "m"),
+    );
+    expect(output).toContain("ERESOLVE exploded");
+    // Nothing after it ran — a half-installed panel must not be seeded, linked
+    // or declared done.
+    expect(countRecorded("build")).toBe(0);
+    for (const name of ["setup:claude-code", "setup:opencode", "setup:codex", "install:speech", "setup:shortcut"]) {
+      expect(countRecorded(name), name).toBe(0);
+    }
+    expect(stdout).not.toContain("Done. Start the panel");
+    for (const cmd of failureCommands(stdout)) expect(cmd).toMatch(RUNNABLE);
+  }, 60000);
+
+  it("stops the run when panel build fails, before any tail step", () => {
+    writeExec(join(stubBin, "pnpm"), [
+      "#!/bin/sh",
+      "# Stub pnpm: the install works, the build does not.",
+      `printf '%s\\n' "pnpm $*" >> "${calls}"`,
+      'case " $* " in *" build "*) echo "tsc exploded" >&2; exit 1 ;; esac',
+      "exit 0",
+    ]);
+
+    const { status, stdout, output } = run(["--yes"]);
+
+    expect(status, output).toBe(1);
+    expect(stdout).toMatch(
+      new RegExp(`^✗ panel build failed — run: pnpm -C ${escapeRe(join(repo, "panel"))} build$`, "m"),
+    );
+    expect(stdout).toMatch(/^✓ panel install$/m);
+    for (const name of ["setup:claude-code", "setup:opencode", "setup:codex", "install:speech", "setup:shortcut"]) {
+      expect(countRecorded(name), name).toBe(0);
+    }
+    expect(stdout).not.toContain("Done. Start the panel");
+  }, 60000);
+
+  it("reports a non-writable node pin without a sentence where the command goes", () => {
+    // pin_node_bin's only externals are the shell and `mv`; a `mv` that refuses
+    // is the one way to reach its failure branch as root.
+    writeExec(join(stubBin, "mv"), ["#!/bin/sh", "# Stub mv: refuse, so the pin cannot be swapped in.", "exit 1"]);
+
+    const { status, stdout, output } = run(["--yes"]);
+
+    // Not fatal — only the Windows launcher needs the pin.
+    expect(status, output).toBe(0);
+    const line = stdout.split("\n").find((l) => l.startsWith("✗ toolchain failed"));
+    expect(line, stdout).toBeTruthy();
+    for (const cmd of failureCommands(stdout)) expect(cmd).toMatch(RUNNABLE);
+    expect(stdout).toContain("Done. Start the panel");
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // the report mechanics
+  // -------------------------------------------------------------------------
+
+  it("lifts a sub-script's own skip reason into the report", () => {
+    // The commonest real-world outcome of setup:shortcut: not WSL, nothing to do.
+    writeExec(join(repo, "scripts", "setup:shortcut"), [
+      "#!/bin/sh",
+      "# Stub setup:shortcut: the machine is not WSL.",
+      `printf '%s\\n' "setup:shortcut $*" >> "${calls}"`,
+      "echo 'skipped (not WSL)'",
+      "exit 0",
+    ]);
+
+    const { status, stdout, output } = run(["--yes"]);
+    expect(status, output).toBe(0);
+
+    expect(stdout).toMatch(/^– shortcut skipped \(not WSL\)$/mu);
+    expect(stdout).not.toMatch(/^✓ shortcut$/m);
+    // The sub-script's own output is not echoed — one line per step.
+    expect(stdout.split("\n").filter((l) => l.includes("not WSL"))).toHaveLength(1);
+  }, 60000);
+
+  it("closes stdin for every sub-script, so none of them can consume the run's input", () => {
+    writeExec(join(repo, "scripts", "install:speech"), [
+      "#!/bin/sh",
+      "# Stub install:speech: report whether stdin had anything to give.",
+      "if IFS= read -r line; then",
+      `  printf '%s\\n' "install:speech stdin:$line" >> "${calls}"`,
+      "else",
+      `  printf '%s\\n' "install:speech stdin:none" >> "${calls}"`,
+      "fi",
+      "exit 0",
+    ]);
+
+    const { status, output } = run(["--yes"], { input: "SHOULD-NOT-REACH-A-SUBSCRIPT\n" });
+    expect(status, output).toBe(0);
+
+    expect(recorded()).toContain("install:speech stdin:none");
+    expect(recorded().join("\n")).not.toContain("SHOULD-NOT-REACH-A-SUBSCRIPT");
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // flags
+  // -------------------------------------------------------------------------
+
+  it("honours --no-speech and --no-shortcut", () => {
+    const noSpeech = run(["--yes", "--no-speech"]);
+    expect(noSpeech.status, noSpeech.output).toBe(0);
+    expect(noSpeech.stdout).toMatch(/^– speech skipped \(--no-speech\)$/mu);
+    expect(countRecorded("install:speech")).toBe(0);
+    expect(countRecorded("setup:shortcut")).toBe(1);
+
+    const other = join(sandbox, "repo-no-shortcut");
+    makeRepo(other, CANONICAL_HTTPS);
+    clearCalls();
+
+    const noShortcut = run(["--yes", "--no-shortcut"], { repoDir: other });
+    expect(noShortcut.status, noShortcut.output).toBe(0);
+    expect(noShortcut.stdout).toMatch(/^– shortcut skipped \(--no-shortcut\)$/mu);
+    expect(countRecorded("setup:shortcut")).toBe(0);
+    expect(countRecorded("install:speech")).toBe(1);
+  }, 60000);
+
+  it("prints usage for -h/--help and refuses an unknown option with exit 2", () => {
+    for (const flag of ["-h", "--help"]) {
+      clearCalls();
+      const help = run([flag]);
+      expect(help.status, help.output).toBe(0);
+      expect(help.stdout).toContain("Usage: pnpm setup");
+      expect(help.stdout).toContain("--no-speech");
+      expect(help.stdout).toContain("--no-shortcut");
+      // Help does no work.
+      expect(recorded()).toEqual([]);
+      expect(existsSync(join(repo, ".projects.local.md"))).toBe(false);
+    }
+
+    clearCalls();
+    const bogus = run(["--frobnicate"]);
+    expect(bogus.status).toBe(2);
+    expect(bogus.output).toContain("Unknown option: --frobnicate");
+    expect(bogus.output).toContain("Usage: pnpm setup");
+    expect(recorded()).toEqual([]);
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // the toolchain pin
+  // -------------------------------------------------------------------------
+
+  it("pins node and names the right start command when corepack is the only manager", () => {
+    // corepack, but no npm at all: pm_resolve cannot pick a manager here, and
+    // the pin must still be written rather than left empty.
+    rmSync(join(stubBin, "pnpm"));
+    rmSync(join(stubBin, "npm"));
+    clearCalls();
+
+    const { status, stdout, output } = run(["--yes"]);
+    expect(status, output).toBe(0);
+    expect(stdout).toMatch(/^✓ toolchain\b.*package manager: corepack pnpm$/m);
+    // pm's "node/pnpm not found" advice must not surface on a run that succeeds.
+    expect(output).not.toContain("node/pnpm not found");
+
+    const pins = readFileSync(localEnv(), "utf8")
+      .split("\n")
+      .filter((l) => l.startsWith("PAVILIO_NODE_BIN="));
+    expect(pins).toEqual([`PAVILIO_NODE_BIN="${stubBin}"`]);
+
+    // And the closing line names a command this host actually has.
+    const lines = stdout.trimEnd().split("\n");
+    expect(lines[lines.length - 1]).toBe(
+      "Done. Start the panel: corepack pnpm start  →  http://localhost:3010",
+    );
+  }, 60000);
+
+  it("names the npm start command when npm is the resolved manager", () => {
+    rmSync(join(stubBin, "pnpm"));
+    rmSync(join(stubBin, "corepack"));
+    clearCalls();
+
+    const { status, stdout, output } = run(["--yes"]);
+    expect(status, output).toBe(0);
+    const lines = stdout.trimEnd().split("\n");
+    expect(lines[lines.length - 1]).toBe("Done. Start the panel: npm start  →  http://localhost:3010");
+  }, 60000);
+
+  it("escapes the pinned path, which scripts/pm eval's back", () => {
+    // Legal on every POSIX filesystem, and every one of these characters means
+    // something inside the double-quoted assignment pm reads.
+    const weird = join(sandbox, 'n$o-"d"-`e`-x\\y');
+    mkdirSync(weird, { recursive: true });
+    writeExec(join(weird, "node"), [
+      "#!/bin/sh",
+      "# Stub node in an awkwardly named directory.",
+      `printf '%s\\n' "node $*" >> "${calls}"`,
+      'case "$1" in',
+      "  --version|-v) printf '%s\\n' 'v24.4.0' ;;",
+      "esac",
+      "exit 0",
+    ]);
+
+    // PAVILIO_NODE_BIN is how pm_probe_pinned is told which interpreter to use,
+    // so this is also how NODE_BIN_DIR comes to hold the awkward path.
+    const { status, output } = run(["--yes"], { env: { PAVILIO_NODE_BIN: weird } });
+    expect(status, output).toBe(0);
+
+    const pins = readFileSync(localEnv(), "utf8")
+      .split("\n")
+      .filter((l) => l.startsWith("PAVILIO_NODE_BIN="));
+    expect(pins).toHaveLength(1);
+
+    // The only assertion that matters: pm reads back exactly what was written.
+    const readBack = spawnSync(
+      BASH,
+      ["-c", `. "${join(repo, "scripts", "pm")}" && pm_probe_pinned && command -v node`],
+      { encoding: "utf8", env: { HOME: home, PATH: sysBin }, cwd: repo },
+    );
+    expect(readBack.stdout.trim()).toBe(join(weird, "node"));
   }, 60000);
 });

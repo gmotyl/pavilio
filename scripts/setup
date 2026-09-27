@@ -29,9 +29,11 @@ set -u
 # The lowest Node the panel's dependencies (and this workspace's tooling) run on.
 MIN_NODE_MAJOR=22
 
-# The repository this script was shipped in, spelled the two ways a clone of it
-# is normally reached. Anything else in `origin` belongs to the user.
+# The repository this script was shipped in: the URL it is added as, and the
+# host/path key that every spelling of it normalises down to. A remote that does
+# not reduce to that key belongs to the user.
 CANONICAL_HTTPS="https://github.com/gmotyl/pavilio.git"
+CANONICAL_KEY="github.com/gmotyl/pavilio"
 
 # This script lives in <repo>/scripts/. `dirname` is deliberately avoided so this
 # still works on a minimal PATH, and the redirects shield the command
@@ -160,12 +162,15 @@ run_sub() {
 # shellcheck source=scripts/pm
 . "$script_dir/pm" || exit 1
 
-if ! pm_resolve; then
-  # pm_resolve also fails when node is present but neither pnpm nor npm is —
-  # and corepack, which ships with node, can still provide pnpm. Only a missing
-  # node is fatal here; the package-manager choice is made below.
+# pm_resolve fails for two different reasons and says the same thing about both:
+# no node at all, or a node with neither pnpm nor npm beside it. Only the first
+# is fatal here — corepack ships with node and can still provide pnpm — so its
+# advice is suppressed and the decision is made below. Redirecting a function
+# call leaves its assignments to $PM / $NODE_BIN_DIR in this shell.
+if ! pm_resolve 2>/dev/null; then
   if ! pm_have_node; then
-    step_fail "toolchain" "install Node.js $MIN_NODE_MAJOR or newer, then: pnpm setup"
+    echo "No Node.js found — install Node.js $MIN_NODE_MAJOR or newer (https://nodejs.org), then rerun." >&2
+    step_fail "toolchain" "pnpm setup"
     exit 1
   fi
 fi
@@ -181,7 +186,7 @@ if [ "$node_major" -lt "$MIN_NODE_MAJOR" ]; then
   # Before anything is installed, built or seeded: an install under an old node
   # half-succeeds and then fails somewhere far less legible than here.
   echo "Node ${node_version:-(unknown)} is too old — Pavilio needs Node.js $MIN_NODE_MAJOR or newer." >&2
-  step_fail "toolchain" "install Node.js $MIN_NODE_MAJOR or newer, then: pnpm setup"
+  step_fail "toolchain" "pnpm setup"
   exit 1
 fi
 
@@ -202,29 +207,59 @@ elif command -v npm >/dev/null 2>&1; then
   PM="npm"
   pm_label="npm"
 else
-  echo "No package manager found — install pnpm (or use the npm that ships with node)." >&2
-  step_fail "toolchain" "install Node.js $MIN_NODE_MAJOR or newer, then: pnpm setup"
+  echo "No pnpm, corepack or npm found beside node — reinstall Node.js $MIN_NODE_MAJOR or newer, or install pnpm." >&2
+  step_fail "toolchain" "pnpm setup"
   exit 1
 fi
 export PM
 
+# pm_resolve leaves NODE_BIN_DIR empty when it bailed out on the package manager
+# rather than on node — the corepack-and-no-npm shape above. The pin below is
+# the Windows launcher's only way back to this interpreter, so fill it in here
+# rather than write an empty one.
+if [ -z "${NODE_BIN_DIR:-}" ]; then
+  node_path="$(command -v node 2>/dev/null)"
+  NODE_BIN_DIR="${node_path%/*}"
+  export NODE_BIN_DIR
+fi
+
 # How to spell the two fatal steps for a human who has to retry one. npm needs
 # `run` for a package script and `--prefix` instead of `-C`, so the two package
-# managers do not share a spelling.
+# managers do not share a spelling — and both are absolute, because the person
+# pasting the command is not necessarily standing in the repo root.
 if [ "$PM" = "pnpm" ]; then
-  rerun_install="$pm_label -C panel install"
-  rerun_build="$pm_label -C panel build"
+  rerun_install="$pm_label -C $repo_root/panel install"
+  rerun_build="$pm_label -C $repo_root/panel build"
 else
-  rerun_install="npm --prefix panel install"
-  rerun_build="npm --prefix panel run build"
+  rerun_install="npm --prefix $repo_root/panel install"
+  rerun_build="npm --prefix $repo_root/panel run build"
 fi
+
+# What to tell the user to type at the end. `pnpm start` is wrong on a host that
+# demonstrably has no pnpm, which is every host that reached the corepack or npm
+# branch above.
+start_cmd="$pm_label start"
 
 # Record the interpreter for the Windows launcher, which starts bash without a
 # login shell and so has no version manager on PATH. The file belongs to the
 # host, not to this script: everything else in it is rewritten verbatim and only
 # the PAVILIO_NODE_BIN line is ours.
+
+# scripts/pm reads the env file by eval'ing it, so the pin has to survive a
+# double-quoted shell word. Backslash first: escaping it afterwards would also
+# escape the backslashes this adds.
+shell_dq_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\$/\\\$}"
+  s="${s//\`/\\\`}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
 pin_node_bin() {
-  local env_file tmp line found=0
+  local env_file tmp line pin found=0
+  pin="$(shell_dq_escape "$NODE_BIN_DIR")"
   env_file="$(pm_local_env_path)"
   tmp="$env_file.pavilio-tmp.$$"
   : >"$tmp" || return 1
@@ -238,7 +273,7 @@ pin_node_bin() {
           # Replaced in place, so the pin keeps the position the user gave it —
           # and any duplicate left by an earlier hand-edit is dropped.
           if [ "$found" = 0 ]; then
-            printf 'PAVILIO_NODE_BIN="%s"\n' "$NODE_BIN_DIR" >>"$tmp" || return 1
+            printf 'PAVILIO_NODE_BIN="%s"\n' "$pin" >>"$tmp" || return 1
             found=1
           fi
           ;;
@@ -247,7 +282,7 @@ pin_node_bin() {
     done <"$env_file"
   fi
   if [ "$found" = 0 ]; then
-    printf 'PAVILIO_NODE_BIN="%s"\n' "$NODE_BIN_DIR" >>"$tmp" || return 1
+    printf 'PAVILIO_NODE_BIN="%s"\n' "$pin" >>"$tmp" || return 1
   fi
   mv "$tmp" "$env_file"
 }
@@ -256,8 +291,10 @@ if pin_node_bin; then
   step_ok "toolchain — node $node_version, package manager: $pm_label"
 else
   # Not fatal: the pin is only needed by the Windows launcher, and a normal
-  # terminal resolves node on its own.
-  step_fail "toolchain" "check that $(pm_local_env_path) is writable"
+  # terminal resolves node on its own. The `run:` value is a command, so the
+  # reason it could not be written goes above it instead.
+  echo "Could not write the node pin to $(pm_local_env_path) — only the Windows launcher needs it." >&2
+  step_fail "toolchain" "touch $(pm_local_env_path) && pnpm setup"
 fi
 
 # ---------------------------------------------------------------------------
@@ -316,11 +353,48 @@ fi
 # 5. remotes
 # ---------------------------------------------------------------------------
 
-is_canonical_remote() {
-  case "${1%.git}" in
-    https://github.com/gmotyl/pavilio | git@github.com:gmotyl/pavilio) return 0 ;;
+# Reduce a remote URL to a comparable "host/path". The same repository is spelled
+# a dozen ways by the tools that clone it — `gh repo clone` and the GUI clients
+# emit ssh://, credential helpers embed a user, GitHub is case-insensitive, and a
+# trailing slash or .git is noise — and none of those differences change which
+# repository it is. What must NOT be folded away is the path itself:
+# gmotyl/pavilio-fork and gmotyl/pavilio-notes are different repositories.
+remote_key() {
+  local url="$1" host rest
+  case "$url" in
+    *://*)
+      url="${url#*://}"
+      ;;
+    *@*:*)
+      # scp-like syntax (git@github.com:owner/repo) carries no scheme; the colon
+      # is the separator the URL forms spell as a slash.
+      url="${url#*@}"
+      url="${url%%:*}/${url#*:}"
+      ;;
   esac
-  return 1
+  host="${url%%/*}"
+  rest="${url#*/}"
+  [ "$rest" = "$url" ] && rest=""
+  # Credentials, then a port: neither is part of the repository's identity.
+  host="${host##*@}"
+  host="${host%%:*}"
+  url="$host${rest:+/$rest}"
+  while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
+  url="${url%.git}"
+  while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
+  printf '%s' "$url"
+}
+
+# Whole-key equality, case-insensitively — never a prefix or a substring match.
+is_canonical_remote() {
+  local key restore rc=1
+  key="$(remote_key "$1")"
+  [ -n "$key" ] || return 1
+  restore="$(shopt -p nocasematch)"
+  shopt -s nocasematch
+  [[ "$key" == "$CANONICAL_KEY" ]] && rc=0
+  eval "$restore"
+  return "$rc"
 }
 
 remotes_step() {
@@ -331,46 +405,67 @@ remotes_step() {
     return 0
   fi
 
-  local origin_url upstream_url notes=""
+  local origin_url upstream_url notes="" upstream_is_ours=0
   origin_url="$(git remote get-url origin 2>/dev/null)" || origin_url=""
   upstream_url="$(git remote get-url upstream 2>/dev/null)" || upstream_url=""
 
   if [ -n "$origin_url" ] && is_canonical_remote "$origin_url"; then
     if [ -n "$upstream_url" ]; then
-      # An upstream is already recorded — an interrupted earlier run, or a
-      # deliberate arrangement. Renaming over it would fail, and removing the
-      # user's remotes is not this script's call.
-      notes="upstream already set; origin left alone"
-    elif git remote rename origin upstream >/dev/null 2>&1; then
+      # Two remotes, one of which is a repository the user cannot push to, under
+      # the name git pushes to by default. Rearranging that is a choice about
+      # someone else's remotes, so it is reported rather than made — as a skip,
+      # because a ✓ here would be a green tick on a state that no number of
+      # re-runs resolves.
+      step_skip "remotes" \
+        "origin is the canonical repo and an upstream already exists — run: git remote remove upstream && pnpm setup"
+      return 0
+    fi
+    if git remote rename origin upstream >/dev/null 2>&1; then
       # `origin` is where git pushes by default, and nobody can push here. Make
       # it `upstream` so the name matches what it is, and free `origin` for the
       # private notes repo the user actually writes to.
       upstream_url="$origin_url"
       origin_url=""
+      upstream_is_ours=1
       notes="origin → upstream"
     else
       step_fail "remotes" "git remote rename origin upstream"
       return 1
     fi
-  elif [ -n "$origin_url" ]; then
-    # A fork, or a private remote from an earlier run: not ours to touch.
-    if [ -z "$upstream_url" ]; then
-      if git remote add upstream "$CANONICAL_HTTPS" >/dev/null 2>&1; then
-        upstream_url="$CANONICAL_HTTPS"
-        notes="upstream added"
-      else
-        step_fail "remotes" "git remote add upstream $CANONICAL_HTTPS"
-        return 1
-      fi
+  fi
+
+  if [ -z "$upstream_url" ]; then
+    # Whether or not there is an origin: scripts/update.sh refuses every pull
+    # without an upstream, so a checkout with no remotes at all (an unzipped
+    # archive, `gh repo create` from a local directory, a user who removed
+    # theirs) has to leave the FIRST run with one.
+    if git remote add upstream "$CANONICAL_HTTPS" >/dev/null 2>&1; then
+      upstream_url="$CANONICAL_HTTPS"
+      upstream_is_ours=1
+      notes="${notes:+$notes; }upstream added"
     else
-      notes="origin and upstream already set"
+      step_fail "remotes" "git remote add upstream $CANONICAL_HTTPS"
+      return 1
+    fi
+  elif [ "$upstream_is_ours" = 0 ]; then
+    if is_canonical_remote "$upstream_url"; then
+      # An upstream from an earlier run of this script: ours to keep tidy.
+      upstream_is_ours=1
+      notes="${notes:+$notes; }upstream already set"
+    else
+      # Someone else's remote that happens to be called `upstream` — a team
+      # repository they fetch from and push to. Nothing here is ours to rewrite.
+      notes="${notes:+$notes; }upstream is not the canonical repo; left alone"
     fi
   fi
 
   # A push URL of `no_push` is git's own idiom for "fetch from here, never push
   # here": a mistyped `git push upstream` fails immediately instead of asking
-  # for credentials to a repository the user cannot write.
-  if [ -n "$upstream_url" ]; then
+  # for credentials to a repository the user cannot write. Only ever stamped on
+  # an upstream this run created or renamed, or one that is the canonical repo —
+  # stamping an arbitrary pre-existing remote destroys a push URL the user set,
+  # irrecoverably, since the old value is not kept anywhere.
+  if [ "$upstream_is_ours" = 1 ]; then
     git remote set-url --push upstream no_push >/dev/null 2>&1 || true
   fi
 
@@ -392,7 +487,14 @@ remotes_step() {
       # Tracking is only set once the remote has actually answered: pointing
       # main at an origin/main that does not exist breaks `git pull` with a
       # message about a ref, not about the URL that was mistyped here.
-      if git fetch origin >&2 && git branch --set-upstream-to=origin/main main >/dev/null 2>&1; then
+      #
+      # Non-interactive on purpose: the URL was typed a moment ago and may be a
+      # typo, an unknown host or a repository that needs credentials. Any of
+      # those would otherwise drop a username, password or host-key prompt into
+      # the middle of the report, on a step that is allowed to fail.
+      if GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
+        GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
+        git fetch origin >&2 && git branch --set-upstream-to=origin/main main >/dev/null 2>&1; then
         notes="${notes:+$notes; }origin added, main tracks origin/main"
       else
         notes="${notes:+$notes; }origin added, but main still tracks upstream — push once, then: git branch --set-upstream-to=origin/main main"
@@ -465,5 +567,5 @@ fi
 
 # ---------------------------------------------------------------------------
 
-printf 'Done. Start the panel: pnpm start  →  http://localhost:%s\n' "${PANEL_PORT:-3010}"
+printf 'Done. Start the panel: %s  →  http://localhost:%s\n' "$start_cmd" "${PANEL_PORT:-3010}"
 exit 0
