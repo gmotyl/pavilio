@@ -208,3 +208,20 @@ pm_in() {
     npm --prefix "$dir" run "$script" -- "$@"
   fi
 }
+
+# Install a subdirectory's dependencies, spelled the way $PM wants it.
+#
+# Deliberately not pm_in: `install` is the package manager's own command, not a
+# package script. Under pnpm the two spellings happen to coincide, which is how
+# `pm_in <dir> install` looked correct — but under npm pm_in expands to
+# `npm --prefix <dir> run install --`, and panel/package.json has no `install`
+# script, so it fails with "Missing script: install" on exactly the hosts the npm
+# fallback exists to serve.
+pm_install() {
+  local dir="$1"
+  if [ "${PM:-}" = "pnpm" ]; then
+    pnpm -C "$dir" install
+  else
+    npm --prefix "$dir" install
+  fi
+}

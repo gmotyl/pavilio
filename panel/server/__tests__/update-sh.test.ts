@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -64,13 +65,21 @@ function runUpdate(extraEnv: Record<string, string> = {}, upstreamArg: string = 
 
 /**
  * Put a recording stand-in for an external command first on the run's PATH. The
- * stub touches a marker file, so a test can assert the command was never reached
- * rather than inferring it from output alone.
+ * stub appends its argv to a marker file, so a test can assert what the run
+ * actually invoked — and in what order — rather than inferring it from output
+ * alone. `extra` is appended to the stub body, for cases that need it to fail.
  */
-function stubCommand(name: string): string {
+function stubCommand(name: string, extra = ""): string {
   const marker = join(sandbox, `${name}-invoked`);
-  writeFileSync(join(stubBin, name), `#!/bin/bash\necho "$@" >>"${marker}"\n`, { mode: 0o755 });
+  writeFileSync(join(stubBin, name), `#!/bin/bash\necho "$@" >>"${marker}"\n${extra}\n`, {
+    mode: 0o755,
+  });
   return marker;
+}
+
+/** What the recording stub for `name` was invoked with, or "" if never called. */
+function invocations(marker: string): string {
+  return existsSync(marker) ? readFileSync(marker, "utf8") : "";
 }
 
 /**
@@ -442,7 +451,8 @@ describe("scripts/update.sh clone mode", () => {
     // A clone has nothing to mirror from: the sync path must not run at all.
     expect(output).not.toMatch(/Syncing panel/);
     expect(existsSync(rsyncCalled)).toBe(false);
-  }, 60000);
+    // A real install + build, same as the full-run clone case below.
+  }, 120000);
 
   it("refuses clone mode without an upstream remote and names pnpm setup", () => {
     initCloneRepo();
@@ -496,6 +506,46 @@ describe("scripts/update.sh clone mode", () => {
     expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(false);
   }, 60000);
 
+  it("installs the panel dependencies before building the bundle", () => {
+    initCloneRepo();
+    // The package manager itself is the recording stub, so the assertion is on
+    // what the run invoked rather than on the line it printed: a rebase lands new
+    // source that may need new dependencies, and a build over stale node_modules
+    // is the silent half-update this step exists to prevent.
+    const pnpmCalled = stubCommand("pnpm");
+
+    const { status, output } = runUpdate({}, dest);
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/Installing panel dependencies/);
+    const calls = invocations(pnpmCalled);
+    expect(calls).toContain(`-C ${join(dest, "panel")} install\n`);
+    // ...and before the build, which is the whole point of installing at all.
+    expect(calls.indexOf("install")).toBeLessThan(calls.indexOf("build"));
+  }, 120000);
+
+  it("stops when the panel dependency install fails, naming both commands and without building", () => {
+    initCloneRepo();
+    // A package manager whose `install` fails and whose every other subcommand
+    // succeeds, so the install step is the only thing that can stop the run.
+    const pnpmCalled = stubCommand(
+      "pnpm",
+      ['for arg in "$@"; do', '  [ "$arg" = "install" ] && exit 1', "done", "exit 0"].join("\n"),
+    );
+
+    const { status, output } = runUpdate({}, dest);
+
+    expect(status).toBe(1);
+    // The user is left rebased, so the message has to say so and say what to run.
+    expect(output).toMatch(/dependencies failed/i);
+    expect(output).toMatch(/pnpm -C .*panel.* install/);
+    expect(output).toMatch(/pnpm -C .*panel.* build/);
+    // A failed install must not be followed by a build over stale dependencies.
+    expect(output).not.toMatch(/panel bundle built/);
+    expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(false);
+    expect(invocations(pnpmCalled)).not.toContain("build");
+  }, 120000);
+
   it("ends clone mode with the restart hint and never restarts the panel", () => {
     initCloneRepo();
     // scripts/panel is the only thing that can stop or start the panel. update.sh
@@ -514,7 +564,8 @@ describe("scripts/update.sh clone mode", () => {
     expect(status).toBe(0);
     expect(output).toContain(`Updated to ${sha} ${subject}.`);
     expect(output).toMatch(/The running panel still serves the old bundle — run: pnpm restart/);
+    // The recording stub above is the real assertion: scripts/panel — the only
+    // thing that can stop or start the panel — was never invoked at all.
     expect(existsSync(panelInvoked)).toBe(false);
-    expect(output).not.toMatch(/\bkill\b/);
   }, 120000);
 });

@@ -21,15 +21,18 @@ UPSTREAM_DIR="${1:-"$SCRIPT_DIR/../../pavilio"}"
 # update started from the Windows shortcut — no login shell, so none of the
 # dotfiles that put a version manager on PATH have been read — finds node and the
 # package manager the same way every other entry point does. It also gives us
-# pm_in, which spells a package script the way whichever manager was found wants.
+# pm_in, which spells a package script the way whichever manager was found wants,
+# and pm_install, which does the same for dependency installation.
 # shellcheck source=scripts/pm
-. "$SCRIPT_DIR/pm"
+. "$SCRIPT_DIR/pm" || exit 1
 pm_resolve || exit 1
 
-# How to re-run the panel build by hand, in the same spelling the run itself uses.
+# How to re-run the panel steps by hand, in the same spelling the run itself uses.
 if [ "$PM" = "pnpm" ]; then
+  PANEL_INSTALL_CMD="pnpm -C \"$REPO_ROOT/panel\" install"
   PANEL_BUILD_CMD="pnpm -C \"$REPO_ROOT/panel\" build"
 else
+  PANEL_INSTALL_CMD="npm --prefix \"$REPO_ROOT/panel\" install"
   PANEL_BUILD_CMD="npm --prefix \"$REPO_ROOT/panel\" run build"
 fi
 
@@ -130,7 +133,21 @@ if [ "$CLONE_MODE" = 1 ]; then
 
   echo ""
   echo "Installing panel dependencies..."
-  pm_in "$REPO_ROOT/panel" install
+  # pm_install, not `pm_in … install`: dependency installation is the package
+  # manager's own command, and panel/package.json has no script by that name.
+  #
+  # `if !` rather than a bare call, like every other fatal step here: under
+  # `set -e` a failed install would abort with nothing but the package manager's
+  # output — and by this point the rebase has already rewritten the user's
+  # history, so they need to be told what state that leaves them in.
+  if ! pm_install "$REPO_ROOT/panel"; then
+    echo ""
+    echo "Error: installing the panel dependencies failed — your commits are replayed onto upstream/main, but node_modules/ is stale and the bundle was not rebuilt."
+    echo "Fix the install, then finish the update on its own:"
+    echo "  $PANEL_INSTALL_CMD"
+    echo "  $PANEL_BUILD_CMD"
+    exit 1
+  fi
 
   echo ""
   echo "Regenerating agent commands from the updated skills/ ..."

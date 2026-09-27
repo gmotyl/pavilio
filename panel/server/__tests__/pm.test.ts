@@ -234,6 +234,37 @@ describe("scripts/pm toolchain resolution", () => {
     expect(npmRun.output).toContain("npm --prefix panel run build --");
   }, 30000);
 
+  it("pm_install installs dependencies with pnpm -C and npm --prefix, not a run script", () => {
+    const withPnpm = join(sandbox, "with-pnpm");
+    stub(withPnpm, "node");
+    stub(withPnpm, "pnpm");
+    stub(withPnpm, "npm");
+    writeLocalEnv(`PAVILIO_NODE_BIN="${withPnpm}"`);
+
+    const body = ["pm_resolve || exit 1", 'echo "PM=$PM"', "pm_install panel"].join("\n");
+    const pnpmRun = runHarness(body);
+
+    expect(pnpmRun.status).toBe(0);
+    expect(field(pnpmRun.output, "PM")).toBe("pnpm");
+    expect(pnpmRun.output).toContain("pnpm -C panel install");
+
+    // The npm fallback this exists for: dependency installation, never
+    // `run install`. panel/package.json has no script by that name, so the
+    // pm_in spelling (`npm --prefix panel run install --`) dies on
+    // "Missing script: install" — and under `set -e` takes the update with it.
+    const npmOnly = join(sandbox, "npm-only");
+    stub(npmOnly, "node");
+    stub(npmOnly, "npm");
+    writeLocalEnv(`PAVILIO_NODE_BIN="${npmOnly}"`);
+
+    const npmRun = runHarness(body);
+
+    expect(npmRun.status).toBe(0);
+    expect(field(npmRun.output, "PM")).toBe("npm");
+    expect(npmRun.output).toContain("npm --prefix panel install");
+    expect(npmRun.output).not.toContain("run install");
+  }, 30000);
+
   it("fails with a message naming pnpm setup when no node is found", () => {
     // No local env file, an empty HOME and a PATH with nothing on it.
     const { status, output } = runHarness();
