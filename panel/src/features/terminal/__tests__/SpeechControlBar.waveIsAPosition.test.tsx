@@ -228,3 +228,76 @@ describe("the wave is a step the transport can stand on", () => {
     expect(nextButton()).toBeDisabled();
   });
 });
+
+describe("stepping on and off the wave moves no cursor", () => {
+  it("lands the first press back on the newest answer, not the one behind it", () => {
+    const speech = makeSpeech({ state: "ready", queue: WITH_HISTORY });
+    render(barTree(speech));
+
+    activity("busy", 2);
+    fireEvent.click(previousButton());
+
+    // The hold is taken — the body is the answer now — and the CURSOR HAS NOT
+    // MOVED. Without the early return the press would hold and step in one go,
+    // so the newest answer, the one the unread count is about, is the single
+    // answer the backward walk never lands on. Invisible whenever the cell
+    // happens to have history, which is why this cell has some.
+    expect(bodyHandedOver()).toBe(false);
+    expect(speech.onPrevious).not.toHaveBeenCalled();
+  });
+
+  it("walks into history on the second press", () => {
+    const speech = makeSpeech({ state: "ready", queue: WITH_HISTORY });
+    render(barTree(speech));
+
+    activity("busy", 2);
+    fireEvent.click(previousButton());
+    fireEvent.click(previousButton());
+
+    // Below the wave a backward press is an ordinary backward press.
+    expect(speech.onPrevious).toHaveBeenCalledTimes(1);
+    expect(speech.onPrevious).toHaveBeenCalledWith(SESSION);
+  });
+
+  it("steps forward onto the wave without moving the cursor", () => {
+    const speech = makeSpeech({ state: "ready", queue: AFTER_A_REFRESH });
+    render(barTree(speech));
+
+    activity("busy", 2);
+    fireEvent.click(previousButton());
+    expect(bodyHandedOver()).toBe(false);
+
+    fireEvent.click(nextButton());
+
+    // The mirror of the first case: the hold is spent on the step that arrives
+    // at the wave, and nothing is asked of the queue.
+    expect(bodyHandedOver()).toBe(true);
+    expect(speech.onNext).not.toHaveBeenCalled();
+  });
+
+  it("keeps the hold while forward is still walking the history", () => {
+    const speech = makeSpeech({
+      state: "ready",
+      queue: queueWith({
+        previous: [answer("u-1"), answer("u-0")],
+        current: answer("u-2"),
+        cursor: 2,
+      }),
+    });
+    render(barTree(speech));
+
+    activity("busy", 2);
+    fireEvent.click(previousButton());
+    expect(bodyHandedOver()).toBe(false);
+
+    fireEvent.click(nextButton());
+
+    // Forward used to release on EVERY press, so a walk that started two
+    // answers deep snapped the body back to the wave on the first step while
+    // the cursor was still in the history — the pane showing one thing and the
+    // transport pointing at another. The hold stands for exactly as long as the
+    // cursor is below the wave.
+    expect(speech.onNext).toHaveBeenCalledWith(SESSION);
+    expect(bodyHandedOver()).toBe(false);
+  });
+});

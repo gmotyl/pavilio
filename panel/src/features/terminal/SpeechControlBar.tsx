@@ -551,8 +551,18 @@ export function SpeechControlBar({
             noteTransport(sessionId);
             // Stepping back is the user saying *I want the text*. Without
             // the hold the pane would give it back for exactly as long as
-            // it took the agent's next activity broadcast to arrive.
+            // it took the agent's next activity broadcast to arrive. True
+            // of both branches below, so it is taken before either.
             holdAnswer(sessionId);
+            // THE FIRST STEP OFF THE WAVE, and it moves no cursor: the wave
+            // is one position above `current`, so stepping back from it
+            // arrives at the newest answer rather than past it. Without this
+            // return the press holds AND steps, which makes the newest
+            // answer — the one the unread count is about — the single answer
+            // a backward walk never lands on. That is invisible on any cell
+            // that happens to have history, and total on a reloaded tab,
+            // where the newest answer is the only one there is.
+            if (onWave) return;
             speech.onPrevious(sessionId);
           }}
         >
@@ -641,8 +651,24 @@ export function SpeechControlBar({
           disabled={!hasNext}
           onClick={() => {
             noteTransport(sessionId);
-            // Forward is the user done with what they stepped back for.
-            releaseAnswer(sessionId);
+            // THE LAST STEP BACK ONTO THE WAVE — the mirror of the previous
+            // control's, and it moves no cursor either.
+            //
+            // Asked BEFORE the dispatch, because afterwards it has no defined
+            // answer: the host reads the queue as it stands now precisely
+            // because its own dispatch has not been applied yet.
+            //
+            // Forward used to release on every press. A walk that started two
+            // answers deep therefore dropped the hold on its FIRST step, and
+            // the body snapped back to the wave while the cursor was still in
+            // the history — the pane showing one thing and the transport
+            // pointing at another. The hold now stands for exactly as long as
+            // the cursor is below the wave, and is spent on the step that
+            // actually arrives at it.
+            if (held && queue.cursor === 0) {
+              releaseAnswer(sessionId);
+              return;
+            }
             speech.onNext(sessionId);
           }}
         >
