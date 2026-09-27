@@ -11,16 +11,9 @@ import DiffView, { type DiffMode } from "./DiffView";
 import FileChangeList from "./FileChangeList";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
 import PaneResizer from "../shell/PaneResizer";
-import useResizablePane, { type PaneBounds } from "../shell/useResizablePane";
+import useResizablePane from "../shell/useResizablePane";
+import { TREE_BOUNDS } from "./repoTree";
 import { preferences } from "../../preferences/declarations";
-
-/**
- * How far the commit tree may be dragged. The floor keeps a path column
- * readable rather than a stack of ellipses; the ceiling is tighter than the
- * file list's because this tree shares its row with a DIFF, which wants every
- * column it can get. `step` is the arrow-key increment.
- */
-const TREE_BOUNDS: PaneBounds = { min: 200, max: 480, step: 16 };
 
 interface Commit {
   sha: string;
@@ -91,7 +84,7 @@ export default function GitHistory({
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
   const [localViewMode] = useGitViewMode();
   // Above the `commits.length === 0` bail-out below, where every hook has to be.
-  const tree = useResizablePane(preferences.gitHistoryPaneWidth, TREE_BOUNDS);
+  const tree = useResizablePane(preferences.repoTreePaneWidth, TREE_BOUNDS);
   const viewMode = controlledViewMode ?? localViewMode;
 
   // Controlled/uncontrolled sync: when activeSha prop changes, mirror to internal state

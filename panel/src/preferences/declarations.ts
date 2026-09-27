@@ -306,19 +306,26 @@ export const preferences = {
     portable: true,
   }),
   /**
-   * The git-history commit tree's width. No `// was:` line, for the same
-   * reason as `fileList.paneWidth`: nothing stored it before, because the pane
-   * was the fixed `w-[280px]` — so 280, and a workspace with no entry opens
-   * exactly as it always has.
+   * The width of every repo file tree — the changed-path list the git views
+   * render beside a diff. No `// was:` line, for the same reason as
+   * `fileList.paneWidth`: nothing stored it before, because the pane was the
+   * fixed `w-[280px]` — so 280, and a workspace with no entry opens exactly as
+   * it always has.
    *
-   * Global, not `repo`, even though the tree only ever appears beside a repo's
+   * One key for all of them, not one per view: the trees are the same tree in
+   * several places, and a width dragged in one is the width you want in the
+   * next. It retires the git-history-only `git.history.paneWidth` with no
+   * migration, per the registry's standing policy — a dragged handle simply
+   * opens at 280 once.
+   *
+   * Global, not `repo`, even though a tree only ever appears beside a repo's
    * diff. How wide you like to read a list of changed paths is a habit; it
    * does not become a different preference because you switched repository.
    * The scope is also load-bearing for the key: a `repo` scope would append
    * `@<repo>` to the storage key, and this one is read under the bare key.
    */
-  gitHistoryPaneWidth: definePreference({
-    key: "git.history.paneWidth", // was: nothing — the tree had a fixed width
+  repoTreePaneWidth: definePreference({
+    key: "repos.tree.paneWidth", // was: nothing — the trees had a fixed width
     scope: "global",
     default: 280,
     codec: num,
