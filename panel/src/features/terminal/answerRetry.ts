@@ -1,0 +1,257 @@
+/**
+ * One manual **Retry Enter** per composer send, kept OUTSIDE React, keyed by
+ * session, for the life of the tab.
+ *
+ * The case it exists for: the draft reached the PTY, the submitting `\r`
+ * reached an OPEN socket, and nothing happened. The agent never woke, so no
+ * output was produced, so the session never went busy and no answer ever
+ * arrived — there is nothing for any existing state machine to react to,
+ * because the defining feature of this failure is that NOTHING happened. The
+ * recovery is one more Return, and it has to be the user's own press: a panel
+ * that retypes Enter on your behalf is a panel that double-submits.
+ *
+ * ## Why this is not part of `answerWaiting`
+ *
+ * They look like the same fact — *a reply to your draft is outstanding* — and
+ * they have opposite exits.
+ *
+ * `answerWaiting` ENDS on an idle transition: an agent that finished without
+ * speaking is the exit that makes the wave shippable at all. Idle is precisely
+ * the state this ticket needs to SURVIVE into, because an idle session two
+ * seconds after an accepted Return is the symptom: the agent is not working,
+ * and it is not working because it never received the keypress. Folding the
+ * ticket into that store would have the wait's exit delete the evidence.
+ *
+ * The second difference is the unit. A wait belongs to the SESSION and survives
+ * being re-entered; a retry offer belongs to one SEND, and a second submit must
+ * take the first one's offer away rather than extend it — otherwise the offer
+ * standing on screen writes a Return for a draft two sends ago. Hence the
+ * generation: `beginRetryTicket` hands one out, every later call carries it,
+ * and anything arriving with a stale one is a callback from a submit the user
+ * has already moved past.
+ *
+ * ## Why the offer is gated on `idle`, and why `attention` is not idle
+ *
+ * The offer is a claim that the keypress was LOST. A session doing anything at
+ * all contradicts that claim, and there are two ways for the server to say so:
+ *
+ * - `busy` — output within the last second. The agent is working, so it got the
+ *   Return,
+ * - `attention` — *busy for a long run, then quiet for one second*. That is an
+ *   agent between two bursts of output as often as it is one that has stopped
+ *   (see `answerWaiting`'s header on the oscillation), and an agent that has
+ *   produced output at all is not one that missed the keypress.
+ *
+ * So only `idle` — which the server reaches from a short run that ended, or
+ * from the user typing into the terminal — permits the offer. The same reading
+ * is applied at the deadline and to every later transition: an offer already on
+ * screen is withdrawn the moment the session shows any sign of life, because by
+ * then the premise is simply false.
+ *
+ * ## Why consuming happens before the write
+ *
+ * `consumeRetryOffer` spends the ticket and answers `true` at most once, and
+ * the composer calls it BEFORE it touches the socket. Two taps in one frame —
+ * a double click, a keyboard activation racing a pointer one — would otherwise
+ * both see an offer standing and both write a Return, which is the exact
+ * double-submit this feature is supposed to be the safe alternative to. The
+ * consume is synchronous and the write is not, so ordering them this way is
+ * what makes "one Return" a property of the store rather than a hope about the
+ * event loop.
+ *
+ * Spent means spent: a refused write does not hand the ticket back. One offer,
+ * one attempt, and the composer's existing `return`-stage failure text says
+ * what happened.
+ *
+ * ## What it holds, and for how long
+ *
+ * Memory only, and no more than one ticket per session. It must survive a
+ * terminal-view remount — every layout change rebuilds `TerminalView`, and an
+ * offer held in component state would vanish when the user resized the cell
+ * they had just sent from — and it must NOT survive a reload: a recovery
+ * control restored from storage would offer to press Enter into a session whose
+ * moment passed minutes ago.
+ */
+import { useSyncExternalStore } from "react";
+import { getActivityState, subscribeActivity } from "./useTerminalActivityChannel";
+
+/** How long after an accepted initial Return the offer appears. */
+export const RETRY_OFFER_MS = 2000;
+
+interface Ticket {
+  /**
+   * Which send this ticket belongs to. Every callback the composer carries is
+   * stamped with it, so a `ptySubmit` report arriving after the user has sent
+   * again is discarded rather than arming an offer for a draft they have moved
+   * past.
+   */
+  generation: number;
+  /**
+   * The utterance the cell's cursor was on when the draft went out — BOXED, so
+   * that "never recorded" (`null`) is a different fact from "the cell had no
+   * answer yet" (`{ id: null }`). Any OTHER id reaching
+   * {@link noteRetryUtterance} is an answer landing, which is the ticket's
+   * premise collapsing: something did reply.
+   */
+  sentOn: { id: string | null } | null;
+  /** The pending deadline, or `null` once it has fired or been cancelled. */
+  timer: ReturnType<typeof setTimeout> | null;
+  /** The offer stands and has not been spent. */
+  offered: boolean;
+  /** The activity subscription opened with the ticket. */
+  unsubscribe: () => void;
+}
+
+const tickets = new Map<string, Ticket>();
+const listeners = new Set<() => void>();
+
+let nextGeneration = 0;
+
+function notify(): void {
+  for (const listener of listeners) listener();
+}
+
+/**
+ * Drops the session's ticket and everything it owns, and reports whether a
+ * VISIBLE offer went with it — the only thing subscribers can see, so the only
+ * thing worth waking them for.
+ */
+function drop(sessionId: string): boolean {
+  const ticket = tickets.get(sessionId);
+  if (!ticket) return false;
+  if (ticket.timer !== null) clearTimeout(ticket.timer);
+  ticket.unsubscribe();
+  tickets.delete(sessionId);
+  return ticket.offered;
+}
+
+/**
+ * Any sign of life from the session withdraws the ticket: the offer's whole
+ * claim is that the Return never landed, and a session producing output has
+ * plainly received it. Read `attention` as life too — see the header — so the
+ * transition rule and the deadline's gate ask exactly one question between
+ * them.
+ */
+function onActivity(sessionId: string, state: string): void {
+  if (state === "idle") return;
+  if (drop(sessionId)) notify();
+}
+
+/** A composer submit opens a ticket, replacing any older one. Returns its generation. */
+export function beginRetryTicket(sessionId: string): number {
+  // The older ticket's timer and offer go with it: an offer for the previous
+  // send would write a Return that this send has already written.
+  const lostOffer = drop(sessionId);
+  const generation = ++nextGeneration;
+  const ticket: Ticket = {
+    generation,
+    sentOn: null,
+    timer: null,
+    offered: false,
+    unsubscribe: () => {},
+  };
+  tickets.set(sessionId, ticket);
+  // Opened after the ticket is in the map: the listener looks itself up, and a
+  // synchronous first call would otherwise find nothing.
+  ticket.unsubscribe = subscribeActivity(sessionId, (state) => {
+    onActivity(sessionId, state);
+  });
+  if (lostOffer) notify();
+  return generation;
+}
+
+/**
+ * The utterance this send was a reply to, recorded so a NEWER one can clear
+ * the ticket. Ignored when the current ticket already carries one.
+ */
+export function noteRetrySentOn(sessionId: string, sentOn: string | null): void {
+  const ticket = tickets.get(sessionId);
+  // The first push is the send's own answer id; anything after it is the pane
+  // re-reporting where the cursor stands, and overwriting with that would keep
+  // moving the goalposts the ticket is measured against.
+  if (!ticket || ticket.sentOn !== null) return;
+  ticket.sentOn = { id: sentOn };
+}
+
+/** The initial Return was accepted — start the timer, if `generation` is still current. */
+export function armRetryOffer(sessionId: string, generation: number): void {
+  const ticket = tickets.get(sessionId);
+  if (!ticket || ticket.generation !== generation || ticket.timer !== null) return;
+  ticket.timer = setTimeout(() => {
+    // The ticket may have been dropped, and `drop` clears this timer — but a
+    // timer already handed to the queue cannot be unscheduled in every runtime,
+    // so the fired callback re-reads the map rather than trusting its closure.
+    const live = tickets.get(sessionId);
+    if (!live || live.generation !== generation) return;
+    live.timer = null;
+    if (getActivityState(sessionId) !== "idle") {
+      // Something is happening in there, so the Return was not lost and the
+      // ticket has nothing left to offer.
+      drop(sessionId);
+      return;
+    }
+    live.offered = true;
+    notify();
+  }, RETRY_OFFER_MS);
+}
+
+/** Drop the ticket, its timer, its offer and its activity subscription. */
+export function clearRetryTicket(sessionId: string, generation?: number): void {
+  const ticket = tickets.get(sessionId);
+  if (!ticket) return;
+  // A failure report from a submit the user has already moved past must not
+  // take the ticket their newer send just opened.
+  if (generation !== undefined && ticket.generation !== generation) return;
+  if (drop(sessionId)) notify();
+}
+
+/** A newer utterance for the session clears the ticket; the recorded one does not. */
+export function noteRetryUtterance(sessionId: string, utteranceId: string | null): void {
+  const ticket = tickets.get(sessionId);
+  if (!ticket) return;
+  // The id the send went out on is the cell standing still — the bar pushes it
+  // on every mount and every render that changes nothing.
+  if (ticket.sentOn !== null && ticket.sentOn.id === utteranceId) return;
+  if (drop(sessionId)) notify();
+}
+
+/** Spend the offer. `true` at most once per ticket; `false` when nothing is offered. */
+export function consumeRetryOffer(sessionId: string): boolean {
+  const ticket = tickets.get(sessionId);
+  if (!ticket || !ticket.offered) return false;
+  // The whole ticket goes, not merely the flag: one accepted Return earns one
+  // offer, and a refused retry is still an offer that was spent.
+  drop(sessionId);
+  notify();
+  return true;
+}
+
+export function isRetryOffered(sessionId: string): boolean {
+  return tickets.get(sessionId)?.offered ?? false;
+}
+
+export function subscribeAnswerRetry(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** {@link isRetryOffered}, re-rendering the caller when the offer appears or goes. */
+export function useRetryOffered(sessionId: string): boolean {
+  return useSyncExternalStore(
+    subscribeAnswerRetry,
+    () => isRetryOffered(sessionId),
+    () => isRetryOffered(sessionId),
+  );
+}
+
+/** The session is gone: its ticket, timer, offer and activity watch go with it. */
+export function forgetAnswerRetry(sessionId: string): void {
+  if (drop(sessionId)) notify();
+}
+
+export function __resetAnswerRetryForTests(): void {
+  for (const sessionId of [...tickets.keys()]) drop(sessionId);
+  notify();
+}
