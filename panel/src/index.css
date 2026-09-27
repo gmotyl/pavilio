@@ -733,8 +733,20 @@ input[type="checkbox"] {
   color: var(--text-primary);
 }
 
+/* Dimmed, but still THERE. 0.32 composited the glyph to `rgb(66,65,68)` over
+   the row's #17171d — 1.76:1, well under the 3:1 WCAG asks of a non-text
+   control — which made "disabled" render as "absent" and falsified the row's
+   own rule, that disabled says *not yet* where hiding said *never*. It was a
+   faint smudge on a monitor and nothing at all on a phone: Greg reported the
+   transport arrows as gone on mobile, and at 390x844 they were laid out
+   exactly where the desktop puts them, unclipped, and merely disabled.
+
+   0.6 puts the glyph at 3.13:1. The state is still obviously the weaker one —
+   enabled is 6.43:1 — and it keeps its two other signals, no hover response
+   and `cursor: default`. `speechBarDisabledContrast.test.ts` pins both halves,
+   so a later nudge in either direction has to argue with a number. */
 .speech-bar-btn[disabled] {
-  opacity: 0.32;
+  opacity: 0.6;
   cursor: default;
 }
 

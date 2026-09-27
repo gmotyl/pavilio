@@ -30,7 +30,8 @@ import { type UtteranceQueue } from "../../speech/utteranceQueue";
 import { cssPx, cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { AnswerPane } from "../AnswerPane";
 import { SpeechControlBar } from "../SpeechControlBar";
-import { __resetAnswerWaitingForTests } from "../answerWaiting";
+import { __resetAnswerWaitingForTests, isAnswerHeld } from "../answerWaiting";
+import { fakeOnNext, fakeOnPrevious } from "../../speech/__tests__/fakeTransportHost";
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
 
@@ -140,8 +141,14 @@ function makeSpeech(
     onPause: vi.fn(),
     onResume: vi.fn(),
     onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
+    // A spy alone is no longer a faithful host: the hold moved into
+    // `onPrevious`/`onNext` so that the chord and the media keys take it too.
+    // See `fakeTransportHost.ts`.
+    onPrevious: vi.fn((sessionId: string) => fakeOnPrevious(sessionId)),
+    onNext: vi.fn((sessionId: string) => {
+      const queue = queueFor();
+      fakeOnNext(sessionId, isAnswerHeld(sessionId), queue.cursor, queue.pending.length);
+    }),
     onNewestAnswer: vi.fn(),
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
@@ -1055,10 +1062,28 @@ describe("the way back out of a hold", () => {
     expect(within(body()).queryByText(ANSWER)).toBeNull();
   });
 
-  it("holds on previous and releases on next", () => {
+  it("keeps the hold while forward still has a backlog to walk", () => {
     heldOnScreen();
 
-    // The transport's own forward control says the same thing the pane's does.
+    // `BACKLOG` has an answer waiting behind the cursor, and the wave sits
+    // above the BACKLOG rather than above `current`. So this press is a step
+    // INTO it, not a step onto the wave: the hold survives and the control
+    // that draws it stays. A gate of "the cursor is on current" released here,
+    // spending the hold without moving and costing a second press to go one
+    // place.
+    fireEvent.click(nextButton());
+
+    expect(nextAnswerControl()).not.toBeNull();
+  });
+
+  it("releases onto the wave once nothing is waiting", () => {
+    render(surfaceTree(makeSpeech(() => ({ ...BACKLOG, pending: [] }))));
+    activity("busy", 2);
+    fireEvent.click(previousButton());
+    expect(nextAnswerControl()).not.toBeNull();
+
+    // Nothing ahead of the cursor now, so forward is the step that arrives at
+    // the wave — and the transport's own control says what the pane's does.
     fireEvent.click(nextButton());
 
     expect(waiting()).toBeInTheDocument();

@@ -1065,25 +1065,41 @@ describe("the keyboard transport, mounted", () => {
     await emitUtterance("cell-a", "a2", "The second answer.");
     expect(played).toEqual(["blob:The first answer."]);
 
-    await pressTransport("ArrowRight");
+    // Let both runs finish, so the arrows below are pressed with nothing
+    // playing: the chords under test are navigation, and a live run would
+    // answer `Space` with a pause rather than a play.
+    await endRun();
+    await endRun();
     expect(played).toEqual(["blob:The first answer.", "blob:The second answer."]);
 
-    // Back is NAVIGATION and makes no sound — the asymmetry with the arrow
-    // above is deliberate, so the backlog can be skimmed without every step
-    // talking over the last. The chord still has to reach `onPrevious`, though,
-    // and silence alone cannot tell "the cursor moved quietly" apart from "the
-    // key did nothing at all".
+    // BOTH arrows are navigation and make no sound, so the backlog can be
+    // skimmed in either direction without every step talking over the last.
+    // Forward used to speak; it stopped when it became the way back onto the
+    // wave as well as the way into the backlog.
     await pressTransport("ArrowLeft");
     expect(played).toEqual(["blob:The first answer.", "blob:The second answer."]);
 
-    // So the forward chord is what reads the cursor back out: coming out of
-    // history it speaks the answer it returns onto. With the cursor still at
-    // the front and nothing pending, `next` would have had nothing to step to
-    // and this would have stayed silent.
-    await pressTransport("ArrowRight");
+    // Silence alone cannot tell "the cursor moved quietly" apart from "the key
+    // did nothing at all", so the PLAY chord reads the cursor back out — the
+    // same second half the rest of this suite uses after a silent step. One
+    // step back is the first answer.
+    await pressTransport("Space");
     expect(played).toEqual([
       "blob:The first answer.",
       "blob:The second answer.",
+      "blob:The first answer.",
+    ]);
+    await endRun();
+
+    // And forward returns to the second. A chord that never reached `onNext`
+    // would leave the cursor in the history and replay the FIRST answer here,
+    // which is what separates this line from the one above.
+    await pressTransport("ArrowRight");
+    await pressTransport("Space");
+    expect(played).toEqual([
+      "blob:The first answer.",
+      "blob:The second answer.",
+      "blob:The first answer.",
       "blob:The second answer.",
     ]);
   });
