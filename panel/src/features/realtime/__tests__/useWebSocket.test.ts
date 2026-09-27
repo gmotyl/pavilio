@@ -17,8 +17,23 @@ class FakeWebSocket {
   onerror: (() => void) | null = null;
   closed = false;
 
+  private openHandler: (() => void) | null = null;
+
   constructor(public url: string) {
     FakeWebSocket.instances.push(this);
+  }
+
+  /**
+   * Open immediately, so the handshake is already done when the channel
+   * attaches its handler and attaching runs it.
+   */
+  set onopen(handler: (() => void) | null) {
+    this.openHandler = handler;
+    if (this.readyState === FakeWebSocket.OPEN) handler?.();
+  }
+
+  get onopen(): (() => void) | null {
+    return this.openHandler;
   }
 
   close(): void {

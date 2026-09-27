@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { REALTIME_RECONNECT_FRAME, subscribeRealtime } from "../realtime/channel";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { prepare } from "./prepare";
 import {
@@ -279,6 +280,20 @@ export interface UtteranceChannelOptions {
    * the same red only because the user's question has the same answer.
    */
   preparingSessionIds: ReadonlySet<string>;
+  /**
+   * The host's `recordAutoplayed`. The catch-up below calls it for every
+   * utterance it takes up after a reconnect, so the armed cell does not speak
+   * an answer that landed while the tab was frozen.
+   *
+   * Returning to the application is not a user gesture, and an armed cell in a
+   * tab with no gesture does not merely *defer* an arrival — it ABSORBS it,
+   * marking the utterance played so the cell stays quiet ever after. A
+   * recovered answer handed to that path would lose its spoken form for good,
+   * which is worse than not recovering it. Marking it ourselves keeps it off
+   * that path entirely, and `recordAutoplayed` records nothing about `heard`,
+   * so the pulse, the pip and the unread count are all unaffected. See ADR 0017.
+   */
+  recordAutoplayed: (sessionId: string, utteranceId: string) => void;
 }
 
 /**
@@ -336,6 +351,68 @@ export interface Channel {
 
 const LATEST_URL = "/api/speech/latest";
 
+/**
+ * One `/latest` entry, decided: what it is, what it does to the session's tally
+ * and whether it has anything to say. Settled before the state update so the
+ * updater stays pure and the `recordAutoplayed` calls can be made outside it.
+ */
+interface CaughtUp {
+  utterance: Utterance;
+  /** The session's tally with this response's vote folded in. */
+  language: LanguageState;
+  /** False for a response with nothing to say: it votes, and seeds no pip. */
+  speakable: boolean;
+}
+
+/** A parsed `/latest` response, waiting for the effect that commits it. */
+interface FetchedLatest {
+  utterances: Utterance[];
+  /** False for the mount fetch: only a catch-up is absorbed. */
+  catchUp: boolean;
+}
+
+/**
+ * Whether what the cell already holds covers a `/latest` entry. One rule, for
+ * the mount fetch and the catch-up alike:
+ *
+ * > skip it when the queue already holds the id, **or** when what the cell is
+ * > showing is at least as new as the entry.
+ *
+ * The id half is `queueHolds`, the same dedupe the live-frame path uses: it
+ * keeps a re-delivery out of the queue wherever the cell is holding it. The
+ * CLOCK half is what the id half cannot say, and it covers three things the
+ * gate used to get wrong:
+ *
+ * - **Mount.** The only thing that can already be there is a live frame that
+ *   raced this fetch, and it is newer than anything `/latest` can say. It used
+ *   to be skipped by a gate on the SESSION, which is a mount-shaped assumption
+ *   and cost the catch-up the answer the user came back for; `at` says the same
+ *   thing without asking which fetch this is, so the split is gone.
+ * - **An aged-out entry.** The server retains one utterance per session and
+ *   hands it back on EVERY catch-up. Once more than `MAX_PREVIOUS` answers have
+ *   pushed it off the far end of the history its id is nowhere in the queue, so
+ *   the id half alone re-takes an answer the cell has moved past — a duplicate
+ *   in the history and a pip for something already heard.
+ * - **The socket race.** An utterance posted after the `/latest` snapshot can
+ *   win the race home, and the snapshot entry — an id the cell has never held —
+ *   would then append over it and leave the cell showing the older answer.
+ *
+ * `utteranceQueueReducer`'s `arrived` case orders nothing by time, so whatever
+ * passes this gate displaces what the cell is showing and un-hears it. This is
+ * the whole of the ordering.
+ *
+ * A record with nothing under `current` — a session that has only ever cast a
+ * language vote, or one whose single arrival queued behind a live run — is
+ * covered by neither half and the entry is taken up, which is right: there is
+ * nothing there for it to displace.
+ */
+function covers(existing: SessionSpeech | undefined, utterance: Utterance): boolean {
+  if (!existing) return false;
+  if (queueHolds(existing.queue, utterance.id)) return true;
+  const showing = existing.queue.current;
+  return showing !== null && showing.at >= utterance.at;
+}
+
 /** Narrows a WS frame or a `/latest` entry onto the locked wire format. */
 function toUtterance(raw: unknown): Utterance | null {
   if (!raw || typeof raw !== "object") return null;
@@ -357,6 +434,7 @@ export function useUtteranceChannel({
   pausedSessionId,
   waitingForSynthesis,
   preparingSessionIds,
+  recordAutoplayed,
 }: UtteranceChannelOptions): Channel {
   const { lastMessage } = useWebSocket();
   const [sessions, setSessions] = useState<Map<string, SessionSpeech>>(() => new Map());
@@ -394,11 +472,54 @@ export function useUtteranceChannel({
   useEffect(() => {
     playbackRef.current = { speakingSessionId, pausedSessionId };
   }, [pausedSessionId, speakingSessionId]);
+  /**
+   * The host's `recordAutoplayed`, mirrored for the same reason as the playback
+   * inputs: the catch-up effect below is keyed on the reconnect count alone, so
+   * taking this callback as a dependency would re-fetch `/latest` every time
+   * the host's armed cell changed its identity.
+   */
+  const recordAutoplayedRef = useRef(recordAutoplayed);
+  useEffect(() => {
+    recordAutoplayedRef.current = recordAutoplayed;
+  }, [recordAutoplayed]);
   // Read once at mount, so a remount restores the armed cell (DECISION 12).
   const [armedSessionId, setArmedSessionId] = useState<string | null>(getStoredArmedSession);
 
+  /**
+   * How many times the realtime channel has come back. It is what re-runs the
+   * hydration below, which would otherwise be `deps: []` — once, at mount — and
+   * so would never ask for the answer that the panel server retained while the
+   * socket was dead. See ADR 0017.
+   *
+   * Subscribed DIRECTLY rather than read off `lastMessage`: the channel
+   * publishes the neutral frame alongside the file-change one, React batches
+   * both into a single render, and `useWebSocket` keeps only the newest frame —
+   * so the neutral one is never visible there. The file-change frame is
+   * deliberately the one published last, because every other consumer depends
+   * on seeing it. `lastMessage` still drives `speech-utterance` arrivals,
+   * unchanged.
+   */
+  const [reconnects, setReconnects] = useState(0);
+  useEffect(
+    () =>
+      subscribeRealtime((frame) => {
+        if (frame.type !== REALTIME_RECONNECT_FRAME.type) return;
+        setReconnects((count) => count + 1);
+      }),
+    [],
+  );
+
+  /**
+   * What the newest `/latest` fetch read, waiting to be committed below. The
+   * fetch itself decides nothing: see the commit effect for why.
+   */
+  const [fetched, setFetched] = useState<FetchedLatest | null>(null);
+
   useEffect(() => {
     let cancelled = false;
+    // Mount and catch-up are the same fetch, gated by the same rule, and differ
+    // in exactly one thing: only a catch-up is absorbed by `recordAutoplayed`.
+    const catchUp = reconnects > 0;
 
     (async () => {
       try {
@@ -407,46 +528,96 @@ export function useUtteranceChannel({
 
         const body = (await res.json()) as { utterances?: unknown };
         const raw = Array.isArray(body?.utterances) ? body.utterances : [];
-        if (cancelled || raw.length === 0) return;
+        const utterances = raw
+          .map(toUtterance)
+          .filter((entry): entry is Utterance => entry !== null);
+        if (cancelled || utterances.length === 0) return;
 
-        setSessions((current) => {
-          const next = new Map(current);
-          for (const entry of raw) {
-            const utterance = toUtterance(entry);
-            // A frame that landed while this fetch was in flight is newer than
-            // anything `/latest` can say, so hydration never displaces one —
-            // that would resurrect an utterance and un-hear a heard cell.
-            if (!utterance || next.has(utterance.sessionId)) continue;
-            const language = advanceLanguage(undefined, utterance.text);
-            // Hydration is an arrival too, so it gets the same gate: a stored
-            // pure-code answer must not seed a pip either.
-            if (!hasSomethingToSay(utterance.text, language.lang)) {
-              next.set(utterance.sessionId, languageOnly(undefined, language));
-              continue;
-            }
-            // A tab that mounts after the broadcast has not heard it, and the
-            // server keeps only the latest — so a seeded cell is unheard, and
-            // its queue is the one stored utterance with nothing on either side
-            // of it. Nothing is playing on a tab that has just mounted, so the
-            // arrival is an idle one by construction.
-            next.set(
-              utterance.sessionId,
-              withArrival(undefined, utterance, language, false),
-            );
-          }
-          return next;
-        });
+        setFetched({ utterances, catchUp });
       } catch {
         // The panel server is unreachable (restarting, or the page was served
         // from a cache). Nothing is seeded and the channel stays usable — live
-        // frames still register once the socket comes back.
+        // frames still register once the socket comes back. A failed catch-up
+        // is not an error state, it is the status quo ante.
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reconnects]);
+
+  /**
+   * Commits what a fetch read, and records only what it actually took up.
+   *
+   * Deliberately not done in the fetch's own continuation. A promise callback
+   * can run while React is holding a live frame's `setSessions` QUEUED but not
+   * yet applied, so the state it reads off `sessionsRef` is older than the one
+   * the updater will be handed: React applies the frame first, the updater's
+   * re-check drops the entry, and `recordAutoplayed` has already absorbed an
+   * answer that arrived as a genuine live frame — silencing it for good, which
+   * ADR 0017 calls worse than not recovering it at all.
+   *
+   * An effect runs with everything React had queued already applied, and
+   * anything queued after it lands BEHIND this update, so what is decided here
+   * is exactly what the cell ends up holding — which is what makes the
+   * `recordAutoplayed` calls below honest.
+   *
+   * Declared ABOVE the arrival effect, for the same reason the playback mirror
+   * is: effects run in declaration order within a commit, so a frame landing in
+   * the same commit queues its update behind this one rather than in front.
+   */
+  useEffect(() => {
+    if (!fetched) return;
+    const { utterances, catchUp } = fetched;
+
+    // Decided against the rendered state before anything is set, so that
+    // `recordAutoplayed` can be called from here rather than from inside the
+    // updater — which writes the host's ref and has to stay pure.
+    const taken: CaughtUp[] = [];
+    for (const utterance of utterances) {
+      const existing = sessionsRef.current.get(utterance.sessionId);
+      if (covers(existing, utterance)) continue;
+      const language = advanceLanguage(existing?.language, utterance.text);
+      taken.push({
+        utterance,
+        language,
+        speakable: hasSomethingToSay(utterance.text, language.lang),
+      });
+    }
+    if (taken.length === 0) return;
+
+    setSessions((current) => {
+      const next = new Map(current);
+      for (const { utterance, language, speakable } of taken) {
+        const existing = next.get(utterance.sessionId);
+        // Hydration is an arrival too, so it gets the same gate: a stored
+        // pure-code answer must not seed a pip either.
+        if (!speakable) {
+          next.set(utterance.sessionId, languageOnly(existing, language));
+          continue;
+        }
+        // A tab that was not there for the broadcast has not heard what it is
+        // being handed, so the cell it seeds is unheard and the answer counts
+        // towards the unread pip. A cell the user has PAUSED does not count as
+        // speaking, exactly as on the live-frame path.
+        const { speakingSessionId: live, pausedSessionId: held } = playbackRef.current;
+        const speaking = live === utterance.sessionId && held !== utterance.sessionId;
+        next.set(utterance.sessionId, withArrival(existing, utterance, language, speaking));
+      }
+      return next;
+    });
+
+    // Only a CATCH-UP is absorbed, never the mount fetch. A tab that has just
+    // loaded has had no gesture either, and the host already absorbs a hydrated
+    // arrival there for that reason; recording one from here would only clobber
+    // the armed cell's own bookkeeping with an id that may never reach the
+    // cursor.
+    if (!catchUp) return;
+    for (const { utterance, speakable } of taken) {
+      if (speakable) recordAutoplayedRef.current(utterance.sessionId, utterance.id);
+    }
+  }, [fetched]);
 
   useEffect(() => {
     if (lastMessage?.type !== "speech-utterance") return;

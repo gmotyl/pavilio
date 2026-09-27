@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { useEffect, useReducer } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Utterance } from "../types";
 
@@ -11,6 +12,31 @@ let lastMessage: Record<string, unknown> | null = null;
 vi.mock("../../realtime/useWebSocket", () => ({
   useWebSocket: () => ({ lastMessage }),
 }));
+
+/**
+ * The neutral reconnect frame cannot arrive through `useWebSocket`: the channel
+ * publishes it alongside the file-change one and React batches both into a
+ * single render, so only whichever was published last is ever visible in
+ * `lastMessage` — deliberately the file-change frame. The catch-up therefore
+ * subscribes to the realtime channel directly, and this stands in for that
+ * subscription, which would otherwise open a socket.
+ */
+const { realtimeListeners } = vi.hoisted(() => ({
+  realtimeListeners: new Set<(frame: Record<string, unknown>) => void>(),
+}));
+vi.mock("../../realtime/channel", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../realtime/channel")>("../../realtime/channel");
+  return {
+    ...actual,
+    subscribeRealtime: (listener: (frame: Record<string, unknown>) => void) => {
+      realtimeListeners.add(listener);
+      return () => {
+        realtimeListeners.delete(listener);
+      };
+    },
+  };
+});
 
 /**
  * Playback lives in `useSpeechPlayer` and synthesis in the host's warming
@@ -26,6 +52,8 @@ let preparing: ReadonlySet<string> = new Set<string>();
 
 const { useUtteranceChannel } = await import("../useUtteranceChannel");
 const { setStoredArmedSession } = await import("../voices");
+const { unplayedSinceLastPlayed } = await import("../unreadAnswers");
+const { REALTIME_RECONNECT_FRAME } = await import("../../realtime/channel");
 const { preferences } = await import("../../../preferences/declarations");
 const { storageKey } = await import("../../../preferences/types");
 
@@ -70,12 +98,20 @@ function serveLatest(utterances: Utterance[]) {
   return fetchMock;
 }
 
-/** The four playback/synthesis inputs, as of whatever the variables now say. */
+/**
+ * The host's `recordAutoplayed`: an input like the four above, because
+ * `autoplayedRef` lives in `useSpeechHost` and the channel imports nothing from
+ * it. A catch-up calls it so an armed cell does not speak what it recovered.
+ */
+let recordAutoplayed = vi.fn();
+
+/** The playback/synthesis inputs, as of whatever the variables now say. */
 const options = () => ({
   speakingSessionId: speaking,
   pausedSessionId: paused,
   waitingForSynthesis: waiting,
   preparingSessionIds: preparing,
+  recordAutoplayed,
 });
 
 /** Renders the hook and lets the mount fetch settle, so no assertion races hydration. */
@@ -87,12 +123,71 @@ async function renderChannel() {
   return rendered;
 }
 
+/** What a panel server that is simply down throws, and how a rejection names it. */
+const UNREACHABLE = "panel server unreachable";
+const reasonOf = (reason: unknown): string =>
+  reason instanceof Error ? reason.message : String(reason);
+
+/** What the channel sees when the socket comes back: the neutral frame, nothing else. */
+async function reconnected() {
+  await act(async () => {
+    for (const listener of [...realtimeListeners]) listener({ ...REALTIME_RECONNECT_FRAME });
+  });
+  // A macrotask, so the re-fetch and its `json()` have both settled.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+/**
+ * React's "am I inside a test?" flag. Switched off for the one test that has to
+ * observe the browser's own scheduling: inside `act` an update made from an
+ * effect is flushed synchronously, which closes the very window that test pins.
+ *
+ * Returns what it displaced, so the `finally` that puts it back restores the
+ * value that was actually there rather than a literal `true` — the flag is set
+ * by the test setup, not by this file, and writing a guess back into a global
+ * is how one test's cleanup starts deciding for the next.
+ */
+function actEnvironment(enabled: boolean | undefined): boolean | undefined {
+  const flags = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = flags.IS_REACT_ACT_ENVIRONMENT;
+  flags.IS_REACT_ACT_ENVIRONMENT = enabled;
+  return previous;
+}
+
+/**
+ * `waitFor` for the one test that runs OUTSIDE `act`. RTL polls from inside its
+ * own `asyncWrapper`, which is `act` — precisely what that test switches off —
+ * so the wait is written out here: one macrotask per pass, the same drain as
+ * before, but bounded by a CONDITION instead of by a guessed number of passes.
+ * A scheduler that needs one more pass under load is then waited out rather
+ * than failing, and a real stall still fails, with a message that says what it
+ * was waiting for.
+ */
+async function drainUntil(
+  settled: () => boolean,
+  description: string,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (settled()) return;
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out after ${timeoutMs}ms of macrotasks waiting for ${description}`);
+    }
+  }
+}
+
 beforeEach(() => {
   lastMessage = null;
   speaking = null;
   paused = null;
   waiting = false;
   preparing = new Set<string>();
+  recordAutoplayed = vi.fn();
+  realtimeListeners.clear();
   serveLatest([]);
 });
 
@@ -954,5 +1049,457 @@ describe("useUtteranceChannel", () => {
     });
     expect(result.current.warmableUtterances).not.toBe(utterances);
     expect(result.current.warmableUtterances).toHaveLength(2);
+  });
+
+  it("re-fetches the retained utterances when the neutral reconnect frame arrives", async () => {
+    const onMount = serveLatest([]);
+    const { result } = await renderChannel();
+    expect(onMount).toHaveBeenCalledTimes(1);
+
+    // What the Stop hook posted while the tab was frozen. It was broadcast to a
+    // dead socket, and the server has been holding it ever since.
+    const onReturn = serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+
+    expect(onReturn).toHaveBeenCalledWith("/api/speech/latest");
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a1"));
+  });
+
+  it("unsubscribes from the realtime channel when the hook unmounts", async () => {
+    const { unmount } = await renderChannel();
+    expect(realtimeListeners.size).toBe(1);
+
+    // The effect RETURNS the unsubscribe, so a remount does not leave the
+    // previous mount's listener behind re-fetching `/latest` forever.
+    unmount();
+    expect(realtimeListeners.size).toBe(0);
+
+    const afterUnmount = serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+    expect(afterUnmount).not.toHaveBeenCalled();
+  });
+
+  it("still hydrates once on mount", async () => {
+    const fetchMock = serveLatest([utterance("cell-a", "a1")]);
+
+    const { result } = await renderChannel();
+
+    // The reconnect subscription must not turn the mount into two fetches.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/speech/latest");
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+  });
+
+  it("takes up a newer utterance for a session it already has a record for", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    // A returning tab ALWAYS has a record for the session — it is the state a
+    // freeze leaves behind — so a gate on the session id skips precisely the
+    // answer the user came back for.
+    serveLatest([utterance("cell-a", "a2", 2_000)]);
+    await reconnected();
+
+    await waitFor(() =>
+      expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000)),
+    );
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["a1"]);
+  });
+
+  it("does not append an utterance the queue already holds", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result, rerender } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    // Under the cursor: the server retains it and hands it back on every
+    // catch-up, so this is the case that repeats forever if it is not gated.
+    await reconnected();
+    expect(result.current.queueFor("cell-a").previous).toHaveLength(0);
+    expect(result.current.queueFor("cell-a").pending).toHaveLength(0);
+
+    // In `previous`: a newer answer superseded it, and a replay must not walk
+    // it back in front of the one the cell is on.
+    lastMessage = frame(utterance("cell-a", "a2", 2_000));
+    await act(async () => {
+      rerender();
+    });
+    serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(["a1"]);
+
+    // In `pending`: it queued behind a live run and has not been reached yet.
+    speaking = "cell-a";
+    lastMessage = frame(utterance("cell-a", "a3", 3_000));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.queueFor("cell-a").pending.map((step) => step.id)).toEqual(["a3"]);
+
+    serveLatest([utterance("cell-a", "a3", 3_000)]);
+    await reconnected();
+    expect(result.current.queueFor("cell-a").pending.map((step) => step.id)).toEqual(["a3"]);
+  });
+
+  it("does not re-take a catch-up the cell has already moved past", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result, rerender } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    // Six newer answers push a1 off the far end of a five-deep history, so its
+    // id is nowhere in the queue any more — and the queue is the whole of a
+    // `queueHolds` dedupe's reach.
+    for (const step of [2, 3, 4, 5, 6, 7]) {
+      lastMessage = frame(utterance("cell-a", `a${step}`, step * 1_000));
+      await act(async () => {
+        rerender();
+      });
+    }
+    const history = ["a6", "a5", "a4", "a3", "a2"];
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(history);
+
+    // The server retains one utterance per session and hands it back on every
+    // catch-up. Aged out of the queue it would be taken as news: a duplicate in
+    // the history, a pip for an answer already heard, and the cell showing one
+    // the listener left behind six answers ago. What the cell is on is newer by
+    // the clock, which is a fact the queue window cannot express.
+    serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a7", 7_000));
+    expect(result.current.queueFor("cell-a").previous.map((step) => step.id)).toEqual(history);
+    expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("does not append a snapshot entry a later utterance has overtaken", async () => {
+    const { result, rerender } = await renderChannel();
+
+    // The snapshot `/latest` will answer the catch-up with, taken before a2 was
+    // posted.
+    serveLatest([utterance("cell-a", "a1")]);
+
+    // a2 was posted after that snapshot and won the race home.
+    lastMessage = frame(utterance("cell-a", "a2", 2_000));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
+
+    await reconnected();
+
+    // The cell never held a1, so an id-only gate has nothing to compare against
+    // and appends the older answer over the newer one — the cell then shows the
+    // stale answer until the user presses next. Sub-second, and still wrong.
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
+    expect(result.current.queueFor("cell-a").previous).toHaveLength(0);
+    expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("does not re-announce an utterance that was already heard", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    await reconnected();
+
+    // The server still retains it; the cell has already listened to it.
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+    expect(result.current.queueFor("cell-a").previous).toHaveLength(0);
+    expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("marks a caught-up utterance as autoplayed so an armed cell stays silent", async () => {
+    const { result } = await renderChannel();
+    await act(async () => {
+      result.current.setArmed("cell-a");
+    });
+
+    serveLatest([utterance("cell-a", "a1")]);
+    await reconnected();
+
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    // Returning to the app is not a user gesture, and an armed cell ABSORBS an
+    // arrival it cannot play rather than deferring it — the recovered answer
+    // would lose its spoken form for good. See ADR 0017.
+    expect(recordAutoplayed).toHaveBeenCalledWith("cell-a", "a1");
+  });
+
+  it("does not mark a catch-up autoplayed when a live frame beat it to the commit", async () => {
+    /**
+     * The window this pins is the browser's, not `act`'s. A live frame's
+     * `setSessions` is QUEUED, not applied, and the `/latest` continuation is a
+     * promise callback that can run in between — so it decides against a
+     * `sessionsRef` that predates the frame, React applies the frame first, and
+     * the updater's own re-check drops the entry while `recordAutoplayed` has
+     * already absorbed it. The answer then arrived as a genuine live frame on
+     * an awake tab and is silent for good, which ADR 0017 calls worse than not
+     * recovering it at all.
+     *
+     * `act` flushes an effect's update synchronously and so closes that window,
+     * which is why this one test renders outside it. `afterCommit` is an effect
+     * declared after the channel's own, so it runs in the same pass one line
+     * past the frame's queued update — the exact moment the fetch has to land.
+     *
+     * Nothing flushes for us out here, so the wait is a drain of the browser's
+     * own macrotask queue — bounded by the SETTLED STATE, the cell actually
+     * holding the answer, rather than by a fixed pass count, which had no
+     * margin left: `ready` arrived on the third of three passes. Draining
+     * longer cannot re-close the window; it was opened by `afterCommit` landing
+     * the fetch mid-commit and is shut long before the first pass returns. And
+     * the failure this pins is observed strictly EARLIER than what we wait on:
+     * a regression records the autoplay from the fetch's own continuation, a
+     * microtask, while `ready` needs React to commit the frame.
+     */
+    let afterCommit: () => void = () => {};
+    let forceRender: () => void = () => {};
+    const { result } = renderHook(() => {
+      const [, bump] = useReducer((n: number) => n + 1, 0);
+      forceRender = bump;
+      const channel = useUtteranceChannel(options());
+      useEffect(() => {
+        afterCommit();
+      });
+      return channel;
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      result.current.setArmed("cell-a");
+    });
+
+    // A catch-up that stays in flight until the live frame has been queued.
+    let land: () => void = () => {};
+    const body = new Promise<{ utterances: Utterance[] }>((resolve) => {
+      land = () => resolve({ utterances: [utterance("cell-a", "a1")] });
+    });
+    global.fetch = vi.fn(
+      async () => ({ ok: true, json: () => body }) as unknown as Response,
+    ) as unknown as typeof fetch;
+    await act(async () => {
+      for (const listener of [...realtimeListeners]) listener({ ...REALTIME_RECONNECT_FRAME });
+    });
+
+    const restoreActEnvironment = actEnvironment(false);
+    try {
+      afterCommit = land;
+      lastMessage = frame(utterance("cell-a", "a1"));
+      forceRender();
+      await drainUntil(
+        () => result.current.stateFor("cell-a") === "ready",
+        "the cell to take up the answer the live frame carried",
+      );
+    } finally {
+      afterCommit = () => {};
+      actEnvironment(restoreActEnvironment);
+    }
+
+    // The socket was back and the answer arrived as an ordinary broadcast, so
+    // it is the arrival path's to autoplay. A catch-up that lost the race to it
+    // took nothing up, and must not record what it did not deliver.
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("commits the catch-up ahead of a live frame landing in the same commit", async () => {
+    /**
+     * Pins the DECLARATION ORDER of the two arrival effects, which is
+     * load-bearing and which nothing else in this file discriminates: the test
+     * above lands its `setFetched` from an effect declared after the channel,
+     * so the fetch always commits in a LATER commit than the live frame and the
+     * same-commit interleave is never built.
+     *
+     * Here it is. `lastMessage` is a module variable read during render, so
+     * staging the frame and then resolving the catch-up puts BOTH changed
+     * dependencies in the one render `setFetched` triggers — the commit effect
+     * and the arrival effect run back to back in that commit, in declaration
+     * order.
+     *
+     * The commit effect is declared ABOVE the arrival effect, so the catch-up's
+     * updater is queued first and the arrival's own `queueHolds` gate finds the
+     * answer already in the queue and no-ops. Swap the two declarations and the
+     * arrival is queued first while the catch-up still decides against a
+     * `sessionsRef` that predates it — the mirror is written during render, so
+     * it says the same thing whichever effect asks — and its updater, which no
+     * longer re-checks `covers`, hands the same id to a reducer with no dedupe
+     * of its own and the cell ends up holding the answer twice.
+     */
+    const { result } = await renderChannel();
+    await act(async () => {
+      result.current.setArmed("cell-a");
+    });
+
+    // A catch-up held in flight, so the frame can be staged before it lands.
+    let land: () => void = () => {};
+    const body = new Promise<{ utterances: Utterance[] }>((resolve) => {
+      land = () => resolve({ utterances: [utterance("cell-a", "a1")] });
+    });
+    global.fetch = vi.fn(
+      async () => ({ ok: true, json: () => body }) as unknown as Response,
+    ) as unknown as typeof fetch;
+    await act(async () => {
+      for (const listener of [...realtimeListeners]) listener({ ...REALTIME_RECONNECT_FRAME });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The broadcast of the very same answer, staged but not yet rendered: the
+    // render `setFetched` triggers is the one that reads it, which is what puts
+    // the two arrivals in a single commit.
+    lastMessage = frame(utterance("cell-a", "a1"));
+    await act(async () => {
+      land();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const queue = result.current.queueFor("cell-a");
+    const held = [...queue.previous, ...(queue.current ? [queue.current] : []), ...queue.pending];
+    // Exactly one copy, anywhere in the queue. `utteranceQueueReducer` dedupes
+    // nothing, so the order these two effects commit in is the whole of what
+    // keeps the second copy out.
+    expect(held.filter((entry) => entry.id === "a1")).toHaveLength(1);
+    expect(queue.previous).toHaveLength(0);
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    // The catch-up committed first, so it is the path that actually delivered
+    // the answer and the one whose `recordAutoplayed` is honest — once, for the
+    // single entry the cell ends up holding.
+    expect(recordAutoplayed).toHaveBeenCalledTimes(1);
+    expect(recordAutoplayed).toHaveBeenCalledWith("cell-a", "a1");
+  });
+
+  it("leaves a caught-up utterance unheard and counted as unread", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+
+    serveLatest([utterance("cell-a", "a2", 2_000)]);
+    await reconnected();
+
+    // Not spoken is not the same as listened to: the pip and the count are the
+    // only trace a silent recovery leaves.
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    expect(result.current.heardFor("cell-a").has("a2")).toBe(false);
+    expect(
+      unplayedSinceLastPlayed(result.current.queueFor("cell-a"), result.current.heardFor("cell-a")),
+    ).toBe(1);
+  });
+
+  it("queues a catch-up behind a live run, and supersedes a paused one", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+
+    // An `online` event can land in the middle of a run the user is listening
+    // to. The recovered answer waits its turn there, exactly as a live frame
+    // would — the catch-up takes the rule from the playback inputs rather than
+    // assuming an arriving tab is idle.
+    speaking = "cell-a";
+    serveLatest([utterance("cell-a", "a2", 2_000)]);
+    await reconnected();
+
+    await waitFor(() =>
+      expect(result.current.queueFor("cell-a").pending.map((step) => step.id)).toEqual(["a2"]),
+    );
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a1"));
+
+    // A cell the user has PAUSED does not hold the next answer hostage, so the
+    // arrival supersedes the held run instead of queueing behind it.
+    paused = "cell-a";
+    serveLatest([utterance("cell-a", "a3", 3_000)]);
+    await reconnected();
+
+    await waitFor(() =>
+      expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a3", 3_000)),
+    );
+    expect(result.current.queueFor("cell-a").pending.map((step) => step.id)).toEqual(["a2"]);
+  });
+
+  it("seeds no pip for a caught-up utterance with nothing to say", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { result } = await renderChannel();
+    await waitFor(() => expect(result.current.stateFor("cell-a")).toBe("ready"));
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+
+    // A pure-code answer prepares to zero units, so announcing it would be a
+    // notification that can never be met — on catch-up as on arrival.
+    serveLatest([codeOnly("cell-a", "c1", 2_000)]);
+    await reconnected();
+
+    expect(result.current.stateFor("cell-a")).toBe("heard");
+    expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a1"));
+    expect(
+      unplayedSinceLastPlayed(result.current.queueFor("cell-a"), result.current.heardFor("cell-a")),
+    ).toBe(0);
+    expect(recordAutoplayed).not.toHaveBeenCalled();
+  });
+
+  it("surfaces no error when the catch-up fetch fails", async () => {
+    // The other half of the same requirement: a failed catch-up is swallowed,
+    // not merely survived. An unreachable panel server is the status quo ante,
+    // and the fetch runs in a floating promise — so anything thrown past the
+    // `catch` becomes an unhandled rejection with nobody to tell, which the
+    // channel's own state cannot show.
+    const rejected: unknown[] = [];
+    const onRejection = (reason: unknown) => rejected.push(reason);
+    process.on("unhandledRejection", onRejection);
+    try {
+      const { unmount } = await renderChannel();
+
+      global.fetch = vi.fn(async () => {
+        throw new Error(UNREACHABLE);
+      }) as unknown as typeof fetch;
+      await reconnected();
+      // A further macrotask, so a rejection has had its turn to surface.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      // The teardown is INSIDE the window, not left to RTL's shared
+      // `cleanup()`: the fetch's continuation runs on the way down too, and a
+      // rejection raised there would surface after the `finally` below had
+      // already stopped listening — invisible to the one test that caused it.
+      await act(async () => {
+        unmount();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      // THIS test's own rejection, not an empty worker. Asserting the array is
+      // empty couples the test to every other one in the file — several install
+      // a throwing `global.fetch`, and one of those left pending fails this
+      // test for a reason that has nothing to do with it.
+      expect(rejected.map(reasonOf).filter((reason) => reason.includes(UNREACHABLE))).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+  });
+
+  it("survives a failed catch-up fetch and still registers later live frames", async () => {
+    const { result, rerender } = await renderChannel();
+
+    global.fetch = vi.fn(async () => {
+      throw new Error(UNREACHABLE);
+    }) as unknown as typeof fetch;
+    await reconnected();
+
+    // A failed catch-up is not an error state, it is the status quo ante.
+    expect(result.current.stateFor("cell-a")).toBe("empty");
+
+    lastMessage = frame(utterance("cell-a", "a1"));
+    await act(async () => {
+      rerender();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("ready");
   });
 });

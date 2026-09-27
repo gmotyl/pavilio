@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react"
-import { reportAutoBlankReopen } from "./terminalInstances"
+import {
+  reportAutoBlankReopen,
+  reportAutoReturnReopen,
+} from "./terminalInstances"
 import { WATCHDOG_STALE_MS } from "./watchdogConfig"
 
 interface Options {
@@ -8,6 +11,13 @@ interface Options {
   reopen: () => void
   /** True when xterm's buffer has nothing to repaint from — see viewportBlank.ts. */
   isViewportBlank: () => boolean
+  /**
+   * True when the session's process exited normally — see `hasExited` in
+   * terminalInstances.ts. Supplied by the caller for the same reason
+   * `isViewportBlank` is: this hook holds a ws, not a session id, and only the
+   * cell knows which session the socket belongs to.
+   */
+  hasExited: () => boolean
 }
 
 // Re-exported from the leaf module that owns it: this hook was the original
@@ -21,16 +31,19 @@ export function useMobileReconnect({
   getDims,
   reopen,
   isViewportBlank,
+  hasExited,
 }: Options): void {
   const lastMessageAtRef = useRef(Date.now())
   const getDimsRef = useRef(getDims)
   const reopenRef = useRef(reopen)
   const isViewportBlankRef = useRef(isViewportBlank)
+  const hasExitedRef = useRef(hasExited)
 
   useEffect(() => {
     getDimsRef.current = getDims
     reopenRef.current = reopen
     isViewportBlankRef.current = isViewportBlank
+    hasExitedRef.current = hasExited
   })
 
   useEffect(() => {
@@ -48,17 +61,37 @@ export function useMobileReconnect({
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return
-      // Anything we could do from here repaints the screen, so the blank check
-      // gates every path — including a dead socket. Refocusing with content on
-      // screen used to reopen unconditionally, scrolling away live output; a
-      // socket that died is now reported as connection state instead (see
-      // onConnectionChange in terminalInstances.ts) and repaired on demand.
+      // Returning to the application is consent, and a socket that is CLOSED
+      // (or absent) produces no output — there is nothing arriving for the
+      // reopen to scroll away, so the blank gate was never protecting this
+      // case. Ahead of the gate on purpose; see ADR 0017.
+      // A cleanly exited shell presents the same CLOSED socket, and it is not
+      // a fault to repair: `[Process exited]` is already on screen and the
+      // server has dropped the session, so a reopen only buys a socket the
+      // server closes again — plus an `auto-return` row for a return that
+      // repaired nothing, in the log measuring exactly that gesture. Every
+      // unasked-repair path excludes it the same way (`reconnectOnActivate`,
+      // `disconnectedSessionIds`); see hasExited's own doc comment.
+      if (!hasExitedRef.current() && (!ws || ws.readyState === WebSocket.CLOSED)) {
+        // Reported before the reopen so the record describes the socket that
+        // prompted it, and as `auto-return` rather than `auto-blank`: what is
+        // on screen is incidental here, the return is the trigger.
+        reportAutoReturnReopen(ws)
+        reopenRef.current()
+        return
+      }
+      // Everything still live enough to produce output keeps the old gate: a
+      // repaint over content is the unasked interruption ADR 0010 rejected.
+      // Left as it was, exit and all: the flag is set in the same breath that
+      // writes `[Process exited]` into the buffer, so a viewport belonging to
+      // an exited session is not blank and cannot reach this gate. A guard
+      // here would be one nothing can exercise.
       if (!isViewportBlankRef.current()) return
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         // Blank, and there is no live socket to nudge over — rebuild it.
         // Reported before the reopen so the record describes the state that
-        // prompted it; this is one of only two paths that reconnect without
-        // the user asking, and an unreported one is invisible in the log.
+        // prompted it; every path that reconnects without the user asking is
+        // invisible in the log unless it says so.
         reportAutoBlankReopen(ws)
         reopenRef.current()
         return

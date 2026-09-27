@@ -14,6 +14,17 @@ const WATCHDOG_CHECK_MS = 10_000;
 const RECONNECT_MS = 2_000;
 
 /**
+ * How long a socket counts as "created by this return". One return raises
+ * `pageshow`, `visibilitychange` and `online` in separate tasks, milliseconds
+ * to tens of milliseconds apart, so the second event must recognise the socket
+ * the first one just opened; a stranded handshake, by contrast, spent an entire
+ * freeze connecting (ADR 0017 measures the median at 10s). A second sits an
+ * order of magnitude above the burst and an order of magnitude below the
+ * shortest freeze, so neither case lands near the boundary.
+ */
+const RETURN_BURST_MS = 1_000;
+
+/**
  * Republished after a reconnect so every `file-change` consumer refetches what
  * it missed while the socket was down. `path: ""` on purpose: the viewers match
  * with `path.includes(theirFile)`, which stays false, so only the lists refresh.
@@ -24,14 +35,25 @@ const RECONNECT_MESSAGE: RealtimeFrame = {
   path: "",
 };
 
+/**
+ * Published alongside `RECONNECT_MESSAGE` and meaning only "the channel came
+ * back". A consumer that has nothing to do with files — speech catch-up, say —
+ * reads this one; keying it off a *file-change* frame would work today and be a
+ * trap for the next reader. See ADR 0017.
+ */
+export const REALTIME_RECONNECT_FRAME = { type: "realtime-reconnect" } as const;
+
 type Listener = (frame: RealtimeFrame) => void;
 
 const listeners = new Set<Listener>();
 
 let socket: WebSocket | null = null;
 let started = false;
-let connections = 0;
+let connections = 0; // successful opens, not attempts
 let lastMessageAt = 0;
+// When the live socket was created, so a return can tell the reconnect it just
+// started from one that spent the whole freeze connecting.
+let socketCreatedAt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let watchdog: ReturnType<typeof setInterval> | null = null;
 
@@ -54,9 +76,26 @@ function connect(): void {
   const ws = new WebSocket(`${protocol}//${window.location.host}`);
   socket = ws;
   lastMessageAt = Date.now();
-  connections += 1;
-  // Not on the first connect — nothing has been missed yet.
-  if (connections > 1) publish({ ...RECONNECT_MESSAGE });
+  socketCreatedAt = lastMessageAt;
+
+  ws.onopen = () => {
+    // A socket a return already replaced recovered nothing: the tab is served
+    // by its successor, so its late handshake owes no catch-up.
+    if (socket !== ws) return;
+    connections += 1;
+    // Not on the first connection — nothing has been missed yet. Counted on
+    // `open` rather than on `new WebSocket`, so a run of failed attempts
+    // against a down server stays worth one reconnect, not one each.
+    if (connections > 1) {
+      // Neutral frame first: `useWebSocket` keeps only the newest frame, and
+      // React batches both of these into one render, so whichever is published
+      // last is the only one its consumers see. The file-change consumers
+      // predate this frame and must keep their reconnect refetch; a consumer
+      // that wants the neutral one subscribes to the channel directly.
+      publish({ ...REALTIME_RECONNECT_FRAME });
+      publish({ ...RECONNECT_MESSAGE });
+    }
+  };
 
   ws.onmessage = (event) => {
     lastMessageAt = Date.now();
@@ -91,10 +130,38 @@ function dropIfStale(): void {
   if (Date.now() - lastMessageAt > STALE_MS) ws.close();
 }
 
-function onVisible(): void {
-  // Background tabs have their timers throttled, so the interval below may
+/**
+ * Returning to the app is consent to repair the connection: a socket that is not
+ * OPEN owes no repaint protection, and the freeze that killed it also killed the
+ * `close` that would have armed the reconnect. See ADR 0017.
+ *
+ * One handler for three events — `visibilitychange`, `pageshow`, `online` — each
+ * of which fires in a case the others miss.
+ */
+function onReturn(): void {
+  // `visibilitychange` fires on the way out too; that is a leave, not a return.
+  if (document.visibilityState !== "visible") return;
+  const ws = socket;
+  if (!ws) return;
+  // Background tabs have their timers throttled, so the watchdog interval may
   // not have run during the gap that killed the socket.
-  if (document.visibilityState === "visible") dropIfStale();
+  if (ws.readyState === WebSocket.OPEN) {
+    dropIfStale();
+    return;
+  }
+  // A CONNECTING socket created by this very return is the ordinary reconnect
+  // finishing; only one that spent the whole freeze connecting is stranded.
+  // A negative age means the clock jumped backwards since the socket was
+  // stamped: not evidence of freshness, so it does not earn the exemption.
+  const age = Date.now() - socketCreatedAt;
+  if (ws.readyState === WebSocket.CONNECTING && age >= 0 && age < RETURN_BURST_MS) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer); // we are reconnecting now; do not do it twice
+    reconnectTimer = null;
+  }
+  socket = null; // before close, so `onclose` does not arm a reconnect
+  ws.close();
+  connect();
 }
 
 /**
@@ -106,7 +173,9 @@ function start(): void {
   started = true;
   connect();
   watchdog = setInterval(dropIfStale, WATCHDOG_CHECK_MS);
-  document.addEventListener("visibilitychange", onVisible);
+  document.addEventListener("visibilitychange", onReturn);
+  window.addEventListener("pageshow", onReturn);
+  window.addEventListener("online", onReturn);
 }
 
 /**
@@ -143,12 +212,15 @@ export function __resetRealtimeChannelForTests(): void {
   started = false;
   connections = 0;
   lastMessageAt = Date.now();
+  socketCreatedAt = 0;
   listeners.clear();
   if (watchdog) clearInterval(watchdog);
   watchdog = null;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
-  document.removeEventListener("visibilitychange", onVisible);
+  document.removeEventListener("visibilitychange", onReturn);
+  window.removeEventListener("pageshow", onReturn);
+  window.removeEventListener("online", onReturn);
   const ws = socket;
   socket = null; // before close, so `onclose` does not arm a reconnect
   ws?.close();

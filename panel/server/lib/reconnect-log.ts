@@ -25,13 +25,19 @@ import { homedir } from "node:os";
  * - `auto-activate` — reconnected because the user focused the session.
  * - `disconnect` — an attached session's socket died on its own.
  * - `auto-blank` — a blank-gated path reopened the session without being asked.
+ * - `auto-return` — reopened because the user returned to the application
+ *   (`visibilitychange`/`pageshow`/`online`) and found a socket that was not
+ *   OPEN. Kept apart from `manual` because returns used to be paid for with a
+ *   Reconnect tap, and folding them back in would hide exactly the gesture
+ *   this change removes.
  */
 export type ReconnectTrigger =
   | "manual"
   | "manual-all"
   | "auto-activate"
   | "disconnect"
-  | "auto-blank";
+  | "auto-blank"
+  | "auto-return";
 
 const TRIGGERS: readonly string[] = [
   "manual",
@@ -39,6 +45,7 @@ const TRIGGERS: readonly string[] = [
   "auto-activate",
   "disconnect",
   "auto-blank",
+  "auto-return",
 ];
 
 /**
