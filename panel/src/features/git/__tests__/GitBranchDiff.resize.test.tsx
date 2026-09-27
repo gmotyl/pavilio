@@ -179,6 +179,17 @@ describe("resizing the git-branch-diff tree", () => {
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.min);
   });
 
+  it("leaves the Branch Diff tree's width unapplied on a narrow viewport", async () => {
+    stubMatchMedia(true);
+    await renderTree();
+
+    expect(screen.queryByTestId("pane-resize-git-branch-diff")).toBeNull();
+    // And no width either. The tree is `hidden md:block`, so a px width here
+    // would be a desktop habit written onto a box the phone never shows — and
+    // with no rail there is nothing to undo it with.
+    expect(tree().style.width).toBe("");
+  });
+
   it("scrolls the inner container, not the aside", async () => {
     await renderTree();
     const box = scroller(tree());

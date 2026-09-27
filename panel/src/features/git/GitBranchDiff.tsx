@@ -127,8 +127,9 @@ export default function GitBranchDiff({
   const [diffContent, setDiffContent] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
-  // The shared repo-tree width: one declaration, so the Changes tree and the
-  // commit tree render at whatever this one was last dragged to.
+  // Above the `activeDiff` return below, where every hook has to be. All three
+  // trees call this hook with the same preference key, so no one call site owns
+  // it: whichever tree was dragged last is the width all three render at.
   const tree = useResizablePane(preferences.repoTreePaneWidth, TREE_BOUNDS);
   // Monotonic id of the latest openDiff() call. Late responses for any
   // earlier id are dropped so a slow fetch can never overwrite the content
