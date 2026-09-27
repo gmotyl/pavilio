@@ -37,11 +37,23 @@ const SERVED_ACTIONS = [
   },
 ];
 
-/** Routes the two GETs the page makes; anything else is a test bug. */
-function stubApi(actions: unknown = SERVED_ACTIONS) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+/**
+ * Routes the GETs the page makes plus the run-action POST; anything else is a
+ * test bug. `actionsFails` answers the actions endpoint with a rejection, which
+ * is the only way to tell a broken server from a workspace with no actions.
+ */
+function stubApi(
+  actions: unknown = SERVED_ACTIONS,
+  opts: { actionsFails?: boolean } = {},
+) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.startsWith("/api/agent-settings/run-action")) {
+      expect(init?.method).toBe("POST");
+      return { ok: true, json: async () => ({ ok: true, output: "ran" }) } as unknown as Response;
+    }
     if (url.startsWith("/api/agent-settings/actions")) {
+      if (opts.actionsFails) throw new Error("connection refused");
       return { ok: true, json: async () => actions } as unknown as Response;
     }
     if (url.startsWith("/api/agent-settings")) {
@@ -51,6 +63,15 @@ function stubApi(actions: unknown = SERVED_ACTIONS) {
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+/** The JSON body of the single run-action POST the page made. */
+function postedRunAction(fetchMock: ReturnType<typeof stubApi>): unknown {
+  const posts = fetchMock.mock.calls.filter(([url]) =>
+    String(url).startsWith("/api/agent-settings/run-action"),
+  );
+  expect(posts).toHaveLength(1);
+  return JSON.parse(String((posts[0][1] as RequestInit).body));
 }
 
 /** Every action button on the page, in DOM order, by its id. */
@@ -86,5 +107,38 @@ describe("AgentSettings workspace actions", () => {
     expect(
       await screen.findByText("Installs this workspace's skills as Codex prompts."),
     ).toBeInTheDocument();
+  });
+
+  it("posts the action id, never the script name", async () => {
+    // The id and the script drifted apart on purpose, and only the id is the
+    // wire contract: posting `setup:codex` here would 400 on the server, which
+    // is the exact failure this design makes possible.
+    const fetchMock = stubApi();
+    render(<AgentSettings />);
+
+    await screen.findByTestId("agent-settings-action-init:codex");
+    await userEvent.click(screen.getByTestId("agent-settings-action-init:codex"));
+    await userEvent.click(await screen.findByTestId("agent-action-confirm-init:codex"));
+
+    expect(postedRunAction(fetchMock)).toEqual({ action: "init:codex" });
+  });
+
+  it("says so when the actions endpoint is unreachable, instead of showing nothing", async () => {
+    // An empty workspace and a broken server rendered identically before: both
+    // were a section that simply was not there.
+    stubApi(SERVED_ACTIONS, { actionsFails: true });
+    render(<AgentSettings />);
+
+    expect(await screen.findByTestId("agent-settings-actions-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-settings-action-setup")).toBeNull();
+  });
+
+  it("renders no actions section at all for a workspace that offers none", async () => {
+    stubApi([]);
+    render(<AgentSettings />);
+
+    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    expect(screen.queryByTestId("agent-settings-actions-error")).toBeNull();
+    expect(screen.queryAllByTestId(/^agent-settings-action-/)).toHaveLength(0);
   });
 });

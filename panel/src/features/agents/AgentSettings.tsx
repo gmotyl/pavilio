@@ -410,6 +410,7 @@ function FileViewer({ file }: { file: SettingsFile }) {
 export default function AgentSettings() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [actions, setActions] = useState<WorkspaceAction[]>([]);
+  const [actionsUnavailable, setActionsUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<ModalState | null>(null);
 
@@ -422,12 +423,20 @@ export default function AgentSettings() {
   }, []);
 
   // The actions this workspace can actually run. A workspace that offers none
-  // (or a server too old to answer) simply renders an empty section.
+  // renders no section at all — but a server that could not answer is a
+  // different thing entirely, and swallowing the error made the two look
+  // identical: an empty page with nothing to say why.
   useEffect(() => {
     fetch("/api/agent-settings/actions")
-      .then((r) => r.json())
-      .then((list) => setActions(Array.isArray(list) ? list : []))
-      .catch(() => {});
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((list) => {
+        setActions(Array.isArray(list) ? list : []);
+        setActionsUnavailable(false);
+      })
+      .catch(() => {
+        setActions([]);
+        setActionsUnavailable(true);
+      });
   }, []);
 
   const openConfirm = (action: WorkspaceAction) => {
@@ -475,9 +484,19 @@ export default function AgentSettings() {
       </section>
 
       {/* Workspace actions — whatever this workspace's package.json defines */}
-      {actions.length > 0 && (
+      {(actions.length > 0 || actionsUnavailable) && (
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Workspace Actions</h2>
+        {actionsUnavailable && (
+          <div
+            data-testid="agent-settings-actions-error"
+            className="flex items-start gap-2 text-xs px-3 py-2 rounded"
+            style={{ background: "color-mix(in srgb, var(--red) 10%, transparent)", color: "var(--red)", border: "1px solid color-mix(in srgb, var(--red) 25%, transparent)" }}
+          >
+            <AlertTriangle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+            Could not load this workspace's actions — the panel server did not answer. Check that it is running, then reload.
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           {actions.map((action) => (
             <button

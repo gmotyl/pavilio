@@ -221,6 +221,22 @@ export const WORKSPACE_ACTIONS: WorkspaceAction[] = [
 /** Long-running actions, in milliseconds. Everything else gets two minutes. */
 const LONG_RUNNING_MS = 300_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
+
+/**
+ * `exec` buffers the child's whole output and kills it at 1 MB by default —
+ * which `bootstrap` and `upgrade`, the two actions on the long timeout, pass
+ * routinely while installing and building. Same budget as routes/scripts.ts,
+ * which learned this first.
+ */
+const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+
+/**
+ * `scripts/pm` is bash, and exec's default shell is /bin/sh. /bin/bash is the
+ * usual home but not a guaranteed one (NixOS, pkgsrc), and an absolute path
+ * that does not exist fails ENOENT with no useful message — so fall back to
+ * whatever PATH resolves.
+ */
+const BASH_SHELL = existsSync("/bin/bash") ? "/bin/bash" : "bash";
 // Keyed by action id, not by script name — the ids above are deliberately
 // stable across script renames.
 const LONG_RUNNING_IDS = new Set(["setup", "update", "setup:restore"]);
@@ -261,10 +277,10 @@ router.post("/run-action", (req, res) => {
     return res.status(400).json({ error: "Unknown action" });
   }
 
+  // No separate "package.json missing" branch: definedScripts() answers a
+  // missing or unparseable file with an empty set, so the check below already
+  // covers it.
   const root = workspaceRoot();
-  if (!existsSync(resolve(root, "package.json"))) {
-    return res.status(404).json({ error: "No package.json found in workspace root" });
-  }
   if (!definedScripts(root).has(entry.script)) {
     return res.status(404).json({ error: `Script ${entry.script} not defined in package.json` });
   }
@@ -277,13 +293,35 @@ router.post("/run-action", (req, res) => {
   // version manager the panel's own environment never loaded.
   const command = `. scripts/pm && pm_resolve && pm_in . ${entry.script}`;
 
-  exec(command, { cwd: root, timeout, shell: "/bin/bash" }, (err, stdout, stderr) => {
-    const output = [stdout, stderr].filter(Boolean).join("\n").trim();
-    if (err?.killed) {
-      return res.status(504).json({ ok: false, output: "Action timed out" });
-    }
-    res.json({ ok: !err, output: output || (err ? err.message : "Done") });
-  });
+  exec(
+    command,
+    { cwd: root, timeout, maxBuffer: MAX_OUTPUT_BYTES, shell: BASH_SHELL },
+    (err, stdout, stderr) => {
+      const output = [stdout, stderr].filter(Boolean).join("\n").trim();
+      const withOutput = (reason: string) => [reason, output].filter(Boolean).join("\n");
+
+      // Two different ways `exec` kills a child, and they are not the same
+      // diagnosis. A buffer overrun carries its own code and does NOT set
+      // `killed`, so it must be tested first: reporting it as a timeout tells
+      // the user to wait longer for a run that in fact finished talking.
+      if ((err as NodeJS.ErrnoException | null)?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+        return res.status(500).json({
+          ok: false,
+          output: withOutput(
+            `Stopped: the action produced more than ${MAX_OUTPUT_BYTES / (1024 * 1024)} MB of output.`,
+          ),
+        });
+      }
+      if (err?.killed) {
+        // The output so far is what says how far it got — throwing it away left
+        // a half-finished install with nothing to read.
+        return res
+          .status(504)
+          .json({ ok: false, output: withOutput(`Timed out after ${Math.round(timeout / 1000)}s`) });
+      }
+      res.json({ ok: !err, output: output || (err ? err.message : "Done") });
+    },
+  );
 });
 
 export default router;

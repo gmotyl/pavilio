@@ -48,6 +48,37 @@ function execSucceedsOnce(stdout = "done"): void {
   }) as never);
 }
 
+/**
+ * Answer the callback with the error `exec` really hands back for a given kill.
+ * The two that matter here are not the same object and must not be reported as
+ * the same thing: a timeout arrives as `killed: true, signal: "SIGTERM"`, while
+ * a maxBuffer overrun arrives as `code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"`
+ * with the partial output still attached.
+ */
+function execFailsOnce(err: NodeJS.ErrnoException, stdout = "", stderr = ""): void {
+  execMock.mockImplementationOnce(((
+    _cmd: string,
+    _opts: unknown,
+    cb: (e: NodeJS.ErrnoException | null, out: string, errOut: string) => void,
+  ) => {
+    cb(err, stdout, stderr);
+    return undefined;
+  }) as never);
+}
+
+function timeoutError(): NodeJS.ErrnoException {
+  const err = new Error("Command failed: . scripts/pm && pm_resolve && pm_in . bootstrap\n") as NodeJS.ErrnoException;
+  (err as NodeJS.ErrnoException & { killed?: boolean }).killed = true;
+  (err as NodeJS.ErrnoException & { signal?: string }).signal = "SIGTERM";
+  return err;
+}
+
+function maxBufferError(): NodeJS.ErrnoException {
+  const err = new Error("stdout maxBuffer length exceeded") as NodeJS.ErrnoException;
+  err.code = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+  return err;
+}
+
 function makeApp() {
   const app = express();
   app.use(express.json());
@@ -107,9 +138,26 @@ describe("GET /api/agent-settings/actions", () => {
       "install:speech",
     ]);
 
-    // Scripts the workspace defines but the catalogue does not describe stay out.
+    // Every entry names the package script it runs. Asserted positively and
+    // pairwise: a `script` that went missing would make the negative checks
+    // below pass trivially while production ran `pm_in . undefined`.
     const res = await request(makeApp()).get("/api/agent-settings/actions");
-    const scripts = (res.body as Array<{ script: string }>).map((a) => a.script);
+    const pairs = (res.body as Array<{ id: string; script: string }>).map((a) => [a.id, a.script]);
+    expect(pairs).toEqual([
+      ["setup", "bootstrap"],
+      ["update", "upgrade"],
+      ["init:claude", "setup:claude-code"],
+      ["init:opencode", "setup:opencode"],
+      ["init:codex", "setup:codex"],
+      ["install:speech", "install:speech"],
+    ]);
+    // Every script is one this workspace actually defines.
+    for (const [id, script] of pairs) {
+      expect(Object.keys(UPSTREAM_SCRIPTS), `${id} → ${script}`).toContain(script);
+    }
+
+    // Scripts the workspace defines but the catalogue does not describe stay out.
+    const scripts = pairs.map(([, script]) => script);
     expect(scripts).not.toContain("setup:shortcut");
     expect(scripts).not.toContain("start");
 
@@ -192,6 +240,9 @@ describe("POST /api/agent-settings/run-action", () => {
     expect(options.timeout).toBe(120_000);
     // `scripts/pm` is bash, and exec's default shell is /bin/sh.
     expect(options.shell).toMatch(/bash$/);
+    // exec's default buffer is 1 MB, which an install or a build blows through
+    // routinely. Same budget as routes/scripts.ts, which learned this already.
+    expect(options.maxBuffer).toBe(4 * 1024 * 1024);
   });
 
   it("keeps the setup and update ids while running the renamed scripts, on the long timeout", async () => {
@@ -200,9 +251,12 @@ describe("POST /api/agent-settings/run-action", () => {
     // subcommands and never reach package.json.
     seedPackageJson(UPSTREAM_SCRIPTS);
 
+    seedPackageJson({ ...UPSTREAM_SCRIPTS, "setup:restore": "./scripts/setup:restore" });
+
     for (const [id, script] of [
       ["setup", "bootstrap"],
       ["update", "upgrade"],
+      ["setup:restore", "setup:restore"],
     ] as const) {
       execMock.mockClear();
       execSucceedsOnce("done");
@@ -214,8 +268,53 @@ describe("POST /api/agent-settings/run-action", () => {
       expect(res.status, `${id} → ${script}`).toBe(200);
       const [command, options] = execMock.mock.calls[0] as [string, { timeout?: number }];
       expect(command).toContain(`pm_in . ${script}`);
-      // Both are slow enough to need the long-running budget, keyed by id.
+      // All three are slow enough to need the long-running budget, keyed by id.
       expect(options.timeout, `${id} timeout`).toBe(300_000);
+      // …and the long ones are exactly the verbose ones, so the buffer matters
+      // most here.
+      expect(options.maxBuffer, `${id} maxBuffer`).toBe(4 * 1024 * 1024);
     }
+
+    // An action that is NOT on the list keeps the two-minute default, so the
+    // 300 s branch is a branch and not the only value this can take.
+    execMock.mockClear();
+    execSucceedsOnce("done");
+    await request(makeApp()).post("/api/agent-settings/run-action").send({ action: "install:speech" });
+    const [, shortOpts] = execMock.mock.calls[0] as [string, { timeout?: number }];
+    expect(shortOpts.timeout).toBe(120_000);
+  });
+
+  it("reports a timeout as a timeout, and keeps the output the run did produce", async () => {
+    seedPackageJson(UPSTREAM_SCRIPTS);
+    execFailsOnce(timeoutError(), "installing dependencies\n", "");
+
+    const res = await request(makeApp())
+      .post("/api/agent-settings/run-action")
+      .send({ action: "setup" });
+
+    expect(res.status).toBe(504);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.output).toContain("Timed out after 300s");
+    // Throwing the output away is what made a half-finished run unreadable.
+    expect(res.body.output).toContain("installing dependencies");
+  });
+
+  it("does not call a buffer overrun a timeout", async () => {
+    seedPackageJson(UPSTREAM_SCRIPTS);
+    execFailsOnce(maxBufferError(), "a lot of build output\n", "");
+
+    const res = await request(makeApp())
+      .post("/api/agent-settings/run-action")
+      .send({ action: "setup" });
+
+    // A child murdered at the buffer limit is a different diagnosis from one
+    // that ran out of time, and `err.killed` is not what separates them.
+    expect(res.body.ok).toBe(false);
+    expect(res.status).not.toBe(504);
+    expect(res.body.output).not.toMatch(/timed out/i);
+    // Named as what it is, with the limit that was hit — otherwise the user is
+    // left with a truncated log and no reason for the truncation.
+    expect(res.body.output).toMatch(/produced more than 4 MB of output/);
+    expect(res.body.output).toContain("a lot of build output");
   });
 });
