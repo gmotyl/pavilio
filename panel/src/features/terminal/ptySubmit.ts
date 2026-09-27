@@ -248,6 +248,25 @@ export interface SubmitReport {
   readonly onDelivered?: () => void;
   /** Raised at most once, with the half that was refused. */
   readonly onFailed?: (stage: SubmitFailure) => void;
+  /**
+   * The submitting `\r` has just been written to an OPEN socket. Raised
+   * exactly once per submit, always after {@link SubmitReport.onDelivered},
+   * and never for a submit that also raised `onFailed("return")` — the two are
+   * the opposite verdicts on one write.
+   *
+   * Stated rather than left to be deduced, because "delivered, and no refusal
+   * by now" is not a fact a caller can read: the return is written
+   * {@link SUBMIT_RETURN_MS} after the body, on a submit that may itself have
+   * been queued a gap behind another, so any deadline a caller picked for that
+   * inference would be a guess at this module's own timing.
+   *
+   * It exists for callers that must distinguish "the line was RUN and stayed
+   * quiet" from the two failures around it — the answer composer's one-shot
+   * Enter retry arms its clock here, because a refused return is already
+   * reported to the user in words and a body that never landed has nothing to
+   * re-run.
+   */
+  readonly onReturnDelivered?: () => void;
 }
 
 interface Submission extends SubmitReport {
@@ -329,8 +348,13 @@ function deliver(sessionId: string, submission: Submission): void {
         // The body is on the far side either way: a refused return leaves it in
         // the prompt, which is a different failure from having sent nothing.
         // The queue is handed on regardless, for the reason it is above.
+        //
+        // Both verdicts are raised from inside the same `try`, so a caller
+        // that throws out of either one still hands the session's turn on —
+        // the delivery report is as much foreign code as the refusal is.
         try {
-          if (!submission.send(RETURN)) submission.onFailed?.("return");
+          if (submission.send(RETURN)) submission.onReturnDelivered?.();
+          else submission.onFailed?.("return");
         } finally {
           advance(sessionId);
         }
