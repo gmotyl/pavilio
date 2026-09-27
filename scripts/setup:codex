@@ -2,24 +2,27 @@
 # Install this repo's skills/ into Codex, so every skill is reachable as a
 # command in the Codex CLI.
 #
-# Codex has no user-defined slash-command directory — its `/` list is compiled
-# into the binary — so the command surface for Codex *is* skills: it discovers
-# $CODEX_HOME/skills/<name>/SKILL.md (default ~/.codex/skills) and exposes them
-# via /skills and by name. This is the Codex counterpart of setup:claude-code
-# (.claude/commands/) and setup:opencode (.opencode/commands/).
+# Codex discovers skills at $CODEX_HOME/skills/<name>/SKILL.md (default
+# ~/.codex/skills) and lists them in-session under /skills. This is the Codex
+# counterpart of setup:claude-code (.claude/commands/) and setup:opencode
+# (.opencode/commands/).
 #
 # Each skills/<name>/ that has a SKILL.md is symlinked to
 # $CODEX_HOME/skills/<name>, so editing skills/<name>/SKILL.md updates the
 # installed skill in place and bundled resources (references/, scripts/) stay
-# reachable.
+# reachable. A skills/<name>/ without a SKILL.md is skipped — Codex would list
+# it and then fail to load it.
 #
 # Additive and idempotent: links this repo owns are kept in sync, links this
 # repo planted for skills that no longer exist are pruned, and entries pointing
 # anywhere else are left alone unless --force is passed.
 #
+# scripts/update.sh (pnpm pull) does NOT re-run this — it refreshes only
+# claude-code and opencode — so re-run it by hand after skills/ changes.
+#
 # Usage:
 #   pnpm setup:codex           # link missing skills, prune our stale links
-#   pnpm setup:codex --force   # also replace foreign links / real directories
+#   pnpm setup:codex --force   # also replace foreign links / real entries
 
 set -u
 
@@ -29,9 +32,20 @@ case "$0" in
   */*) script_dir="${0%/*}" ;;
   *) script_dir="." ;;
 esac
-script_dir="$(cd "$script_dir" && pwd)"
-repo_root="$(cd "$script_dir/.." && pwd)"
+# The redirects shield the command substitutions from an exported CDPATH, which
+# both relocates the target and echoes the directory it picked onto stdout.
+script_dir="$(cd "$script_dir" >/dev/null 2>&1 && pwd)"
+repo_root="$(cd "$script_dir/.." >/dev/null 2>&1 && pwd)"
 skills_src="$repo_root/skills"
+
+# Nothing below `set -u` aborts on its own, and every step here writes into the
+# user's config directory — a failure that is not checked becomes a run that
+# prints "[link] <name>" for each skill, reports "N installed" and exits 0 while
+# having installed nothing. scripts/setup calls this and judges it by exit code.
+fail() {
+  echo "❌ $1" >&2
+  exit 1
+}
 
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 codex_skills="$codex_home/skills"
@@ -55,12 +69,25 @@ if [ ! -d "$codex_home" ]; then
   exit 0
 fi
 
-mkdir -p "$codex_skills"
+# Fails when ~/.codex is not writable, or when `skills` already exists there as
+# a regular file — after which every ln below would fail too.
+if ! mkdir -p "$codex_skills"; then
+  fail "Could not create $codex_skills — check that it is writable and is not an existing file"
+fi
+
+# Plant one symlink, or stop: a link this run could not write is a skill Codex
+# will not find, and silently counting it as installed is the bug this guards.
+link_skill() {
+  if ! ln -s "$1" "$2"; then
+    fail "Could not link $2 → $1 — check that $codex_skills is writable"
+  fi
+}
 
 installed=0
 replaced=0
 pruned=0
 kept=0
+conflicts=0
 
 # Prune symlinks that point into this repo's skills/ but no longer resolve —
 # left behind when a skill is renamed or removed upstream. Links pointing
@@ -72,7 +99,9 @@ for entry in "$codex_skills"/*; do
   case "$current" in
     "$skills_src"/*)
       name="${entry##*/}"
-      rm "$entry"
+      if ! rm "$entry"; then
+        fail "Could not remove the dangling link $entry — check that $codex_skills is writable"
+      fi
       echo "  [prune] $name — dangling → $current"
       pruned=$((pruned + 1))
       ;;
@@ -88,7 +117,9 @@ for src_dir in "$skills_src"/*/; do
   # fail to load it.
   [ -f "$src_dir/SKILL.md" ] || continue
 
-  src_abs="$(cd "$src_dir" && pwd)"
+  if ! src_abs="$(cd "$src_dir" >/dev/null 2>&1 && pwd)"; then
+    fail "Could not resolve $src_dir — check the skills/ tree"
+  fi
   target="$codex_skills/$name"
 
   if [ -L "$target" ]; then
@@ -98,35 +129,57 @@ for src_dir in "$skills_src"/*/; do
       continue
     fi
     if [ "$force" = "1" ]; then
-      rm "$target"
-      ln -s "$src_abs" "$target"
+      # `rm`, never `rm -rf`: the entry is a symlink, so this unlinks it and
+      # leaves whatever it pointed at — another checkout, usually — untouched.
+      if ! rm "$target"; then
+        fail "Could not remove the existing link $target — check that $codex_skills is writable"
+      fi
+      link_skill "$src_abs" "$target"
       echo "  [replace] $name (was: $current)"
       replaced=$((replaced + 1))
       continue
     fi
     echo "  [keep] $name — existing symlink → $current (use --force to replace)"
-    kept=$((kept + 1))
+    conflicts=$((conflicts + 1))
     continue
   fi
 
   if [ -e "$target" ]; then
+    # `-e` matches far more than a directory: a real skill folder someone
+    # copied in, a stray file, even a socket. Name what is actually there.
+    if [ -d "$target" ]; then
+      kind="directory"
+    elif [ -f "$target" ]; then
+      kind="file"
+    else
+      kind="entry"
+    fi
     if [ "$force" = "1" ]; then
-      rm -rf "$target"
-      ln -s "$src_abs" "$target"
-      echo "  [replace] $name (was a real directory)"
+      if ! rm -rf "$target"; then
+        fail "Could not remove the existing $kind $target — check that $codex_skills is writable"
+      fi
+      link_skill "$src_abs" "$target"
+      echo "  [replace] $name (was a real $kind)"
       replaced=$((replaced + 1))
       continue
     fi
-    echo "  [keep] $name — existing directory (use --force to replace)"
-    kept=$((kept + 1))
+    echo "  [keep] $name — existing $kind (use --force to replace)"
+    conflicts=$((conflicts + 1))
     continue
   fi
 
-  ln -s "$src_abs" "$target"
+  link_skill "$src_abs" "$target"
   echo "  [link]  $name"
   installed=$((installed + 1))
 done
 
 echo ""
-echo "setup:codex — $installed installed, $replaced replaced, $pruned pruned, $kept left as-is."
+echo "setup:codex — $installed installed, $replaced replaced, $pruned pruned, $kept left as-is, $conflicts conflicting."
+# Conflicts are the only outcome that needs the user to do something, so they
+# are counted apart from the already-correct links and named again here.
+if [ "$conflicts" -gt 0 ]; then
+  noun="entries"
+  [ "$conflicts" = 1 ] && noun="entry"
+  echo "⚠️  $conflicts $noun under $codex_skills point somewhere else — re-run with 'pnpm setup:codex --force' to replace."
+fi
 echo "Codex reads them from $codex_skills/<name>/SKILL.md — list them in-session with /skills."

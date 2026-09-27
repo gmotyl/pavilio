@@ -6,8 +6,10 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readlinkSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -134,11 +136,94 @@ describe("scripts/setup:codex", () => {
       join(repo, "skills", "pavilio-grill"),
     );
 
+    // A conflict is not the same outcome as an already-correct link, and the
+    // summary has to say so — otherwise the last line reads "N left as-is" and
+    // --force is undiscoverable from it.
+    expect(kept.output).toContain("1 conflicting");
+    expect(kept.output).toMatch(/point somewhere else/);
+    expect(kept.output).toMatch(/setup:codex --force/);
+
     const forced = run(["--force"]);
     expect(forced.status).toBe(0);
     expect(readlinkSync(join(codexSkills, "pavilio-note"))).toBe(
       join(repo, "skills", "pavilio-note"),
     );
+    // --force unlinks the entry; it must never follow it and delete the other
+    // checkout it pointed at.
+    expect(statSync(foreign).isDirectory()).toBe(true);
+    expect(readFileSync(join(foreign, "SKILL.md"), "utf8")).toContain("pavilio-note");
+    expect(forced.output).toContain("0 conflicting");
+  }, 30000);
+
+  it("replaces a real directory only with --force, and keeps its contents out of the repo", () => {
+    mkdirSync(codexSkills, { recursive: true });
+    // Somebody copied a skill in by hand instead of linking it.
+    const planted = join(codexSkills, "pavilio-note");
+    mkdirSync(planted, { recursive: true });
+    writeFileSync(join(planted, "SKILL.md"), "# hand-copied\n");
+    writeFileSync(join(planted, "notes.md"), "keep me\n");
+
+    const kept = run();
+    expect(kept.status).toBe(0);
+    // Untouched without --force, and reported as what it actually is.
+    expect(lstatSync(planted).isDirectory()).toBe(true);
+    expect(readFileSync(join(planted, "SKILL.md"), "utf8")).toContain("hand-copied");
+    expect(kept.output).toContain("existing directory");
+    expect(kept.output).toContain("1 conflicting");
+
+    // rm -rf is the most dangerous statement in this script: it must remove the
+    // planted directory and put our link in its place, nothing wider.
+    const forced = run(["--force"]);
+    expect(forced.status).toBe(0);
+    expect(lstatSync(planted).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(planted)).toBe(join(repo, "skills", "pavilio-note"));
+    expect(forced.output).toContain("was a real directory");
+    // The repo's own skill survived intact — the link is not a loop onto itself.
+    expect(readFileSync(join(repo, "skills", "pavilio-note", "SKILL.md"), "utf8")).toContain(
+      "pavilio-note",
+    );
+    expect(existsSync(join(planted, "notes.md"))).toBe(false);
+  }, 30000);
+
+  it("says so and exits non-zero when CODEX_HOME/skills cannot be created", () => {
+    mkdirSync(codexHome, { recursive: true });
+    // `skills` occupied by a regular file: mkdir -p fails, and so would every
+    // `ln -s` after it. Unchecked, the script printed "[link] <name>" per skill,
+    // reported "2 installed" and exited 0 having installed nothing.
+    writeFileSync(codexSkills, "not a directory\n");
+
+    const { status, output } = run();
+
+    expect(status).not.toBe(0);
+    expect(status).toBeGreaterThan(0);
+    expect(output).not.toMatch(/\[link\]/);
+    expect(output).not.toMatch(/\d+ installed/);
+    expect(output).toContain(codexSkills);
+    // And the file is still a file: nothing was silently clobbered.
+    expect(statSync(codexSkills).isFile()).toBe(true);
+  }, 30000);
+
+  it("says so and exits non-zero when a link cannot be written", () => {
+    mkdirSync(codexSkills, { recursive: true });
+    // mkdir -p succeeds (the directory is already there) but linking does not.
+    // Simulated by shadowing `ln` rather than by permissions: this suite may run
+    // as root, for whom a read-only directory is no obstacle at all.
+    const stubBin = join(sandbox, "bin");
+    mkdirSync(stubBin, { recursive: true });
+    writeFileSync(
+      join(stubBin, "ln"),
+      ["#!/bin/sh", "# Stub ln: the link cannot be written.", "echo 'ln: cannot create link' >&2", "exit 1", ""].join(
+        "\n",
+      ),
+      { mode: 0o755 },
+    );
+
+    const { status, output } = run([], { PATH: `${stubBin}:${COREUTILS_DIR}` });
+
+    expect(status).toBeGreaterThan(0);
+    expect(output).not.toMatch(/\d+ installed/);
+    expect(output).toContain("Could not link");
+    expect(existsSync(join(codexSkills, "pavilio-note"))).toBe(false);
   }, 30000);
 
   it("skips when codex is not installed", () => {
