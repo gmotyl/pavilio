@@ -105,11 +105,11 @@ if [ "$CLONE_MODE" = 1 ]; then
   echo "Updating in place (clone mode)"
   echo "The workspace is a pavilio clone at $REPO_ROOT — pulling instead of mirroring."
 
-  # `upstream` is what `pnpm setup` adds when it turns a clone into a workspace.
+  # `upstream` is what `pnpm bootstrap` adds when it turns a clone into a workspace.
   # Without it there is nothing to pull from, and guessing (origin? a URL?) would
   # be the one place this script could rewrite the user's own history wrongly.
   if ! git -C "$REPO_ROOT" remote get-url upstream >/dev/null 2>&1; then
-    echo "No 'upstream' remote — run: pnpm setup"
+    echo "No 'upstream' remote — run: pnpm bootstrap"
     exit 1
   fi
 
@@ -164,7 +164,7 @@ if [ "$CLONE_MODE" = 1 ]; then
   echo "Updated to $UPDATED_SHA $UPDATED_SUBJECT."
   # The panel process is never touched from here: it may be serving the very
   # terminal this update was started from, and stopping it would kill the run.
-  echo "The running panel still serves the old bundle — run: pnpm restart"
+  echo "The running panel still serves the old bundle — run: pnpm reboot"
   exit 0
 fi
 

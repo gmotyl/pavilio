@@ -57,13 +57,13 @@ function makeApp() {
 
 /** The scripts an upstream clone of pavilio defines, verbatim in spirit. */
 const UPSTREAM_SCRIPTS: Record<string, string> = {
-  setup: "./scripts/setup",
+  bootstrap: "./scripts/bootstrap",
   "setup:shortcut": "./scripts/setup:shortcut",
   "setup:codex": "./scripts/setup:codex",
   "setup:claude-code": "./scripts/setup:claude-code",
   "setup:opencode": "./scripts/setup:opencode",
   "install:speech": "./scripts/install:speech",
-  update: "bash scripts/update.sh",
+  upgrade: "bash scripts/update.sh",
   start: "./scripts/panel start",
   stop: "./scripts/panel stop",
   status: "./scripts/panel status",
@@ -192,5 +192,30 @@ describe("POST /api/agent-settings/run-action", () => {
     expect(options.timeout).toBe(120_000);
     // `scripts/pm` is bash, and exec's default shell is /bin/sh.
     expect(options.shell).toMatch(/bash$/);
+  });
+
+  it("keeps the setup and update ids while running the renamed scripts, on the long timeout", async () => {
+    // The ids are the wire contract with the UI and did not move; the package
+    // scripts did, because `pnpm setup` and `pnpm update` are pnpm's own
+    // subcommands and never reach package.json.
+    seedPackageJson(UPSTREAM_SCRIPTS);
+
+    for (const [id, script] of [
+      ["setup", "bootstrap"],
+      ["update", "upgrade"],
+    ] as const) {
+      execMock.mockClear();
+      execSucceedsOnce("done");
+
+      const res = await request(makeApp())
+        .post("/api/agent-settings/run-action")
+        .send({ action: id });
+
+      expect(res.status, `${id} → ${script}`).toBe(200);
+      const [command, options] = execMock.mock.calls[0] as [string, { timeout?: number }];
+      expect(command).toContain(`pm_in . ${script}`);
+      // Both are slow enough to need the long-running budget, keyed by id.
+      expect(options.timeout, `${id} timeout`).toBe(300_000);
+    }
   });
 });

@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 /**
- * scripts/setup is the one command a fresh clone runs. It derives the repo root
+ * scripts/bootstrap is the one command a fresh clone runs. It derives the repo root
  * from its own location, so every case here runs a *copy* of it (next to a copy
  * of scripts/pm) out of <sandbox>/repo/scripts/, against a sandbox git clone.
  *
@@ -31,7 +31,7 @@ import { join, resolve } from "node:path";
  *     (node/pnpm/npm/corepack) and a curated symlink bin with the handful of
  *     system tools the script legitimately needs (git and coreutils). No
  *     `claude`, no `codex`, no `powershell.exe` is discoverable;
- *   - every sub-script scripts/setup drives (setup:claude-code, setup:opencode,
+ *   - every sub-script scripts/bootstrap drives (setup:claude-code, setup:opencode,
  *     setup:codex, install:speech, setup:shortcut) is a *stub* written into the
  *     sandbox. The real ones are never copied, so the code that would symlink
  *     into ~/.claude/skills or ask PowerShell to write a .lnk onto the Desktop is
@@ -42,18 +42,18 @@ import { join, resolve } from "node:path";
  */
 
 const REPO_ROOT = resolve(__dirname, "../../..");
-const SETUP = join(REPO_ROOT, "scripts", "setup");
+const BOOTSTRAP = join(REPO_ROOT, "scripts", "bootstrap");
 const PM_LIB = join(REPO_ROOT, "scripts", "pm");
 
 /** Absolute, because the script runs on a PATH that could not resolve `bash`. */
 const BASH =
   spawnSync("sh", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim() || "/bin/bash";
 
-/** The canonical upstream, as scripts/setup spells it when it adds one. */
+/** The canonical upstream, as scripts/bootstrap spells it when it adds one. */
 const CANONICAL_HTTPS = "https://github.com/gmotyl/pavilio.git";
 
 /**
- * The system tools scripts/setup (and the git fixtures) may legitimately reach
+ * The system tools scripts/bootstrap (and the git fixtures) may legitimately reach
  * for. Symlinked one by one into a sandbox bin rather than putting /usr/bin on
  * PATH, so the set of host executables this suite can see is enumerated here and
  * nowhere else.
@@ -153,7 +153,7 @@ function escapeRe(s: string): string {
 
 /**
  * The `run:` value of every `✗ … failed — run: <cmd>` line. The contract in
- * scripts/setup's own header is that this is a command, not prose.
+ * scripts/bootstrap's own header is that this is a command, not prose.
  */
 function failureCommands(stdout: string): string[] {
   return stdout
@@ -187,16 +187,16 @@ function git(args: string[], cwd: string = repo) {
 }
 
 /**
- * Build a sandbox checkout: a copy of scripts/setup and scripts/pm, stubs for
+ * Build a sandbox checkout: a copy of scripts/bootstrap and scripts/pm, stubs for
  * every sub-script, the seed file, and a real git repository with `originUrl`
  * as its origin (omit for a repo with no remotes at all).
  */
 function makeRepo(dir: string, originUrl?: string): string {
   mkdirSync(join(dir, "scripts"), { recursive: true });
   mkdirSync(join(dir, "panel"), { recursive: true });
-  copyFileSync(SETUP, join(dir, "scripts", "setup"));
+  copyFileSync(BOOTSTRAP, join(dir, "scripts", "bootstrap"));
   copyFileSync(PM_LIB, join(dir, "scripts", "pm"));
-  spawnSync("chmod", ["755", join(dir, "scripts", "setup")]);
+  spawnSync("chmod", ["755", join(dir, "scripts", "bootstrap")]);
   writeFileSync(join(dir, "AGENTS.md.example"), "# Example registry\n\n- seeded\n");
   writeFileSync(join(dir, "panel", "package.json"), '{"name":"panel"}\n');
   for (const name of ["setup:claude-code", "setup:opencode", "setup:codex", "install:speech", "setup:shortcut"]) {
@@ -230,18 +230,18 @@ function run(
   };
   // Guard rails: a future edit must not be able to point this suite at the
   // developer's own home, checkout or PATH.
-  if (!dir.startsWith(sandbox)) throw new Error(`refusing to run scripts/setup outside the sandbox: ${dir}`);
-  if (!env.HOME.startsWith(sandbox)) throw new Error(`refusing to run scripts/setup with HOME=${env.HOME}`);
+  if (!dir.startsWith(sandbox)) throw new Error(`refusing to run scripts/bootstrap outside the sandbox: ${dir}`);
+  if (!env.HOME.startsWith(sandbox)) throw new Error(`refusing to run scripts/bootstrap with HOME=${env.HOME}`);
   // CODEX_HOME overrides ~/.codex on its own, so it is a second way out of the
   // sandbox and needs the same guard as HOME.
   if (env.CODEX_HOME !== undefined && !env.CODEX_HOME.startsWith(sandbox)) {
-    throw new Error(`refusing to run scripts/setup with CODEX_HOME=${env.CODEX_HOME}`);
+    throw new Error(`refusing to run scripts/bootstrap with CODEX_HOME=${env.CODEX_HOME}`);
   }
   for (const entry of env.PATH.split(":")) {
-    if (!entry.startsWith(sandbox)) throw new Error(`refusing to run scripts/setup with ${entry} on PATH`);
+    if (!entry.startsWith(sandbox)) throw new Error(`refusing to run scripts/bootstrap with ${entry} on PATH`);
   }
 
-  const res = spawnSync(BASH, [join(dir, "scripts", "setup"), ...args], {
+  const res = spawnSync(BASH, [join(dir, "scripts", "bootstrap"), ...args], {
     encoding: "utf8",
     cwd: dir,
     env,
@@ -286,7 +286,7 @@ afterEach(() => {
   rmSync(sandbox, { recursive: true, force: true });
 });
 
-describe("scripts/setup", () => {
+describe("scripts/bootstrap", () => {
   it("takes a fresh clone through install, build, seed, skills, speech and shortcut", () => {
     // Every agent this workspace knows about is "installed" in the sandbox home.
     mkdirSync(join(home, ".claude"), { recursive: true });
@@ -386,7 +386,7 @@ describe("scripts/setup", () => {
     expect(output.toLowerCase()).toMatch(/node/);
     // The report line carries a command, not a sentence: the "install Node.js"
     // part is an explanation and belongs on stderr.
-    expect(failureCommands(stdout)).toEqual(["pnpm setup"]);
+    expect(failureCommands(stdout)).toEqual(["pnpm bootstrap"]);
     // Nothing was installed, built, seeded or linked.
     expect(countRecorded("pnpm -C")).toBe(0);
     expect(countRecordedTool("npm")).toBe(0);
@@ -644,7 +644,7 @@ describe("scripts/setup", () => {
     expect(stdout).not.toMatch(/^✓ remotes/m);
     const skip = stdout.split("\n").find((l) => l.startsWith("– remotes skipped ("));
     expect(skip, stdout).toBeTruthy();
-    expect(skip).toContain("git remote remove upstream && pnpm setup");
+    expect(skip).toContain("git remote remove upstream && pnpm bootstrap");
 
     // …and nothing was changed behind that skip.
     expect(git(["remote", "get-url", "origin"], dir).stdout.trim()).toBe(CANONICAL_HTTPS);
@@ -818,7 +818,7 @@ describe("scripts/setup", () => {
       clearCalls();
       const help = run([flag]);
       expect(help.status, help.output).toBe(0);
-      expect(help.stdout).toContain("Usage: pnpm setup");
+      expect(help.stdout).toContain("Usage: pnpm bootstrap");
       expect(help.stdout).toContain("--no-speech");
       expect(help.stdout).toContain("--no-shortcut");
       // Help does no work.
@@ -830,7 +830,7 @@ describe("scripts/setup", () => {
     const bogus = run(["--frobnicate"]);
     expect(bogus.status).toBe(2);
     expect(bogus.output).toContain("Unknown option: --frobnicate");
-    expect(bogus.output).toContain("Usage: pnpm setup");
+    expect(bogus.output).toContain("Usage: pnpm bootstrap");
     expect(recorded()).toEqual([]);
   }, 60000);
 

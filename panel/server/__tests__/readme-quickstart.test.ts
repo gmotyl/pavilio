@@ -71,7 +71,7 @@ function mentions(body: string, needle: string | RegExp): boolean {
 }
 
 describe("README Quick Start", () => {
-  it("Quick Start opens with exactly clone, pnpm setup, pnpm start", () => {
+  it("Quick Start opens with exactly clone, pnpm bootstrap, pnpm start", () => {
     // Before the optional-extras pitch, not after it: the first thing a reader
     // needs is the thing that makes the panel exist.
     expect(headingIndex("Quick Start")).toBeLessThan(headingIndex("Recommended Skills"));
@@ -82,20 +82,23 @@ describe("README Quick Start", () => {
     // 1. the clone. Any host spelling (ssh or https), any target directory.
     expect(lines[0]).toMatch(/^git clone\b.*\bpavilio\.git\b/);
 
-    // 2. the one setup command — spelled `pnpm run setup`, with the `run`.
-    //    `pnpm setup` is one of pnpm's OWN subcommands (it installs pnpm into
-    //    the user's shell rc and never looks at package.json), so a bare
-    //    `pnpm setup` here does not run scripts/setup at all: it edits the
-    //    reader's ~/.zshrc and reports success. Verified against pnpm 10.
-    expect(lines[1]).toBe("pnpm run setup");
+    // 2. the one setup command — `pnpm bootstrap`, no `run` needed.
+    //    The script is deliberately NOT called `setup`: `pnpm setup` is one of
+    //    pnpm's OWN subcommands (it installs pnpm into the user's shell rc and
+    //    never looks at package.json), so a bare `pnpm setup` would not run our
+    //    script at all — it would edit the reader's ~/.zshrc and report success.
+    //    Verified against pnpm 10. `bootstrap` is not a pnpm command, so the
+    //    bare spelling is the correct one.
+    expect(lines[1]).toBe("pnpm bootstrap");
 
     // 3. the panel. `start` is not a pnpm subcommand, so this one is literal.
     expect(lines[2]).toBe("pnpm start");
 
-    // And nowhere in the block is the builtin-shadowed spelling.
+    // And nowhere in the block is a name pnpm claims for itself.
     for (const line of lines) {
-      expect(line).not.toMatch(/^pnpm\s+setup\b/);
-      expect(line).not.toMatch(/^pnpm\s+update\b/);
+      expect(line).not.toMatch(/^pnpm\s+(run\s+)?setup\b/);
+      expect(line).not.toMatch(/^pnpm\s+(run\s+)?update\b/);
+      expect(line).not.toMatch(/^pnpm\s+(run\s+)?restart\b/);
     }
   });
 
@@ -118,7 +121,7 @@ describe("README Quick Start", () => {
       mentions(wsl, /node.{0,20}not found|not find node|could not find/i),
       "WSL2 note must name the node-not-found case",
     ).toBe(true);
-    expect(mentions(wsl, "pnpm run setup"), "WSL2 note must say to re-run setup").toBe(true);
+    expect(mentions(wsl, "pnpm bootstrap"), "WSL2 note must say to re-run setup").toBe(true);
 
     const notes = section("Keep your notes safe");
     // What the notes actually are: commits, on main, in this workspace.
@@ -133,10 +136,12 @@ describe("README Quick Start", () => {
     // And how an update keeps them: replayed on top of upstream, not merged.
     expect(mentions(notes, /rebase/i), "must say the update rebases").toBe(true);
     expect(mentions(notes, "upstream")).toBe(true);
-    // Spelled the way that actually reaches scripts/update.sh. `pnpm update` is
-    // pnpm's own dependency updater and would never run it.
-    expect(notes).toMatch(/`pnpm pull`|`pnpm run update`/);
-    expect(notes).not.toMatch(/`pnpm update`(?!\s*(is|runs|would))/);
+    // Spelled the way that actually reaches scripts/update.sh: `pnpm pull`.
+    // `pnpm update` is pnpm's own dependency updater and would never run it —
+    // and neither would `pnpm upgrade` or `pnpm up`, which pnpm 10 documents as
+    // aliases of exactly that command.
+    expect(notes).toMatch(/`pnpm pull`/);
+    expect(notes).not.toMatch(/`pnpm (run )?(update|upgrade|up)`(?!\s*(is|runs|would|and))/);
   });
 
   it("no hand-written shortcut snippet or reference .lnk remains", () => {

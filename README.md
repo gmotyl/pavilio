@@ -28,20 +28,22 @@ start working.
 
 ```bash
 git clone https://github.com/gmotyl/pavilio.git my-workspace && cd my-workspace
-pnpm run setup
+pnpm bootstrap
 pnpm start
 ```
 
 The panel is then on <http://localhost:3010>.
 
-> **`pnpm run setup`, with the `run`.** `pnpm setup` is one of pnpm's *own*
-> subcommands — it appends pnpm's `PNPM_HOME` block to your shell profile and
-> never reads `package.json` — so the bare spelling does something else entirely
-> and reports success. `pnpm update` is the same trap (that one updates your
-> dependencies); the update command here is `pnpm pull`. `pnpm start`, `pnpm stop`
-> and `pnpm status` are safe as written.
+> **`bootstrap`, not `setup`.** Every command in this README is named so that
+> the bare `pnpm <name>` spelling reaches *this* workspace's script. That rules
+> out the names pnpm claims for itself: `pnpm setup` appends pnpm's `PNPM_HOME`
+> block to your shell profile; `pnpm update` — and its aliases `pnpm upgrade`
+> and `pnpm up` — rewrites your lockfile; `pnpm restart` is npm's lifecycle
+> spelling that runs `stop`, `restart` *and* `start`. None of them ever reads
+> `package.json` the way you meant. So setup is `pnpm bootstrap`, the update is
+> `pnpm pull`, and the restart is `pnpm reboot`.
 
-`pnpm run setup` is idempotent — re-run it whenever you like. It never overwrites
+`pnpm bootstrap` is idempotent — re-run it whenever you like. It never overwrites
 a file you own and never adds a remote twice. In one pass it:
 
 1. **toolchain** — finds `node` (**Node 22 or newer** is required) and picks
@@ -96,9 +98,9 @@ Two things to expect on a first run:
   `bash -lc`, a login shell that reads `/etc/profile` and `~/.profile` but
   **never `~/.bashrc`** — which is where fnm and nvm are usually wired up. The
   launcher therefore resolves the interpreter itself, from the pin that
-  `pnpm run setup` wrote. If that pin is missing or points at a node you have
+  `pnpm bootstrap` wrote. If that pin is missing or points at a node you have
   since removed, open a normal terminal in the workspace and re-run
-  `pnpm run setup`: it re-pins whichever node you are really using.
+  `pnpm bootstrap`: it re-pins whichever node you are really using.
 
 ### Keep your notes safe
 
@@ -135,18 +137,19 @@ opencode slash-commands, but **not** Codex. Run `pnpm setup:codex` by hand after
 |---|---|
 | `pnpm start` | Start the panel detached on <http://localhost:3010>. Builds `panel/dist` first if it is missing; appends output to `panel/.panel.log`. |
 | `pnpm stop` | Stop whatever is holding the panel port. |
-| `pnpm run restart` | Stop, then start. Every browser terminal session lives inside the panel process, so this closes all of them — it says how many before doing it. |
+| `pnpm reboot` | Stop, then start. Every browser terminal session lives inside the panel process, so this closes all of them — it says how many before doing it. |
 | `pnpm status` | One line: running (with pid) or stopped. Exits 0 when running, 3 when not. |
 | `pnpm pull` | Update from upstream, then reinstall, regenerate commands and rebuild the bundle. |
 | `pnpm build` | Rebuild the served bundle by hand. |
 | `pnpm test` | The panel test suite. |
-| `pnpm run setup` | Re-run setup. Safe at any time, and the way to re-pin node. |
+| `pnpm bootstrap` | Re-run setup. Safe at any time, and the way to re-pin node. |
 | `pnpm setup:shortcut` | Rewrite the Windows desktop shortcut in place (WSL2 only). |
 | `pnpm setup:codex` | Re-link `skills/` into Codex. |
 
-`pnpm run restart` needs its `run` for a different reason than `setup` does:
-`pnpm restart` is npm's lifecycle spelling and runs `stop`, `restart` *and*
-`start` in turn. It works, it is just three commands where you asked for one.
+None of these needs a `run` in front of it: `bootstrap`, `pull` and `reboot`
+are named precisely so that they do not collide with `pnpm setup`, `pnpm update`
+and `pnpm restart`, which pnpm handles itself and would never pass on to
+`package.json`.
 
 All of the panel commands are thin wrappers around
 `./scripts/panel start|stop|restart|status`, which needs no package manager at
@@ -203,7 +206,7 @@ Every skill under `skills/` is exposed as a slash command in Claude Code and ope
 
 ## Windows desktop shortcut (WSL2)
 
-`pnpm run setup` writes this shortcut for you, and `pnpm setup:shortcut` rewrites
+`pnpm bootstrap` writes this shortcut for you, and `pnpm setup:shortcut` rewrites
 it on its own — it reopens the same file rather than leaving a second, suffixed
 copy behind. Both run from inside WSL and drive the Windows side through
 `powershell.exe`, so there is nothing to place by hand and nothing
@@ -267,7 +270,7 @@ A missing `panel/dist` is never a silent fallback to Vite: `./scripts/panel star
 
 To reach the panel from other devices on your Wi-Fi (phone, MacBook, tablet), Windows needs a `netsh portproxy` entry that forwards `<hostLanIp>:3010` into the WSL VM. WSL doesn't add this for you, and creating it requires admin elevation.
 
-The desktop shortcut's launcher, `scripts/start-panel-windows.sh`, handles this: it starts the panel, checks the portproxy, prompts UAC **only when the entry is missing or stale**, then prints clickable pair links (local + LAN). Subsequent launches are silent no-ops. `pnpm run setup` already points the shortcut at it.
+The desktop shortcut's launcher, `scripts/start-panel-windows.sh`, handles this: it starts the panel, checks the portproxy, prompts UAC **only when the entry is missing or stale**, then prints clickable pair links (local + LAN). Subsequent launches are silent no-ops. `pnpm bootstrap` already points the shortcut at it.
 
 What it does:
 
@@ -408,7 +411,7 @@ cd my-workspace
 cp ../pavilio/AGENTS.md.example .projects.local.md
 # Edit .projects.local.md with your actual projects
 
-pnpm run setup
+pnpm bootstrap
 ```
 
 To take a new upstream version, from the workspace:
@@ -434,7 +437,7 @@ whether the workspace and the upstream clone are the same directory:
 
 Both modes then reinstall the panel's dependencies, regenerate the agent
 slash-commands and rebuild the served bundle. Neither one restarts a running
-panel — do that yourself with `pnpm run restart`.
+panel — do that yourself with `pnpm reboot`.
 
 ### Private config
 

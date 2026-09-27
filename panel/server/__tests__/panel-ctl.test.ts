@@ -290,15 +290,28 @@ describe("scripts/panel process control", () => {
     expect(running.output).toContain("log=panel/.panel.log");
   }, 60000);
 
-  it("root package.json start/stop/restart/status delegate to scripts/panel", () => {
+  it("root package.json start/stop/reboot/status delegate to scripts/panel", () => {
     const pkg = JSON.parse(readFileSync(ROOT_PACKAGE_JSON, "utf8")) as {
       scripts: Record<string, string>;
     };
 
-    for (const command of ["start", "stop", "restart", "status"]) {
-      expect(pkg.scripts[command], `scripts.${command}`).toContain("scripts/panel");
-      expect(pkg.scripts[command], `scripts.${command}`).toContain(command);
+    // Package-script name → scripts/panel subcommand. They match everywhere but
+    // `reboot`: `pnpm restart` is npm's lifecycle spelling (it would run stop,
+    // restart AND start), so the package script had to be named something pnpm
+    // does not claim. scripts/panel's own subcommand is still `restart`.
+    const delegates: Record<string, string> = {
+      start: "start",
+      stop: "stop",
+      reboot: "restart",
+      status: "status",
+    };
+
+    for (const [script, subcommand] of Object.entries(delegates)) {
+      expect(pkg.scripts[script], `scripts.${script}`).toContain("scripts/panel");
+      expect(pkg.scripts[script], `scripts.${script}`).toContain(subcommand);
     }
+    // And the shadowed name is gone from package.json entirely.
+    expect(pkg.scripts.restart, "scripts.restart must not exist").toBeUndefined();
     // The old spellings backgrounded pnpm with `&` and killed port 3010 by hand;
     // both are the script's job now.
     expect(pkg.scripts.start).not.toContain("&");

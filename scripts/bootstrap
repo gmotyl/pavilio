@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # One command that takes a fresh clone to a panel you can start.
 #
-#   pnpm setup                 # everything
-#   pnpm setup --no-speech     # skip the speech Stop hooks
-#   pnpm setup --no-shortcut   # skip the Windows desktop shortcut
-#   pnpm setup --yes           # never ask a question (CI, re-runs, scripts)
+#   pnpm bootstrap                 # everything
+#   pnpm bootstrap --no-speech     # skip the speech Stop hooks
+#   pnpm bootstrap --no-shortcut   # skip the Windows desktop shortcut
+#   pnpm bootstrap --yes           # never ask a question (CI, re-runs, scripts)
+#
+# `bootstrap`, not `setup`: `pnpm setup` is one of pnpm's own subcommands and
+# never reaches this file.
 #
 # It is a *report*, not a log: every step prints exactly one line —
 #
@@ -58,7 +61,7 @@ cd "$repo_root" || exit 1
 
 usage() {
   cat <<'EOF'
-Usage: pnpm setup [--no-speech] [--no-shortcut] [--yes]
+Usage: pnpm bootstrap [--no-speech] [--no-shortcut] [--yes]
 
   --no-speech     do not install the speech Stop hooks
   --no-shortcut   do not create the Windows desktop shortcut
@@ -170,7 +173,7 @@ run_sub() {
 if ! pm_resolve 2>/dev/null; then
   if ! pm_have_node; then
     echo "No Node.js found — install Node.js $MIN_NODE_MAJOR or newer (https://nodejs.org), then rerun." >&2
-    step_fail "toolchain" "pnpm setup"
+    step_fail "toolchain" "pnpm bootstrap"
     exit 1
   fi
 fi
@@ -186,7 +189,7 @@ if [ "$node_major" -lt "$MIN_NODE_MAJOR" ]; then
   # Before anything is installed, built or seeded: an install under an old node
   # half-succeeds and then fails somewhere far less legible than here.
   echo "Node ${node_version:-(unknown)} is too old — Pavilio needs Node.js $MIN_NODE_MAJOR or newer." >&2
-  step_fail "toolchain" "pnpm setup"
+  step_fail "toolchain" "pnpm bootstrap"
   exit 1
 fi
 
@@ -208,7 +211,7 @@ elif command -v npm >/dev/null 2>&1; then
   pm_label="npm"
 else
   echo "No pnpm, corepack or npm found beside node — reinstall Node.js $MIN_NODE_MAJOR or newer, or install pnpm." >&2
-  step_fail "toolchain" "pnpm setup"
+  step_fail "toolchain" "pnpm bootstrap"
   exit 1
 fi
 export PM
@@ -294,7 +297,7 @@ else
   # terminal resolves node on its own. The `run:` value is a command, so the
   # reason it could not be written goes above it instead.
   echo "Could not write the node pin to $(pm_local_env_path) — only the Windows launcher needs it." >&2
-  step_fail "toolchain" "touch $(pm_local_env_path) && pnpm setup"
+  step_fail "toolchain" "touch $(pm_local_env_path) && pnpm bootstrap"
 fi
 
 # ---------------------------------------------------------------------------
@@ -417,7 +420,7 @@ remotes_step() {
       # because a ✓ here would be a green tick on a state that no number of
       # re-runs resolves.
       step_skip "remotes" \
-        "origin is the canonical repo and an upstream already exists — run: git remote remove upstream && pnpm setup"
+        "origin is the canonical repo and an upstream already exists — run: git remote remove upstream && pnpm bootstrap"
       return 0
     fi
     if git remote rename origin upstream >/dev/null 2>&1; then
@@ -472,7 +475,7 @@ remotes_step() {
   if [ -z "$origin_url" ] && [ "$assume_yes" = 0 ]; then
     local answer=""
     printf 'Private repo URL for your notes (Enter to skip): '
-    # A closed or exhausted stdin (CI, a pipe, `pnpm setup </dev/null`) reads as
+    # A closed or exhausted stdin (CI, a pipe, `pnpm bootstrap </dev/null`) reads as
     # "Enter to skip" rather than hanging the run.
     if ! IFS= read -r answer; then
       answer=""

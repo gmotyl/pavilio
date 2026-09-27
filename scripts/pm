@@ -174,7 +174,7 @@ pm_probe_newest_nvm_version() {
 }
 
 pm_not_found() {
-  echo "node/pnpm not found. Open a normal terminal in $PM_REPO_ROOT and run: pnpm setup" >&2
+  echo "node/pnpm not found. Open a normal terminal in $PM_REPO_ROOT and run: pnpm bootstrap" >&2
 }
 
 # Find a toolchain and record it in $PM / $NODE_BIN_DIR. Returns 1, having said

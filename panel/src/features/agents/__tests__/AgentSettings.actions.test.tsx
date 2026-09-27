@@ -21,8 +21,11 @@ afterEach(() => {
 /** What the server says this workspace can run — deliberately not the old list. */
 const SERVED_ACTIONS = [
   {
+    // id and script differ on purpose: the id is the wire contract, the script
+    // is what package.json defines (`setup` is a pnpm built-in, hence
+    // `bootstrap`).
     id: "setup",
-    script: "setup",
+    script: "bootstrap",
     label: "Setup workspace",
     description: "Installs dependencies and prepares this clone to run the panel.",
   },

@@ -142,7 +142,9 @@ router.post("/write", (req, res) => {
  *
  * `id` is the stable handle the client posts back; `script` is the package
  * script it maps to. They differ where the button's name and the script's name
- * have drifted apart (`init:claude` → `setup:claude-code`).
+ * have drifted apart (`init:claude` → `setup:claude-code`), and they stay
+ * differing on purpose: the ids are the wire contract with the UI, so renaming a
+ * package script changes `script` alone and leaves every posted id untouched.
  */
 export interface WorkspaceAction {
   id: string;
@@ -154,15 +156,20 @@ export interface WorkspaceAction {
 /** The order here is the order the Settings page shows them in. */
 export const WORKSPACE_ACTIONS: WorkspaceAction[] = [
   {
+    // id stays "setup" — it is the wire contract with the UI (and the key
+    // LONG_RUNNING_IDS looks up). Only the package script was renamed, because
+    // `pnpm setup` is one of pnpm's own subcommands.
     id: "setup",
-    script: "setup",
+    script: "bootstrap",
     label: "Setup workspace",
     description:
       "Runs the one-shot workspace setup: installs the panel's dependencies, resolves a node/pnpm toolchain, and writes the per-host launcher config. Idempotent — safe to re-run on an already-working clone.",
   },
   {
+    // Same as above: the id is unchanged, the package script is now `upgrade`
+    // because `pnpm update` is pnpm's own dependency updater.
     id: "update",
-    script: "update",
+    script: "upgrade",
     label: "Update",
     description:
       "Pulls the latest pavilio, reinstalls dependencies and rebuilds the panel. The panel still has to be restarted afterwards for the new build to be served.",
@@ -214,6 +221,8 @@ export const WORKSPACE_ACTIONS: WorkspaceAction[] = [
 /** Long-running actions, in milliseconds. Everything else gets two minutes. */
 const LONG_RUNNING_MS = 300_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
+// Keyed by action id, not by script name — the ids above are deliberately
+// stable across script renames.
 const LONG_RUNNING_IDS = new Set(["setup", "update", "setup:restore"]);
 
 /** The workspace above `projects/` — never the panel directory. */

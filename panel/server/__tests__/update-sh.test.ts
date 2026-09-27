@@ -454,7 +454,7 @@ describe("scripts/update.sh clone mode", () => {
     // A real install + build, same as the full-run clone case below.
   }, 120000);
 
-  it("refuses clone mode without an upstream remote and names pnpm setup", () => {
+  it("refuses clone mode without an upstream remote and names pnpm bootstrap", () => {
     initCloneRepo();
     git(dest, "remote", "remove", "upstream");
 
@@ -462,7 +462,7 @@ describe("scripts/update.sh clone mode", () => {
 
     expect(status).toBe(1);
     expect(output).toMatch(/No 'upstream' remote/);
-    expect(output).toMatch(/pnpm setup/);
+    expect(output).toMatch(/pnpm bootstrap/);
     expect(output).not.toMatch(/panel bundle built/);
   }, 60000);
 
@@ -563,7 +563,7 @@ describe("scripts/update.sh clone mode", () => {
 
     expect(status).toBe(0);
     expect(output).toContain(`Updated to ${sha} ${subject}.`);
-    expect(output).toMatch(/The running panel still serves the old bundle — run: pnpm restart/);
+    expect(output).toMatch(/The running panel still serves the old bundle — run: pnpm reboot/);
     // The recording stub above is the real assertion: scripts/panel — the only
     // thing that can stop or start the panel — was never invoked at all.
     expect(existsSync(panelInvoked)).toBe(false);

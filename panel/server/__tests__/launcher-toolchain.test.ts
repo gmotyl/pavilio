@@ -241,7 +241,7 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(status).toBe(1);
     // scripts/pm's own diagnosis, naming the sandbox checkout it derived.
     expect(output).toContain("node/pnpm not found");
-    expect(output).toContain(`run: pnpm setup`);
+    expect(output).toContain(`run: pnpm bootstrap`);
     expect(output).toContain(repo);
 
     // And nothing was started, polled or printed as ready.

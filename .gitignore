@@ -59,7 +59,7 @@ panel/panel.config.local.ts
 panel/.autosync-state.json
 
 # Per-host launcher overrides (e.g. PANEL_EXTRA_PORTS), and the temp file
-# scripts/setup rewrites it through — a crashed run leaves one behind.
+# scripts/bootstrap rewrites it through — a crashed run leaves one behind.
 scripts/start-panel-windows.local.env
 scripts/start-panel-windows.local.env.pavilio-tmp.*
 

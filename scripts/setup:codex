@@ -41,7 +41,7 @@ skills_src="$repo_root/skills"
 # Nothing below `set -u` aborts on its own, and every step here writes into the
 # user's config directory — a failure that is not checked becomes a run that
 # prints "[link] <name>" for each skill, reports "N installed" and exits 0 while
-# having installed nothing. scripts/setup calls this and judges it by exit code.
+# having installed nothing. scripts/bootstrap calls this and judges it by exit code.
 fail() {
   echo "❌ $1" >&2
   exit 1

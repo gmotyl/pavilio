@@ -286,13 +286,13 @@ describe("scripts/pm toolchain resolution", () => {
     expect(npmRun.output).not.toContain("run install");
   }, 30000);
 
-  it("fails with a message naming pnpm setup when no node is found", () => {
+  it("fails with a message naming pnpm bootstrap when no node is found", () => {
     // No local env file, an empty HOME and a PATH with nothing on it.
     const { status, output } = runHarness();
 
     expect(status).not.toBe(0);
     expect(output).toMatch(/node\/pnpm not found/i);
-    expect(output).toContain("pnpm setup");
+    expect(output).toContain("pnpm bootstrap");
     expect(output).toContain(repo);
     expect(output).not.toContain("NODE_BIN_DIR=");
   }, 30000);
