@@ -38,6 +38,10 @@ MIN_NODE_MAJOR=22
 CANONICAL_HTTPS="https://github.com/gmotyl/pavilio.git"
 CANONICAL_KEY="github.com/gmotyl/pavilio"
 
+# The name suggested when a remote has to be moved out of `upstream`'s way. Any
+# free name converges; this one only has to make the advice pasteable.
+FREE_REMOTE_NAME="team"
+
 # This script lives in <repo>/scripts/. `dirname` is deliberately avoided so this
 # still works on a minimal PATH, and the redirects shield the command
 # substitutions from an exported CDPATH, which both relocates the target and
@@ -383,7 +387,10 @@ remote_key() {
   host="${host%%:*}"
   url="$host${rest:+/$rest}"
   while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
-  url="${url%.git}"
+  # Case-folded like everything above it: GitHub answers to `.GIT` as readily as
+  # to `github.com`, and a suffix that only strips in lower case would file a
+  # canonical origin spelled `…/Pavilio.GIT` as somebody's fork.
+  url="${url%[.][gG][iI][tT]}"
   while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
   printf '%s' "$url"
 }
@@ -393,7 +400,9 @@ is_canonical_remote() {
   local key restore rc=1
   key="$(remote_key "$1")"
   [ -n "$key" ] || return 1
-  restore="$(shopt -p nocasematch)"
+  # `shopt -p` exits 1 when the option is unset — which is the normal case here.
+  # Harmless today, but it would abort the run under `set -e`, so say so.
+  restore="$(shopt -p nocasematch)" || true
   shopt -s nocasematch
   [[ "$key" == "$CANONICAL_KEY" ]] && rc=0
   eval "$restore"
@@ -419,8 +428,15 @@ remotes_step() {
       # someone else's remotes, so it is reported rather than made — as a skip,
       # because a ✓ here would be a green tick on a state that no number of
       # re-runs resolves.
+      #
+      # The advice is a RENAME, never a remove: the existing `upstream` may be
+      # the team repository whose push URL the `upstream_is_ours` guard below
+      # exists to protect, and deleting a remote is not recoverable from the
+      # report. `$FREE_REMOTE_NAME` is only a suggestion — the prose says so, so
+      # the `run:` value itself can stay a command you can paste.
+      echo "An upstream already exists, so origin cannot be renamed to it. Move the existing one out of the way under any free name — '$FREE_REMOTE_NAME' below is just a suggestion — and rerun; nothing is deleted." >&2
       step_skip "remotes" \
-        "origin is the canonical repo and an upstream already exists — run: git remote remove upstream && pnpm bootstrap"
+        "origin is the canonical repo and an upstream already exists — run: git remote rename upstream $FREE_REMOTE_NAME && pnpm bootstrap"
       return 0
     fi
     if git remote rename origin upstream >/dev/null 2>&1; then
@@ -457,8 +473,16 @@ remotes_step() {
       notes="${notes:+$notes; }upstream already set"
     else
       # Someone else's remote that happens to be called `upstream` — a team
-      # repository they fetch from and push to. Nothing here is ours to rewrite.
-      notes="${notes:+$notes; }upstream is not the canonical repo; left alone"
+      # repository they fetch from and push to. Nothing here is ours to rewrite,
+      # and nothing here converges either: scripts/update.sh pulls `upstream`
+      # unconditionally, so the next `pnpm upgrade` would rebase that repository
+      # into this clone. A ✓ would be a green tick on exactly that. Same
+      # treatment as the canonical-origin-plus-upstream state above — a skip
+      # with a fix that renames rather than deletes.
+      echo "'upstream' is not the Pavilio repository, and 'pnpm upgrade' pulls 'upstream' unconditionally — it would rebase that repository into this clone. Move it aside under any free name — '$FREE_REMOTE_NAME' below is just a suggestion — and rerun; nothing is deleted." >&2
+      step_skip "remotes" \
+        "upstream is not the canonical repo — run: git remote rename upstream $FREE_REMOTE_NAME && pnpm bootstrap"
+      return 0
     fi
   fi
 

@@ -248,7 +248,17 @@ function run(
     // Always a closed/finite stdin: the origin prompt must never hang the suite.
     input: opts.input ?? "",
   });
-  return { status: res.status, stdout: res.stdout, output: `${res.stdout}${res.stderr}` };
+  const result = { status: res.status, stdout: res.stdout, output: `${res.stdout}${res.stderr}` };
+
+  // The `run:` contract, asserted on EVERY run this suite makes rather than in
+  // the handful of cases that happened to think of it: a `✗` line ends in a
+  // command a human can paste, never in a sentence. A new failure branch is
+  // covered by this the moment any test reaches it.
+  for (const cmd of failureCommands(result.stdout)) {
+    expect(cmd, `unrunnable run: value —\n${result.stdout}`).toMatch(RUNNABLE);
+  }
+
+  return result;
 }
 
 /** The per-host env file scripts/pm reads PAVILIO_NODE_BIN from. */
@@ -556,7 +566,7 @@ describe("scripts/bootstrap", () => {
 
     const { status, stdout, output } = run(["--yes"], { repoDir: dir });
     expect(status, output).toBe(0);
-    expect(stdout).toMatch(/^[✓–] remotes\b/mu);
+    expect(stdout).toMatch(/^– remotes skipped \(/mu);
 
     // Both URLs survived: nothing here is setup's to rewrite.
     expect(git(["remote", "get-url", "upstream"], dir).stdout.trim()).toBe(
@@ -567,6 +577,60 @@ describe("scripts/bootstrap", () => {
     );
     expect(git(["remote", "get-url", "origin"], dir).stdout.trim()).toBe(
       "git@github.com:someone-else/pavilio.git",
+    );
+  }, 60000);
+
+  it("re-stamps no_push on an upstream that is itself the canonical repo", () => {
+    // The third mechanism of the upstream_is_ours fix, reached on its own: a
+    // FORK origin, so the rename arm never fires and nothing is left over from
+    // an earlier run — and an `upstream` that already IS the canonical repo,
+    // with its push URL put back to the fetch URL by hand (what a user gets
+    // from `git remote set-url upstream <url>`). Recognising that upstream as
+    // canonical is the only thing that can restore no_push here.
+    const dir = join(sandbox, "repo-canonical-upstream");
+    makeRepo(dir, "git@github.com:someone-else/pavilio.git");
+    git(["remote", "add", "upstream", CANONICAL_HTTPS], dir);
+    git(["remote", "set-url", "--push", "upstream", CANONICAL_HTTPS], dir);
+    expect(git(["remote", "get-url", "--push", "upstream"], dir).stdout.trim()).toBe(CANONICAL_HTTPS);
+
+    const { status, stdout, output } = run(["--yes"], { repoDir: dir });
+    expect(status, output).toBe(0);
+    expect(stdout).toMatch(/^✓ remotes\b.*upstream already set/m);
+
+    expect(git(["remote", "get-url", "upstream"], dir).stdout.trim()).toBe(CANONICAL_HTTPS);
+    expect(git(["remote", "get-url", "--push", "upstream"], dir).stdout.trim()).toBe("no_push");
+    // …and the user's own remote is untouched, push URL included.
+    expect(git(["remote", "get-url", "--push", "origin"], dir).stdout.trim()).toBe(
+      "git@github.com:someone-else/pavilio.git",
+    );
+  }, 60000);
+
+  it("reports a non-canonical upstream as a skip, and never advises deleting it", () => {
+    const dir = join(sandbox, "repo-team-upstream");
+    makeRepo(dir, "git@github.com:someone-else/pavilio.git");
+    git(["remote", "add", "upstream", "https://github.com/acme/pavilio-team.git"], dir);
+
+    const { status, stdout, output } = run(["--yes"], { repoDir: dir });
+    expect(status, output).toBe(0);
+
+    // Not a ✓: scripts/update.sh pulls `upstream` unconditionally, so the next
+    // `pnpm upgrade` would rebase the team repository into this clone. An
+    // unconvergeable remote state is a skip with a fix, not a green tick.
+    expect(stdout).not.toMatch(/^✓ remotes/m);
+    const skip = stdout.split("\n").find((l) => l.startsWith("– remotes skipped ("));
+    expect(skip, stdout).toBeTruthy();
+    expect(skip).toMatch(/run: git remote rename upstream \S+ && pnpm bootstrap\)$/u);
+    // A rename converges just as well and destroys nothing — the advice must
+    // never be to delete a remote whose push URL this step exists to protect.
+    expect(stdout).not.toContain("git remote remove upstream");
+    expect(output).not.toContain("git remote remove upstream");
+
+    // Nothing behind the skip was touched.
+    expect(git(["remote", "get-url", "upstream"], dir).stdout.trim()).toBe(
+      "https://github.com/acme/pavilio-team.git",
+    );
+    expect(git(["remote", "get-url", "--push", "upstream"], dir).stdout.trim()).toBe(
+      "https://github.com/acme/pavilio-team.git",
     );
   }, 60000);
 
@@ -592,7 +656,13 @@ describe("scripts/bootstrap", () => {
       "ssh://git@github.com/gmotyl/pavilio",
       "https://github.com/gmotyl/pavilio.git/",
       "https://github.com/GMotyl/Pavilio.git",
+      // GitHub is case-insensitive end to end, and the `.git` suffix is no more
+      // part of the identity than the host's case is.
+      "https://GitHub.com/GMotyl/Pavilio.GIT",
       "https://user:token@github.com/gmotyl/pavilio.git",
+      // A port, with the credentials the `user:token` spelling strips first
+      // still present, so the port strip itself is what has to do the work.
+      "ssh://git@github.com:22/gmotyl/pavilio.git",
       "git@github.com:gmotyl/pavilio.git",
       "https://github.com/gmotyl/pavilio",
     ];
@@ -644,7 +714,11 @@ describe("scripts/bootstrap", () => {
     expect(stdout).not.toMatch(/^✓ remotes/m);
     const skip = stdout.split("\n").find((l) => l.startsWith("– remotes skipped ("));
     expect(skip, stdout).toBeTruthy();
-    expect(skip).toContain("git remote remove upstream && pnpm bootstrap");
+    expect(skip).toMatch(/run: git remote rename upstream \S+ && pnpm bootstrap\)$/u);
+    // Never a delete: `upstream` may be the team repo whose push URL the
+    // upstream_is_ours branch above exists to protect.
+    expect(stdout).not.toContain("git remote remove upstream");
+    expect(output).not.toContain("git remote remove upstream");
 
     // …and nothing was changed behind that skip.
     expect(git(["remote", "get-url", "origin"], dir).stdout.trim()).toBe(CANONICAL_HTTPS);
@@ -709,7 +783,6 @@ describe("scripts/bootstrap", () => {
       expect(countRecorded(name), name).toBe(0);
     }
     expect(stdout).not.toContain("Done. Start the panel");
-    for (const cmd of failureCommands(stdout)) expect(cmd).toMatch(RUNNABLE);
   }, 60000);
 
   it("stops the run when panel build fails, before any tail step", () => {
@@ -745,7 +818,6 @@ describe("scripts/bootstrap", () => {
     expect(status, output).toBe(0);
     const line = stdout.split("\n").find((l) => l.startsWith("✗ toolchain failed"));
     expect(line, stdout).toBeTruthy();
-    for (const cmd of failureCommands(stdout)) expect(cmd).toMatch(RUNNABLE);
     expect(stdout).toContain("Done. Start the panel");
   }, 60000);
 
