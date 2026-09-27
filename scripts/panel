@@ -6,7 +6,9 @@
 #   ./scripts/panel restart   # stop + start, warning about terminal sessions
 #   ./scripts/panel status    # one line; exit 0 running, 3 stopped
 #
-# Root `pnpm start|stop|restart|status` are thin wrappers around this file.
+# Root `pnpm start|stop|reboot|status` are thin wrappers around this file.
+# `reboot`, not `restart`: `pnpm restart` is npm's lifecycle spelling and never
+# reaches package.json. This script's own subcommand is still `restart`.
 #
 # Why it exists: `pnpm -C panel start &` tied the panel to the shell that ran it.
 # Closing the terminal — or a setup script finishing — took the panel down with

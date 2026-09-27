@@ -144,6 +144,46 @@ describe("README Quick Start", () => {
     expect(notes).not.toMatch(/`pnpm (run )?(update|upgrade|up)`(?!\s*(is|runs|would|and))/);
   });
 
+  it("no package script is named after a command pnpm resolves itself", () => {
+    // pnpm matches its OWN subcommands before it ever looks at package.json, so
+    // a script named after one is unreachable by the bare `pnpm <name>` spelling
+    // this README teaches — pnpm runs its own thing and reports success.
+    //
+    // `update` has two documented aliases, `up` and `upgrade`, and all three run
+    // pnpm's dependency updater. That is why the workspace's update command is
+    // `pnpm pull` (and its second spelling `pnpm sync`) and never `pnpm upgrade`.
+    // Verified against pnpm 10.18.1.
+    //
+    // `start` and `test` are absent from this list on purpose: pnpm claims those
+    // names too, but only to run the package script of the same name.
+    const CLAIMED_BY_PNPM = ["setup", "install", "update", "up", "upgrade", "restart"];
+
+    for (const manifest of [join(REPO_ROOT, "package.json"), join(REPO_ROOT, "panel/package.json")]) {
+      const scripts = (
+        JSON.parse(readFileSync(manifest, "utf8")) as { scripts?: Record<string, string> }
+      ).scripts ?? {};
+      for (const claimed of CLAIMED_BY_PNPM) {
+        expect(Object.keys(scripts), `${manifest} defines an unreachable script "${claimed}"`)
+          .not.toContain(claimed);
+      }
+    }
+
+    // …and the update command is still there under a name that does reach it.
+    const rootScripts = (
+      JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+        scripts: Record<string, string>;
+      }
+    ).scripts;
+    expect(rootScripts.sync, "scripts.sync must run scripts/update.sh").toContain(
+      "scripts/update.sh",
+    );
+    // `pull` predates `sync` and people's fingers know it — both names point at
+    // the one script, deliberately.
+    expect(rootScripts.pull, "scripts.pull must run scripts/update.sh").toContain(
+      "scripts/update.sh",
+    );
+  });
+
   it("no hand-written shortcut snippet or reference .lnk remains", () => {
     // scripts/setup:shortcut writes the shortcut through powershell.exe. The
     // hand-typed PowerShell recipe it replaced told the reader to build a

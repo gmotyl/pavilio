@@ -614,7 +614,7 @@ describe("scripts/bootstrap", () => {
     expect(status, output).toBe(0);
 
     // Not a ✓: scripts/update.sh pulls `upstream` unconditionally, so the next
-    // `pnpm upgrade` would rebase the team repository into this clone. An
+    // `pnpm sync` would rebase the team repository into this clone. An
     // unconvergeable remote state is a skip with a fix, not a green tick.
     expect(stdout).not.toMatch(/^✓ remotes/m);
     const skip = stdout.split("\n").find((l) => l.startsWith("– remotes skipped ("));

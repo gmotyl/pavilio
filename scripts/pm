@@ -223,7 +223,9 @@ pm_resolve() {
 # shorthand only reaches package.json for names pnpm does not claim itself:
 # `setup`, `update` and `restart` (among others) are pnpm's OWN subcommands, and
 # the shorthand silently runs those instead of the package script of the same
-# name. `pnpm run <script>` always means the package script.
+# name. `update` brings two aliases with it — `up` and `upgrade` — which is why
+# the workspace's update script is called `sync`, never `upgrade`.
+# `pnpm run <script>` always means the package script.
 pm_in() {
   local dir="$1" script="$2"
   shift 2

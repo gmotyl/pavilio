@@ -166,10 +166,12 @@ export const WORKSPACE_ACTIONS: WorkspaceAction[] = [
       "Runs the one-shot workspace setup: installs the panel's dependencies, resolves a node/pnpm toolchain, and writes the per-host launcher config. Idempotent — safe to re-run on an already-working clone.",
   },
   {
-    // Same as above: the id is unchanged, the package script is now `upgrade`
-    // because `pnpm update` is pnpm's own dependency updater.
+    // Same as above: the id is unchanged, the package script is now `sync`
+    // because `pnpm update` is pnpm's own dependency updater — and so are its
+    // aliases `pnpm up` and `pnpm upgrade`, which is why the script is not
+    // called `upgrade` either.
     id: "update",
-    script: "upgrade",
+    script: "sync",
     label: "Update",
     description:
       "Pulls the latest pavilio, reinstalls dependencies and rebuilds the panel. The panel still has to be restarted afterwards for the new build to be served.",
@@ -224,7 +226,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
  * `exec` buffers the child's whole output and kills it at 1 MB by default —
- * which `bootstrap` and `upgrade`, the two actions on the long timeout, pass
+ * which `bootstrap` and `sync`, the two actions on the long timeout, pass
  * routinely while installing and building. Same budget as routes/scripts.ts,
  * which learned this first.
  */

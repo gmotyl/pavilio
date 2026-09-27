@@ -140,16 +140,19 @@ opencode slash-commands, but **not** Codex. Run `pnpm setup:codex` by hand after
 | `pnpm reboot` | Stop, then start. Every browser terminal session lives inside the panel process, so this closes all of them — it says how many before doing it. |
 | `pnpm status` | One line: running (with pid) or stopped. Exits 0 when running, 3 when not. |
 | `pnpm pull` | Update from upstream, then reinstall, regenerate commands and rebuild the bundle. |
+| `pnpm sync` | The same script under a second name. `pull` came first and stayed; `sync` reads better next to the team workflow below. |
 | `pnpm build` | Rebuild the served bundle by hand. |
 | `pnpm test` | The panel test suite. |
 | `pnpm bootstrap` | Re-run setup. Safe at any time, and the way to re-pin node. |
 | `pnpm setup:shortcut` | Rewrite the Windows desktop shortcut in place (WSL2 only). |
 | `pnpm setup:codex` | Re-link `skills/` into Codex. |
 
-None of these needs a `run` in front of it: `bootstrap`, `pull` and `reboot`
-are named precisely so that they do not collide with `pnpm setup`, `pnpm update`
-and `pnpm restart`, which pnpm handles itself and would never pass on to
-`package.json`.
+None of these needs a `run` in front of it: `bootstrap`, `pull`, `sync` and
+`reboot` are named precisely so that they do not collide with `pnpm setup`,
+`pnpm update` and `pnpm restart`, which pnpm handles itself and would never pass
+on to `package.json`. `update` is the one with a reach beyond its own name: pnpm
+documents `pnpm up` and `pnpm upgrade` as aliases of it, so all three rewrite
+your lockfile and none of them can be the update command here.
 
 All of the panel commands are thin wrappers around
 `./scripts/panel start|stop|restart|status`, which needs no package manager at
@@ -392,9 +395,9 @@ Note that `Ctrl+Shift+C` is **not** copy here, which is where it differs from mo
 
 ## Teams: a private workspace tracking upstream
 
-The Quick Start clone is already a workspace that tracks upstream: `pnpm run
-setup` renames the pavilio remote to `upstream`, leaves `origin` free for your
-own private repository, and `pnpm pull` rebases your notes onto whatever
+The Quick Start clone is already a workspace that tracks upstream: `pnpm
+bootstrap` renames the pavilio remote to `upstream`, leaves `origin` free for
+your own private repository, and `pnpm pull` rebases your notes onto whatever
 upstream has grown since. For one person, that is the whole story.
 
 Teams usually want the other shape — **one private workspace repository, with a

@@ -94,7 +94,7 @@ const UPSTREAM_SCRIPTS: Record<string, string> = {
   "setup:claude-code": "./scripts/setup:claude-code",
   "setup:opencode": "./scripts/setup:opencode",
   "install:speech": "./scripts/install:speech",
-  upgrade: "bash scripts/update.sh",
+  sync: "bash scripts/update.sh",
   start: "./scripts/panel start",
   stop: "./scripts/panel stop",
   status: "./scripts/panel status",
@@ -145,7 +145,7 @@ describe("GET /api/agent-settings/actions", () => {
     const pairs = (res.body as Array<{ id: string; script: string }>).map((a) => [a.id, a.script]);
     expect(pairs).toEqual([
       ["setup", "bootstrap"],
-      ["update", "upgrade"],
+      ["update", "sync"],
       ["init:claude", "setup:claude-code"],
       ["init:opencode", "setup:opencode"],
       ["init:codex", "setup:codex"],
@@ -248,14 +248,15 @@ describe("POST /api/agent-settings/run-action", () => {
   it("keeps the setup and update ids while running the renamed scripts, on the long timeout", async () => {
     // The ids are the wire contract with the UI and did not move; the package
     // scripts did, because `pnpm setup` and `pnpm update` are pnpm's own
-    // subcommands and never reach package.json.
+    // subcommands and never reach package.json — nor do `pnpm up` and
+    // `pnpm upgrade`, which pnpm documents as aliases of `update`.
     seedPackageJson(UPSTREAM_SCRIPTS);
 
     seedPackageJson({ ...UPSTREAM_SCRIPTS, "setup:restore": "./scripts/setup:restore" });
 
     for (const [id, script] of [
       ["setup", "bootstrap"],
-      ["update", "upgrade"],
+      ["update", "sync"],
       ["setup:restore", "setup:restore"],
     ] as const) {
       execMock.mockClear();

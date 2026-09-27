@@ -235,24 +235,25 @@ describe("scripts/pm toolchain resolution", () => {
   }, 30000);
 
   it("pm_in spells an explicit run so a pnpm built-in cannot shadow the script", () => {
-    // `setup`, `update` and `restart` are pnpm's own subcommands. The bare
-    // `pnpm -C <dir> <script>` shorthand never falls through to package.json for
-    // them — `pnpm -C . setup` edits the user's shell rc, `update` rewrites the
-    // lockfile — so pm_in must always say `run`.
+    // `setup`, `update` and `restart` are pnpm's own subcommands, and `up` and
+    // `upgrade` are aliases of `update`. The bare `pnpm -C <dir> <script>`
+    // shorthand never falls through to package.json for them — `pnpm -C . setup`
+    // edits the user's shell rc, `update` rewrites the lockfile — so pm_in must
+    // always say `run`.
     const withPnpm = join(sandbox, "with-pnpm");
     stub(withPnpm, "node");
     stub(withPnpm, "pnpm");
     stub(withPnpm, "npm");
     writeLocalEnv(`PAVILIO_NODE_BIN="${withPnpm}"`);
 
-    const body = ["pm_resolve || exit 1", "pm_in . bootstrap", "pm_in . upgrade"].join("\n");
+    const body = ["pm_resolve || exit 1", "pm_in . bootstrap", "pm_in . sync"].join("\n");
     const { status, output } = runHarness(body);
 
     expect(status).toBe(0);
     expect(output).toContain("pnpm -C . run bootstrap");
-    expect(output).toContain("pnpm -C . run upgrade");
+    expect(output).toContain("pnpm -C . run sync");
     // Never the shorthand: that is the spelling pnpm claims for itself.
-    expect(output).not.toMatch(/pnpm -C \. (bootstrap|upgrade)\b/);
+    expect(output).not.toMatch(/pnpm -C \. (bootstrap|sync)\b/);
   }, 30000);
 
   it("pm_install installs dependencies with pnpm -C and npm --prefix, not a run script", () => {

@@ -475,11 +475,11 @@ remotes_step() {
       # Someone else's remote that happens to be called `upstream` — a team
       # repository they fetch from and push to. Nothing here is ours to rewrite,
       # and nothing here converges either: scripts/update.sh pulls `upstream`
-      # unconditionally, so the next `pnpm upgrade` would rebase that repository
+      # unconditionally, so the next `pnpm sync` would rebase that repository
       # into this clone. A ✓ would be a green tick on exactly that. Same
       # treatment as the canonical-origin-plus-upstream state above — a skip
       # with a fix that renames rather than deletes.
-      echo "'upstream' is not the Pavilio repository, and 'pnpm upgrade' pulls 'upstream' unconditionally — it would rebase that repository into this clone. Move it aside under any free name — '$FREE_REMOTE_NAME' below is just a suggestion — and rerun; nothing is deleted." >&2
+      echo "'upstream' is not the Pavilio repository, and 'pnpm sync' pulls 'upstream' unconditionally — it would rebase that repository into this clone. Move it aside under any free name — '$FREE_REMOTE_NAME' below is just a suggestion — and rerun; nothing is deleted." >&2
       step_skip "remotes" \
         "upstream is not the canonical repo — run: git remote rename upstream $FREE_REMOTE_NAME && pnpm bootstrap"
       return 0
