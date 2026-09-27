@@ -15,6 +15,11 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
 # Default: sibling directory named pavilio
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Whether the caller named an upstream directory matters on its own, separately
+# from what the default resolves to: an explicit path is a decision, the default
+# is only a guess.
+UPSTREAM_DIR_GIVEN=0
+[ "$#" -gt 0 ] && [ -n "${1:-}" ] && UPSTREAM_DIR_GIVEN=1
 UPSTREAM_DIR="${1:-"$SCRIPT_DIR/../../pavilio"}"
 
 # Toolchain resolution is shared with the launcher and the setup scripts, so an
@@ -27,6 +32,11 @@ UPSTREAM_DIR="${1:-"$SCRIPT_DIR/../../pavilio"}"
 . "$SCRIPT_DIR/pm" || exit 1
 pm_resolve || exit 1
 
+# is_canonical_remote / repo_is_pavilio_clone — the same normalisation
+# scripts/bootstrap uses when it decides which remotes are ours.
+# shellcheck source=scripts/remotes
+. "$SCRIPT_DIR/remotes" || exit 1
+
 # How to re-run the panel steps by hand, in the same spelling the run itself uses.
 if [ "$PM" = "pnpm" ]; then
   PANEL_INSTALL_CMD="pnpm -C \"$REPO_ROOT/panel\" install"
@@ -36,13 +46,30 @@ else
   PANEL_BUILD_CMD="npm --prefix \"$REPO_ROOT/panel\" run build"
 fi
 
-# Clone mode: the workspace *is* a pavilio clone, so the default sibling path
-# resolves back onto the repo itself and there is no separate tree to mirror from.
-# The update is then a rebase onto the `upstream` remote rather than an rsync —
-# and the notes in the tree are the user's own commits, not machine-generated
-# mirror output, so nothing here commits on their behalf either.
+# Clone mode: the workspace *is* a pavilio clone, so there is no separate tree to
+# mirror from. The update is then a rebase onto the `upstream` remote rather than
+# an rsync — and the notes in the tree are the user's own commits, not
+# machine-generated mirror output, so nothing here commits on their behalf either.
+#
+# Which mode applies is a question about THIS repository, not about what a
+# sibling directory happens to be called. It used to be answered by comparing the
+# default upstream path — `../pavilio` — against the repo root, which meant clone
+# mode engaged only for a checkout whose own directory was literally named
+# `pavilio`. The README's Quick Start says
+# `git clone …/pavilio.git my-workspace`, so every user who followed the
+# documented instructions got `Error: upstream repo not found at …/../pavilio`
+# from the update command and no way to tell why.
+#
+# So: no upstream directory named on the command line, and a remote that reduces
+# to the canonical pavilio repository → clone mode. An explicit path still means
+# sync mode, except when it points back at this very repository, which has only
+# ever meant "update in place".
 CLONE_MODE=0
-if [ "$(readlink -f "$UPSTREAM_DIR")" = "$(readlink -f "$REPO_ROOT")" ]; then
+if [ "$UPSTREAM_DIR_GIVEN" = 0 ]; then
+  if repo_is_pavilio_clone "$REPO_ROOT"; then
+    CLONE_MODE=1
+  fi
+elif [ "$(readlink -f "$UPSTREAM_DIR")" = "$(readlink -f "$REPO_ROOT")" ]; then
   CLONE_MODE=1
 fi
 
@@ -50,7 +77,17 @@ if [ "$CLONE_MODE" = 0 ] && [ ! -d "$UPSTREAM_DIR/.git" ]; then
   echo "Error: upstream repo not found at $UPSTREAM_DIR"
   echo "Usage: $0 [/path/to/pavilio]"
   echo ""
-  echo "Clone it first: git clone git@github.com:gmotyl/pavilio.git"
+  # Neither shape applies, so say what was ruled out on both sides: there is no
+  # sibling clone to mirror from, and this repository does not track pavilio
+  # itself either. Without the second half the reader is told to go and clone a
+  # directory they may not need at all.
+  if [ "$UPSTREAM_DIR_GIVEN" = 0 ]; then
+    echo "$REPO_ROOT has no remote pointing at $CANONICAL_HTTPS, so it is not a pavilio clone."
+    echo "Either pass the path of a pavilio clone to mirror from, or clone one beside this workspace:"
+  else
+    echo "Clone it first:"
+  fi
+  echo "  git clone $CANONICAL_HTTPS"
   exit 1
 fi
 

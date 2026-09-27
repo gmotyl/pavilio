@@ -44,6 +44,8 @@ import { join, resolve } from "node:path";
 const REPO_ROOT = resolve(__dirname, "../../..");
 const BOOTSTRAP = join(REPO_ROOT, "scripts", "bootstrap");
 const PM_LIB = join(REPO_ROOT, "scripts", "pm");
+/** scripts/bootstrap also sources scripts/remotes for the canonical-remote check. */
+const REMOTES_LIB = join(REPO_ROOT, "scripts", "remotes");
 
 /** Absolute, because the script runs on a PATH that could not resolve `bash`. */
 const BASH =
@@ -196,6 +198,7 @@ function makeRepo(dir: string, originUrl?: string): string {
   mkdirSync(join(dir, "panel"), { recursive: true });
   copyFileSync(BOOTSTRAP, join(dir, "scripts", "bootstrap"));
   copyFileSync(PM_LIB, join(dir, "scripts", "pm"));
+  copyFileSync(REMOTES_LIB, join(dir, "scripts", "remotes"));
   spawnSync("chmod", ["755", join(dir, "scripts", "bootstrap")]);
   writeFileSync(join(dir, "AGENTS.md.example"), "# Example registry\n\n- seeded\n");
   writeFileSync(join(dir, "panel", "package.json"), '{"name":"panel"}\n');

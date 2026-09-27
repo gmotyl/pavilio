@@ -424,11 +424,14 @@ pnpm pull                                 # or: bash scripts/update.sh [/path/to
 ```
 
 `scripts/update.sh` has two modes and chooses between them itself, by asking
-whether the workspace and the upstream clone are the same directory:
+whether the workspace it is running in is a pavilio clone — read from its
+remotes, not from what the directory is called, so the Quick Start's
+`my-workspace` is recognised as readily as a folder named `pavilio`:
 
-- **Clone mode** — the workspace *is* a pavilio clone (the Quick Start shape).
-  It rebases your commits onto `upstream/main` and commits nothing on your
-  behalf: the tracked files there are your own work.
+- **Clone mode** — the workspace *is* a pavilio clone (the Quick Start shape):
+  `upstream` (or, before `pnpm bootstrap` has run, `origin`) points at pavilio
+  itself. It rebases your commits onto `upstream/main` and commits nothing on
+  your behalf: the tracked files there are your own work.
 - **Sync mode** — the workspace is a separate repository with a pavilio clone as
   its sibling (the shape above). It fast-forwards that clone to `origin/main`,
   then **rsyncs** `panel/`, `skills/`, `scripts/` and — when the upstream has one
@@ -436,7 +439,8 @@ whether the workspace and the upstream clone are the same directory:
   `chore(sync): pavilio upstream @ <sha>`. Only `panel/` is mirrored with
   `--delete`, so modules retired upstream disappear here too; `skills/`,
   `scripts/` and `commands/` keep whatever you added downstream. Pass the clone's
-  path as an argument when it is not the sibling directory named `pavilio`.
+  path as an argument when it is not the sibling directory named `pavilio` — an
+  explicit path always means sync mode, whatever the workspace's own remotes say.
 
 Both modes then reinstall the panel's dependencies, regenerate the agent
 slash-commands and rebuild the served bundle. Neither one restarts a running

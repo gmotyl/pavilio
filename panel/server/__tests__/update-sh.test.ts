@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 /**
  * scripts/update.sh derives SCRIPT_DIR from $0 and REPO_ROOT from its parent, so a
@@ -24,6 +24,10 @@ const UPDATE_SH = resolve(__dirname, "../../../scripts/update.sh");
 // update.sh sources its sibling scripts/pm for the toolchain, so the sandbox copy
 // needs it next to the script.
 const PM_SH = resolve(__dirname, "../../../scripts/pm");
+// …and scripts/remotes, which is how it recognises a pavilio clone.
+const REMOTES_SH = resolve(__dirname, "../../../scripts/remotes");
+/** The canonical pavilio URL, exactly as scripts/remotes defines it. */
+const CANONICAL_UPSTREAM_URL = "https://github.com/gmotyl/pavilio.git";
 
 let sandbox: string;
 let upstream: string;
@@ -55,8 +59,16 @@ function currentBranch(): string {
   return git(upstream, "rev-parse", "--abbrev-ref", "HEAD");
 }
 
-function runUpdate(extraEnv: Record<string, string> = {}, upstreamArg: string = upstream) {
-  const res = spawnSync("bash", [join(dest, "scripts", "update.sh"), upstreamArg], {
+/**
+ * `upstreamArg: null` runs the script with NO positional upstream directory —
+ * the spelling `pnpm pull` uses, and the only one a Quick Start user ever types.
+ */
+function runUpdate(
+  extraEnv: Record<string, string> = {},
+  upstreamArg: string | null = upstream,
+) {
+  const argv = [join(dest, "scripts", "update.sh"), ...(upstreamArg === null ? [] : [upstreamArg])];
+  const res = spawnSync("bash", argv, {
     encoding: "utf8",
     env: { ...gitEnv(), PATH: `${stubBin}:${process.env.PATH ?? ""}`, ...extraEnv },
   });
@@ -102,22 +114,45 @@ function destStatus(): string {
 
 /**
  * Turn the destination into a pavilio *clone* — the same repo update.sh is run
- * from — with `upstream` pointing at the bare origin. Clone mode is selected by
- * the upstream directory resolving to the repo itself, so these runs pass `dest`
- * as the argument. The script and pm are re-copied after the clone and stay
- * untracked, which is what a real clone of a workspace-less checkout looks like
- * here: origin's scripts/ never carries them, so they cannot collide on a rebase.
+ * from — the shape `git clone …/pavilio.git my-workspace && pnpm bootstrap`
+ * leaves behind: an `upstream` remote spelled with the canonical pavilio URL,
+ * and a directory name that has nothing to do with it.
+ *
+ * `upstream` therefore carries the real URL, which is what selects clone mode,
+ * while a sandbox-local `insteadOf` rewrite sends every fetch to the bare repo
+ * next door. Nothing here can reach the network: the rewrite is set in this
+ * clone's own config, and the canonical URL is never contacted.
+ *
+ * The script and its two sourced libraries are re-copied after the clone and
+ * stay untracked, which is what a real clone of a workspace-less checkout looks
+ * like here: origin's scripts/ never carries them, so they cannot collide on a
+ * rebase.
  */
-function initCloneRepo() {
+function initCloneRepo({ canonicalUpstream = true }: { canonicalUpstream?: boolean } = {}) {
   writePanelFixture(SUCCEEDING_BUILD);
   commitUpstream("panel build succeeds");
   rmSync(dest, { recursive: true, force: true });
   git(sandbox, "clone", "--quiet", origin, dest);
   git(dest, "remote", "rename", "origin", "upstream");
-  mkdirSync(join(dest, "scripts"), { recursive: true });
-  copyFileSync(UPDATE_SH, join(dest, "scripts", "update.sh"));
-  copyFileSync(PM_SH, join(dest, "scripts", "pm"));
-  writeFileSync(join(dest, ".git", "info", "exclude"), "scripts/update.sh\nscripts/pm\n");
+  if (canonicalUpstream) {
+    git(dest, "remote", "set-url", "upstream", CANONICAL_UPSTREAM_URL);
+    git(dest, "config", `url.${origin}.insteadOf`, CANONICAL_UPSTREAM_URL);
+  }
+  copyScriptsInto(dest);
+}
+
+/** The scripts/ files update.sh needs beside it, and the ignore entry for them. */
+function copyScriptsInto(repo: string) {
+  mkdirSync(join(repo, "scripts"), { recursive: true });
+  copyFileSync(UPDATE_SH, join(repo, "scripts", "update.sh"));
+  copyFileSync(PM_SH, join(repo, "scripts", "pm"));
+  copyFileSync(REMOTES_SH, join(repo, "scripts", "remotes"));
+  if (existsSync(join(repo, ".git", "info"))) {
+    writeFileSync(
+      join(repo, ".git", "info", "exclude"),
+      "scripts/update.sh\nscripts/pm\nscripts/remotes\n",
+    );
+  }
 }
 
 // A build that fails on purpose. The sandbox has no node_modules, so the real
@@ -152,7 +187,11 @@ beforeEach(() => {
   sandbox = mkdtempSync(join(tmpdir(), "update-sh-"));
   home = join(sandbox, "home");
   upstream = join(sandbox, "upstream");
-  dest = join(sandbox, "dest");
+  // Named the way README's Quick Start names it (`git clone … my-workspace`) and
+  // emphatically NOT `pavilio`: clone mode used to be selected by comparing the
+  // repo root against a sibling path spelled `../pavilio`, so a sandbox whose
+  // checkout happened to be called `pavilio` would have hidden that bug.
+  dest = join(sandbox, "my-workspace");
   stubBin = join(sandbox, "stub-bin");
   mkdirSync(home, { recursive: true });
   mkdirSync(stubBin, { recursive: true });
@@ -182,9 +221,8 @@ beforeEach(() => {
   git(upstream, "push", "-q", "origin", "main");
 
   // The destination workspace: nothing but the script under test.
-  mkdirSync(join(dest, "scripts"), { recursive: true });
-  copyFileSync(UPDATE_SH, join(dest, "scripts", "update.sh"));
-  copyFileSync(PM_SH, join(dest, "scripts", "pm"));
+  mkdirSync(dest, { recursive: true });
+  copyScriptsInto(dest);
 });
 
 afterEach(() => {
@@ -440,27 +478,89 @@ describe("scripts/update.sh sync commit", () => {
 });
 
 describe("scripts/update.sh clone mode", () => {
-  it("selects clone mode when the upstream directory is the repository itself", () => {
+  it("selects clone mode from the canonical remote, in a directory not named pavilio", () => {
+    // The reported bug, exactly: the README's Quick Start is
+    // `git clone …/pavilio.git my-workspace`, and `pnpm pull` inside it used to
+    // look for a sibling directory literally named `pavilio`, find nothing, and
+    // die — so every install that followed the documented instructions had an
+    // update command that could never work. The identity of a clone is its
+    // remote, never the name somebody gave the folder.
     initCloneRepo();
+    expect(basename(dest), "the fixture must not be named pavilio").not.toBe("pavilio");
+    expect(existsSync(join(sandbox, "pavilio")), "no sibling clone exists here").toBe(false);
     const rsyncCalled = stubCommand("rsync");
 
-    const { status, output } = runUpdate({}, dest);
+    // No positional argument — the spelling `pnpm pull` uses.
+    const { status, output } = runUpdate({}, null);
 
     expect(status).toBe(0);
     expect(output).toMatch(/Updating in place \(clone mode\)/);
     // A clone has nothing to mirror from: the sync path must not run at all.
     expect(output).not.toMatch(/Syncing panel/);
     expect(existsSync(rsyncCalled)).toBe(false);
-    // A real install + build, same as the full-run clone case below.
   }, 120000);
 
-  it("refuses clone mode without an upstream remote and names pnpm bootstrap", () => {
-    initCloneRepo();
-    git(dest, "remote", "remove", "upstream");
+  it("still selects clone mode when the repository itself is passed as the upstream directory", () => {
+    // The pre-existing spelling — `bash scripts/update.sh "$(pwd)"`. Asking to
+    // mirror a tree onto itself has only ever meant "update in place", and the
+    // canonical-remote rule must not turn it into an rsync from self.
+    initCloneRepo({ canonicalUpstream: false });
+    const rsyncCalled = stubCommand("rsync");
 
     const { status, output } = runUpdate({}, dest);
 
+    expect(status).toBe(0);
+    expect(output).toMatch(/Updating in place \(clone mode\)/);
+    expect(existsSync(rsyncCalled)).toBe(false);
+  }, 120000);
+
+  it("stays in sync mode when a positional upstream directory is given", () => {
+    // A canonical remote does not outrank an explicit argument: a team workspace
+    // that happens to carry one still mirrors from the clone it was handed.
+    initDestRepo();
+    git(dest, "remote", "add", "upstream", CANONICAL_UPSTREAM_URL);
+    const rsyncCalled = stubCommand("rsync");
+
+    const { output } = runUpdate({}, upstream);
+
+    expect(output).not.toMatch(/clone mode/);
+    expect(output).toMatch(/Syncing panel/);
+    expect(existsSync(rsyncCalled)).toBe(true);
+  }, 120000);
+
+  it("fails usefully in a repo with no canonical remote and no argument", () => {
+    // Neither shape: not a pavilio clone, and no sibling clone to mirror from.
+    // The message has to name the path it looked for and how to supply one.
+    initDestRepo();
+    git(dest, "remote", "add", "origin", "https://github.com/acme/notes.git");
+
+    const { status, output } = runUpdate({}, null);
+
     expect(status).toBe(1);
+    expect(output).toMatch(/upstream repo not found/i);
+    expect(output).toMatch(/\/path\/to\/pavilio/);
+    // Both halves of why: no sibling clone to mirror from, and this repository
+    // is not a pavilio clone either. Without the second half the reader is sent
+    // to clone a directory they may not need.
+    expect(output).toContain(dest);
+    expect(output).toMatch(/not a pavilio clone/i);
+    expect(output).toContain(CANONICAL_UPSTREAM_URL);
+    expect(output).not.toMatch(/clone mode/);
+    expect(output).not.toMatch(/Syncing panel/);
+  }, 60000);
+
+  it("refuses clone mode without an upstream remote and names pnpm bootstrap", () => {
+    // A Quick Start clone that has not been bootstrapped yet: `origin` is still
+    // the canonical URL, so it is recognised as a clone, and the guard that
+    // tells the user to run `pnpm bootstrap` is the one that must fire — not a
+    // complaint about a sibling directory they were never told to create.
+    initCloneRepo();
+    git(dest, "remote", "rename", "upstream", "origin");
+
+    const { status, output } = runUpdate({}, null);
+
+    expect(status).toBe(1);
+    expect(output).toMatch(/Updating in place \(clone mode\)/);
     expect(output).toMatch(/No 'upstream' remote/);
     expect(output).toMatch(/pnpm bootstrap/);
     expect(output).not.toMatch(/panel bundle built/);
@@ -479,7 +579,7 @@ describe("scripts/update.sh clone mode", () => {
     commitUpstream("upstream moves on");
     const upstreamHead = git(upstream, "rev-parse", "HEAD");
 
-    const { status, output } = runUpdate({}, dest);
+    const { status, output } = runUpdate({}, null);
 
     expect(status).toBe(0);
     // The user's commit sits on top of upstream/main, unchanged and uncommitted-over.
@@ -496,7 +596,7 @@ describe("scripts/update.sh clone mode", () => {
     writeFileSync(join(upstream, "conflict.txt"), "theirs\n");
     commitUpstream("upstream conflicting edit");
 
-    const { status, output } = runUpdate({}, dest);
+    const { status, output } = runUpdate({}, null);
 
     expect(status).toBe(1);
     expect(output).toMatch(/conflict\.txt/);
@@ -514,7 +614,7 @@ describe("scripts/update.sh clone mode", () => {
     // is the silent half-update this step exists to prevent.
     const pnpmCalled = stubCommand("pnpm");
 
-    const { status, output } = runUpdate({}, dest);
+    const { status, output } = runUpdate({}, null);
 
     expect(status).toBe(0);
     expect(output).toMatch(/Installing panel dependencies/);
@@ -533,7 +633,7 @@ describe("scripts/update.sh clone mode", () => {
       ['for arg in "$@"; do', '  [ "$arg" = "install" ] && exit 1', "done", "exit 0"].join("\n"),
     );
 
-    const { status, output } = runUpdate({}, dest);
+    const { status, output } = runUpdate({}, null);
 
     expect(status).toBe(1);
     // The user is left rebased, so the message has to say so and say what to run.
@@ -559,7 +659,7 @@ describe("scripts/update.sh clone mode", () => {
     const sha = git(dest, "rev-parse", "--short", "HEAD");
     const subject = git(dest, "log", "-1", "--pretty=%s");
 
-    const { status, output } = runUpdate({}, dest);
+    const { status, output } = runUpdate({}, null);
 
     expect(status).toBe(0);
     expect(output).toContain(`Updated to ${sha} ${subject}.`);

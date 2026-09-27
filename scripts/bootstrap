@@ -32,12 +32,6 @@ set -u
 # The lowest Node the panel's dependencies (and this workspace's tooling) run on.
 MIN_NODE_MAJOR=22
 
-# The repository this script was shipped in: the URL it is added as, and the
-# host/path key that every spelling of it normalises down to. A remote that does
-# not reduce to that key belongs to the user.
-CANONICAL_HTTPS="https://github.com/gmotyl/pavilio.git"
-CANONICAL_KEY="github.com/gmotyl/pavilio"
-
 # The name suggested when a remote has to be moved out of `upstream`'s way. Any
 # free name converges; this one only has to make the advice pasteable.
 FREE_REMOTE_NAME="team"
@@ -168,6 +162,11 @@ run_sub() {
 # lands on the same interpreter this setup pinned.
 # shellcheck source=scripts/pm
 . "$script_dir/pm" || exit 1
+# $CANONICAL_HTTPS / $CANONICAL_KEY and the remote_key / is_canonical_remote
+# pair used by the remotes step below. Shared with scripts/update.sh, which asks
+# the same question — "is this the pavilio repository?" — of the same URLs.
+# shellcheck source=scripts/remotes
+. "$script_dir/remotes" || exit 1
 
 # pm_resolve fails for two different reasons and says the same thing about both:
 # no node at all, or a node with neither pnpm nor npm beside it. Only the first
@@ -360,54 +359,7 @@ fi
 # 5. remotes
 # ---------------------------------------------------------------------------
 
-# Reduce a remote URL to a comparable "host/path". The same repository is spelled
-# a dozen ways by the tools that clone it — `gh repo clone` and the GUI clients
-# emit ssh://, credential helpers embed a user, GitHub is case-insensitive, and a
-# trailing slash or .git is noise — and none of those differences change which
-# repository it is. What must NOT be folded away is the path itself:
-# gmotyl/pavilio-fork and gmotyl/pavilio-notes are different repositories.
-remote_key() {
-  local url="$1" host rest
-  case "$url" in
-    *://*)
-      url="${url#*://}"
-      ;;
-    *@*:*)
-      # scp-like syntax (git@github.com:owner/repo) carries no scheme; the colon
-      # is the separator the URL forms spell as a slash.
-      url="${url#*@}"
-      url="${url%%:*}/${url#*:}"
-      ;;
-  esac
-  host="${url%%/*}"
-  rest="${url#*/}"
-  [ "$rest" = "$url" ] && rest=""
-  # Credentials, then a port: neither is part of the repository's identity.
-  host="${host##*@}"
-  host="${host%%:*}"
-  url="$host${rest:+/$rest}"
-  while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
-  # Case-folded like everything above it: GitHub answers to `.GIT` as readily as
-  # to `github.com`, and a suffix that only strips in lower case would file a
-  # canonical origin spelled `…/Pavilio.GIT` as somebody's fork.
-  url="${url%[.][gG][iI][tT]}"
-  while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
-  printf '%s' "$url"
-}
-
-# Whole-key equality, case-insensitively — never a prefix or a substring match.
-is_canonical_remote() {
-  local key restore rc=1
-  key="$(remote_key "$1")"
-  [ -n "$key" ] || return 1
-  # `shopt -p` exits 1 when the option is unset — which is the normal case here.
-  # Harmless today, but it would abort the run under `set -e`, so say so.
-  restore="$(shopt -p nocasematch)" || true
-  shopt -s nocasematch
-  [[ "$key" == "$CANONICAL_KEY" ]] && rc=0
-  eval "$restore"
-  return "$rc"
-}
+# remote_key and is_canonical_remote live in scripts/remotes, sourced above.
 
 remotes_step() {
   # "Clone mode" only: a checkout unpacked from an archive has no remotes to
