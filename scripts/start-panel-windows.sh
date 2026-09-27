@@ -2,8 +2,14 @@
 # Pavilio panel launcher for Windows-WSL desktop shortcut.
 #
 # What it does on every launch:
-#   1. starts the panel (`npm start` backgrounds `pnpm -C panel start`, which
-#      serves the built bundle from panel/dist — see README "Windows desktop shortcut")
+#   0. resolves node/pnpm through scripts/pm. The shortcut runs this file with
+#      `bash -lc`, and a login shell reads none of the dotfiles that put nvm/fnm
+#      on PATH — so a bare `npm`/`pnpm` here dies with "command not found"
+#      before anything else has a chance to run. Nothing is started until this
+#      succeeds.
+#   1. starts the panel through scripts/panel, which owns the process (detached,
+#      logged, builds panel/dist when it is missing — see README "Windows
+#      desktop shortcut")
 #   2. waits for the panel to come up on 127.0.0.1
 #   3. (WSL2 only) ensures the Windows-side `netsh portproxy` entries forward
 #      each managed port on the host to the current WSL IP — prompts UAC
@@ -33,21 +39,44 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Sourced up front, before anything reads the per-host env file: pm owns the
+# path to that file (pm_local_env_path), and defines the toolchain resolver this
+# script calls below. Sourcing it has no side effects of its own — it only
+# defines functions — so PATH is untouched until pm_resolve actually runs.
+# shellcheck source=scripts/pm
+. "${SCRIPT_DIR}/pm" || exit 1
+
 PANEL_PORT="${PANEL_PORT:-3010}"
 PANEL_EXTRA_PORTS="${PANEL_EXTRA_PORTS:-}"
 
 # Per-host overrides (untracked, gitignored). Lets users add extra ports
 # without editing this upstream-managed script.
-if [ -f "${SCRIPT_DIR}/start-panel-windows.local.env" ]; then
-  # shellcheck disable=SC1091
-  . "${SCRIPT_DIR}/start-panel-windows.local.env"
+#
+# Sourced exactly once, here, and only for this script's own settings
+# (PANEL_EXTRA_PORTS, PANEL_POST_LAUNCH_CMD, ...). pm reads the same file again
+# for PAVILIO_NODE_BIN, but in a subshell of its own — so the file is never
+# sourced twice into this shell, and the pin is still read by the code that
+# knows how to cope with the CRLF and BOM a Windows editor leaves behind.
+PANEL_LOCAL_ENV="$(pm_local_env_path)"
+if [ -f "$PANEL_LOCAL_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$PANEL_LOCAL_ENV"
 fi
 
 BASE="http://127.0.0.1:${PANEL_PORT}"
 
 cd "${SCRIPT_DIR}/.."
 
-npm start
+# Find node/pnpm before anything is started. pm_resolve says what to do about it
+# when there is nothing to find, so the shortcut window carries a fix rather
+# than a bare "command not found".
+pm_resolve || exit 1
+
+# scripts/panel owns the process: detached, logged, and building panel/dist when
+# it is missing. Called directly rather than through `npm start` — `npm` is the
+# thing that may not exist here, and the root script is only a wrapper around
+# this same file.
+"${SCRIPT_DIR}/panel" start
 
 echo
 printf 'Waiting for panel'
