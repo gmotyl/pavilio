@@ -1,0 +1,196 @@
+// Workspace Actions are whatever the workspace itself can actually run.
+//
+// The panel used to ship a hard-coded list of `pnpm run …` invocations that only
+// existed in the maintainer's private workspace, so on a fresh upstream clone
+// every button in Settings → Workspace Actions failed. The catalogue below lives
+// on the server and is intersected with the `scripts` block of the workspace
+// root's own package.json: an action is offered only when the workspace defines
+// the script behind it.
+//
+// Nothing here spawns anything. `node:child_process` is replaced wholesale by a
+// vi.fn(), so a regression that shells out on the validation path fails loudly
+// (the callback is never invoked, the request hangs) rather than running a real
+// setup script against this machine. The workspace root is a fresh temp dir per
+// case, so the real package.json is never read either.
+
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import express from "express";
+import request from "supertest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+
+let tmpRoot = "";
+let projectsDir = "";
+let workspaceRoot = "";
+
+vi.mock("../../config", () => ({
+  getConfig: () => ({ projectsDir }),
+}));
+vi.mock("node:child_process", () => ({
+  exec: vi.fn(),
+}));
+
+import { exec } from "node:child_process";
+import agentSettingsRouter from "../agent-settings";
+
+const execMock = vi.mocked(exec);
+
+/** Let a run succeed without a process: answer the callback the route passed. */
+function execSucceedsOnce(stdout = "done"): void {
+  execMock.mockImplementationOnce(((
+    _cmd: string,
+    _opts: unknown,
+    cb: (err: Error | null, stdout: string, stderr: string) => void,
+  ) => {
+    cb(null, stdout, "");
+    return undefined;
+  }) as never);
+}
+
+function makeApp() {
+  const app = express();
+  app.use(express.json());
+  app.use("/api/agent-settings", agentSettingsRouter);
+  return app;
+}
+
+/** The scripts an upstream clone of pavilio defines, verbatim in spirit. */
+const UPSTREAM_SCRIPTS: Record<string, string> = {
+  setup: "./scripts/setup",
+  "setup:shortcut": "./scripts/setup:shortcut",
+  "setup:codex": "./scripts/setup:codex",
+  "setup:claude-code": "./scripts/setup:claude-code",
+  "setup:opencode": "./scripts/setup:opencode",
+  "install:speech": "./scripts/install:speech",
+  update: "bash scripts/update.sh",
+  start: "./scripts/panel start",
+  stop: "./scripts/panel stop",
+  status: "./scripts/panel status",
+};
+
+function seedPackageJson(scripts: Record<string, string>): void {
+  writeFileSync(
+    join(workspaceRoot, "package.json"),
+    JSON.stringify({ name: "workspace-under-test", scripts }),
+  );
+}
+
+async function listedActionIds(): Promise<string[]> {
+  const res = await request(makeApp()).get("/api/agent-settings/actions");
+  expect(res.status).toBe(200);
+  return (res.body as Array<{ id: string }>).map((a) => a.id);
+}
+
+beforeEach(() => {
+  tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-agent-actions-"));
+  workspaceRoot = tmpRoot;
+  projectsDir = join(tmpRoot, "projects");
+  mkdirSync(projectsDir, { recursive: true });
+  execMock.mockReset();
+});
+
+afterEach(() => {
+  rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+describe("GET /api/agent-settings/actions", () => {
+  it("lists only allowlisted actions the workspace package.json defines", async () => {
+    seedPackageJson(UPSTREAM_SCRIPTS);
+
+    expect(await listedActionIds()).toEqual([
+      "setup",
+      "update",
+      "init:claude",
+      "init:opencode",
+      "init:codex",
+      "install:speech",
+    ]);
+
+    // Scripts the workspace defines but the catalogue does not describe stay out.
+    const res = await request(makeApp()).get("/api/agent-settings/actions");
+    const scripts = (res.body as Array<{ script: string }>).map((a) => a.script);
+    expect(scripts).not.toContain("setup:shortcut");
+    expect(scripts).not.toContain("start");
+
+    // Every entry carries the copy the UI shows; nothing is left for the client.
+    for (const action of res.body as Array<Record<string, string>>) {
+      expect(action.label.length).toBeGreaterThan(0);
+      expect(action.description.length).toBeGreaterThan(10);
+    }
+  });
+
+  it("appends workspace-specific backup and restore actions when defined", async () => {
+    seedPackageJson({
+      ...UPSTREAM_SCRIPTS,
+      "setup:backup": "./scripts/setup:backup",
+      "setup:restore": "./scripts/setup:restore",
+    });
+
+    expect(await listedActionIds()).toEqual([
+      "setup",
+      "update",
+      "init:claude",
+      "init:opencode",
+      "init:codex",
+      "install:speech",
+      "setup:backup",
+      "setup:restore",
+    ]);
+  });
+});
+
+describe("POST /api/agent-settings/run-action", () => {
+  it("rejects an unknown action id with 400 before spawning", async () => {
+    seedPackageJson(UPSTREAM_SCRIPTS);
+
+    const res = await request(makeApp())
+      .post("/api/agent-settings/run-action")
+      .send({ action: "setup; rm -rf /" });
+
+    expect(res.status).toBe(400);
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a defined-in-catalogue but undefined-in-workspace action with 404", async () => {
+    // An upstream clone has no backup/restore scripts, but the id is a real one.
+    seedPackageJson(UPSTREAM_SCRIPTS);
+
+    const res = await request(makeApp())
+      .post("/api/agent-settings/run-action")
+      .send({ action: "setup:backup" });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("Script setup:backup not defined in package.json");
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it("runs an action through scripts/pm rather than a hard-coded pnpm", async () => {
+    seedPackageJson(UPSTREAM_SCRIPTS);
+    execSucceedsOnce("claude commands synced");
+
+    const res = await request(makeApp())
+      .post("/api/agent-settings/run-action")
+      .send({ action: "init:claude" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.output).toBe("claude commands synced");
+
+    expect(execMock).toHaveBeenCalledTimes(1);
+    const [command, options] = execMock.mock.calls[0] as [string, { cwd?: string; timeout?: number; shell?: string }];
+
+    // The toolchain is resolved by the workspace's own resolver, not assumed.
+    expect(command).toContain(". scripts/pm");
+    expect(command).toContain("pm_resolve");
+    expect(command).toContain("pm_in . setup:claude-code");
+    // The id is not the script; nothing hard-codes a package manager.
+    expect(command).not.toMatch(/\bpnpm\b/);
+    expect(command).not.toMatch(/\bnpm\b/);
+
+    expect(options.cwd).toBe(workspaceRoot);
+    expect(options.timeout).toBe(120_000);
+    // `scripts/pm` is bash, and exec's default shell is /bin/sh.
+    expect(options.shell).toMatch(/bash$/);
+  });
+});

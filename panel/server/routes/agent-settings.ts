@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { exec } from "child_process";
+// `node:` prefixed so a suite's `vi.mock("node:child_process")` intercepts it.
+import { exec } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { resolve } from "path";
@@ -129,23 +130,145 @@ router.post("/write", (req, res) => {
   res.json({ path: resolved, size: stat.size, modified: stat.mtimeMs });
 });
 
-const ALLOWED_ACTIONS = new Set(["init:claude", "init:opencode", "setup:backup", "setup:restore"]);
+/**
+ * One Workspace Action, described once — here.
+ *
+ * The panel used to carry this list in the React component as a set of
+ * `pnpm run <id>` strings, and half of them named scripts that only ever
+ * existed in the maintainer's private workspace: on a fresh upstream clone
+ * every button in Settings → Workspace Actions failed. So the catalogue moved
+ * server-side, where it can be intersected with what the workspace's own
+ * package.json actually defines, and the component renders whatever it is given.
+ *
+ * `id` is the stable handle the client posts back; `script` is the package
+ * script it maps to. They differ where the button's name and the script's name
+ * have drifted apart (`init:claude` → `setup:claude-code`).
+ */
+export interface WorkspaceAction {
+  id: string;
+  script: string;
+  label: string;
+  description: string;
+}
+
+/** The order here is the order the Settings page shows them in. */
+export const WORKSPACE_ACTIONS: WorkspaceAction[] = [
+  {
+    id: "setup",
+    script: "setup",
+    label: "Setup workspace",
+    description:
+      "Runs the one-shot workspace setup: installs the panel's dependencies, resolves a node/pnpm toolchain, and writes the per-host launcher config. Idempotent — safe to re-run on an already-working clone.",
+  },
+  {
+    id: "update",
+    script: "update",
+    label: "Update",
+    description:
+      "Pulls the latest pavilio, reinstalls dependencies and rebuilds the panel. The panel still has to be restarted afterwards for the new build to be served.",
+  },
+  {
+    id: "init:claude",
+    script: "setup:claude-code",
+    label: "Init Claude",
+    description:
+      "Installs this workspace's skills (skills/*/SKILL.md) as Claude Code slash commands under .claude/commands/, so they are invocable from any session started here.",
+  },
+  {
+    id: "init:opencode",
+    script: "setup:opencode",
+    label: "Init OpenCode",
+    description:
+      "Installs this workspace's skills and commands for OpenCode — symlinks under ~/.claude/skills/ plus .opencode/commands/ — so the same slash commands work there as in Claude Code.",
+  },
+  {
+    id: "init:codex",
+    script: "setup:codex",
+    label: "Init Codex",
+    description:
+      "Installs this workspace's skills as Codex prompts and wires up its hooks, so Codex sessions started here share the same commands as the other agents.",
+  },
+  {
+    id: "install:speech",
+    script: "install:speech",
+    label: "Install speech",
+    description:
+      "Installs the speech hook into your agent configs, so a finished turn is spoken aloud and its answer is forwarded to the panel.",
+  },
+  {
+    id: "setup:backup",
+    script: "setup:backup",
+    label: "Backup Configs",
+    description:
+      "Copies your Claude Code, OpenCode and Kilo Code configuration into backup-git/dotfiles/, then commits and pushes it. Read-only with respect to your live configs — safe to run at any time.",
+  },
+  {
+    id: "setup:restore",
+    script: "setup:restore",
+    label: "Restore & Bootstrap",
+    description:
+      "Full machine bootstrap: clones the registered repositories and restores .env files, dotfiles and every agent config from backup-git/dotfiles/. Existing files are skipped unless --force is passed.",
+  },
+];
+
+/** Long-running actions, in milliseconds. Everything else gets two minutes. */
+const LONG_RUNNING_MS = 300_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
+const LONG_RUNNING_IDS = new Set(["setup", "update", "setup:restore"]);
+
+/** The workspace above `projects/` — never the panel directory. */
+function workspaceRoot(): string {
+  const { projectsDir } = getConfig();
+  return resolve(projectsDir, "..");
+}
+
+/** The script names the workspace's own package.json defines, if any. */
+function definedScripts(root: string): Set<string> {
+  const pkgPath = resolve(root, "package.json");
+  if (!existsSync(pkgPath)) return new Set();
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { scripts?: Record<string, string> };
+    return new Set(Object.keys(pkg.scripts ?? {}));
+  } catch {
+    // A workspace whose package.json will not parse offers no actions rather
+    // than taking the whole Settings page down with it.
+    return new Set();
+  }
+}
+
+router.get("/actions", (_req, res) => {
+  const defined = definedScripts(workspaceRoot());
+  res.json(WORKSPACE_ACTIONS.filter((action) => defined.has(action.script)));
+});
 
 router.post("/run-action", (req, res) => {
   const { action } = req.body as { action?: string };
-  if (!action || !ALLOWED_ACTIONS.has(action)) {
+  // The request only ever selects a catalogue entry; nothing it sends reaches
+  // the shell. The command below is built from `entry.script`, which is a
+  // literal in this file, so the injection surface is structural, not a matter
+  // of how well the id was validated.
+  const entry = WORKSPACE_ACTIONS.find((candidate) => candidate.id === action);
+  if (!entry) {
     return res.status(400).json({ error: "Unknown action" });
   }
 
-  const { projectsDir } = getConfig();
-  const workspaceRoot = resolve(projectsDir, "..");
-  if (!existsSync(resolve(workspaceRoot, "package.json"))) {
+  const root = workspaceRoot();
+  if (!existsSync(resolve(root, "package.json"))) {
     return res.status(404).json({ error: "No package.json found in workspace root" });
   }
+  if (!definedScripts(root).has(entry.script)) {
+    return res.status(404).json({ error: `Script ${entry.script} not defined in package.json` });
+  }
 
-  const timeout = action === "setup:restore" ? 300_000 : 120_000;
+  const timeout = LONG_RUNNING_IDS.has(entry.id) ? LONG_RUNNING_MS : DEFAULT_TIMEOUT_MS;
 
-  exec(`pnpm run ${action}`, { cwd: workspaceRoot, timeout }, (err, stdout, stderr) => {
+  // `scripts/pm` is the workspace's own toolchain resolver: it finds a node and
+  // decides between pnpm and npm. Hard-coding `pnpm` here is exactly what broke
+  // these buttons on machines that only have npm, or whose pnpm is behind a
+  // version manager the panel's own environment never loaded.
+  const command = `. scripts/pm && pm_resolve && pm_in . ${entry.script}`;
+
+  exec(command, { cwd: root, timeout, shell: "/bin/bash" }, (err, stdout, stderr) => {
     const output = [stdout, stderr].filter(Boolean).join("\n").trim();
     if (err?.killed) {
       return res.status(504).json({ ok: false, output: "Action timed out" });
