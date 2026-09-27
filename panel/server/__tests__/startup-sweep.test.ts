@@ -31,6 +31,9 @@ vi.mock("../config.js", () => ({
     tlsCert: undefined,
     tlsKey: undefined,
   })),
+  // Nothing named a port here, so the auto-increment path applies — the same
+  // one every case in this file has always taken.
+  isPortExplicit: vi.fn(() => false),
 }));
 
 vi.mock("../lib/auth.js", () => ({

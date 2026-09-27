@@ -26,6 +26,17 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=scripts/pm
 . "$SCRIPT_DIR/pm" || exit 1
 
+# A PANEL_PORT that came from the environment is *exported* onward to the panel,
+# which now treats it as an address it may not move off (panel/server/config.ts).
+# The 3010 default below is deliberately not exported: it is this script's guess,
+# and exporting it would override a port set in panel/panel.config.local.ts and
+# turn every such workspace into a hard failure.
+if [ -n "${PANEL_PORT:-}" ]; then
+  PANEL_PORT_REQUESTED=1
+  export PANEL_PORT
+else
+  PANEL_PORT_REQUESTED=0
+fi
 PANEL_PORT="${PANEL_PORT:-3010}"
 PANEL_URL="http://localhost:$PANEL_PORT"
 LOG_REL="panel/.panel.log"
@@ -42,30 +53,58 @@ POLL_INTERVAL=0.25
 # Is anything accepting connections on the panel port? A bash builtin, so this
 # works with no lsof, no ss and no node — and it answers the question that
 # actually matters (can a browser reach the panel), not "does a pidfile exist".
+# Takes a port; defaults to $PANEL_PORT. The argument exists for the one case
+# that has to ask about a port this script was not told about — a panel that
+# auto-incremented off a busy one and landed elsewhere.
 panel_port_open() {
-  (exec 3<>"/dev/tcp/127.0.0.1/$PANEL_PORT") 2>/dev/null
+  (exec 3<>"/dev/tcp/127.0.0.1/${1:-$PANEL_PORT}") 2>/dev/null
 }
 
 # The pid(s) listening on the panel port, newline separated, empty when none.
 # Three probes because no single one of them is everywhere: lsof is the usual
 # answer, ss ships with iproute2 on minimal images, fuser is the last resort.
 panel_listener_pids() {
-  local pids=""
+  local p="${1:-$PANEL_PORT}" pids=""
   if command -v lsof >/dev/null 2>&1; then
-    pids="$(lsof -ti "tcp:$PANEL_PORT" -sTCP:LISTEN 2>/dev/null)"
+    pids="$(lsof -ti "tcp:$p" -sTCP:LISTEN 2>/dev/null)"
   fi
   if [ -z "$pids" ] && command -v ss >/dev/null 2>&1; then
-    pids="$(ss -ltnpH "sport = :$PANEL_PORT" 2>/dev/null |
+    pids="$(ss -ltnpH "sport = :$p" 2>/dev/null |
       grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u)"
   fi
   if [ -z "$pids" ] && command -v fuser >/dev/null 2>&1; then
-    pids="$(fuser -n tcp "$PANEL_PORT" 2>/dev/null | tr -s ' ' '\n' | grep '[0-9]')"
+    pids="$(fuser -n tcp "$p" 2>/dev/null | tr -s ' ' '\n' | grep '[0-9]')"
   fi
   printf '%s' "$pids"
 }
 
 panel_first_pid() {
-  panel_listener_pids | head -n 1
+  panel_listener_pids "${1:-$PANEL_PORT}" | head -n 1
+}
+
+# The port the panel reported binding during THIS run, read back out of the log.
+#
+# panel-server.ts prints `Panel bound to http://127.0.0.1:<port> (loopback only)`
+# once it is listening, and cmd_start appends a `--- panel start … ---` marker
+# before every launch — so the last such line after the last marker is this
+# run's, and an older line from a previous start can never be mistaken for it.
+#
+# Builtins only, like the rest of this file: the log can be read without awk.
+panel_logged_port() {
+  [ -f "$LOG_FILE" ] || return 1
+  local line found="" port
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "--- panel start "*) found="" ;;
+      *"Panel bound to "*) found="$line" ;;
+    esac
+  done <"$LOG_FILE"
+  [ -n "$found" ] || return 1
+  # "…://127.0.0.1:3011 (loopback only)" → "3011".
+  port="${found##*:}"
+  port="${port%%[!0-9]*}"
+  [ -n "$port" ] || return 1
+  printf '%s' "$port"
 }
 
 # Poll a predicate until it holds or the deadline passes. `$1` is the command,
@@ -136,7 +175,33 @@ cmd_start() {
   printf 'Starting panel'
   if ! panel_wait_for panel_port_open "$START_TIMEOUT"; then
     echo
+    # Before declaring a failure: the panel may be up and simply not *here*.
+    # panel-server.ts auto-increments off a busy port whenever the port was
+    # configured rather than named in PANEL_PORT, so the panel this script just
+    # launched can be listening one port up. Reporting "it did not start" then
+    # is both false and dangerous — cmd_stop only ever looks at $PANEL_PORT, so
+    # that panel would keep running with nothing able to find it.
+    #
+    # It is adopted rather than killed: it came up, it is serving, and browser
+    # terminal sessions live inside it. Killing a healthy panel because this
+    # script guessed the wrong port would destroy work; naming the port, the pid
+    # and the command that reaches it costs the reader one line.
+    local landed
+    landed="$(panel_logged_port || true)"
+    if [ -n "$landed" ] && [ "$landed" != "$PANEL_PORT" ] && panel_port_open "$landed"; then
+      echo "panel started on port $landed, not $PANEL_PORT — something else is holding $PANEL_PORT."
+      echo "  reachable at http://localhost:$landed (pid $(panel_first_pid "$landed"), log: $LOG_REL)"
+      echo "  this script reads \$PANEL_PORT, so manage that panel with:"
+      echo "    PANEL_PORT=$landed $0 stop"
+      return 0
+    fi
     echo "Panel did not come up on port $PANEL_PORT within ${START_TIMEOUT}s." >&2
+    if [ "$PANEL_PORT_REQUESTED" = 1 ]; then
+      # A named port is passed through to the server, which refuses to relocate
+      # off it. So "nothing is listening here" is the honest end of the story —
+      # there is no second port to go looking on.
+      echo "PANEL_PORT=$PANEL_PORT was named explicitly, so the panel will not fall back to another port." >&2
+    fi
     echo "Last lines of $LOG_REL:" >&2
     tail -n 20 "$LOG_FILE" >&2 2>/dev/null
     return 1

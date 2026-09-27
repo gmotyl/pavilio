@@ -9,7 +9,7 @@ import { createServer as createHttpServer, type Server as HttpServer } from "htt
 import { createServer as createHttpsServer } from "https";
 import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
-import { loadConfig, getConfig } from "./config.js";
+import { loadConfig, getConfig, isPortExplicit } from "./config.js";
 import { loadPreferences } from "./lib/preferences-store.js";
 import {
   authMiddleware,
@@ -48,20 +48,40 @@ import { listSessions } from "./lib/terminal-manager.js";
 import { listOsUsers } from "./lib/os-users.js";
 
 /**
+ * Raised when the port the operator named by `PANEL_PORT` is already taken.
+ * Its own class so the entry points can print the instruction without a stack:
+ * the message is the whole of what the reader needs.
+ */
+export class PortUnavailableError extends Error {
+  constructor(public readonly port: number) {
+    super(
+      `PANEL_PORT=${port} is already in use, and a port you named is an address, not a preference — ` +
+        `refusing to move to another one.\n` +
+        `Stop whatever holds it (PANEL_PORT=${port} ./scripts/panel stop), or name a free port.`,
+    );
+    this.name = "PortUnavailableError";
+  }
+}
+
+/** Can this process bind `port` on loopback right now? */
+async function portIsFree(port: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const probe = createNetServer();
+    probe.once("error", () => resolve(false));
+    probe.listen(port, "127.0.0.1", () => {
+      probe.close(() => resolve(true));
+    });
+  });
+}
+
+/**
  * First port in `start..start+span-1` nothing else is listening on. Shared by
  * both entries — the serving entry needs one for the panel itself, the dev
  * entry needs a second one for Vite's HMR socket.
  */
 export async function findFreePort(start: number, span = 50): Promise<number> {
   for (let candidate = start; candidate < start + span; candidate++) {
-    const free = await new Promise<boolean>((resolve) => {
-      const probe = createNetServer();
-      probe.once("error", () => resolve(false));
-      probe.listen(candidate, "127.0.0.1", () => {
-        probe.close(() => resolve(true));
-      });
-    });
-    if (free) return candidate;
+    if (await portIsFree(candidate)) return candidate;
   }
   throw new Error(`No free port in ${start}..${start + span - 1}`);
 }
@@ -90,9 +110,21 @@ export async function startPanel(
   loadPreferences(getConfig().preferencesPath);
   rebuildIndex();
   const { port: configuredPort, tlsCert, tlsKey } = getConfig();
-  const port = await findFreePort(configuredPort);
-  if (port !== configuredPort) {
-    console.log(`Port ${configuredPort} in use, using ${port} instead.`);
+  // A configured port is a wish and may be stepped past; a port named in
+  // PANEL_PORT is an address that scripts/panel, `scripts/panel stop` and the
+  // Windows launcher are all already pointed at. Moving silently off that one
+  // is what left a panel running on 3011 that nothing could find or stop.
+  let port: number;
+  if (isPortExplicit()) {
+    if (!(await portIsFree(configuredPort))) {
+      throw new PortUnavailableError(configuredPort);
+    }
+    port = configuredPort;
+  } else {
+    port = await findFreePort(configuredPort);
+    if (port !== configuredPort) {
+      console.log(`Port ${configuredPort} in use, using ${port} instead.`);
+    }
   }
   const protocol = tlsCert && tlsKey ? "https" : "http";
 

@@ -37,6 +37,8 @@ let repo: string;
 let stubBin: string;
 let serverJs: string;
 let port: number;
+/** Further sandbox ports a case may have put a listener on; reaped in afterEach. */
+let extraPorts: number[] = [];
 
 /** Is anything accepting connections on the port right now? */
 function portOpen(p: number): boolean {
@@ -125,13 +127,14 @@ const BUILD_FAILS = ['echo "stub pnpm build: TS2345 the bundle is broken" >&2', 
   "\n    ",
 );
 
-function runPanel(command: string) {
+function runPanel(command: string, extraEnv: Record<string, string> = {}) {
   const res = spawnSync("bash", [join(repo, "scripts", "panel"), command], {
     encoding: "utf8",
     env: {
       ...process.env,
       PATH: `${stubBin}:${process.env.PATH ?? ""}`,
       PANEL_PORT: String(port),
+      ...extraEnv,
     },
     timeout: 60000,
   });
@@ -155,40 +158,58 @@ beforeEach(() => {
   copyFileSync(PM_SCRIPT, join(repo, "scripts", "pm"));
 
   // The stand-in panel server: binds PANEL_PORT and stays up until killed.
+  //
+  // PANEL_STUB_BIND_PORT makes it bind somewhere else instead, which is what
+  // the real panel used to do on its own: panel-server.ts auto-increments off a
+  // busy port and prints `Panel bound to …` with the port that won. A stub that
+  // always honoured PANEL_PORT validated scripts/panel against a server whose
+  // behaviour the real one does not have — which is why the orphaned-panel bug
+  // got all the way to a smoke run.
   writeFileSync(
     serverJs,
     [
       "const http = require('http');",
-      "const port = Number(process.env.PANEL_PORT);",
+      "const port = Number(process.env.PANEL_STUB_BIND_PORT || process.env.PANEL_PORT);",
       "http",
       "  .createServer((req, res) => {",
       "    res.setHeader('content-type', 'application/json');",
       "    res.end('[]');",
       "  })",
-      "  .listen(port, '127.0.0.1', () => console.log('stub panel listening on ' + port));",
+      "  .listen(port, '127.0.0.1', () => {",
+      "    console.log('stub panel listening on ' + port);",
+      "    console.log('Panel bound to http://127.0.0.1:' + port + ' (loopback only)');",
+      "  });",
       "",
     ].join("\n"),
   );
 
   port = pickFreePort();
+  extraPorts = [];
   writePnpmStub(BUILD_OK);
 });
 
 afterEach(async () => {
   // Kill by port first, then sweep anything still naming the sandbox — an
-  // assertion that threw mid-test must not leave a listener behind.
-  for (let i = 0; i < 5; i += 1) {
-    const pid = listenerPid(port);
-    if (!pid) break;
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already gone */
+  // assertion that threw mid-test must not leave a listener behind. Every port
+  // the case could have landed on, not just the requested one: the whole point
+  // of the drift case is that the panel ends up somewhere else.
+  for (const p of [port, ...extraPorts]) {
+    for (let i = 0; i < 5; i += 1) {
+      const pid = listenerPid(p);
+      if (!pid) break;
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+      await new Promise((r) => setTimeout(r, 100));
     }
-    await new Promise((r) => setTimeout(r, 100));
   }
   spawnSync("pkill", ["-9", "-f", sandbox]);
-  await waitUntil(() => !portOpen(port), 5000);
+  for (const p of [port, ...extraPorts]) {
+    expect(await waitUntil(() => !portOpen(p), 5000), `port ${p} still listening`).toBe(true);
+  }
+  extraPorts = [];
   rmSync(sandbox, { recursive: true, force: true });
 });
 
@@ -289,6 +310,67 @@ describe("scripts/panel process control", () => {
     expect(running.output).toContain(`url=http://localhost:${port}`);
     expect(running.output).toContain("log=panel/.panel.log");
   }, 60000);
+
+  it("start names the port the panel really bound instead of claiming it never started", async () => {
+    // Observed twice in a smoke run against a machine with 3010 already taken:
+    // the panel came up on 3011, `scripts/panel start` waited out 30s on 3010,
+    // printed "Panel did not come up on port 3010" and exited 1 — leaving the
+    // panel it had just started running where `scripts/panel stop` (which looks
+    // at $PANEL_PORT) could never find it.
+    const landed = pickFreePort();
+    expect(landed).not.toBe(port);
+    extraPorts.push(landed);
+
+    const { status, output } = runPanel("start", { PANEL_STUB_BIND_PORT: String(landed) });
+
+    // The panel is up — somewhere else.
+    expect(await waitUntil(() => portOpen(landed))).toBe(true);
+    expect(portOpen(port)).toBe(false);
+
+    // It must not be reported as a failure to start…
+    expect(output).not.toMatch(/did not come up/i);
+    // …nor as a bare success on the port that was asked for.
+    expect(output).toContain(String(landed));
+    expect(status).toBe(0);
+
+    // And the process must not be left unmanaged: the report has to hand over
+    // the command that actually reaches it.
+    expect(output).toMatch(new RegExp(`PANEL_PORT=${landed}`));
+
+    // Not just prose — that command really does manage it.
+    const stopped = runPanel("stop", { PANEL_PORT: String(landed) });
+    expect(stopped.status).toBe(0);
+    expect(await waitUntil(() => !portOpen(landed), 15000)).toBe(true);
+  }, 90000);
+
+  it("start still fails when the panel came up nowhere at all", async () => {
+    // The other half: reading the log must not turn a dead panel into a
+    // success. A server that exits immediately leaves no `Panel bound to` line.
+    writeFileSync(
+      join(stubBin, "pnpm"),
+      [
+        "#!/bin/sh",
+        'dir="."',
+        'if [ "$1" = "-C" ]; then dir="$2"; shift 2; fi',
+        'if [ "$1" = "run" ]; then shift; fi',
+        'case "$1" in',
+        "  start) echo 'stub panel died on boot' >&2; exit 1 ;;",
+        "  build)",
+        `    ${BUILD_OK}`,
+        "    ;;",
+        "esac",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const { status, output } = runPanel("start");
+
+    expect(status).toBe(1);
+    expect(output).toMatch(/did not come up/i);
+    expect(output).toContain("stub panel died on boot");
+    expect(portOpen(port)).toBe(false);
+  }, 90000);
 
   it("root package.json start/stop/reboot/status delegate to scripts/panel", () => {
     const pkg = JSON.parse(readFileSync(ROOT_PACKAGE_JSON, "utf8")) as {

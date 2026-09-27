@@ -32,7 +32,7 @@ function passRouter(): Router {
 // Mutable, test-controlled config: the squatter's port is only known at
 // runtime, so `getConfig` has to read it out of here rather than close over a
 // literal. `vi.hoisted` for the usual factory-hoisting reason.
-const config = vi.hoisted(() => ({ port: 0 }));
+const config = vi.hoisted(() => ({ port: 0, explicit: false }));
 
 vi.mock("../config.js", () => ({
   loadConfig: vi.fn(async () => {}),
@@ -42,6 +42,7 @@ vi.mock("../config.js", () => ({
     tlsCert: undefined,
     tlsKey: undefined,
   })),
+  isPortExplicit: vi.fn(() => config.explicit),
 }));
 
 vi.mock("../lib/auth.js", () => ({
@@ -91,6 +92,15 @@ let squatter: NetServer | undefined;
 let panel: HttpServer | undefined;
 let previousPanelUrl: string | undefined;
 
+/** A loopback port nothing is listening on right now. */
+async function aFreePort(): Promise<number> {
+  const probe = createNetServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", () => resolve()));
+  const port = (probe.address() as AddressInfo).port;
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  return port;
+}
+
 /** Bind a real loopback port and report it, so findFreePort must skip it. */
 async function squatOnAPort(): Promise<number> {
   squatter = createNetServer();
@@ -119,6 +129,7 @@ beforeEach(() => {
   previousPanelUrl = process.env.PAVILIO_PANEL_URL;
   delete process.env.PAVILIO_PANEL_URL;
   config.port = 0;
+  config.explicit = false;
 });
 
 afterEach(async () => {
@@ -163,5 +174,46 @@ describe("startPanel publishes the resolved panel URL", () => {
     });
 
     expect(seenAtMount).toEqual([`http://127.0.0.1:${boundPort()}`]);
+  });
+});
+
+describe("a port the operator asked for by name", () => {
+  it("binds exactly the requested port", async () => {
+    // Nothing is holding it, so this is only half the contract — but without it
+    // the refusal below could be satisfied by a panel that never starts at all.
+    config.port = await aFreePort();
+    config.explicit = true;
+
+    await startPanel(() => {});
+
+    expect(boundPort()).toBe(config.port);
+  });
+
+  it("refuses to move to another port when the requested one is taken", async () => {
+    // The field failure this exists to stop: `scripts/panel start` is told
+    // PANEL_PORT, the panel quietly lands one port up, the script times out on
+    // the port it was told, and the panel it started keeps running where
+    // `scripts/panel stop` will never look for it. Silently relocating off a
+    // port the operator named is the whole defect — so refuse, loudly.
+    const taken = await squatOnAPort();
+    config.port = taken;
+    config.explicit = true;
+
+    await expect(startPanel(() => {})).rejects.toThrow(/PANEL_PORT/);
+
+    // Not merely "it threw": nothing may be listening anywhere afterwards.
+    expect(vi.mocked(registerPanelServer)).not.toHaveBeenCalled();
+    expect(process.env.PAVILIO_PANEL_URL).toBeUndefined();
+  });
+
+  it("still auto-increments when the port was only configured, not requested", async () => {
+    // The pre-existing behaviour, unchanged: a config-file port is a preference.
+    const taken = await squatOnAPort();
+    config.port = taken;
+    config.explicit = false;
+
+    await startPanel(() => {});
+
+    expect(boundPort()).not.toBe(taken);
   });
 });

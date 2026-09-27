@@ -158,6 +158,14 @@ All of the panel commands are thin wrappers around
 `./scripts/panel start|stop|restart|status`, which needs no package manager at
 all — that is what the Windows launcher calls.
 
+**Running on another port.** `PANEL_PORT=3020 pnpm start` moves the whole set —
+the script, the server and the links it prints. A port you name that way is an
+address, not a preference: if something else already holds it the panel says so
+and stops, rather than quietly binding the next one up where `pnpm stop` would
+never find it. Set `port` in `panel/panel.config.local.ts` instead and the old
+behaviour applies — the panel steps to the next free port and prints where it
+landed.
+
 ## Recommended Skills — Superpowers
 
 This workflow is designed to work with **[Superpowers](https://github.com/obra/superpowers)** — a set of AI agent skills that enforce structured brainstorming, planning, and execution workflows. Installing Superpowers transforms your AI agent from a code autocompleter into a disciplined engineering partner.
