@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Install this repo's skills/ into Codex, so every skill is reachable as a
+# command in the Codex CLI.
+#
+# Codex has no user-defined slash-command directory — its `/` list is compiled
+# into the binary — so the command surface for Codex *is* skills: it discovers
+# $CODEX_HOME/skills/<name>/SKILL.md (default ~/.codex/skills) and exposes them
+# via /skills and by name. This is the Codex counterpart of setup:claude-code
+# (.claude/commands/) and setup:opencode (.opencode/commands/).
+#
+# Each skills/<name>/ that has a SKILL.md is symlinked to
+# $CODEX_HOME/skills/<name>, so editing skills/<name>/SKILL.md updates the
+# installed skill in place and bundled resources (references/, scripts/) stay
+# reachable.
+#
+# Additive and idempotent: links this repo owns are kept in sync, links this
+# repo planted for skills that no longer exist are pruned, and entries pointing
+# anywhere else are left alone unless --force is passed.
+#
+# Usage:
+#   pnpm setup:codex           # link missing skills, prune our stale links
+#   pnpm setup:codex --force   # also replace foreign links / real directories
+
+set -u
+
+# This script lives in <repo>/scripts/. `dirname` is deliberately avoided so
+# this still works when setup runs on a minimal PATH.
+case "$0" in
+  */*) script_dir="${0%/*}" ;;
+  *) script_dir="." ;;
+esac
+script_dir="$(cd "$script_dir" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+skills_src="$repo_root/skills"
+
+codex_home="${CODEX_HOME:-$HOME/.codex}"
+codex_skills="$codex_home/skills"
+
+force=0
+if [ "${1:-}" = "--force" ]; then
+  force=1
+fi
+
+if [ ! -d "$skills_src" ]; then
+  echo "❌ $skills_src not found — run 'pnpm pull' first to sync skills/." >&2
+  exit 1
+fi
+
+# Codex keeps everything under CODEX_HOME, so its absence is the one reliable
+# "codex is not installed here" signal. Creating the directory anyway would
+# leave a config tree behind on a machine that never asked for one, and the
+# top-level setup calls this unconditionally.
+if [ ! -d "$codex_home" ]; then
+  echo "skipped (codex not installed)"
+  exit 0
+fi
+
+mkdir -p "$codex_skills"
+
+installed=0
+replaced=0
+pruned=0
+kept=0
+
+# Prune symlinks that point into this repo's skills/ but no longer resolve —
+# left behind when a skill is renamed or removed upstream. Links pointing
+# anywhere else are never touched here, dangling or not.
+for entry in "$codex_skills"/*; do
+  [ -L "$entry" ] || continue
+  [ -e "$entry" ] && continue
+  current="$(readlink "$entry")"
+  case "$current" in
+    "$skills_src"/*)
+      name="${entry##*/}"
+      rm "$entry"
+      echo "  [prune] $name — dangling → $current"
+      pruned=$((pruned + 1))
+      ;;
+  esac
+done
+
+for src_dir in "$skills_src"/*/; do
+  [ -d "$src_dir" ] || continue
+  name="${src_dir%/}"
+  name="${name##*/}"
+
+  # A directory without SKILL.md is not a skill — Codex would list it and then
+  # fail to load it.
+  [ -f "$src_dir/SKILL.md" ] || continue
+
+  src_abs="$(cd "$src_dir" && pwd)"
+  target="$codex_skills/$name"
+
+  if [ -L "$target" ]; then
+    current="$(readlink "$target")"
+    if [ "$current" = "$src_abs" ]; then
+      kept=$((kept + 1))
+      continue
+    fi
+    if [ "$force" = "1" ]; then
+      rm "$target"
+      ln -s "$src_abs" "$target"
+      echo "  [replace] $name (was: $current)"
+      replaced=$((replaced + 1))
+      continue
+    fi
+    echo "  [keep] $name — existing symlink → $current (use --force to replace)"
+    kept=$((kept + 1))
+    continue
+  fi
+
+  if [ -e "$target" ]; then
+    if [ "$force" = "1" ]; then
+      rm -rf "$target"
+      ln -s "$src_abs" "$target"
+      echo "  [replace] $name (was a real directory)"
+      replaced=$((replaced + 1))
+      continue
+    fi
+    echo "  [keep] $name — existing directory (use --force to replace)"
+    kept=$((kept + 1))
+    continue
+  fi
+
+  ln -s "$src_abs" "$target"
+  echo "  [link]  $name"
+  installed=$((installed + 1))
+done
+
+echo ""
+echo "setup:codex — $installed installed, $replaced replaced, $pruned pruned, $kept left as-is."
+echo "Codex reads them from $codex_skills/<name>/SKILL.md — list them in-session with /skills."
