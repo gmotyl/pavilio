@@ -306,19 +306,31 @@ export const preferences = {
     portable: true,
   }),
   /**
-   * The git-history commit tree's width. No `// was:` line, for the same
-   * reason as `fileList.paneWidth`: nothing stored it before, because the pane
-   * was the fixed `w-[280px]` — so 280, and a workspace with no entry opens
-   * exactly as it always has.
+   * The width of every repo file tree — the changed-path list the git views
+   * render beside a diff. One of those trees did store a width before: the
+   * history tree, under the git-history-only `git.history.paneWidth`. The two
+   * working-tree trees stored nothing, because their pane was the hardcoded
+   * `w-[240px]`. The default is 280 — the history tree's own — so the only
+   * width anyone could have dragged carries over by value, and a workspace
+   * with no entry opens at the number the history tree always opened at.
    *
-   * Global, not `repo`, even though the tree only ever appears beside a repo's
+   * One key for all of them, not one per view: the trees are the same tree in
+   * several places, and a width dragged in one is the width you want in the
+   * next. `git.history.paneWidth` is retired with no migration, per the
+   * registry's standing policy — a dragged handle simply opens at 280 once.
+   * Its orphan is not the usual quiet one, though: the key was `portable`, so
+   * it sits as a line in the workspace's `.pavilio/preferences.json` rather
+   * than only in a browser, and hand-seeding this key means deleting that
+   * line.
+   *
+   * Global, not `repo`, even though a tree only ever appears beside a repo's
    * diff. How wide you like to read a list of changed paths is a habit; it
    * does not become a different preference because you switched repository.
    * The scope is also load-bearing for the key: a `repo` scope would append
    * `@<repo>` to the storage key, and this one is read under the bare key.
    */
-  gitHistoryPaneWidth: definePreference({
-    key: "git.history.paneWidth", // was: nothing — the tree had a fixed width
+  repoTreePaneWidth: definePreference({
+    key: "repos.tree.paneWidth", // was: git.history.paneWidth (history tree only; the working-tree trees had a fixed width)
     scope: "global",
     default: 280,
     codec: num,

@@ -11,6 +11,9 @@ import DiffView, { type DiffMode } from "./DiffView";
 import BranchPicker from "./BranchPicker";
 import FileChangeList from "./FileChangeList";
 import { useWebSocket } from "../realtime/useWebSocket";
+import PaneResizer from "../shell/PaneResizer";
+import useResizablePane from "../shell/useResizablePane";
+import { TREE_BOUNDS } from "./repoTree";
 import { preferences } from "../../preferences/declarations";
 import {
   usePreference,
@@ -124,6 +127,10 @@ export default function GitBranchDiff({
   const [diffContent, setDiffContent] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
+  // Above the `activeDiff` return below, where every hook has to be. All three
+  // trees call this hook with the same preference key, so no one call site owns
+  // it: whichever tree was dragged last is the width all three render at.
+  const tree = useResizablePane(preferences.repoTreePaneWidth, TREE_BOUNDS);
   // Monotonic id of the latest openDiff() call. Late responses for any
   // earlier id are dropped so a slow fetch can never overwrite the content
   // of a file the user has since clicked away from.
@@ -514,14 +521,47 @@ export default function GitBranchDiff({
     if (showListSidebar) {
       return (
         <div className="md:flex md:gap-4">
+          {/*
+            `w-[240px]` is GONE rather than overridden, for the reason the other
+            two trees document: the hook starts a drag from React state, never a
+            measurement, so a width class still in the cascade would leave the
+            rendered tree disagreeing with the reported one.
+
+            `sticky` survives untouched, and no `relative` joins it. The rail is
+            absolutely positioned and the reflex fix — adding `relative` — would
+            have REPLACED the sticky; a sticky box is already a positioned box,
+            so it is the rail's containing block as it stands.
+
+            The scrolling moved one level in for the rail's sake: an absolute
+            child of a scroll container scrolls away with the content, and a
+            resize rail that disappears when you scroll the tree is no rail at
+            all. The CAP moved in with it, and its number had to change to keep
+            the box the height it was — preflight sets `box-sizing: border-box`,
+            so `max-h-[calc(100vh-120px)]` on the aside capped the BORDER box,
+            and the content it left room for was that minus the aside's `p-2`
+            (8px twice) and its 1px border (twice): 18px. The inner div has
+            neither, so the cap reads `calc(100vh-138px)` here and the tree
+            scrolls exactly where it did.
+          */}
           <aside
-            className="hidden md:block w-[240px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg p-2"
+            data-testid="git-branch-diff-tree"
+            className="hidden md:block shrink-0 self-start sticky top-4 rounded-lg p-2"
             style={{
               background: "var(--bg-base)",
               border: "1px solid var(--border-subtle)",
+              ...(tree.isMobile ? null : { width: `${tree.width}px` }),
             }}
           >
-            {renderSidebarList()}
+            <div className="max-h-[calc(100vh-138px)] overflow-y-auto">
+              {renderSidebarList()}
+            </div>
+            {/* The inner edge: the seam with the diff. */}
+            <PaneResizer
+              name="git-branch-diff"
+              edge="right"
+              label="Resize the branch-diff file tree"
+              {...tree.handleProps}
+            />
           </aside>
           <div className="flex-1 min-w-0">{renderDiff()}</div>
         </div>
