@@ -249,10 +249,17 @@ export interface SubmitReport {
   /** Raised at most once, with the half that was refused. */
   readonly onFailed?: (stage: SubmitFailure) => void;
   /**
-   * The submitting `\r` has just been written to an OPEN socket. Raised
-   * exactly once per submit, always after {@link SubmitReport.onDelivered},
-   * and never for a submit that also raised `onFailed("return")` — the two are
-   * the opposite verdicts on one write.
+   * The submitting `\r` has just been written to an OPEN socket. Raised at
+   * most once per submit, always after {@link SubmitReport.onDelivered}, and
+   * never for a submit that also raised `onFailed("return")` — the two are the
+   * opposite verdicts on one write.
+   *
+   * At MOST once, not exactly once: the two refusals each end a submit that
+   * never reaches this write. A refused RETURN raises `onFailed("return")` in
+   * its place, and a refused BODY never gets as far as scheduling the return
+   * at all — so a submit may perfectly well raise this never. "Exactly once"
+   * would have told a caller that the absence of this call is impossible,
+   * which is the opposite of what the caller below reads it for.
    *
    * Stated rather than left to be deduced, because "delivered, and no refusal
    * by now" is not a fact a caller can read: the return is written

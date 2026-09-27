@@ -237,3 +237,72 @@ describe("the submitting return reports its delivery", () => {
     expect(firstReturn).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * The third report is foreign code like the other two, and the queue's
+ * invariant is not allowed to depend on it behaving.
+ *
+ * `ptySubmit.test.ts` already pins that rule for `onDelivered` and for both
+ * refusals; this is the same rule for the report added here, and it needs its
+ * own test because it is the same rule at a DIFFERENT call site — the one
+ * inside the scheduled return, where a restructuring that raised the delivery
+ * outside the `try` would leave the session's entry in `queues` standing with
+ * nothing left to drain it. That entry IS the busy flag, so what the user gets
+ * is a cell whose composer and launcher pills are dead until the page is
+ * reloaded, and every existing test in the terminal tree passes while it is.
+ */
+describe("when the caller throws out of the return's delivery report", () => {
+  it("still advances the queue when onReturnDelivered throws", () => {
+    const first = vi.fn((_data: string) => true);
+
+    submitToPty(SESSION, first, "first", {
+      onReturnDelivered: () => {
+        throw new Error("a subscriber blew up");
+      },
+    });
+    expect(first.mock.calls).toEqual([["first"]]);
+
+    // The throw happens inside the scheduled return, so this is where it
+    // surfaces — asserted here so the suite catches it deliberately rather
+    // than meeting it as an unhandled error.
+    expect(() => vi.advanceTimersByTime(SUBMIT_RETURN_MS)).toThrow(
+      "a subscriber blew up",
+    );
+    expect(first.mock.calls).toEqual([["first"], ["\r"]]);
+
+    // The session's turn was handed on regardless, which is the only thing
+    // that can be observed about it: a later submit is WRITTEN rather than
+    // pushed onto a queue nothing will ever drain.
+    const second = vi.fn((_data: string) => true);
+    submitToPty(SESSION, second, "second");
+    expect(second.mock.calls).toEqual([["second"]]);
+  });
+
+  it("still advances the queue when a submit queued behind one throws", () => {
+    // The wedge is worse one step in: the throwing submit is itself the one
+    // that was handed the turn, so a queue left mid-submit here strands a
+    // session that already has a third reply waiting on it.
+    const first = vi.fn((_data: string) => true);
+    const second = vi.fn((_data: string) => true);
+
+    submitToPty(SESSION, first, "first");
+    submitToPty(SESSION, second, "second", {
+      onReturnDelivered: () => {
+        throw new Error("the second subscriber blew up");
+      },
+    });
+
+    // The first return goes out and hands the turn to the body behind it.
+    vi.advanceTimersByTime(SUBMIT_RETURN_MS);
+    expect(second.mock.calls).toEqual([["second"]]);
+
+    expect(() => vi.advanceTimersByTime(SUBMIT_RETURN_MS)).toThrow(
+      "the second subscriber blew up",
+    );
+    expect(second.mock.calls).toEqual([["second"], ["\r"]]);
+
+    const third = vi.fn((_data: string) => true);
+    submitToPty(SESSION, third, "third");
+    expect(third.mock.calls).toEqual([["third"]]);
+  });
+});

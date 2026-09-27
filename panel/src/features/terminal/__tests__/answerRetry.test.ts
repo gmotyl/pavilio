@@ -133,8 +133,17 @@ describe("the deadline", () => {
   });
 
   it("offers nothing when the session is busy at the deadline", () => {
-    acceptedSend();
+    // Busy BEFORE the ticket opens, and that order is the whole test. A
+    // broadcast made after `beginRetryTicket` is taken by the eager
+    // `onActivity` withdrawal instead: the ticket is gone before the clock
+    // runs out, the timer callback bails on its `tickets.get` and the gate at
+    // the deadline is never asked anything — which is how these two tests
+    // passed while that gate was deleted outright. Seeding the state first
+    // leaves nothing listening to react, so the timer runs the full
+    // `RETRY_OFFER_MS` and `getActivityState` at the deadline is the only
+    // thing that can say no.
     activity("busy");
+    acceptedSend();
 
     vi.advanceTimersByTime(RETRY_OFFER_MS);
 
@@ -146,15 +155,20 @@ describe("the deadline", () => {
   });
 
   it("offers nothing when the session is at attention at the deadline", () => {
-    acceptedSend();
     // `attention` is *busy a long time, then quiet for a second* — an agent
     // mid-run between two bursts of output, which is not an unanswered send.
+    // Seeded before the ticket for the reason above: this file has to reach
+    // the deadline's own reading of the state, not the transition rule.
     activity("attention");
+    acceptedSend();
 
     vi.advanceTimersByTime(RETRY_OFFER_MS);
 
     expect(isRetryOffered(SESSION)).toBe(false);
     expect(consumeRetryOffer(SESSION)).toBe(false);
+    // The timer is spent and the ticket with it — `attention` is read at the
+    // deadline exactly as `busy` is, not merely left unoffered.
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

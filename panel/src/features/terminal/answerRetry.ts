@@ -151,8 +151,14 @@ export function beginRetryTicket(sessionId: string): number {
     unsubscribe: () => {},
   };
   tickets.set(sessionId, ticket);
-  // Opened after the ticket is in the map: the listener looks itself up, and a
-  // synchronous first call would otherwise find nothing.
+  // Opened after the ticket is in the map, and after `ticket.unsubscribe` has
+  // a value to be overwritten. `subscribeActivity` adds to a set and replays
+  // nothing, so no callback can arrive before this line returns — the ordering
+  // is defence rather than a response to a first call that happens. What it
+  // defends against is the channel ever gaining a replay: a listener reached
+  // before the map write would find no ticket and silently do nothing, and one
+  // reached before the assignment below would drop the ticket through the
+  // no-op placeholder and leak the very watch it was closing.
   ticket.unsubscribe = subscribeActivity(sessionId, (state) => {
     onActivity(sessionId, state);
   });
@@ -187,7 +193,16 @@ export function armRetryOffer(sessionId: string, generation: number): void {
     if (getActivityState(sessionId) !== "idle") {
       // Something is happening in there, so the Return was not lost and the
       // ticket has nothing left to offer.
-      drop(sessionId);
+      //
+      // Guarded like every other withdrawal in this file, even though no
+      // ticket reaching this line can be offered TODAY — the timer is armed
+      // once, and `offered` is set two lines below it. It is guarded because
+      // that is a property of the arming rule and not of this branch: an
+      // `armRetryOffer` that ever ran again after a timer had fired would take
+      // a VISIBLE offer down here, and an unnotified withdrawal leaves the
+      // button on screen while `isRetryOffered` says it is gone — a control
+      // that writes a Return nothing will accept.
+      if (drop(sessionId)) notify();
       return;
     }
     live.offered = true;
