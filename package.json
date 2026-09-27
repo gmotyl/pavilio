@@ -7,6 +7,9 @@
     "create-project": "./scripts/create-project.sh",
     "register-project": "./scripts/register-project.sh",
     "export-project": "./scripts/export-project-to-notebooklm.sh",
+    "setup": "./scripts/setup",
+    "setup:shortcut": "./scripts/setup:shortcut",
+    "setup:codex": "./scripts/setup:codex",
     "setup:all": "./scripts/setup:all",
     "setup:claude-code": "./scripts/setup:claude-code",
     "setup:opencode": "./scripts/setup:opencode",
@@ -25,8 +28,10 @@
     "test": "pnpm -C panel test",
     "build": "pnpm -C panel build",
     "dev": "pnpm -C panel dev",
-    "start": "pnpm -C panel start &",
-    "stop": "lsof -ti :3010 | xargs kill 2>/dev/null; echo 'Panel stopped'"
+    "start": "./scripts/panel start",
+    "stop": "./scripts/panel stop",
+    "restart": "./scripts/panel restart",
+    "status": "./scripts/panel status"
   },
   "keywords": [
     "project-management",

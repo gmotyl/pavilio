@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# Pavilio panel process control — start, stop, restart, status.
+#
+#   ./scripts/panel start     # detached; builds the bundle first if it is missing
+#   ./scripts/panel stop      # kills whatever holds the port
+#   ./scripts/panel restart   # stop + start, warning about terminal sessions
+#   ./scripts/panel status    # one line; exit 0 running, 3 stopped
+#
+# Root `pnpm start|stop|restart|status` are thin wrappers around this file.
+#
+# Why it exists: `pnpm -C panel start &` tied the panel to the shell that ran it.
+# Closing the terminal — or a setup script finishing — took the panel down with
+# it, and its output went to a scrollback nobody kept. The panel is a background
+# service, so it is started in a session of its own with its output appended to a
+# log, and the port (not a pidfile) is the single source of truth about whether
+# it is up: a pidfile goes stale the moment the panel is killed from elsewhere.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Toolchain resolution is shared with the launcher and the setup scripts, so a
+# double-clicked shortcut with no dotfiles read finds node the same way.
+# shellcheck source=scripts/pm
+. "$SCRIPT_DIR/pm" || exit 1
+
+PANEL_PORT="${PANEL_PORT:-3010}"
+PANEL_URL="http://localhost:$PANEL_PORT"
+LOG_REL="panel/.panel.log"
+LOG_FILE="$REPO_ROOT/$LOG_REL"
+BUNDLE="$REPO_ROOT/panel/dist/index.html"
+
+# How long to wait for the port to appear after a start, and to free after a
+# stop. Both are polled rather than slept: a cold `tsx` boot on a loaded machine
+# takes seconds, and a healthy one takes a fraction of one.
+START_TIMEOUT=30
+STOP_TIMEOUT=10
+POLL_INTERVAL=0.25
+
+# Is anything accepting connections on the panel port? A bash builtin, so this
+# works with no lsof, no ss and no node — and it answers the question that
+# actually matters (can a browser reach the panel), not "does a pidfile exist".
+panel_port_open() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$PANEL_PORT") 2>/dev/null
+}
+
+# The pid(s) listening on the panel port, newline separated, empty when none.
+# Three probes because no single one of them is everywhere: lsof is the usual
+# answer, ss ships with iproute2 on minimal images, fuser is the last resort.
+panel_listener_pids() {
+  local pids=""
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -ti "tcp:$PANEL_PORT" -sTCP:LISTEN 2>/dev/null)"
+  fi
+  if [ -z "$pids" ] && command -v ss >/dev/null 2>&1; then
+    pids="$(ss -ltnpH "sport = :$PANEL_PORT" 2>/dev/null |
+      grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u)"
+  fi
+  if [ -z "$pids" ] && command -v fuser >/dev/null 2>&1; then
+    pids="$(fuser -n tcp "$PANEL_PORT" 2>/dev/null | tr -s ' ' '\n' | grep '[0-9]')"
+  fi
+  printf '%s' "$pids"
+}
+
+panel_first_pid() {
+  panel_listener_pids | head -n 1
+}
+
+# Poll a predicate until it holds or the deadline passes. `$1` is the command,
+# `$2` the timeout in whole seconds.
+panel_wait_for() {
+  local check="$1" timeout="$2" waited=0
+  # Integer loop over quarter-second sleeps: `timeout * 4` iterations.
+  local max=$((timeout * 4))
+  while [ "$waited" -lt "$max" ]; do
+    if "$check"; then return 0; fi
+    sleep "$POLL_INTERVAL"
+    waited=$((waited + 1))
+  done
+  "$check"
+}
+
+panel_port_closed() {
+  ! panel_port_open
+}
+
+# Build the bundle the server serves. Foreground and loud: a failure here is the
+# user's to read and fix, and there is no log to point them at yet.
+panel_build() {
+  echo "Building the panel bundle (panel/dist is missing)..."
+  (cd "$REPO_ROOT" && pm_in panel build)
+}
+
+cmd_start() {
+  if panel_port_open; then
+    local pid
+    pid="$(panel_first_pid)"
+    echo "already running (pid ${pid:-?}) — $PANEL_URL"
+    return 0
+  fi
+
+  # Only start needs a toolchain: stop and status are pure process control and
+  # must keep working on a machine whose node has since been uninstalled.
+  pm_resolve || return 1
+
+  if [ ! -f "$BUNDLE" ]; then
+    if ! panel_build; then
+      echo "Panel build failed — not starting. Fix the build above and re-run." >&2
+      return 1
+    fi
+  fi
+
+  # A session of its own (setsid), immune to SIGHUP (nohup), with stdin closed
+  # and both streams appended to the log — nothing is left attached to read
+  # them. The child re-sources scripts/pm rather than inheriting the functions,
+  # so it resolves the toolchain exactly the way a fresh shell would.
+  local launcher=(
+    "$BASH" -c '
+      . "$1/pm" && pm_resolve || exit 1
+      cd "$2" || exit 1
+      pm_in panel start
+    ' _ "$SCRIPT_DIR" "$REPO_ROOT"
+  )
+  mkdir -p "$(dirname "$LOG_FILE")"
+  echo "--- panel start $(date -Is 2>/dev/null) ---" >>"$LOG_FILE"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid nohup "${launcher[@]}" >>"$LOG_FILE" 2>&1 </dev/null &
+  else
+    # No util-linux (macOS): nohup plus a background job is the best available,
+    # and still survives the shell that started it.
+    nohup "${launcher[@]}" >>"$LOG_FILE" 2>&1 </dev/null &
+  fi
+
+  printf 'Starting panel'
+  if ! panel_wait_for panel_port_open "$START_TIMEOUT"; then
+    echo
+    echo "Panel did not come up on port $PANEL_PORT within ${START_TIMEOUT}s." >&2
+    echo "Last lines of $LOG_REL:" >&2
+    tail -n 20 "$LOG_FILE" >&2 2>/dev/null
+    return 1
+  fi
+  echo " ready."
+  echo "panel started (pid $(panel_first_pid)) — $PANEL_URL (log: $LOG_REL)"
+}
+
+cmd_stop() {
+  if ! panel_port_open; then
+    echo "panel not running (nothing to stop on port $PANEL_PORT)"
+    return 0
+  fi
+
+  local pids
+  pids="$(panel_listener_pids)"
+  if [ -z "$pids" ]; then
+    echo "Port $PANEL_PORT is held by a process this user cannot see — stop it by hand." >&2
+    return 1
+  fi
+
+  # Only ever the pids holding *this* port: a broad pattern kill would take out
+  # a second panel, or an unrelated node, on someone else's port.
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null
+  if ! panel_wait_for panel_port_closed "$STOP_TIMEOUT"; then
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null
+    panel_wait_for panel_port_closed "$STOP_TIMEOUT"
+  fi
+
+  if panel_port_open; then
+    echo "Panel on port $PANEL_PORT would not die (pids: $(echo $pids | tr '\n' ' '))." >&2
+    return 1
+  fi
+  echo "panel stopped (was pid $(echo "$pids" | head -n 1))"
+}
+
+cmd_restart() {
+  # Terminal sessions live in the panel process, so a restart ends every one of
+  # them. Say how many before doing it — a silent restart that closes six live
+  # agent sessions is the surprise this line exists to prevent. Best effort: a
+  # panel that is down, or answers something unexpected, just says nothing.
+  local sessions count
+  sessions="$(curl -fsS --max-time 2 "http://127.0.0.1:$PANEL_PORT/api/terminal/sessions" 2>/dev/null)"
+  if [ -n "$sessions" ]; then
+    count="$(printf '%s' "$sessions" |
+      node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const v=JSON.parse(s);process.stdout.write(String(Array.isArray(v)?v.length:0))}catch{process.stdout.write("")}})' 2>/dev/null)"
+    if [ -n "$count" ] && [ "$count" != "0" ]; then
+      echo "closing $count terminal sessions"
+    fi
+  fi
+
+  cmd_stop || return 1
+  cmd_start
+}
+
+cmd_status() {
+  if panel_port_open; then
+    echo "running pid=$(panel_first_pid) port=$PANEL_PORT url=$PANEL_URL log=$LOG_REL"
+    return 0
+  fi
+  echo "stopped (port $PANEL_PORT is free)"
+  return 3
+}
+
+case "${1:-start}" in
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  restart) cmd_restart ;;
+  status) cmd_status ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status}" >&2
+    exit 64
+    ;;
+esac

@@ -53,6 +53,8 @@ projects/*/config.local.json
 # Panel
 panel/node_modules/
 panel/dist/
+# Where `scripts/panel start` appends the detached server's output.
+panel/.panel.log
 panel/panel.config.local.ts
 panel/.autosync-state.json
 
