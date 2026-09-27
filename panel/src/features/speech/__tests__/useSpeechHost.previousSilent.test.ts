@@ -103,8 +103,10 @@ vi.mock("../../realtime/useWebSocket", async () => {
 
 import {
   __resetAnswerWaitingForTests,
+  getAnswerWaiting,
   holdAnswer,
   isAnswerHeld,
+  noteAgentStarting,
 } from "../../terminal/answerWaiting";
 import { prepare } from "../prepare";
 import { useSpeechHost } from "../useSpeechHost";
@@ -112,6 +114,8 @@ import { utteranceUnderCursor } from "../utteranceQueue";
 
 /** The `src` of every started playback, in order. A silent press adds none. */
 const played: string[] = [];
+/** One entry per `unlock()` — a play on the source-less element. */
+const unlocks: number[] = [];
 const elements: HTMLMediaElement[] = [];
 
 async function drain(): Promise<void> {
@@ -163,6 +167,7 @@ async function threeAnswers(sessionId: string): Promise<void> {
 beforeEach(() => {
   synth.reset();
   played.length = 0;
+  unlocks.length = 0;
   elements.length = 0;
   ws.setters.clear();
   localStorage.clear();
@@ -187,11 +192,16 @@ beforeEach(() => {
     this: HTMLMediaElement,
   ) {
     const src = this.getAttribute("src");
-    // `unlock()` plays a source-less element on purpose; that is not audio, and
-    // this test file's whole subject is whether audio started.
+    // `unlock()` plays a source-less element on purpose; that is not audio, so
+    // it is counted apart rather than ignored. Silence is this file's first
+    // subject, but a press that is silent AND never unlocks is the regression
+    // the wave step nearly shipped — see "the wave step still spends the
+    // autoplay grant".
     if (src) {
       played.push(src);
       elements.push(this);
+    } else {
+      unlocks.push(1);
     }
     return Promise.resolve();
   });
@@ -369,5 +379,111 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
     await settle(() => result.current.onPrevious("cell-a"));
 
     expect(isAnswerHeld("cell-a")).toBe(true);
+  });
+});
+
+/**
+ * The wave as a POSITION, asserted where every surface meets.
+ *
+ * The row, the `Ctrl+Shift+Arrow` chord and the OS media keys all raise
+ * `onPrevious` / `onNext`. The wave step therefore lives in the host, and this
+ * is where it is pinned: a version that lived in the row alone left the chord
+ * with no wave step at all — a no-op on the very cell a reload strands, and a
+ * step PAST the newest answer wherever history exists.
+ *
+ * `noteAgentStarting` is how the wave is put on the body here: it is the one
+ * trigger with no debounce, so the whole describe runs on real timers like the
+ * rest of the file.
+ */
+describe("useSpeechHost — the wave is a position the transport stands on", () => {
+  it("lands the first press back on the newest answer without moving the cursor", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+    await threeAnswers("cell-a");
+    noteAgentStarting("cell-a");
+    expect(getAnswerWaiting("cell-a").waiting).toBe(true);
+
+    await settle(() => result.current.onPrevious("cell-a"));
+
+    // The hold is taken and the CURSOR HAS NOT MOVED. This cell has history on
+    // purpose: without the wave step the press would hold and step in one go,
+    // and u-3 — the answer the unread count is about — would be the single
+    // answer a backward walk never lands on.
+    expect(isAnswerHeld("cell-a")).toBe(true);
+    expect(result.current.queueFor("cell-a").cursor).toBe(0);
+    expect(played).toEqual([]);
+  });
+
+  it("walks into the history on the second press", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+    await threeAnswers("cell-a");
+    noteAgentStarting("cell-a");
+
+    await settle(() => result.current.onPrevious("cell-a"));
+    await settle(() => result.current.onPrevious("cell-a"));
+
+    // Below the wave a backward press is an ordinary backward press.
+    expect(result.current.queueFor("cell-a").cursor).toBe(1);
+  });
+
+  it("steps forward onto the wave without moving the cursor", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+    await threeAnswers("cell-a");
+    noteAgentStarting("cell-a");
+
+    await settle(() => result.current.onPrevious("cell-a"));
+    await settle(() => result.current.onNext("cell-a"));
+
+    // The mirror: the hold is spent on the step that arrives at the wave, and
+    // the cursor stays on the newest answer.
+    expect(isAnswerHeld("cell-a")).toBe(false);
+    expect(getAnswerWaiting("cell-a").waiting).toBe(true);
+    expect(result.current.queueFor("cell-a").cursor).toBe(0);
+  });
+
+  it("steps into a backlog rather than onto the wave while answers are waiting", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+
+    // A live run with an answer QUEUED behind it: the newest answer the cell
+    // holds is `pending.at(-1)`, not `current`, so the wave sits above the
+    // BACKLOG.
+    await emitUtterance("cell-a", "u-1", FIRST);
+    await settle(() => result.current.onSpeak("cell-a"));
+    await emitUtterance("cell-a", "u-2", SECOND);
+    expect(result.current.queueFor("cell-a").pending.map((u) => u.id)).toEqual(["u-2"]);
+    played.length = 0;
+
+    noteAgentStarting("cell-a");
+    holdAnswer("cell-a");
+
+    await settle(() => result.current.onNext("cell-a"));
+
+    // A gate of "the cursor is on `current`" would have released here and moved
+    // nothing — the hold spent without a step, and a second press needed to go
+    // one place. The gate is "nothing ahead of the cursor".
+    expect(result.current.queueFor("cell-a").current?.id).toBe("u-2");
+    expect(isAnswerHeld("cell-a")).toBe(true);
+
+    // ...and now the backlog is empty, so forward reaches the wave.
+    await settle(() => result.current.onNext("cell-a"));
+    expect(isAnswerHeld("cell-a")).toBe(false);
+    expect(result.current.queueFor("cell-a").current?.id).toBe("u-2");
+  });
+
+  it("still spends the autoplay grant on both wave steps", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+    await threeAnswers("cell-a");
+    noteAgentStarting("cell-a");
+    unlocks.length = 0;
+
+    // The reloaded cell's WHOLE round trip: read the answer off the wave, then
+    // go back to it. Neither press moves the cursor, and an implementation that
+    // returned early before `unlock()` would leave a tab that has interacted
+    // plenty still locked — the autoplay effect then ABSORBS the next answer,
+    // marking it played, so arming afterwards is silent ever after.
+    await settle(() => result.current.onPrevious("cell-a"));
+    await settle(() => result.current.onNext("cell-a"));
+
+    expect(unlocks.length).toBeGreaterThan(0);
+    expect(played).toEqual([]);
   });
 });

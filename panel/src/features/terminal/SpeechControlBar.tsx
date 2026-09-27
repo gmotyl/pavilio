@@ -3,12 +3,10 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { LauncherPills } from "./LauncherPills";
 import {
-  holdAnswer,
   noteNewestAnswer,
   noteSpeaking,
   noteTransport,
   noteUtterance,
-  releaseAnswer,
   useAnswerHeld,
   useAnswerWaiting,
 } from "./answerWaiting";
@@ -17,6 +15,7 @@ import { dismissAttentionOnArrival } from "./attentionArrival";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
 import { utteranceUnderCursor } from "../speech/utteranceQueue";
+import { stepsOffTheWave, stepsOntoTheWave } from "../speech/waveStep";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../speech/types";
 import { getStoredVoice } from "../speech/voices";
 
@@ -231,7 +230,7 @@ export function SpeechControlBar({
   // `waiting` and `held` are read for a different question entirely — not to
   // draw anything, but because the wave is a POSITION the transport can stand
   // on, and the two ends below cannot be derived without knowing whether the
-  // body is on it. See `onWave`.
+  // body is on it. See the two ends below and `features/speech/waveStep.ts`.
   const { pending, waiting } = useAnswerWaiting(sessionId);
   const held = useAnswerHeld(sessionId);
   const queue = speech.queueFor(sessionId);
@@ -377,15 +376,25 @@ export function SpeechControlBar({
   // same-reference guards — what keeps a refused press from repainting the
   // grid — would each become an edge case. `held` already names the position,
   // so the walk is expressible without touching the queue at all.
-  const onWave = waiting && !held;
+  //
+  // These two ends are the row's only remaining share of the model — the STEP
+  // itself is the host's, so that the chord and the media keys take it too.
+  // What is left here is presentation, and it has to MIRROR the host's rule:
+  // an end that disagrees either offers a press that does nothing or refuses
+  // one that would have worked, and the type checker sees neither. The two
+  // rules are `onPrevious`/`onNext` in `useSpeechHost.ts`.
   // Asked of `utteranceUnderCursor` rather than of `current`, for the reason
   // the ends themselves are: the cursor's meaning lives in the file that owns
   // it. A cell that has never spoken has nothing under the cursor, so the wave
   // sits on top of nothing and adds no step — which is how the row's "disabled
   // until the first answer" rule survives this change untouched.
   const atAnswer = utteranceUnderCursor(queue) !== null;
-  const hasPrevious = (onWave && atAnswer) || queue.cursor < queue.previous.length;
-  const hasNext = held || queue.cursor > 0 || queue.pending.length > 0;
+  const hasPrevious =
+    stepsOffTheWave(waiting, held, atAnswer) || queue.cursor < queue.previous.length;
+  const hasNext =
+    stepsOntoTheWave(held, queue.cursor, queue.pending.length) ||
+    queue.cursor > 0 ||
+    queue.pending.length > 0;
 
   /**
    * Whether the cell has ever spoken — the one question the row's contents
@@ -549,20 +558,12 @@ export function SpeechControlBar({
           disabled={!hasPrevious}
           onClick={() => {
             noteTransport(sessionId);
-            // Stepping back is the user saying *I want the text*. Without
-            // the hold the pane would give it back for exactly as long as
-            // it took the agent's next activity broadcast to arrive. True
-            // of both branches below, so it is taken before either.
-            holdAnswer(sessionId);
-            // THE FIRST STEP OFF THE WAVE, and it moves no cursor: the wave
-            // is one position above `current`, so stepping back from it
-            // arrives at the newest answer rather than past it. Without this
-            // return the press holds AND steps, which makes the newest
-            // answer — the one the unread count is about — the single answer
-            // a backward walk never lands on. That is invisible on any cell
-            // that happens to have history, and total on a reloaded tab,
-            // where the newest answer is the only one there is.
-            if (onWave) return;
+            // UNCONDITIONAL, on purpose. The hold and the wave step both
+            // belong to `onPrevious` in the host, because the chord and the
+            // OS media keys raise the same callback and must behave the same
+            // way — a rule the row kept for itself would be a second
+            // transport. This handler's whole job is to say that the row's
+            // control was pressed.
             speech.onPrevious(sessionId);
           }}
         >
@@ -651,24 +652,8 @@ export function SpeechControlBar({
           disabled={!hasNext}
           onClick={() => {
             noteTransport(sessionId);
-            // THE LAST STEP BACK ONTO THE WAVE — the mirror of the previous
-            // control's, and it moves no cursor either.
-            //
-            // Asked BEFORE the dispatch, because afterwards it has no defined
-            // answer: the host reads the queue as it stands now precisely
-            // because its own dispatch has not been applied yet.
-            //
-            // Forward used to release on every press. A walk that started two
-            // answers deep therefore dropped the hold on its FIRST step, and
-            // the body snapped back to the wave while the cursor was still in
-            // the history — the pane showing one thing and the transport
-            // pointing at another. The hold now stands for exactly as long as
-            // the cursor is below the wave, and is spent on the step that
-            // actually arrives at it.
-            if (held && queue.cursor === 0) {
-              releaseAnswer(sessionId);
-              return;
-            }
+            // Unconditional, like the backward control beside it: the release
+            // onto the wave is `onNext`'s, in the host.
             speech.onNext(sessionId);
           }}
         >

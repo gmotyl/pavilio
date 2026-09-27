@@ -21,10 +21,18 @@
  * cursor, because the wave is not an utterance — it is a position the BODY is
  * in, and `held` is what names it.
  *
- * Asserted through the real waiting store, like its sibling
- * `SpeechControlBar.answerWaiting.test.tsx`: the criterion is what the user can
- * press and what the body then shows, and a spy on the store would pass on a
- * push made with the wrong session or at the wrong moment.
+ * ## What lives here, and what does not
+ *
+ * The STEP is the host's — `onPrevious`/`onNext` in `useSpeechHost.ts` — because
+ * three surfaces raise those callbacks and a rule kept in the row would be a
+ * second transport. `useSpeechHost.waveStep.test.ts` is where the step's own
+ * behaviour is pinned, against the real store and the real queue.
+ *
+ * This file covers the row's remaining share: the two ENDS, which are
+ * presentation and must mirror the host's rule, and the fact that each control
+ * DELEGATES rather than deciding. The delegation assertions are what stop the
+ * model being quietly re-implemented here, which is exactly how the row and the
+ * chord came apart the first time.
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,6 +43,7 @@ import { SpeechControlBar } from "../SpeechControlBar";
 import {
   __resetAnswerWaitingForTests,
   getAnswerWaiting,
+  holdAnswer,
   watchSessionActivity,
 } from "../answerWaiting";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
@@ -198,7 +207,12 @@ describe("the wave is a step the transport can stand on", () => {
     render(barTree(makeSpeech({ state: "ready", queue: AFTER_A_REFRESH })));
 
     activity("busy", 2);
-    fireEvent.click(previousButton());
+    // The hold is set on the STORE, not by clicking: the click now delegates to
+    // the host, and a mocked host moves nothing. What this end asks about is
+    // the store's answer, which is the same one the real host would have left.
+    act(() => {
+      holdAnswer(SESSION);
+    });
 
     // The mirror of the first case. The cursor has not moved and the backlog is
     // empty, so both of the old arms of `hasNext` are false — the live one is
@@ -229,75 +243,42 @@ describe("the wave is a step the transport can stand on", () => {
   });
 });
 
-describe("stepping on and off the wave moves no cursor", () => {
-  it("lands the first press back on the newest answer, not the one behind it", () => {
-    const speech = makeSpeech({ state: "ready", queue: WITH_HISTORY });
-    render(barTree(speech));
-
-    activity("busy", 2);
-    fireEvent.click(previousButton());
-
-    // The hold is taken — the body is the answer now — and the CURSOR HAS NOT
-    // MOVED. Without the early return the press would hold and step in one go,
-    // so the newest answer, the one the unread count is about, is the single
-    // answer the backward walk never lands on. Invisible whenever the cell
-    // happens to have history, which is why this cell has some.
-    expect(bodyHandedOver()).toBe(false);
-    expect(speech.onPrevious).not.toHaveBeenCalled();
-  });
-
-  it("walks into history on the second press", () => {
-    const speech = makeSpeech({ state: "ready", queue: WITH_HISTORY });
-    render(barTree(speech));
-
-    activity("busy", 2);
-    fireEvent.click(previousButton());
-    fireEvent.click(previousButton());
-
-    // Below the wave a backward press is an ordinary backward press.
-    expect(speech.onPrevious).toHaveBeenCalledTimes(1);
-    expect(speech.onPrevious).toHaveBeenCalledWith(SESSION);
-  });
-
-  it("steps forward onto the wave without moving the cursor", () => {
+describe("the row delegates the step instead of deciding it", () => {
+  it("raises onPrevious even when the wave owns the body", () => {
     const speech = makeSpeech({ state: "ready", queue: AFTER_A_REFRESH });
     render(barTree(speech));
 
     activity("busy", 2);
     fireEvent.click(previousButton());
-    expect(bodyHandedOver()).toBe(false);
 
-    fireEvent.click(nextButton());
-
-    // The mirror of the first case: the hold is spent on the step that arrives
-    // at the wave, and nothing is asked of the queue.
-    expect(bodyHandedOver()).toBe(true);
-    expect(speech.onNext).not.toHaveBeenCalled();
+    // The row once returned early here, holding the answer itself and never
+    // reaching the host. That made the press invisible to `unlock()` — so a
+    // tab whose whole interaction was reading an answer off the wave stayed
+    // locked, and the next armed answer was absorbed — and it left the chord
+    // and the OS media keys, which raise this same callback, with no wave step
+    // at all.
+    expect(speech.onPrevious).toHaveBeenCalledWith(SESSION);
   });
 
-  it("keeps the hold while forward is still walking the history", () => {
-    const speech = makeSpeech({
-      state: "ready",
-      queue: queueWith({
-        previous: [answer("u-1"), answer("u-0")],
-        current: answer("u-2"),
-        cursor: 2,
-      }),
-    });
+  it("raises onNext even when a hold is standing on the newest answer", () => {
+    const speech = makeSpeech({ state: "ready", queue: AFTER_A_REFRESH });
     render(barTree(speech));
 
     activity("busy", 2);
-    fireEvent.click(previousButton());
-    expect(bodyHandedOver()).toBe(false);
-
+    act(() => {
+      holdAnswer(SESSION);
+    });
     fireEvent.click(nextButton());
 
-    // Forward used to release on EVERY press, so a walk that started two
-    // answers deep snapped the body back to the wave on the first step while
-    // the cursor was still in the history — the pane showing one thing and the
-    // transport pointing at another. The hold stands for exactly as long as the
-    // cursor is below the wave.
     expect(speech.onNext).toHaveBeenCalledWith(SESSION);
-    expect(bodyHandedOver()).toBe(false);
+  });
+
+  it("raises the plain step below the wave too", () => {
+    const speech = makeSpeech({ state: "ready", queue: WITH_HISTORY });
+    render(barTree(speech));
+
+    fireEvent.click(previousButton());
+
+    expect(speech.onPrevious).toHaveBeenCalledWith(SESSION);
   });
 });
