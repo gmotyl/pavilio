@@ -50,6 +50,24 @@ describe("terminal-title", () => {
     }
   });
 
+  it("recognises an ST-terminated title split across two chunks", () => {
+    // The BEL sweep above cannot catch a split inside the ST terminator,
+    // because BEL is a single byte. ST is `ESC \`, so a chunk can end on the
+    // terminator's own ESC while the introducer is still further back.
+    const seq = "run \x1b]0;Pavilio crash after changes\x1b\\";
+    for (let i = 0; i < seq.length; i++) {
+      const s = createTitleState();
+      expect(scanTitle(seq.slice(0, i), s)).toBeNull();
+      expect(scanTitle(seq.slice(i), s)).toBe("Pavilio crash after changes");
+    }
+  });
+
+  it("carries a trailing partial sequence after a complete title", () => {
+    const s = createTitleState();
+    expect(scanTitle("\x1b]0;first\x07 noise \x1b]0;sec", s)).toBe("first");
+    expect(scanTitle("ond\x07", s)).toBe("second");
+  });
+
   it("strips a leading status glyph", () => {
     for (const glyph of ["◐", "◑", "✳"]) {
       const s = createTitleState();
@@ -57,6 +75,23 @@ describe("terminal-title", () => {
         "Pavilio crash after changes",
       );
     }
+  });
+
+  it("leaves a bracketed job prefix intact", () => {
+    const s = createTitleState();
+    expect(scanTitle("\x1b]0;[3] npm run dev\x07", s)).toBe("[3] npm run dev");
+  });
+
+  it("leaves a parenthesised env prefix intact", () => {
+    const s = createTitleState();
+    expect(scanTitle("\x1b]0;(base) conda env\x07", s)).toBe("(base) conda env");
+  });
+
+  it("leaves a leading path tilde intact", () => {
+    const s = createTitleState();
+    expect(scanTitle("\x1b]0;~/projects/pavilio\x07", s)).toBe(
+      "~/projects/pavilio",
+    );
   });
 
   it("reports no change when only the animating prefix differs", () => {
@@ -78,9 +113,51 @@ describe("terminal-title", () => {
     const s = createTitleState();
     const long = "a".repeat(200);
     const out = scanTitle(`\x1b]0;${long}\x07`, s);
+    // The 120 here is the spec contract; every other assertion derives from
+    // the exported constant so a hardcoded cut elsewhere cannot hide.
     expect(MAX_TITLE_LENGTH).toBe(120);
-    expect(out).toBe("a".repeat(120));
+    expect(out).toBe("a".repeat(MAX_TITLE_LENGTH));
     expect(out).toHaveLength(MAX_TITLE_LENGTH);
+  });
+
+  it("truncates the normalised text, not the raw sequence", () => {
+    const s = createTitleState();
+    // Decoration to strip, a control character to fold into a space, and a
+    // body longer than the cut — so truncating before normalising and
+    // truncating after it produce different strings.
+    const body = `◐ ${"a".repeat(100)}\n${"b".repeat(100)}`;
+    const out = scanTitle(`\x1b]0;${body}\x07`, s);
+    expect(out).toBe(
+      `${"a".repeat(100)} ${"b".repeat(100)}`.slice(0, MAX_TITLE_LENGTH),
+    );
+    expect(out).toHaveLength(MAX_TITLE_LENGTH);
+    expect(out).not.toContain("◐");
+  });
+
+  it("truncates an over-long title that arrived in pieces", () => {
+    const s = createTitleState();
+    // The body is longer than any carry bound that could plausibly be set to
+    // "a title's worth of bytes" — it must still complete and be cut to 120,
+    // not dropped. (Spec: an over-long title is truncated, not rejected; a
+    // title may be split at any point within the sequence.)
+    const head = `Pavilio ${"x".repeat(252)}`;
+    const tail = "y".repeat(60);
+    expect(scanTitle(`\x1b]0;${head}`, s)).toBeNull();
+    expect(scanTitle(`${tail}\x07`, s)).toBe(
+      `${head}${tail}`.slice(0, MAX_TITLE_LENGTH),
+    );
+  });
+
+  it("never publishes a title spliced from a dropped buffer", () => {
+    const s = createTitleState();
+    // Past the carry bound the whole buffer is dropped, introducer included.
+    // The bytes already seen are never re-attached to a later terminator, so
+    // no title is published that the process did not actually send.
+    expect(scanTitle(`\x1b]0;${"a".repeat(9000)}`, s)).toBeNull();
+    expect(s.pending).toBe("");
+    expect(scanTitle("\x07", s)).toBeNull();
+    // The scanner recovers: the next well-formed sequence is read normally.
+    expect(scanTitle("\x1b]0;after the drop\x07", s)).toBe("after the drop");
   });
 
   it("returns an empty string for an emptied title", () => {
@@ -93,17 +170,21 @@ describe("terminal-title", () => {
     expect(scanTitle("plain output\r\n", s)).toBeNull();
     // Other OSC commands (here: OSC 7, current working directory) are not titles.
     expect(scanTitle("\x1b]7;file:///home/greg\x07", s)).toBeNull();
-    // OSC 10 must not be mistaken for OSC 1.
+    // OSC 10 must not be mistaken for OSC 1 — the `;` in the `[012];`
+    // introducer is what separates them, not any dedicated guard.
     expect(scanTitle("\x1b]10;rgb:ffff/ffff/ffff\x07", s)).toBeNull();
   });
 
   it("does not let an unterminated sequence grow pending without bound", () => {
     const s = createTitleState();
+    // 10 KB of unterminated sequence must stay under the carry bound. The
+    // literal is intentional: deriving it from the module's constant would
+    // let the bound be raised without the ceiling ever being noticed.
     expect(scanTitle("\x1b]0;", s)).toBeNull();
     for (let i = 0; i < 10; i++) {
       expect(scanTitle("a".repeat(1024), s)).toBeNull();
-      expect(s.pending.length).toBeLessThanOrEqual(256);
+      expect(s.pending.length).toBeLessThanOrEqual(4096);
     }
-    expect(s.pending.length).toBeLessThanOrEqual(256);
+    expect(s.pending.length).toBeLessThanOrEqual(4096);
   });
 });
