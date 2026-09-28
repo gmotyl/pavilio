@@ -1423,6 +1423,40 @@ input[type="checkbox"] {
   color: var(--text-secondary);
 }
 
+/* The one manual Return, offered when a submit the socket accepted produced
+   nothing at all. It shares the notice row's furniture — the same strip ground
+   of #17171d, inherited from `.answer-pane` and only TINTED here by a
+   translucent accent rather than replaced, the same 13px gutter, the same 10px
+   JetBrains Mono — because it is the same strip of the pane answering the same
+   question, and a control drawn in the pane's ordinary UI font here would read
+   as part of the answer above rather than as part of the composer below.
+
+   `align-self: flex-start` because this is a BUTTON in a column of full-width
+   rows: left to stretch it would be a click target running the width of the
+   pane for an action the user must take deliberately and exactly once.
+
+   The accent, not `--red`: nothing has failed. The submit went, and this is
+   the offer to press the key again — so it wears what the send button wears,
+   at the size of the row it sits in. */
+.answer-pane-retry-enter {
+  flex: none;
+  align-self: flex-start;
+  margin: 0 13px 7px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--accent-dim);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.answer-pane-retry-enter:hover {
+  background: rgba(229, 168, 75, 0.24);
+}
+
 /* What the three keys do, in the pane's dimmest ink. Desktop only — two of
    them do not exist on a phone — so nothing here has a mobile case. */
 .answer-pane-hint {

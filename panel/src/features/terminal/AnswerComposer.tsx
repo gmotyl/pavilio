@@ -3,6 +3,13 @@ import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { preferences } from "../../preferences/declarations";
 import { toast } from "../../lib/toast";
+import {
+  armRetryOffer,
+  beginRetryTicket,
+  clearRetryTicket,
+  consumeRetryOffer,
+  useRetryOffered,
+} from "./answerRetry";
 import { clearDraft, getDraft, setDraft } from "./composerDrafts";
 import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
 import { submitToPty, type SubmitFailure } from "./ptySubmit";
@@ -87,6 +94,16 @@ const FAILURE_TEXT: Record<SubmitFailure, string> = {
  */
 const PENDING_TEXT = "Sending… waiting for the terminal.";
 
+/**
+ * What the retry writes, and the whole of what it writes.
+ *
+ * Spelled out here rather than imported from `ptySubmit` because it is NOT
+ * that module's return: the retry does not go through `submitToPty` at all
+ * (see {@link AnswerComposer}), so borrowing the constant would imply a
+ * relationship between the two writes that deliberately does not exist.
+ */
+const RETRY_RETURN = "\r";
+
 /** The file a path ends in — the chip's whole text. */
 function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -115,8 +132,13 @@ export interface AnswerComposerProps {
    * Not raised at all for a submit the socket refused, and raised late rather
    * than early for one that had to queue behind another: a submit is written
    * when its turn comes, and the wait is about the write.
+   *
+   * `generation` is this send's retry ticket, passed through so the pane's push
+   * into that ticket can be recognised as stale — a submit written after the
+   * reconnect wait may be reporting for a draft the user has already replaced.
+   * Absent on the retry press, which has no live ticket left to write into.
    */
-  onSubmitted: () => void;
+  onSubmitted: (generation?: number) => void;
 }
 
 /**
@@ -340,6 +362,16 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    */
   const [unsettled, setUnsettled] = useState(0);
   const pending = unsettled > 0;
+  /**
+   * Whether the store is offering this session its one manual Return.
+   *
+   * Read from a module store and not from state on purpose: the offer is made
+   * two seconds after a submit, by a timer this component does not own, and it
+   * has to survive the terminal-view remount that every layout change causes.
+   * The whole of the reasoning — and why the ticket is not folded into
+   * `answerWaiting` — is on `answerRetry`.
+   */
+  const retryOffered = useRetryOffered(sessionId);
   /** The mobile auto-grow effect's own handle on the field — see below. */
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   const { height, isMobile, handleProps } = useResizableRow(
@@ -424,6 +456,19 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // because a settle that lands between this render and this call would
     // otherwise be written back out of existence.
     setUnsettled((n) => n + 1);
+    // This send's recovery ticket, opened BEFORE the write because the reports
+    // it is armed and cleared by are raised from inside it. Opening it takes
+    // any offer standing for the PREVIOUS send off the screen, which is the
+    // point: a Return written for a draft two sends ago is a keypress the user
+    // did not ask for.
+    //
+    // The generation is captured in this closure and carried into every
+    // callback below, so a report that arrives after the user has sent again
+    // is recognisably stale and arms nothing. Reading the session's current
+    // generation inside the callbacks instead would be reading whatever the
+    // LATEST send put there, which is the one thing the number exists to tell
+    // apart.
+    const generation = beginRetryTicket(sessionId);
     // Nothing is cleared here. The draft is spent by DELIVERY, in the callback
     // below — see the note on this component: a clear made on the strength of
     // an Enter is a clear made before anything is known, and the verdict can
@@ -446,9 +491,29 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         // exists anywhere but in this browser — so this is the moment it stops
         // being a draft.
         consumeDraft(reply);
-        onSubmitted();
+        // With this send's generation, so a report that has been overtaken —
+        // three seconds in the reconnect wait is long enough for the user to
+        // press Enter again — cannot write its baseline into the ticket the
+        // newer send opened. The same number every other callback here carries.
+        onSubmitted(generation);
+      },
+      // The submitting `\r` reached an OPEN socket and the line was RUN. Not
+      // `onDelivered`: a delivered BODY is still sitting in the prompt with
+      // nobody having pressed Enter on it, and a clock started there would be
+      // measuring a keypress that had not been made yet. This is the only
+      // report that means "the agent was asked", which is what makes two
+      // seconds of silence after it worth offering a recovery for.
+      onReturnDelivered: () => {
+        armRetryOffer(sessionId, generation);
       },
       onFailed: (stage) => {
+        // Either half refused ends the ticket, and for the same reason on both:
+        // there is nothing a second Return could recover. A refused BODY never
+        // left the browser, so there is no line in the prompt to run; a refused
+        // RETURN is already on screen in words, and offering to re-press a key
+        // whose refusal the user is reading would be the panel arguing with
+        // itself.
+        clearRetryTicket(sessionId, generation);
         // A refused RETURN comes after a delivery that already lowered this,
         // which is why the decrement is here rather than shared: each submit
         // raises exactly one of these two callbacks, and the return's refusal
@@ -469,6 +534,60 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // is fair: the reply IS on the far side, it simply has not been run, so
     // the wait is about something the agent can still be given with one
     // keypress in the terminal, and the notice says exactly that.
+  };
+
+  /**
+   * The offer, spent: one bare Return into the same PTY, and nothing else.
+   *
+   * ## Why the consume comes first
+   *
+   * `consumeRetryOffer` is synchronous and the write is not guaranteed to be
+   * anything in particular, so ordering them this way is what makes "one
+   * Return" a fact rather than a hope about the event loop. Two activations in
+   * one frame — a double click, a keyboard activation racing a pointer one —
+   * would otherwise both find an offer standing and both write, which is
+   * precisely the double submit this control is supposed to be the safe
+   * alternative to. Only a `true` leads to a write, and the `false` the second
+   * activation gets is the store saying the ticket is already spent.
+   *
+   * ## Why this is not a `submitToPty` call
+   *
+   * `submitToPty` writes a BODY and then the return that runs it, and there is
+   * no body to write here: the draft is already on the far side, sitting in
+   * the TUI's prompt with nobody having pressed Enter on it. Handing the reply
+   * to that path again would put a second copy of it in the prompt — the
+   * duplicate reply this whole feature exists to make unnecessary — and would
+   * open a second retry ticket for a send that was never made. What is missing
+   * is one keypress, so one keypress is what is written, through the cell's
+   * own `send` and on its own frame.
+   *
+   * Spent means spent. A refused write does not hand the ticket back and
+   * nothing here schedules another attempt: the user gets the composer's
+   * existing `return`-stage text, which already says exactly where their reply
+   * is and what has not happened to it.
+   */
+  const retryEnter = (): void => {
+    // Before the write, and before anything else that could be observed.
+    if (!consumeRetryOffer(sessionId)) return;
+    // This is a new attempt and its verdict is not in yet, so the previous
+    // one's notice goes — the same rule a fresh submit follows.
+    setFailure(null);
+    if (!send(RETRY_RETURN)) {
+      // The same refusal the submitting return reports, because it IS the same
+      // failure: the body is in the prompt and the key that runs it did not
+      // land. One text for one situation.
+      setFailure("return");
+      return;
+    }
+    // The reply is owed an answer again — the Return has just been pressed on
+    // it a second time — so the pane goes back to waiting for one. The wait is
+    // all that restarts: no draft is consumed here, because the delivery that
+    // opened this ticket consumed it a moment after the Enter that made it.
+    //
+    // No generation: `consumeRetryOffer` above took the ticket, so the pane's
+    // push into it finds nothing and there is no live state for a stamp to
+    // protect.
+    onSubmitted();
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -691,6 +810,33 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           {failure === null ? PENDING_TEXT : FAILURE_TEXT[failure]}
         </div>
       )}
+      {/* The one manual Return, offered two seconds after a submit whose own
+          Return reached the socket and produced nothing at all. It sits in the
+          composer's status row — beside the failure/pending notice above, not
+          inside it — because the two say different things: that row is about a
+          submit the SOCKET refused, and this button is about a submit the
+          socket accepted and the agent never reacted to.
+
+          Rendered from the store and not from any pane state, so it is
+          independent of whether the answer-waiting body is on screen. That
+          body ends on an idle transition, and idle is exactly the state this
+          offer is made in — a control tied to it would vanish at the moment it
+          became useful.
+
+          Its accessible name is the text on it. The send button next to the
+          field carries an `aria-label` because it is an arrow glyph with no
+          words in it; this one has words, and an `aria-label` repeating them
+          would only be a second copy to keep in step. */}
+      {retryOffered ? (
+        <button
+          type="button"
+          className="answer-pane-retry-enter"
+          data-testid={`answer-pane-retry-enter-${sessionId}`}
+          onClick={retryEnter}
+        >
+          Retry Enter
+        </button>
+      ) : null}
       {/* Desktop only: two of the three keys it names do not exist on a phone. */}
       {isMobile ? null : (
         <div className="answer-pane-hint" data-testid={`answer-pane-hint-${sessionId}`}>

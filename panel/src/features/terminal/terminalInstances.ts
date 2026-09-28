@@ -19,6 +19,7 @@ import { speechTransportKeyFor } from "../speech/useSpeechKeys";
 // the xterm does (layout changes remount the cell); a destroyed session takes
 // its entry with it so the store does not leak.
 import { forgetAnswerPane } from "./answerPaneState";
+import { forgetAnswerRetry } from "./answerRetry";
 import { forgetAnswerWaiting, watchSessionActivity } from "./answerWaiting";
 import { forgetLauncherUse } from "./launcherUse";
 
@@ -664,6 +665,16 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
         inst.terminal.write("\r\n\x1b[90m[Process exited]\x1b[0m\r\n");
         inst.exited = true;
         inst.exitCode = typeof msg.code === "number" ? msg.code : undefined;
+        // The unspent retry ticket goes with the process, for the reason
+        // `destroyTerminal` drops it: its offer is a control the user can still
+        // ACT on, and there is nothing left to act on. A dead process is not a
+        // busy one, so the deadline's `idle` gate passes and the offer appears
+        // on a cell that has just printed `[Process exited]`; pressing it
+        // consumes the ticket, writes a Return that the server's own close is
+        // racing, and reports nothing, because `send` only asks whether the
+        // SOCKET was open. Dropped here rather than guarded at the press so the
+        // button leaves the screen instead of going quietly inert.
+        forgetAnswerRetry(sessionId);
         for (const l of inst.exitListeners) l(inst.exitCode);
       }
       // "ping" messages are intentionally ignored — their only purpose is
@@ -1136,6 +1147,11 @@ export function destroyTerminal(sessionId: string): void {
   // nothing left to wait for, nobody left to tell, and no reason to keep a
   // channel subscription open under its name.
   forgetAnswerWaiting(sessionId);
+  // …and the unspent retry ticket, which owns a deadline and an activity watch
+  // of its own. Its offer is the one piece of this state a user can still ACT
+  // on: left behind, it would stand on a reopened cell under the same id and
+  // write a Return into a session that no longer exists.
+  forgetAnswerRetry(sessionId);
   // …and the "a launcher was used here" flag with it: the session id is gone,
   // and a cell that reuses it later is a different cell with nothing running.
   forgetLauncherUse(sessionId);

@@ -13,13 +13,21 @@
  * of the branch, and `autoplay.integration.test.tsx` proves it against the real
  * host; what this file pins is that the pills branch did not drop it.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { SpeechControlBar } from "../SpeechControlBar";
 import { __resetPtySubmitForTests } from "../ptySubmit";
+import {
+  RETRY_OFFER_MS,
+  __resetAnswerRetryForTests,
+  armRetryOffer,
+  beginRetryTicket,
+  isRetryOffered,
+  noteRetrySentOn,
+} from "../answerRetry";
 import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
 import { preferences } from "../../../preferences/declarations";
@@ -160,6 +168,12 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetPtySubmitForTests();
+  // …and any retry ticket, which owns a deadline and an activity watch of its
+  // own and is keyed by the same session id the next test reuses.
+  __resetAnswerRetryForTests();
+  // One test drives the retry deadline on a fake clock; a clock left installed
+  // would hang every `waitFor` after it.
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -211,6 +225,39 @@ describe("LauncherPills", () => {
     // Exactly the command and exactly one return, from exactly one press: a
     // pill that fired twice would run the agent twice.
     await expectRan(send, "claude");
+  });
+
+  /**
+   * A pill is a new submit, so it takes the composer's standing *Retry Enter*
+   * offer with it — the rule `beginRetryTicket` follows for a second reply.
+   *
+   * It matters because the two writes do not share a lane. The offer writes a
+   * bare `\r` through the cell's own `send`, while a pill's body goes through
+   * `submitToPty`'s per-session queue and can sit in the reconnect wait for up
+   * to three seconds. An offer left standing could be pressed inside that
+   * window and land its Return AHEAD of the body it was meant to run, which is
+   * the ordering `ptySubmit` exists to guarantee.
+   */
+  it("a launcher press withdraws a standing Retry Enter offer", () => {
+    // Fake timers, because the offer is two seconds behind the accepted Return
+    // and waiting that out for real is two seconds of suite time. `fireEvent`
+    // rather than `userEvent` for the press: `userEvent` schedules gaps of its
+    // own between the pointer events, which a fake clock nobody is advancing
+    // never lets it past.
+    vi.useFakeTimers();
+    const send = vi.fn((_data: string) => true);
+    renderBar(makeSpeech({ state: "empty" }), send);
+
+    const generation = beginRetryTicket("cell-a");
+    noteRetrySentOn("cell-a", "u-1", generation);
+    armRetryOffer("cell-a", generation);
+    // The ticket's own deadline, reached with the session idle.
+    vi.advanceTimersByTime(RETRY_OFFER_MS);
+    expect(isRetryOffered("cell-a")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "claude" }));
+
+    expect(isRetryOffered("cell-a")).toBe(false);
   });
 
   it("labels the pill with the name and sends the command", async () => {

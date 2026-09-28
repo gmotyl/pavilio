@@ -2,6 +2,7 @@ import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { LauncherPills } from "./LauncherPills";
+import { noteRetryUtterance } from "./answerRetry";
 import {
   noteNewestAnswer,
   noteSpeaking,
@@ -14,7 +15,7 @@ import { segmentStateFor, type SegmentState } from "./segmentState";
 import { dismissAttentionOnArrival } from "./attentionArrival";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
-import { utteranceUnderCursor } from "../speech/utteranceQueue";
+import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { stepsOffTheWave, stepsOntoTheWave } from "../speech/waveStep";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../speech/types";
 import { getStoredVoice } from "../speech/voices";
@@ -274,6 +275,16 @@ export function SpeechControlBar({
   const answerId = utteranceUnderCursor(queue)?.id ?? null;
   const withinReadyPulse = useReadyPulseWindow(state === "ready", answerId);
 
+  /**
+   * The newest answer the cell HOLDS — not the one under the cursor. Declared
+   * here rather than beside its own effect below because the retry ticket is
+   * measured against it too, and that push happens first.
+   *
+   * See {@link newestUtteranceId} for why neither `current` nor the cursor can
+   * stand in for it.
+   */
+  const newestAnswerId = newestUtteranceId(queue);
+
   // The reply landing, noticed HERE rather than in the pane. The queue is not a
   // store anything subscribes to — the host's identity changes when an
   // utterance arrives and the whole cell re-renders — so the arrival has to be
@@ -290,19 +301,36 @@ export function SpeechControlBar({
     noteUtterance(sessionId, answerId);
   }, [sessionId, answerId]);
 
-  /**
-   * The newest answer the cell HOLDS — not the one under the cursor.
-   *
-   * `queue.current?.id` alone would be wrong, and wrong in exactly the case
-   * the hold exists for: an answer arriving while the voice is reading takes
-   * the reducer's `speaking: true` arm, which appends to `pending` and leaves
-   * `current` where it was. A listener who stepped back to re-read while the
-   * agent was still talking would never be told the answer landed.
-   *
-   * `pending` is oldest-first, so its LAST entry is the newest thing the cell
-   * has been given.
-   */
-  const newestAnswerId = queue.pending.at(-1)?.id ?? queue.current?.id ?? null;
+  // The retry ticket is told about an arrival at the same moment and for the
+  // same reason: it too has to be withdrawn by an answer that landed while the
+  // pane was shut, or a user who reopens the pane finds a button offering to
+  // press Enter into a conversation that has already moved on.
+  //
+  // It is told the NEWEST id and not the cursor's, which is the one difference
+  // between this push and `noteUtterance`'s above, and the reason they are two
+  // effects rather than one. The cursor is wrong for a ticket in both
+  // directions. It misses the arrival the ticket exists to be withdrawn by: an
+  // answer landing while the voice is reading appends to `pending` and leaves
+  // `current` and the cursor untouched, so the id would be byte-identical, this
+  // effect would not re-run, and a standing offer would sit through a genuine
+  // reply. And it invents one that never happened: `previous`/`next` move the
+  // cursor, so a user stepping back to re-read while waiting would change the
+  // id and drop a ticket whose premise — a keypress that never landed — is
+  // untouched by browsing history. Nothing re-arms a dropped ticket, so that
+  // one is silent and permanent.
+  //
+  // The ticket this pushes into may still have NOTHING recorded against it: the
+  // composer opens it at the Enter, and the id it is measured against is
+  // recorded when the body is WRITTEN, which a queued submit or the reconnect
+  // path puts up to three seconds later. A remount inside that gap is the
+  // ordinary case, not the exotic one. It is safe regardless, because the store
+  // adopts the first id it is handed instead of reading it as a newer answer —
+  // a rule kept beside the comparison it guards rather than staged from here,
+  // where it would be an ordering between two calls. See `answerRetry.ts` on
+  // why the adoption cannot preserve a VISIBLE offer, and what it does risk.
+  useEffect(() => {
+    noteRetryUtterance(sessionId, newestAnswerId);
+  }, [sessionId, newestAnswerId]);
 
   // The arrival, pushed on every queue change. `answerWaiting` absorbs the
   // first push per session as SEEDING — an entry that has never been told
