@@ -4,6 +4,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import ProjectView from "../ProjectView";
 import { mockFetchResponses } from "../../../test-utils";
+import { preferences } from "../../../preferences/declarations";
+import { storageKey } from "../../../preferences/types";
 
 const MODIFIED = Date.parse("2026-09-20T10:00:00Z");
 
@@ -120,5 +122,92 @@ describe("the mockups empty state", () => {
 
     expect(await screen.findByText("No files in this section.")).toBeTruthy();
     expect(screen.queryByTestId("mockups-empty-state")).toBeNull();
+  });
+});
+
+/**
+ * jsdom computes no layout, so nothing below may assert a pixel height. What is
+ * under test is the class contract ProjectView renders: the chain of height
+ * owners that lets the mockup frame fill the pane instead of the page scrolling.
+ */
+const classesOf = (el: Element) => el.className.split(/\s+/).filter(Boolean);
+
+/** Appended to `project-view` only while the open file is a mockup. */
+const VIEW_FILL = ["md:flex", "md:flex-col", "md:h-full", "md:min-h-0"];
+/** What `FileListSidebar` appends to its detail pane when `fillHeight` is on. */
+const DETAIL_FILL = ["md:h-full", "md:min-h-0"];
+
+const view = () => screen.getByTestId("project-view");
+/** The positioned wrapper ProjectView renders around the page body. */
+const outer = () => view().parentElement!;
+
+describe("the mockup fill chain", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fills the pane when the selected file is an html mockup", async () => {
+    renderMockups(["pavilio/mockups/boot-legend.html"], {
+      file: "pavilio/mockups/boot-legend.html",
+    });
+
+    const detail = await screen.findByTestId("file-list-sidebar-detail");
+    expect(classesOf(outer())).toContain("relative");
+    expect(classesOf(outer())).toContain("md:h-full");
+    expect(classesOf(view())).toEqual(expect.arrayContaining(VIEW_FILL));
+    expect(classesOf(detail)).toEqual(expect.arrayContaining(DETAIL_FILL));
+  });
+
+  it("leaves the page scrolling when the selected file is markdown", async () => {
+    // The regression guard for `useTabScrollMemory` on the text sections: a
+    // fill made unconditional would bound the page height here too and kill
+    // the remembered scroll position.
+    renderMockups(["pavilio/mockups/README.md"], {
+      file: "pavilio/mockups/README.md",
+    });
+
+    const detail = await screen.findByTestId("file-list-sidebar-detail");
+    expect(classesOf(outer())).not.toContain("md:h-full");
+    for (const cls of VIEW_FILL) expect(classesOf(view())).not.toContain(cls);
+    for (const cls of DETAIL_FILL) expect(classesOf(detail)).not.toContain(cls);
+  });
+
+  it("fills the pane for an html file selected outside the mockups section", async () => {
+    // The condition is the extension, not the section — an html file filed
+    // under notes/ goes in the frame and gets the same height chain.
+    renderMockups(["pavilio/notes/demo.html"], {
+      section: "notes",
+      file: "pavilio/notes/demo.html",
+    });
+
+    const detail = await screen.findByTestId("file-list-sidebar-detail");
+    expect(classesOf(view())).toEqual(expect.arrayContaining(VIEW_FILL));
+    expect(classesOf(detail)).toEqual(expect.arrayContaining(DETAIL_FILL));
+  });
+
+  it("leaves the page scrolling when no file is selected", async () => {
+    renderMockups([], { section: "notes" });
+
+    await screen.findByText("No files in this section.");
+    expect(classesOf(outer())).not.toContain("md:h-full");
+    for (const cls of VIEW_FILL) expect(classesOf(view())).not.toContain(cls);
+  });
+
+  it("keeps the compact width cap when wide mode is off and a mockup is open", async () => {
+    const prefs = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
+      .__PAVILIO_PREFS__!;
+    prefs[storageKey(preferences.wideMode, "mockups")] = false;
+    renderMockups(["pavilio/mockups/boot-legend.html"], {
+      file: "pavilio/mockups/boot-legend.html",
+    });
+
+    await screen.findByTestId("file-list-sidebar-detail");
+    // Width and height are independent: the fill must not disturb the clamp.
+    expect(classesOf(view())).toContain("max-w-5xl");
+    expect(classesOf(view())).toEqual(expect.arrayContaining(VIEW_FILL));
   });
 });
