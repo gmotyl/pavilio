@@ -21,6 +21,15 @@
  * background, has to fail this file rather than pass it because the
  * arithmetic lived in a comment.
  *
+ * The Retry Enter control is measured here for the same reason and by the same
+ * arithmetic, which is why it is in this file rather than beside its own
+ * behavioural tests: it is the same 10px JetBrains Mono on the same strip, and
+ * it is the WORSE case of the two. Its ground is `--accent-dim`, a 15% tint —
+ * so the colour its ink is actually read against appears nowhere in the
+ * stylesheet, and BOTH the tint and the surface under it can move a ratio
+ * nobody can see. A composited pair is exactly the pair a reviewer has no way
+ * to check by eye.
+ *
  * ## The role that did not take effect
  *
  * The row flips `role="status"` to `role="alert"` between the wait and the
@@ -185,6 +194,26 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/**
+ * An `rgba(...)` laid over an opaque `#rrggbb`, as the compositor lays it.
+ *
+ * Needed because a translucent background is not a colour anything can be
+ * measured against: WCAG ratios are defined on what the eye receives, which
+ * here is the strip's own ground seen through the tint. Doing the blend in the
+ * test is what makes a nudge to EITHER — the tint's alpha, the accent, the
+ * pane's surface — land as a failure instead of as a shade nobody notices.
+ */
+function over(rgba: string, backdrop: string): string {
+  const inside = rgba.match(/rgba?\(([^)]+)\)/);
+  if (!inside) throw new Error(`not an rgb/rgba colour: ${rgba}`);
+  const [r, g, b, alpha = 1] = inside[1].split(",").map((part) => Number(part.trim()));
+  const blend = (front: number, at: number): string =>
+    Math.round(front * alpha + parseInt(backdrop.slice(at, at + 2), 16) * (1 - alpha))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${blend(r, 1)}${blend(g, 3)}${blend(b, 5)}`;
+}
+
 beforeEach(() => {
   __resetPtySubmitForTests();
   __resetComposerDraftsForTests();
@@ -233,6 +262,27 @@ describe("the pending row is legible", () => {
     // element with two states, and moving the pending colour must not be taken
     // as a licence to leave the other one unmeasured.
     expect(contrast(tokenValue("--red"), background)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("clears WCAG AA for the Retry Enter control on its tinted ground", () => {
+    const rule = declarationsOf(".answer-pane-retry-enter");
+    // Read off the stylesheet by token name and not by literal, so that the
+    // blend below is measuring the colours the button will actually wear: a
+    // rule repainted with some other pair has to arrive here as a mismatch
+    // rather than quietly go on scoring the old one.
+    expect(rule.color).toBe("var(--accent)");
+    expect(rule.background).toBe("var(--accent-dim)");
+
+    // The button paints no opaque ground of its own — `--accent-dim` is 15%
+    // accent, and what shows through is whatever `.answer-pane` painted, which
+    // is the same #17171d the notice row above states outright.
+    const ground = over(tokenValue("--accent-dim"), declarationsOf(".answer-pane").background);
+
+    // Same bar as the row it sits beside, and for the same reason: 10px
+    // JetBrains Mono is normal text, so 4.5:1 and not 3:1. `--accent`
+    // (#e5a84b) on that composite measures about 6.9:1 — comfortable, and
+    // comfortable only as long as nothing moves either end of it.
+    expect(contrast(tokenValue("--accent"), ground)).toBeGreaterThanOrEqual(4.5);
   });
 });
 

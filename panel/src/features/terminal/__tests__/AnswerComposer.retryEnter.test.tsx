@@ -295,6 +295,15 @@ describe("the composer opens a ticket per send", () => {
     expect(calls.arm).toEqual([]);
     expect(retryButton()).toBeNull();
     expect(noticeText()).toMatch(/not submitted/i);
+    // And the ticket is CLEARED on this half too, not merely left unarmed. The
+    // two are indistinguishable on screen — a ticket that was never armed has
+    // no deadline timer, so no offer can appear either way — which is how a
+    // reviewer narrowed `onFailed` to the body stage alone with all nine tests
+    // here green. What the counted watch says out loud is the part the screen
+    // cannot: an unarmed ticket still holds an open activity subscription, and
+    // a return-stage refusal that walks away from it leaks that subscription
+    // until the next submit or the session's destruction.
+    expect(watches).toEqual({ opened: 1, closed: 1 });
   });
 
   it("a refused submit clears the ticket", () => {

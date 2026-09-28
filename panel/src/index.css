@@ -1412,11 +1412,12 @@ input[type="checkbox"] {
 }
 
 /* The one manual Return, offered when a submit the socket accepted produced
-   nothing at all. It shares the notice row's furniture — the same #17171d
-   ground, the same 13px gutter, the same 10px JetBrains Mono — because it is
-   the same strip of the pane answering the same question, and a control drawn
-   in the pane's ordinary UI font here would read as part of the answer above
-   rather than as part of the composer below.
+   nothing at all. It shares the notice row's furniture — the same strip ground
+   of #17171d, inherited from `.answer-pane` and only TINTED here by a
+   translucent accent rather than replaced, the same 13px gutter, the same 10px
+   JetBrains Mono — because it is the same strip of the pane answering the same
+   question, and a control drawn in the pane's ordinary UI font here would read
+   as part of the answer above rather than as part of the composer below.
 
    `align-self: flex-start` because this is a BUTTON in a column of full-width
    rows: left to stretch it would be a click target running the width of the
