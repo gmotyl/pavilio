@@ -19,6 +19,7 @@ import { speechTransportKeyFor } from "../speech/useSpeechKeys";
 // the xterm does (layout changes remount the cell); a destroyed session takes
 // its entry with it so the store does not leak.
 import { forgetAnswerPane } from "./answerPaneState";
+import { forgetAnswerRetry } from "./answerRetry";
 import { forgetAnswerWaiting, watchSessionActivity } from "./answerWaiting";
 import { forgetLauncherUse } from "./launcherUse";
 
@@ -1136,6 +1137,11 @@ export function destroyTerminal(sessionId: string): void {
   // nothing left to wait for, nobody left to tell, and no reason to keep a
   // channel subscription open under its name.
   forgetAnswerWaiting(sessionId);
+  // …and the unspent retry ticket, which owns a deadline and an activity watch
+  // of its own. Its offer is the one piece of this state a user can still ACT
+  // on: left behind, it would stand on a reopened cell under the same id and
+  // write a Return into a session that no longer exists.
+  forgetAnswerRetry(sessionId);
   // …and the "a launcher was used here" flag with it: the session id is gone,
   // and a cell that reuses it later is a different cell with nothing running.
   forgetLauncherUse(sessionId);

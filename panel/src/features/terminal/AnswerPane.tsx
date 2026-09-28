@@ -14,6 +14,7 @@ import { ANSWER_PANE_FULL_HEIGHT, preferences } from "../../preferences/declarat
 import { usePreference } from "../../preferences/usePreference";
 import { AnswerComposer } from "./AnswerComposer";
 import { AnswerWaiting, AnswerWaitingNext } from "./AnswerWaitingView";
+import { noteRetrySentOn } from "./answerRetry";
 import { beginWaiting, releaseAnswer, useAnswerHeld, useAnswerWaiting } from "./answerWaiting";
 import { projectOfSession } from "./sessionProject";
 import { useActivityState } from "./useTerminalActivityChannel";
@@ -350,6 +351,20 @@ export function AnswerPane({
   // voice keeps reading; only the body hands over.
   const onSubmitted = useCallback((): void => {
     beginWaiting(sessionId, answerId);
+    // The SAME id, to the other store that measures an arrival against it. The
+    // wait and the retry ticket disagree about nearly everything — see
+    // `answerRetry.ts` on why they are two modules with opposite exits — but
+    // not about this: both are asking "has anything newer than THIS come
+    // back?", and capturing the id twice would let one of them be measured
+    // against an answer the send was never a reply to.
+    //
+    // Pushed from the pane rather than the composer for the reason above, and
+    // at DELIVERY rather than at the Enter because the ticket exists from the
+    // Enter onward: the composer opens it before the first write, so there is a
+    // gap — a queued submit, or the reconnect path's three seconds — in which
+    // the ticket is live and has no id yet. `SpeechControlBar` closes that gap
+    // from its own side; this is the push that gets it right.
+    noteRetrySentOn(sessionId, answerId);
   }, [sessionId, answerId]);
 
   // The reply landing is NOT noticed here — it is noticed on the bar. See the
