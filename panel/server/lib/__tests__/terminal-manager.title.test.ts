@@ -205,6 +205,21 @@ describe("a session's title", () => {
     expect(second.name).toBe("pavilio-2")
   })
 
+  it("a title does not become the session's name", () => {
+    const meta = open("pavilio")
+    expect(meta.name).toBe("pavilio-1")
+
+    emitPtyData("\x1b]0;Pavilio crash after changes\x07")
+
+    // The title landed...
+    expect(listed(meta.id)?.title).toBe("Pavilio crash after changes")
+    // ...beside the name, not over it. Every consumer that treats the name as
+    // an identifier — rename, the identity file, the label precedence rules —
+    // reads this field, so the title must never be written into it.
+    expect(listed(meta.id)?.name).toBe("pavilio-1")
+    expect(getSession(meta.id)!.name).toBe("pavilio-1")
+  })
+
   it("the scanner's carry buffer never reaches a client", () => {
     const meta = open()
     // An unterminated introducer parks bytes in the carry buffer.
@@ -218,13 +233,27 @@ describe("a session's title", () => {
     expect(getSession(meta.id)!.titleState.pending).toContain("\x1b]0;")
   })
 
-  it("a title outlives the process that published it", () => {
+  it("a title survives a flood of untitled output", () => {
     const meta = open()
     emitPtyData("\x1b]0;Pavilio crash after changes\x07")
 
-    // The agent exits without clearing its title; the shell prompt returns.
-    emitPtyData("\r\n$ ")
+    // The titled process keeps running and floods the stream: an OSC that is
+    // not a title, then a runaway introducer that never terminates, then
+    // ~80 KB of build log across 200 chunks carrying non-title escapes.
+    emitPtyData("\x1b]10;?\x07")
+    emitPtyData("\x1b]0;runaway with no terminator ")
+    for (let i = 0; i < 200; i++) {
+      emitPtyData(
+        `\x1b[32m ok \x1b[0m compiled module ${i} ${"x".repeat(380)}\r\n`,
+      )
+    }
 
+    // The title set before the flood is still the session's title...
     expect(listed(meta.id)?.title).toBe("Pavilio crash after changes")
+    // ...and none of the flood was carried forward: the runaway sequence is
+    // dropped rather than growing the carry buffer into an unbounded sink.
+    expect(getSession(meta.id)!.titleState.pending).not.toContain(
+      "compiled module",
+    )
   })
 })
