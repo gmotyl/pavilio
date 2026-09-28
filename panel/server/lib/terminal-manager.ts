@@ -15,6 +15,7 @@ import {
   destroyReplay,
 } from "./terminalReplay";
 import { nextSessionName, removeName, writeName } from "./terminal-identity";
+import { createTitleState, scanTitle, type TitleState } from "./terminal-title";
 import { listOsUsers, hasGitBindMount } from "./os-users";
 import { translateCwd, buildRunAsSpawnCommand } from "./terminal-run-as";
 
@@ -27,6 +28,13 @@ export interface TerminalSession {
   createdAt: string;
   pty: pty.IPty;
   modeState: ModeState;
+  /** Volatile display state from the PTY's OSC title. Never an identifier. */
+  title?: string;
+  /**
+   * The title scanner's carry buffer for a sequence split across two chunks.
+   * Server-private: `toMeta` strips it, so it never reaches a client.
+   */
+  titleState: TitleState;
   /**
    * Home directory this session's identity file lives under — the target
    * user's home for a `runAsUser` session, the panel-owner's own home
@@ -52,7 +60,10 @@ export interface TerminalOwner {
   gid: number;
 }
 
-export type TerminalSessionMeta = Omit<TerminalSession, "pty" | "owner">;
+export type TerminalSessionMeta = Omit<
+  TerminalSession,
+  "pty" | "owner" | "titleState"
+>;
 
 const sessions = new Map<string, TerminalSession>();
 
@@ -94,7 +105,7 @@ function defaultShell(): string {
 }
 
 function toMeta(session: TerminalSession): TerminalSessionMeta {
-  const { pty: _pty, owner: _owner, ...meta } = session;
+  const { pty: _pty, owner: _owner, titleState: _titleState, ...meta } = session;
   return meta;
 }
 
@@ -202,6 +213,7 @@ export function createSession(opts: {
     createdAt: new Date().toISOString(),
     pty: ptyProcess,
     modeState: createModeState(),
+    titleState: createTitleState(),
     identityHomeDir,
     // A wrapped session runs as the target account; every other path (no
     // runAsUser, an unknown one, or the owner's own username) spawns
@@ -238,6 +250,32 @@ export function createSession(opts: {
     if (now - lastRecordedAt >= RECORD_THROTTLE_MS) {
       lastRecordedAt = now;
       recordOutput(id);
+    }
+  });
+
+  // Read the window title the processes inside the PTY publish (OSC 0/1/2).
+  // Display state only: it never becomes the session's name and never touches
+  // the identity file — that file is the contract for a process reading its
+  // own name from inside the PTY, and a title is not a name.
+  //
+  // Isolated the same way `sessionStore.notify` isolates a subscriber: this
+  // stream also feeds replay and mode state, so a throw in here must not take
+  // those down with it.
+  ptyProcess.onData((data) => {
+    try {
+      const title = scanTitle(data, session.titleState);
+      // `null` means the chunk said nothing about the title; `""` is a clear.
+      if (title === null) return;
+      if (title === "") {
+        delete session.title;
+        return;
+      }
+      // An unchanged value is not reassigned: an agent's animating prefix
+      // republishes the same prose every 960 ms, and it normalises away.
+      if (title === session.title) return;
+      session.title = title;
+    } catch (err) {
+      console.warn("[terminal] title scan threw:", err);
     }
   });
 
