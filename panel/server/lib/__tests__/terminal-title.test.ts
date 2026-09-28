@@ -77,6 +77,26 @@ describe("terminal-title", () => {
     }
   });
 
+  it("strips a status glyph behind leading whitespace", () => {
+    // The strip must survive a leading space: agents pad their title, and if
+    // one space defeated the strip the glyph would flip through twice a
+    // second — exactly the republish the strip exists to prevent.
+    const s = createTitleState();
+    expect(scanTitle("\x1b]0; ◐ Pavilio crash after changes\x07", s)).toBe(
+      "Pavilio crash after changes",
+    );
+  });
+
+  it("leaves a leading dollar sign intact", () => {
+    const s = createTitleState();
+    expect(scanTitle("\x1b]0;$ echo hi\x07", s)).toBe("$ echo hi");
+  });
+
+  it("leaves a leading currency symbol intact", () => {
+    const s = createTitleState();
+    expect(scanTitle("\x1b]0;€ 500 budget\x07", s)).toBe("€ 500 budget");
+  });
+
   it("leaves a bracketed job prefix intact", () => {
     const s = createTitleState();
     expect(scanTitle("\x1b]0;[3] npm run dev\x07", s)).toBe("[3] npm run dev");
@@ -173,6 +193,26 @@ describe("terminal-title", () => {
     // OSC 10 must not be mistaken for OSC 1 — the `;` in the `[012];`
     // introducer is what separates them, not any dedicated guard.
     expect(scanTitle("\x1b]10;rgb:ffff/ffff/ffff\x07", s)).toBeNull();
+  });
+
+  it("does not carry after a completed non-title sequence", () => {
+    const s = createTitleState();
+    // OSC 7 (cwd) and OSC 133 (shell integration marks) stream constantly in
+    // a shell-integration session. They are complete sequences, so nothing
+    // after them needs carrying — the introducer must not pin the carry and
+    // make every later chunk of ordinary output get copied and rescanned.
+    expect(scanTitle("\x1b]7;file:///home/greg\x07", s)).toBeNull();
+    expect(s.pending).toBe("");
+    for (let i = 0; i < 4; i++) {
+      expect(scanTitle("plain output line\r\n".repeat(50), s)).toBeNull();
+      expect(s.pending).toBe("");
+    }
+    expect(scanTitle("\x1b]133;A\x07", s)).toBeNull();
+    expect(s.pending).toBe("");
+    // The carry still works for a genuinely unterminated introducer.
+    expect(scanTitle("\x1b]0;half", s)).toBeNull();
+    expect(s.pending).toBe("\x1b]0;half");
+    expect(scanTitle(" a title\x07", s)).toBe("half a title");
   });
 
   it("does not let an unterminated sequence grow pending without bound", () => {
