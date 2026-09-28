@@ -59,6 +59,48 @@ describe("FileListSidebar fillHeight", () => {
     expect(classesOf(list())).not.toContain("md:overflow-y-auto");
   });
 
+  it("renders no fill classes on the row root by default", () => {
+    // The fill is APPENDED only when fillHeight is on. A row root that carries
+    // md:flex-1 / md:min-h-0 unconditionally is a leak, not a harmless extra:
+    // it height-bounds the row on every text section too.
+    renderSidebar();
+    const cls = classesOf(row());
+    // The row's own classes are untouched by the absence of the fill.
+    expect(cls).toContain("flex");
+    expect(cls).toContain("md:flex-row");
+    expect(cls).toContain("gap-6");
+    expect(cls).not.toContain("md:flex-1");
+    expect(cls).not.toContain("md:min-h-0");
+  });
+
+  it("renders no fill classes in the rail layout by default", () => {
+    renderSidebar();
+    fireEvent.click(screen.getByTestId("file-list-sidebar-toggle"));
+    const rail = classesOf(screen.getByTestId("file-list-sidebar-rail"));
+    const rowCls = classesOf(row());
+    expect(rowCls).toContain("relative");
+    expect(rowCls).toContain("flex-row");
+    expect(rowCls).not.toContain("md:flex-1");
+    expect(rowCls).not.toContain("md:min-h-0");
+    const detailCls = classesOf(detail());
+    expect(detailCls).not.toContain("md:h-full");
+    expect(detailCls).not.toContain("md:min-h-0");
+    // The rail is a toggle strip, not the scrolling list.
+    expect(rail).not.toContain("md:overflow-y-auto");
+    expect(rail).not.toContain("md:min-h-0");
+  });
+
+  it("keeps the list fill off the rail aside when fillHeight is set", () => {
+    // The contract table applies fillList to the expanded list aside only; the
+    // rail holds no rows, so giving it a scroll box would be dead weight.
+    renderSidebar(true);
+    fireEvent.click(screen.getByTestId("file-list-sidebar-toggle"));
+    const rail = classesOf(screen.getByTestId("file-list-sidebar-rail"));
+    expect(rail).toContain("shrink-0");
+    expect(rail).not.toContain("md:overflow-y-auto");
+    expect(rail).not.toContain("md:min-h-0");
+  });
+
   it("hands the detail pane the row's height when fillHeight is set", () => {
     renderSidebar(true);
     const cls = classesOf(detail());

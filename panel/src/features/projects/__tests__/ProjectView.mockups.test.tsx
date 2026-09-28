@@ -197,6 +197,22 @@ describe("the mockup fill chain", () => {
     for (const cls of VIEW_FILL) expect(classesOf(view())).not.toContain(cls);
   });
 
+  it("leaves the page scrolling when a special section is open", async () => {
+    // `repos` is one of SPECIAL_SECTIONS, which render no FileListSidebar at
+    // all — so there is nothing to fill. The `?file=` param is deliberately an
+    // html path: the special-section test is what must keep the fill off, not
+    // the absence of an html-looking file in the URL.
+    renderMockups(["pavilio/mockups/boot-legend.html"], {
+      section: "repos",
+      file: "pavilio/mockups/boot-legend.html",
+    });
+
+    await screen.findByTestId("project-view");
+    expect(screen.queryByTestId("file-list-sidebar-detail")).toBeNull();
+    expect(classesOf(outer())).not.toContain("md:h-full");
+    for (const cls of VIEW_FILL) expect(classesOf(view())).not.toContain(cls);
+  });
+
   it("keeps the compact width cap when wide mode is off and a mockup is open", async () => {
     const prefs = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
       .__PAVILIO_PREFS__!;
