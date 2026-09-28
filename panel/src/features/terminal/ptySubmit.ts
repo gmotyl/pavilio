@@ -63,8 +63,11 @@
  * UI on — the answer pane into its waiting state, the launcher row from its
  * pills to `start` — must do it where the body is actually written, and for a
  * submit held behind another that is a gap after the click that asked for it.
- * So the two are one report with two halves ({@link SubmitReport}) rather than
- * a refusal channel beside a return value nobody could trust.
+ * So delivery and refusal are members of one report ({@link SubmitReport})
+ * rather than a refusal channel beside a return value nobody could trust. The
+ * report has since grown a third member — `onReturnDelivered`, for the caller
+ * that has to tell "the line was RUN and stayed quiet" apart from either
+ * refusal — which is the same argument a third time.
  *
  * Nothing is queued for a retry and nothing is re-attempted on reconnect. That
  * was weighed and rejected: an answer that lands two minutes later replies to a
@@ -220,16 +223,27 @@ export type SubmitFailure = "body" | "return";
 /**
  * How a submit reports what became of it.
  *
- * Both halves are optional and a submit raises at most one of them: a body
- * either reaches the socket, in which case {@link SubmitReport.onDelivered} is
- * raised there and then, or it does not, in which case
- * {@link SubmitReport.onFailed} is. A refused RETURN comes after a delivered
- * body and is the one case that raises both, in that order — which is the
- * truth of it: the text IS on the far side, it simply has not been run.
+ * Every member is optional, and a submit raises AT MOST ONE PER WRITE — which
+ * is not the same as at most one per submit, because a submit is two writes.
+ * The three outcomes, in full:
  *
- * An object rather than two positional callbacks because the two mean opposite
- * things and nothing in a call site reading `submitToPty(id, send, body, f, g)`
- * would say which was which.
+ * - the body is refused: {@link SubmitReport.onFailed}`("body")`, and nothing
+ *   else — there is no return to write,
+ * - the body lands and the return is refused: {@link SubmitReport.onDelivered}
+ *   then {@link SubmitReport.onFailed}`("return")` — which is the truth of it:
+ *   the text IS on the far side, it simply has not been run,
+ * - both land: {@link SubmitReport.onDelivered} then
+ *   {@link SubmitReport.onReturnDelivered}, the ordinary success.
+ *
+ * So the success case raises two, and no caller may read the arrival of one
+ * member as saying anything about the others. {@link
+ * SubmitReport.onReturnDelivered} exists precisely to stop the inference that
+ * used to be tempting here — that a delivery with no refusal behind it means
+ * the line ran.
+ *
+ * An object rather than positional callbacks because they mean opposite things
+ * and nothing in a call site reading `submitToPty(id, send, body, f, g)` would
+ * say which was which.
  */
 export interface SubmitReport {
   /**
@@ -538,11 +552,13 @@ function write(sessionId: string, submission: Submission): void {
  * the user's, and a per-line write would submit each line separately.
  *
  * `report` is how a caller hears what became of the submit — see
- * {@link SubmitReport}. Both halves are optional because not every caller has
+ * {@link SubmitReport}. Every member is optional because not every caller has
  * somewhere to say it, but a caller that CLEARS anything on submit needs
  * `onFailed`, or it is clearing on the strength of a write that never
- * happened, and a caller that ADVANCES on one needs `onDelivered`, for the
- * same reason read the other way round.
+ * happened; a caller that ADVANCES on one needs `onDelivered`, for the same
+ * reason read the other way round; and a caller that starts a clock on the
+ * line having RUN needs `onReturnDelivered`, because a delivered body is not
+ * yet a submitted one.
  */
 export function submitToPty(
   sessionId: string,

@@ -21,7 +21,7 @@ import { useActivityState } from "./useTerminalActivityChannel";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { unplayedSinceLastPlayed } from "../speech/unreadAnswers";
-import { utteranceUnderCursor } from "../speech/utteranceQueue";
+import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { getStoredVoice } from "../speech/voices";
 import { type UnitToBlocks, layoutRail, matchableBlocks } from "./layoutRail";
 import { matchUnitsToBlocks } from "./matchUnitsToBlocks";
@@ -349,23 +349,42 @@ export function AnswerPane({
   //
   // Nothing on `speech` is read here — see the note on `answerWaiting.ts`. The
   // voice keeps reading; only the body hands over.
-  const onSubmitted = useCallback((): void => {
-    beginWaiting(sessionId, answerId);
-    // The SAME id, to the other store that measures an arrival against it. The
-    // wait and the retry ticket disagree about nearly everything — see
-    // `answerRetry.ts` on why they are two modules with opposite exits — but
-    // not about this: both are asking "has anything newer than THIS come
-    // back?", and capturing the id twice would let one of them be measured
-    // against an answer the send was never a reply to.
-    //
-    // Pushed from the pane rather than the composer for the reason above, and
-    // at DELIVERY rather than at the Enter because the ticket exists from the
-    // Enter onward: the composer opens it before the first write, so there is a
-    // gap — a queued submit, or the reconnect path's three seconds — in which
-    // the ticket is live and has no id yet. `SpeechControlBar` closes that gap
-    // from its own side; this is the push that gets it right.
-    noteRetrySentOn(sessionId, answerId);
-  }, [sessionId, answerId]);
+  const onSubmitted = useCallback(
+    (generation?: number): void => {
+      beginWaiting(sessionId, answerId);
+      // Where the cell STOOD when the draft went out, to the other store that
+      // measures an arrival against it. The wait and the retry ticket disagree
+      // about nearly everything — see `answerRetry.ts` on why they are two
+      // modules with opposite exits — but not about this: both are asking "has
+      // anything newer than THIS come back?".
+      //
+      // The NEWEST id, not the cursor's, and that is the one place the two
+      // stores are handed different values. `answerWaiting` keeps the cursor
+      // and the newest as two separate facts and never compares one against
+      // the other; the ticket has a single slot, fed here and by the bar's
+      // `noteRetryUtterance`, so both have to speak the same vocabulary or the
+      // first push after the send reads as an answer landing and drops the
+      // ticket on the spot. Newest is also the right value on its own terms:
+      // an answer arriving while the voice is reading lands in `pending` and
+      // never touches the cursor, so a cursor baseline cannot be moved by the
+      // very arrival the ticket must be withdrawn by.
+      //
+      // Pushed from the pane rather than the composer because the pane is what
+      // knows the queue, and at DELIVERY rather than at the Enter because the
+      // ticket exists from the Enter onward: the composer opens it before the
+      // first write, so there is a gap — a queued submit, or the reconnect
+      // path's three seconds — in which the ticket is live and has no id yet.
+      // `SpeechControlBar` closes that gap from its own side; this is the push
+      // that gets it right.
+      //
+      // The generation comes down from the composer, so a report from a submit
+      // the user has already moved past cannot write its stale baseline into
+      // the ticket their newer send just opened — the rule `armRetryOffer` and
+      // `clearRetryTicket` already follow.
+      noteRetrySentOn(sessionId, newestUtteranceId(queue), generation);
+    },
+    [sessionId, answerId, queue],
+  );
 
   // The reply landing is NOT noticed here — it is noticed on the bar. See the
   // note beside `noteUtterance` in `SpeechControlBar.tsx`: this pane unmounts

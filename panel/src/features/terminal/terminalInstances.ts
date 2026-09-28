@@ -665,6 +665,16 @@ function connectWs(sessionId: string, inst: InternalInstance): WebSocket {
         inst.terminal.write("\r\n\x1b[90m[Process exited]\x1b[0m\r\n");
         inst.exited = true;
         inst.exitCode = typeof msg.code === "number" ? msg.code : undefined;
+        // The unspent retry ticket goes with the process, for the reason
+        // `destroyTerminal` drops it: its offer is a control the user can still
+        // ACT on, and there is nothing left to act on. A dead process is not a
+        // busy one, so the deadline's `idle` gate passes and the offer appears
+        // on a cell that has just printed `[Process exited]`; pressing it
+        // consumes the ticket, writes a Return that the server's own close is
+        // racing, and reports nothing, because `send` only asks whether the
+        // SOCKET was open. Dropped here rather than guarded at the press so the
+        // button leaves the screen instead of going quietly inert.
+        forgetAnswerRetry(sessionId);
         for (const l of inst.exitListeners) l(inst.exitCode);
       }
       // "ping" messages are intentionally ignored — their only purpose is

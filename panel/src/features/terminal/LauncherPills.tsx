@@ -2,6 +2,7 @@ import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { toast } from "../../lib/toast";
 import { setAnswerPaneOpen } from "./answerPaneState";
+import { clearRetryTicket } from "./answerRetry";
 import { noteAgentStarting } from "./answerWaiting";
 import { noteLauncherUsed, useLauncherUsed } from "./launcherUse";
 import { submitToPty } from "./ptySubmit";
@@ -109,6 +110,17 @@ function runCommand(
   command: string,
   onDelivered?: () => void,
 ): void {
+  // A standing *Retry Enter* offer belongs to the composer's last send, and
+  // this is a new one: the rule `beginRetryTicket` follows for a second reply
+  // applies to a pill just as much, because the offer writes a bare `\r`
+  // through the cell's own `send` while a pill's body goes through
+  // `submitToPty`'s per-session queue. Left up, it could be pressed while this
+  // command sits in the reconnect wait and land its Return AHEAD of the body it
+  // was meant to run — the ordering `ptySubmit` exists to guarantee.
+  //
+  // Unconditional, with no generation: a pill knows nothing about which send
+  // opened the ticket, and every one of them is superseded by this press.
+  clearRetryTicket(sessionId);
   submitToPty(sessionId, send, command, {
     onDelivered: () => {
       noteAgentStarting(sessionId);

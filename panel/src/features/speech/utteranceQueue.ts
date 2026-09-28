@@ -100,6 +100,25 @@ export const utteranceUnderCursor = (state: UtteranceQueue): Utterance | null =>
   state.cursor === 0 ? state.current : (state.previous[state.cursor - 1] ?? null);
 
 /**
+ * The id of the newest answer the cell HOLDS — a different question from
+ * {@link utteranceUnderCursor}, and the one every store that has to recognise
+ * an ARRIVAL asks.
+ *
+ * `current?.id` alone is wrong in exactly the case those stores exist for: an
+ * answer landing while the voice is reading takes the reducer's
+ * `speaking: true` arm, which appends to `pending` and leaves `current` and the
+ * cursor untouched. The cursor is wrong in the mirror case: a transport press
+ * moves it with nothing having landed.
+ *
+ * `pending` is oldest-first, so its LAST entry is the newest thing the cell has
+ * been given. Written once, here, because the surfaces that push it used to
+ * re-inline the formula and a store fed the cursor by one of them cannot tell
+ * an arrival from a listener stepping back through history.
+ */
+export const newestUtteranceId = (state: UtteranceQueue): string | null =>
+  state.pending.at(-1)?.id ?? state.current?.id ?? null;
+
+/**
  * Push a superseded answer onto the front of the history, dropping the oldest
  * once it is full. A null `current` pushes nothing: an empty cursor is not a
  * step of history, and writing one would cost the listener a real answer at the

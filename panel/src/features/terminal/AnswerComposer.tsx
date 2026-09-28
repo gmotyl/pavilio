@@ -132,8 +132,13 @@ export interface AnswerComposerProps {
    * Not raised at all for a submit the socket refused, and raised late rather
    * than early for one that had to queue behind another: a submit is written
    * when its turn comes, and the wait is about the write.
+   *
+   * `generation` is this send's retry ticket, passed through so the pane's push
+   * into that ticket can be recognised as stale — a submit written after the
+   * reconnect wait may be reporting for a draft the user has already replaced.
+   * Absent on the retry press, which has no live ticket left to write into.
    */
-  onSubmitted: () => void;
+  onSubmitted: (generation?: number) => void;
 }
 
 /**
@@ -486,7 +491,11 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         // exists anywhere but in this browser — so this is the moment it stops
         // being a draft.
         consumeDraft(reply);
-        onSubmitted();
+        // With this send's generation, so a report that has been overtaken —
+        // three seconds in the reconnect wait is long enough for the user to
+        // press Enter again — cannot write its baseline into the ticket the
+        // newer send opened. The same number every other callback here carries.
+        onSubmitted(generation);
       },
       // The submitting `\r` reached an OPEN socket and the line was RUN. Not
       // `onDelivered`: a delivered BODY is still sitting in the prompt with
@@ -574,6 +583,10 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // it a second time — so the pane goes back to waiting for one. The wait is
     // all that restarts: no draft is consumed here, because the delivery that
     // opened this ticket consumed it a moment after the Enter that made it.
+    //
+    // No generation: `consumeRetryOffer` above took the ticket, so the pane's
+    // push into it finds nothing and there is no live state for a stamp to
+    // protect.
     onSubmitted();
   };
 

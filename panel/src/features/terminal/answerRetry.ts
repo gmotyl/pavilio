@@ -87,11 +87,16 @@ interface Ticket {
    */
   generation: number;
   /**
-   * The utterance the cell's cursor was on when the draft went out — BOXED, so
-   * that "never recorded" (`null`) is a different fact from "the cell had no
-   * answer yet" (`{ id: null }`). Any OTHER id reaching
-   * {@link noteRetryUtterance} is an answer landing, which is the ticket's
-   * premise collapsing: something did reply.
+   * The NEWEST utterance the cell held when the draft went out — BOXED, so that
+   * "never recorded" (`null`) is a different fact from "the cell had no answer
+   * yet" (`{ id: null }`). Any OTHER id reaching {@link noteRetryUtterance} is
+   * an answer landing, which is the ticket's premise collapsing: something did
+   * reply.
+   *
+   * Newest and never the cursor — see `speech/utteranceQueue.ts`'s
+   * `newestUtteranceId`. Both writers speak that vocabulary, and they have to:
+   * this is ONE slot, so a baseline recorded as the cursor and compared against
+   * the newest would read the very first push after the send as an arrival.
    */
   sentOn: { id: string | null } | null;
   /** The pending deadline, or `null` once it has fired or been cancelled. */
@@ -167,15 +172,32 @@ export function beginRetryTicket(sessionId: string): number {
 }
 
 /**
- * The utterance this send was a reply to, recorded so a NEWER one can clear
- * the ticket. Ignored when the current ticket already carries one.
+ * The newest answer the cell held when this send went out, recorded so a NEWER
+ * one can clear the ticket. Ignored when the current ticket already carries
+ * one.
+ *
+ * `generation` is optional only because a caller may have no live ticket left
+ * to stamp; every caller that HAS one passes it. Without it, a report from a
+ * submit the user has moved past — one that spent three seconds in the
+ * reconnect wait while they pressed Enter again — would write its stale
+ * baseline into the ticket the newer send just opened. The consequence is
+ * benign in today's tree, because a stale baseline is only ever OLDER than the
+ * true one and the first real reply still differs from it; it is guarded
+ * because this was the one ticket entry point where a superseded submit could
+ * reach live state at all, and the other two ({@link armRetryOffer},
+ * {@link clearRetryTicket}) already follow the rule.
  */
-export function noteRetrySentOn(sessionId: string, sentOn: string | null): void {
+export function noteRetrySentOn(
+  sessionId: string,
+  sentOn: string | null,
+  generation?: number,
+): void {
   const ticket = tickets.get(sessionId);
-  // The first push is the send's own answer id; anything after it is the pane
-  // re-reporting where the cursor stands, and overwriting with that would keep
-  // moving the goalposts the ticket is measured against.
+  // The first push is the send's own newest-answer id; anything after it is a
+  // surface re-reporting where the cell stands, and overwriting with that would
+  // keep moving the goalposts the ticket is measured against.
   if (!ticket || ticket.sentOn !== null) return;
+  if (generation !== undefined && ticket.generation !== generation) return;
   ticket.sentOn = { id: sentOn };
 }
 
@@ -225,6 +247,29 @@ export function clearRetryTicket(sessionId: string, generation?: number): void {
  * not. A ticket that has recorded NOTHING adopts the id instead of being
  * cleared by it.
  *
+ * ## What the caller must push
+ *
+ * The NEWEST answer the cell holds — `newestUtteranceId` in
+ * `speech/utteranceQueue.ts` — never the one under the cursor. The cursor is
+ * wrong in both directions, and both are silent:
+ *
+ * - it misses the arrival this function exists for. An answer landing while the
+ *   voice is reading takes the queue reducer's `speaking: true` arm, which
+ *   appends to `pending` and leaves `current` and the cursor exactly where they
+ *   were. The id would be byte-identical, the pushing effect's deps unchanged,
+ *   and a standing offer would sit through a genuine reply — then write a bare
+ *   `\r` into a session that had just answered.
+ * - it invents one that did not happen. `previous`/`next` move the same cursor,
+ *   so a user stepping back to re-read while waiting would push a different id
+ *   and drop the ticket. Nothing re-arms one — {@link armRetryOffer} is
+ *   reachable only from `ptySubmit`'s `onReturnDelivered` — so the offer for a
+ *   keypress that really was lost would vanish for good, on a gesture that says
+ *   nothing whatever about whether the Return landed.
+ *
+ * {@link noteRetrySentOn} records the same value for the same reason: the
+ * ticket has ONE slot, and a baseline in one vocabulary compared against pushes
+ * in the other would read the first push after a send as an answer landing.
+ *
  * ## Why an unrecorded ticket adopts rather than clears
  *
  * The comparison below is "is this a different answer from the one the send
@@ -233,7 +278,7 @@ export function clearRetryTicket(sessionId: string, generation?: number): void {
  * `beginRetryTicket` runs synchronously at the Enter; the id is recorded by
  * `noteRetrySentOn` when the body is WRITTEN, which is not the same instant —
  * a submit made while another is in flight waits behind it, and the reconnect
- * path can hold one for three seconds. Anything pushing the cursor's id inside
+ * path can hold one for three seconds. Anything pushing the cell's id inside
  * that gap — the bar remounting on a layout change, the ordinary way a remount
  * happens — would otherwise take the ticket, and take it silently, because
  * nothing is on screen yet to vanish. The user would send, get no answer, and

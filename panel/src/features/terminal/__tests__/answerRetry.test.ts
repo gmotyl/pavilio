@@ -288,6 +288,36 @@ describe("the id the send replied to", () => {
 });
 
 describe("generations", () => {
+  /**
+   * The third entry point, brought under the same rule as the other two.
+   *
+   * `noteRetrySentOn` is raised from `onDelivered`, and a body can be written
+   * seconds after the Enter that asked for it — a submit queued behind another,
+   * or one held in the reconnect wait. The user has ample time to press Enter
+   * again inside that gap, and the report that finally arrives is then
+   * describing a draft they have moved past. Unstamped, it would write its own
+   * baseline into the ticket the NEWER send opened, and that ticket would be
+   * measured against an answer its send was never a reply to.
+   */
+  it("ignores a recorded id from a superseded generation", () => {
+    const stale = beginRetryTicket(SESSION);
+    const current = beginRetryTicket(SESSION);
+
+    // Submit A's delivery, landing after the user has already sent again.
+    noteRetrySentOn(SESSION, "u-stale", stale);
+    // The live ticket is untouched by it, so its own report still records.
+    noteRetrySentOn(SESSION, "u-1", current);
+    armRetryOffer(SESSION, current);
+    activity("idle");
+    vi.advanceTimersByTime(RETRY_OFFER_MS);
+
+    expect(isRetryOffered(SESSION)).toBe(true);
+    // Measured against `u-1` and not `u-stale`: the cell standing on the answer
+    // this send replied to ends nothing.
+    noteRetryUtterance(SESSION, "u-1");
+    expect(isRetryOffered(SESSION)).toBe(true);
+  });
+
   it("ignores an arm for a superseded generation", () => {
     const stale = beginRetryTicket(SESSION);
     beginRetryTicket(SESSION);

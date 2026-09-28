@@ -190,15 +190,20 @@ const speech: GridSpeech = {
 /** A live socket: every frame this file writes lands. */
 const send = vi.fn((_data: string) => true);
 
+/** Every socket the pool has opened in this test, newest last. */
+const sockets: FakeSocket[] = [];
+
 /** A socket the pool can hold without jsdom dialling anything. */
 class FakeSocket {
   static OPEN = 1;
   readyState = 0;
   onopen: unknown = null;
-  onmessage: unknown = null;
+  onmessage: ((ev: MessageEvent) => void) | null = null;
   onerror: unknown = null;
   onclose: unknown = null;
-  constructor(public url: string) {}
+  constructor(public url: string) {
+    sockets.push(this);
+  }
   send(): void {}
   close(): void {
     this.readyState = 3;
@@ -294,8 +299,26 @@ const answerLands = (id: string | null): void => {
   });
 };
 
+/** The row redrawn on a queue the test has just changed — an arrival, or a transport press. */
+const rerenderBar = (bar: RenderResult, answerOpen = true): void => {
+  act(() => {
+    bar.rerender(
+      <MemoryRouter>
+        <SpeechControlBar
+          sessionId={SESSION}
+          speech={speech}
+          answerOpen={answerOpen}
+          onToggleAnswer={() => {}}
+          send={send}
+        />
+      </MemoryRouter>,
+    );
+  });
+};
+
 beforeEach(() => {
   at = 0;
+  sockets.length = 0;
   queue = queueOf(utterance("u-1"));
   send.mockClear();
   _resetForTests();
@@ -441,6 +464,61 @@ describe("a reply landing", () => {
   });
 });
 
+describe("what the ticket is measured against", () => {
+  /**
+   * The value both writers push is the NEWEST answer the cell holds, never the
+   * one under the cursor — and these two are the cases that tell them apart.
+   * Both are silent failures: neither shows up as an error, and one of them is
+   * a control that stays on screen through a reply it should have withdrawn
+   * for.
+   *
+   * The cursor cannot see this arrival. An answer landing while the voice is
+   * reading takes the queue reducer's `speaking: true` arm, which appends to
+   * `pending` and leaves `current` and the cursor exactly where they were — so
+   * a bar pushing the cursor's id pushes a byte-identical value, its effect's
+   * deps do not change, and the push never happens at all.
+   */
+  it("an answer arriving while the voice reads clears a standing offer", () => {
+    const bar = renderBar();
+    renderPane();
+
+    submitAndWaitForOffer();
+    expect(retryButton()).not.toBeNull();
+
+    // The arrival, as the reducer stages it for a speaking cell: appended to
+    // `pending`, with `current` and the cursor untouched.
+    queue = { previous: [], current: utterance("u-1"), pending: [utterance("u-2")], cursor: 0 };
+    rerenderBar(bar);
+
+    expect(isRetryOffered(SESSION)).toBe(false);
+  });
+
+  /**
+   * The mirror case. `previous`/`next` move the cursor with nothing having
+   * landed, so a ticket keyed on the cursor would be dropped by a user
+   * stepping back to re-read an earlier answer while they waited — and nothing
+   * re-arms a dropped ticket, since `armRetryOffer` is reachable only from
+   * `ptySubmit`'s `onReturnDelivered`. The offer for a keypress that really
+   * was lost would go for good, on a gesture that says nothing about whether
+   * the Return landed.
+   */
+  it("a transport press back through history keeps a standing offer", () => {
+    queue = { previous: [utterance("u-0")], current: utterance("u-1"), pending: [], cursor: 0 };
+    const bar = renderBar();
+    renderPane();
+
+    submitAndWaitForOffer();
+    expect(retryButton()).not.toBeNull();
+
+    // *Previous answer*: the cursor steps into the history. The cell holds
+    // exactly what it held a moment ago.
+    queue = { ...queue, cursor: 1 };
+    rerenderBar(bar);
+
+    expect(isRetryOffered(SESSION)).toBe(true);
+  });
+});
+
 describe("the session ending", () => {
   /**
    * Keyed by session id, like the pane state and the wait beside it — so a
@@ -458,6 +536,33 @@ describe("the session ending", () => {
     expect(isRetryOffered(SESSION)).toBe(true);
 
     destroyTerminal(SESSION);
+
+    expect(isRetryOffered(SESSION)).toBe(false);
+  });
+
+  /**
+   * The process dying is the same end reached without a delete. A dead process
+   * produces no output, so it is not busy, so the deadline's `idle` gate passes
+   * and the offer appears on a cell that has just printed `[Process exited]` —
+   * and `send` would report `true` for the Return, because it only asks whether
+   * the SOCKET was open. The ticket goes on the exit frame so the button leaves
+   * the screen rather than going quietly inert.
+   */
+  it("the process exiting forgets the session's retry ticket", () => {
+    acquireTerminal(SESSION);
+
+    const generation = beginRetryTicket(SESSION);
+    noteRetrySentOn(SESSION, "u-1", generation);
+    armRetryOffer(SESSION, generation);
+    activity("idle");
+    tick(RETRY_OFFER_MS);
+    expect(isRetryOffered(SESSION)).toBe(true);
+
+    act(() => {
+      sockets.at(-1)?.onmessage?.({
+        data: JSON.stringify({ type: "exit", code: 0 }),
+      } as MessageEvent);
+    });
 
     expect(isRetryOffered(SESSION)).toBe(false);
   });
