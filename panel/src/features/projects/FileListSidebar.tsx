@@ -68,6 +68,13 @@ interface Props {
   aboveList?: ReactNode;
   /** Filter/sort bar rendered above the source list (expanded view only). */
   controls?: ReactNode;
+  /**
+   * Height-bound the row and hand the detail pane the remaining height, from
+   * the `md` breakpoint up. Off by default: a height-bounded pane leaves the
+   * shell's scroll container with nothing to scroll, which is what
+   * `useTabScrollMemory` restores into on the text file sections.
+   */
+  fillHeight?: boolean;
 }
 
 function SourceGroup({
@@ -121,6 +128,7 @@ export default function FileListSidebar({
   onRefresh,
   aboveList,
   controls,
+  fillHeight = false,
 }: Props) {
   const { collapsed, peeking, toggle, startPeek, endPeek } =
     useFileListSidebar();
@@ -168,6 +176,13 @@ export default function FileListSidebar({
       {detail}
     </PeekTriggerContext.Provider>
   );
+
+  // Fill classes are APPENDED to what each node already carries — never a
+  // replacement. `md:min-h-0` is what lets a flex child shrink below its
+  // content so the scroll lands inside the row instead of stretching it.
+  const fillRow = fillHeight ? " md:flex-1 md:min-h-0" : "";
+  const fillDetail = fillHeight ? " md:h-full md:min-h-0" : "";
+  const fillList = fillHeight ? " md:min-h-0 md:overflow-y-auto" : "";
 
   const toggleButton = (
     <button
@@ -255,7 +270,7 @@ export default function FileListSidebar({
       if ((e.target as HTMLElement).closest("[data-file-row]")) closeNow();
     };
     return (
-      <div className="relative flex flex-row gap-2 md:gap-4">
+      <div className={`relative flex flex-row gap-2 md:gap-4${fillRow}`}>
         <aside data-testid="file-list-sidebar-rail" className="shrink-0">
           {/* While peeking, the overlay carries the live toggle; the rail keeps
               an invisible same-size spacer so its width — and the detail's
@@ -269,7 +284,12 @@ export default function FileListSidebar({
             toggleButton
           )}
         </aside>
-        <section className="flex-1 min-w-0">{wrappedDetail}</section>
+        <section
+          data-testid="file-list-sidebar-detail"
+          className={`flex-1 min-w-0${fillDetail}`}
+        >
+          {wrappedDetail}
+        </section>
         {peeking && (
           <aside
             data-testid="file-list-sidebar-peek"
@@ -300,10 +320,10 @@ export default function FileListSidebar({
   // the flex row squeezing the pane below the width the hook thinks it has.
   // On mobile the row stacks and the aside is full-bleed, so no width is set.
   return (
-    <div className="flex flex-col md:flex-row gap-6">
+    <div className={`flex flex-col md:flex-row gap-6${fillRow}`}>
       <aside
         data-testid="file-list-sidebar"
-        className="shrink-0 relative"
+        className={`shrink-0 relative${fillList}`}
         style={pane.isMobile ? undefined : { width: `${pane.width}px` }}
       >
         {listContent}
@@ -315,7 +335,12 @@ export default function FileListSidebar({
           {...pane.handleProps}
         />
       </aside>
-      <section className="flex-1 min-w-0">{wrappedDetail}</section>
+      <section
+        data-testid="file-list-sidebar-detail"
+        className={`flex-1 min-w-0${fillDetail}`}
+      >
+        {wrappedDetail}
+      </section>
     </div>
   );
 }
