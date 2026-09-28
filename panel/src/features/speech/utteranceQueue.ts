@@ -110,13 +110,33 @@ export const utteranceUnderCursor = (state: UtteranceQueue): Utterance | null =>
  * cursor untouched. The cursor is wrong in the mirror case: a transport press
  * moves it with nothing having landed.
  *
- * `pending` is oldest-first, so its LAST entry is the newest thing the cell has
- * been given. Written once, here, because the surfaces that push it used to
- * re-inline the formula and a store fed the cursor by one of them cannot tell
- * an arrival from a listener stepping back through history.
+ * And `pending.at(-1)` alone — oldest-first, so its last entry is the newest
+ * thing ever APPENDED — is wrong wherever a backlog outlived the run that was
+ * filling it. The two arms of `arrived` write to different places: the speaking
+ * arm appends to `pending`, the idle arm makes the arrival `current` and leaves
+ * `pending` exactly as it was. A cell that collects a backlog while speaking and
+ * is then PAUSED reports `speaking: false` (see `useUtteranceChannel`'s
+ * `live === sessionId && held !== sessionId`), so the next answer takes the idle
+ * arm and lands in `current` NEWER than everything still queued behind it.
+ * Reading the backlog's tail there returns an answer the cell has already moved
+ * past — and returns the SAME id it returned before the arrival, so a consumer
+ * watching this value for a change is told nothing happened.
+ *
+ * So the two candidates are compared by `at`, the server's epoch-ms stamp, and
+ * the later one wins. A tie goes to `pending`, which is the order the queue
+ * itself would play them in.
+ *
+ * Written once, here, because the surfaces that push it used to re-inline the
+ * formula, and a store fed the cursor — or a stale backlog tail — by one of them
+ * cannot tell an arrival from a listener stepping back through history.
  */
-export const newestUtteranceId = (state: UtteranceQueue): string | null =>
-  state.pending.at(-1)?.id ?? state.current?.id ?? null;
+export const newestUtteranceId = (state: UtteranceQueue): string | null => {
+  const queued = state.pending.at(-1) ?? null;
+  const shown = state.current;
+  if (queued === null) return shown?.id ?? null;
+  if (shown === null) return queued.id;
+  return shown.at > queued.at ? shown.id : queued.id;
+};
 
 /**
  * Push a superseded answer onto the front of the history, dropping the oldest

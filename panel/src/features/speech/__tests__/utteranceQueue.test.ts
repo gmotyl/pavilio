@@ -4,6 +4,7 @@ import {
   MAX_PENDING,
   MAX_PREVIOUS,
   emptyUtteranceQueue,
+  newestUtteranceId,
   utteranceQueueReducer,
   utteranceUnderCursor,
 } from "../utteranceQueue";
@@ -443,5 +444,53 @@ describe("utteranceQueueReducer", () => {
     utteranceQueueReducer(frozen(walked), { type: "arrived", utterance: answer(9), speaking: true });
 
     expect(walked).toEqual(walkedSnapshot);
+  });
+});
+
+/**
+ * The value every store that recognises an ARRIVAL is fed — the answer-waiting
+ * hold and the composer's retry ticket both key on it, and both are wrong in
+ * the same silent way if it goes stale: the value does not change, so the
+ * pushing effect does not re-run, so nothing is told the answer landed.
+ */
+describe("newestUtteranceId", () => {
+  it("is the cursor's answer on a cell with no backlog, wherever the cursor is", () => {
+    const state = withHistory(3);
+    expect(newestUtteranceId(state)).toBe("u3");
+
+    // A transport press moves the cursor and nothing has landed, so the answer
+    // the cell HOLDS is unchanged — which is the whole difference between this
+    // and `utteranceUnderCursor`.
+    const back = press(state, 2, "previous");
+    expect(utteranceUnderCursor(back)).toEqual(answer(1));
+    expect(newestUtteranceId(back)).toBe("u3");
+  });
+
+  it("is the backlog's tail while the voice is reading", () => {
+    // The speaking arm appends and leaves `current` alone, so the newest thing
+    // the cell holds is behind the cursor rather than on it.
+    const state = withPending(2);
+    expect(state.current).toEqual(answer(0));
+    expect(newestUtteranceId(state)).toBe("u2");
+  });
+
+  it("is the idle arrival that overtook a backlog, not the backlog's tail", () => {
+    // The case the tail alone gets wrong. A cell collects a backlog while
+    // speaking; the user PAUSES it, which reports `speaking: false`; the next
+    // answer therefore takes the idle arm, becomes `current`, and leaves
+    // `pending` exactly as it was — newer than everything still queued.
+    const paused = withPending(2);
+    const state = arrive(paused, answer(3), false);
+
+    expect(state.pending).toEqual([answer(1), answer(2)]);
+    expect(state.current).toEqual(answer(3));
+    // The tail alone would answer `u2` here — and would have answered `u2`
+    // before this arrival too, so a consumer watching for a change is told
+    // nothing happened on the one event that was an answer landing.
+    expect(newestUtteranceId(state)).toBe("u3");
+  });
+
+  it("is null only for a cell that holds nothing", () => {
+    expect(newestUtteranceId(emptyUtteranceQueue)).toBeNull();
   });
 });
