@@ -58,6 +58,18 @@ import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types"
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
 import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
+// The waiting store lives under `features/terminal` because the wave is the
+// CELL's state, not the voice's — but the wave STEP belongs here, in the one
+// place every transport surface funnels through. See `onPrevious`. No cycle:
+// the store imports only its own debounce and the activity channel.
+import {
+  getAnswerWaiting,
+  holdAnswer,
+  isAnswerHeld,
+  noteTransport,
+  releaseAnswer,
+} from "../terminal/answerWaiting";
+import { stepsOffTheWave, stepsOntoTheWave } from "./waveStep";
 import { MAX_PENDING, MAX_PREVIOUS, utteranceUnderCursor } from "./utteranceQueue";
 import { getStoredVoice } from "./voices";
 
@@ -706,6 +718,58 @@ export function useSpeechHost(): SpeechHost {
   const onPrevious = useCallback(
     (sessionId: string): void => {
       const queue = queueFor(sessionId);
+
+      // THE WAVE IS A POSITION, and it is read HERE rather than in the bar.
+      //
+      // Three surfaces raise this callback — the row's control, the
+      // `Ctrl+Shift+Arrow` chord (`useSpeechKeys`) and the OS media keys
+      // (`useMediaSessionTransport`) — and they agreed about every other
+      // transport rule before the wave existed. A wave step implemented in the
+      // row alone is two transports: the chord would be a no-op on the very
+      // cell a reload strands, and would step PAST the newest answer wherever
+      // history exists. So the step lives where all three meet.
+      //
+      // What it is: the wave — the body handed over while the agent works — is
+      // one position ABOVE the newest answer the cell holds, not a lid over it.
+      // A backward press taken from there lands on the answer under the cursor
+      // and moves the cursor no step. Without that, the first press back both
+      // holds and steps, so the newest answer — the one the unread count is
+      // about — is the single answer a backward walk never lands on. Invisible
+      // on a cell with history; total on a reloaded tab, where the server's one
+      // retained utterance is the only answer there is.
+      // READ BEFORE `noteTransport`, and that ordering is the whole of a bug
+      // this once had. `noteTransport` sets `markOnly`, and `derive` collapses
+      // a SEND-owned handover to `MARK_ONLY` the moment it is set — `waiting`
+      // goes false. Asked afterwards, `stepsOffTheWave` answers no on exactly
+      // the ordinary path "sent a draft, pressed Previous to re-read", and the
+      // press holds AND steps, skipping the newest answer. The row used to
+      // read its render-time snapshot, which is to say: before the press.
+      const steppingOffTheWave = stepsOffTheWave(
+        getAnswerWaiting(sessionId).waiting,
+        isAnswerHeld(sessionId),
+        utteranceUnderCursor(queue) !== null,
+      );
+
+      // The send wait's own rule: a transport press gives the body back and
+      // leaves the mark on the play button. It lives here rather than in the
+      // row for the same reason the step does — the chord and the media keys
+      // are transport presses too, and a row that kept this to itself left
+      // them unable to give the body back at all.
+      noteTransport(sessionId);
+
+      if (steppingOffTheWave) {
+        // A backward press is the user saying *I want the text*, and this
+        // branch is a real move, so it takes the hold.
+        holdAnswer(sessionId);
+        // The grant is spent even though the cursor did not move — see the
+        // note on `unlock()` below. This branch is the one that most needs it:
+        // on the reloaded cell it and the forward step back onto the wave are
+        // the whole round trip, so skipping it here leaves a tab that has
+        // interacted plenty and is still locked.
+        unlock();
+        return;
+      }
+
       // What the press lands on: the cursor one step further back, read off
       // the queue as it stands now because the dispatch below has not been
       // applied to this value yet. Asking `utteranceUnderCursor` rather than
@@ -719,6 +783,14 @@ export function useSpeechHost(): SpeechHost {
       // press from making a sound anyway.
       const target = utteranceUnderCursor({ ...queue, cursor: queue.cursor + 1 });
       if (!target) return;
+
+      // The hold is taken AFTER the refusal, not before it. Before, it was a
+      // rule the row's `disabled={!hasPrevious}` made unreachable — but the
+      // chord and the media keys ask no button whether it is enabled, so a
+      // `Ctrl+Shift+←` on a cell with no history would set a hold that nothing
+      // in that run clears. `derive` answers a standing hold with `SETTLED`,
+      // so the cell's pane would stop handing over to the wave altogether.
+      holdAnswer(sessionId);
 
       // And the press is SILENT: the cursor moves and nothing else happens.
       //
@@ -759,24 +831,79 @@ export function useSpeechHost(): SpeechHost {
   const onNext = useCallback(
     (sessionId: string): void => {
       const queue = queueFor(sessionId);
+
+      // THE LAST STEP BACK ONTO THE WAVE — the mirror of `onPrevious`'s, and
+      // here for the same reason: every surface must take it.
+      //
+      // The gate is "nothing ahead of the cursor", NOT "the cursor is on
+      // `current`". With a backlog the newest answer the cell holds is
+      // `pending.at(-1)`, which is what the row's own unread mark counts, so
+      // the wave sits above the BACKLOG and forward from `current` steps into
+      // it. Releasing here on a queued cell would spend the hold without
+      // moving, and cost a second press to go one place.
+      const steppingOntoTheWave = stepsOntoTheWave(
+        isAnswerHeld(sessionId),
+        queue.cursor,
+        queue.pending.length,
+      );
+
+      // The send wait's rule, as on the backward press — and read after the
+      // gate above for the same reason: `noteTransport` moves what `derive`
+      // reports, so anything asked of the store belongs before it.
+      noteTransport(sessionId);
+
+      if (steppingOntoTheWave) {
+        unlock();
+        releaseAnswer(sessionId);
+        return;
+      }
+
       // From history, next means "come back" — one step towards the newest
       // answer, which is the step in between rather than `current` whenever
       // the listener has walked further than one back. Otherwise it means
-      // "skip ahead" into what is waiting.
+      // "skip ahead" into what is waiting. Either way the hold SURVIVES: it
+      // stands for exactly as long as the cursor is below the wave, and is
+      // spent above, by the branch this one falls through from.
       const returning = queue.cursor > 0;
       const target = returning
         ? utteranceUnderCursor({ ...queue, cursor: queue.cursor - 1 })
         : (queue.pending[0] ?? null);
       if (!returning && !target) return;
 
+      // And the press is SILENT, exactly as `onPrevious` is — see its comment
+      // for the reasoning, which holds in both directions and is only repeated
+      // here in outline.
+      //
+      // Forward used to speak what it landed on, and the asymmetry was written
+      // down as deliberate: forward was "the way into what is waiting". It is
+      // no longer only that. The unread count says an answer is waiting and the
+      // play control speaks it, while forward is also the one way back to the
+      // wave — so the carve-out made the gesture that RETURNS to the waiting
+      // state the loudest control on the row. Navigation moves the cursor;
+      // audio starts from the arm switch or the play button, and from nothing
+      // else.
+      //
+      // `unlock()` STAYS, although this press no longer makes a sound: it is
+      // the browser's autoplay grant, handed out only from inside a gesture
+      // handler and attached to the element for good. A tab whose only
+      // interaction was navigating is a tab the autoplay effect ABSORBS the
+      // next answer in — marking it autoplayed and staying quiet ever after —
+      // so skimming and then arming would silently eat an answer.
+      //
+      // `recordAutoplayed` STAYS for the same reason it does on the backward
+      // press, and it is what makes this silent on the ARMED cell too: the
+      // autoplay effect watches the utterance under the cursor, so a step looks
+      // exactly like an arrival to it. Without the record an armed cell would
+      // speak the answer the user merely stepped onto — the press silenced
+      // everywhere except the state it is listened to in. It records nothing
+      // about `heard`, so the unplayed count is untouched.
       unlock();
       dispatchQueue(sessionId, { type: "next" });
       if (!target) return;
 
       recordAutoplayed(sessionId, target.id);
-      speakUtterance(sessionId, target);
     },
-    [dispatchQueue, queueFor, recordAutoplayed, speakUtterance, unlock],
+    [dispatchQueue, queueFor, recordAutoplayed, unlock],
   );
 
   /**

@@ -47,7 +47,15 @@ export function MockupFrame({
   const [selected, setSelected] = useState<Width>(WIDTHS[0]);
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    // `h-[70vh]` is the phone's height and the fallback for any surface whose
+    // ancestor chain is not bounded; from `md` up the pane bounds it, so the
+    // frame defers to the chain with `h-full`. `min-h-0` stays unconditional:
+    // without it the flex item's `min-height: auto` lets a tall mockup push the
+    // column past the pane.
+    <div
+      data-testid={`${testIdPrefix}-root`}
+      className="flex flex-col h-[70vh] md:h-full min-h-0"
+    >
       <div
         data-testid={`${testIdPrefix}-toolbar`}
         className="flex items-center gap-2 mb-4 pb-3"

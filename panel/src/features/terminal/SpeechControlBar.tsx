@@ -2,20 +2,21 @@ import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { LauncherPills } from "./LauncherPills";
+import { noteRetryUtterance } from "./answerRetry";
 import {
-  holdAnswer,
   noteNewestAnswer,
   noteSpeaking,
   noteTransport,
   noteUtterance,
-  releaseAnswer,
+  useAnswerHeld,
   useAnswerWaiting,
 } from "./answerWaiting";
 import { segmentStateFor, type SegmentState } from "./segmentState";
 import { dismissAttentionOnArrival } from "./attentionArrival";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
-import { utteranceUnderCursor } from "../speech/utteranceQueue";
+import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
+import { stepsOffTheWave, stepsOntoTheWave } from "../speech/waveStep";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../speech/types";
 import { getStoredVoice } from "../speech/voices";
 
@@ -224,9 +225,15 @@ export function SpeechControlBar({
   send,
 }: SpeechControlBarProps) {
   const state = speech.stateFor(sessionId);
-  // Only the mark: whether the pane's BODY has handed over is the pane's
-  // business, and the bar draws the same fact one control smaller.
-  const { pending } = useAnswerWaiting(sessionId);
+  // `pending` is only the mark: whether the pane's BODY has handed over is the
+  // pane's business, and the bar draws the same fact one control smaller.
+  //
+  // `waiting` and `held` are read for a different question entirely — not to
+  // draw anything, but because the wave is a POSITION the transport can stand
+  // on, and the two ends below cannot be derived without knowing whether the
+  // body is on it. See the two ends below and `features/speech/waveStep.ts`.
+  const { pending, waiting } = useAnswerWaiting(sessionId);
+  const held = useAnswerHeld(sessionId);
   const queue = speech.queueFor(sessionId);
   const units = speech.unitsFor(sessionId);
 
@@ -268,6 +275,16 @@ export function SpeechControlBar({
   const answerId = utteranceUnderCursor(queue)?.id ?? null;
   const withinReadyPulse = useReadyPulseWindow(state === "ready", answerId);
 
+  /**
+   * The newest answer the cell HOLDS — not the one under the cursor. Declared
+   * here rather than beside its own effect below because the retry ticket is
+   * measured against it too, and that push happens first.
+   *
+   * See {@link newestUtteranceId} for why neither `current` nor the cursor can
+   * stand in for it.
+   */
+  const newestAnswerId = newestUtteranceId(queue);
+
   // The reply landing, noticed HERE rather than in the pane. The queue is not a
   // store anything subscribes to — the host's identity changes when an
   // utterance arrives and the whole cell re-renders — so the arrival has to be
@@ -284,19 +301,36 @@ export function SpeechControlBar({
     noteUtterance(sessionId, answerId);
   }, [sessionId, answerId]);
 
-  /**
-   * The newest answer the cell HOLDS — not the one under the cursor.
-   *
-   * `queue.current?.id` alone would be wrong, and wrong in exactly the case
-   * the hold exists for: an answer arriving while the voice is reading takes
-   * the reducer's `speaking: true` arm, which appends to `pending` and leaves
-   * `current` where it was. A listener who stepped back to re-read while the
-   * agent was still talking would never be told the answer landed.
-   *
-   * `pending` is oldest-first, so its LAST entry is the newest thing the cell
-   * has been given.
-   */
-  const newestAnswerId = queue.pending.at(-1)?.id ?? queue.current?.id ?? null;
+  // The retry ticket is told about an arrival at the same moment and for the
+  // same reason: it too has to be withdrawn by an answer that landed while the
+  // pane was shut, or a user who reopens the pane finds a button offering to
+  // press Enter into a conversation that has already moved on.
+  //
+  // It is told the NEWEST id and not the cursor's, which is the one difference
+  // between this push and `noteUtterance`'s above, and the reason they are two
+  // effects rather than one. The cursor is wrong for a ticket in both
+  // directions. It misses the arrival the ticket exists to be withdrawn by: an
+  // answer landing while the voice is reading appends to `pending` and leaves
+  // `current` and the cursor untouched, so the id would be byte-identical, this
+  // effect would not re-run, and a standing offer would sit through a genuine
+  // reply. And it invents one that never happened: `previous`/`next` move the
+  // cursor, so a user stepping back to re-read while waiting would change the
+  // id and drop a ticket whose premise — a keypress that never landed — is
+  // untouched by browsing history. Nothing re-arms a dropped ticket, so that
+  // one is silent and permanent.
+  //
+  // The ticket this pushes into may still have NOTHING recorded against it: the
+  // composer opens it at the Enter, and the id it is measured against is
+  // recorded when the body is WRITTEN, which a queued submit or the reconnect
+  // path puts up to three seconds later. A remount inside that gap is the
+  // ordinary case, not the exotic one. It is safe regardless, because the store
+  // adopts the first id it is handed instead of reading it as a newer answer —
+  // a rule kept beside the comparison it guards rather than staged from here,
+  // where it would be an ordering between two calls. See `answerRetry.ts` on
+  // why the adoption cannot preserve a VISIBLE offer, and what it does risk.
+  useEffect(() => {
+    noteRetryUtterance(sessionId, newestAnswerId);
+  }, [sessionId, newestAnswerId]);
 
   // The arrival, pushed on every queue change. `answerWaiting` absorbs the
   // first push per session as SEEDING — an entry that has never been told
@@ -352,8 +386,43 @@ export function SpeechControlBar({
   // refuses one that would have worked, and neither is visible to the type
   // checker: `previous` is an array, so the old `!== null` half is true
   // forever and would leave `hasPrevious` permanently reading `cursor === 0`.
-  const hasPrevious = queue.cursor < queue.previous.length;
-  const hasNext = queue.cursor > 0 || queue.pending.length > 0;
+  //
+  // ...and the walk the cursor steps along has ONE MORE POSITION than the list
+  // does. The wave is not an utterance, so it has no index; it is where the
+  // body is when the agent owns it, one step above `current`. A rail that asks
+  // only the list cannot see it, and the state that proves the point is the
+  // one a reload leaves behind: the server hands back a single retained
+  // utterance with no history and nothing waiting, so `cursor < previous.length`
+  // and `cursor > 0 || pending.length` are both false while the play button is
+  // reporting an unread answer the user has no control to reach. The hold —
+  // `adr/0016`'s one carve-out from the wave owning the body — is taken by
+  // exactly the press that was disabled.
+  //
+  // Deliberately NOT a `-1` cursor. Everything that reads the cursor
+  // (`utteranceUnderCursor`, the play control, the scrubber, the host's own
+  // no-op guards) would grow a null-position case, and the reducer's
+  // same-reference guards — what keeps a refused press from repainting the
+  // grid — would each become an edge case. `held` already names the position,
+  // so the walk is expressible without touching the queue at all.
+  //
+  // These two ends are the row's only remaining share of the model — the STEP
+  // itself is the host's, so that the chord and the media keys take it too.
+  // What is left here is presentation, and it has to MIRROR the host's rule:
+  // an end that disagrees either offers a press that does nothing or refuses
+  // one that would have worked, and the type checker sees neither. The two
+  // rules are `onPrevious`/`onNext` in `useSpeechHost.ts`.
+  // Asked of `utteranceUnderCursor` rather than of `current`, for the reason
+  // the ends themselves are: the cursor's meaning lives in the file that owns
+  // it. A cell that has never spoken has nothing under the cursor, so the wave
+  // sits on top of nothing and adds no step — which is how the row's "disabled
+  // until the first answer" rule survives this change untouched.
+  const atAnswer = utteranceUnderCursor(queue) !== null;
+  const hasPrevious =
+    stepsOffTheWave(waiting, held, atAnswer) || queue.cursor < queue.previous.length;
+  const hasNext =
+    stepsOntoTheWave(held, queue.cursor, queue.pending.length) ||
+    queue.cursor > 0 ||
+    queue.pending.length > 0;
 
   /**
    * Whether the cell has ever spoken — the one question the row's contents
@@ -516,11 +585,12 @@ export function SpeechControlBar({
           className="speech-bar-btn"
           disabled={!hasPrevious}
           onClick={() => {
-            noteTransport(sessionId);
-            // Stepping back is the user saying *I want the text*. Without
-            // the hold the pane would give it back for exactly as long as
-            // it took the agent's next activity broadcast to arrive.
-            holdAnswer(sessionId);
+            // ONE CALL, on purpose. The hold, the wave step and the send
+            // wait's `noteTransport` all belong to `onPrevious` in the host,
+            // because the chord and the OS media keys raise the same callback
+            // and must behave the same way — a rule the row kept for itself
+            // would be a second transport. This handler's whole job is to say
+            // that the row's control was pressed.
             speech.onPrevious(sessionId);
           }}
         >
@@ -608,9 +678,8 @@ export function SpeechControlBar({
           className="speech-bar-btn"
           disabled={!hasNext}
           onClick={() => {
-            noteTransport(sessionId);
-            // Forward is the user done with what they stepped back for.
-            releaseAnswer(sessionId);
+            // One call, like the backward control beside it: the release onto
+            // the wave is `onNext`'s, in the host.
             speech.onNext(sessionId);
           }}
         >

@@ -998,7 +998,9 @@ describe("useSpeechHost — no budget, no resume point", () => {
  * still silent in the bad sense: while history was one slot, `previous` was
  * the only thing behind the cursor, so a careless port could not miss. With a
  * list it can, and the bar moves onto the wrong answer with nothing to say so.
- * `onNext` keeps its playback, which is also what makes the landing audible.
+ * `onNext` is silent too now, so every landing in this test is read out by the
+ * play control — which is what makes each of them audible, and what keeps a
+ * careless port from passing by landing somewhere quiet.
  */
 describe("useSpeechHost — the transport walks the whole history", () => {
   it("lands the cursor on the answer a step back, without speaking it", async () => {
@@ -1044,11 +1046,14 @@ describe("useSpeechHost — the transport walks the whole history", () => {
     expect(result.current.queueFor("cell-a").cursor).toBe(2);
     expect(played).toEqual([]);
 
-    // Coming forward plays what it comes back onto, all the way to current:
-    // the asymmetry is the point, and this is the arm that pins it.
+    // Coming forward lands on what it comes back onto and stays quiet, exactly
+    // as going back does — the symmetry is the point now. The play control is
+    // what says which answer the step arrived at.
     played.length = 0;
     await settle(() => result.current.onNext("cell-a"));
     expect(result.current.queueFor("cell-a").cursor).toBe(1);
+    expect(played).toEqual([]);
+    await clickControl(result.current, "cell-a");
     expect(played).toEqual([`blob:${second[0]}`]);
   });
 

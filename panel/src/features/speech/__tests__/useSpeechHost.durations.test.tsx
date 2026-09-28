@@ -369,8 +369,12 @@ describe("the scrubber's durations belong to an utterance, not to a cell", () =>
       });
     });
 
-    // `next` supersedes the live run mid-unit and plays the new answer.
+    // `next` moves onto the queued answer and the play control starts it,
+    // superseding the live run mid-unit. Stepping is silent in both directions
+    // now, so "barge in with next" is two calls — the same shape the replay
+    // test above uses, and the run it produces is the same barge-in.
     await settle(() => host.onNext("cell-a"));
+    await settle(() => host.onSpeak("cell-a"));
     unsubscribe();
 
     // `play` clears the map synchronously, inside the same call `speakUtterance`

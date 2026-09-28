@@ -32,6 +32,9 @@ afterEach(() => {
 const frame = () =>
   screen.getByTestId("mockup-viewer-frame") as HTMLIFrameElement;
 
+const root = (prefix = "mockup-viewer") =>
+  screen.getByTestId(`${prefix}-root`) as HTMLElement;
+
 describe("MockupFrame", () => {
   it("renders an iframe pointing at the raw route for the file", () => {
     render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
@@ -159,5 +162,61 @@ describe("MockupFrame", () => {
     expect(frame()).toBe(before);
     fireEvent.click(screen.getByTestId("mockup-viewer-width-full"));
     expect(frame()).toBe(before);
+  });
+
+  it("gives the frame an explicit height on a phone and defers to the pane from md up", () => {
+    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+
+    // jsdom lays nothing out, so the only thing that can be pinned is the class
+    // contract. `h-[70vh]` is the height a phone gets, where nothing above the
+    // frame bounds the chain; `md:h-full` is what resolves against the bounded
+    // pane on desktop. Without the explicit height the frame collapses to its
+    // content on a phone — the empty-space symptom this change removes.
+    const classes = Array.from(root().classList);
+    expect(classes).toContain("h-[70vh]");
+    expect(classes).toContain("md:h-full");
+  });
+
+  it("keeps min-h-0 so a tall mockup cannot push the column past the pane", () => {
+    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+
+    // `min-h-0` is unconditional: a flex item defaults to `min-height: auto`,
+    // which lets a tall mockup grow the column beyond the pane and brings the
+    // empty space back from the other direction. The flex column itself has to
+    // survive too, or the height classes describe a block that ignores them.
+    const classes = Array.from(root().classList);
+    expect(classes).toContain("min-h-0");
+    expect(classes).toContain("flex");
+    expect(classes).toContain("flex-col");
+  });
+
+  it("leaves the iframe asking for the full height of its container", () => {
+    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+
+    // The definite height moves one level up; how the iframe asks for it does
+    // not change — `100%` of a now-bounded container is the whole point.
+    expect(frame().style.height).toBe("100%");
+  });
+
+  it("does not change the frame's height when a width preset is picked", () => {
+    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+
+    const before = root().className;
+    fireEvent.click(screen.getByTestId("mockup-viewer-width-phone"));
+    expect(root().className).toBe(before);
+    fireEvent.click(screen.getByTestId("mockup-viewer-width-tablet"));
+    expect(root().className).toBe(before);
+  });
+
+  it("prefixes the root test id with the given testIdPrefix", () => {
+    render(
+      <MockupFrame
+        filePath={FILE_PATH}
+        absolutePath={ABSOLUTE}
+        testIdPrefix="preview"
+      />,
+    );
+
+    expect(root("preview")).toBeTruthy();
   });
 });

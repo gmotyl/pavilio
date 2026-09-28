@@ -14,11 +14,11 @@ const PORTABLE = [
   "git.branchDiff.base",
   "git.branchDiff.open",
   "git.commitsOpen",
-  "git.history.paneWidth",
   "git.viewMode",
   "git.worktree.expanded",
   "projects.favorites",
   "repos.searchScope",
+  "repos.tree.paneWidth",
   "search.includeArchived",
   "shell.leftSidebar.expanded",
   "shell.leftSidebar.width",
@@ -70,7 +70,7 @@ const MACHINE_LOCAL = [
  * Rows the design's portability table names that nothing declares yet: no
  * code persists or resizes them today. Listed here so declaring one is a
  * one-line move into PORTABLE rather than a spurious red — which is what
- * `fileList.paneWidth`, the git-history tree's `git.history.paneWidth` and
+ * `fileList.paneWidth`, the repo file trees' `repos.tree.paneWidth` and
  * finally the two sidebar widths have each been in turn.
  *
  * EMPTY, and kept rather than deleted: every row of the design's table is
@@ -98,7 +98,6 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["git.branchDiff.open", true, "repo"],
   // `isOpen` reads `map[repoPath] !== false`, so an absent entry is OPEN.
   ["git.commitsOpen", true, "repo"],
-  ["git.history.paneWidth", 280, "global"],
   ["git.viewMode", "flat", "global"],
   ["git.worktree.expanded", false, "repo"],
   ["nav.lastFile", null, "project"],
@@ -106,6 +105,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["nav.lastReposQuery", null, "project"],
   ["projects.favorites", [], "global"],
   ["repos.searchScope", "changed", "global"],
+  ["repos.tree.paneWidth", 280, "global"],
   ["search.includeArchived", true, "global"],
   ["shell.leftSidebar.expanded", true, "global"],
   // The two fixed sidebar widths the stylesheet used to carry, as numbers.
@@ -267,6 +267,14 @@ describe("the declaration table", () => {
     expect(keyOf("time.report").portable).toBe(true);
     expect(keyOf("time.form.resetAutoOnSave").portable).toBe(true);
   });
+
+  it("no declaration keeps the retired history-only key", () => {
+    // The commit tree's width is now `repos.tree.paneWidth`, the one width
+    // every repo file tree reads. No migration, per the registry's standing
+    // policy: a workspace that dragged the old handle opens at 280 again.
+    const keys = ALL_PREFERENCES.map((d) => d.key);
+    expect(keys).not.toContain("git.history.paneWidth");
+  });
 });
 
 /**
@@ -420,5 +428,47 @@ describe("the answer surface's heights are kept per project", () => {
 
     expect(readPreference(preferences.answerComposerHeight, BETA)).toBe(62);
     expect(readPreference(preferences.answerPaneHeight, BETA)).toBe(4000);
+  });
+});
+
+/**
+ * The single width the repo file trees share, asserted through the store
+ * rather than off the table above: "the declaration says 280" is a fact about
+ * the registry, while "a tree nobody has dragged opens at 280" is a fact about
+ * what a reader gets, and only a read proves it.
+ */
+describe("the width the repo file trees share", () => {
+  beforeEach(() => {
+    globals.__PAVILIO_PREFS__ = { version: 1 };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 200 })),
+    );
+  });
+
+  afterEach(() => {
+    delete globals.__PAVILIO_PREFS__;
+    localStorage.clear();
+    sessionStorage.clear();
+    __resetPreferenceStoreForTests();
+    vi.unstubAllGlobals();
+  });
+
+  it("repoTreePaneWidth defaults to 280", () => {
+    // 280 written out rather than read off the declaration: comparing the
+    // registry against itself would assert nothing.
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(280);
+  });
+
+  it("repoTreePaneWidth round-trips a stored width", () => {
+    writePreference(preferences.repoTreePaneWidth, 344);
+
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(344);
+    // Portable and `global`: the width lands in the workspace document under
+    // the bare key, with no scope argument appended.
+    expect(globals.__PAVILIO_PREFS__).toEqual({
+      version: 1,
+      "repos.tree.paneWidth": 344,
+    });
   });
 });

@@ -111,7 +111,7 @@ describe("resizing the file-list sidebar", () => {
 
   it("the file list width is independent of the history tree width", () => {
     // A stored history-tree width must not reach the file list...
-    doc()[preferences.gitHistoryPaneWidth.key] = 420;
+    doc()[preferences.repoTreePaneWidth.key] = 420;
     renderSidebar();
     expect(aside()).toHaveStyle({ width: "288px" });
 
@@ -119,7 +119,7 @@ describe("resizing the file-list sidebar", () => {
     // one declaration would fail one of these two whichever key it borrowed.
     dragBy(-50);
     expect(aside()).toHaveStyle({ width: "238px" });
-    expect(readPreference(preferences.gitHistoryPaneWidth)).toBe(420);
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(420);
     expect(readPreference(preferences.fileListPaneWidth)).toBe(238);
   });
 
