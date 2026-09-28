@@ -104,4 +104,51 @@ describe("sessionLabel", () => {
     expect(isAutoName(session({ project: "a.b", name: "a.b-1" }))).toBe(true);
     expect(isAutoName(session({ project: "a.b", name: "axb-1" }))).toBe(false);
   });
+
+  /**
+   * The generated shape is `<project>-<n>` with a REAL number, anchored at both
+   * ends. Each of the three cases below pins one part of that shape, because
+   * each part is individually load-bearing and individually easy to lose: a
+   * bare `<project>-` is not a generated name, a name that merely ENDS in the
+   * shape is not one either, and neither is one that merely STARTS with it. The
+   * last of the three is the lookalike `panel/server/lib/terminal-identity.ts`
+   * names in its own doc comment, so this encodes a rule the codebase states.
+   */
+  it("a bare project prefix with no number is not a generated name", () => {
+    expect(isAutoName(session({ project: "pavilio", name: "pavilio-" }))).toBe(
+      false,
+    );
+  });
+
+  it("a name that only ends in the generated shape is not a generated name", () => {
+    expect(
+      isAutoName(session({ project: "pavilio", name: "old-pavilio-1" })),
+    ).toBe(false);
+  });
+
+  it("a name that only starts with the generated shape is not a generated name", () => {
+    expect(
+      isAutoName(session({ project: "pavilio", name: "pavilio-1-old" })),
+    ).toBe(false);
+  });
+
+  /**
+   * `sessionLabel` reads `session.title ?? session.name`, so an EMPTY title
+   * would render as an empty caption. That it cannot happen is a SERVER
+   * guarantee, not a client one: clearing a title is `delete session.title` in
+   * `panel/server/lib/terminal-manager.ts` — the field goes ABSENT, never to
+   * `""` — and a server test pins that, naming this very `??`.
+   *
+   * This test documents that coupling from the client side rather than
+   * endorsing an empty label. It asserts today's behaviour so that loosening
+   * the operator (to `||`, say) becomes a deliberate act with a failing test
+   * attached, instead of a silent change to what the client would do if the
+   * server ever did start sending `""`.
+   */
+  it("an empty title is the server's cleared signal, which never reaches the client", () => {
+    const s = session({ project: "pavilio", name: "pavilio-1", title: "" });
+
+    expect(isAutoName(s)).toBe(true);
+    expect(sessionLabel(s)).toBe("");
+  });
 });
