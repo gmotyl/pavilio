@@ -220,13 +220,68 @@ export function clearRetryTicket(sessionId: string, generation?: number): void {
   if (drop(sessionId)) notify();
 }
 
-/** A newer utterance for the session clears the ticket; the recorded one does not. */
+/**
+ * A newer utterance for the session clears the ticket; the recorded one does
+ * not. A ticket that has recorded NOTHING adopts the id instead of being
+ * cleared by it.
+ *
+ * ## Why an unrecorded ticket adopts rather than clears
+ *
+ * The comparison below is "is this a different answer from the one the send
+ * replied to?", and a ticket with nothing recorded is not a ticket that
+ * answers `yes` — it is one that has not been told what to compare against.
+ * `beginRetryTicket` runs synchronously at the Enter; the id is recorded by
+ * `noteRetrySentOn` when the body is WRITTEN, which is not the same instant —
+ * a submit made while another is in flight waits behind it, and the reconnect
+ * path can hold one for three seconds. Anything pushing the cursor's id inside
+ * that gap — the bar remounting on a layout change, the ordinary way a remount
+ * happens — would otherwise take the ticket, and take it silently, because
+ * nothing is on screen yet to vanish. The user would send, get no answer, and
+ * get no offer either.
+ *
+ * So the first push adopts. `noteRetrySentOn` ignores every id after the
+ * first, so the pane's own push stays authoritative for every ticket that got
+ * that far, and this adoption only ever fills a ticket the pane has not
+ * reached. Record-then-compare lives here rather than in the one caller
+ * because it is one decision: a caller doing it in two statements is an
+ * ordering a later edit can split or reorder with nothing to catch it.
+ *
+ * ## What the adoption can and cannot get wrong
+ *
+ * It is wrong only where the adopted id is NOT the one the send replied to —
+ * an answer that landed between the Enter and the write. It cannot preserve a
+ * VISIBLE offer even then: `noteRetrySentOn` is raised from `onDelivered` and
+ * {@link armRetryOffer} from `onReturnDelivered`, which `ptySubmit` raises
+ * strictly after it (the return is scheduled in that call's `finally`), so
+ * every ticket that reaches a timer has already recorded an id, and the
+ * unrecorded window closes before any offer can exist.
+ *
+ * The tempting stronger claim — that such an answer is output, so the session
+ * is busy, so the activity watch withdraws the ticket anyway — is NOT a
+ * certainty, and is not what this rests on. `recordOutput` in
+ * `server/lib/terminalActivity.ts` notifies only `if (rec.state !== "busy")`,
+ * so output into an already-busy session raises no event at all; and activity
+ * rides its own socket (`/ws/terminal-activity`, 2s reconnect backoff) while
+ * utterances ride the main realtime channel, so an answer can arrive while
+ * `getActivityState` is frozen on a stale `idle`. The residual risk is
+ * therefore real but bounded: the ticket adopts the one answer that landed in
+ * the gap, and two seconds later the deadline's own `getActivityState(...) !==
+ * "idle"` gate has to miss it too. The cost if both line up is one
+ * user-initiated `\r` into a session that just answered.
+ */
 export function noteRetryUtterance(sessionId: string, utteranceId: string | null): void {
   const ticket = tickets.get(sessionId);
   if (!ticket) return;
+  // Boxed, so that a cell with no answer yet records `{ id: null }` — a fact
+  // about where the send went out from — rather than staying indistinguishable
+  // from a ticket nothing has been recorded on.
+  if (ticket.sentOn === null) {
+    ticket.sentOn = { id: utteranceId };
+    return;
+  }
   // The id the send went out on is the cell standing still — the bar pushes it
   // on every mount and every render that changes nothing.
-  if (ticket.sentOn !== null && ticket.sentOn.id === utteranceId) return;
+  if (ticket.sentOn.id === utteranceId) return;
   if (drop(sessionId)) notify();
 }
 

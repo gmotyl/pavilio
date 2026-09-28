@@ -227,6 +227,66 @@ describe("the offer's lifetime", () => {
   });
 });
 
+/**
+ * The ticket is opened at the Enter and told what it replied to when the BODY
+ * is written — a gap a queued submit or the reconnect path can hold open for
+ * seconds. Everything above reaches `noteRetryUtterance` through
+ * `acceptedSend`, which records the id first, so nothing above says what
+ * happens to a ticket that has been told nothing yet. These do: the first id
+ * pushed is ADOPTED, because "is this a different answer?" is not a question a
+ * ticket with no recorded answer can say yes to.
+ */
+describe("the id the send replied to", () => {
+  it("a ticket with nothing recorded adopts the first id pushed at it", () => {
+    // No `noteRetrySentOn`: the body has not been written yet.
+    const generation = beginRetryTicket(SESSION);
+    armRetryOffer(SESSION, generation);
+
+    // The bar remounting on a layout change, pushing the cursor it stands on.
+    noteRetryUtterance(SESSION, "u-1");
+    vi.advanceTimersByTime(RETRY_OFFER_MS);
+
+    expect(isRetryOffered(SESSION)).toBe(true);
+    // Adopted, not made inert: the same id is the cell standing still and ends
+    // nothing, and a NEWER one is still the answer this ticket loses to.
+    noteRetryUtterance(SESSION, "u-1");
+    expect(isRetryOffered(SESSION)).toBe(true);
+    noteRetryUtterance(SESSION, "u-2");
+    expect(isRetryOffered(SESSION)).toBe(false);
+  });
+
+  it("adopts a cell that had no answer yet, and keeps losing to the first that arrives", () => {
+    // `null` is a value the ticket can hold — the send went out from a cell
+    // showing nothing — and it has to be distinguishable from having recorded
+    // nothing at all, or the next push would clear the ticket all over again.
+    const generation = beginRetryTicket(SESSION);
+    armRetryOffer(SESSION, generation);
+
+    noteRetryUtterance(SESSION, null);
+    noteRetryUtterance(SESSION, null);
+    vi.advanceTimersByTime(RETRY_OFFER_MS);
+
+    expect(isRetryOffered(SESSION)).toBe(true);
+
+    noteRetryUtterance(SESSION, "u-1");
+    expect(isRetryOffered(SESSION)).toBe(false);
+  });
+
+  it("a ticket that HAS recorded an id is still cleared by a different one", () => {
+    // The other half, pinned beside the first so that adopting can never be
+    // widened into adopting always: once an id is recorded, a differing push is
+    // the premise collapsing and takes the whole ticket.
+    acceptedSend("u-1");
+
+    noteRetryUtterance(SESSION, "u-2");
+
+    vi.advanceTimersByTime(RETRY_OFFER_MS);
+    expect(isRetryOffered(SESSION)).toBe(false);
+    expect(consumeRetryOffer(SESSION)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("generations", () => {
   it("ignores an arm for a superseded generation", () => {
     const stale = beginRetryTicket(SESSION);

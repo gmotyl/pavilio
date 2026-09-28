@@ -2,7 +2,7 @@ import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { LauncherPills } from "./LauncherPills";
-import { noteRetrySentOn, noteRetryUtterance } from "./answerRetry";
+import { noteRetryUtterance } from "./answerRetry";
 import {
   holdAnswer,
   noteNewestAnswer,
@@ -287,31 +287,17 @@ export function SpeechControlBar({
   // pane was shut, or a user who reopens the pane finds a button offering to
   // press Enter into a conversation that has already moved on.
   //
-  // ## Why the ticket is SEEDED here before it is compared against
-  //
-  // `noteRetryUtterance` clears a ticket whose recorded id differs from the one
-  // pushed — and a ticket with NOTHING recorded differs from every id there is.
-  // The ticket is opened by the composer at the Enter, and the id it is
-  // measured against is recorded by the pane when the body is WRITTEN, which is
-  // not the same instant: a submit made while another is in flight is queued
-  // behind it, and the reconnect path can hold one for three seconds. Anything
-  // that runs this effect inside that gap — a layout change remounting the
-  // cell, which is the ordinary way a remount happens — would take the ticket
-  // with it, and take it silently, because nothing is on screen yet to vanish.
-  // The user would then send, get no answer, and get no offer either.
-  //
-  // So the id is recorded before it is compared. `noteRetrySentOn` is ignored
-  // once a ticket carries one, so this seeds only a ticket the pane has not
-  // reached yet, and the pane's own push stays authoritative for every ticket
-  // that got that far. Where the seed differs from what the pane would later
-  // record, it is because an answer landed between the Enter and the write —
-  // and that answer is output, which makes the session busy, which withdraws
-  // the ticket through the activity watch instead. The seeding decides nothing
-  // the store does not already decide; it only stops a ticket being spent by a
-  // question it has not been given the answer to.
+  // The ticket this pushes into may still have NOTHING recorded against it: the
+  // composer opens it at the Enter, and the id it is measured against is
+  // recorded when the body is WRITTEN, which a queued submit or the reconnect
+  // path puts up to three seconds later. A remount inside that gap is the
+  // ordinary case, not the exotic one. It is safe regardless, because the store
+  // adopts the first id it is handed instead of reading it as a newer answer —
+  // a rule kept beside the comparison it guards rather than staged from here,
+  // where it would be an ordering between two calls. See `answerRetry.ts` on
+  // why the adoption cannot preserve a VISIBLE offer, and what it does risk.
   useEffect(() => {
     noteUtterance(sessionId, answerId);
-    noteRetrySentOn(sessionId, answerId);
     noteRetryUtterance(sessionId, answerId);
   }, [sessionId, answerId]);
 
