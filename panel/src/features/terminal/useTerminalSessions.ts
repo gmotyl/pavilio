@@ -63,6 +63,13 @@ export interface SessionMeta {
   cwd: string;
   pid: number;
   createdAt: string;
+  /**
+   * Volatile display state the process inside the PTY publishes about itself
+   * through an OSC title sequence. NEVER an identifier: nothing is looked up,
+   * stored or renamed by it, and it rides the session-list poll like any other
+   * field. Absent until something in the terminal sets one.
+   */
+  title?: string;
 }
 
 export interface CreateSessionOpts {
@@ -72,13 +79,23 @@ export interface CreateSessionOpts {
   runAsUser?: string;
 }
 
+/**
+ * A project name is a directory name, so `.` and `+` are legal in one. Every
+ * regex built around a project has to match it literally — `nextProjectName`
+ * and `isAutoName` share this so the counter and the label can never disagree
+ * about which names are the generated shape.
+ */
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function nextProjectName(
   project: string,
   existing: SessionMeta[],
 ): string {
   // Collect numeric suffixes already in use for "{project}-N"
   const used = new Set<number>();
-  const rx = new RegExp(`^${project.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-(\\d+)$`);
+  const rx = new RegExp(`^${escapeForRegExp(project)}-(\\d+)$`);
   for (const s of existing) {
     if (s.project !== project) continue;
     const m = rx.exec(s.name);
@@ -87,6 +104,36 @@ export function nextProjectName(
   let n = 1;
   while (used.has(n)) n++;
   return `${project}-${n}`;
+}
+
+/**
+ * Whether the session still carries the name the panel generated for it.
+ *
+ * "Manual" is DERIVED from the name's shape rather than tracked as a flag,
+ * because `POST /api/terminal/sessions` cannot report one honestly:
+ * `createTerminalSession` sends `opts.name || nextProjectName(...)`, so the
+ * server is handed a name on every create and cannot tell a typed one from a
+ * computed one. This is the same test `nextProjectName` runs to collect the
+ * suffixes already in use, which is why a renamed session dropping out of the
+ * auto-named set is established behaviour and not a new rule.
+ *
+ * The accepted edge: a session renamed by hand to exactly `pavilio-9` re-enters
+ * the set, and its title starts showing again.
+ */
+export function isAutoName(session: SessionMeta): boolean {
+  return new RegExp(`^${escapeForRegExp(session.project)}-\\d+$`).test(
+    session.name,
+  );
+}
+
+/**
+ * What every wide surface renders: the title only while the name is still
+ * generated. Once a human has chosen a name, that choice outranks anything the
+ * process inside the terminal publishes — including a title that arrives after
+ * the rename.
+ */
+export function sessionLabel(session: SessionMeta): string {
+  return isAutoName(session) ? session.title ?? session.name : session.name;
 }
 
 export function useTerminalSessions(project: string) {
