@@ -1,0 +1,103 @@
+# Pavilio repository identity — sourced, never executed.
+#
+#   . "$SCRIPT_DIR/remotes"
+#
+# After sourcing:
+#   $CANONICAL_HTTPS        — the URL a pavilio remote is added as
+#   $CANONICAL_KEY          — the host/path every spelling of it reduces to
+#   remote_key <url>        — reduce a remote URL to that comparable key
+#   is_canonical_remote <url>   — is this URL the pavilio repository?
+#   repo_is_pavilio_clone <dir> — does that repo track pavilio directly?
+#
+# Why it is its own file: scripts/bootstrap decides whether a remote is ours
+# before it renames or stamps anything, and scripts/update.sh decides whether
+# the workspace it is running in *is* a pavilio clone. Both answers come from
+# the same normalisation, and two copies of it would drift the first time a new
+# URL spelling turned up.
+#
+# Like scripts/pm, this uses nothing but bash builtins: it is sourced by entry
+# points that run before a toolchain is known to exist.
+
+# The repository this workspace was shipped from: the URL it is added as, and
+# the host/path key that every spelling of it normalises down to. A remote that
+# does not reduce to that key belongs to the user.
+CANONICAL_HTTPS="https://github.com/gmotyl/pavilio.git"
+CANONICAL_KEY="github.com/gmotyl/pavilio"
+
+# Reduce a remote URL to a comparable "host/path". The same repository is spelled
+# a dozen ways by the tools that clone it — `gh repo clone` and the GUI clients
+# emit ssh://, credential helpers embed a user, GitHub is case-insensitive, and a
+# trailing slash or .git is noise — and none of those differences change which
+# repository it is. What must NOT be folded away is the path itself:
+# gmotyl/pavilio-fork and gmotyl/pavilio-notes are different repositories.
+remote_key() {
+  local url="$1" host rest
+  case "$url" in
+    *://*)
+      url="${url#*://}"
+      ;;
+    *@*:*)
+      # scp-like syntax (git@github.com:owner/repo) carries no scheme; the colon
+      # is the separator the URL forms spell as a slash.
+      url="${url#*@}"
+      url="${url%%:*}/${url#*:}"
+      ;;
+  esac
+  host="${url%%/*}"
+  rest="${url#*/}"
+  [ "$rest" = "$url" ] && rest=""
+  # Credentials, then a port: neither is part of the repository's identity.
+  host="${host##*@}"
+  host="${host%%:*}"
+  url="$host${rest:+/$rest}"
+  while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
+  # Case-folded like everything above it: GitHub answers to `.GIT` as readily as
+  # to `github.com`, and a suffix that only strips in lower case would file a
+  # canonical origin spelled `…/Pavilio.GIT` as somebody's fork.
+  url="${url%[.][gG][iI][tT]}"
+  while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
+  printf '%s' "$url"
+}
+
+# Whole-key equality, case-insensitively — never a prefix or a substring match.
+is_canonical_remote() {
+  local key restore rc=1
+  key="$(remote_key "$1")"
+  [ -n "$key" ] || return 1
+  # `shopt -p` exits 1 when the option is unset — which is the normal case here.
+  # Harmless today, but it would abort the run under `set -e`, so say so.
+  restore="$(shopt -p nocasematch)" || true
+  shopt -s nocasematch
+  [[ "$key" == "$CANONICAL_KEY" ]] && rc=0
+  eval "$restore"
+  return "$rc"
+}
+
+# Is the repository at $1 a pavilio clone — a checkout that tracks pavilio
+# itself, rather than a private workspace repository that merely sits next to
+# one? Answered from the remotes, never from the directory's name: the README's
+# own Quick Start clones into `my-workspace`, and a check on the name would call
+# every documented install "not a pavilio clone".
+#
+# `upstream` first, because that is what `pnpm bootstrap` renames the clone's
+# origin to; `origin` second, so a clone that has not been bootstrapped yet is
+# still recognised — and then gets the "run: pnpm bootstrap" message that fits
+# it, rather than a complaint about a sibling directory it was never told about.
+# Both spellings of each remote's URL are checked: the one written in the config
+# and the one git actually dials. They differ whenever the user has a
+# `url.<base>.insteadOf` rewrite — a `gh:` shorthand, or a company mirror — and
+# either side of such a rewrite is a legitimate way to spell this repository.
+repo_is_pavilio_clone() {
+  local dir="$1" name url
+  for name in upstream origin; do
+    for url in \
+      "$(git -C "$dir" config --get "remote.$name.url" 2>/dev/null || true)" \
+      "$(git -C "$dir" remote get-url "$name" 2>/dev/null || true)"; do
+      [ -n "$url" ] || continue
+      if is_canonical_remote "$url"; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}

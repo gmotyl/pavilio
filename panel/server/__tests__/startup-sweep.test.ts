@@ -31,6 +31,9 @@ vi.mock("../config.js", () => ({
     tlsCert: undefined,
     tlsKey: undefined,
   })),
+  // Nothing named a port here, so the auto-increment path applies — the same
+  // one every case in this file has always taken.
+  isPortExplicit: vi.fn(() => false),
 }));
 
 vi.mock("../lib/auth.js", () => ({
@@ -79,6 +82,10 @@ vi.mock("../lib/terminal-manager.js", () => ({ listSessions: vi.fn(() => []) }))
 vi.mock("http", async (importOriginal) => ({
   ...(await importOriginal<typeof import("http")>()),
   createServer: vi.fn(() => ({
+    // startPanel registers an `error` listener before listen() so a bind
+    // failure becomes PortUnavailableError instead of an unhandled event; a
+    // double without it is not a server this code can be started against.
+    once: vi.fn(),
     listen: vi.fn((_port: number, _host: string, cb?: () => void) => {
       cb?.();
     }),

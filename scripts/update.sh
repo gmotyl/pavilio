@@ -14,17 +14,196 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
 # Resolve upstream local clone directory
 # Default: sibling directory named pavilio
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Whether the caller named an upstream directory matters on its own, separately
+# from what the default resolves to: an explicit path is a decision, the default
+# is only a guess.
+UPSTREAM_DIR_GIVEN=0
+[ "$#" -gt 0 ] && [ -n "${1:-}" ] && UPSTREAM_DIR_GIVEN=1
 UPSTREAM_DIR="${1:-"$SCRIPT_DIR/../../pavilio"}"
 
-if [ ! -d "$UPSTREAM_DIR/.git" ]; then
+# Toolchain resolution is shared with the launcher and the setup scripts, so an
+# update started from the Windows shortcut — no login shell, so none of the
+# dotfiles that put a version manager on PATH have been read — finds node and the
+# package manager the same way every other entry point does. It also gives us
+# pm_in, which spells a package script the way whichever manager was found wants,
+# and pm_install, which does the same for dependency installation.
+# shellcheck source=scripts/pm
+. "$SCRIPT_DIR/pm" || exit 1
+pm_resolve || exit 1
+
+# is_canonical_remote / repo_is_pavilio_clone — the same normalisation
+# scripts/bootstrap uses when it decides which remotes are ours.
+# shellcheck source=scripts/remotes
+. "$SCRIPT_DIR/remotes" || exit 1
+
+# How to re-run the panel steps by hand, in the same spelling the run itself uses.
+if [ "$PM" = "pnpm" ]; then
+  PANEL_INSTALL_CMD="pnpm -C \"$REPO_ROOT/panel\" install"
+  PANEL_BUILD_CMD="pnpm -C \"$REPO_ROOT/panel\" build"
+else
+  PANEL_INSTALL_CMD="npm --prefix \"$REPO_ROOT/panel\" install"
+  PANEL_BUILD_CMD="npm --prefix \"$REPO_ROOT/panel\" run build"
+fi
+
+# Clone mode: the workspace *is* a pavilio clone, so there is no separate tree to
+# mirror from. The update is then a rebase onto the `upstream` remote rather than
+# an rsync — and the notes in the tree are the user's own commits, not
+# machine-generated mirror output, so nothing here commits on their behalf either.
+#
+# Which mode applies is a question about THIS repository, not about what a
+# sibling directory happens to be called. It used to be answered by comparing the
+# default upstream path — `../pavilio` — against the repo root, which meant clone
+# mode engaged only for a checkout whose own directory was literally named
+# `pavilio`. The README's Quick Start says
+# `git clone …/pavilio.git my-workspace`, so every user who followed the
+# documented instructions got `Error: upstream repo not found at …/../pavilio`
+# from the update command and no way to tell why.
+#
+# So: no upstream directory named on the command line, and a remote that reduces
+# to the canonical pavilio repository → clone mode. An explicit path still means
+# sync mode, except when it points back at this very repository, which has only
+# ever meant "update in place".
+CLONE_MODE=0
+if [ "$UPSTREAM_DIR_GIVEN" = 0 ]; then
+  if repo_is_pavilio_clone "$REPO_ROOT"; then
+    CLONE_MODE=1
+  fi
+elif [ "$(readlink -f "$UPSTREAM_DIR")" = "$(readlink -f "$REPO_ROOT")" ]; then
+  CLONE_MODE=1
+fi
+
+if [ "$CLONE_MODE" = 0 ] && [ ! -d "$UPSTREAM_DIR/.git" ]; then
   echo "Error: upstream repo not found at $UPSTREAM_DIR"
   echo "Usage: $0 [/path/to/pavilio]"
   echo ""
-  echo "Clone it first: git clone git@github.com:gmotyl/pavilio.git"
+  # Neither shape applies, so say what was ruled out on both sides: there is no
+  # sibling clone to mirror from, and this repository does not track pavilio
+  # itself either. Without the second half the reader is told to go and clone a
+  # directory they may not need at all.
+  if [ "$UPSTREAM_DIR_GIVEN" = 0 ]; then
+    echo "$REPO_ROOT has no remote pointing at $CANONICAL_HTTPS, so it is not a pavilio clone."
+    echo "Either pass the path of a pavilio clone to mirror from, or clone one beside this workspace:"
+  else
+    echo "Clone it first:"
+  fi
+  echo "  git clone $CANONICAL_HTTPS"
   exit 1
 fi
 
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Re-run command setup for whichever agents are already configured, so new/renamed
+# skills become slash-commands without a manual step. Guarded (never abort the
+# update) and fed </dev/null so a setup script's prompt can't hang an unattended
+# run. Shared by both modes: a clone gets its skills from the rebase rather than
+# from an rsync, but the commands generated from them go just as stale.
+regenerate_agent_commands() {
+  if [ -d "$REPO_ROOT/.claude" ]; then
+    if bash "$REPO_ROOT/scripts/setup:claude-code" </dev/null >/dev/null 2>&1; then
+      echo "  ✓ Claude Code commands refreshed (.claude/commands/)"
+    else
+      echo "  ⚠️  Claude Code refresh failed — run: bash scripts/setup:claude-code"
+    fi
+  fi
+  if [ -d "$REPO_ROOT/.opencode" ] || [ -d "$HOME/.config/opencode" ]; then
+    if bash "$REPO_ROOT/scripts/setup:opencode" </dev/null >/dev/null 2>&1; then
+      echo "  ✓ OpenCode commands refreshed (opencode.json + .opencode/commands/)"
+    else
+      echo "  ⚠️  OpenCode refresh failed — run: bash scripts/setup:opencode"
+    fi
+  fi
+}
+
+# The panel serves a pre-built bundle, so dist/ is only as fresh as the last build:
+# without this step an update would land new source and keep serving the old
+# bundle, silently. Built in the workspace, from the source just landed in it —
+# in sync mode the upstream clone's own dist/ is never copied (rsync excludes it).
+#
+# Deliberately the last fatal step of either mode, and everything above it has to
+# have happened first: failing earlier would leave skills/ updated while the
+# slash-commands generated from them stayed stale — a half-updated workspace.
+# Being last also puts the failure at the end of the output, where the summary
+# would otherwise be, instead of buried mid-scroll.
+build_panel() {
+  echo ""
+  echo "Building the panel bundle..."
+  # `if !` rather than a bare call: under `set -e` a failed build would abort before
+  # the explanation below, leaving the user with vite's output and nothing else.
+  if ! pm_in "$REPO_ROOT/panel" build; then
+    echo ""
+    echo "Error: the panel build failed — the sources are up to date but the served bundle is stale."
+    echo "Fix the build, then re-run it on its own:"
+    echo "  $PANEL_BUILD_CMD"
+    exit 1
+  fi
+  echo "  ✓ panel bundle built"
+}
+
+if [ "$CLONE_MODE" = 1 ]; then
+  echo "Updating in place (clone mode)"
+  echo "The workspace is a pavilio clone at $REPO_ROOT — pulling instead of mirroring."
+
+  # `upstream` is what `pnpm bootstrap` adds when it turns a clone into a workspace.
+  # Without it there is nothing to pull from, and guessing (origin? a URL?) would
+  # be the one place this script could rewrite the user's own history wrongly.
+  if ! git -C "$REPO_ROOT" remote get-url upstream >/dev/null 2>&1; then
+    echo "No 'upstream' remote — run: pnpm bootstrap"
+    exit 1
+  fi
+
+  echo ""
+  echo "Pulling upstream/main..."
+  # --rebase: the user's notes commits are replayed on top of upstream rather than
+  # merged, so the clone keeps a linear history it can still push somewhere else.
+  # --autostash: a live notes workspace is almost never clean, and refusing to
+  # update over a half-written note would mean refusing nearly every time.
+  if ! git -C "$REPO_ROOT" pull --rebase --autostash upstream main; then
+    echo ""
+    echo "Error: the rebase onto upstream/main stopped — your commits are not replayed yet."
+    git -C "$REPO_ROOT" status --short
+    echo ""
+    echo "Resolve the paths above, then finish it:"
+    echo "  git -C \"$REPO_ROOT\" rebase --continue"
+    echo "or put the workspace back the way it was:"
+    echo "  git -C \"$REPO_ROOT\" rebase --abort"
+    exit 1
+  fi
+
+  echo ""
+  echo "Installing panel dependencies..."
+  # pm_install, not `pm_in … install`: dependency installation is the package
+  # manager's own command, and panel/package.json has no script by that name.
+  #
+  # `if !` rather than a bare call, like every other fatal step here: under
+  # `set -e` a failed install would abort with nothing but the package manager's
+  # output — and by this point the rebase has already rewritten the user's
+  # history, so they need to be told what state that leaves them in.
+  if ! pm_install "$REPO_ROOT/panel"; then
+    echo ""
+    echo "Error: installing the panel dependencies failed — your commits are replayed onto upstream/main, but node_modules/ is stale and the bundle was not rebuilt."
+    echo "Fix the install, then finish the update on its own:"
+    echo "  $PANEL_INSTALL_CMD"
+    echo "  $PANEL_BUILD_CMD"
+    exit 1
+  fi
+
+  echo ""
+  echo "Regenerating agent commands from the updated skills/ ..."
+  regenerate_agent_commands
+
+  build_panel
+
+  # No commit here, deliberately: in a clone the tracked files are the user's own
+  # work and the update only replays them. There is nothing machine-generated left
+  # over to commit on their behalf.
+  UPDATED_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+  UPDATED_SUBJECT="$(git -C "$REPO_ROOT" log -1 --pretty=%s)"
+  echo ""
+  echo "Updated to $UPDATED_SHA $UPDATED_SUBJECT."
+  # The panel process is never touched from here: it may be serving the very
+  # terminal this update was started from, and stopping it would kill the run.
+  echo "The running panel still serves the old bundle — run: pnpm reboot"
+  exit 0
+fi
 
 echo "Pulling latest from upstream at $UPSTREAM_DIR..."
 # rsync copies the upstream working tree, so main must be the checked-out branch.
@@ -143,47 +322,9 @@ rsync -a \
 
 echo ""
 echo "Regenerating agent commands from the freshly-synced skills/ ..."
-# Re-run command setup for whichever agents are already configured, so new/renamed
-# skills become slash-commands without a manual step. Guarded (never abort the pull)
-# and fed </dev/null so a setup script's prompt can't hang an unattended update.
-if [ -d "$REPO_ROOT/.claude" ]; then
-  if bash "$REPO_ROOT/scripts/setup:claude-code" </dev/null >/dev/null 2>&1; then
-    echo "  ✓ Claude Code commands refreshed (.claude/commands/)"
-  else
-    echo "  ⚠️  Claude Code refresh failed — run: bash scripts/setup:claude-code"
-  fi
-fi
-if [ -d "$REPO_ROOT/.opencode" ] || [ -d "$HOME/.config/opencode" ]; then
-  if bash "$REPO_ROOT/scripts/setup:opencode" </dev/null >/dev/null 2>&1; then
-    echo "  ✓ OpenCode commands refreshed (opencode.json + .opencode/commands/)"
-  else
-    echo "  ⚠️  OpenCode refresh failed — run: bash scripts/setup:opencode"
-  fi
-fi
+regenerate_agent_commands
 
-echo ""
-echo "Building the panel bundle..."
-# The panel serves a pre-built bundle, so dist/ is only as fresh as the last build:
-# without this step a pull would land new source and keep serving the old bundle,
-# silently. Built in the destination workspace, from the source just synced into
-# it — the upstream clone's own dist/ is never copied (rsync excludes it).
-#
-# Deliberately the last step of the run. It is the only fatal step left after the
-# rsyncs, and everything above it has to have happened first: failing earlier would
-# leave skills/ synced while the slash-commands generated from it stayed stale — a
-# half-updated workspace. Being last also puts the failure at the end of the
-# output, where the summary would otherwise be, instead of buried mid-scroll.
-PANEL_BUILD_CMD="pnpm -C \"$REPO_ROOT/panel\" build"
-# `if !` rather than a bare call: under `set -e` a failed build would abort before
-# the explanation below, leaving the user with vite's output and nothing else.
-if ! pnpm -C "$REPO_ROOT/panel" build; then
-  echo ""
-  echo "Error: the panel build failed — sources are synced but the served bundle is stale."
-  echo "Fix the build, then re-run it on its own:"
-  echo "  $PANEL_BUILD_CMD"
-  exit 1
-fi
-echo "  ✓ panel bundle built"
+build_panel
 
 echo ""
 echo "Committing the synced files..."

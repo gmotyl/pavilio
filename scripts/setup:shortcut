@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Create (or refresh) the Windows desktop shortcut that starts the Pavilio panel.
+#
+# Runs from inside WSL and drives the Windows side through powershell.exe, so
+# there is nothing to place by hand and nothing machine-specific committed to the
+# repo. On a checkout that is not WSL it prints "skipped (not WSL)" and succeeds,
+# so the top-level setup can call it unconditionally.
+#
+# The shortcut targets wsl.exe rather than the .sh launcher: Windows has no idea
+# how to run a shell script, and the distro is named explicitly because the
+# shortcut may well be clicked while another distro is the Windows default.
+
+set -u
+
+# `command -v powershell.exe` alone is not enough: WSL interop can be disabled,
+# and a plain Linux box could still have something by that name on PATH.
+if ! command -v powershell.exe >/dev/null 2>&1 || [ -z "${WSL_DISTRO_NAME:-}" ]; then
+  echo "skipped (not WSL)"
+  exit 0
+fi
+
+# The launcher lives next to this script. `dirname` is deliberately avoided so
+# this still works when setup runs on a minimal PATH. The redirect shields the
+# command substitution from an exported CDPATH, which both relocates the target
+# and echoes the directory it picked onto stdout.
+case "$0" in
+  */*) script_dir="${0%/*}" ;;
+  *) script_dir="." ;;
+esac
+script_dir="$(cd "$script_dir" >/dev/null 2>&1 && pwd)"
+launcher="$script_dir/start-panel-windows.sh"
+
+# If that cd failed, script_dir is empty and the shortcut would point at
+# /start-panel-windows.sh — a shortcut that writes fine and fails on every
+# click. The same guard catches a misplaced or unshipped launcher.
+if [ ! -f "$launcher" ]; then
+  echo "❌ Launcher not found at ${launcher} — run this from a complete checkout" >&2
+  exit 1
+fi
+
+# Three layers of quoting sit between this shell and the launcher, and each one
+# has to be satisfied separately:
+#
+#   1. `bash -lc` re-parses its argument as a shell command string, so a path
+#      with a space has to arrive already single-quoted.
+#   2. Windows splits the shortcut's Arguments into argv before wsl.exe sees
+#      them, so that single-quoted word has to sit inside double quotes.
+#   3. The whole thing is interpolated into a PowerShell single-quoted literal,
+#      where a literal ' is written '' — the same escape scripts/
+#      start-panel-windows.sh applies to its own payload.
+#
+# Without all three, a checkout under "C:\Users\Greg Motyl" or "C:\Users\O'Brien"
+# either breaks the PowerShell parse or produces a shortcut that writes
+# successfully and flashes "No such file or directory" on every double-click.
+SQ="'"
+SH_ESC="'\\''"
+launcher_sh="'${launcher//$SQ/$SH_ESC}'"
+
+ps_launcher="${launcher_sh//$SQ/$SQ$SQ}"
+ps_distro="${WSL_DISTRO_NAME//$SQ/$SQ$SQ}"
+
+# Windows resolves the shortcut's arguments, so the launcher has to be named by
+# absolute path — a relative one would resolve against wsl.exe's working
+# directory, not against the repo.
+payload="\$ErrorActionPreference = 'Stop'
+# Ask Windows for the Desktop by name so a OneDrive-redirected Desktop is honoured.
+\$desktop = [Environment]::GetFolderPath('Desktop')
+\$lnk = Join-Path \$desktop 'Pavilio Panel.lnk'
+\$shell = New-Object -ComObject WScript.Shell
+# CreateShortcut() on an existing path opens it for rewriting, so re-running this
+# overwrites the same file instead of leaving a second, suffixed copy behind.
+\$shortcut = \$shell.CreateShortcut(\$lnk)
+\$shortcut.TargetPath = 'C:\\Windows\\System32\\wsl.exe'
+\$shortcut.Arguments = '~ -d \"${ps_distro}\" -- bash -lc \"${ps_launcher}\"'
+\$shortcut.WorkingDirectory = 'C:\\Windows\\System32'
+\$shortcut.IconLocation = 'C:\\Windows\\System32\\wsl.exe,0'
+\$shortcut.Description = 'Start the Pavilio panel'
+\$shortcut.Save()
+Write-Output \$lnk"
+
+if ! written="$(powershell.exe -NoProfile -NonInteractive -Command "$payload")"; then
+  echo "❌ Could not write the desktop shortcut (see the PowerShell error above)" >&2
+  exit 1
+fi
+
+# PowerShell answers with CRLF line endings.
+written="${written//$'\r'/}"
+
+# Report a path the user can act on from this shell when wslpath can give one.
+printed="$written"
+if command -v wslpath >/dev/null 2>&1; then
+  converted="$(wslpath -u "$written" 2>/dev/null)" && [ -n "$converted" ] && printed="$converted"
+fi
+
+echo "✅ Shortcut written: $printed"

@@ -93,6 +93,8 @@ Sessions are bracketed by two skills: [`pavilio-session-start`](skills/pavilio-s
 
 All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.md` with YAML frontmatter. The right sidebar of the panel lists them; `pnpm setup:claude-code` and `pnpm setup:opencode` derive one slash command per skill for each agent (`pnpm pull` re-runs both for configured agents).
 
+**Codex:** `pnpm setup:codex` symlinks each `skills/<name>/` that has a `SKILL.md` into `$CODEX_HOME/skills/` (default `~/.codex/skills`), where Codex reads `<name>/SKILL.md`; list them in-session with `/skills`. It links what is missing, prunes the stale links it planted itself, and leaves every other entry alone — `--force` replaces those too, foreign symlinks and real directories alike. It skips with a message when `$CODEX_HOME` is absent. Unlike the two above, `pnpm pull` does not re-run it: run `pnpm setup:codex` yourself after `skills/` changes.
+
 **pavilio- family** (self-contained slash commands — each depends only on other `pavilio-*` skills):
 
 - [`pavilio-session-start`](skills/pavilio-session-start/SKILL.md) — start/resume a project; opens the session's progress file (`/pavilio-session-start`)

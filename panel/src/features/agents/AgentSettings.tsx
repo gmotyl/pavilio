@@ -21,44 +21,39 @@ interface AgentConfig {
   files: SettingsFile[];
 }
 
+/**
+ * One Workspace Action, exactly as `GET /api/agent-settings/actions` sends it.
+ *
+ * The server owns the catalogue — which actions exist, what they are called and
+ * what they do — and offers only the ones this workspace's own package.json
+ * actually defines. Nothing about an action is described here, or the page
+ * would once again show buttons a fresh clone cannot run.
+ */
 interface WorkspaceAction {
   id: string;
+  script: string;
   label: string;
   description: string;
-  detail: string;
-  danger: boolean;
 }
 
-const WORKSPACE_ACTIONS: WorkspaceAction[] = [
-  {
-    id: "init:claude",
-    label: "Init Claude",
-    description: "Syncs project skills (skills/*/SKILL.md) into .claude/commands/ as slash commands for Claude Code in this workspace.",
-    detail: "pnpm run init:claude",
-    danger: false,
-  },
-  {
-    id: "init:opencode",
-    label: "Init OpenCode",
-    description: "Backs up ~/.config/opencode to backup-git/dotfiles/opencode/, then copies .opencode/commands/*.md to ~/.config/opencode/commands/ so project commands are available globally in OpenCode.",
-    detail: "pnpm run init:opencode",
-    danger: false,
-  },
-  {
-    id: "setup:backup",
-    label: "Backup Configs",
-    description: "Saves Claude Code, OpenCode, and Kilo Code configuration files to backup-git/dotfiles/, then commits and pushes to git. Safe to run at any time.",
-    detail: "pnpm run setup:backup",
-    danger: false,
-  },
-  {
-    id: "setup:restore",
-    label: "Restore & Bootstrap",
-    description: "Full machine bootstrap: clones all repositories, restores .env files, dotfiles, and all agent configs from backup-git/dotfiles/. Skips files that already exist unless --force is passed.",
-    detail: "pnpm run setup:restore",
-    danger: true,
-  },
-];
+/**
+ * Which actions get the destructive treatment: a red button and an extra
+ * warning in the confirm step.
+ *
+ * This is presentation, not catalogue — it says how an action is *shown*, never
+ * that it exists or what it does. An id the server did not send is simply never
+ * rendered, so a stale entry here shows nothing.
+ */
+const DESTRUCTIVE_ACTION_IDS = new Set(["setup:restore"]);
+
+function isDestructive(action: WorkspaceAction): boolean {
+  return DESTRUCTIVE_ACTION_IDS.has(action.id);
+}
+
+/** The script the server will run, shown so the user sees it before saying yes. */
+function commandFor(action: WorkspaceAction): string {
+  return `pm_in . ${action.script}`;
+}
 
 type ModalState =
   | { status: "confirm"; action: WorkspaceAction }
@@ -93,7 +88,7 @@ function ActionModal({ state, onClose, onConfirm }: {
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-          {action.danger && <AlertTriangle size={16} style={{ color: "var(--red)", flexShrink: 0 }} />}
+          {isDestructive(action) && <AlertTriangle size={16} style={{ color: "var(--red)", flexShrink: 0 }} />}
           <span className="font-semibold text-sm flex-1" style={{ color: "var(--text-primary)" }}>
             {action.label}
           </span>
@@ -115,10 +110,10 @@ function ActionModal({ state, onClose, onConfirm }: {
         <div className="px-5 py-4 space-y-3">
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>{action.description}</p>
           <code className="block text-xs px-3 py-2 rounded" style={{ background: "var(--bg-base)", color: "var(--text-muted)", fontFamily: "monospace" }}>
-            {action.detail}
+            {commandFor(action)}
           </code>
 
-          {action.danger && state.status === "confirm" && (
+          {isDestructive(action) && state.status === "confirm" && (
             <div
               className="flex items-start gap-2 text-xs px-3 py-2 rounded"
               style={{ background: "color-mix(in srgb, var(--red) 10%, transparent)", color: "var(--red)", border: "1px solid color-mix(in srgb, var(--red) 25%, transparent)" }}
@@ -171,15 +166,15 @@ function ActionModal({ state, onClose, onConfirm }: {
                 onClick={onConfirm}
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-colors"
                 style={{
-                  background: action.danger ? "color-mix(in srgb, var(--red) 15%, transparent)" : "color-mix(in srgb, var(--accent) 15%, transparent)",
-                  color: action.danger ? "var(--red)" : "var(--accent)",
-                  border: `1px solid ${action.danger ? "color-mix(in srgb, var(--red) 30%, transparent)" : "color-mix(in srgb, var(--accent) 30%, transparent)"}`,
+                  background: isDestructive(action) ? "color-mix(in srgb, var(--red) 15%, transparent)" : "color-mix(in srgb, var(--accent) 15%, transparent)",
+                  color: isDestructive(action) ? "var(--red)" : "var(--accent)",
+                  border: `1px solid ${isDestructive(action) ? "color-mix(in srgb, var(--red) 30%, transparent)" : "color-mix(in srgb, var(--accent) 30%, transparent)"}`,
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = action.danger ? "color-mix(in srgb, var(--red) 25%, transparent)" : "color-mix(in srgb, var(--accent) 25%, transparent)";
+                  e.currentTarget.style.background = isDestructive(action) ? "color-mix(in srgb, var(--red) 25%, transparent)" : "color-mix(in srgb, var(--accent) 25%, transparent)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = action.danger ? "color-mix(in srgb, var(--red) 15%, transparent)" : "color-mix(in srgb, var(--accent) 15%, transparent)";
+                  e.currentTarget.style.background = isDestructive(action) ? "color-mix(in srgb, var(--red) 15%, transparent)" : "color-mix(in srgb, var(--accent) 15%, transparent)";
                 }}
               >
                 <Play size={11} />
@@ -414,6 +409,10 @@ function FileViewer({ file }: { file: SettingsFile }) {
 
 export default function AgentSettings() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const [actions, setActions] = useState<WorkspaceAction[]>([]);
+  // null = fine. Otherwise the status the server answered with, or null inside
+  // the object when nothing answered at all — the two need different advice.
+  const [actionsUnavailable, setActionsUnavailable] = useState<{ status: number | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<ModalState | null>(null);
 
@@ -423,6 +422,30 @@ export default function AgentSettings() {
       .then(setAgents)
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, []);
+
+  // The actions this workspace can actually run. A workspace that offers none
+  // renders no section at all — but a server that could not answer is a
+  // different thing entirely, and swallowing the error made the two look
+  // identical: an empty page with nothing to say why.
+  useEffect(() => {
+    fetch("/api/agent-settings/actions")
+      .then((r) =>
+        r.ok
+          ? r.json()
+          : Promise.reject(Object.assign(new Error(`HTTP ${r.status}`), { status: r.status })),
+      )
+      .then((list) => {
+        setActions(Array.isArray(list) ? list : []);
+        setActionsUnavailable(null);
+      })
+      .catch((err: { status?: number }) => {
+        setActions([]);
+        // A thrown fetch has no status; a rejected response carries the one the
+        // server answered with. Collapsing them lost the only detail that tells
+        // the reader which of two unrelated problems they have.
+        setActionsUnavailable({ status: typeof err?.status === "number" ? err.status : null });
+      });
   }, []);
 
   const openConfirm = (action: WorkspaceAction) => {
@@ -469,36 +492,50 @@ export default function AgentSettings() {
         </div>
       </section>
 
-      {/* Workspace actions */}
+      {/* Workspace actions — whatever this workspace's package.json defines */}
+      {(actions.length > 0 || actionsUnavailable) && (
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Workspace Actions</h2>
+        {actionsUnavailable && (
+          <div
+            data-testid="agent-settings-actions-error"
+            className="flex items-start gap-2 text-xs px-3 py-2 rounded"
+            style={{ background: "color-mix(in srgb, var(--red) 10%, transparent)", color: "var(--red)", border: "1px solid color-mix(in srgb, var(--red) 25%, transparent)" }}
+          >
+            <AlertTriangle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+            {actionsUnavailable.status === null
+              ? "Could not load this workspace's actions — the panel server did not answer. Check that it is running, then reload."
+              : `Could not load this workspace's actions — the panel server answered ${actionsUnavailable.status}. It is running, but it does not serve this endpoint: the bundle is newer than the server. Rebuild and restart it (pnpm build, then pnpm reboot).`}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
-          {WORKSPACE_ACTIONS.map((action) => (
+          {actions.map((action) => (
             <button
               key={action.id}
               data-testid={`agent-settings-action-${action.id}`}
               onClick={() => openConfirm(action)}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-colors"
               style={{
-                background: action.danger ? "color-mix(in srgb, var(--red) 10%, transparent)" : "var(--bg-surface)",
-                color: action.danger ? "var(--red)" : "var(--text-secondary)",
-                border: `1px solid ${action.danger ? "color-mix(in srgb, var(--red) 25%, transparent)" : "var(--border-subtle)"}`,
+                background: isDestructive(action) ? "color-mix(in srgb, var(--red) 10%, transparent)" : "var(--bg-surface)",
+                color: isDestructive(action) ? "var(--red)" : "var(--text-secondary)",
+                border: `1px solid ${isDestructive(action) ? "color-mix(in srgb, var(--red) 25%, transparent)" : "var(--border-subtle)"}`,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = action.danger ? "color-mix(in srgb, var(--red) 18%, transparent)" : "var(--bg-hover)";
-                e.currentTarget.style.color = action.danger ? "var(--red)" : "var(--text-primary)";
+                e.currentTarget.style.background = isDestructive(action) ? "color-mix(in srgb, var(--red) 18%, transparent)" : "var(--bg-hover)";
+                e.currentTarget.style.color = isDestructive(action) ? "var(--red)" : "var(--text-primary)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = action.danger ? "color-mix(in srgb, var(--red) 10%, transparent)" : "var(--bg-surface)";
-                e.currentTarget.style.color = action.danger ? "var(--red)" : "var(--text-secondary)";
+                e.currentTarget.style.background = isDestructive(action) ? "color-mix(in srgb, var(--red) 10%, transparent)" : "var(--bg-surface)";
+                e.currentTarget.style.color = isDestructive(action) ? "var(--red)" : "var(--text-secondary)";
               }}
             >
-              {action.danger ? <AlertTriangle size={11} /> : <Play size={11} />}
+              {isDestructive(action) ? <AlertTriangle size={11} /> : <Play size={11} />}
               {action.label}
             </button>
           ))}
         </div>
       </section>
+      )}
 
       <div className="space-y-8">
         {agents.map((agent) => (

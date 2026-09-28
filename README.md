@@ -24,6 +24,148 @@ start working.
 - **Real-time updates** via WebSocket (file changes reflect instantly)
 - **Three-column layout** — agents sidebar, content area, file tree
 
+## Quick Start
+
+```bash
+git clone https://github.com/gmotyl/pavilio.git my-workspace && cd my-workspace
+pnpm bootstrap
+pnpm start
+```
+
+The panel is then on <http://localhost:3010>.
+
+> **`bootstrap`, not `setup`.** Every command in this README is named so that
+> the bare `pnpm <name>` spelling reaches *this* workspace's script. That rules
+> out the names pnpm claims for itself: `pnpm setup` appends pnpm's `PNPM_HOME`
+> block to your shell profile; `pnpm update` — and its aliases `pnpm upgrade`
+> and `pnpm up` — rewrites your lockfile; `pnpm restart` is npm's lifecycle
+> spelling that runs `stop`, `restart` *and* `start`. None of them ever reads
+> `package.json` the way you meant. So setup is `pnpm bootstrap`, the update is
+> `pnpm pull`, and the restart is `pnpm reboot`.
+
+`pnpm bootstrap` is idempotent — re-run it whenever you like. It never overwrites
+a file you own and never adds a remote twice. In one pass it:
+
+1. **toolchain** — finds `node` (**Node 22 or newer** is required) and picks
+   `pnpm`, `corepack pnpm` or `npm`, whichever this machine actually has. It
+   records the interpreter's directory in `scripts/start-panel-windows.local.env`,
+   which is the Windows launcher's only way back to it.
+2. **seed** — creates `projects/` and, if you do not have one yet,
+   `.projects.local.md` from `AGENTS.md.example`. That file is your private
+   project registry; once it exists, setup leaves it alone.
+3. **panel install** and **panel build** — the only two steps that are fatal.
+4. **remotes** — see [Keep your notes safe](#keep-your-notes-safe) below.
+5. **skills** — installs everything under `skills/` as slash commands, for each
+   agent already configured on this machine: Claude Code (`~/.claude`), opencode
+   (`~/.config/opencode` or a local `.opencode/`), Codex (`~/.codex`). Agents you
+   do not have are reported as skipped, not installed.
+6. **speech** and **shortcut** — the spoken Stop-hook announcements, and (WSL2
+   only) the Windows desktop shortcut.
+
+Every step prints exactly one line: `✓` done, `–` skipped and why, `✗` failed and
+the command to retry it with. Only the two package-manager steps stop the run —
+everything after them is a convenience, so a machine with no Codex, no WSL or a
+locked-down home directory still ends up with a working panel.
+
+Flags: `--no-speech`, `--no-shortcut`, `--yes` (never prompt — for CI, re-runs
+and scripts).
+
+### macOS
+
+Nothing extra to do. Install Node 22 or newer, run the three commands above, and
+that is the whole install — the Windows shortcut step reports
+`skipped (not WSL)` and every other step applies unchanged.
+
+To reach the panel from your phone, use Tailscale rather than your LAN: see
+[Mobile access (Tailscale)](#mobile-access-tailscale).
+
+### WSL2
+
+Run the three commands **inside WSL**, from a normal terminal. Setup then also
+writes a **`Pavilio Panel` shortcut to your Windows desktop** — see
+[Windows desktop shortcut](#windows-desktop-shortcut-wsl2) for exactly what it
+puts there. Double-clicking it opens a console, starts the panel, and prints
+clickable pair links for the local browser and for your phone.
+
+Two things to expect on a first run:
+
+- **One UAC prompt, once.** Reaching the panel from another device on your Wi-Fi
+  needs a Windows `netsh portproxy` entry into the WSL VM, and creating one
+  requires elevation. The launcher asks **only when that entry is missing or
+  stale** — every later launch is a silent no-op. Cancelling it costs you LAN
+  access and nothing else: the panel still runs, locally and on `127.0.0.1`.
+- **`node/pnpm not found` in the shortcut window.** The shortcut runs
+  `bash -lc`, a login shell that reads `/etc/profile` and `~/.profile` but
+  **never `~/.bashrc`** — which is where fnm and nvm are usually wired up. The
+  launcher therefore resolves the interpreter itself, from the pin that
+  `pnpm bootstrap` wrote. If that pin is missing or points at a node you have
+  since removed, open a normal terminal in the workspace and re-run
+  `pnpm bootstrap`: it re-pins whichever node you are really using.
+
+### Keep your notes safe
+
+Your notes, progress files and project registry are ordinary **git commits on
+`main` in this workspace**. There is no database and no sync service behind the
+panel, so the workspace needs a remote of its own to be safe anywhere — and
+setup wires up two:
+
+- **`origin`** — *your* private repository, the one you push notes to. Setup asks
+  for it once, with the prompt `Private repo URL for your notes (Enter to skip):`.
+  Give it a URL and it adds the remote, fetches it, and points `main` at
+  `origin/main`. Press Enter to skip, and add it later with
+  `git remote add origin <url>`.
+- **`upstream`** — pavilio itself, fetch-only: its push URL is set to `no_push`,
+  so a stray `git push upstream` fails immediately instead of asking for
+  credentials to a repository you cannot write to.
+
+`pnpm pull` then updates the workspace by **rebasing your commits onto
+`upstream/main`** (`git pull --rebase --autostash`). Your notes are replayed on
+top of the new version rather than merged into it, so the history stays linear
+and still pushes cleanly to your own `origin`. After the rebase it reinstalls the
+panel's dependencies, regenerates the agent slash-commands and rebuilds the
+bundle — but it never restarts the running panel, which may be serving the very
+terminal you started the update from. It ends by reminding you to restart it
+yourself.
+
+One exception worth remembering: `pnpm pull` refreshes the Claude Code and
+opencode slash-commands, but **not** Codex. Run `pnpm setup:codex` by hand after
+`skills/` changes.
+
+## Everyday commands
+
+| Command | What it does |
+|---|---|
+| `pnpm start` | Start the panel detached on <http://localhost:3010>. Builds `panel/dist` first if it is missing; appends output to `panel/.panel.log`. |
+| `pnpm stop` | Stop whatever is holding the panel port. |
+| `pnpm reboot` | Stop, then start. Every browser terminal session lives inside the panel process, so this closes all of them — it says how many before doing it. |
+| `pnpm status` | One line: running (with pid) or stopped. Exits 0 when running, 3 when not. |
+| `pnpm pull` | Update from upstream, then reinstall, regenerate commands and rebuild the bundle. |
+| `pnpm sync` | The same script under a second name. `pull` came first and stayed; `sync` reads better next to the team workflow below. |
+| `pnpm build` | Rebuild the served bundle by hand. |
+| `pnpm test` | The panel test suite. |
+| `pnpm bootstrap` | Re-run setup. Safe at any time, and the way to re-pin node. |
+| `pnpm setup:shortcut` | Rewrite the Windows desktop shortcut in place (WSL2 only). |
+| `pnpm setup:codex` | Re-link `skills/` into Codex. |
+
+None of these needs a `run` in front of it: `bootstrap`, `pull`, `sync` and
+`reboot` are named precisely so that they do not collide with `pnpm setup`,
+`pnpm update` and `pnpm restart`, which pnpm handles itself and would never pass
+on to `package.json`. `update` is the one with a reach beyond its own name: pnpm
+documents `pnpm up` and `pnpm upgrade` as aliases of it, so all three rewrite
+your lockfile and none of them can be the update command here.
+
+All of the panel commands are thin wrappers around
+`./scripts/panel start|stop|restart|status`, which needs no package manager at
+all — that is what the Windows launcher calls.
+
+**Running on another port.** `PANEL_PORT=3020 pnpm start` moves the whole set —
+the script, the server and the links it prints. A port you name that way is an
+address, not a preference: if something else already holds it the panel says so
+and stops, rather than quietly binding the next one up where `pnpm stop` would
+never find it. Set `port` in `panel/panel.config.local.ts` instead and the old
+behaviour applies — the panel steps to the next free port and prints where it
+landed.
+
 ## Recommended Skills — Superpowers
 
 This workflow is designed to work with **[Superpowers](https://github.com/obra/superpowers)** — a set of AI agent skills that enforce structured brainstorming, planning, and execution workflows. Installing Superpowers transforms your AI agent from a code autocompleter into a disciplined engineering partner.
@@ -73,108 +215,47 @@ Every skill under `skills/` is exposed as a slash command in Claude Code and ope
 | `/pavilio-qa-agent` | Acceptance-criteria-driven QA runner |
 | `/pavilio-create-skill` | Scaffold a new workspace skill (slash command in both agents) |
 
-## Quick Start
-
-Two ways to use this:
-
-### Option A — Fork and own it (Recommended)
-
-Like `create-react-app` used to be — fork once, make it yours, evolve it however you want. No upstream dependency.
-
-```bash
-# Fork this repo on GitHub, then:
-git clone git@github.com:YOUR_USERNAME/pavilio.git my-workspace
-cd my-workspace
-
-# Configure the panel
-cp panel/panel.config.ts panel/panel.config.local.ts
-# Edit panel.config.local.ts with your paths
-
-# Set up your private project registry
-cp AGENTS.md.example .projects.local.md
-# Edit .projects.local.md with your actual projects
-
-# Build and start the panel
-cd panel && npm install && npm run build && npm start
-# Open http://localhost:3010
-```
-
-You own the code. Customize freely. If you want to pull in future improvements from this repo, do it manually by cherry-picking what's useful.
-
-### Option B — Track upstream (recommended for teams)
-
-Keep your private workspace in sync with this repo. New panel features, scripts, and commands flow in automatically.
-
-```bash
-# Clone both repos into the same parent directory
-git clone git@github.com:gmotyl/pavilio.git   # the upstream
-git clone git@github.com:YOUR_USERNAME/my-workspace.git  # your private repo
-cd my-workspace
-
-# Set up private config
-cp ../pavilio/AGENTS.md.example .projects.local.md
-# Edit .projects.local.md with your actual projects
-
-cp panel/panel.config.ts panel/panel.config.local.ts
-# Edit panel.config.local.ts with your paths
-
-# Build and start the panel
-cd panel && npm install && npm run build && npm start
-```
-
-To pull the latest improvements from upstream:
-
-```bash
-npm run update   # or: bash scripts/update.sh
-```
-
-This pulls `panel/`, `skills/`, `scripts/`, and — when the upstream clone has it — `commands/`. Your private files (`.projects.local.md`, `panel.config.local.ts`, custom scripts) are never touched.
-
 ## Windows desktop shortcut (WSL2)
 
-If you run pavilio from WSL on Windows, you can pin a `.lnk` to your desktop that launches `npm start` in your workspace with one click. From inside WSL, in any PowerShell session (no admin needed), substitute `WORKSPACE` with the WSL path to your workspace (e.g. `/root/git/prv/projects`) and run:
+`pnpm bootstrap` writes this shortcut for you, and `pnpm setup:shortcut` rewrites
+it on its own — it reopens the same file rather than leaving a second, suffixed
+copy behind. Both run from inside WSL and drive the Windows side through
+`powershell.exe`, so there is nothing to place by hand and nothing
+machine-specific committed to the repo. Anywhere that is not WSL, the step
+reports `skipped (not WSL)` and succeeds.
 
-```powershell
-$desktop = [Environment]::GetFolderPath('Desktop')
-$lnk = Join-Path $desktop 'Pavilio Panel.lnk'
-$ws = New-Object -ComObject WScript.Shell
-$s = $ws.CreateShortcut($lnk)
-$s.TargetPath = 'C:\Windows\System32\wsl.exe'
-$s.Arguments = '~ -d Ubuntu --cd WORKSPACE -- bash -lc "npm start; echo; echo --- npm start returned, panel running in background ---; exec bash"'
-$s.WorkingDirectory = 'C:\Windows\System32'
-$s.IconLocation = 'C:\Windows\System32\wsl.exe,0'
-$s.Description = 'Run npm start in WSL'
-$s.Save()
-```
+What it writes, as `Pavilio Panel` on your Windows desktop:
 
-Substitute `Ubuntu` with your distro name if different (`wsl --list --quiet` to check). Double-clicking the shortcut opens a console, runs `npm start` (which backgrounds the panel via `pnpm -C panel start &`), and drops you to a bash prompt — closing the window leaves the panel running. Stop it with `npm stop` from any WSL shell.
-
-If you prefer to see live panel logs (and have closing the window stop the panel), swap the `Arguments` line to:
-
-```powershell
-$s.Arguments = '~ -d Ubuntu --cd WORKSPACE/panel -- bash -lc "npm start; echo; echo --- panel exited ---; exec bash"'
-```
-
-### A reference copy of the shortcut
-
-A working shortcut is kept in the repo at [`scripts/Pavilio Panel.lnk`](./scripts/Pavilio%20Panel.lnk) so it survives a reinstall. It is a **backup for reference, not something to copy onto another machine** — a `.lnk` hardcodes one checkout path and distro name and carries that machine's link-tracker data. Recreate it with the PowerShell above; read this one only to see what the fields should look like:
-
-| field | value |
+| Field | Value |
 | --- | --- |
 | Target | `C:\Windows\System32\wsl.exe` |
-| Arguments | `~ -d Ubuntu -- bash -lc /root/git/prv/projects/scripts/start-panel-windows.sh` |
+| Arguments | `~ -d "<your distro>" -- bash -lc "<workspace>/scripts/start-panel-windows.sh"` |
 | Working directory | `C:\Windows\System32` |
-| Icon | `C:\Windows\System32\wsl.exe` |
+| Icon | `C:\Windows\System32\wsl.exe,0` |
+| Description | `Start the Pavilio panel` |
 
-Note it passes the script's **absolute** path rather than using `--cd WORKSPACE` with a relative one. Either form works; the absolute path is independent of the directory the shortcut starts in (`C:\Windows\System32`, which WSL sees as `/mnt/c/Windows/System32` — there is no useful relative path from there).
+Three details in those arguments are load-bearing, and worth knowing before you
+edit them by hand:
 
-Three details in that argument list are load-bearing:
+- **`-d "<your distro>"`** pins the distro to the one setup ran in. Without it
+  `wsl.exe` opens whichever distro is currently default, which changes as soon as
+  another is installed or `wsl --set-default` runs — and then the shortcut opens
+  a distro with no workspace in it.
+- **`--`** ends `wsl.exe`'s own options; everything after it is the command for
+  Linux. Drop it and `wsl.exe` tries to parse `bash -lc …` as its own flags.
+- **`bash -lc`** is a *login* shell, so `/etc/profile` and `~/.profile` are read
+  — and **`~/.bashrc` is not**, with or without `-l`. Bash skips it for
+  non-interactive shells, and Ubuntu's default copy returns on its own second
+  line (`[ -z "$PS1" ] && return`). A version manager wired up only there — the
+  usual home for fnm's `eval "$(fnm env)"` or nvm's `nvm.sh` — is therefore
+  invisible to the shortcut, which is why the launcher resolves node itself
+  instead of trusting PATH.
 
-- **`-d Ubuntu`** pins the distro. Without it `wsl.exe` uses whichever distro is currently default, which changes as soon as another is installed or `wsl --set-default` runs — and then the shortcut opens a distro with no workspace in it.
-- **`--`** ends `wsl.exe`'s own options; everything after it is the command for Linux. Drop it and `wsl.exe` tries to parse `bash -lc …` as its own flags.
-- **`bash -lc`** runs a **login** shell, so `/etc/profile` and `~/.profile` are sourced — which is where `PATH` additions for a hand-installed `node`/`pnpm` (or `PNPM_HOME`) normally live. `wsl.exe` hands bash a near-empty environment, so anything the shortcut needs has to come from that chain.
-
-  Worth knowing before you debug a `command not found` here: **`~/.bashrc` is not read at all**, with or without `-l`. Bash skips it for non-interactive shells, and Ubuntu's default copy bails on its own second line (`[ -z "$PS1" ] && return`). So a version manager wired up only in `~/.bashrc` — the usual place for fnm's `eval "$(fnm env)"` or nvm's `nvm.sh` — is **not** loaded by the shortcut. If the launch cannot find a tool, export it from `~/.profile` or call it by absolute path; adding it to `~/.bashrc` will not help.
+The shortcut runs `scripts/start-panel-windows.sh`, which resolves the toolchain,
+hands the panel over to `scripts/panel`, repairs the Windows portproxy when it
+needs repairing, and prints the pair links. It is portable: on macOS or native
+Linux the Windows-specific block is skipped, so the same script still works as a
+plain launcher.
 
 ### If the browser console shows Vite HMR messages
 
@@ -191,24 +272,20 @@ The usual cause is the **workspace's own root `package.json`**: `pnpm pull` sync
 ```json
 "build": "pnpm -C panel build",
 "dev":   "pnpm -C panel dev",
-"start": "pnpm -C panel start &"
+"start": "./scripts/panel start"
 ```
 
-A missing or stale `panel/dist` is a loud startup failure naming `pnpm build`, never a silent fallback to Vite. `pnpm pull` builds the bundle as part of its run, so it normally stays fresh — the exception is the first pull after upgrading to a build-aware `update.sh`, where the copy of the script already running is still the old one. Run `pnpm build` once by hand, or `pnpm pull` twice.
+A missing `panel/dist` is never a silent fallback to Vite: `./scripts/panel start` (what `pnpm start` calls) builds the bundle first, and the serving entry started any other way fails loudly instead. `pnpm pull` builds the bundle as part of its run, so it normally stays fresh — the exception is the first pull after upgrading to a build-aware `update.sh`, where the copy of the script already running is still the old one. Run `pnpm build` once by hand, or `pnpm pull` twice.
 
 ### LAN access from phone or other devices
 
 To reach the panel from other devices on your Wi-Fi (phone, MacBook, tablet), Windows needs a `netsh portproxy` entry that forwards `<hostLanIp>:3010` into the WSL VM. WSL doesn't add this for you, and creating it requires admin elevation.
 
-Use the bundled launcher `scripts/start-panel-windows.sh` instead of plain `npm start` — it starts the panel, checks the portproxy, prompts UAC **only when the entry is missing or stale**, then prints clickable pair links (local + LAN). Subsequent launches are silent no-ops.
-
-```powershell
-$s.Arguments = '~ -d Ubuntu --cd WORKSPACE -- bash -lc "scripts/start-panel-windows.sh"'
-```
+The desktop shortcut's launcher, `scripts/start-panel-windows.sh`, handles this: it starts the panel, checks the portproxy, prompts UAC **only when the entry is missing or stale**, then prints clickable pair links (local + LAN). Subsequent launches are silent no-ops. `pnpm bootstrap` already points the shortcut at it.
 
 What it does:
 
-1. Starts the panel (`npm start` in the background).
+1. Resolves node and the package manager (see the shortcut section above), then starts the panel through `scripts/panel` — detached and logged. A start that fails stops the run right there, under the build error that explains it.
 2. Detects the current WSL VM IP (changes on each WSL restart).
 3. Reads `netsh portproxy show all`; if the entry for port 3010 is missing or points at a stale WSL IP, opens a UAC prompt to add `0.0.0.0:3010 → <wslIp>:3010` and (re)create the `Pavilio LAN 3010` firewall rule. **Click Yes** on the prompt — only needed on first run or after Windows loses the entry.
 4. Calls `/api/mobile-access/lan/enable` so the panel binds `0.0.0.0`.
@@ -218,7 +295,7 @@ A few points worth knowing:
 
 - The portproxy entry is bound to `listenaddress=0.0.0.0`, matching the form WSL uses for its preinstalled 22/80/443 forwards. Specific-IP entries can drop on Windows reboot if the adapter hasn't been assigned the IP yet by the time the IP Helper service applies persisted config (DHCP-timing race). `0.0.0.0` survives reboots reliably.
 - If you cancel the UAC prompt, the panel still runs locally and on `127.0.0.1` — only LAN reach is affected. Re-run the shortcut to retry.
-- The script is portable: on macOS or native Linux the Windows-specific block is skipped automatically, so the same `.lnk`-style flow works in WSL while the script remains usable elsewhere.
+- Extra ports can go through the same UAC-once flow: set `PANEL_EXTRA_PORTS` in the untracked `scripts/start-panel-windows.local.env` (e.g. `"3000"` for a Vite dev server) and the launcher forwards those too.
 
 ## Project Structure
 
@@ -324,43 +401,93 @@ Full terminal sessions in the browser, one per agent. Keyboard shortcuts differ 
 
 Note that `Ctrl+Shift+C` is **not** copy here, which is where it differs from most terminals — `Ctrl+C` took over that job.
 
-## Using as Your Upstream
+## Teams: a private workspace tracking upstream
 
-Fork this repo as the foundation for your private workspace. Upgrades sync via rsync — your private files are never touched.
+The Quick Start clone is already a workspace that tracks upstream: `pnpm
+bootstrap` renames the pavilio remote to `upstream`, leaves `origin` free for
+your own private repository, and `pnpm pull` rebases your notes onto whatever
+upstream has grown since. For one person, that is the whole story.
 
-### One-Time Setup
+Teams usually want the other shape — **one private workspace repository, with a
+pavilio clone beside it** to sync from. New panel features, skills and scripts
+flow in; files that only exist in your private repo are never touched.
 
 ```bash
-# 1. Fork this repo on GitHub, then clone both repos side by side:
-git clone git@github.com:YOUR_USERNAME/pavilio.git
-git clone git@github.com:YOUR_USERNAME/my-workspace.git
-# Both must be in the same parent directory so update.sh can find the upstream
+# Clone both into the same parent directory
+git clone git@github.com:gmotyl/pavilio.git              # the upstream
+git clone git@github.com:YOUR_TEAM/my-workspace.git      # your private repo
+cd my-workspace
 
-# 2. In your private workspace, copy the private config templates:
-cp AGENTS.md.example .projects.local.md
+# Your private project registry
+cp ../pavilio/AGENTS.md.example .projects.local.md
 # Edit .projects.local.md with your actual projects
+
+# Seed the two things sync mode cannot bring you: it rsyncs panel/, skills/,
+# scripts/ and commands/, but never the root package.json — and without that
+# there is no `pnpm` script to run in the first place.
+cp ../pavilio/package.json .
+cp -R ../pavilio/scripts .
+
+# The first sync. The explicit path is not optional here: see below.
+bash scripts/update.sh ../pavilio
 ```
 
-### Upgrading
+**Do not run `pnpm bootstrap` in a workspace of this shape.** `bootstrap` is the
+Quick Start's command, and part of its job is to add `upstream =
+https://github.com/gmotyl/pavilio.git` to any clone that lacks one. That single
+remote is what `scripts/update.sh` reads to decide which mode it is in, so a
+workspace that has been bootstrapped stops being mirrored and starts being
+*rebased* onto pavilio — the opposite of everything this section promises.
+
+To take a new upstream version, from the workspace:
 
 ```bash
-bash scripts/update.sh
-# or: npm run update
+pnpm pull ../pavilio                      # or: bash scripts/update.sh /path/to/pavilio
 ```
 
-This pulls the latest from your `pavilio` fork (via `git pull`), then rsyncs `panel/`, `commands/`, and `scripts/` into your workspace. Files that only exist in your private repo are never deleted.
+Always name the pavilio clone. An explicit path means sync mode unconditionally,
+whatever the workspace's own remotes have grown since — bare `pnpm pull` is the
+Quick Start's spelling, and here it is a bet on a remote you did not check.
 
-### Private Config
+`scripts/update.sh` has two modes and chooses between them itself, by asking
+whether the workspace it is running in is a pavilio clone — read from its
+remotes, not from what the directory is called, so the Quick Start's
+`my-workspace` is recognised as readily as a folder named `pavilio`:
+
+- **Clone mode** — the workspace *is* a pavilio clone (the Quick Start shape):
+  `upstream` (or, before `pnpm bootstrap` has run, `origin`) points at pavilio
+  itself. It rebases your commits onto `upstream/main` and commits nothing on
+  your behalf: the tracked files there are your own work.
+- **Sync mode** — the workspace is a separate repository with a pavilio clone as
+  its sibling (the shape above). It fast-forwards that clone to `origin/main`,
+  then **rsyncs** `panel/`, `skills/`, `scripts/` and — when the upstream has one
+  — `commands/` into the workspace, and commits the result for you as
+  `chore(sync): pavilio upstream @ <sha>`. Only `panel/` is mirrored with
+  `--delete`, so modules retired upstream disappear here too; `skills/`,
+  `scripts/` and `commands/` keep whatever you added downstream. Pass the clone's
+  path as an argument when it is not the sibling directory named `pavilio` — an
+  explicit path always means sync mode, whatever the workspace's own remotes say.
+
+Both modes then reinstall the panel's dependencies, regenerate the agent
+slash-commands and rebuild the served bundle. Neither one restarts a running
+panel — do that yourself with `pnpm reboot`.
+
+### Private config
 
 | File | Purpose |
 |------|---------|
 | `.projects.local.md` | Your private project registry (gitignored) |
 | `panel/panel.config.local.ts` | Local panel path overrides (gitignored) |
+| `scripts/start-panel-windows.local.env` | Per-host launcher settings and the node pin (gitignored) |
 
 ### Rules
 
-- Improve the panel, commands, and scripts in `pavilio` directly — never push changes from your private workspace back here
-- `AGENTS.md` and `CLAUDE.md` are manually maintained — cherry-pick upstream improvements as needed
+- Improve the panel, skills, commands and scripts in `pavilio` directly — never
+  push changes from your private workspace back here.
+- `AGENTS.md` and `CLAUDE.md` are manually maintained on both sides — cherry-pick
+  upstream improvements as needed.
+- `pnpm pull` regenerates the Claude Code and opencode slash-commands, but not
+  the Codex ones: run `pnpm setup:codex` yourself after `skills/` changes.
 
 ## Creating a New Project
 
