@@ -89,7 +89,7 @@ const FIXTURES: Record<string, Fixture> = {
 
   // ── Git ──────────────────────────────────────────────────────────────────
   "git.viewMode": { value: "tree" },
-  "git.history.paneWidth": { value: 360 },
+  "repos.tree.paneWidth": { value: 360 },
   "git.commitsOpen": { value: false, scopeArg: "~/git/prv/pavilio" },
   "git.branchDiff.base": { value: "main", scopeArg: "~/git/prv/pavilio" },
   "git.branchDiff.open": { value: false, scopeArg: "~/git/prv/pavilio" },

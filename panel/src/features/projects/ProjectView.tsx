@@ -198,11 +198,21 @@ export default function ProjectView() {
     [name, section, hasRepos],
   );
 
+  // Same predicate the detail pane already branches on, guarded by the same
+  // section test it renders under — one rule, no second code path. A mockup is
+  // framed content that should fill what is left of the viewport; every other
+  // file is a document the page scrolls.
+  const fillsHeight = Boolean(
+    section && !SPECIAL_SECTIONS.has(section) && selectedFile && isHtml(selectedFile),
+  );
+
   return (
-    <div className="relative">
+    <div className={`relative${fillsHeight ? " md:h-full" : ""}`}>
     <div
       data-testid="project-view"
-      className={`p-6 ${wide ? "" : "max-w-5xl"}`}
+      className={`p-6 ${wide ? "" : "max-w-5xl"}${
+        fillsHeight ? " md:flex md:flex-col md:h-full md:min-h-0" : ""
+      }`}
     >
       {/* Desktop-only big title */}
       <div className="hidden md:flex items-center mb-4">
@@ -335,6 +345,7 @@ export default function ProjectView() {
         <FileListSidebar
           testId="section-files"
           title={sectionTitle(section)}
+          fillHeight={fillsHeight}
           controls={sectionControls.controlsBar}
           sources={[
             {

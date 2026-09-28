@@ -31,7 +31,9 @@ import {
   __resetAnswerWaitingForTests,
   getAnswerWaiting,
   watchSessionActivity,
+  isAnswerHeld,
 } from "../answerWaiting";
+import { fakeOnNext, fakeOnPrevious } from "../../speech/__tests__/fakeTransportHost";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
 
 // The activity channel dials a WebSocket at import time and re-arms a 2s
@@ -101,8 +103,13 @@ function makeSpeech(cell: Cell): GridSpeech {
     onPause: vi.fn(),
     onResume: vi.fn(),
     onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
+    // A spy alone is no longer a faithful host: the hold moved into
+    // `onPrevious`/`onNext` so that the chord and the media keys take it too.
+    // See `fakeTransportHost.ts`.
+    onPrevious: vi.fn((sessionId: string) => fakeOnPrevious(sessionId)),
+    onNext: vi.fn((sessionId: string) =>
+      fakeOnNext(sessionId, isAnswerHeld(sessionId), cell.queue.cursor, cell.queue.pending.length),
+    ),
     onNewestAnswer: vi.fn(),
     onArm: vi.fn(),
     onJumpToUnit: vi.fn(),
@@ -337,11 +344,12 @@ describe("the bar tells the waiting store when an answer lands", () => {
 });
 
 describe("the transport holds the answer and lets it go", () => {
-  it("holds on previous and releases on next", () => {
+  it("holds on previous and releases on the step back onto the wave", () => {
     const cell: Cell = {
       state: "ready",
-      // A step behind the cursor for previous, and an answer waiting for next.
-      queue: queueWith({ ...WITH_HISTORY, pending: [answer("u-2")] }),
+      // A step behind the cursor for previous, and NOTHING waiting: the wave
+      // sits directly above the cursor, so one forward press reaches it.
+      queue: queueWith(WITH_HISTORY),
     };
     render(barTree(makeSpeech(cell)));
 
@@ -357,5 +365,23 @@ describe("the transport holds the answer and lets it go", () => {
     // so the body goes straight back to the wave.
     fireEvent.click(nextButton());
     expect(bodyHandedOver()).toBe(true);
+  });
+
+  it("keeps the hold while a backlog is still ahead of the cursor", () => {
+    const cell: Cell = {
+      state: "ready",
+      queue: queueWith({ ...WITH_HISTORY, pending: [answer("u-2")] }),
+    };
+    render(barTree(makeSpeech(cell)));
+
+    activity("busy", 2);
+    fireEvent.click(previousButton());
+    expect(bodyHandedOver()).toBe(false);
+
+    // With an answer waiting, the newest thing the cell holds is that answer —
+    // which is what the row's unread mark counts — so the wave is above the
+    // BACKLOG and this press steps into it rather than onto the wave.
+    fireEvent.click(nextButton());
+    expect(bodyHandedOver()).toBe(false);
   });
 });

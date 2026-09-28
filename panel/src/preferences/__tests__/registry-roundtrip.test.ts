@@ -48,7 +48,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   // ── num ─────────────────────────────────────────────────────────────────
   "terminal.drawer.width": [480, 0, 1, 1024, 23.5, -1],
   "fileList.paneWidth": [288, 0, 200, 560, 344.5, -1],
-  "git.history.paneWidth": [280, 0, 200, 480, 344.5, -1],
+  "repos.tree.paneWidth": [280, 0, 200, 480, 344.5, -1],
   "shell.leftSidebar.width": [240, 0, 180, 400, 344.5, -1],
   "shell.rightSidebar.width": [264, 0, 200, 440, 344.5, -1],
   "speech.answerComposer.height": [62, 0, 40, 320, 96.5, -1],

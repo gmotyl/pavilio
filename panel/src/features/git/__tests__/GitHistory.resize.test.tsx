@@ -127,18 +127,18 @@ describe("resizing the git-history tree", () => {
     dragBy(60);
 
     expect(tree()).toHaveStyle({ width: "340px" });
-    expect(readPreference(preferences.gitHistoryPaneWidth)).toBe(340);
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(340);
   });
 
   it("the drag stops at the widths this tree was given", async () => {
     await renderTree();
     dragBy(600);
     expect(tree()).toHaveStyle({ width: "480px" });
-    expect(readPreference(preferences.gitHistoryPaneWidth)).toBe(480);
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(480);
 
     dragBy(-600);
     expect(tree()).toHaveStyle({ width: "200px" });
-    expect(readPreference(preferences.gitHistoryPaneWidth)).toBe(200);
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(200);
   });
 
   it("the history tree width is independent of the file list width", async () => {
@@ -152,7 +152,7 @@ describe("resizing the git-history tree", () => {
     dragBy(-40);
     expect(tree()).toHaveStyle({ width: "240px" });
     expect(readPreference(preferences.fileListPaneWidth)).toBe(420);
-    expect(readPreference(preferences.gitHistoryPaneWidth)).toBe(240);
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(240);
   });
 
   it("no handle on a mobile viewport", async () => {
