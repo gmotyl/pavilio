@@ -422,14 +422,32 @@ cd my-workspace
 cp ../pavilio/AGENTS.md.example .projects.local.md
 # Edit .projects.local.md with your actual projects
 
-pnpm bootstrap
+# Seed the two things sync mode cannot bring you: it rsyncs panel/, skills/,
+# scripts/ and commands/, but never the root package.json — and without that
+# there is no `pnpm` script to run in the first place.
+cp ../pavilio/package.json .
+cp -R ../pavilio/scripts .
+
+# The first sync. The explicit path is not optional here: see below.
+bash scripts/update.sh ../pavilio
 ```
+
+**Do not run `pnpm bootstrap` in a workspace of this shape.** `bootstrap` is the
+Quick Start's command, and part of its job is to add `upstream =
+https://github.com/gmotyl/pavilio.git` to any clone that lacks one. That single
+remote is what `scripts/update.sh` reads to decide which mode it is in, so a
+workspace that has been bootstrapped stops being mirrored and starts being
+*rebased* onto pavilio — the opposite of everything this section promises.
 
 To take a new upstream version, from the workspace:
 
 ```bash
-pnpm pull                                 # or: bash scripts/update.sh [/path/to/pavilio]
+pnpm pull ../pavilio                      # or: bash scripts/update.sh /path/to/pavilio
 ```
+
+Always name the pavilio clone. An explicit path means sync mode unconditionally,
+whatever the workspace's own remotes have grown since — bare `pnpm pull` is the
+Quick Start's spelling, and here it is a bet on a remote you did not check.
 
 `scripts/update.sh` has two modes and chooses between them itself, by asking
 whether the workspace it is running in is a pavilio clone — read from its

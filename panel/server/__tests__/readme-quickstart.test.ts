@@ -126,7 +126,10 @@ describe("README Quick Start", () => {
     const notes = section("Keep your notes safe");
     // What the notes actually are: commits, on main, in this workspace.
     expect(mentions(notes, /commits?\b/i)).toBe(true);
-    expect(mentions(notes, /`?main`?\b/)).toBe(true);
+    // Leading \b on purpose: without it the optional backticks collapse the
+    // pattern to /main\b/, which matches inside `domain` and `remain` — so the
+    // assertion passed on prose that never named the branch.
+    expect(mentions(notes, /\b`?main`?\b/)).toBe(true);
     // The prompt setup asks, and the remote it wires up.
     expect(mentions(notes, "origin"), "must name the private origin remote").toBe(true);
     expect(

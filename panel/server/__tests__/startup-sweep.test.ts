@@ -82,6 +82,10 @@ vi.mock("../lib/terminal-manager.js", () => ({ listSessions: vi.fn(() => []) }))
 vi.mock("http", async (importOriginal) => ({
   ...(await importOriginal<typeof import("http")>()),
   createServer: vi.fn(() => ({
+    // startPanel registers an `error` listener before listen() so a bind
+    // failure becomes PortUnavailableError instead of an unhandled event; a
+    // double without it is not a server this code can be started against.
+    once: vi.fn(),
     listen: vi.fn((_port: number, _host: string, cb?: () => void) => {
       cb?.();
     }),

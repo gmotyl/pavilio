@@ -9,7 +9,7 @@
 // descriptions — so a component that still knows any of them fails.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import AgentSettings from "../AgentSettings";
@@ -17,6 +17,21 @@ import AgentSettings from "../AgentSettings";
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/**
+ * Wait until the component's `/api/agent-settings/actions` request has not only
+ * been made but fully settled, including the `.then`/`.catch` that sets state.
+ * Tests asserting that nothing rendered need this: "not yet" and "never" are
+ * the same DOM.
+ */
+async function settleActions(fetchMock: ReturnType<typeof vi.fn>) {
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith("/api/agent-settings/actions"),
+  );
+  await act(async () => {
+    await Promise.allSettled(fetchMock.mock.results.map((r) => r.value));
+  });
+}
 
 /** What the server says this workspace can run — deliberately not the old list. */
 const SERVED_ACTIONS = [
@@ -44,7 +59,7 @@ const SERVED_ACTIONS = [
  */
 function stubApi(
   actions: unknown = SERVED_ACTIONS,
-  opts: { actionsFails?: boolean } = {},
+  opts: { actionsFails?: boolean; actionsStatus?: number } = {},
 ) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -54,6 +69,11 @@ function stubApi(
     }
     if (url.startsWith("/api/agent-settings/actions")) {
       if (opts.actionsFails) throw new Error("connection refused");
+      // A server that answers with a status is a different failure from one
+      // that does not answer, and the page has to tell them apart.
+      if (opts.actionsStatus) {
+        return { ok: false, status: opts.actionsStatus, json: async () => ({}) } as unknown as Response;
+      }
       return { ok: true, json: async () => actions } as unknown as Response;
     }
     if (url.startsWith("/api/agent-settings")) {
@@ -134,11 +154,29 @@ describe("AgentSettings workspace actions", () => {
   });
 
   it("renders no actions section at all for a workspace that offers none", async () => {
-    stubApi([]);
+    const fetchMock = stubApi([]);
     render(<AgentSettings />);
 
-    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    // The heading is gated on the /api/agent-settings fetch alone, and the
+    // /actions request is an independent promise — so awaiting the heading
+    // proves nothing about it. This test asserts an ABSENCE, which is also
+    // what the page looks like before /actions has answered at all: without
+    // settling it first, the test passes whether the feature works or not.
+    await settleActions(fetchMock);
+
     expect(screen.queryByTestId("agent-settings-actions-error")).toBeNull();
     expect(screen.queryAllByTestId(/^agent-settings-action-/)).toHaveLength(0);
+  });
+
+  it("says the server answered, not that it is down, when /actions 404s", async () => {
+    // The realistic shape of this failure is a bundle newer than the server —
+    // the endpoint is simply not there yet. Telling the reader to check that
+    // the server is running sends them after the one thing that is fine.
+    stubApi(SERVED_ACTIONS, { actionsStatus: 404 });
+    render(<AgentSettings />);
+
+    const error = await screen.findByTestId("agent-settings-actions-error");
+    expect(error).toHaveTextContent("answered 404");
+    expect(error).not.toHaveTextContent("did not answer");
   });
 });

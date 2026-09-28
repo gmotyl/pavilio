@@ -776,7 +776,9 @@ describe("scripts/bootstrap", () => {
 
     expect(status, output).toBe(1);
     expect(stdout).toMatch(
-      new RegExp(`^✗ panel install failed — run: pnpm -C ${escapeRe(join(repo, "panel"))} install$`, "m"),
+      // The path is quoted in the hint, so that a repo under a path with a
+      // space stays one argument when the user pastes it.
+      new RegExp(`^✗ panel install failed — run: pnpm -C "${escapeRe(join(repo, "panel"))}" install$`, "m"),
     );
     expect(output).toContain("ERESOLVE exploded");
     // Nothing after it ran — a half-installed panel must not be seeded, linked
@@ -801,7 +803,9 @@ describe("scripts/bootstrap", () => {
 
     expect(status, output).toBe(1);
     expect(stdout).toMatch(
-      new RegExp(`^✗ panel build failed — run: pnpm -C ${escapeRe(join(repo, "panel"))} build$`, "m"),
+      // The path is quoted in the hint, so that a repo under a path with a
+      // space stays one argument when the user pastes it.
+      new RegExp(`^✗ panel build failed — run: pnpm -C "${escapeRe(join(repo, "panel"))}" build$`, "m"),
     );
     expect(stdout).toMatch(/^✓ panel install$/m);
     for (const name of ["setup:claude-code", "setup:opencode", "setup:codex", "install:speech", "setup:shortcut"]) {

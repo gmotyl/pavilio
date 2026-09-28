@@ -221,13 +221,36 @@ export async function startPanel(
   // request never pays the /etc/passwd read cost; listOsUsers() never throws.
   listOsUsers();
 
-  server.listen(port, "127.0.0.1", () => {
-    console.log(`Panel bound to ${protocol}://127.0.0.1:${port} (loopback only)`);
+  // `listen()` is where the port is actually claimed, and nothing makes that
+  // atomic with the `portIsFree` probe above: the probe closes its socket, and
+  // anything on the machine may take the port before this line runs. Without an
+  // `error` listener that lost race arrives as an unhandled 'error' event — a
+  // raw ERR_UNHANDLED_ERROR stack, which is precisely what PortUnavailableError
+  // exists to replace. The same listener covers every other bind failure
+  // (EACCES on a privileged port, EADDRNOTAVAIL), which the probe cannot
+  // predict either. Registered before `listen()` so no failure can outrun it.
+  const bound = new Promise<void>((resolveBound, rejectBound) => {
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      rejectBound(err.code === "EADDRINUSE" ? new PortUnavailableError(port) : err);
+    });
+    server.listen(port, "127.0.0.1", () => {
+      console.log(`Panel bound to ${protocol}://127.0.0.1:${port} (loopback only)`);
+      resolveBound();
+    });
   });
 
+  // Still synchronous, and still before the bind is awaited: `listen()` starts
+  // accepting the moment it is called, so attaching the upgrade handler after
+  // the bind resolved would open a window where a WebSocket could arrive with
+  // nothing to answer it.
   setupWebSocket(server);
   registerPanelServer(server, port, getWss);
   setupFileWatcher();
+
+  // Everything below this line is periodic work that a panel which never bound
+  // has no business starting — a scheduler committing to a repo out of a
+  // process that is about to exit with PortUnavailableError is the worst of it.
+  await bound;
 
   setInterval(pruneDeadAgents, 30_000);
 

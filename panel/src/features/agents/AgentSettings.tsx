@@ -410,7 +410,9 @@ function FileViewer({ file }: { file: SettingsFile }) {
 export default function AgentSettings() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [actions, setActions] = useState<WorkspaceAction[]>([]);
-  const [actionsUnavailable, setActionsUnavailable] = useState(false);
+  // null = fine. Otherwise the status the server answered with, or null inside
+  // the object when nothing answered at all — the two need different advice.
+  const [actionsUnavailable, setActionsUnavailable] = useState<{ status: number | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<ModalState | null>(null);
 
@@ -428,14 +430,21 @@ export default function AgentSettings() {
   // identical: an empty page with nothing to say why.
   useEffect(() => {
     fetch("/api/agent-settings/actions")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((r) =>
+        r.ok
+          ? r.json()
+          : Promise.reject(Object.assign(new Error(`HTTP ${r.status}`), { status: r.status })),
+      )
       .then((list) => {
         setActions(Array.isArray(list) ? list : []);
-        setActionsUnavailable(false);
+        setActionsUnavailable(null);
       })
-      .catch(() => {
+      .catch((err: { status?: number }) => {
         setActions([]);
-        setActionsUnavailable(true);
+        // A thrown fetch has no status; a rejected response carries the one the
+        // server answered with. Collapsing them lost the only detail that tells
+        // the reader which of two unrelated problems they have.
+        setActionsUnavailable({ status: typeof err?.status === "number" ? err.status : null });
       });
   }, []);
 
@@ -494,7 +503,9 @@ export default function AgentSettings() {
             style={{ background: "color-mix(in srgb, var(--red) 10%, transparent)", color: "var(--red)", border: "1px solid color-mix(in srgb, var(--red) 25%, transparent)" }}
           >
             <AlertTriangle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-            Could not load this workspace's actions — the panel server did not answer. Check that it is running, then reload.
+            {actionsUnavailable.status === null
+              ? "Could not load this workspace's actions — the panel server did not answer. Check that it is running, then reload."
+              : `Could not load this workspace's actions — the panel server answered ${actionsUnavailable.status}. It is running, but it does not serve this endpoint: the bundle is newer than the server. Rebuild and restart it (pnpm build, then pnpm reboot).`}
           </div>
         )}
         <div className="flex flex-wrap gap-2">
