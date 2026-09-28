@@ -38,6 +38,7 @@ import {
   TERMINAL_FOCUS_EVENT,
   dispatchTerminalFocus,
   readTerminalFocus,
+  sessionLabel,
   writeTerminalFocus,
   type SessionMeta,
   type TerminalFocusEventDetail,
@@ -462,8 +463,13 @@ export default function LeftSidebar() {
                     }}
                   >
                     <SessionIndicator sessionId={s.id} />
-                    <span className="font-mono text-[11px] truncate">
-                      {s.name}
+                    {/* One line, ellipsised; the whole label is on `title=`
+                        so the truncation never hides what the row means. */}
+                    <span
+                      className="font-mono text-[11px] truncate"
+                      title={sessionLabel(s)}
+                    >
+                      {sessionLabel(s)}
                     </span>
                   </button>
                 </li>
