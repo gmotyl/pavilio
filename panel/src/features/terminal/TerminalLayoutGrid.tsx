@@ -495,7 +495,7 @@ function TerminalCell({
           // once there is one. The editor below still edits the NAME, which is
           // why it reads `session.name` and this reads `sessionLabel`.
           <span
-            className="text-[10.5px] font-mono tracking-wide uppercase truncate flex-1"
+            className="text-[10.5px] font-mono tracking-wide truncate flex-1"
             style={{ color: "var(--text-secondary)", letterSpacing: "0.08em" }}
             title={`${sessionLabel(session)} — double-click to rename`}
             onDoubleClick={(e) => {

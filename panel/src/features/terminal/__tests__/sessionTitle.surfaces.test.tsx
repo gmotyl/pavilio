@@ -455,6 +455,17 @@ describe("terminal surfaces label a session by its title", () => {
     expect(document.body.innerHTML).not.toContain(TITLE);
   });
 
+  // `textContent` is blind to `text-transform`, so every assertion above still
+  // passes when the header SHOUTS the title. The uppercase styling suited a
+  // short `<project>-<n>` handle and does not suit prose at 10.5px, so it is
+  // pinned here — on the className, the only place the difference shows.
+  it("the cell header does not shout a prose title", () => {
+    renderGrid([auto()]);
+
+    const label = screen.getByTitle(`${TITLE} — double-click to rename`);
+    expect(label.className).not.toContain("uppercase");
+  });
+
   // The global terminals view owns no label of its own: it renders through
   // TerminalLayoutGrid and TerminalToolbar, so it inherits theirs. Asserted by
   // mounting the real surface with its real children rather than by editing it.
