@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ClipboardList } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import {
@@ -23,6 +23,11 @@ import ViewerActions from "./ViewerActions";
 import { usePeekTriggerProps } from "./peekTrigger";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
+import { RunBanner } from "./RunBanner";
+import { startTaskRun } from "./startTaskRun";
+import { taskListStatus } from "./taskList";
+import { workspaceRelativePath } from "./workspaceRelativePath";
+import { dispatchTerminalFocus } from "../terminal/useTerminalSessions";
 
 interface Props {
   projectName: string;
@@ -307,6 +312,34 @@ export default function PlansTab({ projectName }: Props) {
     ? (filesByPath.get(selectedPath)?.relativeToProjectsDir ?? undefined)
     : undefined;
 
+  // A change's tasks.md with work left gets the run banner; the path it is
+  // handed is workspace-relative, the form the objective template names.
+  const runStatus =
+    selectedPath && fileContent !== null ? taskListStatus(selectedPath, fileContent) : null;
+  const runPath = selectedPath
+    ? workspaceRelativePath(selectedPath, selectedBasePath ?? "")
+    : "";
+  const navigate = useNavigate();
+  const [runError, setRunError] = useState<string | null>(null);
+  useEffect(() => setRunError(null), [selectedPath]);
+  const onRun = useCallback(
+    (runLine: string) =>
+      startTaskRun({ project: projectName, runLine }).then(
+        (sessionId) => {
+          setRunError(null);
+          // Same hand-off as the sidebar's new-terminal button: the focus is
+          // already stored by the create, the broadcast tells a mounted
+          // Terminal view, and the navigation shows the run.
+          dispatchTerminalFocus(projectName, sessionId);
+          navigate(`/project/${encodeURIComponent(projectName)}/iterm`);
+        },
+        (err: unknown) => {
+          setRunError(err instanceof Error ? err.message : String(err));
+        },
+      ),
+    [projectName, navigate],
+  );
+
   // Load plan content when selection changes
   useEffect(() => {
     if (!selectedPath) {
@@ -569,6 +602,19 @@ export default function PlansTab({ projectName }: Props) {
           {selectedPath && !fileError && fileContent === null && (
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
               Loading…
+            </p>
+          )}
+          {runStatus && (
+            <RunBanner
+              status={runStatus}
+              project={projectName}
+              path={runPath}
+              onRun={onRun}
+            />
+          )}
+          {runStatus && runError && (
+            <p role="alert" className="text-sm" style={{ color: "var(--red)" }}>
+              Could not start the run: {runError}
             </p>
           )}
           {fileContent !== null && (
