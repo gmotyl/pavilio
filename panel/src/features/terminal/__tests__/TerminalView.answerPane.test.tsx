@@ -418,7 +418,7 @@ describe("TerminalView and the answer pane", () => {
     first.unmount();
     render(cell(speech));
     await settleTerminal();
-    // Still the cell's own choice, not a reseed from the browser default.
+    // The stored preference the click wrote, read again by the remounted view.
     expect(footerBox()).toBeChecked();
   });
 
@@ -454,7 +454,9 @@ describe("TerminalView and the answer pane", () => {
 });
 
 describe("TerminalView opens the pane on a new answer", () => {
-  it("a cell seeds its switch from the default at mount", async () => {
+  it("the footer box mirrors the one stored preference", async () => {
+    // The cell holds no switch of its own any more: the box shows the Settings
+    // preference and writes it, so there is nothing per cell to seed.
     storeDefault(true);
     const speech = makeSpeech();
     render(cell(speech));
@@ -462,18 +464,12 @@ describe("TerminalView opens the pane on a new answer", () => {
     fireEvent.click(eye());
     expect(footerBox()).toBeChecked();
 
-    // The cell's switch is its own: flipping it writes nothing back to the
-    // default, and the default changing later does not reach a mounted cell.
     fireEvent.click(footerBox());
     expect(footerBox()).not.toBeChecked();
-    expect(getStoredAutoOpenAnswer()).toBe(true);
+    expect(getStoredAutoOpenAnswer()).toBe(false);
     fireEvent.click(footerBox());
     expect(footerBox()).toBeChecked();
-
-    storeDefault(false);
-    fireEvent.click(eye());
-    fireEvent.click(eye());
-    expect(footerBox()).toBeChecked();
+    expect(getStoredAutoOpenAnswer()).toBe(true);
   });
 
   it("a cell mounted with the default off starts off", async () => {

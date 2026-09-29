@@ -6,10 +6,12 @@
  * cell), and presets, drag placement and seam resize go through the same
  * grid. The xterm survives that only because `terminalInstances` keeps it in
  * a module-level pool; pane state held in component state died with the view
- * (smoke test, 2026-09-16: MAX closed the pane). So the three things the view
- * used to own — whether the pane is open, the cell's own "Open on new answer"
- * switch, and the utterance ids the cell has already seen — live here, keyed
- * by session, for the life of the tab.
+ * (smoke test, 2026-09-16: MAX closed the pane). So the two things the view
+ * used to own — whether the pane is open, and the utterance ids the cell has
+ * already seen — live here, keyed by session, for the life of the tab.
+ *
+ * The "Open on new answer" preference is NOT held here: the view reads it from
+ * Settings at arrival, so a change there reaches a cell that already exists.
  *
  * In memory on purpose: a reload starts every pane closed, as the spec asks. A
  * session that is destroyed drops its entry (see `destroyTerminal`).
@@ -20,19 +22,10 @@
  * documents in `features/speech/types.ts`.
  */
 import { useSyncExternalStore } from "react";
-import { getStoredAutoOpenAnswer } from "../speech/autoOpenAnswer";
 
 export interface AnswerPaneSnapshot {
   /** Whether the cell's pane is open. */
   readonly open: boolean;
-  /**
-   * The cell's own "Open on new answer" switch. Seeded ONCE, from the
-   * browser-wide default Settings keeps, when the session's entry is first
-   * created; never written back to that default. A cell flipped mid-session
-   * keeps its choice, and the default changing later reaches only sessions
-   * first seen afterwards.
-   */
-  readonly autoOpen: boolean;
 }
 
 interface Entry {
@@ -56,7 +49,7 @@ function entryFor(sessionId: string): Entry {
   let entry = entries.get(sessionId);
   if (!entry) {
     entry = {
-      snapshot: { open: false, autoOpen: getStoredAutoOpenAnswer() },
+      snapshot: { open: false },
       seen: null,
     };
     entries.set(sessionId, entry);
@@ -73,13 +66,6 @@ export function setAnswerPaneOpen(sessionId: string, open: boolean): void {
   const entry = entryFor(sessionId);
   if (entry.snapshot.open === open) return;
   entry.snapshot = { ...entry.snapshot, open };
-  notify();
-}
-
-export function setAnswerPaneAutoOpen(sessionId: string, autoOpen: boolean): void {
-  const entry = entryFor(sessionId);
-  if (entry.snapshot.autoOpen === autoOpen) return;
-  entry.snapshot = { ...entry.snapshot, autoOpen };
   notify();
 }
 
@@ -116,7 +102,7 @@ export function forgetAnswerPane(sessionId: string): void {
   notify();
 }
 
-/** The session's `{ open, autoOpen }`, re-rendering the caller when either changes. */
+/** The session's `{ open }`, re-rendering the caller when it changes. */
 export function useAnswerPaneState(sessionId: string): AnswerPaneSnapshot {
   return useSyncExternalStore(
     subscribeAnswerPane,

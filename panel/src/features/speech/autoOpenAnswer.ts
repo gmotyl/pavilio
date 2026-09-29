@@ -14,10 +14,8 @@
  * the eye. It is a DEFAULT, not a behavior: clearing the box stores `false`,
  * and the stored `false` is what every later read gets back.
  *
- * And it is a default in the narrower sense too — each `TerminalView` seeds
- * its own switch from it once, at mount, and never writes back, so a cell
- * flipped mid-session keeps its choice and a change here reaches only cells
- * mounted afterwards.
+ * No cell holds a copy: `TerminalView` reads it when an answer arrives, so a
+ * change here reaches every cell, including ones already mounted.
  */
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
