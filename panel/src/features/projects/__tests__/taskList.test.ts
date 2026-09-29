@@ -36,6 +36,11 @@ describe("taskListStatus", () => {
     ).toBeNull();
   });
 
+  it("a stray tasks.md directly under changes/archive is not runnable", () => {
+    // Without the archive guard this path would parse as a change named "archive".
+    expect(taskListStatus("plans/openspec/changes/archive/tasks.md", list(1, 3))).toBeNull();
+  });
+
   it("a proposal with checkboxes is not a task list", () => {
     expect(
       taskListStatus("plans/openspec/changes/2026-09-28-commands-in-context/proposal.md", list(0, 3)),
