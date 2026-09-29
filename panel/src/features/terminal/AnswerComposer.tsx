@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { preferences } from "../../preferences/declarations";
@@ -16,6 +16,7 @@ import { submitToPty, type SubmitFailure } from "./ptySubmit";
 import { projectOfSession } from "./sessionProject";
 import { reconnectOnActivate } from "./terminalInstances";
 import { dismissAttentionOnArrival } from "./attentionArrival";
+import { CommandPicker, type CommandPickerHandle } from "./CommandPicker";
 
 /**
  * How far the composer may be dragged, and how far one arrow key moves it.
@@ -103,6 +104,17 @@ const PENDING_TEXT = "Sending… waiting for the terminal.";
  * relationship between the two writes that deliberately does not exist.
  */
 const RETRY_RETURN = "\r";
+
+/**
+ * The `/token` that starts at `at` in `text` — the slash and every
+ * non-whitespace character after it — or null when there is no slash there any
+ * more. The picker's query is this token minus its slash, and a pick replaces
+ * exactly this token.
+ */
+function slashToken(text: string, at: number): string | null {
+  if (text[at] !== "/") return null;
+  return /^\/\S*/.exec(text.slice(at))?.[0] ?? null;
+}
 
 /** The file a path ends in — the chip's whole text. */
 function basename(path: string): string {
@@ -258,6 +270,10 @@ export interface AnswerComposerProps {
  * have to repeat the stop — so the field simply lets the key bubble the three
  * nodes to the root that owns it.
  *
+ * The one exception is the command picker. While it is open the field takes
+ * Escape first, closes the picker, and stops the key there, so the pane stays
+ * open; once the picker is closed Escape bubbles to the root exactly as before.
+ *
  * ## Why the text is mirrored into a module store
  *
  * `useState` is the field's value, but it is not where the draft LIVES. The
@@ -374,6 +390,33 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   const retryOffered = useRetryOffered(sessionId);
   /** The mobile auto-grow effect's own handle on the field — see below. */
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
+  /**
+   * Where the command picker's `/token` starts in the draft, or null while the
+   * picker is closed.
+   *
+   * A position rather than a boolean so the picker is not tied to the start of
+   * the field: a typed `/` only ever opens it at 0 (the draft must be empty,
+   * per the spec), but the `/ skills` chip of Task 11 can open the SAME picker
+   * by splicing a `/` in at the caret and setting this to the caret — the
+   * query, the close rule and the insertion below then work unchanged.
+   *
+   * The picker is open only while a `/token` is still at this position AND the
+   * caret is inside it (see `onChange`). That is the close rule the trimmed
+   * filter needs: `filterSkills` would still match `/pavilio-question ` and
+   * keep an entry highlighted, so a space typed after the token must close the
+   * picker, or the Enter meant to send would pick instead.
+   */
+  const [pickerAt, setPickerAt] = useState<number | null>(null);
+  /** The highlighted option's element id — the field's `aria-activedescendant`. */
+  const [activeOption, setActiveOption] = useState<string | null>(null);
+  const pickerRef = useRef<CommandPickerHandle | null>(null);
+  /** The composer's column, which the picker floats over; a press outside it closes the picker. */
+  const wellRef = useRef<HTMLDivElement | null>(null);
+  /** Where the caret goes once a pick's text has been committed to the field. */
+  const pendingCaret = useRef<number | null>(null);
+  const pickerToken = pickerAt === null ? null : slashToken(text, pickerAt);
+  const pickerOpen = pickerToken !== null;
+  const pickerId = `command-picker-${sessionId}`;
   const { height, isMobile, handleProps } = useResizableRow(
     preferences.answerComposerHeight,
     BOUNDS,
@@ -416,6 +459,64 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : FALLBACK_LINE_HEIGHT_PX;
     field.style.height = `${Math.min(field.scrollHeight, MOBILE_COMPOSER_MAX_ROWS * lineHeight)}px`;
   }, [text, isMobile]);
+
+  /**
+   * A pick's caret, applied after React has written the new value — setting
+   * the selection before that would be undone by the value write moving the
+   * caret to the end. The pick keeps focus in the field (the options take no
+   * focus on press), so only the selection needs placing.
+   */
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current;
+    const field = fieldRef.current;
+    if (caret === null || !field) return;
+    pendingCaret.current = null;
+    field.setSelectionRange(caret, caret);
+  }, [text]);
+
+  /**
+   * A press anywhere outside the composer's column closes the picker — the
+   * send button, the answer above, another cell.
+   *
+   * Not `blur`: on a touch viewport a tap on an option can blur the field
+   * before its click lands, and a picker closed by that blur would unmount the
+   * very option being tapped. A press is decided by WHERE it lands, which an
+   * option inside the well never fails. Tabbing away leaves the picker up; it
+   * takes keys only through the field, so it holds nothing hostage meanwhile.
+   */
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onPointerDown = (e: PointerEvent): void => {
+      const target = e.target instanceof Node ? e.target : null;
+      if (target && wellRef.current?.contains(target)) return;
+      setPickerAt(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [pickerOpen]);
+
+  /**
+   * The picked entry's short form replaces the `/token` the user was filtering
+   * with, and the caret is left right after it, because most skills take an
+   * argument (D3). No trailing space: the spec puts the caret "immediately
+   * after" `/<name>`, and the user's own space is what closes the token.
+   *
+   * The expansion to the portable instruction is NOT here: it happens on the
+   * way out, at send (D7, Task 11). The field shows what the user picked.
+   */
+  const pick = (name: string): void => {
+    if (pickerAt === null) return;
+    // The store, not `text`: the same "now" the paste splice reads.
+    const base = getDraft(sessionId);
+    const token = slashToken(base, pickerAt) ?? "";
+    const short = `/${name}`;
+    const next = `${base.slice(0, pickerAt)}${short}${base.slice(pickerAt + token.length)}`;
+    pendingCaret.current = pickerAt + short.length;
+    setDraft(sessionId, next);
+    setText(next);
+    setPickerAt(null);
+    setActiveOption(null);
+  };
 
   /**
    * The draft this submit was made of is on the far side now, so spend it —
@@ -591,6 +692,28 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    // While the picker is open it takes Escape, Enter and the arrows AHEAD of
+    // everything below, and gives them back the moment it closes (D3). Never
+    // during IME composition: an Enter or Escape there belongs to the input
+    // method (committing or cancelling the candidate), not to the list.
+    if (pickerOpen && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+      if (e.key === "Escape") {
+        // The picker only. `stopPropagation` keeps the key from the pane's
+        // root, which would otherwise close the whole pane on it; the draft
+        // keeps its `/`, so a slash meant literally survives.
+        e.preventDefault();
+        e.stopPropagation();
+        setPickerAt(null);
+        setActiveOption(null);
+        return;
+      }
+      const owned =
+        (e.key === "Enter" && !e.shiftKey) || e.key === "ArrowUp" || e.key === "ArrowDown";
+      if (owned && pickerRef.current?.handleKey(e.key as "Enter" | "ArrowUp" | "ArrowDown")) {
+        e.preventDefault();
+        return;
+      }
+    }
     // Shift+Enter is the textarea's own business, and so is every other key.
     if (e.key !== "Enter" || e.shiftKey) return;
     // Enter never types in this field, empty or not: a newline that appeared
@@ -661,7 +784,19 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         // pane out.
         style={isMobile ? undefined : { height: `${height}px` }}
       >
-        <div className="answer-pane-composer-well">
+        <div className="answer-pane-composer-well" ref={wellRef}>
+          {/* Mounted per open, so each open refetches the skills — see
+              `CommandPicker`. Above the chip row, floating over the answer, so
+              nothing in the pane moves when it appears (D1). */}
+          {pickerOpen ? (
+            <CommandPicker
+              ref={pickerRef}
+              id={pickerId}
+              query={pickerToken.slice(1)}
+              onPick={pick}
+              onActiveChange={setActiveOption}
+            />
+          ) : null}
           {attachments.length > 0 ? (
             <div className="answer-pane-composer-chips">
               {attachments.map((path, index) => (
@@ -699,11 +834,33 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
             placeholder="Reply to the terminal…"
             rows={isMobile ? MOBILE_COMPOSER_MIN_ROWS : 2}
             value={text}
+            // The field stays a textbox for assistive tech and points at the
+            // picker's listbox while it is open: focus never leaves the field,
+            // so `aria-activedescendant` is how the highlighted entry is read.
+            aria-autocomplete="list"
+            aria-controls={pickerOpen ? pickerId : undefined}
+            aria-activedescendant={pickerOpen ? (activeOption ?? undefined) : undefined}
             onChange={(e) => {
+              const next = e.target.value;
+              // The picker opens on a `/` typed into an EMPTY draft and nowhere
+              // else — `see src/` is a path, not a command (spec: "A slash
+              // inside the text is just text"). Once open it stays open only
+              // while its `/token` survives with the caret inside it; a space
+              // after the token, deleting the slash, or moving past it closes it.
+              if (pickerAt === null) {
+                if (text === "" && next === "/") setPickerAt(0);
+              } else {
+                const token = slashToken(next, pickerAt);
+                const caret = e.target.selectionStart;
+                if (token === null || caret <= pickerAt || caret > pickerAt + token.length) {
+                  setPickerAt(null);
+                  setActiveOption(null);
+                }
+              }
               // Every keystroke goes to both: the state the field renders from,
               // and the store it will be rebuilt from after the pane is closed.
-              setDraft(sessionId, e.target.value);
-              setText(e.target.value);
+              setDraft(sessionId, next);
+              setText(next);
               // Typing is the user having read the refusal and moved on; a
               // notice that outlived the reply it was about would go on
               // claiming the next one failed too.
