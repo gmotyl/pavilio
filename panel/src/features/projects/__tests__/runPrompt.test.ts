@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeRunLine, resolveObjective, splitRunLoop } from "../runPrompt";
+import { composeRunLine, resolveObjective, splitRunLoop, takesPrompt } from "../runPrompt";
 
 const VARS = {
   change: "2026-09-28-commands-in-context",
@@ -73,6 +73,15 @@ describe("composeRunLine", () => {
     );
   });
 
+  it("folds tabs and other control characters to spaces, like line breaks", () => {
+    // A tab typed into a PTY asks the shell to complete; ESC, ^C, ^D and DEL
+    // are keystrokes too. None of them may reach the terminal as themselves.
+    expect(composeRunLine('claude "{prompt}"', "a\tb\u001bc\u0003d\u0004e\u007ff\u0000g")).toBe(
+      'claude "a b c d e f g"',
+    );
+    expect(composeRunLine("aider --message {prompt}", "x\ty")).toBe("aider --message 'x y'");
+  });
+
   it("returns a run loop with no placeholder unchanged", () => {
     expect(composeRunLine("claude --continue", "ignored")).toBe("claude --continue");
   });
@@ -88,5 +97,24 @@ describe("splitRunLoop", () => {
 
   it("puts a run loop without a placeholder wholly before the objective", () => {
     expect(splitRunLoop("claude --continue")).toEqual({ before: "claude --continue", after: "" });
+  });
+
+  it("marks a later placeholder, which the send fills too", () => {
+    // `composeRunLine` substitutes every `{prompt}`; the drawing must not show
+    // a raw placeholder that the sent line will not contain.
+    expect(splitRunLoop('tool "{prompt}" --title "{prompt}"')).toEqual({
+      before: 'tool "',
+      after: '" --title "«objective»"',
+    });
+    expect(composeRunLine('tool "{prompt}" --title "{prompt}"', "go")).toBe(
+      'tool "go" --title "go"',
+    );
+  });
+});
+
+describe("takesPrompt", () => {
+  it("is true only for a run loop that has a placeholder", () => {
+    expect(takesPrompt('claude "/goal {prompt}"')).toBe(true);
+    expect(takesPrompt("claude --continue")).toBe(false);
   });
 });

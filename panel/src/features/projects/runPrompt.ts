@@ -26,12 +26,14 @@ type QuoteState = "bare" | "single" | "double";
  * The objective, written so the shell hands it to the CLI as the text the
  * user saw, for whichever quoting the run loop put around `{prompt}`.
  *
- * Line breaks fold to spaces first: the line is typed into a PTY, where a
- * newline is a return, and a return inside an open quote leaves the shell at a
- * continuation prompt rather than starting the agent.
+ * Line breaks and every other control character fold to spaces first: the
+ * line is typed into a PTY, where each is a keystroke. A newline is a return,
+ * and a return inside an open quote leaves the shell at a continuation prompt
+ * rather than starting the agent; a tab asks for completion; ESC, ^C, ^D and
+ * DEL edit or abort the line being typed.
  */
 function quoteFor(state: QuoteState, objective: string): string {
-  const text = objective.replace(/\r?\n|\r/g, " ");
+  const text = objective.replace(/\r\n|[\u0000-\u001f\u007f]/g, " ");
   if (state === "double") {
     // Inside "…" these four keep a meaning: `"` ends the string, `$` and a
     // backtick expand, `\` escapes. `!` is worse — an interactive bash or zsh
@@ -75,12 +77,26 @@ export function composeRunLine(runLoop: string, objective: string): string {
   return out;
 }
 
+/** Whether the launcher's run loop has anywhere to put the objective. */
+export function takesPrompt(runLoop: string): boolean {
+  return runLoop.includes(PROMPT);
+}
+
+/** How a `{prompt}` after the first is drawn: the send fills it with the same objective. */
+export const OBJECTIVE_MARKER = "«objective»";
+
 /**
  * The launcher's wrapper, cut at the first `{prompt}`, for drawing around the
- * editable objective. A run loop with no placeholder is all wrapper.
+ * editable objective. A run loop with no placeholder is all wrapper. A later
+ * `{prompt}` is drawn as {@link OBJECTIVE_MARKER}, since `composeRunLine`
+ * fills every one and the drawing must not show a placeholder the sent line
+ * will not contain.
  */
 export function splitRunLoop(runLoop: string): { before: string; after: string } {
   const at = runLoop.indexOf(PROMPT);
   if (at < 0) return { before: runLoop, after: "" };
-  return { before: runLoop.slice(0, at), after: runLoop.slice(at + PROMPT.length) };
+  return {
+    before: runLoop.slice(0, at),
+    after: runLoop.slice(at + PROMPT.length).split(PROMPT).join(OBJECTIVE_MARKER),
+  };
 }

@@ -50,10 +50,10 @@ function objective(): HTMLTextAreaElement {
 }
 
 function cliOptions(): string[] {
-  const group = screen.getByRole("radiogroup", { name: "CLI" });
+  const group = screen.getByRole("group", { name: "CLI" });
   return within(group)
-    .getAllByRole("radio")
-    .map((radio) => radio.textContent ?? "");
+    .getAllByRole("button")
+    .map((button) => button.textContent ?? "");
 }
 
 describe("RunBanner", () => {
@@ -125,15 +125,15 @@ describe("RunBanner", () => {
     const onRun = renderBanner(vi.fn());
     const wrapper = () => screen.getByTestId("run-banner-wrapper-before").textContent;
 
-    await user.click(screen.getByRole("radio", { name: "codex" }));
+    await user.click(screen.getByRole("button", { name: "codex" }));
     await user.clear(objective());
     await user.type(objective(), "My objective");
     expect(wrapper()).toBe('codex "/goal ');
 
-    await user.click(screen.getByRole("radio", { name: "opencode" }));
+    await user.click(screen.getByRole("button", { name: "opencode" }));
 
-    expect(screen.getByRole("radio", { name: "opencode" })).toHaveAttribute(
-      "aria-checked",
+    expect(screen.getByRole("button", { name: "opencode" })).toHaveAttribute(
+      "aria-pressed",
       "true",
     );
     expect(wrapper()).toBe('opencode --prompt "');
@@ -176,7 +176,7 @@ describe("RunBanner", () => {
     );
 
     // Still runnable from the single row, with the resolved default objective.
-    await user.click(screen.getByRole("radio", { name: "codex" }));
+    await user.click(screen.getByRole("button", { name: "codex" }));
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(onRun).toHaveBeenCalledWith(
       `codex "/goal Implement all tasks in ${PATH}; done when every task is checked and tests + lint pass."`,
@@ -225,7 +225,7 @@ describe("RunBanner", () => {
     const first = render(
       <RunBanner status={STATUS} project="pavilio" path={PATH} onRun={vi.fn()} />,
     );
-    await user.click(screen.getByRole("radio", { name: "codex" }));
+    await user.click(screen.getByRole("button", { name: "codex" }));
     expect(globals.__PAVILIO_PREFS__![storageKey(preferences.plansRunLauncher)]).toBe("codex");
     first.unmount();
 
@@ -240,7 +240,7 @@ describe("RunBanner", () => {
       />,
     );
 
-    expect(screen.getByRole("radio", { name: "codex" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "codex" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(onRun.mock.calls[0][0]).toMatch(/^codex "\/goal /);
   });
@@ -254,8 +254,8 @@ describe("RunBanner", () => {
     writePreference(preferences.plansRunLauncher, "codex");
     renderBanner();
 
-    expect(screen.getByRole("radio", { name: "claude" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.queryByRole("radio", { name: "codex" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "claude" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "codex" })).not.toBeInTheDocument();
   });
 
   it("reordering launchers keeps the picked CLI", async () => {
@@ -263,23 +263,72 @@ describe("RunBanner", () => {
     writePreference(preferences.terminalLaunchers, LAUNCHERS);
     const onRun = vi.fn();
     renderBanner(onRun);
-    await user.click(screen.getByRole("radio", { name: "codex" }));
+    await user.click(screen.getByRole("button", { name: "codex" }));
 
     act(() => {
       writePreference(preferences.terminalLaunchers, [LAUNCHERS[2], LAUNCHERS[0], LAUNCHERS[1]]);
     });
 
     expect(cliOptions()).toEqual(["opencode", "claude", "codex"]);
-    expect(screen.getByRole("radio", { name: "codex" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "codex" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(onRun.mock.calls[0][0]).toMatch(/^codex "\/goal /);
+  });
+
+  it("the CLI switch is toggle buttons: one pressed, each reached by Tab and picked by Space", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    renderBanner();
+
+    const group = screen.getByRole("group", { name: "CLI" });
+    const buttons = within(group).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
+
+    screen.getByRole("button", { name: "Collapse run banner" }).focus();
+    await user.tab();
+    expect(buttons[0]).toHaveFocus();
+    await user.tab();
+    expect(buttons[1]).toHaveFocus();
+    await user.keyboard(" ");
+    expect(buttons[1]).toHaveAttribute("aria-pressed", "true");
+    expect(buttons[0]).toHaveAttribute("aria-pressed", "false");
+    await user.tab();
+    expect(buttons[2]).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(buttons[2]).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("run-banner-wrapper-before").textContent).toBe('opencode --prompt "');
+  });
+
+  it("a run loop that takes no prompt disables the objective and says so", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, [
+      { name: "resume", command: "claude", runLoop: "claude --continue" },
+    ]);
+    const onRun = renderBanner(vi.fn());
+
+    expect(objective()).toBeDisabled();
+    expect(screen.getByText("This launcher's run loop takes no prompt")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    // What is read is what is sent: the run loop alone, no objective.
+    expect(onRun).toHaveBeenCalledWith("claude --continue");
+  });
+
+  it("a later placeholder in the run loop is drawn as the objective, not as raw text", () => {
+    writePreference(preferences.terminalLaunchers, [
+      { name: "tool", command: "tool", runLoop: 'tool "{prompt}" --title "{prompt}"' },
+    ]);
+    renderBanner();
+
+    const after = screen.getByTestId("run-banner-wrapper-after").textContent;
+    expect(after).toBe('" --title "«objective»"');
+    expect(after).not.toContain("{prompt}");
   });
 
   it("offers no run when no launcher has a run loop", () => {
     writePreference(preferences.terminalLaunchers, [{ name: "claude", command: "claude" }]);
     renderBanner();
 
-    expect(screen.queryByRole("radiogroup", { name: "CLI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "CLI" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
     expect(screen.getByText(/no launcher has a run loop/i)).toBeInTheDocument();
   });

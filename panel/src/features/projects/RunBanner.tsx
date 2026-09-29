@@ -1,10 +1,10 @@
-import { useState, type KeyboardEvent } from "react";
+import { useId, useState, type KeyboardEvent } from "react";
 import { ChevronDown, ChevronRight, Play } from "lucide-react";
 
 import { preferences, type TerminalLauncher } from "../../preferences/declarations";
 import { readOverridable } from "../../preferences/overridable";
 import { usePreference, useScopedPreference } from "../../preferences/usePreference";
-import { composeRunLine, resolveObjective, splitRunLoop } from "./runPrompt";
+import { composeRunLine, resolveObjective, splitRunLoop, takesPrompt } from "./runPrompt";
 import type { TaskListStatus } from "./taskList";
 
 /**
@@ -13,12 +13,15 @@ import type { TaskListStatus } from "./taskList";
  * start with — shown RESOLVED, so what is read is what is sent.
  *
  * The objective is editable for one send and stored nowhere. The template it
- * was resolved from is a preference with its own editor; an edit here that
- * wrote back would turn a one-off tweak into every later run's default.
+ * was resolved from is a preference — a workspace default with a per-project
+ * override — whose editor is future work; an edit here that wrote back would
+ * turn a one-off tweak into every later run's default.
  *
  * The launcher's run loop is drawn around the objective, dimmed and never
  * editable: it belongs to the launcher entry, not to the template, and it
- * redraws when the CLI switch moves.
+ * redraws when the CLI switch moves. A run loop with no `{prompt}` sends no
+ * objective, so the field is disabled and says so rather than being dropped
+ * silently.
  *
  * The switch remembers the last CLI picked, by name, for every change
  * (`plansRunLauncher`), so a run is not a question asked every time.
@@ -112,7 +115,11 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
   };
 
   const [busy, setBusy] = useState(false);
-  const canRun = Boolean(launcher) && draft.trim() !== "" && !busy;
+  const noPromptNote = useId();
+  // A run loop with nowhere to put the objective sends it nowhere, so the
+  // field neither gates Run nor pretends to be part of the line.
+  const usesObjective = launcher ? takesPrompt(launcher.runLoop) : true;
+  const canRun = Boolean(launcher) && (!usesObjective || draft.trim() !== "") && !busy;
 
   const run = () => {
     if (!canRun || !launcher) return;
@@ -150,14 +157,17 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
   const controls = (
     <>
       {options.length > 0 ? (
-        <div className="run-banner-cli" role="radiogroup" aria-label="CLI">
+        // Toggle buttons, as the panel's other one-of-n switches are
+        // (MockupFrame's widths, the colour presets): each is a Tab stop and
+        // Enter/Space picks it, and the pick reaches assistive tech through
+        // `aria-pressed` rather than colour alone.
+        <div className="run-banner-cli" role="group" aria-label="CLI">
           {options.map((entry, index) => (
             <button
-              // Index keys: names may repeat, and position is the identity.
+              // Index keys: names may repeat.
               key={index}
               type="button"
-              role="radio"
-              aria-checked={index === pickedIndex}
+              aria-pressed={index === pickedIndex}
               data-on={index === pickedIndex || undefined}
               onClick={() => pick(index)}
             >
@@ -219,6 +229,8 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
           onKeyDown={onObjectiveKey}
           rows={2}
           spellCheck={false}
+          disabled={!usesObjective}
+          aria-describedby={usesObjective ? undefined : noPromptNote}
         />
         <span
           className="run-banner-wrap"
@@ -228,6 +240,11 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
           {wrapper.after}
         </span>
       </div>
+      {!usesObjective && (
+        <div className="run-banner-note" id={noPromptNote}>
+          This launcher's run loop takes no prompt
+        </div>
+      )}
       <div
         className="run-banner-progress"
         role="progressbar"
