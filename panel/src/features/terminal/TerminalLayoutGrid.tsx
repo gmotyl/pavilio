@@ -18,6 +18,7 @@ import { dismissAttentionOnArrival } from "./attentionArrival";
 import { CellSpeechControlsToggle } from "./CellSpeechControlsToggle";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { TerminalViewportModal } from "./TerminalViewportModal";
+import { visibleSessionId } from "./visibleSession";
 import {
   TerminalPlacementOverlay,
   type PlacementOverlayHandle,
@@ -206,9 +207,7 @@ export function TerminalLayoutGrid({
   // Keep ALL other sessions mounted (hidden) so their terminal state survives.
   let body: React.ReactNode;
   if (isMobile || maximized) {
-    const visible = focusedId
-      ? sessions.find((s) => s.id === focusedId) ?? sessions[0]
-      : sessions[0];
+    const visibleId = visibleSessionId(sessions, focusedId);
     body = (
       <div className="relative w-full h-full">
         {sessions.map((s) => (
@@ -216,8 +215,8 @@ export function TerminalLayoutGrid({
             key={s.id}
             className="absolute inset-0"
             style={{
-              visibility: s.id === visible.id ? "visible" : "hidden",
-              pointerEvents: s.id === visible.id ? "auto" : "none",
+              visibility: s.id === visibleId ? "visible" : "hidden",
+              pointerEvents: s.id === visibleId ? "auto" : "none",
             }}
           >
             {cell(s)}
