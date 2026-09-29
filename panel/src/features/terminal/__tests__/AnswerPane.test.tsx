@@ -626,6 +626,19 @@ describe("AnswerPane", () => {
       />
     );
     expect(noSwitchProps).toBeTruthy();
+    // Its own element: tsc reports only the first excess prop per element, so
+    // sharing one would leave this directive unused.
+    const noSwitchCallback = (
+      <AnswerPane
+        sessionId="cell-a"
+        speech={makeSpeech(h)}
+        onClose={() => {}}
+        send={NO_SEND}
+        // @ts-expect-error `onAutoOpenChange` is no longer a prop of the pane.
+        onAutoOpenChange={() => {}}
+      />
+    );
+    expect(noSwitchCallback).toBeTruthy();
   });
 
   it("Escape closes", () => {

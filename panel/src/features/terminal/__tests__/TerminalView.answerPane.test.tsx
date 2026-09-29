@@ -205,7 +205,7 @@ async function settleTerminal(): Promise<void> {
 const eye = (): HTMLElement => screen.getByTestId("speech-bar-eye-cell-a");
 const pane = (): HTMLElement | null => screen.queryByTestId("answer-pane-cell-a");
 
-/** The browser-wide default, as Settings would leave it. */
+/** The one global preference, as Settings would leave it. */
 const storeDefault = (on: boolean): void => {
   setStoredAutoOpenAnswer(on);
 };

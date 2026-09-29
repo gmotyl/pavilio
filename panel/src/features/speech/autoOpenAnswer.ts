@@ -27,7 +27,7 @@ export function getStoredAutoOpenAnswer(): boolean {
 }
 
 /**
- * Stores the default and returns the value now in effect — `on` itself, so a
+ * Stores the preference and returns the value now in effect — `on` itself, so a
  * page whose portable document never arrived (the store drops the write) still
  * gets the choice applied for this page.
  */

@@ -98,6 +98,18 @@ describe("AutoOpenAnswerToggle", () => {
     expect(getStoredAutoOpenAnswer()).toBe(false);
   });
 
+  it("the help text describes the one preference cells read on arrival", () => {
+    render(<AutoOpenAnswerToggle />);
+    expect(
+      screen.getByText(
+        "Every cell reads this when an answer arrives; a change here reaches cells already open.",
+      ),
+    ).toBeInTheDocument();
+    // No footer or per-cell switch exists any more; the copy must not name one.
+    expect(screen.queryByText(/footer/i)).toBeNull();
+    expect(screen.queryByText(/switch/i)).toBeNull();
+  });
+
   it("sits in the Settings page's Speech section, under the voice", async () => {
     stubEmptyAgentSettingsApi();
 
