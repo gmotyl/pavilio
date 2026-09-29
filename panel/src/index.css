@@ -1871,6 +1871,59 @@ input[type="checkbox"] {
   right: 10px;
 }
 
+/* The picker's callout — the settled mockup's "door teach" — standing just
+   above the composer's chip row and pointing down at the `/ skills` chip.
+
+   Accent-bordered on the accent's dim ground, where the band's two are
+   elevated-grey: this one names a control of the PANE, not of the row, and it
+   is the one of the three that does something when followed.
+
+   `BootLegend` writes `bottom` and `left` inline from the chip row's measured
+   box, so the stub below lands on the chip whatever height the grip left the
+   field at. The `bottom` here is only the unmeasured fallback — the chip row
+   sits about this far up at the composer's default height. The width is capped
+   by the cell as well as by the mockup's 300px, so a narrow cell keeps it
+   inside its edges. It takes the pointer back like the band does; nothing
+   under it is live, since it only ever stands over an empty pane. */
+.boot-legend-door {
+  position: absolute;
+  bottom: 120px;
+  left: 12px;
+  max-width: min(300px, calc(100% - 22px));
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--accent);
+  background: var(--accent-dim);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  animation: boot-legend-in 180ms ease-out both;
+}
+
+/* The stub: from the box's bottom edge down across `DOOR_GAP` (10px, plus the
+   1px border) to the chip row, over the chip's left half. */
+.boot-legend-door::after {
+  content: "";
+  position: absolute;
+  left: 22px;
+  bottom: -11px;
+  width: 1px;
+  height: 10px;
+  background: var(--accent);
+}
+
+.boot-legend-door b {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
 /* ── THE RUN BANNER ───────────────────────────────────────────────────────────
 
    Above a change's `tasks.md` while it has unchecked boxes. The accent rule on

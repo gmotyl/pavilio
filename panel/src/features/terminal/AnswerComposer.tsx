@@ -1152,10 +1152,13 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           Retry Enter
         </button>
       ) : null}
-      {/* Desktop only: two of the three keys it names do not exist on a phone. */}
+      {/* Desktop only: two of the three keys it names do not exist on a phone.
+          The fourth fact is the picker's, and it is the half of teaching the
+          picker that outlasts the boot legend; on a phone the `/ skills` chip
+          carries it alone (D18). */}
       {isMobile ? null : (
         <div className="answer-pane-hint" data-testid={`answer-pane-hint-${sessionId}`}>
-          ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER
+          ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER · / FOR SKILLS
         </div>
       )}
     </>

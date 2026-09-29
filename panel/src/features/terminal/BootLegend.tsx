@@ -1,5 +1,6 @@
 /**
- * The boot legend: two callouts, on the two controls nothing else teaches.
+ * The boot legend: two callouts, on the two controls nothing else teaches —
+ * and, at the foot of the pane, a third on the command picker.
  *
  * ## Why it is a CELL-LEVEL overlay and not pane content
  *
@@ -44,6 +45,23 @@
  * `ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER` on its own hint
  * line, forty pixels under the field. A third callout would name, in a box that
  * has to be dismissed, what is already named in a line that does not.
+ *
+ * ## Why the picker's callout is not in the band
+ *
+ * The command picker is a control of exactly the legend's kind — nothing else
+ * names it — but it opens from the `/ skills` chip in the composer's chip row,
+ * at the FOOT of the pane, while the band hangs off the speech row at the top of
+ * the cell. A third box in the band would need a leader the length of the cell.
+ * So it stands just above the chip row, pointing down at the chip (the settled
+ * mockup's "door teach"), and the band keeps exactly its two callouts and its
+ * narrow-cell rule: the door does not compete for the band's width.
+ *
+ * It is part of THIS component so it shares the legend's lifecycle — the
+ * `legendShown` derivation in `TerminalView` — and goes away with the band. It
+ * is measured like the leaders, off the chip row's own box, because the grip
+ * moves that row. And it steps aside rather than cover anything: it is not
+ * drawn while the picker is open (the picker floats in the same place), nor in
+ * a pane too short to hold it between the band and the chips.
  */
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
@@ -51,8 +69,12 @@ export interface BootLegendProps {
   sessionId: string;
 }
 
-/** One callout, and the control its leader ends on. */
-interface Callout {
+/**
+ * One callout in the BAND, and the control its leader ends on. Exported for
+ * the type-level test that holds the band to these two keys: the picker's
+ * callout is deliberately not one of them (see the header).
+ */
+export interface Callout {
   /** Stable within the legend — the class of control, not its session. */
   readonly key: "transport" | "eye";
   /** `data-testid` of the control in the speech row this leader terminates on. */
@@ -146,6 +168,33 @@ const CALLOUT_GUTTER = 16;
 export const BOTH_CALLOUTS_MIN_CELL =
   CALLOUT_INSET * 2 + CALLOUT_MAX_WIDTH * 2 + CALLOUT_GUTTER;
 
+/**
+ * The picker's callout — the "door teach" — and its geometry.
+ *
+ * `DOOR_GAP` is the space between the box's bottom edge and the chip row's top,
+ * which the box's short downward stub (`.boot-legend-door::after`) spans to
+ * reach the chip. `DOOR_ROOM` is the least height the box needs above that gap
+ * and below the band — two lines of body under its title, plus a margin clear of
+ * the band — below which the pane is too short and the door is not drawn at all.
+ *
+ * Careful with the WORDS here too: no "Enter", "Esc" or "composer" — the same
+ * test that holds the band's bodies reads this one.
+ */
+const DOOR_GAP = 10;
+const DOOR_ROOM = 72;
+const DOOR_TITLE = "Workspace skills";
+const DOOR_BODY = "Type a slash, or press the chip, to run one of the workspace's skills here.";
+
+/** The picker's callout, measured: where it stands, and whether it may. */
+interface Door {
+  /** `data-testid` of the `/ skills` chip it points at. */
+  readonly target: string;
+  /** Offsets in this overlay's box; null when unmeasured (jsdom, first frame). */
+  readonly place: { bottom: number; left: number } | null;
+  /** False while the picker is open or the pane is too short to hold it. */
+  readonly shown: boolean;
+}
+
 export function BootLegend({ sessionId }: BootLegendProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const callouts = calloutsFor(sessionId);
@@ -161,6 +210,17 @@ export function BootLegend({ sessionId }: BootLegendProps) {
    * for it — see `roomForBoth`.
    */
   const [cellWidth, setCellWidth] = useState(0);
+  /**
+   * The picker's callout, or null when this cell has no chip in the document
+   * (nothing to point at, so nothing is drawn). Starts shown and unplaced, the
+   * same "unmeasured is roomy" rule `cellWidth` follows.
+   */
+  const chipTarget = `answer-pane-skills-chip-${sessionId}`;
+  const [door, setDoor] = useState<Door | null>(() => ({
+    target: chipTarget,
+    place: null,
+    shown: true,
+  }));
 
   /**
    * Where each named control is, in this overlay's own coordinates.
@@ -200,6 +260,36 @@ export function BootLegend({ sessionId }: BootLegendProps) {
         };
       }),
     );
+    // The picker's callout, off the chip row's top edge. Measured in the same
+    // pass for the same reason as the cell's width.
+    const chip = document.querySelector(`[data-testid="${chipTarget}"]`);
+    const chipRow = chip?.closest(".answer-pane-chip-row") ?? null;
+    if (!chip || !chipRow) {
+      setDoor(null);
+    } else {
+      // The chip's own `aria-expanded` is the picker's open state: the picker
+      // floats above the chip row, exactly where this box stands.
+      const pickerOpen = chip.getAttribute("aria-expanded") === "true";
+      if (origin.height === 0) {
+        setDoor({ target: chipTarget, place: null, shown: !pickerOpen });
+      } else {
+        const rowTop = chipRow.getBoundingClientRect().top - origin.top;
+        // The band's lowest edge, as drawn — zero when the band is empty.
+        let bandBottom = 0;
+        root.querySelectorAll(".boot-legend-callout").forEach((box) => {
+          bandBottom = Math.max(bandBottom, box.getBoundingClientRect().bottom - origin.top);
+        });
+        const fits = rowTop - DOOR_GAP - DOOR_ROOM >= bandBottom;
+        setDoor({
+          target: chipTarget,
+          place: {
+            bottom: origin.height - rowTop + DOOR_GAP,
+            left: chip.getBoundingClientRect().left - origin.left,
+          },
+          shown: fits && !pickerOpen,
+        });
+      }
+    }
     // `callouts` is rebuilt per render from `sessionId` alone, so the id is the
     // real dependency; listing the array would re-measure on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -225,11 +315,30 @@ export function BootLegend({ sessionId }: BootLegendProps) {
     const observer =
       root && typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
     observer?.observe(root!);
+    // The chip row MOVES without the cell resizing: the grip drags the field's
+    // row below it, and attachments wrap the row itself. So the observer also
+    // watches the chip row and every row under it — their heights are the
+    // chip row's distance from the cell's foot. And the chip's `aria-expanded`
+    // is watched so the door steps aside the moment the picker opens.
+    const chipRow = document
+      .querySelector(`[data-testid="answer-pane-skills-chip-${sessionId}"]`)
+      ?.closest(".answer-pane-chip-row");
+    for (let row = chipRow ?? null; row && observer; row = row.nextElementSibling) {
+      observer.observe(row);
+    }
+    const mutations =
+      chipRow && typeof MutationObserver === "function" ? new MutationObserver(measure) : null;
+    mutations?.observe(chipRow!, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-expanded"],
+    });
     return () => {
       window.removeEventListener("resize", measure);
       observer?.disconnect();
+      mutations?.disconnect();
     };
-  }, [measure]);
+  }, [measure, sessionId]);
 
   /**
    * Whether this cell can carry both boxes side by side.
@@ -255,7 +364,7 @@ export function BootLegend({ sessionId }: BootLegendProps) {
       // has just been asked to start an agent, and a status the screen reader
       // interrupts itself for would be the wrong weight for a hint.
       role="note"
-      aria-label="What the controls above do"
+      aria-label="What the controls in this cell do"
     >
       {/* The leaders. `overflow: visible` in the stylesheet, because a curve
           drawn from a callout up into the row leaves this box's top edge by
@@ -334,6 +443,20 @@ export function BootLegend({ sessionId }: BootLegendProps) {
           </div>
         );
       })}
+
+      {door?.shown ? (
+        <div
+          className="boot-legend-door"
+          data-testid={`boot-legend-door-${sessionId}`}
+          data-leads-to={door.target}
+          // Above the chip row, from the measurement; the stylesheet's fallback
+          // stands in only while nothing has been laid out.
+          style={door.place ? { bottom: door.place.bottom, left: door.place.left } : undefined}
+        >
+          <b>{DOOR_TITLE}</b>
+          {DOOR_BODY}
+        </div>
+      ) : null}
     </div>
   );
 }
