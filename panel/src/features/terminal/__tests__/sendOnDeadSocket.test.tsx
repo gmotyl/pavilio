@@ -160,8 +160,6 @@ function renderPane(send: (data: string) => boolean) {
         speech={makeSpeech()}
         onClose={() => {}}
         send={send}
-        autoOpen={false}
-        onAutoOpenChange={() => {}}
       />
     </MemoryRouter>,
   );

@@ -1,5 +1,6 @@
 /**
- * The browser-wide default for the answer pane's "Open on new answer" switch.
+ * Whether a new answer opens the answer pane — one Settings preference, with
+ * no per-cell switch beside it.
  *
  * PORTABLE: it is a choice about how the panel behaves, not a fact about this
  * machine, so it travels in the workspace file alongside the voice. Reads and

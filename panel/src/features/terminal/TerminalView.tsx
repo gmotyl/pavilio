@@ -17,8 +17,6 @@ import { viewportLooksBlank } from "./viewportBlank";
 import { getStoredAutoOpenAnswer } from "../speech/autoOpenAnswer";
 import type { GridSpeech } from "../speech/types";
 import { utteranceUnderCursor, type UtteranceQueue } from "../speech/utteranceQueue";
-import { preferences } from "../../preferences/declarations";
-import { usePreference } from "../../preferences/usePreference";
 
 interface TerminalViewProps {
   sessionId: string;
@@ -103,9 +101,6 @@ export function TerminalView({
   // like the bar. The "Open on new answer" preference is not copied into the
   // store: the arrival effect below reads it from Settings when an answer lands.
   const { open: answerOpen } = useAnswerPaneState(sessionId);
-  // Only the pane footer's checkbox still reads it reactively; it writes the
-  // same Settings preference.
-  const [autoOpen, setAutoOpen] = usePreference(preferences.answerPaneAutoOpen);
 
   // Hiding the bar CLOSES the pane rather than merely covering it — a pane
   // without its bar has no eye to close it, and one that came back unasked
@@ -436,8 +431,6 @@ export function TerminalView({
             sessionId={sessionId}
             speech={speech}
             onClose={closeAnswer}
-            autoOpen={autoOpen}
-            onAutoOpenChange={setAutoOpen}
             // The same `send` the row's pills take — one transport to the PTY,
             // reached from the two places the user can type into this cell
             // without touching the terminal.

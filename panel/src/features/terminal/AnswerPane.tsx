@@ -37,13 +37,6 @@ export interface AnswerPaneProps {
    */
   onClose: () => void;
   /**
-   * The cell's own "Open on new answer" switch, shown in the meta row. Owned by
-   * `TerminalView` — seeded from the browser-wide default at mount and never
-   * written back to it — so the pane only reflects it and reports a flip.
-   */
-  autoOpen: boolean;
-  onAutoOpenChange: (on: boolean) => void;
-  /**
    * The cell's own PTY write, handed straight to the composer. `TerminalView`
    * reads it off the live instance at call time — the same one the bar's
    * launcher pills send with, so a reply typed here and a pill clicked up there
@@ -246,14 +239,11 @@ export function AnswerPane({
   sessionId,
   speech,
   onClose,
-  autoOpen,
-  onAutoOpenChange,
   send,
 }: AnswerPaneProps) {
-  // Global, and read here rather than passed in: unlike `autoOpen` — which is
-  // the CELL's switch, seeded from a browser-wide default and owned by
-  // `TerminalView` — whether a pane carries a composer at all is one answer for
-  // the whole panel, so the pane reads and writes it directly.
+  // Global, and read here rather than passed in: whether a pane carries a
+  // composer at all is one answer for the whole panel, so the pane reads and
+  // writes it directly.
   const [composerOn, setComposerOn] = usePreference(preferences.answerComposerEnabled);
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -687,25 +677,14 @@ export function AnswerPane({
           </>
         )}
       </div>
-      {/* The pane's switches, directly under the text and ABOVE the composer.
+      {/* The pane's switch, directly under the text and ABOVE the composer.
           design.md's order, and the reason for it: the composer is the reply,
-          so the two switches that decide what the pane does belong with the
-          pane rather than under the box you type into. They were the pane's
-          footer when the auto-open switch was its only control, and stayed
-          there when the composer arrived — which put the reply box between the
-          answer and its own switches. Outside the scroll container either way,
+          so the switch that decides what the pane does belongs with the pane
+          rather than under the box you type into. Whether a new answer opens
+          the pane is not here: that is one Settings preference, read by
+          `TerminalView` when an answer arrives. Outside the scroll container,
           so the row stays put while the text scrolls. */}
       <div className="answer-pane-meta">
-        <label className="answer-pane-meta-label" htmlFor={`answer-pane-auto-open-${sessionId}`}>
-          <input
-            id={`answer-pane-auto-open-${sessionId}`}
-            data-testid={`answer-pane-auto-open-${sessionId}`}
-            type="checkbox"
-            checked={autoOpen}
-            onChange={() => onAutoOpenChange(!autoOpen)}
-          />
-          Open on new answer
-        </label>
         <label className="answer-pane-meta-label" htmlFor={`answer-pane-composer-on-${sessionId}`}>
           <input
             id={`answer-pane-composer-on-${sessionId}`}

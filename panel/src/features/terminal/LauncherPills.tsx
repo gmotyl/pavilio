@@ -91,8 +91,8 @@ function sessionStartCommand(sessionId: string): string {
  * because anything left would misbehave if it were reversed.
  *
  * It is unconditional in one respect that is easy to misread as a bug: it does
- * NOT consult the cell's "Open on new answer" switch. That switch means *open
- * the pane when a new answer arrives*; a press is a different event, and a
+ * NOT consult the Settings "open on a new answer" preference. That preference
+ * means *open the pane when a new answer arrives*; a press is a different event, and a
  * user pressing a button and being shown the result of pressing it needs no
  * separate opt-in. The bar's visibility does still outrank it, in the most
  * literal way available — these pills are IN the bar, so a hidden bar has no

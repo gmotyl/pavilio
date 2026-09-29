@@ -236,8 +236,6 @@ function renderPaneFor(sessionId = SESSION, areaHeight = AREA): RenderedPane {
         speech={makeSpeech()}
         onClose={() => {}}
         send={() => true}
-        autoOpen={false}
-        onAutoOpenChange={() => {}}
       />
     </MemoryRouter>
   );

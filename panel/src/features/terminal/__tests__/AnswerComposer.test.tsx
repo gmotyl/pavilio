@@ -146,8 +146,6 @@ const paneTree = (sessionId: string, speech: GridSpeech) => (
         speech={speech}
         onClose={onClose}
         send={send}
-        autoOpen={false}
-        onAutoOpenChange={() => {}}
       />
     </div>
   </MemoryRouter>
@@ -476,8 +474,6 @@ describe("AnswerComposer", () => {
                 speech={speech}
                 onClose={() => setOpen(false)}
                 send={send}
-                autoOpen={false}
-                onAutoOpenChange={() => {}}
               />
             ) : null}
           </div>

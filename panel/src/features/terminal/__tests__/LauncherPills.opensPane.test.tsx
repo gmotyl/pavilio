@@ -44,7 +44,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prepare } from "../../speech/prepare";
-import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
+import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 
@@ -302,14 +302,14 @@ describe("a launcher press opens the answer pane", () => {
     expect(pane()).toBeNull();
 
     // ...nor does it come back unasked when the row returns, which is the rule
-    // the eye and the auto-open switch already live under.
+    // the eye and the auto-open preference already live under.
     view.rerender(cell(speech, true));
     expect(pane()).toBeNull();
   });
 
   it("the press opens the pane with auto-open switched off", async () => {
-    // The browser-wide default Settings keeps, off — and the cell's entry is
-    // dropped afterwards so it seeds from it.
+    // The Settings preference, off — and the cell's entry is dropped so the
+    // cell starts fresh.
     setStoredAutoOpenAnswer(false);
     forgetAnswerPane(SESSION);
     render(cell(makeSpeech()));
@@ -317,14 +317,14 @@ describe("a launcher press opens the answer pane", () => {
     fireEvent.click(launcher());
     await settleSubmit();
 
-    // The switch means "open the pane when a NEW ANSWER arrives". A press is a
+    // The preference means "open the pane when a NEW ANSWER arrives". A press is a
     // different event — the user pressing a button and being shown the result
     // of pressing it needs no separate opt-in.
     expect(pane()).not.toBeNull();
     expect(wave()).toBeInTheDocument();
-    // Asserted on the control itself, so this cannot pass against a switch the
-    // press quietly turned on.
-    expect(screen.getByTestId(`answer-pane-auto-open-${SESSION}`)).not.toBeChecked();
+    // Asserted on the stored preference itself, so this cannot pass against a
+    // press that quietly turned it on.
+    expect(getStoredAutoOpenAnswer()).toBe(false);
   });
 
   it("the wait ending on idle does not close a press-opened pane", async () => {
@@ -389,8 +389,8 @@ describe("a launcher press opens the answer pane", () => {
    * closing an answer the user is reading.
    */
   it("an answer with auto-open off survives the wait ending", async () => {
-    // The browser-wide default Settings keeps, off — and the cell's entry
-    // dropped afterwards so it seeds from it.
+    // The Settings preference, off — and the cell's entry dropped so the cell
+    // starts fresh.
     setStoredAutoOpenAnswer(false);
     forgetAnswerPane(SESSION);
     const speech = makeSpeech();
@@ -399,8 +399,8 @@ describe("a launcher press opens the answer pane", () => {
     fireEvent.click(launcher());
     await settleSubmit();
     expect(wave()).toBeInTheDocument();
-    // The switch really is off, so no auto-open runs on the arrival below.
-    expect(screen.getByTestId(`answer-pane-auto-open-${SESSION}`)).not.toBeChecked();
+    // The preference really is off, so no auto-open runs on the arrival below.
+    expect(getStoredAutoOpenAnswer()).toBe(false);
 
     // The answer the press was waiting for.
     speech.arrive();
