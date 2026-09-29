@@ -1,9 +1,3 @@
-/**
- * The rule for which session the fullscreen (mobile / maximized) terminal area
- * shows. The grid keeps every session mounted and reveals one; anything else
- * that must follow "the session on screen" asks this same helper, so the two
- * can never disagree.
- */
 import { describe, expect, it } from "vitest";
 import { visibleSessionId } from "../visibleSession";
 
