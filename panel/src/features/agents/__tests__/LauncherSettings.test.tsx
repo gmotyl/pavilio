@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { LauncherSettings } from "../LauncherSettings";
@@ -285,6 +285,26 @@ describe("LauncherSettings", () => {
       await user.tab();
       expect(stored()).toEqual(DEFAULTS);
       expect(nameFields()[0]).toHaveValue("claude");
+    });
+
+    it("a rejected row edit restores the run-loop draft as well", async () => {
+      const user = userEvent.setup();
+
+      render(<LauncherSettings />);
+      // A run-loop draft left dirty WITHOUT a blur: `fireEvent.change` moves the
+      // field's value but not the focus, so no commit has run for it yet.
+      fireEvent.change(runLoopFields()[1], { target: { value: "codex --unsaved" } });
+      expect(runLoopFields()[1]).toHaveValue("codex --unsaved");
+
+      // Blanking the same row's name and committing rejects the whole edit, so
+      // every field shows what is stored — the run loop included, not the
+      // draft the panel never kept.
+      await user.clear(nameFields()[1]);
+      await user.tab();
+
+      expect(stored()).toEqual(DEFAULTS);
+      expect(nameFields()[1]).toHaveValue("codex");
+      expect(runLoopFields()[1]).toHaveValue('codex "/goal {prompt}"');
     });
 
     it("an entry with a blank command is still rejected", async () => {
