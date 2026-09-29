@@ -110,12 +110,24 @@ function session(id: string): SessionMeta {
   };
 }
 
+/** `resume` is in its description only — the name says nothing about it. */
+const SESSION_START: SkillEntry = {
+  name: "pavilio-session-start",
+  description: "Start or resume a project session",
+  path: "skills/pavilio-session-start/SKILL.md",
+};
+
+/** What `/api/skills` answers with; null holds the answer back (still loading). */
+let served: SkillEntry[] | null = SKILLS;
+
 /** One fetch for both endpoints this tree reaches: the session list and the skills. */
 function stubFetch(): void {
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string) => {
-      const body = String(url).includes("/api/skills") ? SKILLS : [session("cell-a")];
+      const isSkills = String(url).includes("/api/skills");
+      if (isSkills && served === null) return new Promise<Response>(() => {});
+      const body = isSkills ? served : [session("cell-a")];
       return Promise.resolve({
         ok: true,
         status: 200,
@@ -155,6 +167,7 @@ const expectSubmitted = async (body: string): Promise<void> => {
 };
 
 beforeEach(async () => {
+  served = SKILLS;
   send.mockClear();
   onClose.mockClear();
   __resetAnswerWaitingForTests();
@@ -350,6 +363,81 @@ describe("CommandPicker", () => {
     // Not the end of the field, where a plain value write would leave it.
     expect(field().selectionStart).toBe("/pavilio-grill".length);
     expect(field().selectionEnd).toBe("/pavilio-grill".length);
+  });
+
+  it("a CLI built-in with no name match is sent on Enter", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/clear");
+    await screen.findByText("No skill matches.");
+    await user.keyboard("{Enter}");
+
+    await expectSubmitted("/clear");
+    expect(picker()).not.toBeInTheDocument();
+  });
+
+  it("a description-only match is listed but Enter sends", async () => {
+    served = [...SKILLS, SESSION_START];
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/resume");
+    const listed = await options();
+    expect(listed.map((o) => o.getAttribute("data-name"))).toEqual(["pavilio-session-start"]);
+    // Listed, not highlighted: Enter has nothing to pick, and says so.
+    expect(listed[0]).toHaveAttribute("aria-selected", "false");
+    expect(field()).not.toHaveAttribute("aria-activedescendant");
+    expect(screen.getByText(/Enter send/)).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+
+    await expectSubmitted("/resume");
+  });
+
+  it("a name fragment is highlighted and Enter picks", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/pav");
+    const [first] = await options();
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText(/Enter insert/)).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+
+    expect(field().value).toBe("/pavilio-execute-plan");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("arrowing onto a description match lets Enter pick it", async () => {
+    served = [...SKILLS, SESSION_START];
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/resume");
+    await options();
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    expect(field().value).toBe("/pavilio-session-start");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("Enter does nothing while the list is still loading", async () => {
+    served = null;
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/pav");
+    await screen.findByText("Loading skills…");
+    await user.keyboard("{Enter}");
+
+    expect(field().value).toBe("/pav");
+    expect(picker()).toBeInTheDocument();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("the picker opens on a touch viewport", async () => {

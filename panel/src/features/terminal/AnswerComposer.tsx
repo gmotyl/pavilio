@@ -802,6 +802,12 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         e.preventDefault();
         return;
       }
+      // An Enter the picker declined (nothing highlighted, e.g. `/clear`) is a
+      // send: the picker goes with the draft it was filtering on.
+      if (owned && e.key === "Enter") {
+        setPickerAt(null);
+        setActiveOption(null);
+      }
     }
     // Shift+Enter is the textarea's own business, and so is every other key.
     if (e.key !== "Enter" || e.shiftKey) return;

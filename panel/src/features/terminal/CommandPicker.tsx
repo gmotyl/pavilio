@@ -9,11 +9,12 @@ export interface CommandPickerHandle {
    * Offer the picker one of its keys. Returns true when the picker consumed
    * it, in which case the composer must not act on it as well.
    *
-   * Enter is ALWAYS consumed while the picker is open, even with nothing to
-   * pick (still loading, no match, a failed fetch): the spec gives the picker
-   * Enter for as long as it is open, and an Enter that fell through to the
-   * composer then would send `/pav` the moment a slow list had not arrived.
-   * Escape, and then Enter, is how a literal slash is sent.
+   * Enter is consumed when an entry is highlighted (it picks) and while the
+   * list is still loading (a no-op: an Enter that fell through then would send
+   * `/pav` the moment a slow list had not arrived). Once the list is in — or
+   * failed to come — and NOTHING is highlighted, Enter is declined and the
+   * composer sends the draft as typed: that is how `/clear`, `/resume` and the
+   * other CLI built-ins still reach the CLI (see {@link highlightFor}).
    */
   handleKey: (key: PickerKey) => boolean;
 }
@@ -41,6 +42,25 @@ export interface CommandPickerProps {
 }
 
 /**
+ * Which entry the picker highlights by itself for `query`, or -1 for none.
+ *
+ * Only a NAME match is highlighted: the first listed entry whose name contains
+ * the trimmed query, case-insensitively — the same name test `filterSkills`
+ * applies. An entry listed only because its description matches is shown but
+ * never highlighted, so a CLI built-in such as `/clear` — which no skill is
+ * named after — leaves nothing for Enter to pick, and Enter sends it.
+ *
+ * A bare `/` (empty query) highlights the first entry: the whole list is a
+ * match, and `/` then Enter keeps picking the top skill. A literal `/` is
+ * still sent with Escape, then Enter.
+ */
+export function highlightFor(matches: readonly SkillEntry[], query: string): number {
+  const q = query.trim().toLowerCase();
+  if (!q) return matches.length > 0 ? 0 : -1;
+  return matches.findIndex((s) => s.name.toLowerCase().includes(q));
+}
+
+/**
  * The filtering list of workspace skills over the composer (Strand A, D1).
  *
  * ## Why it fetches on mount
@@ -64,9 +84,11 @@ export interface CommandPickerProps {
  * ## Why the highlight wraps
  *
  * Up from the first entry goes to the last and Down from the last to the
- * first, so a short list never dead-ends a keypress. The highlight returns to
- * the first entry whenever the query changes, because the list it indexed
- * into is a different list now.
+ * first, so a short list never dead-ends a keypress. With nothing highlighted,
+ * Down lands on the first entry and Up on the last — any entry, a
+ * description-only match included, and Enter then picks it. The highlight
+ * returns to {@link highlightFor}'s choice whenever the query changes, because
+ * the list it indexed into is a different list now.
  */
 export function CommandPicker({
   id,
@@ -82,15 +104,21 @@ export function CommandPicker({
     if (!loading && !error) onSkillsLoaded?.(skills);
   }, [skills, loading, error, onSkillsLoaded]);
   const matches = useMemo(() => filterSkills(skills, query), [skills, query]);
-  const [active, setActive] = useState(0);
+  // null: no arrow key yet for this query, so the highlight is the automatic one.
+  const [active, setActive] = useState<number | null>(null);
   // Reset during render rather than in an effect, so no frame ever shows the
   // old index against the new list.
   const [seenQuery, setSeenQuery] = useState(query);
   if (seenQuery !== query) {
     setSeenQuery(query);
-    setActive(0);
+    setActive(null);
   }
-  const index = matches.length === 0 ? -1 : Math.min(active, matches.length - 1);
+  const index =
+    matches.length === 0
+      ? -1
+      : active === null
+        ? highlightFor(matches, query)
+        : Math.min(active, matches.length - 1);
   const optionId = (i: number): string => `${id}-option-${i}`;
   const activeId = index >= 0 ? optionId(index) : null;
 
@@ -106,16 +134,21 @@ export function CommandPicker({
     () => ({
       handleKey: (key) => {
         if (key === "Enter") {
-          if (index >= 0) onPick(matches[index].name);
-          return true;
+          if (index >= 0) {
+            onPick(matches[index].name);
+            return true;
+          }
+          return loading;
         }
         if (matches.length === 0) return true;
         const step = key === "ArrowDown" ? 1 : -1;
-        setActive((index + step + matches.length) % matches.length);
+        // From no highlight, Down is the first entry and Up the last.
+        const from = index >= 0 ? index : step === 1 ? -1 : 0;
+        setActive((from + step + matches.length) % matches.length);
         return true;
       },
     }),
-    [index, matches, onPick],
+    [index, loading, matches, onPick],
   );
 
   let status: string | null = null;
@@ -157,7 +190,11 @@ export function CommandPicker({
         </div>
       ) : null}
       <div className="command-picker-foot" aria-hidden>
-        ↑↓ move · Enter insert · Esc close
+        {index >= 0
+          ? "↑↓ move · Enter insert · Esc close"
+          : loading
+            ? "↑↓ move · Esc close"
+            : "↑↓ move · Enter send · Esc close"}
       </div>
     </div>
   );
