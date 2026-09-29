@@ -172,7 +172,9 @@ export function CommandPicker({
             aria-selected={i === index}
             data-name={skill.name}
             // `mousedown`, not `click`, is what would move focus out of the
-            // field — and a blur closes the picker before the click lands.
+            // field. Preventing it keeps the focus — and the caret the pick
+            // places — in the field, so the argument can be typed straight on.
+            // (The picker does not close on blur; an outside press closes it.)
             onMouseDown={(e) => e.preventDefault()}
             onMouseEnter={() => setActive(i)}
             onClick={() => onPick(skill.name)}

@@ -440,6 +440,60 @@ describe("CommandPicker", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("moving the caret out of the token closes the picker", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/gri");
+    await options();
+    // No edit, only a caret move: `onChange` never fires for it.
+    await user.keyboard("{Home}");
+
+    expect(field().selectionStart).toBe(0);
+    expect(picker()).not.toBeInTheDocument();
+    expect(field().value).toBe("/gri");
+  });
+
+  it("Up from the first entry wraps to the last", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/");
+    await options();
+    await user.keyboard("{ArrowUp}{Enter}");
+
+    expect(field().value).toBe("/pavilio-question");
+  });
+
+  it("Down from the last entry wraps to the first", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/");
+    await options();
+    // Three entries: two steps reach the last, the third wraps.
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
+
+    expect(field().value).toBe("/pavilio-execute-plan");
+  });
+
+  it("a press outside the composer closes the picker", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/gri");
+    await options();
+    await user.click(document.body);
+
+    expect(picker()).not.toBeInTheDocument();
+    expect(field().value).toBe("/gri");
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("the picker opens on a touch viewport", async () => {
     installMatchMedia(true);
     const user = userEvent.setup();

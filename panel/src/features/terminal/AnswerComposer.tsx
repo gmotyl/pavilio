@@ -981,6 +981,20 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               setFailure(null);
             }}
             onKeyDown={onKeyDown}
+            // The caret can leave the `/token` without a keystroke that edits
+            // the text — Home, ArrowLeft, a click elsewhere in the draft — and
+            // `onChange` never sees that. `onSelect` fires on every caret move,
+            // so the same "caret inside the token" rule closes the picker here.
+            onSelect={(e) => {
+              if (pickerAt === null) return;
+              const field = e.currentTarget;
+              const token = slashToken(field.value, pickerAt);
+              const caret = field.selectionStart;
+              if (token === null || caret <= pickerAt || caret > pickerAt + token.length) {
+                setPickerAt(null);
+                setActiveOption(null);
+              }
+            }}
             // Arriving at the cell, in the plainest form the panel has: the
             // user is not merely looking at the answer, they are typing a reply
             // to it. The rule itself — why only `attention` is cleared, and why

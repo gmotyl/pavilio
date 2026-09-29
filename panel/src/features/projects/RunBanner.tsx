@@ -146,6 +146,7 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
     <button
       type="button"
       className="run-banner-chevron"
+      data-testid="run-banner-chevron"
       aria-label={expanded ? "Collapse run banner" : "Expand run banner"}
       aria-expanded={expanded}
       onClick={() => setExpanded((open) => !open)}
@@ -167,6 +168,7 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
               // Index keys: names may repeat.
               key={index}
               type="button"
+              data-testid={`run-banner-cli-${index}`}
               aria-pressed={index === pickedIndex}
               data-on={index === pickedIndex || undefined}
               onClick={() => pick(index)}
@@ -181,6 +183,7 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
       <button
         type="button"
         className="run-banner-run"
+        data-testid="run-banner-run"
         disabled={!canRun}
         onClick={run}
       >
