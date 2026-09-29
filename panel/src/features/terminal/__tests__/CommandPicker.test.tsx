@@ -1,7 +1,9 @@
 /**
  * The command picker at the composer: a `/` at the start of an empty draft
- * opens a filtering list of the workspace's skills, and while it is open it
- * takes Escape and Enter ahead of the composer.
+ * opens a filtering list of the workspace's skills, and while it is open the
+ * composer offers it Up, Down and Enter first, and closes it on Escape before
+ * Escape can close the pane. Enter it takes only while an entry is highlighted
+ * (or the list is still loading); otherwise the draft is sent as typed.
  *
  * Asserted through `AnswerPane`, like `AnswerComposer.test.tsx`, because two of
  * the criteria are about keys the PANE owns — Escape closes the pane from its
@@ -115,6 +117,13 @@ const SESSION_START: SkillEntry = {
   name: "pavilio-session-start",
   description: "Start or resume a project session",
   path: "skills/pavilio-session-start/SKILL.md",
+};
+
+/** Named so that `compact` is a whole segment; `session` is in its description. */
+const COMPACT: SkillEntry = {
+  name: "pavilio-compact",
+  description: "Package the session into a handoff",
+  path: "skills/pavilio-compact/SKILL.md",
 };
 
 /** What `/api/skills` answers with; null holds the answer back (still loading). */
@@ -283,7 +292,7 @@ describe("CommandPicker", () => {
     renderPane();
 
     await user.click(field());
-    await user.keyboard("/question");
+    await user.keyboard("/pavilio-q");
     await options();
     await user.keyboard("{Enter}");
     expect(field().value).toBe("/pavilio-question");
@@ -408,6 +417,140 @@ describe("CommandPicker", () => {
     await user.keyboard("{Enter}");
 
     expect(field().value).toBe("/pavilio-execute-plan");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("a CLI built-in equal to a skill's segment is sent on Enter", async () => {
+    served = [...SKILLS, COMPACT];
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/compact");
+    const listed = await options();
+    // Listed by its name, yet a whole segment is not a prefix of one: no highlight.
+    expect(listed.map((o) => o.getAttribute("data-name"))).toEqual(["pavilio-compact"]);
+    expect(listed[0]).toHaveAttribute("aria-selected", "false");
+    expect(field()).not.toHaveAttribute("aria-activedescendant");
+    await user.keyboard("{Enter}");
+
+    await expectSubmitted("/compact");
+  });
+
+  it("/help, with no match at all, is sent on Enter", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/help");
+    await screen.findByText("No skill matches.");
+    await user.keyboard("{Enter}");
+
+    await expectSubmitted("/help");
+  });
+
+  it("a strict segment prefix is highlighted", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/gri");
+    const [only] = await options();
+    expect(only).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Enter}");
+
+    expect(field().value).toBe("/pavilio-grill");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("the highlight is case-insensitive", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/Gri");
+    const [only] = await options();
+    expect(only).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Enter}");
+
+    expect(field().value).toBe("/pavilio-grill");
+  });
+
+  it("a full name is highlighted and Enter picks", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/pavilio-question");
+    const [only] = await options();
+    expect(only).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Enter}");
+
+    expect(field().value).toBe("/pavilio-question");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("the highlight is the first entry the rule accepts, not the first listed", async () => {
+    served = [...SKILLS, COMPACT, SESSION_START];
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/sess");
+    const listed = await options();
+    // pavilio-compact is listed first, by its description only.
+    expect(listed.map((o) => o.getAttribute("data-name"))).toEqual([
+      "pavilio-compact",
+      "pavilio-session-start",
+    ]);
+    expect(listed[0]).toHaveAttribute("aria-selected", "false");
+    expect(listed[1]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("a bare segment is not highlighted and Enter sends it", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/question");
+    const [only] = await options();
+    expect(only).toHaveAttribute("data-name", "pavilio-question");
+    expect(only).toHaveAttribute("aria-selected", "false");
+    await user.keyboard("{Enter}");
+
+    await expectSubmitted("/question");
+  });
+
+  it("arrowing onto a bare-segment match lets Enter pick it", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/question");
+    await options();
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    expect(field().value).toBe("/pavilio-question");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("Up with nothing highlighted lands on the last entry", async () => {
+    served = [...SKILLS, COMPACT, SESSION_START];
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    // A whole segment of one name, a description word of the other: no highlight.
+    await user.keyboard("/session");
+    const listed = await options();
+    expect(listed.map((o) => o.getAttribute("data-name"))).toEqual([
+      "pavilio-compact",
+      "pavilio-session-start",
+    ]);
+    expect(field()).not.toHaveAttribute("aria-activedescendant");
+    await user.keyboard("{ArrowUp}{Enter}");
+
+    expect(field().value).toBe("/pavilio-session-start");
     expect(send).not.toHaveBeenCalled();
   });
 

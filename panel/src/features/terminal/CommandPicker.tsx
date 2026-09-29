@@ -13,8 +13,8 @@ export interface CommandPickerHandle {
    * list is still loading (a no-op: an Enter that fell through then would send
    * `/pav` the moment a slow list had not arrived). Once the list is in — or
    * failed to come — and NOTHING is highlighted, Enter is declined and the
-   * composer sends the draft as typed: that is how `/clear`, `/resume` and the
-   * other CLI built-ins still reach the CLI (see {@link highlightFor}).
+   * composer sends the draft as typed: that is how `/clear`, `/compact`, `/resume`
+   * and the other CLI built-ins still reach the CLI (see {@link highlightFor}).
    */
   handleKey: (key: PickerKey) => boolean;
 }
@@ -44,20 +44,33 @@ export interface CommandPickerProps {
 /**
  * Which entry the picker highlights by itself for `query`, or -1 for none.
  *
- * Only a NAME match is highlighted: the first listed entry whose name contains
- * the trimmed query, case-insensitively — the same name test `filterSkills`
- * applies. An entry listed only because its description matches is shown but
- * never highlighted, so a CLI built-in such as `/clear` — which no skill is
- * named after — leaves nothing for Enter to pick, and Enter sends it.
+ * With `t` the trimmed, lowercased query and `n` a lowercased name split on
+ * `-` into segments, an entry is highlighted when
+ *
+ * - `n` starts with `t` — so a name typed in full always highlights, or
+ * - some segment starts with `t` and is longer than it — a STRICT prefix of a
+ *   segment (`/gri` for `pavilio-grill`).
+ *
+ * The first listed entry that qualifies wins. A query that equals a whole
+ * segment but not the start of the name (`/compact` against
+ * `pavilio-compact`, `/question` against `pavilio-question`) is NOT
+ * highlighted: that is what a CLI built-in looks like, so Enter sends it and
+ * `/compact`, `/resume`, `/clear` still reach the CLI. The price: a bare
+ * segment such as `/question` sends too — type more of the name, or arrow onto
+ * the entry, to pick it. An entry listed only because its description (or a
+ * mid-segment substring) matches is shown but never highlighted.
  *
  * A bare `/` (empty query) highlights the first entry: the whole list is a
  * match, and `/` then Enter keeps picking the top skill. A literal `/` is
  * still sent with Escape, then Enter.
  */
 export function highlightFor(matches: readonly SkillEntry[], query: string): number {
-  const q = query.trim().toLowerCase();
-  if (!q) return matches.length > 0 ? 0 : -1;
-  return matches.findIndex((s) => s.name.toLowerCase().includes(q));
+  const t = query.trim().toLowerCase();
+  if (!t) return matches.length > 0 ? 0 : -1;
+  return matches.findIndex((s) => {
+    const n = s.name.toLowerCase();
+    return n.startsWith(t) || n.split("-").some((seg) => seg !== t && seg.startsWith(t));
+  });
 }
 
 /**
