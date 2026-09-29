@@ -316,6 +316,42 @@ describe("CommandPicker", () => {
     expect(document.activeElement).toBe(field());
   });
 
+  it("picking the command already typed keeps the caret with the text", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    // Typed in full, so the pick leaves the text exactly as it was.
+    await user.keyboard("/pavilio-grill");
+    await options();
+    await user.keyboard("{Enter}");
+    expect(field().value).toBe("/pavilio-grill");
+
+    await user.keyboard(" my idea");
+    expect(field().value).toBe("/pavilio-grill my idea");
+    expect(field().selectionStart).toBe("/pavilio-grill my idea".length);
+  });
+
+  it("a pick in front of other text leaves the caret right after the name", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("see this");
+    field().setSelectionRange(0, 0);
+    // The chip opens the picker at the caret, ahead of the existing text.
+    await user.click(screen.getByTestId("answer-pane-skills-chip-cell-a"));
+    expect(field().value).toBe("/ see this");
+    await user.keyboard("gri");
+    await options();
+    await user.keyboard("{Enter}");
+
+    expect(field().value).toBe("/pavilio-grill see this");
+    // Not the end of the field, where a plain value write would leave it.
+    expect(field().selectionStart).toBe("/pavilio-grill".length);
+    expect(field().selectionEnd).toBe("/pavilio-grill".length);
+  });
+
   it("the picker opens on a touch viewport", async () => {
     installMatchMedia(true);
     const user = userEvent.setup();

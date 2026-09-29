@@ -417,6 +417,18 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   /** Where the caret goes once a pick's text has been committed to the field. */
   const pendingCaret = useRef<number | null>(null);
   /**
+   * Bumped with every `pendingCaret` write, and what the effect that applies it
+   * is keyed on. Not `text`: picking the command already typed in full leaves
+   * the text unchanged, so an effect keyed on it would never run, the caret
+   * would stay pending, and the next keystroke's render would snap the caret
+   * back behind the token.
+   */
+  const [caretRequest, setCaretRequest] = useState(0);
+  const placeCaret = (at: number): void => {
+    pendingCaret.current = at;
+    setCaretRequest((n) => n + 1);
+  };
+  /**
    * The skill names a leading `/<name>` is expanded for at send (D7).
    *
    * The picker's list is gone by the time the user sends — it unmounts on the
@@ -494,7 +506,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     if (caret === null || !field) return;
     pendingCaret.current = null;
     field.setSelectionRange(caret, caret);
-  }, [text]);
+  }, [caretRequest]);
 
   /**
    * The composer's own load of the known skill names — see `knownSkills`.
@@ -556,7 +568,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     const short = `/${name}`;
     knownSkills.current.add(name);
     const next = `${base.slice(0, pickerAt)}${short}${base.slice(pickerAt + token.length)}`;
-    pendingCaret.current = pickerAt + short.length;
+    placeCaret(pickerAt + short.length);
     setDraft(sessionId, next);
     setText(next);
     setPickerAt(null);
@@ -582,7 +594,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     const after = base.slice(caret);
     const slash = after === "" || /^\s/.test(after) ? "/" : "/ ";
     const next = `${base.slice(0, caret)}${slash}${after}`;
-    pendingCaret.current = caret + 1;
+    placeCaret(caret + 1);
     setDraft(sessionId, next);
     setText(next);
     setPickerAt(caret);
@@ -935,6 +947,9 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
             aria-activedescendant={pickerOpen ? (activeOption ?? undefined) : undefined}
             onChange={(e) => {
               const next = e.target.value;
+              // A keystroke places its own caret; one still pending from a pick
+              // must never be applied on top of it.
+              pendingCaret.current = null;
               // The picker opens on a `/` typed into an EMPTY draft and nowhere
               // else — `see src/` is a path, not a command (spec: "A slash
               // inside the text is just text"). Once open it stays open only
