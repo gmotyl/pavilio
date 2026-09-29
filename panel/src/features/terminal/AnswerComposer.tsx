@@ -448,6 +448,13 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    * own open loads the list, and a picked name is added the moment it is
    * picked (it is known by construction).
    *
+   * Every load MERGES into the set rather than replacing it. The loads race —
+   * the mount's own fetch can answer after the picker's, or fail while the
+   * picker's succeeds — and a replace would let a late or partial answer drop
+   * a name the user has just picked, sending `/<name>` verbatim. The cost is
+   * that a skill deleted while this composer is mounted is still expanded,
+   * to a path that is no longer there; the next mount starts empty again.
+   *
    * Accepted degradation: a skill added to the workspace since the last load,
    * typed by hand without opening the picker, is sent verbatim — the same
    * text the user sees in the field, which the agent may still act on.
@@ -455,7 +462,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    */
   const knownSkills = useRef<Set<string>>(new Set());
   const learnSkills = useCallback((skills: readonly SkillEntry[]): void => {
-    knownSkills.current = new Set(skills.map((s) => s.name));
+    for (const skill of skills) knownSkills.current.add(skill.name);
   }, []);
   const pickerToken = pickerAt === null ? null : slashToken(text, pickerAt);
   const pickerOpen = pickerToken !== null;

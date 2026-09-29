@@ -197,4 +197,85 @@ describe("AnswerComposer command chip", () => {
     expect(attachment.parentElement).toBe(chip().parentElement);
     expect(attachment.parentElement).toHaveClass("answer-pane-composer-chips");
   });
+
+  describe("the known skill names at send", () => {
+    const skillsResponse = (body: SkillEntry[]) =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
+    const down = () => Promise.reject(new Error("offline"));
+    const GRILL = "Read and follow the instructions in skills/pavilio-grill/SKILL.md exactly.";
+
+    it("a picked skill is expanded even when the mount's load failed", async () => {
+      // The composer's own load fails; the picker's succeeds.
+      fetchFn.mockImplementationOnce(down);
+      const user = userEvent.setup();
+      renderComposer();
+      await skillsLoaded();
+
+      await user.click(field());
+      await user.keyboard("/gri");
+      const listbox = await screen.findByRole("listbox");
+      await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+      await user.keyboard("{Enter}");
+      await user.keyboard(" see{Enter}");
+
+      await expectSubmitted(`${GRILL} ARGUMENTS: see`);
+    });
+
+    it("the picker's load teaches a name typed by hand later", async () => {
+      // The mount's load fails, the picker's first open loads the list, and a
+      // second open fails — so only that first open can have taught the name.
+      fetchFn
+        .mockImplementationOnce(down)
+        .mockImplementationOnce(() => skillsResponse(SKILLS))
+        .mockImplementationOnce(down);
+      const user = userEvent.setup();
+      renderComposer();
+      await skillsLoaded();
+
+      await user.click(field());
+      await user.keyboard("/");
+      const listbox = await screen.findByRole("listbox");
+      await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(2));
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      await user.keyboard("{Backspace}");
+
+      // Typed in full, never picked: the space closes the picker unpicked.
+      await user.keyboard("/pavilio-grill my idea");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      await user.keyboard("{Enter}");
+
+      await expectSubmitted(`${GRILL} ARGUMENTS: my idea`);
+    });
+
+    it("a late mount load does not drop a name learned from the picker", async () => {
+      // The mount's load is still in flight while the user picks, and then
+      // answers with a list that lacks the picked name.
+      let answerMount: (body: SkillEntry[]) => void = () => {};
+      fetchFn.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answerMount = (body) =>
+              resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
+          }),
+      );
+      const user = userEvent.setup();
+      renderComposer();
+
+      await user.click(field());
+      await user.keyboard("/gri");
+      const listbox = await screen.findByRole("listbox");
+      await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+      await user.keyboard("{Enter}");
+      expect(field().value).toBe("/pavilio-grill");
+
+      answerMount([SKILLS[1]]);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await user.keyboard(" see{Enter}");
+      await expectSubmitted(`${GRILL} ARGUMENTS: see`);
+    });
+  });
 });
