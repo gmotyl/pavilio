@@ -5,7 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { RunBanner } from "../RunBanner";
 import type { TaskListStatus } from "../taskList";
 import { preferences, type TerminalLauncher } from "../../../preferences/declarations";
-import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
+import {
+  __resetPreferenceStoreForTests,
+  PREFERENCE_PATCH_DEBOUNCE_MS,
+  writePreference,
+} from "../../../preferences/store";
 import { writeOverride } from "../../../preferences/overridable";
 import { storageKey } from "../../../preferences/types";
 
@@ -331,5 +335,62 @@ describe("RunBanner", () => {
     expect(screen.queryByRole("group", { name: "CLI" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
     expect(screen.getByText(/no launcher has a run loop/i)).toBeInTheDocument();
+  });
+
+  it("re-clicking the already-picked CLI writes no preference", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    renderBanner();
+    // Nothing remembered: the first is pressed by default.
+    expect(screen.getByRole("button", { name: "claude" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("button", { name: "claude" }));
+    await new Promise((r) => setTimeout(r, PREFERENCE_PATCH_DEBOUNCE_MS + 50));
+
+    expect(storageKey(preferences.plansRunLauncher) in globals.__PAVILIO_PREFS__!).toBe(false);
+    // The launchers written above PATCH on their own; none may carry the pick.
+    const picks = fetchMock.mock.calls.filter(([, init]) => {
+      const req = init as RequestInit | undefined;
+      return (
+        req?.method === "PATCH" &&
+        String(req.body).includes(storageKey(preferences.plansRunLauncher))
+      );
+    });
+    expect(picks).toHaveLength(0);
+  });
+
+  it("a run loop with no prompt stays runnable when the template resolves to blank", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, [
+      { name: "resume", command: "claude", runLoop: "claude --continue" },
+    ]);
+    writePreference(preferences.taskPromptDefault, "   ");
+    const onRun = renderBanner(vi.fn());
+
+    expect(objective().value.trim()).toBe("");
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(onRun).toHaveBeenCalledWith("claude --continue");
+  });
+
+  it("the footer offers no editing or shortcut while the objective is disabled", () => {
+    writePreference(preferences.terminalLaunchers, [
+      { name: "resume", command: "claude", runLoop: "claude --continue" },
+    ]);
+    renderBanner();
+
+    const foot = screen.getByTestId("run-banner-foot").textContent ?? "";
+    expect(foot).not.toMatch(/editable/);
+    expect(foot).not.toContain("⌘↵");
+    expect(foot).toContain("opens a new terminal");
+  });
+
+  it("the footer names editing and the shortcut while the objective is live", () => {
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    renderBanner();
+
+    const foot = screen.getByTestId("run-banner-foot").textContent ?? "";
+    expect(foot).toContain("editable for this send");
+    expect(foot).toContain("⌘↵");
   });
 });

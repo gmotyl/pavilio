@@ -109,6 +109,9 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
   const pickedIndex = resolvePick(options, picked, remembered);
   const launcher = options[pickedIndex];
   const pick = (index: number) => {
+    // The pressed one again changes nothing, so it writes nothing: with no CLI
+    // remembered yet it would otherwise store the default nobody chose.
+    if (index === pickedIndex) return;
     const name = options[index].name;
     setPicked({ index, name });
     setRemembered(name);
@@ -267,8 +270,11 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
           />
         )}
       </div>
-      <div className="run-banner-foot">
-        editable for this send · ⌘↵ to run · opens a new terminal
+      <div className="run-banner-foot" data-testid="run-banner-foot">
+        {/* A disabled objective is neither editable nor reached by ⌘↵. */}
+        {usesObjective
+          ? "editable for this send · ⌘↵ to run · opens a new terminal"
+          : "opens a new terminal"}
       </div>
     </section>
   );
