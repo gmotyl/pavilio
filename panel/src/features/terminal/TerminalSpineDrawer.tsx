@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { X } from "lucide-react";
-import type { SessionMeta } from "./useTerminalSessions";
+import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { useProjectColors } from "./useProjectColors";
@@ -149,8 +149,15 @@ export function TerminalSpineDrawer({
                           }}
                         >
                           <TerminalActivityLed sessionId={s.id} />
-                          <span className="text-[12.5px] font-mono truncate flex-1">
-                            {s.name}
+                          {/* The label is what the session is DOING when the
+                              panel named it, and the name once the user did —
+                              one line, ellipsised, with the whole string on
+                              `title=` so nothing is lost to the truncation. */}
+                          <span
+                            className="text-[12.5px] font-mono truncate flex-1"
+                            title={sessionLabel(s)}
+                          >
+                            {sessionLabel(s)}
                           </span>
                           {active && (
                             <span

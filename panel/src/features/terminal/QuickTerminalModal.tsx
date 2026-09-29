@@ -7,6 +7,7 @@ import type { SessionMeta } from "./useTerminalSessions";
 import {
   dispatchTerminalFocus,
   readTerminalFocus,
+  sessionLabel,
   writeTerminalFocus,
 } from "./useTerminalSessions";
 import { matchProjectFromPath } from "../projects/matchProjectFromPath";
@@ -294,10 +295,11 @@ export default function QuickTerminalModal() {
               <span>{project}</span>
               {selectedSession && (
                 <span
-                  className="text-[11px]"
+                  className="text-[11px] truncate max-w-[220px]"
                   style={{ color: "var(--text-muted)" }}
+                  title={sessionLabel(selectedSession)}
                 >
-                  / {selectedSession.name}
+                  / {sessionLabel(selectedSession)}
                 </span>
               )}
               <ChevronDown size={12} />
@@ -341,7 +343,9 @@ export default function QuickTerminalModal() {
                         }}
                       >
                         <TerminalActivityLed sessionId={s.id} />
-                        <span className="truncate">{s.name}</span>
+                        <span className="truncate" title={sessionLabel(s)}>
+                          {sessionLabel(s)}
+                        </span>
                       </button>
                     );
                   })
@@ -366,8 +370,8 @@ export default function QuickTerminalModal() {
                   onClick={() => openDotTarget(s)}
                   title={
                     isCurrentProject
-                      ? s.name
-                      : `${s.project} / ${s.name}`
+                      ? sessionLabel(s)
+                      : `${s.project} / ${sessionLabel(s)}`
                   }
                   className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-colors"
                   style={{
@@ -384,8 +388,8 @@ export default function QuickTerminalModal() {
                     sessionId={s.id}
                     title={
                       isCurrentProject
-                        ? s.name
-                        : `${s.project} / ${s.name}`
+                        ? sessionLabel(s)
+                        : `${s.project} / ${sessionLabel(s)}`
                     }
                   />
                 </button>

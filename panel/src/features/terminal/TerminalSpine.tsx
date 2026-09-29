@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import type { SessionMeta } from "./useTerminalSessions";
+import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
 
 interface Props {
@@ -92,7 +92,7 @@ export function TerminalSpine({
               e.stopPropagation();
               onOpenDrawer();
             }}
-            title={s.name}
+            title={sessionLabel(s)}
             style={{
               display: "block",
               width: active ? "5px" : "4px",

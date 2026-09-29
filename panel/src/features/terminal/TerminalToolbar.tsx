@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Plus, Maximize2, Minimize2, X, ChevronDown, FolderGit2, RotateCw } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
-import { nextProjectName } from "./useTerminalSessions";
+import { nextProjectName, sessionLabel } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
 import { useOsUsers } from "./useOsUsers";
 import { useDefaultTerminalUsers } from "./useDefaultTerminalUsers";
@@ -335,9 +335,9 @@ export function TerminalToolbar({
                     e.stopPropagation();
                     setEditingId(s.id);
                   }}
-                  title={`${s.name} — double-click to rename`}
+                  title={`${sessionLabel(s)} — double-click to rename`}
                 >
-                  {s.name}
+                  {sessionLabel(s)}
                 </span>
               )}
               {/* Sits before the close ×, and unlike it is never hover-gated:

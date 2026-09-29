@@ -8,7 +8,7 @@ import React, {
 import { Eye, X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
-import type { SessionMeta } from "./useTerminalSessions";
+import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
@@ -490,17 +490,21 @@ function TerminalCell({
             />
           </>
         ) : (
+          // The header LABELS the session — the title a process publishes
+          // while the panel's generated name still stands, the chosen name
+          // once there is one. The editor below still edits the NAME, which is
+          // why it reads `session.name` and this reads `sessionLabel`.
           <span
-            className="text-[10.5px] font-mono tracking-wide uppercase truncate flex-1"
+            className="text-[10.5px] font-mono tracking-wide truncate flex-1"
             style={{ color: "var(--text-secondary)", letterSpacing: "0.08em" }}
-            title={`${session.name} — double-click to rename`}
+            title={`${sessionLabel(session)} — double-click to rename`}
             onDoubleClick={(e) => {
               e.stopPropagation();
               blurHandledRef.current = false;
               setEditingName(true);
             }}
           >
-            {session.name}
+            {sessionLabel(session)}
           </span>
         )}
         <div className="flex gap-0.5">
