@@ -37,6 +37,7 @@ import systemRouter from "./routes/system.js";
 import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
+import skillsRouter from "./routes/skills.js";
 import { machineHostname } from "./lib/hostname.js";
 import { startScheduler } from "./lib/autoSyncScheduler.js";
 import { isEnabled } from "./lib/autoSyncState.js";
@@ -192,6 +193,7 @@ export async function startPanel(
 
   app.use("/api/projects", projectsRouter);
   app.use("/api/files", filesRouter);
+  app.use("/api/skills", skillsRouter);
   app.use("/api/git", gitRouter);
   app.use("/api/agents", agentsRouter);
   app.use("/api/search", searchRouter);
