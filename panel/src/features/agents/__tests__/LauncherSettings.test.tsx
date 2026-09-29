@@ -24,9 +24,9 @@ const KEY = storageKey(preferences.terminalLaunchers);
  * nothing is stored, so asserting a read against that constant would pass on
  * identity and prove nothing about what was — or was not — written. */
 const DEFAULTS: TerminalLauncher[] = [
-  { name: "claude", command: "claude" },
-  { name: "codex", command: "codex" },
-  { name: "opencode", command: "opencode" },
+  { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+  { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
+  { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
 ];
 
 /**
@@ -54,6 +54,10 @@ function nameFields(): HTMLInputElement[] {
 
 function commandFields(): HTMLInputElement[] {
   return screen.getAllByRole("textbox", { name: /^Launcher \d+ command$/ }) as HTMLInputElement[];
+}
+
+function runLoopFields(): HTMLInputElement[] {
+  return screen.getAllByRole("textbox", { name: /^Launcher \d+ run loop$/ }) as HTMLInputElement[];
 }
 
 /** The settings page lists agent config files over `fetch`; it needs none here. */
@@ -138,10 +142,7 @@ describe("LauncherSettings", () => {
     await user.click(screen.getByRole("button", { name: "Remove launcher 2: codex" }));
 
     // Read back through the store, not off the component's state.
-    expect(stored()).toEqual([
-      { name: "claude", command: "claude" },
-      { name: "opencode", command: "opencode" },
-    ]);
+    expect(stored()).toEqual([DEFAULTS[0], DEFAULTS[2]]);
 
     // The last two go as well. An emptied list is the trap: the declared
     // default is handed back only when NOTHING is stored, so a stored empty
@@ -205,5 +206,157 @@ describe("LauncherSettings", () => {
 
     expect(stored()).toEqual(DEFAULTS);
     expect(nameFields()).toHaveLength(3);
+  });
+
+  describe("the run-loop column", () => {
+    it("the shipped defaults carry a run loop for each agent", () => {
+      // Nothing stored: the read is the declared default, written out above.
+      expect(stored()).toEqual(DEFAULTS);
+      expect(stored().every((entry) => Boolean(entry.runLoop))).toBe(true);
+
+      render(<LauncherSettings />);
+      expect(runLoopFields().map((field) => field.value)).toEqual([
+        'claude "/goal {prompt}"',
+        'codex "/goal {prompt}"',
+        'opencode --prompt "{prompt}"',
+      ]);
+    });
+
+    it("an entry with a blank run loop is saved", async () => {
+      const user = userEvent.setup();
+
+      render(<LauncherSettings />);
+      await user.type(screen.getByRole("textbox", { name: "New launcher name" }), "resume");
+      await user.type(
+        screen.getByRole("textbox", { name: "New launcher command" }),
+        "claude --resume",
+      );
+      // The run-loop field is left blank: that launcher is simply not offered
+      // for a run, which is an honest answer and must stay saveable.
+      await user.click(screen.getByRole("button", { name: "Add launcher" }));
+
+      expect(stored()).toEqual([...DEFAULTS, { name: "resume", command: "claude --resume" }]);
+
+      // Clearing an existing row's run loop is a committed edit too.
+      await user.clear(runLoopFields()[2]);
+      await user.tab();
+
+      expect(stored()[2]).toEqual({ name: "opencode", command: "opencode" });
+      expect(stored()).toHaveLength(4);
+    });
+
+    it("an entry with a run loop typed into the add form keeps it", async () => {
+      const user = userEvent.setup();
+
+      render(<LauncherSettings />);
+      await user.type(screen.getByRole("textbox", { name: "New launcher name" }), "yolo");
+      await user.type(screen.getByRole("textbox", { name: "New launcher command" }), "claude");
+      // `{` is a userEvent key-descriptor opener; `{{` types a literal brace.
+      await user.type(
+        screen.getByRole("textbox", { name: "New launcher run loop" }),
+        'claude "/goal {{prompt}"',
+      );
+      await user.click(screen.getByRole("button", { name: "Add launcher" }));
+
+      expect(stored().at(-1)).toEqual({
+        name: "yolo",
+        command: "claude",
+        runLoop: 'claude "/goal {prompt}"',
+      });
+      expect(screen.getByRole("textbox", { name: "New launcher run loop" })).toHaveValue("");
+    });
+
+    it("an entry with a blank name is still rejected", async () => {
+      const user = userEvent.setup();
+
+      render(<LauncherSettings />);
+      await user.type(screen.getByRole("textbox", { name: "New launcher command" }), "claude");
+      await user.type(
+        screen.getByRole("textbox", { name: "New launcher run loop" }),
+        'claude "/goal {{prompt}"',
+      );
+      await user.click(screen.getByRole("button", { name: "Add launcher" }));
+
+      expect(stored()).toEqual(DEFAULTS);
+      expect(nameFields()).toHaveLength(3);
+
+      // A run loop alone does not rescue a row whose name was cleared.
+      await user.clear(nameFields()[0]);
+      await user.tab();
+      expect(stored()).toEqual(DEFAULTS);
+      expect(nameFields()[0]).toHaveValue("claude");
+    });
+
+    it("an entry with a blank command is still rejected", async () => {
+      const user = userEvent.setup();
+
+      render(<LauncherSettings />);
+      await user.type(screen.getByRole("textbox", { name: "New launcher name" }), "yolo");
+      await user.type(
+        screen.getByRole("textbox", { name: "New launcher run loop" }),
+        'claude "/goal {{prompt}"',
+      );
+      await user.click(screen.getByRole("button", { name: "Add launcher" }));
+
+      expect(stored()).toEqual(DEFAULTS);
+      expect(nameFields()).toHaveLength(3);
+
+      await user.clear(commandFields()[0]);
+      await user.tab();
+      expect(stored()).toEqual(DEFAULTS);
+      expect(commandFields()[0]).toHaveValue("claude");
+    });
+
+    it("a stored list predating the column loads without a run loop", async () => {
+      const user = userEvent.setup();
+      // The exact shape a workspace document held before this change, placed
+      // straight into the document rather than through `writePreference`.
+      globals.__PAVILIO_PREFS__ = {
+        ...globals.__PAVILIO_PREFS__,
+        [KEY]: [
+          { name: "claude", command: "claude" },
+          { name: "resume", command: "claude --resume" },
+        ],
+      };
+
+      expect(() => render(<LauncherSettings />)).not.toThrow();
+      expect(stored()).toEqual([
+        { name: "claude", command: "claude" },
+        { name: "resume", command: "claude --resume" },
+      ]);
+      expect(stored().some((entry) => "runLoop" in entry)).toBe(false);
+      expect(runLoopFields().map((field) => field.value)).toEqual(["", ""]);
+
+      // Editing another column of an old entry does not invent a run loop.
+      await user.clear(commandFields()[1]);
+      await user.type(commandFields()[1], "claude --continue");
+      await user.tab();
+      expect(stored()[1]).toEqual({ name: "resume", command: "claude --continue" });
+    });
+
+    it("editing a row does not mutate the declared defaults", async () => {
+      const user = userEvent.setup();
+      const before = stored();
+      // Nothing stored, so this IS the declared array, handed back by reference.
+      expect(before).toBe(DEFAULT_TERMINAL_LAUNCHERS);
+      const firstEntry = DEFAULT_TERMINAL_LAUNCHERS[0];
+
+      render(<LauncherSettings />);
+      await user.clear(runLoopFields()[0]);
+      await user.type(runLoopFields()[0], "claude --print {{prompt}");
+      await user.tab();
+
+      const after = stored();
+      expect(after[0]).toEqual({
+        name: "claude",
+        command: "claude",
+        runLoop: "claude --print {prompt}",
+      });
+      // A new array and a new entry object; the declared ones are untouched.
+      expect(after).not.toBe(DEFAULT_TERMINAL_LAUNCHERS);
+      expect(after[0]).not.toBe(firstEntry);
+      expect(DEFAULT_TERMINAL_LAUNCHERS[0]).toBe(firstEntry);
+      expect(DEFAULT_TERMINAL_LAUNCHERS).toEqual(DEFAULTS);
+    });
   });
 });

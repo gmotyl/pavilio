@@ -27,7 +27,25 @@ import { usePreference } from "../../preferences/usePreference";
  * what the PTY receives, so a blank either side is not an entry. A rejected
  * edit puts the stored value back into the field rather than leaving the user
  * looking at text the panel did not keep.
+ *
+ * The run loop is NOT a third required half. It is the whole command line a
+ * task run spawns, and an agent with no goal mode has no honest value for it —
+ * so a blank one is saved, as an entry with no `runLoop` key at all, and that
+ * launcher is simply not offered for a run.
  */
+
+/**
+ * Builds a fresh entry from the form's drafts, or `null` when a required half
+ * is blank. A blank run loop is left off rather than stored as `""`, so an
+ * entry saved without one has the same shape as one stored before the column.
+ */
+function toEntry(name: string, command: string, runLoop: string): TerminalLauncher | null {
+  const entry: TerminalLauncher = { name: name.trim(), command: command.trim() };
+  if (!entry.name || !entry.command) return null;
+  const loop = runLoop.trim();
+  if (loop) entry.runLoop = loop;
+  return entry;
+}
 
 const inputStyle = {
   background: "var(--bg-surface)",
@@ -48,6 +66,7 @@ function LauncherRow({
 }) {
   const [name, setName] = useState(entry.name);
   const [command, setCommand] = useState(entry.command);
+  const [runLoop, setRunLoop] = useState(entry.runLoop ?? "");
 
   /**
    * The stored entry can change under a row that is not being edited — another
@@ -58,16 +77,24 @@ function LauncherRow({
   useEffect(() => {
     setName(entry.name);
     setCommand(entry.command);
-  }, [entry.name, entry.command]);
+    setRunLoop(entry.runLoop ?? "");
+  }, [entry.name, entry.command, entry.runLoop]);
 
   const commit = () => {
-    const next = { name: name.trim(), command: command.trim() };
-    if (!next.name || !next.command) {
+    const next = toEntry(name, command, runLoop);
+    if (!next) {
       setName(entry.name);
       setCommand(entry.command);
+      setRunLoop(entry.runLoop ?? "");
       return;
     }
-    if (next.name === entry.name && next.command === entry.command) return;
+    if (
+      next.name === entry.name &&
+      next.command === entry.command &&
+      (next.runLoop ?? "") === (entry.runLoop ?? "")
+    ) {
+      return;
+    }
     onCommit(next);
   };
 
@@ -89,6 +116,17 @@ function LauncherRow({
         value={command}
         onChange={(e) => setCommand(e.target.value)}
         onBlur={commit}
+        className="text-sm px-2 py-1 rounded flex-1 font-mono"
+        style={inputStyle}
+        spellCheck={false}
+      />
+      <input
+        aria-label={`Launcher ${index + 1} run loop`}
+        data-testid={`launcher-run-loop-${index}`}
+        value={runLoop}
+        onChange={(e) => setRunLoop(e.target.value)}
+        onBlur={commit}
+        placeholder="no run loop"
         className="text-sm px-2 py-1 rounded flex-1 font-mono"
         style={inputStyle}
         spellCheck={false}
@@ -117,13 +155,15 @@ export function LauncherSettings() {
   const [launchers, setLaunchers] = usePreference(preferences.terminalLaunchers);
   const [newName, setNewName] = useState("");
   const [newCommand, setNewCommand] = useState("");
+  const [newRunLoop, setNewRunLoop] = useState("");
 
   const add = () => {
-    const entry = { name: newName.trim(), command: newCommand.trim() };
-    if (!entry.name || !entry.command) return;
+    const entry = toEntry(newName, newCommand, newRunLoop);
+    if (!entry) return;
     setLaunchers((current) => [...current, entry]);
     setNewName("");
     setNewCommand("");
+    setNewRunLoop("");
   };
 
   const commitAt = (index: number, next: TerminalLauncher) => {
@@ -173,6 +213,16 @@ export function LauncherSettings() {
           style={inputStyle}
           spellCheck={false}
         />
+        <input
+          aria-label="New launcher run loop"
+          data-testid="launcher-new-run-loop"
+          value={newRunLoop}
+          onChange={(e) => setNewRunLoop(e.target.value)}
+          placeholder='run loop, e.g. claude "/goal {prompt}"'
+          className="text-sm px-2 py-1 rounded flex-1 font-mono"
+          style={inputStyle}
+          spellCheck={false}
+        />
         <button
           type="button"
           data-testid="launcher-add"
@@ -192,7 +242,10 @@ export function LauncherSettings() {
       </div>
       <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
         The pills on a cell that has not spoken yet. The name is the label; the
-        command is sent to the terminal verbatim, with a trailing return.
+        command is sent to the terminal verbatim, with a trailing return. The
+        run loop is the whole command line a task run spawns, with{" "}
+        <code>{"{prompt}"}</code> standing for the objective; leave it blank and
+        the launcher is not offered for a run.
       </p>
     </div>
   );
