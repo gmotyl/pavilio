@@ -1607,6 +1607,12 @@ input[type="checkbox"] {
   color: var(--text-muted);
 }
 
+/* The hint line's newest fact, `/ FOR SKILLS`, in the accent the settled
+   mockup gives it (`.hintline .new`): the one part of the line that is new. */
+.answer-pane-hint-new {
+  color: var(--accent);
+}
+
 /* The pane's two switches, right-aligned, directly under the text and ABOVE the
    composer — design.md's order. Outside the scroll container so the row stays
    put while the text scrolls. It paints nothing of its own, and draws no rule
@@ -1903,15 +1909,18 @@ input[type="checkbox"] {
   animation: boot-legend-in 180ms ease-out both;
 }
 
-/* The stub: from the box's bottom edge down across `DOOR_GAP` (10px, plus the
-   1px border) to the chip row, over the chip's left half. */
+/* The stub: from the box's bottom edge (past its 1px border) down to the CHIP,
+   over the chip's left half — across `DOOR_GAP` and the chip's own offset
+   inside the row, which `BootLegend` writes as `--boot-legend-door-reach`. The
+   fallback is the unmeasured case: 10px of gap plus the row's 9px above the
+   chip (8px padding, 1px seam). */
 .boot-legend-door::after {
   content: "";
   position: absolute;
   left: 22px;
-  bottom: -11px;
+  bottom: calc(-1px - var(--boot-legend-door-reach, 19px));
   width: 1px;
-  height: 10px;
+  height: var(--boot-legend-door-reach, 19px);
   background: var(--accent);
 }
 

@@ -63,7 +63,7 @@
  * drawn while the picker is open (the picker floats in the same place), nor in
  * a pane too short to hold it between the band and the chips.
  */
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 export interface BootLegendProps {
   sessionId: string;
@@ -171,17 +171,24 @@ export const BOTH_CALLOUTS_MIN_CELL =
 /**
  * The picker's callout — the "door teach" — and its geometry.
  *
- * `DOOR_GAP` is the space between the box's bottom edge and the chip row's top,
- * which the box's short downward stub (`.boot-legend-door::after`) spans to
- * reach the chip. `DOOR_ROOM` is the least height the box needs above that gap
- * and below the band — two lines of body under its title, plus a margin clear of
- * the band — below which the pane is too short and the door is not drawn at all.
+ * `DOOR_GAP` is the space between the box's bottom edge and the chip row's top.
+ * The box's downward stub (`.boot-legend-door::after`) spans that gap AND the
+ * chip's own offset inside the row, so it lands on the chip rather than on the
+ * row's padding; the length is written inline as `--boot-legend-door-reach`.
+ *
+ * The room the box needs above that gap is its own MEASURED height plus
+ * `DOOR_BAND_CLEARANCE` clear of the band — below that the pane is too short and
+ * the door is not drawn at all. Measured, because the body wraps to three lines
+ * in a narrow cell and a two-line constant then let it overlap the band.
+ * `DOOR_HEIGHT_FALLBACK` (title plus two lines) stands in only until the box has
+ * been laid out once; the last measured height is kept while it is not drawn.
  *
  * Careful with the WORDS here too: no "Enter", "Esc" or "composer" — the same
  * test that holds the band's bodies reads this one.
  */
 const DOOR_GAP = 10;
-const DOOR_ROOM = 72;
+const DOOR_BAND_CLEARANCE = 8;
+const DOOR_HEIGHT_FALLBACK = 64;
 const DOOR_TITLE = "Workspace skills";
 const DOOR_BODY = "Type a slash, or press the chip, to run one of the workspace's skills here.";
 
@@ -189,8 +196,11 @@ const DOOR_BODY = "Type a slash, or press the chip, to run one of the workspace'
 interface Door {
   /** `data-testid` of the `/ skills` chip it points at. */
   readonly target: string;
-  /** Offsets in this overlay's box; null when unmeasured (jsdom, first frame). */
-  readonly place: { bottom: number; left: number } | null;
+  /**
+   * Offsets in this overlay's box, and the stub's length down to the chip;
+   * null when unmeasured (jsdom, first frame).
+   */
+  readonly place: { bottom: number; left: number; reach: number } | null;
   /** False while the picker is open or the pane is too short to hold it. */
   readonly shown: boolean;
 }
@@ -221,6 +231,8 @@ export function BootLegend({ sessionId }: BootLegendProps) {
     place: null,
     shown: true,
   }));
+  /** The door's last laid-out height — see `DOOR_HEIGHT_FALLBACK`. */
+  const doorHeight = useRef(DOOR_HEIGHT_FALLBACK);
 
   /**
    * Where each named control is, in this overlay's own coordinates.
@@ -274,17 +286,23 @@ export function BootLegend({ sessionId }: BootLegendProps) {
         setDoor({ target: chipTarget, place: null, shown: !pickerOpen });
       } else {
         const rowTop = chipRow.getBoundingClientRect().top - origin.top;
+        const chipBox = chip.getBoundingClientRect();
         // The band's lowest edge, as drawn — zero when the band is empty.
         let bandBottom = 0;
         root.querySelectorAll(".boot-legend-callout").forEach((box) => {
           bandBottom = Math.max(bandBottom, box.getBoundingClientRect().bottom - origin.top);
         });
-        const fits = rowTop - DOOR_GAP - DOOR_ROOM >= bandBottom;
+        // The box as it is drawn now, when it is; a zero is "not laid out"
+        // rather than a box of no height, and keeps the last real answer.
+        const drawn = root.querySelector(".boot-legend-door")?.getBoundingClientRect().height ?? 0;
+        if (drawn > 0) doorHeight.current = drawn;
+        const fits = rowTop - DOOR_GAP - doorHeight.current - DOOR_BAND_CLEARANCE >= bandBottom;
         setDoor({
           target: chipTarget,
           place: {
             bottom: origin.height - rowTop + DOOR_GAP,
-            left: chip.getBoundingClientRect().left - origin.left,
+            left: chipBox.left - origin.left,
+            reach: DOOR_GAP + Math.max(0, chipBox.top - origin.top - rowTop),
           },
           shown: fits && !pickerOpen,
         });
@@ -318,14 +336,18 @@ export function BootLegend({ sessionId }: BootLegendProps) {
     // The chip row MOVES without the cell resizing: the grip drags the field's
     // row below it, and attachments wrap the row itself. So the observer also
     // watches the chip row and every row under it — their heights are the
-    // chip row's distance from the cell's foot. And the chip's `aria-expanded`
-    // is watched so the door steps aside the moment the picker opens.
+    // chip row's distance from the pane's foot — and the pane itself, whose
+    // own bottom edge is dragged without any row inside it changing size. And
+    // the chip's `aria-expanded` is watched so the door steps aside the moment
+    // the picker opens.
     const chipRow = document
       .querySelector(`[data-testid="answer-pane-skills-chip-${sessionId}"]`)
       ?.closest(".answer-pane-chip-row");
     for (let row = chipRow ?? null; row && observer; row = row.nextElementSibling) {
       observer.observe(row);
     }
+    const answerPane = chipRow?.closest(".answer-pane") ?? null;
+    if (answerPane && observer) observer.observe(answerPane);
     const mutations =
       chipRow && typeof MutationObserver === "function" ? new MutationObserver(measure) : null;
     mutations?.observe(chipRow!, {
@@ -451,7 +473,15 @@ export function BootLegend({ sessionId }: BootLegendProps) {
           data-leads-to={door.target}
           // Above the chip row, from the measurement; the stylesheet's fallback
           // stands in only while nothing has been laid out.
-          style={door.place ? { bottom: door.place.bottom, left: door.place.left } : undefined}
+          style={
+            door.place
+              ? ({
+                  bottom: door.place.bottom,
+                  left: door.place.left,
+                  "--boot-legend-door-reach": `${door.place.reach}px`,
+                } as CSSProperties)
+              : undefined
+          }
         >
           <b>{DOOR_TITLE}</b>
           {DOOR_BODY}

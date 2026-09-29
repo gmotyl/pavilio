@@ -1169,7 +1169,8 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           carries it alone (D18). */}
       {isMobile ? null : (
         <div className="answer-pane-hint" data-testid={`answer-pane-hint-${sessionId}`}>
-          ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER · / FOR SKILLS
+          ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER ·{" "}
+          <span className="answer-pane-hint-new">/ FOR SKILLS</span>
         </div>
       )}
     </>

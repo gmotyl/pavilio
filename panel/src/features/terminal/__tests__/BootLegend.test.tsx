@@ -308,6 +308,11 @@ const CHIP_ROW_FROM_FOOT = 110;
 const BAND_TOP = 54;
 const BAND_HEIGHT = 64;
 
+/** How tall `stubLayout` lays the picker's callout out; tests may change it. */
+let doorHeight = 64;
+/** How far above the cell's foot `stubLayout` puts the chip row; tests may move it. */
+let chipRowFromFoot = CHIP_ROW_FROM_FOOT;
+
 function stubLayout(cellWidth: number, cellHeight = 400): void {
   const box = (left: number, top: number, width: number, height: number): DOMRect =>
     ({
@@ -338,10 +343,13 @@ function stubLayout(cellWidth: number, cellHeight = 400): void {
     // the row's left padding. The band's boxes at their measured top, one
     // short paragraph tall, so the picker's callout has a band to stay clear of.
     if (this.classList.contains("answer-pane-chip-row")) {
-      return box(0, cellHeight - CHIP_ROW_FROM_FOOT, cellWidth, 30);
+      return box(0, cellHeight - chipRowFromFoot, cellWidth, 30);
     }
     if (testId === `answer-pane-skills-chip-${SESSION}`) {
-      return box(12, cellHeight - CHIP_ROW_FROM_FOOT + 8, 62, 22);
+      return box(12, cellHeight - chipRowFromFoot + 8, 62, 22);
+    }
+    if (this.classList.contains("boot-legend-door")) {
+      return box(12, 0, 300, doorHeight);
     }
     if (this.classList.contains("boot-legend-callout")) {
       return box(10, BAND_TOP, 190, BAND_HEIGHT);
@@ -394,6 +402,8 @@ function openLegend(cellWidth?: number, sessionId = SESSION, cellHeight?: number
 }
 
 beforeEach(() => {
+  doorHeight = 64;
+  chipRowFromFoot = CHIP_ROW_FROM_FOOT;
   at = 0;
   term.writes.length = 0;
   term.accept = true;
@@ -1027,5 +1037,144 @@ describe("the boot legend teaches the command picker", () => {
     await waitFor(() => expect(door()).toBeNull());
     // The band is untouched: the legend is still up, only the door gave way.
     expect(legend()).not.toBeNull();
+  });
+
+  it("the callout follows the pane's own resize edge", () => {
+    const observers: RecordingResizeObserver[] = [];
+    class RecordingResizeObserver {
+      observed = new Set<Element>();
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(el: Element): void {
+        this.observed.add(el);
+      }
+      unobserve(el: Element): void {
+        this.observed.delete(el);
+      }
+      disconnect(): void {
+        this.observed.clear();
+      }
+    }
+    vi.stubGlobal("ResizeObserver", RecordingResizeObserver);
+    const cellHeight = 400;
+    openLegend(720, SESSION, cellHeight);
+    const before = px(door()!.style.bottom);
+
+    // Dragging the pane's bottom edge resizes the PANE, and nothing inside it:
+    // the chip row moves with the pane's foot. The legend must be watching it.
+    const answerPane = pane()!;
+    const watcher = observers.find((o) => o.observed.has(answerPane));
+    expect(watcher, "no observer watches the answer pane's own box").toBeDefined();
+
+    chipRowFromFoot = CHIP_ROW_FROM_FOOT + 60;
+    act(() => watcher!.callback([], watcher as unknown as ResizeObserver));
+    expect(px(door()!.style.bottom)).toBe(before + 60);
+  });
+
+  it("dismissing the legend disconnects every observer and listener it set up", async () => {
+    // Other parts of the cell observe and listen too, so every instance records
+    // WHAT it watches: the legend's are the ones watching the legend's boxes.
+    const resizeObservers: { observed: Element[]; disconnected: boolean }[] = [];
+    class TrackedResizeObserver {
+      private readonly record = { observed: [] as Element[], disconnected: false };
+      constructor(_cb: ResizeObserverCallback) {
+        resizeObservers.push(this.record);
+      }
+      observe(el: Element): void {
+        this.record.observed.push(el);
+      }
+      unobserve(): void {}
+      disconnect(): void {
+        this.record.disconnected = true;
+      }
+    }
+    const mutationObservers: { filter: string[]; disconnected: boolean }[] = [];
+    const RealMutationObserver = MutationObserver;
+    class TrackedMutationObserver extends RealMutationObserver {
+      private readonly record = { filter: [] as string[], disconnected: false };
+      constructor(cb: MutationCallback) {
+        super(cb);
+        mutationObservers.push(this.record);
+      }
+      observe(target: Node, options?: MutationObserverInit): void {
+        this.record.filter.push(...(options?.attributeFilter ?? []));
+        super.observe(target, options);
+      }
+      disconnect(): void {
+        this.record.disconnected = true;
+        super.disconnect();
+      }
+    }
+    vi.stubGlobal("ResizeObserver", TrackedResizeObserver);
+    vi.stubGlobal("MutationObserver", TrackedMutationObserver);
+    const added = vi.spyOn(window, "addEventListener");
+    const removed = vi.spyOn(window, "removeEventListener");
+    try {
+      openLegend(720);
+      const root = legend()!;
+      const legendRO = resizeObservers.find((r) => r.observed.includes(root));
+      expect(legendRO, "no observer watches the legend's root").toBeDefined();
+      const legendMO = mutationObservers.find((m) => m.filter.includes("aria-expanded"));
+      expect(legendMO, "no observer watches the chip's aria-expanded").toBeDefined();
+      const resizeListeners = added.mock.calls
+        .filter(([type]) => type === "resize")
+        .map(([, fn]) => fn);
+      expect(resizeListeners.length).toBeGreaterThan(0);
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      await waitFor(() => expect(legend()).toBeNull());
+
+      expect(legendRO!.disconnected).toBe(true);
+      expect(legendMO!.disconnected).toBe(true);
+      const removedFns = removed.mock.calls
+        .filter(([type]) => type === "resize")
+        .map(([, fn]) => fn);
+      for (const fn of resizeListeners) expect(removedFns).toContain(fn);
+    } finally {
+      added.mockRestore();
+      removed.mockRestore();
+    }
+  });
+
+  it("the callout's stub reaches the chip, not just the chip row", () => {
+    const drop = injectStylesheet();
+    try {
+      openLegend(720, SESSION, 400);
+      const taught = door()!;
+      // The chip sits 8px below the row's top edge in this layout; the stub
+      // spans the gap under the box AND that offset.
+      const reach = px(taught.style.getPropertyValue("--boot-legend-door-reach"));
+      const doorBottomEdge = 400 - px(taught.style.bottom);
+      const chipTop = 400 - CHIP_ROW_FROM_FOOT + 8;
+      expect(doorBottomEdge + reach).toBe(chipTop);
+      // ...and the stylesheet draws the stub from that number.
+      const after = cssRule(".boot-legend-door::after");
+      expect(after).toMatch(/height:\s*var\(--boot-legend-door-reach/);
+      expect(after).toMatch(/bottom:\s*calc\([^;]*var\(--boot-legend-door-reach/);
+    } finally {
+      drop();
+    }
+  });
+
+  it("room for the callout is its measured height, not a two-line guess", () => {
+    // 320px of cell puts the chip row at 210: 72px of box would fit under the
+    // band's 118, a three-line box of 80px does not.
+    doorHeight = 80;
+    openLegend(720, SESSION, 320);
+    expect(door()).toBeNull();
+  });
+
+  it("a callout of two lines still fits where there is room for it", () => {
+    doorHeight = 64;
+    openLegend(720, SESSION, 320);
+    expect(door()).not.toBeNull();
+  });
+
+  it("the hint line's skills fact is accented, as the mockup draws it", () => {
+    openLegend();
+    const accent = hint()!.querySelector(".answer-pane-hint-new");
+    expect(accent?.textContent).toBe("/ FOR SKILLS");
+    expect(cssRule(".answer-pane-hint-new")).toMatch(/color:\s*var\(--accent\)/);
   });
 });
