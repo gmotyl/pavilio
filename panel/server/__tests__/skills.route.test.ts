@@ -114,6 +114,30 @@ describe("GET /api/skills", () => {
     ]);
   });
 
+  it("an entry that cannot be read (a self-referencing link) is skipped, the rest listed", async () => {
+    addSkill("good", "description: fine");
+    // stat() on a link to itself fails with ELOOP.
+    symlinkSync(join(skillsDir(), "loop"), join(skillsDir(), "loop"));
+    expect(await list()).toEqual([
+      { name: "good", description: "fine", path: "skills/good/SKILL.md" },
+    ]);
+  });
+
+  it("a root that cannot be read answers 500 without naming a path", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    rmSync(skillsDir(), { recursive: true, force: true });
+    // A file where the directory should be: readdir fails with ENOTDIR.
+    writeFileSync(skillsDir(), "not a dir");
+    const res = await request(makeApp()).get("/api/skills");
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.body)).not.toContain(tmpRoot);
+    expect(JSON.stringify(res.body)).not.toContain("/");
+    expect(res.body.error).toBeTruthy();
+    // The details go to the server log instead.
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
   it("a missing skills root answers 200 with an empty list", async () => {
     rmSync(skillsDir(), { recursive: true, force: true });
     expect(await list()).toEqual([]);
@@ -148,6 +172,15 @@ describe("parseDescription", () => {
 
   it("handles CRLF line endings", () => {
     expect(parseDescription("---\r\ndescription: crlf\r\n---\r\n")).toBe("crlf");
+  });
+
+  it("an indented --- inside a block scalar does not end the frontmatter", () => {
+    const text = "---\ndescription: |\n  before\n  ---\n  after\nname: x\n---\nbody\n";
+    expect(parseDescription(text)).toBe("before\n---\nafter");
+  });
+
+  it("ignores a leading byte order mark", () => {
+    expect(parseDescription("\uFEFF---\ndescription: bom\n---\n")).toBe("bom");
   });
 
   it("returns empty without frontmatter or key", () => {

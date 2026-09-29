@@ -16,7 +16,10 @@ import { resolveRoot } from "../lib/file-roots.js";
  * - symlinked skill dirs are followed (the workspace links some skills in from
  *   `.agents/skills/`); dangling links are skipped silently;
  * - hidden entries (`.foo`) and plain files are skipped;
- * - a missing root yields an empty list, not an error.
+ * - an entry that cannot be read (ELOOP, EACCES, …) is skipped too, so one bad
+ *   skill never costs the whole listing;
+ * - a missing root yields an empty list, not an error; any other failure to
+ *   read the root is a 500 whose body names no path (the details are logged).
  * Order is unspecified (callers sort).
  */
 
@@ -34,7 +37,9 @@ router.get("/", async (_req, res) => {
   try {
     res.json(await discoverSkills(resolveRoot("skills")));
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    // fs messages carry the absolute path; that stays in the server log.
+    console.error("[skills] listing the skills root failed:", err);
+    res.status(500).json({ error: "Could not read the skills directory" });
   }
 });
 
@@ -59,9 +64,13 @@ export async function discoverSkills(root: string): Promise<SkillEntry[]> {
           if (!(await fs.stat(skillFile)).isFile()) return null;
           text = await fs.readFile(skillFile, "utf8");
         } catch (err) {
-          // Missing SKILL.md, dangling symlink, or an entry removed mid-walk.
-          if (isNotFound(err) || isCode(err, "ENOTDIR")) return null;
-          throw err;
+          // Missing SKILL.md, dangling symlink, or an entry removed mid-walk:
+          // expected, and silent. Anything else (a link loop, a permission)
+          // skips just this entry, noted in the log.
+          if (!isNotFound(err) && !isCode(err, "ENOTDIR")) {
+            console.warn(`[skills] skipping ${name}:`, (err as { code?: string }).code ?? err);
+          }
+          return null;
         }
         return { name, description: parseDescription(text), path: `skills/${name}/SKILL.md` };
       }),
@@ -87,9 +96,11 @@ function isNotFound(err: unknown): boolean {
  * cannot find yields "".
  */
 export function parseDescription(text: string): string {
-  const lines = text.replace(/^﻿/, "").split(/\r?\n/);
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
   if (lines[0]?.trim() !== "---") return "";
-  const end = lines.findIndex((l, i) => i > 0 && (l.trim() === "---" || l.trim() === "..."));
+  // The closing delimiter sits at column 0: an indented `---` is content of a
+  // block scalar, not the end of the frontmatter.
+  const end = lines.findIndex((l, i) => i > 0 && /^(---|\.\.\.)\s*$/.test(l));
   if (end === -1) return "";
   const fm = lines.slice(1, end);
 
