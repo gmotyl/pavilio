@@ -1243,8 +1243,9 @@ input[type="checkbox"] {
    row itself: the bar and the pane share `#17171d`, the xterm keeps `#1a1b26`,
    and what YOU type is neither agent nor shell, so the well is darker than
    both. Putting it on the field rather than the row is what makes the send
-   button beside it read as part of the surface instead of as part of the input,
-   and the row's `border-top` is the seam with the switches above it.
+   button beside it read as part of the surface instead of as part of the input.
+   The seam with the switches above is the chip row's `border-top` — that row
+   sits between the two (see `.answer-pane-chip-row`).
 
    The row paints the SPEECH ground, not the well: the well is the field's, so
    the send button beside it reads as part of the surface rather than as part of
@@ -1255,14 +1256,29 @@ input[type="checkbox"] {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 8px 12px 10px;
+  padding: 3px 12px 10px;
+  background: #17171d;
+}
+
+/* The chip row: its own row between the grip and the field's row, OUTSIDE the
+   height the grip drags. The `/ skills` chip means it is always drawn, and
+   inside the dragged height it was paid for out of the field — 16.5px of
+   field at the default 62px, less than one line. Out here the field's row
+   keeps the whole stored height and the chip row adds its own (wrapping, when
+   attachments pile up). It carries the composer's seam with the switches
+   above, since it is now the composer's first row. The top padding is the
+   composer's old one; the chip's own 4px margin plus the field row's 3px is
+   the settled mockup's 7px between the chips and the field. */
+.answer-pane-chip-row {
+  flex: none;
+  padding: 8px 12px 0;
   background: #17171d;
   border-top: 1px solid var(--border-subtle);
 }
 
-/* The field and its chips, stacked — the column that takes the row's width and
-   leaves the send button its 34px. Stretched, because the row aligns its items
-   to the bottom and this one must still fill the height the grip dragged. */
+/* The field's column — the one that takes the row's width and leaves the send
+   button its 34px. Stretched, because the row aligns its items to the bottom
+   and this one must still fill the height the grip dragged. */
 .answer-pane-composer-well {
   flex: 1 1 auto;
   min-width: 0;
@@ -1270,12 +1286,10 @@ input[type="checkbox"] {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* The command picker floats over the answer from here. */
-  position: relative;
 }
 
-/* The command picker (commands-in-context, Strand A): floated above the well
-   so nothing in the pane moves when it opens (D1) — the answer it covers is
+/* The command picker (commands-in-context, Strand A): floated above the chip
+   row so nothing in the pane moves when it opens (D1) — the answer it covers is
    the one the user is replying to, and it comes back on Escape. Drawn after
    the settled mockup's `.picker`. The list scrolls rather than growing past a
    short cell. */
@@ -1401,6 +1415,8 @@ input[type="checkbox"] {
    on `AnswerComposer`. */
 .answer-pane-composer-chips {
   flex: none;
+  /* The command picker floats over the answer from here. */
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;

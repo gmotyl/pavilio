@@ -23,12 +23,19 @@ import { expandCommand } from "./expandCommand";
 /**
  * How far the composer may be dragged, and how far one arrow key moves it.
  *
- * The floor is one line plus the field's own padding — below that the box shows
- * less than what is being typed into it. The ceiling is deliberately short of
- * the pane: the composer eats the answer it is a reply to, and a field taller
- * than the text above it has stopped being a reply to it.
+ * The number is the height of the FIELD's row — the field and the send button
+ * beside it. The chip row above it is a row of its own and is not counted: it
+ * is always drawn (the `/ skills` chip), it wraps when attachments pile up,
+ * and a chip row inside a fixed height could only ever be paid for out of the
+ * field.
+ *
+ * The floor is one line plus the field's own padding and border (34px) plus
+ * the row's padding (13px), rounded up — below that the box shows less than
+ * what is being typed into it. The ceiling is deliberately short of the pane:
+ * the composer eats the answer it is a reply to, and a field taller than the
+ * text above it has stopped being a reply to it.
  */
-const BOUNDS: RowBounds = { min: 40, max: 320, step: 12 };
+const BOUNDS: RowBounds = { min: 48, max: 320, step: 12 };
 
 /**
  * The mobile field's height floor and ceiling, in ROWS rather than pixels.
@@ -412,8 +419,10 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   /** The highlighted option's element id — the field's `aria-activedescendant`. */
   const [activeOption, setActiveOption] = useState<string | null>(null);
   const pickerRef = useRef<CommandPickerHandle | null>(null);
-  /** The composer's column, which the picker floats over; a press outside it closes the picker. */
+  /** The field's column; a press outside it and the chip row closes the picker. */
   const wellRef = useRef<HTMLDivElement | null>(null);
+  /** The chip row, which the picker floats over — see `wellRef`. */
+  const chipRowRef = useRef<HTMLDivElement | null>(null);
   /** Where the caret goes once a pick's text has been committed to the field. */
   const pendingCaret = useRef<number | null>(null);
   /**
@@ -531,20 +540,23 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   }, [learnSkills]);
 
   /**
-   * A press anywhere outside the composer's column closes the picker — the
-   * send button, the answer above, another cell.
+   * A press anywhere outside the field and the chip row (the picker is drawn
+   * inside the chip row) closes the picker — the send button, the answer
+   * above, another cell.
    *
    * Not `blur`: on a touch viewport a tap on an option can blur the field
    * before its click lands, and a picker closed by that blur would unmount the
    * very option being tapped. A press is decided by WHERE it lands, which an
-   * option inside the well never fails. Tabbing away leaves the picker up; it
+   * option inside the chip row never fails. Tabbing away leaves the picker up; it
    * takes keys only through the field, so it holds nothing hostage meanwhile.
    */
   useEffect(() => {
     if (!pickerOpen) return;
     const onPointerDown = (e: PointerEvent): void => {
       const target = e.target instanceof Node ? e.target : null;
-      if (target && wellRef.current?.contains(target)) return;
+      if (target && (wellRef.current?.contains(target) || chipRowRef.current?.contains(target))) {
+        return;
+      }
       setPickerAt(null);
     };
     document.addEventListener("pointerdown", onPointerDown, true);
@@ -875,16 +887,15 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           <PaneResizer name="composer" edge="top" label="Resize the composer" {...handleProps} />
         </div>
       )}
-      <div
-        className="answer-pane-composer"
-        // The row's height on desktop. On a touch viewport the stored number is
-        // not applied at all: the field is one row and the viewport lays the
-        // pane out.
-        style={isMobile ? undefined : { height: `${height}px` }}
-      >
-        <div className="answer-pane-composer-well" ref={wellRef}>
+      {/* The chip row is a row of its own, ABOVE the height the grip drags
+          rather than inside it: it is always drawn now, and inside a fixed
+          height it squeezed the field below one line (see BOUNDS). On a touch
+          viewport — where there is no hint line — the `/ skills` chip is the
+          only thing that teaches the picker (D18). */}
+      <div className="answer-pane-chip-row" ref={chipRowRef}>
+        <div className="answer-pane-composer-chips">
           {/* Mounted per open, so each open refetches the skills — see
-              `CommandPicker`. Above the chip row, floating over the answer, so
+              `CommandPicker`. Floated above the chip row, over the answer, so
               nothing in the pane moves when it appears (D1). */}
           {pickerOpen ? (
             <CommandPicker
@@ -896,50 +907,55 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               onSkillsLoaded={learnSkills}
             />
           ) : null}
-          {/* Always drawn now: the `/ skills` chip is its permanent first
-              entry, and on a touch viewport — where there is no hint line —
-              it is the only thing that teaches the picker (D18). */}
-          <div className="answer-pane-composer-chips">
-            <button
-              type="button"
-              className="answer-pane-composer-chip answer-pane-command-chip"
-              data-testid={`answer-pane-skills-chip-${sessionId}`}
-              title="Run one of the workspace's skills"
-              aria-haspopup="listbox"
-              aria-expanded={pickerOpen}
-              aria-controls={pickerOpen ? pickerId : undefined}
-              // Keep the focus (and the caret) in the field.
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={openPickerFromChip}
-            >
-              <b>/</b> skills
-            </button>
-            {attachments.map((path, index) => (
-                <span
-                  key={path}
-                  className="answer-pane-composer-chip"
-                  data-testid={`answer-pane-attachment-${sessionId}-${index}`}
-                  // The path is the chip's tooltip and the field's text; the
-                  // basename is all the chip itself says.
-                  title={path}
+          <button
+            type="button"
+            className="answer-pane-composer-chip answer-pane-command-chip"
+            data-testid={`answer-pane-skills-chip-${sessionId}`}
+            title="Run one of the workspace's skills"
+            aria-haspopup="listbox"
+            aria-expanded={pickerOpen}
+            aria-controls={pickerOpen ? pickerId : undefined}
+            // Keep the focus (and the caret) in the field.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={openPickerFromChip}
+          >
+            <b>/</b> skills
+          </button>
+          {attachments.map((path, index) => (
+              <span
+                key={path}
+                className="answer-pane-composer-chip"
+                data-testid={`answer-pane-attachment-${sessionId}-${index}`}
+                // The path is the chip's tooltip and the field's text; the
+                // basename is all the chip itself says.
+                title={path}
+              >
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden
                 >
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    aria-hidden
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="2" />
-                    <circle cx="8.5" cy="8.5" r="1.5" />
-                    <path d="m21 15-5-5L5 21" />
-                  </svg>
-                  {basename(path)}
-                </span>
-              ))}
-          </div>
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="m21 15-5-5L5 21" />
+                </svg>
+                {basename(path)}
+              </span>
+            ))}
+        </div>
+      </div>
+      <div
+        className="answer-pane-composer"
+        // The row's height on desktop. On a touch viewport the stored number is
+        // not applied at all: the field is one row and the viewport lays the
+        // pane out.
+        style={isMobile ? undefined : { height: `${height}px` }}
+      >
+        <div className="answer-pane-composer-well" ref={wellRef}>
           <textarea
             ref={fieldRef}
             className="answer-pane-composer-field"
