@@ -1,6 +1,6 @@
 ---
 name: pavilio-archive-plan
-description: Archive a shipped change OpenSpec-style — fold its delta specs into the living specs under openspec/specs/, move the change dir into the archived-changes tree, and distill durable knowledge into CONTEXT.md/ADRs. Skill-owned (git-mv + markdown fold), no CLI. Use when the user invokes `/pavilio-archive-plan`, a change's PR has merged, or [[pavilio-manager]] flags a merged-but-unarchived change.
+description: Archive a shipped change OpenSpec-style — fold its delta specs into the living specs under openspec/specs/, move the change dir into the archived-changes tree, distill durable knowledge into CONTEXT.md/ADRs, and retire the shipped branch, its remote and its worktree. Skill-owned (git-mv + markdown fold), no CLI. Use when the user invokes `/pavilio-archive-plan`, a change's PR has merged, or [[pavilio-manager]] flags a merged-but-unarchived change.
 ---
 
 # pavilio-archive-plan
@@ -37,6 +37,18 @@ No args → resolve project + backend from the session (see [[pavilio-openspec-s
 
 5. **Commit** the living-specs changes, `CONTEXT.md`, **and the moved change dir** in the workspace repo: `chore(<project>): archive <change-id>`.
 
+6. **Retire the shipped branch and its worktree.** A merged change leaves a branch, a remote branch and usually a worktree behind. Archiving the change without them means the repo accumulates one dead branch per shipped change — they pile up silently, because nothing else ever revisits them. Only act on a branch you have *proved* shipped.
+
+   1. **Find the candidate.** The change dir records no branch, so derive it and confirm: the head branch of the merged PR from step 1 (`gh pr view <n> --json headRefName`), or a worktree whose path matches `<repo>-<slug>` / a branch whose name carries the change slug. No candidate → say so and stop. Nothing is wrong with a change that shipped straight from `main`.
+   2. **Prove it merged by PR state, never by ancestry.** `gh pr list --head <branch> --state merged`. Where the repo squash-merges, a shipped branch is **not** an ancestor of `main`, so `git merge-base --is-ancestor` calls a merged branch unmerged — judging by ancestry keeps everything and the step does nothing. No merged PR for the branch → **keep it**. Unshipped work is the one thing this step must never eat.
+   3. **Check the worktree is safe to remove:** `git -C <worktree> status --porcelain` empty, and `git -C <worktree> log --oneline origin/<branch>..HEAD` empty. Dirty or unpushed → leave it, say why, and carry on with the rest.
+   4. **Remove**, in this order: `git worktree remove <path>` → `git branch -d <branch>` → `git push --no-verify origin --delete <branch>`.
+   5. Report what was retired and what was kept, with the reason for each keep.
+
+   **`--no-verify` on the delete, and batch the refspecs.** A `pre-push` hook that runs the test suite fires on deletions too, where there is no diff to test — one delete per push then costs a whole suite run each, which looks like a network hang rather than a hook. Deleting several at once: one push, all refspecs (`git push --no-verify origin :refs/heads/a :refs/heads/b …`).
+
+   **Never** delete a branch checked out in another worktree (git refuses — leave it and say so), a worktree this session did not create (another session's, e.g. under `/tmp`), or anything under `.claude/worktrees/`.
+
 ## Living specs layout
 
 ```
@@ -54,3 +66,4 @@ Capability files are **undated kebab-case names** (`checkout-tax`, `realtime-ref
 - Does not write or modify code.
 - Does not shell out to an OpenSpec binary — fold + move are skill logic (see [[pavilio-openspec-storage]]).
 - Does not replace [[pavilio-session-end]] — archive is per-change, session-end is per-session.
+- Does not delete unshipped branches, branches with no merged PR, or worktrees it did not create — step 6 retires only what a merged PR proves has shipped.
