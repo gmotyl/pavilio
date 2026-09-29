@@ -833,6 +833,10 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     }
     // Shift+Enter is the textarea's own business, and so is every other key.
     if (e.key !== "Enter" || e.shiftKey) return;
+    // An Enter that commits an IME candidate is the input method's, not a
+    // send — and not ours to preventDefault either. Safari reports it as key
+    // "Enter" with keyCode 229 and may not set `isComposing`, hence both.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     // Enter never types in this field, empty or not: a newline that appeared
     // when the send was swallowed would leave the next line indented by a
     // keystroke the user meant as "send".

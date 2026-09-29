@@ -11,7 +11,7 @@
  * them first and give them back. A harness that rendered the picker alone
  * could not see either handover.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -635,6 +635,46 @@ describe("CommandPicker", () => {
     expect(picker()).not.toBeInTheDocument();
     expect(field().value).toBe("/gri");
     expect(send).not.toHaveBeenCalled();
+  });
+
+  describe("an Enter that commits an IME candidate never sends", () => {
+    const composingEnters: Array<[string, Partial<KeyboardEventInit> & { keyCode?: number }]> = [
+      ["isComposing", { isComposing: true }],
+      ["keyCode 229 (Safari)", { keyCode: 229 }],
+    ];
+
+    for (const [label, init] of composingEnters) {
+      it(`with the picker closed (${label})`, async () => {
+        const user = userEvent.setup();
+        renderPane();
+
+        await user.click(field());
+        await user.keyboard("konnichiwa");
+        fireEvent.keyDown(field(), { key: "Enter", ...init });
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(send).not.toHaveBeenCalled();
+        expect(field().value).toBe("konnichiwa");
+        // The guard is on composition, not on Enter: a plain one still sends.
+        await user.keyboard("{Enter}");
+        await expectSubmitted("konnichiwa");
+      });
+
+      it(`with the picker open and nothing highlighted (${label})`, async () => {
+        const user = userEvent.setup();
+        renderPane();
+
+        await user.click(field());
+        await user.keyboard("/clear");
+        await screen.findByText("No skill matches.");
+        fireEvent.keyDown(field(), { key: "Enter", ...init });
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(send).not.toHaveBeenCalled();
+        expect(field().value).toBe("/clear");
+        expect(picker()).toBeInTheDocument();
+      });
+    }
   });
 
   it("the picker opens on a touch viewport", async () => {
