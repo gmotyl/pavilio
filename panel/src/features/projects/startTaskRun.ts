@@ -65,9 +65,11 @@ function submit(sessionId: string, live: LiveTerminal, runLine: string): Promise
       onFailed: (stage) =>
         reject(
           new Error(
+            // Either way the session exists: say so, so nobody retries into a
+            // second terminal without looking for the first.
             stage === "body"
-              ? "The run line could not be written to the new terminal"
-              : "The run line was typed but its Enter did not reach the terminal",
+              ? "The terminal was created but the run line could not be sent"
+              : "The terminal was created and the run line typed, but its Enter did not reach it",
           ),
         ),
     });

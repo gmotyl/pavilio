@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ClipboardList } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
@@ -322,9 +322,16 @@ export default function PlansTab({ projectName }: Props) {
   const navigate = useNavigate();
   const [runError, setRunError] = useState<string | null>(null);
   useEffect(() => setRunError(null), [selectedPath]);
+  // The selection at settle time: a run started from one tasks.md that fails
+  // after the user opened another must not report its error under that one.
+  const selectedPathRef = useRef(selectedPath);
+  useEffect(() => {
+    selectedPathRef.current = selectedPath;
+  }, [selectedPath]);
   const onRun = useCallback(
-    (runLine: string) =>
-      startTaskRun({ project: projectName, runLine }).then(
+    (runLine: string) => {
+      const startedFrom = selectedPathRef.current;
+      return startTaskRun({ project: projectName, runLine }).then(
         (sessionId) => {
           setRunError(null);
           // Same hand-off as the sidebar's new-terminal button: the focus is
@@ -334,9 +341,11 @@ export default function PlansTab({ projectName }: Props) {
           navigate(`/project/${encodeURIComponent(projectName)}/iterm`);
         },
         (err: unknown) => {
+          if (selectedPathRef.current !== startedFrom) return;
           setRunError(err instanceof Error ? err.message : String(err));
         },
-      ),
+      );
+    },
     [projectName, navigate],
   );
 

@@ -26,6 +26,7 @@ const LAUNCHERS: TerminalLauncher[] = [
 
 const ACTIVE_TASKS = "/p/projects/alokai/plans/openspec/changes/live-change/tasks.md";
 const ACTIVE_PROPOSAL = "/p/projects/alokai/plans/openspec/changes/live-change/proposal.md";
+const OTHER_TASKS = "/p/projects/alokai/plans/openspec/changes/next-change/tasks.md";
 const ARCHIVED_TASKS =
   "/p/projects/alokai/plans/openspec/changes/archive/2026-01-05-done-change/tasks.md";
 
@@ -57,6 +58,13 @@ const TREE = {
           status: "active",
           archiveDate: null,
           artifacts: [artifact("proposal", ACTIVE_PROPOSAL), artifact("tasks", ACTIVE_TASKS)],
+        },
+        {
+          changeId: "next-change",
+          source: "openspec:project",
+          status: "active",
+          archiveDate: null,
+          artifacts: [artifact("tasks", OTHER_TASKS)],
         },
         {
           changeId: "2026-01-05-done-change",
@@ -147,5 +155,34 @@ describe("PlansTab run banner", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Could not create a terminal");
     expect(screen.queryByText("terminal view")).toBeNull();
+  });
+
+  it("a run that fails after switching to another tasks.md shows no error there", async () => {
+    let rejectRun: (err: Error) => void = () => {};
+    vi.mocked(startTaskRun).mockImplementationOnce(
+      () => new Promise<string>((_resolve, reject) => (rejectRun = reject)),
+    );
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
+
+    // The user moves on to the other change's tasks.md before the run settles.
+    fireEvent.click(
+      await screen.findByTestId("plans-tab-artifact-openspec:project-next-change-tasks"),
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([u]) => String(u).includes("plans/read") && String(u).includes("next-change"),
+        ),
+      ).toBe(true),
+    );
+    await screen.findByText("Step two pending");
+
+    rejectRun(new Error("Could not create a terminal"));
+    // Let the rejection land, then check nothing was reported under the new file.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
