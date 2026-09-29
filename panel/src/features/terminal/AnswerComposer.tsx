@@ -396,11 +396,11 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    * Where the command picker's `/token` starts in the draft, or null while the
    * picker is closed.
    *
-   * A position rather than a boolean so the picker is not tied to the start of
-   * the field: a typed `/` only ever opens it at 0 (the draft must be empty,
-   * per the spec), but the `/ skills` chip of Task 11 can open the SAME picker
-   * by splicing a `/` in at the caret and setting this to the caret — the
-   * query, the close rule and the insertion below then work unchanged.
+   * Today it is only ever 0: a typed `/` opens the picker only on an empty
+   * draft (per the spec), and the `/ skills` chip puts its `/` at the start
+   * of the draft too, because only a leading `/<name>` is expanded at send
+   * (see `openPickerFromChip`). It stays a position so the query, the close
+   * rule and the insertion below read the token from one place.
    *
    * The picker is open only while a `/token` is still at this position AND the
    * caret is inside it (see `onChange`). That is the close rule the trimmed
@@ -578,26 +578,29 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   /**
    * The `/ skills` chip: the same picker a typed `/` opens, reached by click.
    *
-   * A `/` is spliced in at the caret and the picker is opened on it, so the
-   * query, the close rule and the pick all work exactly as for a typed slash
-   * (see `pickerAt`). A space follows it when the caret sat in front of other
-   * text, or the `/token` would swallow that text as its query. The chip's
-   * mousedown is prevented, so the field keeps the focus (and its caret); the
-   * `focus()` below is for a field that was not focused to begin with.
+   * The `/` always goes in at the START of the draft, wherever the caret was,
+   * and the picker is opened on it, so the query, the close rule and the pick
+   * all work exactly as for a typed slash (see `pickerAt`). The start and not
+   * the caret because a skill is a command only there: `expandCommand` expands
+   * a `/<name>` at index 0 and nowhere else, so `see /pavilio-question` spliced
+   * at the caret would be sent verbatim. Text already in the draft becomes the
+   * skill's arguments instead. A space follows the slash when text follows it,
+   * or the `/token` would swallow that text as its query. The caret is left
+   * right after the slash. The chip's mousedown is prevented, so the field
+   * keeps the focus; the `focus()` below is for a field that was not focused
+   * to begin with.
    */
   const openPickerFromChip = (): void => {
     const field = fieldRef.current;
     field?.focus();
     if (pickerOpen) return;
     const base = getDraft(sessionId);
-    const caret = Math.min(field?.selectionStart ?? base.length, base.length);
-    const after = base.slice(caret);
-    const slash = after === "" || /^\s/.test(after) ? "/" : "/ ";
-    const next = `${base.slice(0, caret)}${slash}${after}`;
-    placeCaret(caret + 1);
+    const slash = base === "" || /^\s/.test(base) ? "/" : "/ ";
+    const next = `${slash}${base}`;
+    placeCaret(1);
     setDraft(sessionId, next);
     setText(next);
-    setPickerAt(caret);
+    setPickerAt(0);
     setActiveOption(null);
     setFailure(null);
   };

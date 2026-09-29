@@ -123,16 +123,60 @@ describe("AnswerComposer command chip", () => {
     await user.click(chip());
 
     // The same picker a leading `/` opens, filtering on the token the chip
-    // just spliced in at the caret — and the field keeps the focus.
+    // just put at the START of the draft (only a leading `/<name>` is a
+    // command), with a space so the text already typed is not the query. The
+    // caret sits right after the slash, and the field keeps the focus.
     const listbox = await screen.findByRole("listbox");
     await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(2));
-    expect(field().value).toBe("see /");
-    expect(field().selectionStart).toBe(5);
+    expect(field().value).toBe("/ see ");
+    expect(field().selectionStart).toBe(1);
     expect(document.activeElement).toBe(field());
 
     // Typing filters it exactly as it would after a typed slash.
     await user.keyboard("quest");
     await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+  });
+
+  it("a skill picked from the chip in front of text is sent as the instruction", async () => {
+    const user = userEvent.setup();
+    renderComposer();
+    await skillsLoaded();
+
+    await user.click(field());
+    await user.keyboard("see");
+    await user.click(chip());
+    const listbox = await screen.findByRole("listbox");
+    await user.keyboard("gri");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    await user.keyboard("{Enter}");
+
+    // The pick replaced the query; what was typed before is now the argument.
+    expect(field().value).toBe("/pavilio-grill see");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await user.keyboard("{Enter}");
+
+    await expectSubmitted(
+      "Read and follow the instructions in skills/pavilio-grill/SKILL.md exactly. ARGUMENTS: see",
+    );
+  });
+
+  it("a skill picked from the chip on an empty draft is sent as the instruction", async () => {
+    const user = userEvent.setup();
+    renderComposer();
+    await skillsLoaded();
+
+    await user.click(chip());
+    const listbox = await screen.findByRole("listbox");
+    expect(field().value).toBe("/");
+    await user.keyboard("quest");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    await user.keyboard("{Enter}");
+    expect(field().value).toBe("/pavilio-question");
+    await user.keyboard("{Enter}");
+
+    await expectSubmitted(
+      "Read and follow the instructions in skills/pavilio-question/SKILL.md exactly. ARGUMENTS:",
+    );
   });
 
   it("the chip shares the row with a pasted-image chip", async () => {
