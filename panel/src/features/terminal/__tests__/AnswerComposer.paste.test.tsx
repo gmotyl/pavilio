@@ -28,6 +28,11 @@ const send = vi.fn((_data: string) => true);
 /** The pane's handover. Not this file's subject — the pane's own suites pin it. */
 const onSubmitted = vi.fn();
 const fetchFn = vi.fn();
+/**
+ * The upload requests only. The composer also loads `/api/skills` once on
+ * mount (the names its send-time expansion knows), which is not a paste.
+ */
+const uploads = (): unknown[][] => fetchFn.mock.calls.filter(([url]) => url !== "/api/skills");
 
 /**
  * The two writes one submit makes: the body, then the return on its own turn.
@@ -125,8 +130,8 @@ describe("AnswerComposer paste", () => {
 
     // The same request the terminal's handler makes, down to the session id:
     // the server chowns the saved file to the OS user behind that session.
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchFn.mock.calls[0];
+    expect(uploads()).toHaveLength(1);
+    const [url, init] = uploads()[0] as [string, RequestInit];
     expect(url).toBe("/api/terminal/paste-image");
     expect(init.method).toBe("POST");
     const form = init.body as FormData;
@@ -148,7 +153,7 @@ describe("AnswerComposer paste", () => {
     // `preventDefault` — and no upload was attempted for a clipboard with no
     // image in it.
     expect(field().value).toBe("just words");
-    expect(fetchFn).not.toHaveBeenCalled();
+    expect(uploads()).toHaveLength(0);
   });
 
   it("reports a failed upload and changes nothing", async () => {

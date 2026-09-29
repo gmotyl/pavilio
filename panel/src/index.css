@@ -1423,6 +1423,32 @@ input[type="checkbox"] {
   text-overflow: ellipsis;
 }
 
+/* The `/ skills` chip: the picker's visible door, first in the same row as
+   the attachments. Neutral rather than blue, so it never reads as a file that
+   has been attached; the accent is only on the slash. */
+.answer-pane-command-chip {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.answer-pane-command-chip b {
+  color: var(--accent);
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 600;
+}
+
+.answer-pane-command-chip:hover,
+.answer-pane-command-chip[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
 /* The one control that survives the mobile collapse: on a phone there is no
    Shift+Enter to explain and no grip to drag, so this is the whole affordance. */
 .answer-pane-composer-send {

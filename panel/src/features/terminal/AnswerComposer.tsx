@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { preferences } from "../../preferences/declarations";
@@ -17,6 +17,8 @@ import { projectOfSession } from "./sessionProject";
 import { reconnectOnActivate } from "./terminalInstances";
 import { dismissAttentionOnArrival } from "./attentionArrival";
 import { CommandPicker, type CommandPickerHandle } from "./CommandPicker";
+import type { SkillEntry } from "./commandSource";
+import { expandCommand } from "./expandCommand";
 
 /**
  * How far the composer may be dragged, and how far one arrow key moves it.
@@ -414,6 +416,26 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   const wellRef = useRef<HTMLDivElement | null>(null);
   /** Where the caret goes once a pick's text has been committed to the field. */
   const pendingCaret = useRef<number | null>(null);
+  /**
+   * The skill names a leading `/<name>` is expanded for at send (D7).
+   *
+   * The picker's list is gone by the time the user sends — it unmounts on the
+   * pick — and `submit` must not wait on a fetch of its own: a send is timed
+   * by `submitToPty` and the retry ticket, and an await in front of it would
+   * move every one of those clocks. So the names are kept here, refreshed by a
+   * one-shot load when the composer mounts and again whenever the picker's
+   * own open loads the list, and a picked name is added the moment it is
+   * picked (it is known by construction).
+   *
+   * Accepted degradation: a skill added to the workspace since the last load,
+   * typed by hand without opening the picker, is sent verbatim — the same
+   * text the user sees in the field, which the agent may still act on.
+   * A ref, not state: it is read only at send and never drawn.
+   */
+  const knownSkills = useRef<Set<string>>(new Set());
+  const learnSkills = useCallback((skills: readonly SkillEntry[]): void => {
+    knownSkills.current = new Set(skills.map((s) => s.name));
+  }, []);
   const pickerToken = pickerAt === null ? null : slashToken(text, pickerAt);
   const pickerOpen = pickerToken !== null;
   const pickerId = `command-picker-${sessionId}`;
@@ -475,6 +497,28 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   }, [text]);
 
   /**
+   * The composer's own load of the known skill names — see `knownSkills`.
+   * Once per mount (the pane mounts the composer per open), silent on failure:
+   * an empty set only means a hand-typed `/name` is sent as typed.
+   */
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/skills");
+        if (!res?.ok) return;
+        const data: unknown = await res.json();
+        if (live && Array.isArray(data)) learnSkills(data as SkillEntry[]);
+      } catch {
+        // The picker's load, or the next mount, will fill it in.
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [learnSkills]);
+
+  /**
    * A press anywhere outside the composer's column closes the picker — the
    * send button, the answer above, another cell.
    *
@@ -510,12 +554,40 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     const base = getDraft(sessionId);
     const token = slashToken(base, pickerAt) ?? "";
     const short = `/${name}`;
+    knownSkills.current.add(name);
     const next = `${base.slice(0, pickerAt)}${short}${base.slice(pickerAt + token.length)}`;
     pendingCaret.current = pickerAt + short.length;
     setDraft(sessionId, next);
     setText(next);
     setPickerAt(null);
     setActiveOption(null);
+  };
+
+  /**
+   * The `/ skills` chip: the same picker a typed `/` opens, reached by click.
+   *
+   * A `/` is spliced in at the caret and the picker is opened on it, so the
+   * query, the close rule and the pick all work exactly as for a typed slash
+   * (see `pickerAt`). A space follows it when the caret sat in front of other
+   * text, or the `/token` would swallow that text as its query. The chip's
+   * mousedown is prevented, so the field keeps the focus (and its caret); the
+   * `focus()` below is for a field that was not focused to begin with.
+   */
+  const openPickerFromChip = (): void => {
+    const field = fieldRef.current;
+    field?.focus();
+    if (pickerOpen) return;
+    const base = getDraft(sessionId);
+    const caret = Math.min(field?.selectionStart ?? base.length, base.length);
+    const after = base.slice(caret);
+    const slash = after === "" || /^\s/.test(after) ? "/" : "/ ";
+    const next = `${base.slice(0, caret)}${slash}${after}`;
+    pendingCaret.current = caret + 1;
+    setDraft(sessionId, next);
+    setText(next);
+    setPickerAt(caret);
+    setActiveOption(null);
+    setFailure(null);
   };
 
   /**
@@ -550,6 +622,11 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // from goes on being editable while the submit is in flight — this string
     // is what was actually written, and what the clear below is conditional on.
     const reply = text;
+    // What the PTY is given: a leading known `/<name>` becomes the portable
+    // instruction (D7, D16), anything else goes exactly as typed. Only the
+    // WRITE changes — the field, the draft store and `consumeDraft`'s
+    // comparison all keep `reply`, so the user's text is never rewritten.
+    const outgoing = expandCommand(reply, knownSkills.current);
     // The last submit's verdict is spent the moment a new one is made, and
     // this one has no verdict yet.
     setFailure(null);
@@ -576,7 +653,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // now be three seconds away.
     //
     // The body now, its submitting return on a later turn — never one write.
-    submitToPty(sessionId, send, reply, {
+    submitToPty(sessionId, send, outgoing, {
       // The waiting state means "the agent is working on what I just said", so
       // the pane is handed over where the body is actually WRITTEN and nowhere
       // else. This used to be decided here, from a flag the failure callback
@@ -795,11 +872,28 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               query={pickerToken.slice(1)}
               onPick={pick}
               onActiveChange={setActiveOption}
+              onSkillsLoaded={learnSkills}
             />
           ) : null}
-          {attachments.length > 0 ? (
-            <div className="answer-pane-composer-chips">
-              {attachments.map((path, index) => (
+          {/* Always drawn now: the `/ skills` chip is its permanent first
+              entry, and on a touch viewport — where there is no hint line —
+              it is the only thing that teaches the picker (D18). */}
+          <div className="answer-pane-composer-chips">
+            <button
+              type="button"
+              className="answer-pane-composer-chip answer-pane-command-chip"
+              data-testid={`answer-pane-skills-chip-${sessionId}`}
+              title="Run one of the workspace's skills"
+              aria-haspopup="listbox"
+              aria-expanded={pickerOpen}
+              aria-controls={pickerOpen ? pickerId : undefined}
+              // Keep the focus (and the caret) in the field.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={openPickerFromChip}
+            >
+              <b>/</b> skills
+            </button>
+            {attachments.map((path, index) => (
                 <span
                   key={path}
                   className="answer-pane-composer-chip"
@@ -824,8 +918,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
                   {basename(path)}
                 </span>
               ))}
-            </div>
-          ) : null}
+          </div>
           <textarea
             ref={fieldRef}
             className="answer-pane-composer-field"

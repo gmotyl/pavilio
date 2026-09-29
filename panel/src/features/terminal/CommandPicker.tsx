@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from "react";
-import { filterSkills, useSkills } from "./commandSource";
+import { filterSkills, useSkills, type SkillEntry } from "./commandSource";
 
 /** The keys the picker takes ahead of the composer while it is open. */
 export type PickerKey = "ArrowUp" | "ArrowDown" | "Enter";
@@ -31,6 +31,12 @@ export interface CommandPickerProps {
    * is how a screen reader is told which entry Enter would insert.
    */
   onActiveChange: (optionId: string | null) => void;
+  /**
+   * The list this open fetched, once it has arrived (not on a failed fetch).
+   * The composer keeps the names so it can tell, at send time, a picked skill
+   * from any other leading slash — the list itself is gone by then.
+   */
+  onSkillsLoaded?: (skills: readonly SkillEntry[]) => void;
   ref?: Ref<CommandPickerHandle>;
 }
 
@@ -62,8 +68,19 @@ export interface CommandPickerProps {
  * the first entry whenever the query changes, because the list it indexed
  * into is a different list now.
  */
-export function CommandPicker({ id, query, onPick, onActiveChange, ref }: CommandPickerProps) {
+export function CommandPicker({
+  id,
+  query,
+  onPick,
+  onActiveChange,
+  onSkillsLoaded,
+  ref,
+}: CommandPickerProps) {
   const { skills, loading, error } = useSkills();
+
+  useEffect(() => {
+    if (!loading && !error) onSkillsLoaded?.(skills);
+  }, [skills, loading, error, onSkillsLoaded]);
   const matches = useMemo(() => filterSkills(skills, query), [skills, query]);
   const [active, setActive] = useState(0);
   // Reset during render rather than in an effect, so no frame ever shows the

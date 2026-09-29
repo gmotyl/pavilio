@@ -278,7 +278,10 @@ describe("CommandPicker", () => {
     // A space ends the token: the trimmed query would still match, so the
     // picker must close on its own or this Enter would pick again.
     await user.keyboard(" who is Ann{Enter}");
-    await expectSubmitted("/pavilio-question who is Ann");
+    // The field showed the short form; the PTY gets the portable instruction.
+    await expectSubmitted(
+      "Read and follow the instructions in skills/pavilio-question/SKILL.md exactly. ARGUMENTS: who is Ann",
+    );
   });
 
   it("a space after the token closes the picker", async () => {
@@ -292,7 +295,9 @@ describe("CommandPicker", () => {
 
     expect(picker()).not.toBeInTheDocument();
     await user.keyboard("{Enter}");
-    await expectSubmitted("/pavilio-question ");
+    await expectSubmitted(
+      "Read and follow the instructions in skills/pavilio-question/SKILL.md exactly. ARGUMENTS:",
+    );
   });
 
   it("the short form lands at the caret with the caret after it", async () => {
