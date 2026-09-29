@@ -137,6 +137,24 @@ describe("AnswerComposer command chip", () => {
     await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
   });
 
+  it("the chip on a draft that already starts with a /token opens the picker on it", async () => {
+    const user = userEvent.setup();
+    renderComposer();
+
+    await user.click(field());
+    // The space closes the picker the typed `/` opened.
+    await user.keyboard("/quest more");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await user.click(chip());
+
+    // No second slash: the leading token is the query, the caret at its end.
+    const listbox = await screen.findByRole("listbox");
+    expect(field().value).toBe("/quest more");
+    expect(field().selectionStart).toBe("/quest".length);
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    expect(within(listbox).getByRole("option").textContent).toContain("pavilio-question");
+  });
+
   it("a skill picked from the chip in front of text is sent as the instruction", async () => {
     const user = userEvent.setup();
     renderComposer();

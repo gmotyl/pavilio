@@ -23,12 +23,18 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
-import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
+import { cssPx, cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import type { UtteranceQueue } from "../../speech/utteranceQueue";
-import { AnswerPane } from "../AnswerPane";
+import {
+  ANSWER_PANE_BODY_FLOOR,
+  ANSWER_PANE_COMPOSER_CHROME,
+  AnswerPane,
+  MIN_PANE_HEIGHT,
+  minPaneHeight,
+} from "../AnswerPane";
 import { __resetSessionStoreForTests, refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
 
@@ -350,7 +356,7 @@ describe("the answer pane's bottom edge", () => {
    * the stylesheet's four insets to say "cover the terminal area".
    *
    * Without the guard the measurement would be 0, the bounds would clamp to
-   * `Math.max(120, 0)` and every pane would open at its 120px floor with the
+   * `Math.max(floor, 0)` and every pane would open at its floor with the
    * terminal exposed below it — the behaviour change #115 rejected — on the
    * first frame of every real mount. Nothing else in this suite sees it: the
    * other tests all declare a measured area, so they never reach the branch.
@@ -358,7 +364,7 @@ describe("the answer pane's bottom edge", () => {
   it("applies no height while the terminal area measures zero", () => {
     renderPaneFor(SESSION, 0);
 
-    // Not "120px", and not "0px": no height at all, which is the only thing
+    // Not the floor, and not "0px": no height at all, which is the only thing
     // that leaves `.answer-pane`'s bottom inset in force.
     expect(pane().style.height).toBe("");
     expect(pane().style.bottom).toBe("");
@@ -439,6 +445,85 @@ describe("the answer pane's bottom edge", () => {
  * user just made would be silently discarded, with every unnameable cell in the
  * tab sharing the one value in the meantime.
  */
+/**
+ * The floor the pane can be dragged down to. With the composer on, the
+ * composer's rows are chrome the answer cannot give up: a floor below them
+ * pushes the pane's own drag row out of the bottom of the pane, where it can
+ * no longer be grabbed.
+ */
+describe("the answer pane's floor", () => {
+  /** Drags the pane far past any floor and returns the height it stopped at. */
+  const dragToFloor = (): number => {
+    const rail = handle()!;
+    fireEvent.pointerDown(rail, { pointerId: 1, clientY: 500 });
+    fireEvent.pointerMove(rail, { pointerId: 1, clientY: -5000 });
+    return Number.parseInt(pane().style.height, 10);
+  };
+
+  it("covers the composer's fixed chrome at the default field height", () => {
+    renderPane();
+    const floor = dragToFloor();
+    // The reviewer's browser measurement: 159px of chrome at the default 62px.
+    expect(floor).toBeGreaterThanOrEqual(159 + ANSWER_PANE_BODY_FLOOR);
+    expect(floor).toBe(minPaneHeight(true, preferences.answerComposerHeight.default));
+    expect(handle()!.getAttribute("aria-valuemin")).toBe(String(floor));
+  });
+
+  it("follows a taller composer", () => {
+    act(() => writePreference(preferences.answerComposerHeight, 200, PROJECT));
+    renderPane();
+    expect(dragToFloor()).toBe(ANSWER_PANE_COMPOSER_CHROME + 200 + ANSWER_PANE_BODY_FLOOR);
+  });
+
+  it("is the bare floor with the composer off", () => {
+    act(() => writePreference(preferences.answerComposerEnabled, false));
+    renderPane();
+    expect(dragToFloor()).toBe(MIN_PANE_HEIGHT);
+  });
+
+  /**
+   * The chrome constant against the stylesheet. jsdom does no layout, so this
+   * is a LOWER bound built from what the CSS declares — every fixed height,
+   * padding, border and margin of the rows it counts, and one font-size of
+   * line box per text row (a line box is never shorter than its font). If a
+   * row grows in the CSS past what the constant allows, this fails.
+   */
+  it("the chrome constant is at least what the stylesheet declares", () => {
+    const pad = (selector: string, side: "top" | "bottom"): number => {
+      const decl = cssRule(selector).replace(/\/\*[\s\S]*?\*\//g, "");
+      const m = /(?:^|;)\s*padding\s*:\s*([^;]+)/.exec(decl);
+      if (!m) throw new Error(`no padding in ${selector}`);
+      const parts = m[1].trim().split(/\s+/).map((v) => Number.parseFloat(v) || 0);
+      const [top, , bottom = top] = parts.length === 1 ? [parts[0], 0, parts[0]] : parts;
+      return side === "top" ? top : bottom;
+    };
+    const chip =
+      pad(".answer-pane-command-chip", "top") +
+      pad(".answer-pane-command-chip", "bottom") +
+      2 + // its 1px border, top and bottom
+      cssPx(".answer-pane-composer-chip", "font-size") +
+      cssPx(".answer-pane-composer-chip", "margin-bottom");
+    const chipRow = pad(".answer-pane-chip-row", "top") + 1 /* seam */ + chip;
+    const meta =
+      pad(".answer-pane-meta", "top") +
+      pad(".answer-pane-meta", "bottom") +
+      cssPx(".answer-pane-meta", "font-size");
+    const hint =
+      pad(".answer-pane-hint", "top") +
+      pad(".answer-pane-hint", "bottom") +
+      cssPx(".answer-pane-hint", "font-size");
+    const declared =
+      cssPx(".answer-pane-grip", "height") +
+      chipRow +
+      meta +
+      hint +
+      cssPx(".answer-pane-drag", "height");
+
+    expect(declared).toBeGreaterThan(60); // vacuity guard: the rows were found
+    expect(ANSWER_PANE_COMPOSER_CHROME).toBeGreaterThanOrEqual(declared);
+  });
+});
+
 describe("the answer pane with no project to name", () => {
   /** Both `project`-scoped heights, under every scope they could be keyed by. */
   function heightKeysInStorage(): string[] {

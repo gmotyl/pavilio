@@ -35,7 +35,8 @@ import { expandCommand } from "./expandCommand";
  * the composer eats the answer it is a reply to, and a field taller than the
  * text above it has stopped being a reply to it.
  */
-const BOUNDS: RowBounds = { min: 48, max: 320, step: 12 };
+export const ANSWER_COMPOSER_BOUNDS: RowBounds = { min: 48, max: 320, step: 12 };
+const BOUNDS = ANSWER_COMPOSER_BOUNDS;
 
 /**
  * The mobile field's height floor and ceiling, in ROWS rather than pixels.
@@ -605,15 +606,25 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    * at the caret would be sent verbatim. Text already in the draft becomes the
    * skill's arguments instead. A space follows the slash when text follows it,
    * or the `/token` would swallow that text as its query. The caret is left
-   * right after the slash. The chip's mousedown is prevented, so the field
-   * keeps the focus; the `focus()` below is for a field that was not focused
-   * to begin with.
+   * right after the slash. A draft that already starts with a `/token` gets
+   * no second slash: the picker opens on that token, the caret at its end, so
+   * it is the query and a pick replaces it. The chip's mousedown is
+   * prevented, so the field keeps the focus; the `focus()` below is for a
+   * field that was not focused to begin with.
    */
   const openPickerFromChip = (): void => {
     const field = fieldRef.current;
     field?.focus();
     if (pickerOpen) return;
     const base = getDraft(sessionId);
+    const leading = slashToken(base, 0);
+    if (leading !== null) {
+      placeCaret(leading.length);
+      setPickerAt(0);
+      setActiveOption(null);
+      setFailure(null);
+      return;
+    }
     const slash = base === "" || /^\s/.test(base) ? "/" : "/ ";
     const next = `${slash}${base}`;
     placeCaret(1);

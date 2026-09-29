@@ -1058,8 +1058,8 @@ input[type="checkbox"] {
   /* No paint of its own: the pane is one surface now, the row's. A darker well
      here is what made the text read as a card's inside, and it is also the
      xterm's own ground (`--bg-base`), which is the one thing the pane must not
-     look like. The seams left are hairlines on the two rows BELOW the text —
-     the meta row's `border-top`, and the composer's own when it is on. */
+     look like. The seam left is the hairline on the composer's chip row,
+     below the meta row, when the composer is on. */
   display: grid;
   grid-template-columns: 22px 1fr;
   column-gap: 10px;
@@ -1610,8 +1610,9 @@ input[type="checkbox"] {
 /* The pane's two switches, right-aligned, directly under the text and ABOVE the
    composer — design.md's order. Outside the scroll container so the row stays
    put while the text scrolls. It paints nothing of its own, and draws no rule
-   either: the seam below it is the composer's own `border-top`, and a second
-   hairline here would box the switches in between two lines. */
+   either: the seam below it is the chip row's `border-top` (the composer's
+   first row), and a second hairline here would box the switches in between
+   two lines. */
 .answer-pane-meta {
   flex: none;
   display: flex;
