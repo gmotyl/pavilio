@@ -62,6 +62,8 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   // `optionalStr`: text that may be absent. No "" sample — a blank stored
   // value reads back as `null` by design, since a blank override is none.
   "plans.taskPrompt.override": [null, "Only {change}.", "true", "240", "null", "{}"],
+  // `optionalStr` again: a launcher name, or `null` for "nothing picked yet".
+  "plans.runBanner.launcher": [null, "codex", "true", "240", "null", "{}"],
 
   // ── oneOf ───────────────────────────────────────────────────────────────
   "repos.searchScope": ["changed", "branch-diff", "commits"],
@@ -99,7 +101,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 41;
+const DECLARATION_COUNT = 42;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { RunBanner } from "../RunBanner";
@@ -217,6 +217,62 @@ describe("RunBanner", () => {
 
     expect(onRun).toHaveBeenCalledTimes(1);
     expect(objective().value).not.toContain("\n");
+  });
+
+  it("the last CLI picked is preselected on the next banner", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    const first = render(
+      <RunBanner status={STATUS} project="pavilio" path={PATH} onRun={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("radio", { name: "codex" }));
+    expect(globals.__PAVILIO_PREFS__![storageKey(preferences.plansRunLauncher)]).toBe("codex");
+    first.unmount();
+
+    // Another change, another file: the pick is one choice for every change.
+    const onRun = vi.fn();
+    render(
+      <RunBanner
+        status={{ changeId: "2026-10-01-other", total: 3, remaining: 3 }}
+        project="pavilio"
+        path="projects/pavilio/plans/openspec/changes/2026-10-01-other/tasks.md"
+        onRun={onRun}
+      />,
+    );
+
+    expect(screen.getByRole("radio", { name: "codex" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(onRun.mock.calls[0][0]).toMatch(/^codex "\/goal /);
+  });
+
+  it("a remembered CLI that is no longer runnable falls back to the first", () => {
+    writePreference(preferences.terminalLaunchers, [
+      LAUNCHERS[0],
+      { name: "codex", command: "codex" },
+      LAUNCHERS[2],
+    ]);
+    writePreference(preferences.plansRunLauncher, "codex");
+    renderBanner();
+
+    expect(screen.getByRole("radio", { name: "claude" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("radio", { name: "codex" })).not.toBeInTheDocument();
+  });
+
+  it("reordering launchers keeps the picked CLI", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    const onRun = vi.fn();
+    renderBanner(onRun);
+    await user.click(screen.getByRole("radio", { name: "codex" }));
+
+    act(() => {
+      writePreference(preferences.terminalLaunchers, [LAUNCHERS[2], LAUNCHERS[0], LAUNCHERS[1]]);
+    });
+
+    expect(cliOptions()).toEqual(["opencode", "claude", "codex"]);
+    expect(screen.getByRole("radio", { name: "codex" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(onRun.mock.calls[0][0]).toMatch(/^codex "\/goal /);
   });
 
   it("offers no run when no launcher has a run loop", () => {

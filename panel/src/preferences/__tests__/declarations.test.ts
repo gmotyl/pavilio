@@ -17,6 +17,7 @@ const PORTABLE = [
   "git.viewMode",
   "git.worktree.expanded",
   "plans.runBanner.expanded",
+  "plans.runBanner.launcher",
   "plans.taskPrompt",
   "plans.taskPrompt.override",
   "projects.favorites",
@@ -108,6 +109,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["nav.lastReposQuery", null, "project"],
   // Open until the chevron is pressed: an unset collapse preference is expanded.
   ["plans.runBanner.expanded", true, "global"],
+  // `null` is "nothing picked yet": the banner takes the first runnable launcher.
+  ["plans.runBanner.launcher", null, "global"],
   [
     "plans.taskPrompt",
     "Implement all tasks in {path}; done when every task is checked and tests + lint pass.",

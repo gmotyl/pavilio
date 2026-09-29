@@ -20,6 +20,9 @@ import type { TaskListStatus } from "./taskList";
  * editable: it belongs to the launcher entry, not to the template, and it
  * redraws when the CLI switch moves.
  *
+ * The switch remembers the last CLI picked, by name, for every change
+ * (`plansRunLauncher`), so a run is not a question asked every time.
+ *
  * Collapse is one remembered toggle for every change (`plansBannerExpanded`),
  * and the collapsed row keeps the count, the switch and Run, so a plan that is
  * only being read costs a single row and can still be started from it.
@@ -56,6 +59,23 @@ function runnable(launchers: TerminalLauncher[]): (TerminalLauncher & { runLoop:
   );
 }
 
+/**
+ * Which runnable launcher is checked. By NAME, so a reordered or shortened
+ * list keeps the pick on the same CLI: this banner's own pick first (its
+ * position when that still holds the same name), else the remembered name,
+ * else — nothing picked, or the pick gone or no longer runnable — the first.
+ */
+function resolvePick(
+  options: TerminalLauncher[],
+  picked: { index: number; name: string } | null,
+  remembered: string | null,
+): number {
+  if (picked && options[picked.index]?.name === picked.name) return picked.index;
+  const name = picked?.name ?? remembered;
+  const at = name === null ? -1 : options.findIndex((entry) => entry.name === name);
+  return at < 0 ? 0 : at;
+}
+
 export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
   const [launchers] = usePreference(preferences.terminalLaunchers);
   const [expanded, setExpanded] = usePreference(preferences.plansBannerExpanded);
@@ -79,11 +99,17 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
   }
 
   const options = runnable(launchers);
-  const [picked, setPicked] = useState<number>(0);
-  // Positions, not names: two launchers may share a name. A list that shrank
-  // under the pick falls back to the first runnable launcher.
-  const pickedIndex = picked < options.length ? picked : 0;
+  const [remembered, setRemembered] = usePreference(preferences.plansRunLauncher);
+  // This banner's own pick carries its position too, so of two launchers that
+  // share a name the one clicked stays checked; the preference keeps the name.
+  const [picked, setPicked] = useState<{ index: number; name: string } | null>(null);
+  const pickedIndex = resolvePick(options, picked, remembered);
   const launcher = options[pickedIndex];
+  const pick = (index: number) => {
+    const name = options[index].name;
+    setPicked({ index, name });
+    setRemembered(name);
+  };
 
   const [busy, setBusy] = useState(false);
   const canRun = Boolean(launcher) && draft.trim() !== "" && !busy;
@@ -133,7 +159,7 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
               role="radio"
               aria-checked={index === pickedIndex}
               data-on={index === pickedIndex || undefined}
-              onClick={() => setPicked(index)}
+              onClick={() => pick(index)}
             >
               {entry.name}
             </button>

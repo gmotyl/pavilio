@@ -334,6 +334,21 @@ export const preferences = {
     codec: bool,
     portable: true,
   }),
+  /**
+   * The CLI the run banner's switch last picked, by launcher NAME, so a run is
+   * not a question asked every time. A name rather than a position: a
+   * reordered or shortened launcher list must not silently move the pick.
+   * `null` (stored blank) is "nothing picked yet": the banner takes the first
+   * launcher with a run loop, and does the same when the remembered one has
+   * gone or lost its run loop.
+   */
+  plansRunLauncher: definePreference<string | null>({
+    key: "plans.runBanner.launcher", // was: nothing — new with the run banner
+    scope: "global",
+    default: null,
+    codec: optionalStr,
+    portable: true,
+  }),
 
   // ── Git ──────────────────────────────────────────────────────────────────
   gitViewMode: definePreference<GitViewMode>({
