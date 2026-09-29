@@ -16,6 +16,9 @@ const PORTABLE = [
   "git.commitsOpen",
   "git.viewMode",
   "git.worktree.expanded",
+  "plans.runBanner.expanded",
+  "plans.taskPrompt",
+  "plans.taskPrompt.override",
   "projects.favorites",
   "repos.searchScope",
   "repos.tree.paneWidth",
@@ -103,6 +106,15 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["nav.lastFile", null, "project"],
   ["nav.lastPath", null, "project"],
   ["nav.lastReposQuery", null, "project"],
+  // Open until the chevron is pressed: an unset collapse preference is expanded.
+  ["plans.runBanner.expanded", true, "global"],
+  [
+    "plans.taskPrompt",
+    "Implement all tasks in {path}; done when every task is checked and tests + lint pass.",
+    "global",
+  ],
+  // `null` is "no override": the read falls through to `plans.taskPrompt`.
+  ["plans.taskPrompt.override", null, "project"],
   ["projects.favorites", [], "global"],
   ["repos.searchScope", "changed", "global"],
   ["repos.tree.paneWidth", 280, "global"],

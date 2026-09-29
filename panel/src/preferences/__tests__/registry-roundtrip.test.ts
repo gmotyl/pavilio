@@ -44,6 +44,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "speech.answerPane.autoOpen": [true, false],
   "speech.answerComposer.on": [true, false],
   "time.form.resetAutoOnSave": [true, false],
+  "plans.runBanner.expanded": [true, false],
 
   // ── num ─────────────────────────────────────────────────────────────────
   "terminal.drawer.width": [480, 0, 1, 1024, 23.5, -1],
@@ -57,6 +58,10 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   // ── str: the values that would round-trip WRONG through a JSON re-parse ──
   "git.branchDiff.base": ["", "main", "true", "240", "null", "{}", "[]", "release/1.0"],
   "speech.voice": ["en-US-AndrewMultilingualNeural", "", "true", "240", "null"],
+  "plans.taskPrompt": ["Implement all tasks in {path}.", "", "true", "240", "null", "{}"],
+  // `optionalStr`: text that may be absent. No "" sample — a blank stored
+  // value reads back as `null` by design, since a blank override is none.
+  "plans.taskPrompt.override": [null, "Only {change}.", "true", "240", "null", "{}"],
 
   // ── oneOf ───────────────────────────────────────────────────────────────
   "repos.searchScope": ["changed", "branch-diff", "commits"],
@@ -94,7 +99,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 38;
+const DECLARATION_COUNT = 41;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

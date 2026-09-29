@@ -24,7 +24,7 @@
  * features, so pulling a feature module in at runtime would invert that — and
  * would close a cycle the moment those features start reading the registry.
  */
-import { bool, json, num, oneOf, str } from "./codecs";
+import { bool, json, num, oneOf, optionalStr, str } from "./codecs";
 import { definePreference, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
@@ -73,6 +73,17 @@ export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
   { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
   { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
 ];
+
+/**
+ * The objective a task run hands its agent when neither the workspace nor the
+ * project has written one. The OBJECTIVE only: no `/goal` and no quotes, which
+ * belong to the launcher's run loop. `{change}`, `{path}` and `{project}` are
+ * substituted at send time. Worded after the example in the change's proposal
+ * (`/goal Implement all tasks in openspec/changes/<id>/tasks.md; …`), with the
+ * path left to `{path}` so it names the file actually on screen.
+ */
+export const DEFAULT_TASK_PROMPT =
+  "Implement all tasks in {path}; done when every task is checked and tests + lint pass.";
 
 /**
  * The voice the panel speaks with when nothing is stored. It lives here, not
@@ -278,6 +289,46 @@ export const preferences = {
   }),
   searchIncludeArchived: definePreference({
     key: "search.includeArchived", // was: panel-search-include-archived
+    scope: "global",
+    default: true,
+    codec: bool,
+    portable: true,
+  }),
+
+  // ── Plans ────────────────────────────────────────────────────────────────
+  // The task-run objective is the panel's first TWO-LEVEL preference: a
+  // workspace default and a per-project override, two declarations read
+  // through `readOverridable` (`./overridable`). `readPreference` alone falls
+  // back to the STATIC default, never to a value stored at a wider scope, so
+  // the pair cannot be one declaration. Keys differ by more than the scope
+  // suffix because every declared key is unique.
+  /** The workspace-wide objective template. */
+  taskPromptDefault: definePreference({
+    key: "plans.taskPrompt", // was: nothing — new with the run banner
+    scope: "global",
+    default: DEFAULT_TASK_PROMPT,
+    codec: str,
+    portable: true,
+  }),
+  /**
+   * A project's own objective template. `null` means "no override": the read
+   * falls through to `plans.taskPrompt`. Reset CLEARS this key (see
+   * `clearOverride`) rather than writing the default into it, or the project
+   * would stop tracking later edits to the default.
+   */
+  taskPromptOverride: definePreference<string | null>({
+    key: "plans.taskPrompt.override", // was: nothing — new with the run banner
+    scope: "project",
+    default: null,
+    codec: optionalStr,
+    portable: true,
+  }),
+  /**
+   * The run banner's chevron. One remembered toggle for every change, open
+   * until the user collapses it — the same shape as `terminal.drawer.open`.
+   */
+  plansBannerExpanded: definePreference({
+    key: "plans.runBanner.expanded", // was: nothing — new with the run banner
     scope: "global",
     default: true,
     codec: bool,
