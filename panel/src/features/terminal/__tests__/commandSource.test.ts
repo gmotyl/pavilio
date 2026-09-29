@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { filterSkills, useSkills, type SkillEntry } from "../commandSource";
 
@@ -72,9 +72,19 @@ describe("filterSkills", () => {
   });
 
   it("does not mutate the input array", () => {
-    const input = [...ALL];
-    filterSkills(input, "");
-    expect(input).toEqual(ALL);
+    // A fresh, out-of-order array: an in-place sort would visibly reorder it.
+    const input = [skill("zulu"), skill("alpha"), skill("mike")];
+    const result = filterSkills(input, "");
+    expect(names(input)).toEqual(["zulu", "alpha", "mike"]);
+    expect(names(result)).toEqual(["alpha", "mike", "zulu"]);
+    expect(result).not.toBe(input);
+  });
+
+  it("matches the name alone case-insensitively", () => {
+    // Neither description contains the term: only the name can match.
+    const list = [skill("Zebra-Tool", "does things"), skill("other", "unrelated")];
+    expect(names(filterSkills(list, "zebra"))).toEqual(["Zebra-Tool"]);
+    expect(names(filterSkills(list, "ZEBRA-t"))).toEqual(["Zebra-Tool"]);
   });
 });
 
@@ -129,5 +139,81 @@ describe("useSkills", () => {
     await act(() => result.current.refresh());
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(names(result.current.skills)).toEqual(["tempo", "fresh"]);
+  });
+
+  it("the latest request wins when responses arrive out of order", async () => {
+    let resolveFirst: (r: Response) => void = () => {};
+    let resolveSecond: (r: Response) => void = () => {};
+    fetchMock
+      .mockReturnValueOnce(new Promise<Response>((r) => (resolveFirst = r)))
+      .mockReturnValueOnce(new Promise<Response>((r) => (resolveSecond = r)));
+    const { result } = renderHook(() => useSkills());
+    let second: Promise<void> = Promise.resolve();
+    act(() => {
+      second = result.current.refresh();
+    });
+
+    // The newer request answers first, then the stale one straggles in.
+    await act(async () => {
+      resolveSecond(await jsonResponse([skill("fresh")]));
+      await second;
+    });
+    await act(async () => {
+      resolveFirst(await jsonResponse([skill("stale")]));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(names(result.current.skills)).toEqual(["fresh"]);
+    expect(result.current.loading).toBe(false);
+  });
+
+  describe("after unmount", () => {
+    let errors: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+    afterEach(() => {
+      errors.mockRestore();
+    });
+
+    it("a response landing after unmount sets no state", async () => {
+      let resolveFetch: (r: Response) => void = () => {};
+      fetchMock.mockReturnValueOnce(new Promise<Response>((r) => (resolveFetch = r)));
+      const { result, unmount } = renderHook(() => useSkills());
+      const before = result.current;
+      unmount();
+
+      resolveFetch(await jsonResponse([skill("late")]));
+      await new Promise((r) => setTimeout(r, 0));
+
+      // No re-render delivered a new result, and React reported nothing.
+      expect(result.current).toBe(before);
+      expect(result.current.skills).toEqual([]);
+      expect(errors).not.toHaveBeenCalled();
+    });
+  });
+
+  it("a later successful refresh clears the error flag", async () => {
+    fetchMock
+      .mockReturnValueOnce(Promise.reject(new Error("offline")))
+      .mockReturnValueOnce(jsonResponse([skill("tempo")]));
+    const { result } = renderHook(() => useSkills());
+    await waitFor(() => expect(result.current.error).toBe(true));
+    await act(() => result.current.refresh());
+    expect(result.current.error).toBe(false);
+    expect(names(result.current.skills)).toEqual(["tempo"]);
+  });
+
+  it("a failed refresh empties a previously loaded list, as documented", async () => {
+    fetchMock
+      .mockReturnValueOnce(jsonResponse([skill("tempo")]))
+      // Created lazily: an eager rejected promise is unhandled until used.
+      .mockImplementationOnce(() => Promise.reject(new Error("offline")));
+    const { result } = renderHook(() => useSkills());
+    await waitFor(() => expect(result.current.skills).toHaveLength(1));
+    await act(() => result.current.refresh());
+    // "A failed or non-ok fetch yields an empty list with `error: true`".
+    expect(result.current.skills).toEqual([]);
+    expect(result.current.error).toBe(true);
   });
 });
