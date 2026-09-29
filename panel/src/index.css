@@ -1733,6 +1733,197 @@ input[type="checkbox"] {
   right: 10px;
 }
 
+/* ── THE RUN BANNER ───────────────────────────────────────────────────────────
+
+   Above a change's `tasks.md` while it has unchecked boxes. The accent rule on
+   the left is the one thing that says "this can be started"; the rest stays in
+   the elevated-surface family so it reads as part of the viewer, not a toast.
+   Collapsed, the same element becomes one flex row carrying count, switch and
+   Run — the chevron is the only thing that changes its shape. */
+.run-banner {
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  padding: 9px 11px;
+  margin: 0 0 13px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.run-banner[data-collapsed],
+.run-banner-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.run-banner[data-collapsed] {
+  padding: 6px 11px;
+}
+
+.run-banner-top {
+  margin-bottom: 7px;
+}
+
+.run-banner-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.run-banner-grow {
+  flex: 1;
+}
+
+.run-banner-chevron {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  padding: 1px;
+  color: var(--text-muted);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.run-banner-chevron:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+/* The CLI switch: a segmented control one size down, mono because each option
+   is the name of a binary. */
+.run-banner-cli {
+  display: inline-flex;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.run-banner-cli button {
+  padding: 2px 7px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.run-banner-cli button + button {
+  border-left: 1px solid var(--border-default);
+}
+
+.run-banner-cli button:hover {
+  background: var(--bg-hover);
+}
+
+.run-banner-cli button[data-on] {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.run-banner-none {
+  color: var(--text-muted);
+}
+
+.run-banner-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--bg-base);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+}
+
+.run-banner-run:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.run-banner-run:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* What the terminal will receive. The launcher's wrapper is dimmed and is
+   plain text; only the objective between it is a field. */
+.run-banner-prompt {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+}
+
+.run-banner-wrap {
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.run-banner-objective {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  field-sizing: content;
+  min-height: 1.5em;
+  margin: 1px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  box-shadow: inset 0 -1px 0 var(--border-strong);
+  outline: none;
+}
+
+.run-banner-objective:focus-visible {
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+.run-banner-progress {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  height: 5px;
+  margin: 8px 0 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: transparent;
+}
+
+.run-banner-progress [data-segment] {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-active);
+}
+
+.run-banner-progress [data-segment="done"] {
+  background: var(--green);
+}
+
+/* Too many tasks for a segment each: one continuous fill over the track. */
+.run-banner-progress:has(.run-banner-progress-fill) {
+  background: var(--bg-active);
+}
+
+.run-banner-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--green);
+}
+
+.run-banner-foot {
+  margin-top: 7px;
+  color: var(--text-muted);
+}
+
 /* ── REDUCED MOTION, LAST IN THE FILE ─────────────────────────────────────────
 
    The one `prefers-reduced-motion` query in this stylesheet — and the note on
