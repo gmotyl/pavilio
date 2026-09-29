@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { TerminalsSurface } from "../TerminalsSurface";
 import type { LayoutPreset, TileLayout } from "../tileLayout";
@@ -247,6 +247,64 @@ describe("TerminalsSurface shortcut bar visibility", () => {
     setAnswerPaneOpen("other", true);
 
     render(<Harness sessions={[session("s1"), session("s2")]} />);
+
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  // On mobile every session stays mounted and one is shown; a hidden session's
+  // pane can auto-open when its agent answers, and must not take the bar away
+  // from the terminal on screen.
+  it("a pane open on a hidden session does not withhold the shortcut bar", () => {
+    setAnswerPaneOpen("s2", true);
+
+    render(
+      <Harness focusedId="s1" sessions={[session("s1"), session("s2")]} />,
+    );
+
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  it("the visible session's open pane withholds the bar and closing it brings it back", () => {
+    setAnswerPaneOpen("s1", true);
+
+    render(
+      <Harness focusedId="s1" sessions={[session("s1"), session("s2")]} />,
+    );
+    expect(screen.queryByTestId("shortcut-bar")).toBeNull();
+
+    act(() => setAnswerPaneOpen("s1", false));
+
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  it("switching onto a session with an open pane withholds the bar", () => {
+    setAnswerPaneOpen("s2", true);
+    const sessions = [session("s1"), session("s2")];
+
+    const { rerender } = render(
+      <Harness focusedId="s1" sessions={sessions} />,
+    );
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+
+    rerender(<Harness focusedId="s2" sessions={sessions} />);
+    expect(screen.queryByTestId("shortcut-bar")).toBeNull();
+
+    rerender(<Harness focusedId="s1" sessions={sessions} />);
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  it("with nothing focused the first session's pane decides", () => {
+    const sessions = [session("s1"), session("s2")];
+    setAnswerPaneOpen("s1", true);
+
+    const { rerender } = render(<Harness sessions={sessions} />);
+    expect(screen.queryByTestId("shortcut-bar")).toBeNull();
+
+    act(() => {
+      setAnswerPaneOpen("s1", false);
+      setAnswerPaneOpen("s2", true);
+    });
+    rerender(<Harness sessions={sessions} />);
 
     expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
   });
