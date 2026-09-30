@@ -8,6 +8,7 @@ import { __resetPreferenceStoreForTests, readPreference, writePreference } from 
  * comparing it against itself would assert nothing at all.
  */
 const PORTABLE = [
+  "composer.shortcuts",
   "fileList.paneWidth",
   "fileList.sidebarCollapsed",
   "fileList.sort",
@@ -95,6 +96,14 @@ const NOT_YET_DECLARED: readonly string[] = [];
  * change flips it.
  */
 const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
+  [
+    "composer.shortcuts",
+    [
+      { label: "Yes", text: "yes" },
+      { label: "OK", text: "ok" },
+    ],
+    "global",
+  ],
   ["fileList.paneWidth", 288, "global"],
   ["fileList.sidebarCollapsed", false, "global"],
   ["fileList.sort", { sortKey: "date", sortDir: "desc" }, "global"],

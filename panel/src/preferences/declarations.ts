@@ -80,6 +80,22 @@ export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
   { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
 ];
 
+/** One quick-reply chip in the answer composer: what it reads, and what it sends. */
+export interface ComposerShortcut {
+  label: string;
+  text: string;
+}
+
+/**
+ * The quick replies an empty workspace opens with. Treat it as frozen, like
+ * `DEFAULT_TERMINAL_LAUNCHERS`: `readPreference` hands it back BY REFERENCE
+ * when nothing is stored, so every editor builds a new array and new entries.
+ */
+export const DEFAULT_COMPOSER_SHORTCUTS: ComposerShortcut[] = [
+  { label: "Yes", text: "yes" },
+  { label: "OK", text: "ok" },
+];
+
 /**
  * The objective a task run hands its agent when neither the workspace nor the
  * project has written one. The OBJECTIVE only: no `/goal` and no quotes, which
@@ -546,6 +562,18 @@ export const preferences = {
     scope: "global",
     default: true,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The composer's quick-reply chips, one JSON value like the launcher row:
+   * the list is ordered and its length is the user's. Global and portable —
+   * a reply like "yes" is a habit of its owner, not a fact about a project.
+   */
+  composerShortcuts: definePreference<ComposerShortcut[]>({
+    key: "composer.shortcuts", // was: nothing — the chips are new
+    scope: "global",
+    default: DEFAULT_COMPOSER_SHORTCUTS,
+    codec: json<ComposerShortcut[]>(),
     portable: true,
   }),
   /**
