@@ -52,16 +52,22 @@ export interface TimeReportPrefs {
 export interface TerminalLauncher {
   name: string;
   command: string;
-  /** Whole command line a task run spawns; `{prompt}` is the objective. Blank = not offered for a run. */
+  /** How the command takes a start prompt; blank/absent = positional. */
+  promptFlag?: string;
+  /** Start-prompt text the CLI receives; `{prompt}` is the objective. "" = not offered. */
   runLoop?: string;
 }
 
 /**
  * The launcher row an empty workspace opens with — the three agents the panel
  * is used to drive, each named after its own binary. Each carries the run
- * loop a task run spawns: one whole command line rather than panel-side rules,
- * because whether there is a `/goal`, whether the prompt is positional or a
- * flag, and where the quotes go all differ between the agents at once.
+ * loop a task run hands its CLI: plain start-prompt text, never shell syntax.
+ * The panel builds the shell line itself as `command [promptFlag] '<text>'`,
+ * so the only per-agent differences left here are the CLI's own mode syntax
+ * (`/goal`) and whether the prompt is positional or behind a flag.
+ *
+ * `features/agents/launcherRunLoop.ts` also reads this list BY NAME as the
+ * shipped default for an entry stored without a `runLoop` / `promptFlag` key.
  *
  * Exported so the settings surface can offer "back to the defaults" without a
  * second copy of the list. Treat it as frozen: `readPreference` hands the
@@ -69,9 +75,9 @@ export interface TerminalLauncher {
  * pushes onto the value it read would rewrite the defaults for the session.
  */
 export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
-  { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
-  { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
-  { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
+  { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+  { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
+  { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
 ];
 
 /**

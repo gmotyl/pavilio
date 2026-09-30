@@ -147,9 +147,9 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   [
     "terminal.launchers",
     [
-      { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
-      { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
-      { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
+      { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+      { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
+      { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
     ],
     "global",
   ],
@@ -327,9 +327,9 @@ describe("the launcher list and the answer composer", () => {
     // that export IS the declared default, so comparing it to itself would
     // assert nothing — including that the order survived the read.
     expect(readPreference(preferences.terminalLaunchers)).toEqual([
-      { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
-      { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
-      { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
+      { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+      { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
+      { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
     ]);
   });
 

@@ -102,7 +102,7 @@ describe("RunBanner", () => {
     await user.click(screen.getByRole("button", { name: "Run" }));
 
     expect(onRun).toHaveBeenCalledTimes(1);
-    expect(onRun).toHaveBeenCalledWith('claude "/goal Only do task 7"');
+    expect(onRun).toHaveBeenCalledWith("/goal 'Only do task 7'");
     // No preference moved: the document, browser storage and the PATCH
     // channel are all exactly as they were before the edit.
     expect(globals.__PAVILIO_PREFS__).toEqual(before);
@@ -209,7 +209,7 @@ describe("RunBanner", () => {
 
     expect(objective().value).toBe("Kept across the fold");
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun).toHaveBeenCalledWith('claude "/goal Kept across the fold"');
+    expect(onRun).toHaveBeenCalledWith("/goal 'Kept across the fold'");
   });
 
   it("Ctrl+Enter in the objective runs it", async () => {

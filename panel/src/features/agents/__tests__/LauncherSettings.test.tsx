@@ -24,9 +24,9 @@ const KEY = storageKey(preferences.terminalLaunchers);
  * nothing is stored, so asserting a read against that constant would pass on
  * identity and prove nothing about what was — or was not — written. */
 const DEFAULTS: TerminalLauncher[] = [
-  { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
-  { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
-  { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
+  { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+  { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
+  { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
 ];
 
 /**
@@ -216,9 +216,9 @@ describe("LauncherSettings", () => {
 
       render(<LauncherSettings />);
       expect(runLoopFields().map((field) => field.value)).toEqual([
-        'claude "/goal {prompt}"',
-        'codex "/goal {prompt}"',
-        'opencode --prompt "{prompt}"',
+        "/goal {prompt}",
+        "/goal {prompt}",
+        "{prompt}",
       ]);
     });
 
@@ -304,7 +304,7 @@ describe("LauncherSettings", () => {
 
       expect(stored()).toEqual(DEFAULTS);
       expect(nameFields()[1]).toHaveValue("codex");
-      expect(runLoopFields()[1]).toHaveValue('codex "/goal {prompt}"');
+      expect(runLoopFields()[1]).toHaveValue("/goal {prompt}");
     });
 
     it("an entry with a blank command is still rejected", async () => {
