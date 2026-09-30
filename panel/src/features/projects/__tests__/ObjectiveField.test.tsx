@@ -295,10 +295,57 @@ describe("ObjectiveField", () => {
     act(() => objective().focus());
     objective().setSelectionRange(inPath, inPath);
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    fireEvent.mouseUp(objective());
 
     expect(objective().value).toBe(template);
     const afterPath = template.indexOf("{path}") + "{path}".length;
     expect([objective().selectionStart, objective().selectionEnd]).toEqual([afterPath, afterPath]);
+  });
+
+  it("dragging over the idle objective selects text", async () => {
+    const template = "Do {change} at {path} in {project}.";
+    writePreference(preferences.taskPromptDefault, template);
+    renderBanner();
+    const resolved = objective().value;
+    const at = resolved.indexOf(" at ") + 1;
+    const inPath = resolved.indexOf(PATH) + 5;
+
+    // A drag: the press focuses and places the caret, the selection grows
+    // while the button is held — past any tick — and the release ends it.
+    fireEvent.mouseDown(objective());
+    act(() => objective().focus());
+    objective().setSelectionRange(at, at);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    // Still the resolved text mid-drag: a swap now would collapse the selection.
+    expect(objective().value).toBe(resolved);
+    objective().setSelectionRange(at, inPath);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(objective().value).toBe(resolved);
+    // Released outside the box, as a drag often is.
+    fireEvent.mouseUp(document);
+
+    expect(objective().value).toBe(template);
+    const afterPath = template.indexOf("{path}") + "{path}".length;
+    expect([objective().selectionStart, objective().selectionEnd]).toEqual([
+      template.indexOf(" at ") + 1,
+      afterPath,
+    ]);
+  });
+
+  it("a press that loses focus before its release leaves no stale press", async () => {
+    const template = "Do {change} at {path} in {project}.";
+    writePreference(preferences.taskPromptDefault, template);
+    renderBanner();
+
+    fireEvent.mouseDown(objective());
+    act(() => objective().focus());
+    act(() => objective().blur());
+    fireEvent.mouseUp(document);
+    expect(objective().value).not.toBe(template);
+
+    // A later keyboard focus swaps at once, not on some release.
+    act(() => objective().focus());
+    expect(objective().value).toBe(template);
   });
 
   it("the mirror scrolls with the textarea", async () => {

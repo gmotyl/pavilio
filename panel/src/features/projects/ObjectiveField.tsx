@@ -174,7 +174,7 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
     commitRef.current = commitDraft;
     useEffect(
       () => () => {
-        if (pendingStart.current) clearTimeout(pendingStart.current);
+        stopAwaitingRelease.current?.();
         commitRef.current();
       },
       [],
@@ -188,12 +188,13 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
     const latestVars = useRef(vars);
     latestVars.current = vars;
     // A press on the idle box: its focus is followed by the browser placing
-    // the caret, hit-tested on the resolved text.
+    // the caret, hit-tested on the resolved text — and, for a drag, by the
+    // selection growing until the button is released.
     const pressed = useRef(false);
-    const pendingStart = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Removes the window listener waiting for that release, if one is set.
+    const stopAwaitingRelease = useRef<(() => void) | null>(null);
 
     const beginEditing = () => {
-      pendingStart.current = null;
       const box = textarea.current;
       if (!box || document.activeElement !== box) return;
       const current = latestVars.current;
@@ -217,10 +218,21 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
       }
       // Chrome fires focus BEFORE it moves the caret to the click, and then
       // applies an offset measured on the resolved text to whatever the box
-      // holds — clamped to the shorter template. So a press swaps only once
-      // the browser has placed the caret.
-      pressed.current = false;
-      pendingStart.current = setTimeout(beginEditing, 0);
+      // holds — clamped to the shorter template. A drag goes on selecting on
+      // the resolved text for as long as the button is held, and swapping the
+      // value under it collapses the selection. So a press swaps only on its
+      // release, and maps both ends of whatever it selected. The release is
+      // heard on the window: a drag is often let go outside the box.
+      const release = () => {
+        stopAwaitingRelease.current?.();
+        beginEditing();
+      };
+      window.addEventListener("mouseup", release, true);
+      stopAwaitingRelease.current = () => {
+        window.removeEventListener("mouseup", release, true);
+        stopAwaitingRelease.current = null;
+        pressed.current = false;
+      };
     };
 
     useLayoutEffect(() => {
@@ -230,6 +242,9 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
     }, [editing]);
 
     const onBlur = () => {
+      // A press whose focus left before its release swaps nothing later.
+      stopAwaitingRelease.current?.();
+      pressed.current = false;
       commitDraft();
       setEditing(false);
     };
@@ -287,6 +302,11 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
           value={shown}
           onMouseDown={() => {
             if (!editingRef.current) pressed.current = true;
+          }}
+          // A press that brought no focus (the box already had it) must not
+          // turn a later keyboard focus into a wait for a release.
+          onMouseUp={() => {
+            if (!stopAwaitingRelease.current) pressed.current = false;
           }}
           onFocus={onFocus}
           onBlur={onBlur}
