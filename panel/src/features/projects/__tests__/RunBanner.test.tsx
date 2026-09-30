@@ -183,7 +183,7 @@ describe("RunBanner", () => {
     await user.click(screen.getByRole("button", { name: "codex" }));
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(onRun).toHaveBeenCalledWith(
-      `codex '/goal Implement all tasks in ${PATH}; done when every task is checked and tests + lint pass.'`,
+      `codex '/goal pavilio-execute-plan Implement all tasks in ${PATH}; done when every task is checked and tests + lint pass.'`,
     );
     // The fold itself is the one remembered toggle.
     expect(globals.__PAVILIO_PREFS__![storageKey(preferences.plansBannerExpanded)]).toBe(false);

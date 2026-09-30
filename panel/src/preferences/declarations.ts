@@ -84,12 +84,12 @@ export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
  * The objective a task run hands its agent when neither the workspace nor the
  * project has written one. The OBJECTIVE only: no `/goal` and no quotes, which
  * belong to the launcher's run loop. `{change}`, `{path}` and `{project}` are
- * substituted at send time. Worded after the example in the change's proposal
- * (`/goal Implement all tasks in openspec/changes/<id>/tasks.md; …`), with the
- * path left to `{path}` so it names the file actually on screen.
+ * substituted at send time. It opens with the skill that executes a plan, so
+ * the agent is told HOW to work the tasks as well as which file holds them;
+ * the path is left to `{path}` so it names the file actually on screen.
  */
 export const DEFAULT_TASK_PROMPT =
-  "Implement all tasks in {path}; done when every task is checked and tests + lint pass.";
+  "pavilio-execute-plan Implement all tasks in {path}; done when every task is checked and tests + lint pass.";
 
 /**
  * The voice the panel speaks with when nothing is stored. It lives here, not

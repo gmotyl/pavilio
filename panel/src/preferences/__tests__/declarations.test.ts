@@ -113,7 +113,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["plans.runBanner.launcher", null, "global"],
   [
     "plans.taskPrompt",
-    "Implement all tasks in {path}; done when every task is checked and tests + lint pass.",
+    "pavilio-execute-plan Implement all tasks in {path}; done when every task is checked and tests + lint pass.",
     "global",
   ],
   // `null` is "no override": the read falls through to `plans.taskPrompt`.
