@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ShortcutSettings } from "../ShortcutSettings";
@@ -186,6 +186,41 @@ describe("ShortcutSettings", () => {
       await user.click(document.body);
       expect(stored()).toEqual([a, { label: "B2", text: "beta --edited" }]);
     });
+  });
+
+  it("a shortcut label is capped at 24 characters", async () => {
+    const user = userEvent.setup();
+    render(<ShortcutSettings />);
+    const long = "A label much longer than any chip should be";
+
+    for (const field of [...labelFields(), screen.getByTestId("shortcut-new-label")]) {
+      expect(field).toHaveAttribute("maxLength", "24");
+    }
+
+    // The input stops at the cap while typing...
+    await user.type(screen.getByTestId("shortcut-new-label"), long);
+    expect(screen.getByTestId("shortcut-new-label")).toHaveValue(long.slice(0, 24));
+
+    // ...and a value that got past it (a script, an old browser) is cut on
+    // save, after trimming, in the add form and in a row edit alike.
+    fireEvent.change(screen.getByTestId("shortcut-new-label"), { target: { value: `  ${long}` } });
+    await user.type(screen.getByTestId("shortcut-new-text"), "go");
+    await user.click(screen.getByTestId("shortcut-add"));
+    expect(stored()[2]).toEqual({ label: long.slice(0, 24), text: "go" });
+
+    fireEvent.change(labelFields()[0], { target: { value: long } });
+    fireEvent.blur(labelFields()[0]);
+    expect(stored()[0]).toEqual({ label: long.slice(0, 24), text: "yes" });
+  });
+
+  it("an untouched over-long stored label is not cut by focus and blur", async () => {
+    const user = userEvent.setup();
+    const long = "A hand-edited label longer than the cap";
+    writePreference(preferences.composerShortcuts, [{ label: long, text: "go" }]);
+    render(<ShortcutSettings />);
+    await user.click(labelFields()[0]);
+    await user.click(document.body);
+    expect(stored()).toEqual([{ label: long, text: "go" }]);
   });
 
   it("a hand-edited non-list shows the shipped shortcuts instead of crashing", () => {

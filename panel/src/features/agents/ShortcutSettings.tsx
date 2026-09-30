@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
 
-import { preferences, type ComposerShortcut } from "../../preferences/declarations";
+import {
+  COMPOSER_SHORTCUT_LABEL_MAX,
+  preferences,
+  type ComposerShortcut,
+} from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { useRowIds } from "./useRowIds";
 
@@ -20,7 +24,15 @@ import { useRowIds } from "./useRowIds";
  * terminal receives, so a blank either side is not an entry. A rejected edit
  * puts the stored value back into the field. Every control is named by its
  * row's 1-based position, since two shortcuts may share a label.
+ *
+ * A label is capped at `COMPOSER_SHORTCUT_LABEL_MAX`: the field will not take
+ * more, and a value that got past it is cut on save, after trimming.
  */
+
+/** A label as it is saved: trimmed, then cut to the cap. */
+function toLabel(draft: string): string {
+  return draft.trim().slice(0, COMPOSER_SHORTCUT_LABEL_MAX);
+}
 
 type Drafts = { label: string; text: string };
 
@@ -43,10 +55,12 @@ function toRowEntry(
   base: ComposerShortcut,
   drafts: Drafts,
 ): ComposerShortcut | null {
+  // Edited is judged on the trimmed draft, before the cap: an untouched
+  // hand-edited label longer than the cap is not cut by a mere focus and blur.
   const label = drafts.label.trim();
   const text = drafts.text.trim();
   const next: ComposerShortcut = {
-    label: label !== base.label ? label : entry.label,
+    label: label !== base.label ? toLabel(label) : entry.label,
     text: text !== base.text ? text : entry.text,
   };
   if (!next.label || !next.text) return null;
@@ -133,6 +147,7 @@ function ShortcutRow({
       <input
         aria-label={`Shortcut ${index + 1} label`}
         data-testid={`shortcut-label-${index}`}
+        maxLength={COMPOSER_SHORTCUT_LABEL_MAX}
         value={label}
         onChange={(e) => setLabel(e.target.value)}
         onBlur={commit}
@@ -176,7 +191,7 @@ export function ShortcutSettings() {
   const [newText, setNewText] = useState("");
 
   const add = () => {
-    const entry: ComposerShortcut = { label: newLabel.trim(), text: newText.trim() };
+    const entry: ComposerShortcut = { label: toLabel(newLabel), text: newText.trim() };
     if (!entry.label || !entry.text) return;
     setShortcuts((current) => [...current, entry]);
     setNewLabel("");
@@ -228,6 +243,7 @@ export function ShortcutSettings() {
         <input
           aria-label="New shortcut label"
           data-testid="shortcut-new-label"
+          maxLength={COMPOSER_SHORTCUT_LABEL_MAX}
           value={newLabel}
           onChange={(e) => setNewLabel(e.target.value)}
           placeholder="label"

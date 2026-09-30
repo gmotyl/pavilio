@@ -109,6 +109,14 @@ export interface ComposerShortcut {
   text: string;
 }
 
+/**
+ * The longest label a shortcut keeps: the label is a chip in the composer's
+ * row, and a sentence-long chip pushes the others out of it. Enforced by the
+ * editor (the field's `maxLength`, and a cut on save), not by the codec — a
+ * longer hand-edited label still reads back as written.
+ */
+export const COMPOSER_SHORTCUT_LABEL_MAX = 24;
+
 /** A stored shortcut rebuilt from its two fields, or `null`: both must be non-blank strings. */
 function toComposerShortcut(value: unknown): ComposerShortcut | null {
   if (!isRecord(value) || !isFilled(value.label) || !isFilled(value.text)) return null;
