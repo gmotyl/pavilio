@@ -7,17 +7,23 @@
  */
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
+import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import {
   anyAnswerPaneOpen,
   forgetAnswerPane,
   getAnswerPaneState,
   markSeenUtterances,
-  setAnswerPaneAutoOpen,
   setAnswerPaneOpen,
   subscribeAnswerPane,
   useAnyAnswerPaneOpen,
 } from "../answerPaneState";
+
+// A pass-through spy on the preference read, so a test can prove the store
+// never consults it: the arrival reads the preference itself, at arrival.
+vi.mock("../../speech/autoOpenAnswer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../speech/autoOpenAnswer")>();
+  return { ...actual, getStoredAutoOpenAnswer: vi.fn(actual.getStoredAutoOpenAnswer) };
+});
 
 const storeDefault = (on: boolean): void => {
   setStoredAutoOpenAnswer(on);
@@ -30,17 +36,21 @@ beforeEach(() => {
 });
 
 describe("answerPaneState", () => {
-  it("a fresh entry starts closed and seeds autoOpen from the browser default once", () => {
+  it("the entry snapshot no longer carries an autoOpen field", () => {
     storeDefault(true);
-    const first = getAnswerPaneState("s-1");
-    expect(first).toEqual({ open: false, autoOpen: true });
+    const read = vi.mocked(getStoredAutoOpenAnswer);
+    read.mockClear();
 
-    // The default changing later does not reach an entry that already exists…
-    storeDefault(false);
-    expect(getAnswerPaneState("s-1")).toBe(first);
-    expect(getAnswerPaneState("s-1").autoOpen).toBe(true);
-    // …but a session first seen afterwards takes the new default.
-    expect(getAnswerPaneState("s-2").autoOpen).toBe(false);
+    const first = getAnswerPaneState("s-1");
+    expect(first).toEqual({ open: false });
+    expect("autoOpen" in first).toBe(false);
+    // Creating the entry did not consult the stored preference.
+    expect(read).not.toHaveBeenCalled();
+
+    // The control: the spy is the binding every importer sees, so a read from
+    // the store would have been counted.
+    getStoredAutoOpenAnswer();
+    expect(read).toHaveBeenCalledTimes(1);
   });
 
   it("setAnswerPaneOpen notifies subscribers and yields a new snapshot", () => {
@@ -52,15 +62,11 @@ describe("answerPaneState", () => {
     expect(listener).toHaveBeenCalledTimes(1);
     const after = getAnswerPaneState("s-1");
     expect(after).not.toBe(before);
-    expect(after).toEqual({ open: true, autoOpen: false });
-
-    setAnswerPaneAutoOpen("s-1", true);
-    expect(listener).toHaveBeenCalledTimes(2);
-    expect(getAnswerPaneState("s-1")).toEqual({ open: true, autoOpen: true });
+    expect(after).toEqual({ open: true });
 
     unsubscribe();
     setAnswerPaneOpen("s-1", false);
-    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it("an unchanged write keeps the same snapshot object and notifies nobody", () => {
@@ -71,7 +77,6 @@ describe("answerPaneState", () => {
     listener.mockClear();
 
     setAnswerPaneOpen("s-1", true);
-    setAnswerPaneAutoOpen("s-1", false);
     expect(getAnswerPaneState("s-1")).toBe(snapshot);
     expect(listener).not.toHaveBeenCalled();
   });
@@ -88,11 +93,10 @@ describe("answerPaneState", () => {
 
   it("forgetAnswerPane drops the entry: the next read is a fresh default", () => {
     setAnswerPaneOpen("s-1", true);
-    setAnswerPaneAutoOpen("s-1", true);
     markSeenUtterances("s-1", ["u-1"]);
 
     forgetAnswerPane("s-1");
-    expect(getAnswerPaneState("s-1")).toEqual({ open: false, autoOpen: false });
+    expect(getAnswerPaneState("s-1")).toEqual({ open: false });
     // The seen set went with it: the first call seeds again.
     expect(markSeenUtterances("s-1", ["u-9"])).toEqual([]);
   });

@@ -408,6 +408,75 @@ describe("the speech row", () => {
     expect(resizeFrames()).toHaveLength(1);
   });
 
+  // -------------------------------------------------------------------------
+  // The auto-open preference, read at arrival.
+  //
+  // The cell holds no copy of the Settings preference: the arrival effect reads
+  // it when an answer lands, so turning it off in Settings reaches a cell that
+  // already exists. The bar's visibility still outranks it, and the utterance a
+  // fresh tab is handed is still old news rather than an arrival.
+  // -------------------------------------------------------------------------
+  const answerPane = (): HTMLElement | null => screen.queryByTestId("answer-pane-cell-a");
+  /** The pane renders markdown, and `MarkdownRenderer` calls `useNavigate`. */
+  const cell = (speech: GridSpeech, speechBarVisible = true) => (
+    <MemoryRouter>
+      <TerminalView sessionId="cell-a" speech={speech} speechBarVisible={speechBarVisible} />
+    </MemoryRouter>
+  );
+
+  it("an arriving answer opens the pane when the stored preference is on", async () => {
+    setStoredAutoOpenAnswer(true);
+    const view = render(cell(makeSpeech("empty")));
+    await settle();
+    expect(answerPane()).toBeNull();
+
+    view.rerender(cell(spokenSpeech()));
+    await settle();
+    expect(answerPane()).not.toBeNull();
+  });
+
+  it("a preference cleared after the cell exists stops the next arrival opening it", async () => {
+    // The cell and its pane entry exist while the preference is still on…
+    setStoredAutoOpenAnswer(true);
+    const view = render(cell(makeSpeech("empty")));
+    await settle();
+
+    // …then Settings clears it, and only afterwards does the answer land.
+    setStoredAutoOpenAnswer(false);
+    view.rerender(cell(spokenSpeech()));
+    await settle();
+    expect(answerPane()).toBeNull();
+  });
+
+  it("a hidden speech bar still outranks the preference", async () => {
+    setStoredAutoOpenAnswer(true);
+    const view = render(cell(makeSpeech("empty"), false));
+    await settle();
+
+    const spoken = spokenSpeech();
+    view.rerender(cell(spoken, false));
+    await settle();
+    expect(answerPane()).toBeNull();
+
+    // Nor is the arrival held back for the bar's return.
+    view.rerender(cell(spoken));
+    await settle();
+    expect(answerPane()).toBeNull();
+  });
+
+  it("the stored utterance handed to a fresh tab is not an arrival", async () => {
+    setStoredAutoOpenAnswer(true);
+    const spoken = spokenSpeech();
+    // The queue already holds the utterance on the very first render.
+    const view = render(cell(spoken));
+    await settle();
+    expect(answerPane()).toBeNull();
+
+    view.rerender(cell(spoken));
+    await settle();
+    expect(answerPane()).toBeNull();
+  });
+
   it("keeps the row shown by default regardless of speech state", async () => {
     // The derivation lives in the cell, so this mounts the cell rather than the
     // view: `speechBarVisible` used to read the session's speech state, which

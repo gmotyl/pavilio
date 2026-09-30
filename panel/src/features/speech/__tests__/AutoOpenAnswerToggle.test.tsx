@@ -73,6 +73,43 @@ describe("AutoOpenAnswerToggle", () => {
     expect(getStoredAutoOpenAnswer()).toBe(true);
   });
 
+  it("the Settings toggle still stores the preference", async () => {
+    // With the pane's own switch gone, this box on the Settings page is the
+    // only control for the preference — and it still writes the same key.
+    const user = userEvent.setup();
+    stubEmptyAgentSettingsApi();
+    expect(KEY).toBe("speech.answerPane.autoOpen");
+    setStoredAutoOpenAnswer(false);
+
+    render(<AgentSettings />);
+    const section = (await screen.findByRole("heading", { level: 2, name: "Speech" })).closest(
+      "section",
+    );
+    const box = within(section!).getByRole("checkbox", { name: LABEL });
+    expect(box).not.toBeChecked();
+
+    await user.click(box);
+    expect(box).toBeChecked();
+    expect(globals.__PAVILIO_PREFS__![KEY]).toBe(true);
+    expect(getStoredAutoOpenAnswer()).toBe(true);
+
+    await user.click(box);
+    expect(globals.__PAVILIO_PREFS__![KEY]).toBe(false);
+    expect(getStoredAutoOpenAnswer()).toBe(false);
+  });
+
+  it("the help text describes the one preference cells read on arrival", () => {
+    render(<AutoOpenAnswerToggle />);
+    expect(
+      screen.getByText(
+        "Every cell reads this when an answer arrives; a change here reaches cells already open.",
+      ),
+    ).toBeInTheDocument();
+    // No footer or per-cell switch exists any more; the copy must not name one.
+    expect(screen.queryByText(/footer/i)).toBeNull();
+    expect(screen.queryByText(/switch/i)).toBeNull();
+  });
+
   it("sits in the Settings page's Speech section, under the voice", async () => {
     stubEmptyAgentSettingsApi();
 

@@ -7,18 +7,14 @@ import {
   type LiveTerminal,
 } from "./terminalInstances";
 import { AnswerPane } from "./AnswerPane";
-import {
-  markSeenUtterances,
-  setAnswerPaneAutoOpen,
-  setAnswerPaneOpen,
-  useAnswerPaneState,
-} from "./answerPaneState";
+import { markSeenUtterances, setAnswerPaneOpen, useAnswerPaneState } from "./answerPaneState";
 import { useAnswerWaiting } from "./answerWaiting";
 import { BootLegend } from "./BootLegend";
 import { captureBufferSnapshot } from "./bufferSnapshot";
 import { SpeechControlBar } from "./SpeechControlBar";
 import { useMobileReconnect } from "./useMobileReconnect";
 import { viewportLooksBlank } from "./viewportBlank";
+import { getStoredAutoOpenAnswer } from "../speech/autoOpenAnswer";
 import type { GridSpeech } from "../speech/types";
 import { utteranceUnderCursor, type UtteranceQueue } from "../speech/utteranceQueue";
 
@@ -95,18 +91,16 @@ export function TerminalView({
   // inside the mount effect below.
   const [ws, setWs] = useState<WebSocket | null>(null);
 
-  // Whether the cell's answer pane is open, and the cell's own "Open on new
-  // answer" switch. Both live in `answerPaneState`, a module-level store keyed
-  // by session, NOT in component state: maximize, grid presets, drag and seam
+  // Whether the cell's answer pane is open. It lives in `answerPaneState`, a
+  // module-level store keyed by session, NOT in component state: maximize, grid presets, drag and seam
   // resize all remount this view (the grid swaps its body subtree), and the
   // xterm survives that only because `terminalInstances` keeps it outside
   // React — the pane's state has to survive the same way. The store is in
   // memory, so a reload still starts closed. The bar's eye toggles `open`; the
   // pane itself mounts here, as a sibling of the observed container, exactly
-  // like the bar. `autoOpen` is seeded once, from the browser-wide default
-  // Settings keeps, when the session's entry is first created, and never
-  // written back to it.
-  const { open: answerOpen, autoOpen } = useAnswerPaneState(sessionId);
+  // like the bar. The "Open on new answer" preference is not copied into the
+  // store: the arrival effect below reads it from Settings when an answer lands.
+  const { open: answerOpen } = useAnswerPaneState(sessionId);
 
   // Hiding the bar CLOSES the pane rather than merely covering it — a pane
   // without its bar has no eye to close it, and one that came back unasked
@@ -140,10 +134,14 @@ export function TerminalView({
       .filter((u) => u !== null)
       .map((u) => u.id);
     const arrived = markSeenUtterances(sessionId, ids).length > 0;
-    // The bar's visibility outranks the switch, as it outranks the eye. The
-    // arrival is still recorded above: it is not held back for the bar's return.
-    if (arrived && autoOpen && speechBarVisible) setAnswerPaneOpen(sessionId, true);
-  }, [sessionId, queue, autoOpen, speechBarVisible]);
+    // The preference is read HERE, at arrival, rather than held as a copy: a
+    // change in Settings reaches a cell that already exists. The bar's
+    // visibility outranks it, as it outranks the eye. The arrival is still
+    // recorded above: it is not held back for the bar's return.
+    if (arrived && speechBarVisible && getStoredAutoOpenAnswer()) {
+      setAnswerPaneOpen(sessionId, true);
+    }
+  }, [sessionId, queue, speechBarVisible]);
 
   // A pane a launcher press opened is no longer put back the way the press
   // found it once the wait ends: `answerPaneState` keeps no memory of why the
@@ -433,8 +431,6 @@ export function TerminalView({
             sessionId={sessionId}
             speech={speech}
             onClose={closeAnswer}
-            autoOpen={autoOpen}
-            onAutoOpenChange={(on) => setAnswerPaneAutoOpen(sessionId, on)}
             // The same `send` the row's pills take — one transport to the PTY,
             // reached from the two places the user can type into this cell
             // without touching the terminal.

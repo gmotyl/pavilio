@@ -51,7 +51,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+
+import type { Callout } from "../BootLegend";
+import { MOBILE_QUERY } from "../../../lib/breakpoints";
 
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { prepare } from "../../speech/prepare";
@@ -299,6 +302,16 @@ function stylesheetWithReducedMotionOn(): string {
 const CONTROL_TOP = 6;
 const CONTROL_SIZE = 44;
 const CONTROL_CENTRE_Y = CONTROL_TOP + CONTROL_SIZE / 2;
+/** The composer below the chip row: field row and hint line, at their defaults. */
+const CHIP_ROW_FROM_FOOT = 110;
+/** The band, where the leaders put it (centre + `LEADER_DROP`), and its height. */
+const BAND_TOP = 54;
+const BAND_HEIGHT = 64;
+
+/** How tall `stubLayout` lays the picker's callout out; tests may change it. */
+let doorHeight = 64;
+/** How far above the cell's foot `stubLayout` puts the chip row; tests may move it. */
+let chipRowFromFoot = CHIP_ROW_FROM_FOOT;
 
 function stubLayout(cellWidth: number, cellHeight = 400): void {
   const box = (left: number, top: number, width: number, height: number): DOMRect =>
@@ -324,6 +337,22 @@ function stubLayout(cellWidth: number, cellHeight = 400): void {
     }
     if (testId === `speech-bar-eye-${SESSION}`) {
       return box(cellWidth - 52, CONTROL_TOP, CONTROL_SIZE, CONTROL_SIZE);
+    }
+    // The foot of the pane: the chip row a fixed distance above the cell's
+    // bottom edge — the composer's field and hint below it — and the chip at
+    // the row's left padding. The band's boxes at their measured top, one
+    // short paragraph tall, so the picker's callout has a band to stay clear of.
+    if (this.classList.contains("answer-pane-chip-row")) {
+      return box(0, cellHeight - chipRowFromFoot, cellWidth, 30);
+    }
+    if (testId === `answer-pane-skills-chip-${SESSION}`) {
+      return box(12, cellHeight - chipRowFromFoot + 8, 62, 22);
+    }
+    if (this.classList.contains("boot-legend-door")) {
+      return box(12, 0, 300, doorHeight);
+    }
+    if (this.classList.contains("boot-legend-callout")) {
+      return box(10, BAND_TOP, 190, BAND_HEIGHT);
     }
     return box(0, 0, 0, 0);
   });
@@ -366,13 +395,15 @@ const px = (value: string): number => Number.parseFloat(value);
  * `cellWidth`, when given, stubs the layout BEFORE the mount so the legend's
  * own `useLayoutEffect` measures against it on the very first pass.
  */
-function openLegend(cellWidth?: number, sessionId = SESSION): void {
-  if (cellWidth !== undefined) stubLayout(cellWidth);
+function openLegend(cellWidth?: number, sessionId = SESSION, cellHeight?: number): void {
+  if (cellWidth !== undefined) stubLayout(cellWidth, cellHeight);
   render(cell(makeSpeech(sessionId), sessionId));
   fireEvent.click(eye(sessionId));
 }
 
 beforeEach(() => {
+  doorHeight = 64;
+  chipRowFromFoot = CHIP_ROW_FROM_FOOT;
   at = 0;
   term.writes.length = 0;
   term.accept = true;
@@ -845,5 +876,305 @@ describe("the boot legend", () => {
     } finally {
       drop();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Teaching the picker (commands-in-context, Task 12).
+//
+// The picker is a control of exactly the legend's kind — nothing else names it
+// — but it lives at the OTHER end of the cell: the band hangs off the speech
+// row at the top, the `/ skills` chip sits in the chip row at the foot of the
+// pane. So its callout is not a third box in the band; it stands above the
+// chip row, and the band keeps its two callouts and its narrow-cell rule.
+// ---------------------------------------------------------------------------
+
+const door = (sessionId = SESSION): HTMLElement | null =>
+  screen.queryByTestId(`boot-legend-door-${sessionId}`);
+const chip = (sessionId = SESSION): HTMLElement | null =>
+  screen.queryByTestId(`answer-pane-skills-chip-${sessionId}`);
+const hint = (sessionId = SESSION): HTMLElement | null =>
+  screen.queryByTestId(`answer-pane-hint-${sessionId}`);
+
+describe("the boot legend teaches the command picker", () => {
+  it("the picker is taught by a callout at the foot of the pane", () => {
+    const drop = injectStylesheet();
+    try {
+      const cellHeight = 400;
+      openLegend(720, SESSION, cellHeight);
+
+      const taught = door();
+      expect(taught, "no callout names the picker").not.toBeNull();
+      // Part of the legend, so it goes away with the band — the legend's own
+      // derivation is the whole lifecycle — and not a box IN the band.
+      expect(legend()!.contains(taught!)).toBe(true);
+      expect(taught!.classList.contains("boot-legend-callout")).toBe(false);
+      // It names the picker, and points at the chip that opens it.
+      expect(taught!.textContent).toMatch(/skills/i);
+      expect(taught!.textContent).toMatch(/slash/i);
+      expect(taught!.getAttribute("data-leads-to")).toBe(`answer-pane-skills-chip-${SESSION}`);
+
+      // ABOVE the chip row, at the foot: its bottom edge is measured off the
+      // row's top, so it sits just over the chips — never over the field below
+      // them — and well below the band at the top of the cell.
+      const bottom = px(taught!.style.bottom);
+      const chipRowTop = cellHeight - CHIP_ROW_FROM_FOOT;
+      const doorBottomEdge = cellHeight - bottom;
+      expect(doorBottomEdge).toBeLessThanOrEqual(chipRowTop);
+      expect(doorBottomEdge).toBeGreaterThanOrEqual(chipRowTop - 16);
+      expect(doorBottomEdge).toBeGreaterThan(BAND_TOP + BAND_HEIGHT);
+      // Left-aligned with the chip it names.
+      expect(px(taught!.style.left)).toBe(12);
+      expect(getComputedStyle(taught!).position).toBe("absolute");
+    } finally {
+      drop();
+    }
+  });
+
+  it("the picker's callout goes with the legend", async () => {
+    openLegend();
+    expect(door()).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(pane()).toBeNull());
+    expect(legend()).toBeNull();
+    expect(door()).toBeNull();
+  });
+
+  it("the band still carries only the transport and eye callouts", () => {
+    openLegend(720);
+
+    expect(calloutTargets()).toEqual(
+      [`speech-bar-playpause-${SESSION}`, `speech-bar-eye-${SESSION}`].sort(),
+    );
+    expect(callouts().map((c) => c.getAttribute("data-leader")).sort()).toEqual([
+      "eye",
+      "transport",
+    ]);
+    // Type-level: a third key in the band is a compile error, not a review note.
+    expectTypeOf<Callout["key"]>().toEqualTypeOf<"transport" | "eye">();
+  });
+
+  it("no callout body names Enter, Esc or composer", () => {
+    openLegend(720);
+
+    const bodies = [...callouts(), door()];
+    expect(bodies).toHaveLength(3);
+    for (const body of bodies) {
+      expect(body, "the picker's callout is missing").not.toBeNull();
+      const text = body!.textContent ?? "";
+      expect(text).not.toMatch(/\bcomposer\b/i);
+      expect(text).not.toMatch(/\benter\b/i);
+      expect(text).not.toMatch(/\besc(ape)?\b/i);
+    }
+  });
+
+  it("the desktop hint line gains the skills hint", () => {
+    openLegend();
+
+    expect(hint()!.textContent).toBe(
+      "ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER · / FOR SKILLS",
+    );
+  });
+
+  it("a touch viewport renders no hint line but does render the chip", () => {
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: (query: string) => ({
+        matches: query === MOBILE_QUERY,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    try {
+      openLegend();
+
+      expect(pane()).not.toBeNull();
+      expect(hint()).toBeNull();
+      // On a phone the chip is the only thing that teaches the picker (D18).
+      expect(chip()).not.toBeNull();
+    } finally {
+      delete (window as { matchMedia?: unknown }).matchMedia;
+    }
+  });
+
+  it("the narrow-cell fallback is unchanged", () => {
+    const drop = injectStylesheet();
+    try {
+      openLegend(320);
+
+      expect(calloutTargets()).toEqual([`speech-bar-eye-${SESSION}`]);
+      expect(calloutFor("transport")).toBeNull();
+      expect(calloutFor("eye")!.getAttribute("data-solo")).toBe("1");
+      // The picker's teaching is not in the band, so it does not compete for
+      // the band's width: it is still there in a cell too narrow for two.
+      expect(door()).not.toBeNull();
+    } finally {
+      drop();
+    }
+  });
+
+  it("a pane too short for it drops the picker's callout rather than laying it over the band", () => {
+    // 200px of cell: the chip row starts at 90, above the band's own bottom
+    // edge — there is no room between the two for a box.
+    openLegend(720, SESSION, 200);
+
+    expect(callouts()).toHaveLength(2);
+    expect(door()).toBeNull();
+  });
+
+  it("the open picker is not covered by the callout that teaches it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify([]), { status: 200 })),
+    );
+    openLegend(720);
+    expect(door()).not.toBeNull();
+
+    fireEvent.click(chip()!);
+    await waitFor(() => expect(chip()!.getAttribute("aria-expanded")).toBe("true"));
+    await waitFor(() => expect(door()).toBeNull());
+    // The band is untouched: the legend is still up, only the door gave way.
+    expect(legend()).not.toBeNull();
+  });
+
+  it("the callout follows the pane's own resize edge", () => {
+    const observers: RecordingResizeObserver[] = [];
+    class RecordingResizeObserver {
+      observed = new Set<Element>();
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(el: Element): void {
+        this.observed.add(el);
+      }
+      unobserve(el: Element): void {
+        this.observed.delete(el);
+      }
+      disconnect(): void {
+        this.observed.clear();
+      }
+    }
+    vi.stubGlobal("ResizeObserver", RecordingResizeObserver);
+    const cellHeight = 400;
+    openLegend(720, SESSION, cellHeight);
+    const before = px(door()!.style.bottom);
+
+    // Dragging the pane's bottom edge resizes the PANE, and nothing inside it:
+    // the chip row moves with the pane's foot. The legend must be watching it.
+    const answerPane = pane()!;
+    const watcher = observers.find((o) => o.observed.has(answerPane));
+    expect(watcher, "no observer watches the answer pane's own box").toBeDefined();
+
+    chipRowFromFoot = CHIP_ROW_FROM_FOOT + 60;
+    act(() => watcher!.callback([], watcher as unknown as ResizeObserver));
+    expect(px(door()!.style.bottom)).toBe(before + 60);
+  });
+
+  it("dismissing the legend disconnects every observer and listener it set up", async () => {
+    // Other parts of the cell observe and listen too, so every instance records
+    // WHAT it watches: the legend's are the ones watching the legend's boxes.
+    const resizeObservers: { observed: Element[]; disconnected: boolean }[] = [];
+    class TrackedResizeObserver {
+      private readonly record = { observed: [] as Element[], disconnected: false };
+      constructor(_cb: ResizeObserverCallback) {
+        resizeObservers.push(this.record);
+      }
+      observe(el: Element): void {
+        this.record.observed.push(el);
+      }
+      unobserve(): void {}
+      disconnect(): void {
+        this.record.disconnected = true;
+      }
+    }
+    const mutationObservers: { filter: string[]; disconnected: boolean }[] = [];
+    const RealMutationObserver = MutationObserver;
+    class TrackedMutationObserver extends RealMutationObserver {
+      private readonly record = { filter: [] as string[], disconnected: false };
+      constructor(cb: MutationCallback) {
+        super(cb);
+        mutationObservers.push(this.record);
+      }
+      observe(target: Node, options?: MutationObserverInit): void {
+        this.record.filter.push(...(options?.attributeFilter ?? []));
+        super.observe(target, options);
+      }
+      disconnect(): void {
+        this.record.disconnected = true;
+        super.disconnect();
+      }
+    }
+    vi.stubGlobal("ResizeObserver", TrackedResizeObserver);
+    vi.stubGlobal("MutationObserver", TrackedMutationObserver);
+    const added = vi.spyOn(window, "addEventListener");
+    const removed = vi.spyOn(window, "removeEventListener");
+    try {
+      openLegend(720);
+      const root = legend()!;
+      const legendRO = resizeObservers.find((r) => r.observed.includes(root));
+      expect(legendRO, "no observer watches the legend's root").toBeDefined();
+      const legendMO = mutationObservers.find((m) => m.filter.includes("aria-expanded"));
+      expect(legendMO, "no observer watches the chip's aria-expanded").toBeDefined();
+      const resizeListeners = added.mock.calls
+        .filter(([type]) => type === "resize")
+        .map(([, fn]) => fn);
+      expect(resizeListeners.length).toBeGreaterThan(0);
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      await waitFor(() => expect(legend()).toBeNull());
+
+      expect(legendRO!.disconnected).toBe(true);
+      expect(legendMO!.disconnected).toBe(true);
+      const removedFns = removed.mock.calls
+        .filter(([type]) => type === "resize")
+        .map(([, fn]) => fn);
+      for (const fn of resizeListeners) expect(removedFns).toContain(fn);
+    } finally {
+      added.mockRestore();
+      removed.mockRestore();
+    }
+  });
+
+  it("the callout's stub reaches the chip, not just the chip row", () => {
+    const drop = injectStylesheet();
+    try {
+      openLegend(720, SESSION, 400);
+      const taught = door()!;
+      // The chip sits 8px below the row's top edge in this layout; the stub
+      // spans the gap under the box AND that offset.
+      const reach = px(taught.style.getPropertyValue("--boot-legend-door-reach"));
+      const doorBottomEdge = 400 - px(taught.style.bottom);
+      const chipTop = 400 - CHIP_ROW_FROM_FOOT + 8;
+      expect(doorBottomEdge + reach).toBe(chipTop);
+      // ...and the stylesheet draws the stub from that number.
+      const after = cssRule(".boot-legend-door::after");
+      expect(after).toMatch(/height:\s*var\(--boot-legend-door-reach/);
+      expect(after).toMatch(/bottom:\s*calc\([^;]*var\(--boot-legend-door-reach/);
+    } finally {
+      drop();
+    }
+  });
+
+  it("room for the callout is its measured height, not a two-line guess", () => {
+    // 320px of cell puts the chip row at 210: 72px of box would fit under the
+    // band's 118, a three-line box of 80px does not.
+    doorHeight = 80;
+    openLegend(720, SESSION, 320);
+    expect(door()).toBeNull();
+  });
+
+  it("a callout of two lines still fits where there is room for it", () => {
+    doorHeight = 64;
+    openLegend(720, SESSION, 320);
+    expect(door()).not.toBeNull();
+  });
+
+  it("the hint line's skills fact is accented, as the mockup draws it", () => {
+    openLegend();
+    const accent = hint()!.querySelector(".answer-pane-hint-new");
+    expect(accent?.textContent).toBe("/ FOR SKILLS");
+    expect(cssRule(".answer-pane-hint-new")).toMatch(/color:\s*var\(--accent\)/);
   });
 });

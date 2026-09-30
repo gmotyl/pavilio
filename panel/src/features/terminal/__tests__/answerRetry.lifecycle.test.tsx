@@ -247,8 +247,6 @@ const renderPane = (): RenderResult =>
         speech={speech}
         onClose={() => {}}
         send={send}
-        autoOpen={false}
-        onAutoOpenChange={() => {}}
       />
     </MemoryRouter>,
   );

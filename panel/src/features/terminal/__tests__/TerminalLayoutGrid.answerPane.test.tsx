@@ -171,8 +171,6 @@ async function settle(): Promise<void> {
 
 const eye = (): HTMLElement => screen.getByTestId("speech-bar-eye-cell-a");
 const pane = (): HTMLElement | null => screen.queryByTestId("answer-pane-cell-a");
-const footerBox = (): HTMLInputElement =>
-  screen.getByTestId("answer-pane-auto-open-cell-a") as HTMLInputElement;
 
 beforeEach(() => {
   forgetAnswerPane("cell-a");
@@ -181,10 +179,8 @@ beforeEach(() => {
 });
 
 describe("TerminalLayoutGrid — the answer pane across a layout change", () => {
-  it("MAX and back leaves the pane open with its footer switch unchanged", async () => {
-    // Seed the switch OFF, against the ON default: what has to survive MAX is
-    // a switch the user MOVED, and a switch left where the default put it
-    // would survive a remount that rebuilt it from scratch.
+  it("MAX and back leaves the pane open", async () => {
+    // Off, so the pane below is open only because the eye opened it.
     setStoredAutoOpenAnswer(false);
     const speech = makeSpeech();
     const view = render(grid(speech, false));
@@ -193,9 +189,6 @@ describe("TerminalLayoutGrid — the answer pane across a layout change", () => 
 
     fireEvent.click(eye());
     expect(pane()).not.toBeNull();
-    expect(footerBox()).not.toBeChecked();
-    fireEvent.click(footerBox());
-    expect(footerBox()).toBeChecked();
 
     // Maximize: the grid body is replaced by the fullscreen stack.
     view.rerender(grid(speech, true));
@@ -203,7 +196,6 @@ describe("TerminalLayoutGrid — the answer pane across a layout change", () => 
     expect(screen.queryByTestId("terminal-grid")).toBeNull();
     expect(pane()).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
-    expect(footerBox()).toBeChecked();
 
     // And back.
     view.rerender(grid(speech, false));
@@ -211,7 +203,6 @@ describe("TerminalLayoutGrid — the answer pane across a layout change", () => 
     expect(screen.getByTestId("terminal-grid")).toBeInTheDocument();
     expect(pane()).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
-    expect(footerBox()).toBeChecked();
   });
 
   it("a pane closed before MAX stays closed after it", async () => {

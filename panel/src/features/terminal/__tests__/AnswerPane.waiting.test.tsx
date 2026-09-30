@@ -216,8 +216,6 @@ const paneTree = (speech: GridSpeech) => (
       speech={speech}
       onClose={() => {}}
       send={send}
-      autoOpen={false}
-      onAutoOpenChange={() => {}}
     />
   </MemoryRouter>
 );
@@ -237,8 +235,6 @@ const surfaceTree = (speech: GridSpeech) => (
       speech={speech}
       onClose={() => {}}
       send={send}
-      autoOpen={false}
-      onAutoOpenChange={() => {}}
     />
   </MemoryRouter>
 );
@@ -276,8 +272,6 @@ const twoCellTree = (speech: GridSpeech, other: string) => (
       speech={speech}
       onClose={() => {}}
       send={send}
-      autoOpen={false}
-      onAutoOpenChange={() => {}}
     />
     <SpeechControlBar
       sessionId={other}

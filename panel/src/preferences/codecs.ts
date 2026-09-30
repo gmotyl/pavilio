@@ -63,3 +63,22 @@ export function oneOf<T extends string>(values: readonly T[]): PreferenceCodec<T
     storesText: true,
   };
 }
+
+/**
+ * Text that may be absent: `null` is stored as the empty string and an empty
+ * stored string reads back as `null`. For an override whose absence means
+ * "use the wider value" — it keeps the stored text verbatim in the workspace
+ * file, where `json<string | null>()` would wrap it in a pair of quotes.
+ *
+ * The cost is that a blank value and no value are one value. For an override
+ * that is the right reading: a blank override overrides nothing.
+ */
+export const optionalStr: PreferenceCodec<string | null> = {
+  parse(raw) {
+    return raw === "" ? null : raw;
+  },
+  serialize(value) {
+    return value ?? "";
+  },
+  storesText: true,
+};

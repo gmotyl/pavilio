@@ -231,7 +231,7 @@ function reportExit(ws: FakeWs): void {
 const field = (sessionId = "cell-a"): HTMLTextAreaElement =>
   screen.getByTestId(`answer-pane-composer-${sessionId}`) as HTMLTextAreaElement;
 
-function renderPane(sessionId: string, speech: GridSpeech = makeSpeech(), autoOpen = false) {
+function renderPane(sessionId: string, speech: GridSpeech = makeSpeech()) {
   return render(
     // The router is for the markdown renderer, which links with `useNavigate`.
     <MemoryRouter>
@@ -240,8 +240,6 @@ function renderPane(sessionId: string, speech: GridSpeech = makeSpeech(), autoOp
         speech={speech}
         onClose={() => {}}
         send={() => true}
-        autoOpen={autoOpen}
-        onAutoOpenChange={() => {}}
       />
     </MemoryRouter>,
   );
@@ -358,8 +356,8 @@ describe("AnswerComposer focus repairs the socket", () => {
     document.addEventListener("focusin", record);
     try {
       // The pane as it opens ON an arriving answer: an utterance under the
-      // cursor, and the cell's auto-open switch on.
-      renderPane("cell-a", speechWith("cell-a", "the answer that opened the pane"), true);
+      // cursor.
+      renderPane("cell-a", speechWith("cell-a", "the answer that opened the pane"));
     } finally {
       document.removeEventListener("focusin", record);
     }

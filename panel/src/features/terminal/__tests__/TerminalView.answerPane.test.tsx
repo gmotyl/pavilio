@@ -10,10 +10,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  getStoredAutoOpenAnswer,
-  setStoredAutoOpenAnswer,
-} from "../../speech/autoOpenAnswer";
+import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import { prepare } from "../../speech/prepare";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
@@ -207,10 +204,8 @@ async function settleTerminal(): Promise<void> {
 
 const eye = (): HTMLElement => screen.getByTestId("speech-bar-eye-cell-a");
 const pane = (): HTMLElement | null => screen.queryByTestId("answer-pane-cell-a");
-const footerBox = (): HTMLInputElement =>
-  screen.getByTestId("answer-pane-auto-open-cell-a") as HTMLInputElement;
 
-/** The browser-wide default, as Settings would leave it. */
+/** The one global preference, as Settings would leave it. */
 const storeDefault = (on: boolean): void => {
   setStoredAutoOpenAnswer(on);
 };
@@ -405,26 +400,9 @@ describe("TerminalView and the answer pane", () => {
     expect(eye()).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("the footer switch survives a remount", async () => {
-    storeDefault(false);
-    const speech = makeSpeech();
-    const first = render(cell(speech));
-    await settleTerminal();
-    fireEvent.click(eye());
-    expect(footerBox()).not.toBeChecked();
-    fireEvent.click(footerBox());
-    expect(footerBox()).toBeChecked();
-
-    first.unmount();
-    render(cell(speech));
-    await settleTerminal();
-    // Still the cell's own choice, not a reseed from the browser default.
-    expect(footerBox()).toBeChecked();
-  });
-
   it("a remount is not an arrival", async () => {
     // The seen set outlives the view too: the queue the remounted view is
-    // handed holds nothing new, so a switch that is on opens nothing.
+    // handed holds nothing new, so a preference that is on opens nothing.
     storeDefault(true);
     const speech = makeSpeech();
     const first = render(cell(speech));
@@ -454,38 +432,7 @@ describe("TerminalView and the answer pane", () => {
 });
 
 describe("TerminalView opens the pane on a new answer", () => {
-  it("a cell seeds its switch from the default at mount", async () => {
-    storeDefault(true);
-    const speech = makeSpeech();
-    render(cell(speech));
-    await settleTerminal();
-    fireEvent.click(eye());
-    expect(footerBox()).toBeChecked();
-
-    // The cell's switch is its own: flipping it writes nothing back to the
-    // default, and the default changing later does not reach a mounted cell.
-    fireEvent.click(footerBox());
-    expect(footerBox()).not.toBeChecked();
-    expect(getStoredAutoOpenAnswer()).toBe(true);
-    fireEvent.click(footerBox());
-    expect(footerBox()).toBeChecked();
-
-    storeDefault(false);
-    fireEvent.click(eye());
-    fireEvent.click(eye());
-    expect(footerBox()).toBeChecked();
-  });
-
-  it("a cell mounted with the default off starts off", async () => {
-    storeDefault(false);
-    const speech = makeSpeech();
-    render(cell(speech));
-    await settleTerminal();
-    fireEvent.click(eye());
-    expect(footerBox()).not.toBeChecked();
-  });
-
-  it("a new answer opens the pane and focuses it when the switch is on", async () => {
+  it("a new answer opens the pane and focuses it when the preference is on", async () => {
     storeDefault(true);
     const speech = makeSpeech();
     const view = render(cell(speech));
@@ -504,7 +451,7 @@ describe("TerminalView opens the pane on a new answer", () => {
 
   it("a new answer opens the pane with nothing stored at all", async () => {
     // No `storeDefault` here, on purpose: the document is empty, exactly as it
-    // is for a user who has never touched the box. The declared default is ON,
+    // is for a user who has never touched the Settings box. The declared default is ON,
     // so the answer this cell has just produced opens its own pane with no
     // click on the eye — the correction this default exists for.
     const speech = makeSpeech();
@@ -517,15 +464,13 @@ describe("TerminalView opens the pane on a new answer", () => {
 
     expect(pane()).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
-    // And the meta row's box shows the value that did it.
-    expect(footerBox()).toBeChecked();
   });
 
-  it("a box the user cleared still governs after a reload", async () => {
+  it("a preference the user cleared still governs after a reload", async () => {
     // Cleared once, in Settings. A reload re-injects the stored document and
-    // drops every cell's in-memory entry, so the fresh cell seeds from the
-    // STORED false rather than from the declared true: the choice outranks
-    // the default, which is why the box is still a box.
+    // drops every cell's in-memory entry, so the arrival in the fresh cell
+    // reads the STORED false rather than the declared true: the choice
+    // outranks the default.
     storeDefault(false);
     const reloaded = { ...globals.__PAVILIO_PREFS__! };
     expect(reloaded[storageKey(preferences.answerPaneAutoOpen)]).toBe(false);
@@ -540,9 +485,6 @@ describe("TerminalView opens the pane on a new answer", () => {
     speech.arrive("u-2");
     view.rerender(cell(speech));
     expect(pane()).toBeNull();
-
-    fireEvent.click(eye());
-    expect(footerBox()).not.toBeChecked();
   });
 
   it("the utterance a fresh tab is handed does not open the pane", async () => {
@@ -616,7 +558,7 @@ describe("TerminalView opens the pane on a new answer", () => {
     expect(pane()).toBeNull();
     offView.unmount();
 
-    // Hidden bar: the bar's visibility outranks the checkbox, and the arrival
+    // Hidden bar: the bar's visibility outranks the preference, and the arrival
     // is not held back for when the bar returns either.
     storeDefault(true);
     const hidden = makeSpeech();

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { bool, json, num, oneOf, str } from "../codecs";
+import { bool, json, num, oneOf, optionalStr, str } from "../codecs";
 import { definePreference, storageKey } from "../types";
 
 const leftSidebarExpanded = definePreference({
@@ -149,6 +149,21 @@ describe("codecs", () => {
     const commitsOpen = { pavilio: ["abc123", "def456"], vector: [] };
     const codec = json<typeof commitsOpen>();
     expect(codec.parse(codec.serialize(commitsOpen))).toEqual(commitsOpen);
+  });
+});
+
+describe("optionalStr", () => {
+  it("stores absence as the empty string and reads it back as absence", () => {
+    expect(optionalStr.serialize(null)).toBe("");
+    expect(optionalStr.parse("")).toBeNull();
+  });
+
+  it("keeps any other text verbatim, including text that looks like JSON", () => {
+    for (const value of ["Only {change}.", "null", "true", "{}"]) {
+      expect(optionalStr.serialize(value)).toBe(value);
+      expect(optionalStr.parse(optionalStr.serialize(value))).toBe(value);
+    }
+    expect(optionalStr.storesText).toBe(true);
   });
 });
 

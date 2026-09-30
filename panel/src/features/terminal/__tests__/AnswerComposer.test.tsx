@@ -146,8 +146,6 @@ const paneTree = (sessionId: string, speech: GridSpeech) => (
         speech={speech}
         onClose={onClose}
         send={send}
-        autoOpen={false}
-        onAutoOpenChange={() => {}}
       />
     </div>
   </MemoryRouter>
@@ -476,8 +474,6 @@ describe("AnswerComposer", () => {
                 speech={speech}
                 onClose={() => setOpen(false)}
                 send={send}
-                autoOpen={false}
-                onAutoOpenChange={() => {}}
               />
             ) : null}
           </div>
@@ -633,14 +629,67 @@ describe("AnswerComposer", () => {
       // pane's bottom edge: dragging it up shortens the whole column and
       // uncovers the terminal, where the grip two rows above it only moves the
       // boundary between the answer and the reply.
+      //
+      // The chip row is a row of its own between the grip and the field's row,
+      // outside the height the grip drags — see "keeps the chip row out of the
+      // dragged height" below.
       expect(regionOrder()).toEqual([
         "answer-pane-body",
         "answer-pane-meta",
         "answer-pane-grip",
+        "answer-pane-chip-row",
         "answer-pane-composer",
         "answer-pane-hint",
         "answer-pane-drag",
       ]);
+    });
+
+    it("keeps the chip row out of the dragged height", () => {
+      renderPane();
+
+      // The `/ skills` chip is always drawn, so a chip row inside the row the
+      // grip sizes would always be paid for out of the field — 16.5px of it at
+      // the default 62px, less than one line. It sits above that row instead,
+      // in a row that takes its own height.
+      const chip = screen.getByRole("button", { name: "/ skills" });
+      expect(chip.closest(".answer-pane-composer")).toBeNull();
+      expect(chip.closest(".answer-pane-chip-row")).not.toBeNull();
+      const row = cssRule(".answer-pane-chip-row").replace(/\/\*[\s\S]*?\*\//g, "");
+      expect(row).toMatch(/(^|;)\s*flex:\s*none\s*(;|$)/);
+      expect(row).not.toMatch(/(^|;)\s*(min-|max-)?height\s*:/);
+    });
+
+    it("never lets the grip squeeze the field below one line", () => {
+      // Stored far below the floor: the row clamps to BOUNDS.min.
+      writePreference(preferences.answerComposerHeight, 1, PROJECT);
+      renderPane();
+      const row = field().closest(".answer-pane-composer") as HTMLElement;
+      const rowHeight = Number.parseFloat(row.style.height);
+
+      // One line of the field, read out of the stylesheet — its line box, its
+      // vertical padding and its border — plus the row's own vertical padding,
+      // which the stored height pays for too.
+      const decl = (selector: string, property: string): string => {
+        const found = cssRule(selector)
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .match(new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`));
+        if (!found) throw new Error(`no ${property} in ${selector}`);
+        return found[1].trim();
+      };
+      const vertical = (shorthand: string): number => {
+        const [top, , bottom = top] = shorthand.split(/\s+/).map(Number.parseFloat);
+        return top + bottom;
+      };
+      const fieldLine =
+        Number.parseFloat(decl(".answer-pane-composer-field", "font-size")) *
+          Number.parseFloat(decl(".answer-pane-composer-field", "line-height")) +
+        vertical(decl(".answer-pane-composer-field", "padding")) +
+        2 * Number.parseFloat(decl(".answer-pane-composer-field", "border"));
+      const floor = fieldLine + vertical(decl(".answer-pane-composer", "padding"));
+
+      expect(rowHeight).toBeGreaterThanOrEqual(floor);
+      // And the declared default opens above that floor too.
+      expect(preferences.answerComposerHeight.default).toBeGreaterThanOrEqual(floor);
     });
 
     it("names the composer's switch for what it does", () => {
@@ -711,6 +760,7 @@ describe("AnswerComposer", () => {
       expect(regionOrder()).toEqual([
         "answer-pane-body",
         "answer-pane-meta",
+        "answer-pane-chip-row",
         "answer-pane-composer",
       ]);
       expect(grip()).toBeNull();

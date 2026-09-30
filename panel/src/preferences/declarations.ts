@@ -24,7 +24,7 @@
  * features, so pulling a feature module in at runtime would invert that — and
  * would close a cycle the moment those features start reading the registry.
  */
-import { bool, json, num, oneOf, str } from "./codecs";
+import { bool, json, num, oneOf, optionalStr, str } from "./codecs";
 import { definePreference, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
@@ -52,11 +52,16 @@ export interface TimeReportPrefs {
 export interface TerminalLauncher {
   name: string;
   command: string;
+  /** Whole command line a task run spawns; `{prompt}` is the objective. Blank = not offered for a run. */
+  runLoop?: string;
 }
 
 /**
  * The launcher row an empty workspace opens with — the three agents the panel
- * is used to drive, each named after its own binary.
+ * is used to drive, each named after its own binary. Each carries the run
+ * loop a task run spawns: one whole command line rather than panel-side rules,
+ * because whether there is a `/goal`, whether the prompt is positional or a
+ * flag, and where the quotes go all differ between the agents at once.
  *
  * Exported so the settings surface can offer "back to the defaults" without a
  * second copy of the list. Treat it as frozen: `readPreference` hands the
@@ -64,10 +69,21 @@ export interface TerminalLauncher {
  * pushes onto the value it read would rewrite the defaults for the session.
  */
 export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
-  { name: "claude", command: "claude" },
-  { name: "codex", command: "codex" },
-  { name: "opencode", command: "opencode" },
+  { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+  { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
+  { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
 ];
+
+/**
+ * The objective a task run hands its agent when neither the workspace nor the
+ * project has written one. The OBJECTIVE only: no `/goal` and no quotes, which
+ * belong to the launcher's run loop. `{change}`, `{path}` and `{project}` are
+ * substituted at send time. Worded after the example in the change's proposal
+ * (`/goal Implement all tasks in openspec/changes/<id>/tasks.md; …`), with the
+ * path left to `{path}` so it names the file actually on screen.
+ */
+export const DEFAULT_TASK_PROMPT =
+  "Implement all tasks in {path}; done when every task is checked and tests + lint pass.";
 
 /**
  * The voice the panel speaks with when nothing is stored. It lives here, not
@@ -279,6 +295,61 @@ export const preferences = {
     portable: true,
   }),
 
+  // ── Plans ────────────────────────────────────────────────────────────────
+  // The task-run objective is the panel's first TWO-LEVEL preference: a
+  // workspace default and a per-project override, two declarations read
+  // through `readOverridable` (`./overridable`). `readPreference` alone falls
+  // back to the STATIC default, never to a value stored at a wider scope, so
+  // the pair cannot be one declaration. Keys differ by more than the scope
+  // suffix because every declared key is unique.
+  /** The workspace-wide objective template. */
+  taskPromptDefault: definePreference({
+    key: "plans.taskPrompt", // was: nothing — new with the run banner
+    scope: "global",
+    default: DEFAULT_TASK_PROMPT,
+    codec: str,
+    portable: true,
+  }),
+  /**
+   * A project's own objective template. `null` means "no override": the read
+   * falls through to `plans.taskPrompt`. Reset CLEARS this key (see
+   * `clearOverride`) rather than writing the default into it, or the project
+   * would stop tracking later edits to the default.
+   */
+  taskPromptOverride: definePreference<string | null>({
+    key: "plans.taskPrompt.override", // was: nothing — new with the run banner
+    scope: "project",
+    default: null,
+    codec: optionalStr,
+    portable: true,
+  }),
+  /**
+   * The run banner's chevron. One remembered toggle for every change, open
+   * until the user collapses it — the same shape as `terminal.drawer.open`.
+   */
+  plansBannerExpanded: definePreference({
+    key: "plans.runBanner.expanded", // was: nothing — new with the run banner
+    scope: "global",
+    default: true,
+    codec: bool,
+    portable: true,
+  }),
+  /**
+   * The CLI the run banner's switch last picked, by launcher NAME, so a run is
+   * not a question asked every time. A name rather than a position: a
+   * reordered or shortened launcher list must not silently move the pick.
+   * `null` (stored blank) is "nothing picked yet": the banner takes the first
+   * launcher with a run loop, and does the same when the remembered one has
+   * gone or lost its run loop.
+   */
+  plansRunLauncher: definePreference<string | null>({
+    key: "plans.runBanner.launcher", // was: nothing — new with the run banner
+    scope: "global",
+    default: null,
+    codec: optionalStr,
+    portable: true,
+  }),
+
   // ── Git ──────────────────────────────────────────────────────────────────
   gitViewMode: definePreference<GitViewMode>({
     key: "git.viewMode", // was: panel-git-view-mode
@@ -453,8 +524,8 @@ export const preferences = {
   /**
    * ON by default: an answer the user just asked for is the thing they are
    * waiting for, so the pane that holds it opens itself rather than asking for
-   * a click on the eye. It stays a preference — the "Open on new answer" box
-   * clears it, and a cleared box is remembered, beating this default.
+   * a click on the eye. It stays a preference — the Settings page's box clears
+   * it, and a cleared box is remembered, beating this default.
    */
   answerPaneAutoOpen: definePreference({
     key: "speech.answerPane.autoOpen", // was: panel-answer-pane-auto-open

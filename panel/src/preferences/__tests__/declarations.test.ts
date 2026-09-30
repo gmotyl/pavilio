@@ -16,6 +16,10 @@ const PORTABLE = [
   "git.commitsOpen",
   "git.viewMode",
   "git.worktree.expanded",
+  "plans.runBanner.expanded",
+  "plans.runBanner.launcher",
+  "plans.taskPrompt",
+  "plans.taskPrompt.override",
   "projects.favorites",
   "repos.searchScope",
   "repos.tree.paneWidth",
@@ -103,6 +107,17 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["nav.lastFile", null, "project"],
   ["nav.lastPath", null, "project"],
   ["nav.lastReposQuery", null, "project"],
+  // Open until the chevron is pressed: an unset collapse preference is expanded.
+  ["plans.runBanner.expanded", true, "global"],
+  // `null` is "nothing picked yet": the banner takes the first runnable launcher.
+  ["plans.runBanner.launcher", null, "global"],
+  [
+    "plans.taskPrompt",
+    "Implement all tasks in {path}; done when every task is checked and tests + lint pass.",
+    "global",
+  ],
+  // `null` is "no override": the read falls through to `plans.taskPrompt`.
+  ["plans.taskPrompt.override", null, "project"],
   ["projects.favorites", [], "global"],
   ["repos.searchScope", "changed", "global"],
   ["repos.tree.paneWidth", 280, "global"],
@@ -132,9 +147,9 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   [
     "terminal.launchers",
     [
-      { name: "claude", command: "claude" },
-      { name: "codex", command: "codex" },
-      { name: "opencode", command: "opencode" },
+      { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+      { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
+      { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
     ],
     "global",
   ],
@@ -312,9 +327,9 @@ describe("the launcher list and the answer composer", () => {
     // that export IS the declared default, so comparing it to itself would
     // assert nothing — including that the order survived the read.
     expect(readPreference(preferences.terminalLaunchers)).toEqual([
-      { name: "claude", command: "claude" },
-      { name: "codex", command: "codex" },
-      { name: "opencode", command: "opencode" },
+      { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+      { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
+      { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
     ]);
   });
 

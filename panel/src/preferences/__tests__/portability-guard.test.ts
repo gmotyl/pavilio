@@ -95,6 +95,12 @@ const FIXTURES: Record<string, Fixture> = {
   "git.branchDiff.open": { value: false, scopeArg: "~/git/prv/pavilio" },
   "git.worktree.expanded": { value: true, scopeArg: "~/git/prv/pavilio-prefs" },
 
+  // ── Plans ────────────────────────────────────────────────────────────────
+  "plans.taskPrompt": { value: "Finish {change}; stop when {path} is fully checked." },
+  "plans.taskPrompt.override": { value: "Only the UI tasks of {change}.", scopeArg: "pavilio" },
+  "plans.runBanner.expanded": { value: false },
+  "plans.runBanner.launcher": { value: "codex" },
+
   // ── Terminal ─────────────────────────────────────────────────────────────
   "terminal.drawer.open": { value: true },
   "terminal.drawer.side": { value: "right" },
@@ -222,8 +228,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(38);
-    expect(portable.length).toBe(29);
+    expect(ALL_PREFERENCES.length).toBe(42);
+    expect(portable.length).toBe(33);
     expect(machineLocal.length).toBe(9);
     expect(sessionTier.length).toBe(3);
     // The portable arm of the union forbids `browserStore`; this says the

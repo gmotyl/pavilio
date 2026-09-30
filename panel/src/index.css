@@ -1058,8 +1058,8 @@ input[type="checkbox"] {
   /* No paint of its own: the pane is one surface now, the row's. A darker well
      here is what made the text read as a card's inside, and it is also the
      xterm's own ground (`--bg-base`), which is the one thing the pane must not
-     look like. The seams left are hairlines on the two rows BELOW the text —
-     the meta row's `border-top`, and the composer's own when it is on. */
+     look like. The seam left is the hairline on the composer's chip row,
+     below the meta row, when the composer is on. */
   display: grid;
   grid-template-columns: 22px 1fr;
   column-gap: 10px;
@@ -1243,8 +1243,9 @@ input[type="checkbox"] {
    row itself: the bar and the pane share `#17171d`, the xterm keeps `#1a1b26`,
    and what YOU type is neither agent nor shell, so the well is darker than
    both. Putting it on the field rather than the row is what makes the send
-   button beside it read as part of the surface instead of as part of the input,
-   and the row's `border-top` is the seam with the switches above it.
+   button beside it read as part of the surface instead of as part of the input.
+   The seam with the switches above is the chip row's `border-top` — that row
+   sits between the two (see `.answer-pane-chip-row`).
 
    The row paints the SPEECH ground, not the well: the well is the field's, so
    the send button beside it reads as part of the surface rather than as part of
@@ -1255,14 +1256,29 @@ input[type="checkbox"] {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 8px 12px 10px;
+  padding: 3px 12px 10px;
+  background: #17171d;
+}
+
+/* The chip row: its own row between the grip and the field's row, OUTSIDE the
+   height the grip drags. The `/ skills` chip means it is always drawn, and
+   inside the dragged height it was paid for out of the field — 16.5px of
+   field at the default 62px, less than one line. Out here the field's row
+   keeps the whole stored height and the chip row adds its own (wrapping, when
+   attachments pile up). It carries the composer's seam with the switches
+   above, since it is now the composer's first row. The top padding is the
+   composer's old one; the chip's own 4px margin plus the field row's 3px is
+   the settled mockup's 7px between the chips and the field. */
+.answer-pane-chip-row {
+  flex: none;
+  padding: 8px 12px 0;
   background: #17171d;
   border-top: 1px solid var(--border-subtle);
 }
 
-/* The field and its chips, stacked — the column that takes the row's width and
-   leaves the send button its 34px. Stretched, because the row aligns its items
-   to the bottom and this one must still fill the height the grip dragged. */
+/* The field's column — the one that takes the row's width and leaves the send
+   button its 34px. Stretched, because the row aligns its items to the bottom
+   and this one must still fill the height the grip dragged. */
 .answer-pane-composer-well {
   flex: 1 1 auto;
   min-width: 0;
@@ -1270,6 +1286,100 @@ input[type="checkbox"] {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* The command picker (commands-in-context, Strand A): floated above the chip
+   row so nothing in the pane moves when it opens (D1) — the answer it covers is
+   the one the user is replying to, and it comes back on Escape. Drawn after
+   the settled mockup's `.picker`. The list scrolls rather than growing past a
+   short cell. */
+.command-picker {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  width: 320px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.command-picker-group {
+  padding: 5px 9px 3px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.command-picker-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.command-picker-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 9px 5px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.command-picker-option[aria-selected="true"] {
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.command-picker-name {
+  flex: none;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+}
+
+.command-picker-option[aria-selected="true"] .command-picker-name {
+  color: var(--accent);
+}
+
+.command-picker-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  text-align: right;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-picker-status {
+  padding: 4px 9px 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.command-picker-foot {
+  padding: 5px 9px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+/* A phone has no arrow keys or Escape to name; the list is tapped. */
+@media (max-width: 767px) {
+  .command-picker-foot {
+    display: none;
+  }
 }
 
 /* The third ground of design.md's three: what YOU type is neither what the
@@ -1305,6 +1415,8 @@ input[type="checkbox"] {
    on `AnswerComposer`. */
 .answer-pane-composer-chips {
   flex: none;
+  /* The command picker floats over the answer from here. */
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -1325,6 +1437,32 @@ input[type="checkbox"] {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* The `/ skills` chip: the picker's visible door, first in the same row as
+   the attachments. Neutral rather than blue, so it never reads as a file that
+   has been attached; the accent is only on the slash. */
+.answer-pane-command-chip {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.answer-pane-command-chip b {
+  color: var(--accent);
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 600;
+}
+
+.answer-pane-command-chip:hover,
+.answer-pane-command-chip[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--text-primary);
 }
 
 /* The one control that survives the mobile collapse: on a phone there is no
@@ -1469,11 +1607,18 @@ input[type="checkbox"] {
   color: var(--text-muted);
 }
 
+/* The hint line's newest fact, `/ FOR SKILLS`, in the accent the settled
+   mockup gives it (`.hintline .new`): the one part of the line that is new. */
+.answer-pane-hint-new {
+  color: var(--accent);
+}
+
 /* The pane's two switches, right-aligned, directly under the text and ABOVE the
    composer — design.md's order. Outside the scroll container so the row stays
    put while the text scrolls. It paints nothing of its own, and draws no rule
-   either: the seam below it is the composer's own `border-top`, and a second
-   hairline here would box the switches in between two lines. */
+   either: the seam below it is the chip row's `border-top` (the composer's
+   first row), and a second hairline here would box the switches in between
+   two lines. */
 .answer-pane-meta {
   flex: none;
   display: flex;
@@ -1731,6 +1876,263 @@ input[type="checkbox"] {
   max-width: none;
   left: 10px;
   right: 10px;
+}
+
+/* The picker's callout — the settled mockup's "door teach" — standing just
+   above the composer's chip row and pointing down at the `/ skills` chip.
+
+   Accent-bordered on the accent's dim ground, where the band's two are
+   elevated-grey: this one names a control of the PANE, not of the row, and it
+   is the one of the three that does something when followed.
+
+   `BootLegend` writes `bottom` and `left` inline from the chip row's measured
+   box, so the stub below lands on the chip whatever height the grip left the
+   field at. The `bottom` here is only the unmeasured fallback — the chip row
+   sits about this far up at the composer's default height. The width is capped
+   by the cell as well as by the mockup's 300px, so a narrow cell keeps it
+   inside its edges. It takes the pointer back like the band does; nothing
+   under it is live, since it only ever stands over an empty pane. */
+.boot-legend-door {
+  position: absolute;
+  bottom: 120px;
+  left: 12px;
+  max-width: min(300px, calc(100% - 22px));
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--accent);
+  background: var(--accent-dim);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  animation: boot-legend-in 180ms ease-out both;
+}
+
+/* The stub: from the box's bottom edge (past its 1px border) down to the CHIP,
+   over the chip's left half — across `DOOR_GAP` and the chip's own offset
+   inside the row, which `BootLegend` writes as `--boot-legend-door-reach`. The
+   fallback is the unmeasured case: 10px of gap plus the row's 9px above the
+   chip (8px padding, 1px seam). */
+.boot-legend-door::after {
+  content: "";
+  position: absolute;
+  left: 22px;
+  bottom: calc(-1px - var(--boot-legend-door-reach, 19px));
+  width: 1px;
+  height: var(--boot-legend-door-reach, 19px);
+  background: var(--accent);
+}
+
+.boot-legend-door b {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* ── THE RUN BANNER ───────────────────────────────────────────────────────────
+
+   Above a change's `tasks.md` while it has unchecked boxes. The accent rule on
+   the left is the one thing that says "this can be started"; the rest stays in
+   the elevated-surface family so it reads as part of the viewer, not a toast.
+   Collapsed, the same element becomes one flex row carrying count, switch and
+   Run — the chevron is the only thing that changes its shape. */
+.run-banner {
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  padding: 9px 11px;
+  margin: 0 0 13px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.run-banner[data-collapsed],
+.run-banner-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.run-banner[data-collapsed] {
+  padding: 6px 11px;
+}
+
+.run-banner-top {
+  margin-bottom: 7px;
+}
+
+.run-banner-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.run-banner-grow {
+  flex: 1;
+}
+
+.run-banner-chevron {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  padding: 1px;
+  color: var(--text-muted);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.run-banner-chevron:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+/* The CLI switch: a segmented control one size down, mono because each option
+   is the name of a binary. */
+.run-banner-cli {
+  display: inline-flex;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.run-banner-cli button {
+  padding: 2px 7px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.run-banner-cli button + button {
+  border-left: 1px solid var(--border-default);
+}
+
+.run-banner-cli button:hover {
+  background: var(--bg-hover);
+}
+
+.run-banner-cli button[data-on] {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.run-banner-none {
+  color: var(--text-muted);
+}
+
+.run-banner-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--bg-base);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+}
+
+.run-banner-run:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.run-banner-run:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* What the terminal will receive. The launcher's wrapper is dimmed and is
+   plain text; only the objective between it is a field. */
+.run-banner-prompt {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+}
+
+.run-banner-wrap {
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.run-banner-objective {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  field-sizing: content;
+  min-height: 1.5em;
+  margin: 1px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  box-shadow: inset 0 -1px 0 var(--border-strong);
+  outline: none;
+}
+
+.run-banner-objective:focus-visible {
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+.run-banner-progress {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  height: 5px;
+  margin: 8px 0 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: transparent;
+}
+
+.run-banner-progress [data-segment] {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-active);
+}
+
+.run-banner-progress [data-segment="done"] {
+  background: var(--green);
+}
+
+/* Too many tasks for a segment each: one continuous fill over the track. */
+.run-banner-progress:has(.run-banner-progress-fill) {
+  background: var(--bg-active);
+}
+
+.run-banner-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--green);
+}
+
+.run-banner-foot {
+  margin-top: 7px;
+  color: var(--text-muted);
+}
+
+.run-banner-note {
+  margin-top: 5px;
+  color: var(--text-muted);
+}
+
+.run-banner-objective:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ── REDUCED MOTION, LAST IN THE FILE ─────────────────────────────────────────

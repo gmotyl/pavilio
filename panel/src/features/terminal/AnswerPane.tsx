@@ -11,8 +11,8 @@ import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { ANSWER_PANE_FULL_HEIGHT, preferences } from "../../preferences/declarations";
-import { usePreference } from "../../preferences/usePreference";
-import { AnswerComposer } from "./AnswerComposer";
+import { usePreference, useScopedPreference } from "../../preferences/usePreference";
+import { ANSWER_COMPOSER_BOUNDS, AnswerComposer } from "./AnswerComposer";
 import { AnswerWaiting, AnswerWaitingNext } from "./AnswerWaitingView";
 import { noteRetrySentOn } from "./answerRetry";
 import { beginWaiting, releaseAnswer, useAnswerHeld, useAnswerWaiting } from "./answerWaiting";
@@ -36,13 +36,6 @@ export interface AnswerPaneProps {
    * `TerminalView` closes the pane and refocuses the terminal.
    */
   onClose: () => void;
-  /**
-   * The cell's own "Open on new answer" switch, shown in the meta row. Owned by
-   * `TerminalView` — seeded from the browser-wide default at mount and never
-   * written back to it — so the pane only reflects it and reports a flip.
-   */
-  autoOpen: boolean;
-  onAutoOpenChange: (on: boolean) => void;
   /**
    * The cell's own PTY write, handed straight to the composer. `TerminalView`
    * reads it off the live instance at call time — the same one the bar's
@@ -88,9 +81,43 @@ const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as c
  * pane shorter than that has stopped being a pane and is merely in the way of
  * the terminal it was dragged out of. There is no matching CEILING constant —
  * see {@link AnswerPane} on why the ceiling is measured rather than declared.
+ *
+ * This is the floor with the composer OFF. With it on, see
+ * {@link minPaneHeight}: the composer's rows are chrome the answer cannot
+ * shrink into, and a fixed 120 left the pane's own drag row pushed ~59px
+ * below the pane at the default field height.
  */
-const MIN_PANE_HEIGHT = 120;
+export const MIN_PANE_HEIGHT = 120;
 const PANE_HEIGHT_STEP = 24;
+
+/**
+ * The pane's rows that are neither the body nor the composer's field row
+ * (whose stored height already includes its own 13px of padding), with the
+ * composer on: the grip (7), the chip row (~35: 8px padding, 1px seam, the
+ * chip and its 4px margin), the meta row, the key hint and the pane's drag row
+ * (7). Measured in a browser at 97px — 159px of fixed chrome at the default
+ * 62px field, 145px at the 48px floor.
+ * Pinned against the stylesheet by `AnswerPane.resize.test.tsx`.
+ */
+export const ANSWER_PANE_COMPOSER_CHROME = 97;
+
+/** What the body keeps at the floor: its 20px of padding and one line of the answer. */
+export const ANSWER_PANE_BODY_FLOOR = 44;
+
+/**
+ * The pane's floor for a composer that is `composerOn` with a field row
+ * `composerHeight` tall: every fixed row plus the body's floor, never below
+ * {@link MIN_PANE_HEIGHT}. It follows the field, so a taller reply box raises
+ * the floor rather than pushing the drag row out of the pane. A chip row that
+ * wraps (many attachments) or the send-failed line is not counted: both are
+ * transient, and a floor sized for them would waste the terminal all day.
+ */
+export function minPaneHeight(composerOn: boolean, composerHeight: number): number {
+  if (!composerOn) return MIN_PANE_HEIGHT;
+  const { min, max } = ANSWER_COMPOSER_BOUNDS;
+  const field = Math.min(max, Math.max(min, composerHeight));
+  return Math.max(MIN_PANE_HEIGHT, ANSWER_PANE_COMPOSER_CHROME + field + ANSWER_PANE_BODY_FLOOR);
+}
 
 /**
  * The cell's answer pane: the utterance under the cursor rendered as markdown
@@ -246,14 +273,11 @@ export function AnswerPane({
   sessionId,
   speech,
   onClose,
-  autoOpen,
-  onAutoOpenChange,
   send,
 }: AnswerPaneProps) {
-  // Global, and read here rather than passed in: unlike `autoOpen` — which is
-  // the CELL's switch, seeded from a browser-wide default and owned by
-  // `TerminalView` — whether a pane carries a composer at all is one answer for
-  // the whole panel, so the pane reads and writes it directly.
+  // Global, and read here rather than passed in: whether a pane carries a
+  // composer at all is one answer for the whole panel, so the pane reads and
+  // writes it directly.
   const [composerOn, setComposerOn] = usePreference(preferences.answerComposerEnabled);
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -271,17 +295,24 @@ export function AnswerPane({
    * ceiling, and it is a measurement rather than a constant.
    */
   const [areaHeight, setAreaHeight] = useState<number | null>(null);
+  // The composer's field height, read under the scope the composer writes it
+  // under, so the floor follows the reply box (see `minPaneHeight`).
+  const [composerHeight] = useScopedPreference(
+    preferences.answerComposerHeight,
+    projectOfSession(sessionId),
+  );
+  const floor = minPaneHeight(composerOn, composerHeight);
   const bounds: RowBounds = useMemo(
     () => ({
-      min: MIN_PANE_HEIGHT,
+      min: floor,
       // The unmeasured case keeps the declared default reachable rather than
       // collapsing it to the floor — nothing is applied while it holds, and a
-      // max of `MIN_PANE_HEIGHT` would make the handle report 120 for a pane
-      // that is covering the whole area.
-      max: Math.max(MIN_PANE_HEIGHT, areaHeight ?? ANSWER_PANE_FULL_HEIGHT),
+      // max of the floor would make the handle report it for a pane that is
+      // covering the whole area.
+      max: Math.max(floor, areaHeight ?? ANSWER_PANE_FULL_HEIGHT),
       step: PANE_HEIGHT_STEP,
     }),
-    [areaHeight],
+    [areaHeight, floor],
   );
   const {
     height: paneHeight,
@@ -687,25 +718,14 @@ export function AnswerPane({
           </>
         )}
       </div>
-      {/* The pane's switches, directly under the text and ABOVE the composer.
+      {/* The pane's switch, directly under the text and ABOVE the composer.
           design.md's order, and the reason for it: the composer is the reply,
-          so the two switches that decide what the pane does belong with the
-          pane rather than under the box you type into. They were the pane's
-          footer when the auto-open switch was its only control, and stayed
-          there when the composer arrived — which put the reply box between the
-          answer and its own switches. Outside the scroll container either way,
+          so the switch that decides what the pane does belongs with the pane
+          rather than under the box you type into. Whether a new answer opens
+          the pane is not here: that is one Settings preference, read by
+          `TerminalView` when an answer arrives. Outside the scroll container,
           so the row stays put while the text scrolls. */}
       <div className="answer-pane-meta">
-        <label className="answer-pane-meta-label" htmlFor={`answer-pane-auto-open-${sessionId}`}>
-          <input
-            id={`answer-pane-auto-open-${sessionId}`}
-            data-testid={`answer-pane-auto-open-${sessionId}`}
-            type="checkbox"
-            checked={autoOpen}
-            onChange={() => onAutoOpenChange(!autoOpen)}
-          />
-          Open on new answer
-        </label>
         <label className="answer-pane-meta-label" htmlFor={`answer-pane-composer-on-${sessionId}`}>
           <input
             id={`answer-pane-composer-on-${sessionId}`}

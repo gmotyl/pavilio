@@ -3,10 +3,12 @@ import { useState } from "react";
 import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "./autoOpenAnswer";
 
 /**
- * The Settings-page checkbox for the answer pane's browser-wide "open on a new
- * answer" default. Sits under the voice picker in the Speech section, for the
- * same reason the voice does: one per-browser preference, with no cell or
- * surface to belong to.
+ * The Settings-page checkbox for the answer pane's "open on a new answer"
+ * preference — the only control for it. Global and portable: it travels with
+ * the workspace, like the voice, and sits under the voice picker in the Speech
+ * section for the same reason: one preference with no cell or surface to
+ * belong to. Every cell reads it when an answer arrives, so a change reaches
+ * cells already open.
  *
  * `setStoredAutoOpenAnswer` returns the value now in effect, so a browser that
  * refuses to store (private mode, blocked site data) still shows the choice
@@ -32,8 +34,8 @@ export function AutoOpenAnswerToggle() {
         Open the answer pane on a new answer
       </label>
       <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-        The default for every cell's own switch, in the pane's footer. A cell
-        takes it when it mounts; flipping the cell's switch does not change it.
+        Every cell reads this when an answer arrives; a change here reaches
+        cells already open.
       </p>
     </div>
   );

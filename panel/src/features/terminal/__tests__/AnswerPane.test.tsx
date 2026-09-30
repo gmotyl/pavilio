@@ -222,9 +222,6 @@ function harness(markdown = MARKDOWN, progress: SpeechProgress | null = null): H
   };
 }
 
-/** The meta row's switch, off and inert unless a test wires it. */
-const OFF = { autoOpen: false, onAutoOpenChange: () => {} };
-
 /** The composer's PTY write, on a live socket — `AnswerComposer.test.tsx` is
  *  where it is spent, and `sendOnDeadSocket.test.tsx` is where a dead one is. */
 const NO_SEND = (): boolean => true;
@@ -233,7 +230,7 @@ function paneElement(speech: GridSpeech, onClose: () => void = () => {}) {
   // MarkdownRenderer calls useNavigate, so the body needs a router.
   return (
     <MemoryRouter>
-      <AnswerPane sessionId="cell-a" speech={speech} onClose={onClose} send={NO_SEND} {...OFF} />
+      <AnswerPane sessionId="cell-a" speech={speech} onClose={onClose} send={NO_SEND} />
     </MemoryRouter>
   );
 }
@@ -606,48 +603,42 @@ describe("AnswerPane", () => {
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
-  it("the meta row's checkbox reflects the cell switch and writes nothing to storage", () => {
+  it("the pane renders no Open on new answer control", () => {
     const h = harness();
-    const onAutoOpenChange = vi.fn();
-    const withSwitch = (autoOpen: boolean) => (
-      <MemoryRouter>
-        <AnswerPane
-          sessionId="cell-a"
-          speech={makeSpeech(h)}
-          onClose={() => {}}
-          send={NO_SEND}
-          autoOpen={autoOpen}
-          onAutoOpenChange={onAutoOpenChange}
-        />
-      </MemoryRouter>
+    render(paneElement(makeSpeech(h)));
+
+    // Whether an answer opens the pane is one Settings preference, not a
+    // switch the pane carries. The meta row keeps its other switch.
+    expect(screen.queryByRole("checkbox", { name: "Open on new answer" })).toBeNull();
+    expect(screen.queryByText("Open on new answer")).toBeNull();
+    expect(screen.queryByTestId("answer-pane-auto-open-cell-a")).toBeNull();
+    expect(screen.getByTestId("answer-pane-composer-on-cell-a")).toBeInTheDocument();
+
+    // Nor does the pane take the props that fed that switch.
+    const noSwitchProps = (
+      <AnswerPane
+        sessionId="cell-a"
+        speech={makeSpeech(h)}
+        onClose={() => {}}
+        send={NO_SEND}
+        // @ts-expect-error `autoOpen` is no longer a prop of the pane.
+        autoOpen={false}
+      />
     );
-    const setItem = vi.spyOn(localStorage, "setItem");
-    const removeItem = vi.spyOn(localStorage, "removeItem");
-
-    const view = render(withSwitch(false));
-    const box = screen.getByTestId("answer-pane-auto-open-cell-a") as HTMLInputElement;
-    expect(box).toBe(screen.getByRole("checkbox", { name: "Open on new answer" }));
-    expect(box).not.toBeChecked();
-    // The meta row is a row of the pane, under the body — not inside the scroll container.
-    const root = screen.getByTestId("answer-pane-cell-a");
-    const body = screen.getByTestId("answer-pane-body-cell-a");
-    expect(box.closest(".answer-pane-meta")?.parentElement).toBe(root);
-    expect(body.contains(box)).toBe(false);
-
-    // A click reports the flipped value to the owner and touches no storage:
-    // the cell's switch is not the browser-wide default.
-    fireEvent.click(box);
-    expect(onAutoOpenChange).toHaveBeenCalledTimes(1);
-    expect(onAutoOpenChange).toHaveBeenCalledWith(true);
-    expect(setItem).not.toHaveBeenCalled();
-    expect(removeItem).not.toHaveBeenCalled();
-
-    // Controlled: the box follows the prop, and flips the other way from on.
-    view.rerender(withSwitch(true));
-    expect(box).toBeChecked();
-    fireEvent.click(box);
-    expect(onAutoOpenChange).toHaveBeenLastCalledWith(false);
-    expect(setItem).not.toHaveBeenCalled();
+    expect(noSwitchProps).toBeTruthy();
+    // Its own element: tsc reports only the first excess prop per element, so
+    // sharing one would leave this directive unused.
+    const noSwitchCallback = (
+      <AnswerPane
+        sessionId="cell-a"
+        speech={makeSpeech(h)}
+        onClose={() => {}}
+        send={NO_SEND}
+        // @ts-expect-error `onAutoOpenChange` is no longer a prop of the pane.
+        onAutoOpenChange={() => {}}
+      />
+    );
+    expect(noSwitchCallback).toBeTruthy();
   });
 
   it("Escape closes", () => {
@@ -679,7 +670,7 @@ describe("AnswerPane", () => {
     render(
       <MemoryRouter>
         <div onMouseDown={cell.mouseDown} onClick={cell.click} onDragStart={cell.dragStart}>
-          <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} send={NO_SEND} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} send={NO_SEND} />
         </div>
       </MemoryRouter>,
     );
@@ -710,7 +701,7 @@ describe("AnswerPane", () => {
     render(
       <MemoryRouter>
         <div onKeyDown={cell.keyDown}>
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} />
         </div>
       </MemoryRouter>,
     );
@@ -761,7 +752,7 @@ describe("AnswerPane", () => {
           <div className="xterm">
             <textarea aria-label="terminal input" />
           </div>
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} />
         </div>
       </MemoryRouter>,
     );
@@ -797,7 +788,7 @@ describe("AnswerPane", () => {
           </div>
         </div>
         <div className="relative">
-          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} {...OFF} />
+          <AnswerPane sessionId="cell-a" speech={makeSpeech(h)} onClose={onClose} send={NO_SEND} />
         </div>
       </MemoryRouter>,
     );
@@ -1231,8 +1222,6 @@ describe("AnswerPane", () => {
             speech={makeSpeech(h)}
             onClose={() => {}}
             send={NO_SEND}
-            autoOpen={false}
-            onAutoOpenChange={() => {}}
           />
         </MemoryRouter>,
       );
