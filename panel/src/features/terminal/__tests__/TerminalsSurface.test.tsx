@@ -227,7 +227,7 @@ describe("TerminalsSurface shortcut bar visibility", () => {
     forgetAnswerPane("other");
   });
 
-  it("the shortcut bar is absent while a rendered session's answer pane is open", () => {
+  it("the shortcut bar is absent while a visible session's answer pane is open", () => {
     setAnswerPaneOpen("s1", true);
 
     render(<Harness sessions={[session("s1"), session("s2")]} />);
