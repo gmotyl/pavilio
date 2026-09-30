@@ -39,7 +39,10 @@ import { fixWholeLine, resolveRunLoop } from "./launcherRunLoop";
  * is stored as `""` — not offered for runs — and **restore default** removes
  * the key again; a flag the user clears is stored as `""` — positional. A
  * default shown in a field is its placeholder, never its value, so typing
- * replaces it and leaving it alone writes nothing.
+ * replaces it and leaving it alone writes nothing — which is also why
+ * clearing a defaulted field does nothing. Turning a default off is its own
+ * control: **don't offer for runs** stores `runLoop: ""`, **positional**
+ * stores `promptFlag: ""`, and **use default** removes the flag key.
  */
 
 /**
@@ -177,6 +180,23 @@ function LauncherRow({
     onCommit(next);
   };
 
+  /**
+   * Stores `runLoop: ""` — not offered for runs. A defaulted run loop is only a
+   * placeholder, so clearing the field is "not edited" and writes nothing; this
+   * is the one-step way to turn the shipped default off.
+   */
+  const disableRunLoop = () => onCommit({ ...entry, runLoop: "" });
+
+  /** Stores `promptFlag: ""` — positional — over a defaulted flag. */
+  const positionalFlag = () => onCommit({ ...entry, promptFlag: "" });
+
+  /** Removes the prompt-flag key, so the name's shipped flag applies again. */
+  const defaultFlag = () => {
+    const next = { ...entry };
+    delete next.promptFlag;
+    onCommit(next);
+  };
+
   // Read off the STORED entry, not the drafts: the markers describe what a run
   // would do now, and an uncommitted draft does nothing yet.
   const state = resolveRunLoop(entry);
@@ -184,13 +204,21 @@ function LauncherRow({
   const isDefault = state.kind === "ready" && state.source === "default";
   const canRestore = state.kind === "none" && entry.runLoop !== undefined && Boolean(shipped?.runLoop);
   const runLoopPlaceholder = isDefault ? state.runLoop : state.kind === "none" ? NOT_OFFERED : "";
-  const defaultFlag =
+  const effectiveFlag =
     state.kind === "ready"
       ? state.promptFlag
       : entry.promptFlag === undefined
         ? (shipped?.promptFlag ?? "")
         : "";
-  const promptFlagPlaceholder = defaultFlag || "positional";
+  const promptFlagPlaceholder = effectiveFlag || "positional";
+  // The flag field shows a default only when no flag is stored. A stored one —
+  // "" included — is the user's, and there is a default to go back to only
+  // when the name ships a flag that differs from it.
+  const flagIsDefaulted = entry.promptFlag === undefined && Boolean(effectiveFlag);
+  const canDefaultFlag =
+    entry.promptFlag !== undefined &&
+    Boolean(shipped?.promptFlag) &&
+    entry.promptFlag.trim() !== shipped?.promptFlag;
 
   return (
     <li className="flex flex-wrap items-start gap-2" data-testid={`launcher-row-${index}`}>
@@ -214,17 +242,45 @@ function LauncherRow({
         style={inputStyle}
         spellCheck={false}
       />
-      <input
-        aria-label={`Launcher ${index + 1} prompt flag`}
-        data-testid={`launcher-prompt-flag-${index}`}
-        value={promptFlag}
-        onChange={(e) => setPromptFlag(e.target.value)}
-        onBlur={commit}
-        placeholder={promptFlagPlaceholder}
-        className="text-sm px-2 py-1 rounded w-32 shrink-0 font-mono"
-        style={inputStyle}
-        spellCheck={false}
-      />
+      <div className="w-32 shrink-0" data-testid={`launcher-prompt-flag-cell-${index}`}>
+        <input
+          aria-label={`Launcher ${index + 1} prompt flag`}
+          data-testid={`launcher-prompt-flag-${index}`}
+          value={promptFlag}
+          onChange={(e) => setPromptFlag(e.target.value)}
+          onBlur={commit}
+          placeholder={promptFlagPlaceholder}
+          className="text-sm px-2 py-1 rounded w-full font-mono"
+          style={flagIsDefaulted ? { ...inputStyle, borderStyle: "dashed" } : inputStyle}
+          spellCheck={false}
+        />
+        {flagIsDefaulted && (
+          <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+            <button
+              type="button"
+              data-testid={`launcher-positional-flag-${index}`}
+              aria-label={`Make the prompt positional for launcher ${index + 1}`}
+              onClick={positionalFlag}
+              style={linkButtonStyle}
+            >
+              positional
+            </button>
+          </p>
+        )}
+        {canDefaultFlag && (
+          <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+            <button
+              type="button"
+              data-testid={`launcher-default-flag-${index}`}
+              aria-label={`Use the default prompt flag for launcher ${index + 1}`}
+              onClick={defaultFlag}
+              style={linkButtonStyle}
+            >
+              use default
+            </button>
+          </p>
+        )}
+      </div>
       <div className="grow basis-64 min-w-0" data-testid={`launcher-run-loop-cell-${index}`}>
         <input
           aria-label={`Launcher ${index + 1} run loop`}
@@ -245,7 +301,17 @@ function LauncherRow({
         />
         {isDefault && (
           <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-            shipped default
+            <span>shipped default</span>
+            {" · "}
+            <button
+              type="button"
+              data-testid={`launcher-disable-run-loop-${index}`}
+              aria-label={`Don't offer launcher ${index + 1} for runs`}
+              onClick={disableRunLoop}
+              style={linkButtonStyle}
+            >
+              don&apos;t offer for runs
+            </button>
           </p>
         )}
         {state.kind === "none" && (
@@ -413,8 +479,9 @@ export function LauncherSettings() {
         <code>{"{prompt}"}</code> standing for the objective — plain text, no
         quotes or shell syntax. The prompt flag is how the command takes that
         text: leave it blank when the prompt is a plain argument. A dashed field
-        is the shipped default; clear a run loop and that launcher is not
-        offered for a run.
+        is the shipped default; clear a run loop, or choose{" "}
+        <em>don&apos;t offer for runs</em>, and that launcher is not offered for a
+        run.
       </p>
     </div>
   );

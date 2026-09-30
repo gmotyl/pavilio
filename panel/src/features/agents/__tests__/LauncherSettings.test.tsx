@@ -524,6 +524,71 @@ describe("LauncherSettings", () => {
       expect(within(row(3)).queryByRole("button", { name: /restore default/i })).toBeNull();
     });
 
+    it("a defaulted run loop is turned off in one step", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.terminalLaunchers, [
+        { name: "claude", command: "claude" },
+        { name: "resume", command: "claude --resume", runLoop: "go on" },
+      ]);
+
+      render(<LauncherSettings />);
+      // Clearing a placeholder is not an edit, so it cannot turn the default off.
+      await user.clear(runLoopFields()[0]);
+      await user.tab();
+      expect(stored()[0]).toEqual({ name: "claude", command: "claude" });
+
+      await user.click(within(row(0)).getByRole("button", { name: "Don't offer launcher 1 for runs" }));
+      expect(stored()[0]).toEqual({ name: "claude", command: "claude", runLoop: "" });
+      expect(within(row(0)).getByText("not offered for runs")).toBeInTheDocument();
+      expect(within(row(0)).queryByTestId("launcher-disable-run-loop-0")).toBeNull();
+
+      // …and back in one step.
+      await user.click(within(row(0)).getByTestId("launcher-restore-run-loop-0"));
+      expect(stored()[0]).toEqual({ name: "claude", command: "claude" });
+      expect(within(row(0)).getByTestId("launcher-disable-run-loop-0")).toBeInTheDocument();
+
+      // A stored run loop is the user's; there is no default to turn off.
+      expect(within(row(1)).queryByTestId("launcher-disable-run-loop-1")).toBeNull();
+    });
+
+    it("a defaulted prompt flag is made positional in one step", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.terminalLaunchers, [
+        { name: "opencode", command: "opencode" },
+        { name: "claude", command: "claude" },
+        { name: "opencode", command: "opencode", promptFlag: "--prompt" },
+      ]);
+
+      render(<LauncherSettings />);
+      expect(promptFlagFields()[0]).toHaveAttribute("placeholder", "--prompt");
+      // Clearing the placeholder writes nothing.
+      await user.clear(promptFlagFields()[0]);
+      await user.tab();
+      expect(stored()[0]).toEqual({ name: "opencode", command: "opencode" });
+
+      await user.click(
+        within(row(0)).getByRole("button", { name: "Make the prompt positional for launcher 1" }),
+      );
+      expect(stored()[0]).toEqual({ name: "opencode", command: "opencode", promptFlag: "" });
+      expect(promptFlagFields()[0]).toHaveAttribute("placeholder", "positional");
+      expect(within(row(0)).queryByTestId("launcher-positional-flag-0")).toBeNull();
+
+      await user.click(
+        within(row(0)).getByRole("button", { name: "Use the default prompt flag for launcher 1" }),
+      );
+      expect(stored()[0]).toEqual({ name: "opencode", command: "opencode" });
+      expect("promptFlag" in stored()[0]).toBe(false);
+      expect(promptFlagFields()[0]).toHaveAttribute("placeholder", "--prompt");
+      expect(within(row(0)).queryByTestId("launcher-default-flag-0")).toBeNull();
+
+      // No shipped flag: nothing to turn off and nothing to go back to.
+      expect(within(row(1)).queryByTestId("launcher-positional-flag-1")).toBeNull();
+      expect(within(row(1)).queryByTestId("launcher-default-flag-1")).toBeNull();
+      // A stored flag equal to the shipped one has no different default.
+      expect(within(row(2)).queryByTestId("launcher-positional-flag-2")).toBeNull();
+      expect(within(row(2)).queryByTestId("launcher-default-flag-2")).toBeNull();
+    });
+
     it("a whole-line run loop is flagged and fixed", async () => {
       const user = userEvent.setup();
       writePreference(preferences.terminalLaunchers, [
@@ -607,7 +672,7 @@ describe("LauncherSettings", () => {
       expect(row(0)).toHaveClass("flex-wrap");
       expect(commandFields()[0]).toHaveClass("basis-32");
       expect(screen.getByTestId("launcher-run-loop-cell-0")).toHaveClass("basis-64");
-      expect(promptFlagFields()[0]).toHaveClass("w-32");
+      expect(screen.getByTestId("launcher-prompt-flag-cell-0")).toHaveClass("w-32");
 
       const add = screen.getByTestId("launcher-add").parentElement!;
       expect(add).toHaveClass("flex-wrap");
