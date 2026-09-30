@@ -282,6 +282,18 @@ describe("ObjectiveField", () => {
     expect(clickAt(0, resolved.length)).toEqual([0, template.length]);
   });
 
+  it("the mirror scrolls with the textarea", async () => {
+    const user = userEvent.setup();
+    renderBanner();
+
+    await user.click(objective());
+    const overlay = screen.getByTestId("objective-overlay");
+    objective().scrollTop = 30;
+    fireEvent.scroll(objective());
+
+    expect(overlay.scrollTop).toBe(30);
+  });
+
   it("an unchanged blur writes nothing", async () => {
     const user = userEvent.setup();
     renderBanner();

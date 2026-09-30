@@ -2071,7 +2071,9 @@ input[type="checkbox"] {
 .run-banner-objective {
   display: block;
   width: 100%;
-  resize: vertical;
+  /* Grows with its content; a hand-dragged height would leave the objective
+     box's mirror layer behind. */
+  resize: none;
   field-sizing: content;
   min-height: 1.5em;
   margin: 1px 0;
@@ -2103,6 +2105,9 @@ input[type="checkbox"] {
 .objective-field > .run-banner-objective,
 .objective-field-overlay {
   grid-area: 1 / 1;
+  /* The same gutter on both, so a scrollbar on the textarea never narrows its
+     lines while the mirror's stay wide. */
+  scrollbar-gutter: stable;
 }
 
 .objective-field-overlay {
@@ -2113,6 +2118,8 @@ input[type="checkbox"] {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   pointer-events: none;
+  /* Clipped, not scrolled on its own: its scrollTop follows the textarea's. */
+  overflow: hidden;
 }
 
 .objective-field-overlay mark {

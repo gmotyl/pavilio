@@ -172,6 +172,7 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
     useEffect(() => () => void commitRef.current(), []);
 
     const textarea = useRef<HTMLTextAreaElement>(null);
+    const overlay = useRef<HTMLDivElement>(null);
     // Where the caret goes once the template replaces the resolved text.
     const caret = useRef<[number, number] | null>(null);
 
@@ -235,6 +236,7 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
       <div className="objective-field" data-editing={editing || undefined}>
         {editing && (
           <div
+            ref={overlay}
             className="objective-field-overlay"
             data-testid="objective-overlay"
             aria-hidden="true"
@@ -252,6 +254,11 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
           onFocus={onFocus}
           onBlur={onBlur}
           onChange={(event) => setDraft(event.target.value)}
+          // The box grows with its content, but should it ever scroll (no
+          // field-sizing, a capped height), the mirror scrolls with it.
+          onScroll={(event) => {
+            if (overlay.current) overlay.current.scrollTop = event.currentTarget.scrollTop;
+          }}
           onKeyDown={onKeyDown}
           rows={2}
           spellCheck={false}
