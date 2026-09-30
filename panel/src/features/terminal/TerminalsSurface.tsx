@@ -247,17 +247,15 @@ export function TerminalsSurface({
       {!shortcutBarYielded && (
         <TerminalShortcutBar
           onSend={(data) => {
-            const targetId = focusedId ?? sessions[0]?.id;
-            if (!targetId) return;
-            const handle = terminalHandlesRef.current.get(targetId);
+            if (!visibleId) return;
+            const handle = terminalHandlesRef.current.get(visibleId);
             handle?.send(data);
             // Re-focus the xterm on the next frame so subsequent taps on
             // the on-screen keyboard still go into the terminal.
             requestAnimationFrame(() => handle?.focus());
           }}
           onToggleKeyboard={() => {
-            const targetId = focusedId ?? sessions[0]?.id;
-            if (targetId) terminalHandlesRef.current.get(targetId)?.focus();
+            if (visibleId) terminalHandlesRef.current.get(visibleId)?.focus();
           }}
         />
       )}
