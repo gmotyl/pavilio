@@ -4,7 +4,8 @@ import { ChevronDown, ChevronRight, Play } from "lucide-react";
 import { preferences, type TerminalLauncher } from "../../preferences/declarations";
 import { readOverridable } from "../../preferences/overridable";
 import { usePreference, useScopedPreference } from "../../preferences/usePreference";
-import { composeRunLine, resolveObjective, splitRunLoop, takesPrompt } from "./runPrompt";
+import { resolveRunLoop } from "../agents/launcherRunLoop";
+import { composeRunLine, resolveObjective, runLineParts, takesPrompt } from "./runPrompt";
 import type { TaskListStatus } from "./taskList";
 
 /**
@@ -60,6 +61,22 @@ function runnable(launchers: TerminalLauncher[]): (TerminalLauncher & { runLoop:
   return launchers.filter(
     (entry): entry is TerminalLauncher & { runLoop: string } => Boolean(entry.runLoop?.trim()),
   );
+}
+
+/**
+ * The command, flag and run loop a launcher's line is built from: its resolved
+ * run loop when it has one ready, else its raw fields. A stopgap until the
+ * banner offers only resolved launchers.
+ */
+function lineFields(launcher: TerminalLauncher & { runLoop: string }) {
+  const state = resolveRunLoop(launcher);
+  return state.kind === "ready"
+    ? { command: launcher.command, promptFlag: state.promptFlag, runLoop: state.runLoop }
+    : {
+        command: launcher.command,
+        promptFlag: launcher.promptFlag ?? "",
+        runLoop: launcher.runLoop,
+      };
 }
 
 /**
@@ -121,12 +138,13 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
   const noPromptNote = useId();
   // A run loop with nowhere to put the objective sends it nowhere, so the
   // field neither gates Run nor pretends to be part of the line.
-  const usesObjective = launcher ? takesPrompt(launcher.runLoop) : true;
+  const fields = launcher ? lineFields(launcher) : null;
+  const usesObjective = fields ? takesPrompt(fields.runLoop) : true;
   const canRun = Boolean(launcher) && (!usesObjective || draft.trim() !== "") && !busy;
 
   const run = () => {
-    if (!canRun || !launcher) return;
-    const result = onRun(composeRunLine(launcher.runLoop, draft));
+    if (!canRun || !fields) return;
+    const result = onRun(composeRunLine(fields.command, fields.promptFlag, fields.runLoop, draft));
     if (result && typeof (result as Promise<unknown>).finally === "function") {
       setBusy(true);
       void (result as Promise<unknown>).catch(() => undefined).finally(() => setBusy(false));
@@ -207,7 +225,9 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
     );
   }
 
-  const wrapper = launcher ? splitRunLoop(launcher.runLoop) : { before: "", after: "" };
+  const wrapper = fields
+    ? runLineParts(fields.command, fields.promptFlag, fields.runLoop)
+    : { before: "", after: "" };
 
   return (
     <section className="run-banner" aria-label="Run this change">

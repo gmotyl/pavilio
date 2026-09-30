@@ -102,7 +102,7 @@ describe("RunBanner", () => {
     await user.click(screen.getByRole("button", { name: "Run" }));
 
     expect(onRun).toHaveBeenCalledTimes(1);
-    expect(onRun).toHaveBeenCalledWith("/goal 'Only do task 7'");
+    expect(onRun).toHaveBeenCalledWith("claude '/goal Only do task 7'");
     // No preference moved: the document, browser storage and the PATCH
     // channel are all exactly as they were before the edit.
     expect(globals.__PAVILIO_PREFS__).toEqual(before);
@@ -132,7 +132,7 @@ describe("RunBanner", () => {
     await user.click(screen.getByRole("button", { name: "codex" }));
     await user.clear(objective());
     await user.type(objective(), "My objective");
-    expect(wrapper()).toBe('codex "/goal ');
+    expect(wrapper()).toBe("codex '/goal ");
 
     await user.click(screen.getByRole("button", { name: "opencode" }));
 
@@ -140,12 +140,12 @@ describe("RunBanner", () => {
       "aria-pressed",
       "true",
     );
-    expect(wrapper()).toBe('opencode --prompt "');
-    expect(screen.getByTestId("run-banner-wrapper-after").textContent).toBe('"');
+    expect(wrapper()).toBe("opencode --prompt '");
+    expect(screen.getByTestId("run-banner-wrapper-after").textContent).toBe("'");
     expect(objective().value).toBe("My objective");
 
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun).toHaveBeenCalledWith('opencode --prompt "My objective"');
+    expect(onRun).toHaveBeenCalledWith("opencode --prompt 'My objective'");
   });
 
   it("the wrapper is not editable", () => {
@@ -183,7 +183,7 @@ describe("RunBanner", () => {
     await user.click(screen.getByRole("button", { name: "codex" }));
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(onRun).toHaveBeenCalledWith(
-      `codex "/goal Implement all tasks in ${PATH}; done when every task is checked and tests + lint pass."`,
+      `codex '/goal Implement all tasks in ${PATH}; done when every task is checked and tests + lint pass.'`,
     );
     // The fold itself is the one remembered toggle.
     expect(globals.__PAVILIO_PREFS__![storageKey(preferences.plansBannerExpanded)]).toBe(false);
@@ -209,7 +209,7 @@ describe("RunBanner", () => {
 
     expect(objective().value).toBe("Kept across the fold");
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun).toHaveBeenCalledWith("/goal 'Kept across the fold'");
+    expect(onRun).toHaveBeenCalledWith("claude '/goal Kept across the fold'");
   });
 
   it("Ctrl+Enter in the objective runs it", async () => {
@@ -246,7 +246,7 @@ describe("RunBanner", () => {
 
     expect(screen.getByRole("button", { name: "codex" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun.mock.calls[0][0]).toMatch(/^codex "\/goal /);
+    expect(onRun.mock.calls[0][0]).toMatch(/^codex '\/goal /);
   });
 
   it("a remembered CLI that is no longer runnable falls back to the first", () => {
@@ -276,7 +276,7 @@ describe("RunBanner", () => {
     expect(cliOptions()).toEqual(["opencode", "claude", "codex"]);
     expect(screen.getByRole("button", { name: "codex" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun.mock.calls[0][0]).toMatch(/^codex "\/goal /);
+    expect(onRun.mock.calls[0][0]).toMatch(/^codex '\/goal /);
   });
 
   it("the CLI switch is toggle buttons: one pressed, each reached by Tab and picked by Space", async () => {
@@ -300,13 +300,13 @@ describe("RunBanner", () => {
     expect(buttons[2]).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(buttons[2]).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("run-banner-wrapper-before").textContent).toBe('opencode --prompt "');
+    expect(screen.getByTestId("run-banner-wrapper-before").textContent).toBe("opencode --prompt '");
   });
 
   it("a run loop that takes no prompt disables the objective and says so", async () => {
     const user = userEvent.setup();
     writePreference(preferences.terminalLaunchers, [
-      { name: "resume", command: "claude", runLoop: "claude --continue" },
+      { name: "resume", command: "claude", runLoop: "/continue" },
     ]);
     const onRun = renderBanner(vi.fn());
 
@@ -314,17 +314,17 @@ describe("RunBanner", () => {
     expect(screen.getByText("This launcher's run loop takes no prompt")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Run" }));
     // What is read is what is sent: the run loop alone, no objective.
-    expect(onRun).toHaveBeenCalledWith("claude --continue");
+    expect(onRun).toHaveBeenCalledWith("claude '/continue'");
   });
 
   it("a later placeholder in the run loop is drawn as the objective, not as raw text", () => {
     writePreference(preferences.terminalLaunchers, [
-      { name: "tool", command: "tool", runLoop: 'tool "{prompt}" --title "{prompt}"' },
+      { name: "tool", command: "tool", runLoop: "{prompt} --title {prompt}" },
     ]);
     renderBanner();
 
     const after = screen.getByTestId("run-banner-wrapper-after").textContent;
-    expect(after).toBe('" --title "«objective»"');
+    expect(after).toBe(" --title «objective»'");
     expect(after).not.toContain("{prompt}");
   });
 
@@ -362,7 +362,7 @@ describe("RunBanner", () => {
   it("a run loop with no prompt stays runnable when the template resolves to blank", async () => {
     const user = userEvent.setup();
     writePreference(preferences.terminalLaunchers, [
-      { name: "resume", command: "claude", runLoop: "claude --continue" },
+      { name: "resume", command: "claude", runLoop: "/continue" },
     ]);
     writePreference(preferences.taskPromptDefault, "   ");
     const onRun = renderBanner(vi.fn());
@@ -370,12 +370,12 @@ describe("RunBanner", () => {
     expect(objective().value.trim()).toBe("");
     expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun).toHaveBeenCalledWith("claude --continue");
+    expect(onRun).toHaveBeenCalledWith("claude '/continue'");
   });
 
   it("the footer offers no editing or shortcut while the objective is disabled", () => {
     writePreference(preferences.terminalLaunchers, [
-      { name: "resume", command: "claude", runLoop: "claude --continue" },
+      { name: "resume", command: "claude", runLoop: "/continue" },
     ]);
     renderBanner();
 

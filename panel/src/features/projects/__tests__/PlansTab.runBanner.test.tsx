@@ -143,7 +143,7 @@ describe("PlansTab run banner", () => {
     await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
     const [opts] = vi.mocked(startTaskRun).mock.calls[0];
     expect(opts.project).toBe("alokai");
-    expect(opts.runLine.startsWith('claude "/goal ')).toBe(true);
+    expect(opts.runLine.startsWith("claude '/goal ")).toBe(true);
     expect(await screen.findByText("terminal view")).toBeTruthy();
   });
 
