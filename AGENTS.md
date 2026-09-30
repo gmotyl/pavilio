@@ -111,6 +111,7 @@ All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.m
 - [`pavilio-create-skill`](skills/pavilio-create-skill/SKILL.md) — scaffold a new workspace skill (`/pavilio-create-skill`)
 - [`pavilio-memo`](skills/pavilio-memo/SKILL.md) — quick capture a thought or note (`/pavilio-memo`)
 - [`pavilio-memo-explain`](skills/pavilio-memo-explain/SKILL.md) — explain a concept/flow as a mermaid memo (`/pavilio-memo-explain`)
+- [`pavilio-memo-grill`](skills/pavilio-memo-grill/SKILL.md) — grill a documentation topic one question at a time, updating the memo after each answer (`/pavilio-memo-grill`)
 - [`pavilio-pr-explain`](skills/pavilio-pr-explain/SKILL.md) — explain a PR/branch/commit-range as a diagram-rich memo, built from the diff (`/pavilio-pr-explain`)
 - [`pavilio-note`](skills/pavilio-note/SKILL.md) — process meeting transcripts; Quill-aware (`/pavilio-note`)
 - [`pavilio-note-batch`](skills/pavilio-note-batch/SKILL.md) — batch-process unprocessed Quill meetings (`/pavilio-note-batch`)
