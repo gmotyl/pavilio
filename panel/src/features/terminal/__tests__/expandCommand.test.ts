@@ -43,7 +43,17 @@ describe("expandCommand", () => {
   });
 
   it("trailing punctuation stays after the replacement", () => {
-    expect(expandCommand("use /pavilio-note.", known)).toBe(`use ${instruction("pavilio-note")}.`);
+    // A kept full stop replaces the instruction's own, so it is not doubled.
+    expect(expandCommand("use /pavilio-note.", known)).toBe(
+      "use Read and follow the instructions in skills/pavilio-note/SKILL.md exactly.",
+    );
+    expect(expandCommand("use /pavilio-note...", known)).toBe(
+      "use Read and follow the instructions in skills/pavilio-note/SKILL.md exactly...",
+    );
+    // Any other punctuation follows the instruction's full stop.
+    expect(expandCommand("use /pavilio-note,", known)).toBe(
+      "use Read and follow the instructions in skills/pavilio-note/SKILL.md exactly.,",
+    );
     expect(expandCommand("use /pavilio-note, then stop", known)).toBe(
       `use ${instruction("pavilio-note")}, then stop`,
     );

@@ -8,7 +8,8 @@ const SLASH_TOKEN = /(^|\s)\/(\S+)/g;
 /**
  * Punctuation a sentence may put right after a token (`use /pavilio-note.`).
  * It is stripped off the END of the token before the known-name lookup and
- * kept, as typed, after the replacement.
+ * kept, as typed, after the replacement — except that when it starts with `.`
+ * the instruction's own final `.` is dropped, so the full stop is not doubled.
  */
 const TRAILING_PUNCTUATION = /[.,;:!?)]+$/;
 
@@ -28,8 +29,10 @@ const instruction = (name: string): string =>
  * token, and `/pavilio-grill/SKILL.md` is one token whose name is not a skill.
  * The name is the token minus its slash, matched against `known` exactly; if
  * that misses, trailing `.,;:!?)` are stripped and the rest is tried, the
- * punctuation then following the instruction as typed (`/pavilio-note.` ->
- * `… exactly..`). A name that is not a known skill is sent verbatim: it may be
+ * punctuation then following the instruction as typed. A kept run that starts
+ * with `.` takes the place of the instruction's own full stop (`/pavilio-note.`
+ * -> `… exactly.`, `/pavilio-note...` -> `… exactly...`); any other run follows
+ * it (`/pavilio-note,` -> `… exactly.,`). A name that is not a known skill is sent verbatim: it may be
  * a TUI's own slash command (`/clear`, `/model`) or just text.
  *
  * ## In place
@@ -52,6 +55,9 @@ export function expandCommand(draft: string, known: ReadonlySet<string>): string
     const punctuation = TRAILING_PUNCTUATION.exec(word)?.[0];
     if (punctuation === undefined) return whole;
     const name = word.slice(0, word.length - punctuation.length);
-    return name !== "" && known.has(name) ? `${lead}${instruction(name)}${punctuation}` : whole;
+    if (name === "" || !known.has(name)) return whole;
+    const expanded = instruction(name);
+    const body = punctuation.startsWith(".") ? expanded.slice(0, -1) : expanded;
+    return `${lead}${body}${punctuation}`;
   });
 }

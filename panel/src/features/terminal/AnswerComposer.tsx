@@ -450,7 +450,8 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     setCaretRequest((n) => n + 1);
   };
   /**
-   * The skill names a leading `/<name>` is expanded for at send (D7).
+   * The skill names a `/<name>` is expanded for at send (D7) — in place,
+   * wherever the `/` starts the draft or follows whitespace.
    *
    * The picker's list is gone by the time the user sends — it unmounts on the
    * pick — and `submit` must not wait on a fetch of its own: a send is timed
@@ -690,7 +691,8 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // from goes on being editable while the submit is in flight — this string
     // is what was actually written, and what the clear below is conditional on.
     const reply = text;
-    // What the PTY is given: a leading known `/<name>` becomes the portable
+    // What the PTY is given: every known `/<name>` at a word boundary (start
+    // of the draft or after whitespace) is replaced in place with the portable
     // instruction (D7, D16), anything else goes exactly as typed. Only the
     // WRITE changes — the field, the draft store and `consumeDraft`'s
     // comparison all keep `reply`, so the user's text is never rewritten.
