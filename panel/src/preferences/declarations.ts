@@ -24,7 +24,7 @@
  * features, so pulling a feature module in at runtime would invert that — and
  * would close a cycle the moment those features start reading the registry.
  */
-import { bool, json, num, oneOf, optionalStr, str } from "./codecs";
+import { bool, json, listOf, num, oneOf, optionalStr, str } from "./codecs";
 import { definePreference, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
@@ -58,6 +58,29 @@ export interface TerminalLauncher {
   runLoop?: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFilled(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * A stored launcher, rebuilt from its known fields, or `null` when it is not
+ * one: the name and the command are required non-blank strings (a pill with no
+ * label or no command is not a launcher). An optional field that is not a
+ * string is dropped rather than failing the entry — its absence already means
+ * "use this name's default" — and `""` is kept, since it means something.
+ */
+function toTerminalLauncher(value: unknown): TerminalLauncher | null {
+  if (!isRecord(value) || !isFilled(value.name) || !isFilled(value.command)) return null;
+  const entry: TerminalLauncher = { name: value.name, command: value.command };
+  if (typeof value.promptFlag === "string") entry.promptFlag = value.promptFlag;
+  if (typeof value.runLoop === "string") entry.runLoop = value.runLoop;
+  return entry;
+}
+
 /**
  * The launcher row an empty workspace opens with — the three agents the panel
  * is used to drive, each named after its own binary. Each carries the run
@@ -84,6 +107,12 @@ export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
 export interface ComposerShortcut {
   label: string;
   text: string;
+}
+
+/** A stored shortcut rebuilt from its two fields, or `null`: both must be non-blank strings. */
+function toComposerShortcut(value: unknown): ComposerShortcut | null {
+  if (!isRecord(value) || !isFilled(value.label) || !isFilled(value.text)) return null;
+  return { label: value.label, text: value.text };
 }
 
 /**
@@ -469,7 +498,8 @@ export const preferences = {
     key: "terminal.launchers", // was: nothing — the row was a hardcoded array
     scope: "global",
     default: DEFAULT_TERMINAL_LAUNCHERS,
-    codec: json<TerminalLauncher[]>(),
+    // Validated, not `json`: the list is hand-editable and every reader maps it.
+    codec: listOf(toTerminalLauncher),
     portable: true,
   }),
   terminalDrawerOpen: definePreference({
@@ -573,7 +603,8 @@ export const preferences = {
     key: "composer.shortcuts", // was: nothing — the chips are new
     scope: "global",
     default: DEFAULT_COMPOSER_SHORTCUTS,
-    codec: json<ComposerShortcut[]>(),
+    // Validated, not `json`: the list is hand-editable and every reader maps it.
+    codec: listOf(toComposerShortcut),
     portable: true,
   }),
   /**

@@ -710,6 +710,12 @@ describe("LauncherSettings", () => {
     });
   });
 
+  it("a hand-edited non-list shows the shipped launchers instead of crashing", () => {
+    globals.__PAVILIO_PREFS__![KEY] = 5;
+    render(<LauncherSettings />);
+    expect(nameFields().map((f) => f.value)).toEqual(["claude", "codex", "opencode"]);
+  });
+
   describe("a write from elsewhere", () => {
     it("does not clobber a row being edited", async () => {
       const user = userEvent.setup();

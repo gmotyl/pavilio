@@ -188,6 +188,12 @@ describe("ShortcutSettings", () => {
     });
   });
 
+  it("a hand-edited non-list shows the shipped shortcuts instead of crashing", () => {
+    globals.__PAVILIO_PREFS__![KEY] = {};
+    render(<ShortcutSettings />);
+    expect(labelFields().map((f) => f.value)).toEqual(["Yes", "OK"]);
+  });
+
   it("the list is workspace-wide", async () => {
     stubEmptyAgentSettingsApi();
     const def = preferences.composerShortcuts;
