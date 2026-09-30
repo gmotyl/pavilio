@@ -302,7 +302,7 @@ describe("CommandPicker", () => {
     await user.keyboard(" who is Ann{Enter}");
     // The field showed the short form; the PTY gets the portable instruction.
     await expectSubmitted(
-      "Read and follow the instructions in skills/pavilio-question/SKILL.md exactly. ARGUMENTS: who is Ann",
+      "Read and follow the instructions in skills/pavilio-question/SKILL.md exactly. who is Ann",
     );
   });
 
@@ -318,7 +318,8 @@ describe("CommandPicker", () => {
     expect(picker()).not.toBeInTheDocument();
     await user.keyboard("{Enter}");
     await expectSubmitted(
-      "Read and follow the instructions in skills/pavilio-question/SKILL.md exactly. ARGUMENTS:",
+      // In place: the space that closed the token is still there after it.
+      "Read and follow the instructions in skills/pavilio-question/SKILL.md exactly. ",
     );
   });
 

@@ -415,11 +415,11 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    * Where the command picker's `/token` starts in the draft, or null while the
    * picker is closed.
    *
-   * Today it is only ever 0: a typed `/` opens the picker only on an empty
-   * draft (per the spec), and the `/ skills` chip puts its `/` at the start
-   * of the draft too, because only a leading `/<name>` is expanded at send
-   * (see `openPickerFromChip`). It stays a position so the query, the close
-   * rule and the insertion below read the token from one place.
+   * A typed `/` opens the picker only on an empty draft (per the spec), so
+   * there it is 0; the `/ skills` chip puts its `/` at the caret, or opens on
+   * the `/token` already under it, so there it can be anywhere (see
+   * `openPickerFromChip`). The query, the close rule and the insertion below
+   * all read the token from this one position.
    *
    * The picker is open only while a `/token` is still at this position AND the
    * caret is inside it (see `onChange`). That is the close rule the trimmed
@@ -609,39 +609,51 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   /**
    * The `/ skills` chip: the same picker a typed `/` opens, reached by click.
    *
-   * The `/` always goes in at the START of the draft, wherever the caret was,
-   * and the picker is opened on it, so the query, the close rule and the pick
-   * all work exactly as for a typed slash (see `pickerAt`). The start and not
-   * the caret because a skill is a command only there: `expandCommand` expands
-   * a `/<name>` at index 0 and nowhere else, so `see /pavilio-question` spliced
-   * at the caret would be sent verbatim. Text already in the draft becomes the
-   * skill's arguments instead. A space follows the slash when text follows it,
-   * or the `/token` would swallow that text as its query. The caret is left
-   * right after the slash. A draft that already starts with a `/token` gets
-   * no second slash: the picker opens on that token, the caret at its end, so
-   * it is the query and a pick replaces it. The chip's mousedown is
-   * prevented, so the field keeps the focus; the `focus()` below is for a
-   * field that was not focused to begin with.
+   * The `/` goes in AT THE CARET and the picker is opened on it, so the
+   * query, the close rule and the pick all work exactly as for a typed slash
+   * (see `pickerAt`). The caret and not the start because `expandCommand`
+   * expands a known `/<name>` wherever it forms a token, in place (design F7):
+   * `do some stuff use /pavilio-note` is sent as the sentence it reads as.
+   *
+   * For the `/` to be a token it needs whitespace (or the draft's start)
+   * before it, so a space goes in first after a non-whitespace character;
+   * and a space follows it when text follows, or the `/token` would swallow
+   * that text as its query. The caret is left right after the slash.
+   *
+   * When the caret is already on a `/token` — inside it or at its end — no
+   * second slash goes in: the picker opens on that token, the caret at its
+   * end, so it is the query and a pick replaces it.
+   *
+   * The chip's mousedown is prevented, so the field keeps the focus (and its
+   * caret); the `focus()` below is for a field that was not focused to begin
+   * with, where the caret is wherever the field last had it.
    */
   const openPickerFromChip = (): void => {
     const field = fieldRef.current;
     field?.focus();
     if (pickerOpen) return;
     const base = getDraft(sessionId);
-    const leading = slashToken(base, 0);
-    if (leading !== null) {
-      placeCaret(leading.length);
-      setPickerAt(0);
+    const caret = Math.min(field?.selectionStart ?? base.length, base.length);
+    // Where the whitespace-delimited word the caret is in (or at the end of) starts.
+    const wordStart = base.slice(0, caret).search(/\S*$/);
+    const existing = slashToken(base, wordStart);
+    if (existing !== null && caret > wordStart) {
+      placeCaret(wordStart + existing.length);
+      setPickerAt(wordStart);
       setActiveOption(null);
       setFailure(null);
       return;
     }
-    const slash = base === "" || /^\s/.test(base) ? "/" : "/ ";
-    const next = `${slash}${base}`;
-    placeCaret(1);
+    const before = base.slice(0, caret);
+    const after = base.slice(caret);
+    const lead = before === "" || /\s$/.test(before) ? "" : " ";
+    const trail = after === "" || /^\s/.test(after) ? "" : " ";
+    const at = before.length + lead.length;
+    const next = `${before}${lead}/${trail}${after}`;
+    placeCaret(at + 1);
     setDraft(sessionId, next);
     setText(next);
-    setPickerAt(0);
+    setPickerAt(at);
     setActiveOption(null);
     setFailure(null);
   };

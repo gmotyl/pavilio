@@ -1,30 +1,43 @@
 /**
- * A leading `/<name>` and whatever follows it: the name is every
- * non-whitespace character after the slash, and the rest (if any) starts after
- * the first run of whitespace — a space, several, or a newline.
+ * A `/token`: a slash that starts the draft or follows whitespace, and every
+ * non-whitespace character after it. The lead (start or the one whitespace
+ * character) is captured so the replacement can put it back unchanged.
  */
-const LEADING_COMMAND = /^\/(\S+)(?:\s+([\s\S]*))?$/;
+const SLASH_TOKEN = /(^|\s)\/(\S+)/g;
 
 /**
- * `/<name> <args>` -> `Read and follow the instructions in skills/<name>/SKILL.md exactly. ARGUMENTS: <args>`
- * Anything else is returned unchanged. The path is RELATIVE, per D16.
+ * Punctuation a sentence may put right after a token (`use /pavilio-note.`).
+ * It is stripped off the END of the token before the known-name lookup and
+ * kept, as typed, after the replacement.
+ */
+const TRAILING_PUNCTUATION = /[.,;:!?)]+$/;
+
+const instruction = (name: string): string =>
+  `Read and follow the instructions in skills/${name}/SKILL.md exactly.`;
+
+/**
+ * Every known `/<name>` that starts the draft or follows whitespace is replaced
+ * in place with `Read and follow the instructions in skills/<name>/SKILL.md exactly.`
+ * Anything else is unchanged. The path is RELATIVE, per D16.
  *
  * ## What counts as a command
  *
- * Only a `/` at index 0 of the draft, followed by a name in `known`. Leading
- * whitespace before the slash makes it "not at the start", exactly as the
- * picker's own trigger does (it opens only on a `/` typed into an empty
- * draft), so an indented `/path` in a pasted snippet is never rewritten. A
- * name that is not a known skill is sent verbatim: it may be a TUI's own slash
- * command (`/clear`, `/model`) or just text.
+ * A token is a `/` at index 0 or right after whitespace (a space, a tab, a
+ * newline), running to the next whitespace or the end of the draft. So a `/`
+ * inside a word or path (`projects/pavilio-grill`, `a/b`, `(/x`) is never a
+ * token, and `/pavilio-grill/SKILL.md` is one token whose name is not a skill.
+ * The name is the token minus its slash, matched against `known` exactly; if
+ * that misses, trailing `.,;:!?)` are stripped and the rest is tried, the
+ * punctuation then following the instruction as typed (`/pavilio-note.` ->
+ * `… exactly..`). A name that is not a known skill is sent verbatim: it may be
+ * a TUI's own slash command (`/clear`, `/model`) or just text.
  *
- * ## The arguments
+ * ## In place
  *
- * The first whitespace run after the name is the separator and is dropped;
- * the arguments are the rest, with trailing whitespace trimmed. Inner
- * whitespace — newlines included — is the user's and is kept as typed. With
- * nothing left the instruction ends in a bare `ARGUMENTS:`, with no trailing
- * space: the spec's "no stray separator".
+ * Only the token itself is replaced; the text before and after it — the
+ * whitespace included — stays where it is, so nothing is trimmed and no
+ * separator is added. There is no `ARGUMENTS:` form: one rule for every
+ * position (design F7).
  *
  * ## Why relative
  *
@@ -33,11 +46,12 @@ const LEADING_COMMAND = /^\/(\S+)(?:\s+([\s\S]*))?$/;
  * own tree. An absolute path computed here would name the panel owner's.
  */
 export function expandCommand(draft: string, known: ReadonlySet<string>): string {
-  const match = LEADING_COMMAND.exec(draft);
-  if (!match) return draft;
-  const [, name, rest = ""] = match;
-  if (!known.has(name)) return draft;
-  const args = rest.trimEnd();
-  const instruction = `Read and follow the instructions in skills/${name}/SKILL.md exactly. ARGUMENTS:`;
-  return args === "" ? instruction : `${instruction} ${args}`;
+  if (known.size === 0) return draft;
+  return draft.replace(SLASH_TOKEN, (whole, lead: string, word: string) => {
+    if (known.has(word)) return `${lead}${instruction(word)}`;
+    const punctuation = TRAILING_PUNCTUATION.exec(word)?.[0];
+    if (punctuation === undefined) return whole;
+    const name = word.slice(0, word.length - punctuation.length);
+    return name !== "" && known.has(name) ? `${lead}${instruction(name)}${punctuation}` : whole;
+  });
 }

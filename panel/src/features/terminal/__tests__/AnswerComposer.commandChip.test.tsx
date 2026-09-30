@@ -1,5 +1,6 @@
 /**
- * The `/ skills` chip, and the portable expansion a picked skill gets at send.
+ * The `/ skills` chip, which puts a skill in at the caret, and the portable
+ * in-place expansion a known skill gets at send.
  *
  * The composer is rendered on its own, as in `AnswerComposer.paste.test.tsx`:
  * nothing above the field takes part in either behaviour. One `fetch` stub
@@ -21,7 +22,17 @@ const SKILLS: SkillEntry[] = [
     description: "Answer questions from notes",
     path: "skills/pavilio-question/SKILL.md",
   },
+  { name: "pavilio-note", description: "Process a meeting transcript", path: "skills/pavilio-note/SKILL.md" },
 ];
+
+const instruction = (name: string): string =>
+  `Read and follow the instructions in skills/${name}/SKILL.md exactly.`;
+
+/** Put the caret at `at` in the focused field, as a click or arrow key would. */
+const caretAt = (at: number): void => {
+  field().setSelectionRange(at, at);
+  fireEvent.select(field());
+};
 
 const SAVED = "/tmp/pavilio-pastes/paste-1.png";
 
@@ -94,7 +105,7 @@ afterEach(() => {
 });
 
 describe("AnswerComposer command chip", () => {
-  it("the field is not rewritten by the expansion", async () => {
+  it("the field keeps the short form after sending", async () => {
     const user = userEvent.setup();
     renderComposer();
     await skillsLoaded();
@@ -106,9 +117,7 @@ describe("AnswerComposer command chip", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     await user.keyboard("{Enter}");
 
-    await expectSubmitted(
-      "Read and follow the instructions in skills/pavilio-grill/SKILL.md exactly. ARGUMENTS: my idea",
-    );
+    await expectSubmitted(`${instruction("pavilio-grill")} my idea`);
     // While the instruction was being written, the field still said what the
     // user typed: the expansion is on the way out only.
     expect(fieldAtWrite[0]).toBe("/pavilio-grill my idea");
@@ -123,13 +132,12 @@ describe("AnswerComposer command chip", () => {
     await user.click(chip());
 
     // The same picker a leading `/` opens, filtering on the token the chip
-    // just put at the START of the draft (only a leading `/<name>` is a
-    // command), with a space so the text already typed is not the query. The
-    // caret sits right after the slash, and the field keeps the focus.
+    // just put at the caret. The caret sits right after the slash, and the
+    // field keeps the focus.
     const listbox = await screen.findByRole("listbox");
-    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(2));
-    expect(field().value).toBe("/ see ");
-    expect(field().selectionStart).toBe(1);
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(3));
+    expect(field().value).toBe("see /");
+    expect(field().selectionStart).toBe("see /".length);
     expect(document.activeElement).toBe(field());
 
     // Typing filters it exactly as it would after a typed slash.
@@ -137,7 +145,54 @@ describe("AnswerComposer command chip", () => {
     await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
   });
 
-  it("the chip on a draft that already starts with a /token opens the picker on it", async () => {
+  it("the chip inserts at the caret", async () => {
+    const user = userEvent.setup();
+    renderComposer();
+    await skillsLoaded();
+
+    // At the end of the draft: the pick lands there, the caret after the name.
+    await user.click(field());
+    await user.keyboard("do some stuff use ");
+    await user.click(chip());
+    let listbox = await screen.findByRole("listbox");
+    await user.keyboard("pavilio-no");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    await user.keyboard("{Enter}");
+    expect(field().value).toBe("do some stuff use /pavilio-note");
+    expect(field().selectionStart).toBe("do some stuff use /pavilio-note".length);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+
+    // Mid-text: the slash goes in at the caret, not at the start, with a
+    // space after it so the text that follows is not swallowed as the query.
+    await user.clear(field());
+    await user.keyboard("hello world");
+    caretAt("hello ".length);
+    await user.click(chip());
+    listbox = await screen.findByRole("listbox");
+    expect(field().value).toBe("hello / world");
+    expect(field().selectionStart).toBe("hello /".length);
+    await user.keyboard("gri");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    await user.keyboard("{Enter}");
+    expect(field().value).toBe("hello /pavilio-grill world");
+    expect(field().selectionStart).toBe("hello /pavilio-grill".length);
+  });
+
+  it("the chip after a word puts a space before the slash", async () => {
+    const user = userEvent.setup();
+    renderComposer();
+
+    await user.click(field());
+    await user.keyboard("see");
+    await user.click(chip());
+
+    // Glued to `see` it would be a path, not a token.
+    await screen.findByRole("listbox");
+    expect(field().value).toBe("see /");
+    expect(field().selectionStart).toBe("see /".length);
+  });
+
+  it("the chip with the caret on a /token opens the picker on it", async () => {
     const user = userEvent.setup();
     renderComposer();
 
@@ -145,17 +200,31 @@ describe("AnswerComposer command chip", () => {
     // The space closes the picker the typed `/` opened.
     await user.keyboard("/quest more");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    caretAt("/qu".length);
     await user.click(chip());
 
-    // No second slash: the leading token is the query, the caret at its end.
-    const listbox = await screen.findByRole("listbox");
+    // No second slash: the token under the caret is the query, the caret at
+    // its end.
+    let listbox = await screen.findByRole("listbox");
     expect(field().value).toBe("/quest more");
     expect(field().selectionStart).toBe("/quest".length);
     await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
     expect(within(listbox).getByRole("option").textContent).toContain("pavilio-question");
+    await user.keyboard("{Escape}");
+
+    // The same for a token mid-draft, with the caret right at its end.
+    await user.clear(field());
+    await user.keyboard("use /gri now");
+    caretAt("use /gri".length);
+    await user.click(chip());
+    listbox = await screen.findByRole("listbox");
+    expect(field().value).toBe("use /gri now");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    await user.keyboard("{Enter}");
+    expect(field().value).toBe("use /pavilio-grill now");
   });
 
-  it("a skill picked from the chip in front of text is sent as the instruction", async () => {
+  it("a skill picked from the chip after text is sent in place", async () => {
     const user = userEvent.setup();
     renderComposer();
     await skillsLoaded();
@@ -168,14 +237,11 @@ describe("AnswerComposer command chip", () => {
     await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
     await user.keyboard("{Enter}");
 
-    // The pick replaced the query; what was typed before is now the argument.
-    expect(field().value).toBe("/pavilio-grill see");
+    expect(field().value).toBe("see /pavilio-grill");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     await user.keyboard("{Enter}");
 
-    await expectSubmitted(
-      "Read and follow the instructions in skills/pavilio-grill/SKILL.md exactly. ARGUMENTS: see",
-    );
+    await expectSubmitted(`see ${instruction("pavilio-grill")}`);
   });
 
   it("a skill picked from the chip on an empty draft is sent as the instruction", async () => {
@@ -192,9 +258,7 @@ describe("AnswerComposer command chip", () => {
     expect(field().value).toBe("/pavilio-question");
     await user.keyboard("{Enter}");
 
-    await expectSubmitted(
-      "Read and follow the instructions in skills/pavilio-question/SKILL.md exactly. ARGUMENTS:",
-    );
+    await expectSubmitted(instruction("pavilio-question"));
   });
 
   it("the chip shares the row with a pasted-image chip", async () => {
@@ -236,7 +300,7 @@ describe("AnswerComposer command chip", () => {
       await user.keyboard("{Enter}");
       await user.keyboard(" see{Enter}");
 
-      await expectSubmitted(`${GRILL} ARGUMENTS: see`);
+      await expectSubmitted(`${GRILL} see`);
     });
 
     it("the picker's load teaches a name typed by hand later", async () => {
@@ -253,7 +317,7 @@ describe("AnswerComposer command chip", () => {
       await user.click(field());
       await user.keyboard("/");
       const listbox = await screen.findByRole("listbox");
-      await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(2));
+      await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(3));
       await user.keyboard("{Escape}");
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       await user.keyboard("{Backspace}");
@@ -263,7 +327,7 @@ describe("AnswerComposer command chip", () => {
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       await user.keyboard("{Enter}");
 
-      await expectSubmitted(`${GRILL} ARGUMENTS: my idea`);
+      await expectSubmitted(`${GRILL} my idea`);
     });
 
     it("a late mount load does not drop a name learned from the picker", async () => {
@@ -293,7 +357,7 @@ describe("AnswerComposer command chip", () => {
       await Promise.resolve();
 
       await user.keyboard(" see{Enter}");
-      await expectSubmitted(`${GRILL} ARGUMENTS: see`);
+      await expectSubmitted(`${GRILL} see`);
     });
   });
 });
