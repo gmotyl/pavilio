@@ -579,4 +579,31 @@ describe("LauncherSettings", () => {
       expect(nameFields()).toHaveLength(3);
     });
   });
+
+  describe("layout", () => {
+    /**
+     * jsdom lays nothing out, so this pins the class contract that the
+     * headless-Chrome measurement relied on: at a 420px Settings width a
+     * non-wrapping row overflowed and squeezed the run loop to 18px. The row
+     * wraps, each growing field has a real flex BASIS (not `flex-1`, whose 0%
+     * basis lets it be crushed), and the flag field is wide enough for its
+     * "positional" / "prompt flag" placeholders.
+     */
+    it("a row and the add form wrap instead of crushing a field", () => {
+      render(<LauncherSettings />);
+
+      expect(row(0)).toHaveClass("flex-wrap");
+      expect(commandFields()[0]).toHaveClass("basis-32");
+      expect(screen.getByTestId("launcher-run-loop-cell-0")).toHaveClass("basis-64");
+      expect(promptFlagFields()[0]).toHaveClass("w-32");
+
+      const add = screen.getByTestId("launcher-add").parentElement!;
+      expect(add).toHaveClass("flex-wrap");
+      expect(screen.getByTestId("launcher-new-run-loop")).toHaveClass("basis-64");
+      expect(screen.getByTestId("launcher-new-prompt-flag")).toHaveClass("w-32");
+      for (const field of screen.getAllByRole("textbox")) {
+        expect(field).not.toHaveClass("flex-1");
+      }
+    });
+  });
 });

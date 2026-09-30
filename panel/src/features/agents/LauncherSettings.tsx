@@ -193,14 +193,14 @@ function LauncherRow({
   const promptFlagPlaceholder = defaultFlag || "positional";
 
   return (
-    <li className="flex items-start gap-2" data-testid={`launcher-row-${index}`}>
+    <li className="flex flex-wrap items-start gap-2" data-testid={`launcher-row-${index}`}>
       <input
         aria-label={`Launcher ${index + 1} name`}
         data-testid={`launcher-name-${index}`}
         value={name}
         onChange={(e) => setName(e.target.value)}
         onBlur={commit}
-        className="text-sm px-2 py-1 rounded w-32"
+        className="text-sm px-2 py-1 rounded w-32 shrink-0"
         style={inputStyle}
         spellCheck={false}
       />
@@ -210,7 +210,7 @@ function LauncherRow({
         value={command}
         onChange={(e) => setCommand(e.target.value)}
         onBlur={commit}
-        className="text-sm px-2 py-1 rounded flex-1 font-mono"
+        className="text-sm px-2 py-1 rounded grow basis-32 min-w-0 font-mono"
         style={inputStyle}
         spellCheck={false}
       />
@@ -221,11 +221,11 @@ function LauncherRow({
         onChange={(e) => setPromptFlag(e.target.value)}
         onBlur={commit}
         placeholder={promptFlagPlaceholder}
-        className="text-sm px-2 py-1 rounded w-24 font-mono"
+        className="text-sm px-2 py-1 rounded w-32 shrink-0 font-mono"
         style={inputStyle}
         spellCheck={false}
       />
-      <div className="flex-1 min-w-0">
+      <div className="grow basis-64 min-w-0" data-testid={`launcher-run-loop-cell-${index}`}>
         <input
           aria-label={`Launcher ${index + 1} run loop`}
           data-testid={`launcher-run-loop-${index}`}
@@ -348,14 +348,14 @@ export function LauncherSettings() {
           />
         ))}
       </ul>
-      <div className="flex items-center gap-2 mt-2">
+      <div className="flex flex-wrap items-center gap-2 mt-2">
         <input
           aria-label="New launcher name"
           data-testid="launcher-new-name"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="name"
-          className="text-sm px-2 py-1 rounded w-32"
+          className="text-sm px-2 py-1 rounded w-32 shrink-0"
           style={inputStyle}
           spellCheck={false}
         />
@@ -365,7 +365,7 @@ export function LauncherSettings() {
           value={newCommand}
           onChange={(e) => setNewCommand(e.target.value)}
           placeholder="command"
-          className="text-sm px-2 py-1 rounded flex-1 font-mono"
+          className="text-sm px-2 py-1 rounded grow basis-32 min-w-0 font-mono"
           style={inputStyle}
           spellCheck={false}
         />
@@ -375,7 +375,7 @@ export function LauncherSettings() {
           value={newPromptFlag}
           onChange={(e) => setNewPromptFlag(e.target.value)}
           placeholder="prompt flag"
-          className="text-sm px-2 py-1 rounded w-24 font-mono"
+          className="text-sm px-2 py-1 rounded w-32 shrink-0 font-mono"
           style={inputStyle}
           spellCheck={false}
         />
@@ -385,7 +385,7 @@ export function LauncherSettings() {
           value={newRunLoop}
           onChange={(e) => setNewRunLoop(e.target.value)}
           placeholder="run loop, e.g. /goal {prompt}"
-          className="text-sm px-2 py-1 rounded flex-1 font-mono"
+          className="text-sm px-2 py-1 rounded grow basis-64 min-w-0 font-mono"
           style={inputStyle}
           spellCheck={false}
         />
