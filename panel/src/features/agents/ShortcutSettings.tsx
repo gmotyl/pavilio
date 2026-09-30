@@ -7,7 +7,6 @@ import {
   type ComposerShortcut,
 } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-import { useRowIds } from "./useRowIds";
 
 /**
  * The composer shortcuts' editor: one row per stored quick reply, plus a form
@@ -36,32 +35,19 @@ function toLabel(draft: string): string {
 
 type Drafts = { label: string; text: string };
 
-function draftsOf(entry: ComposerShortcut): Drafts {
-  return { label: entry.label, text: entry.text };
-}
-
-function sameDrafts(a: Drafts, b: Drafts): boolean {
-  return a.label === b.label && a.text === b.text;
-}
-
 /**
  * Builds a row's next entry from its drafts, or `null` when a half is blank.
- * Only fields whose draft differs from `base` — the entry the drafts were last
- * filled from — are applied, on top of the CURRENT `entry`, so a field another
- * tab changed mid-edit keeps that change.
+ * The drafts were filled from `entry` — every change of the stored list
+ * refills them — so a label draft that still matches is untouched and keeps
+ * the stored label as it is: an untouched hand-edited label longer than the
+ * cap is not cut by a mere focus and blur. Edited is judged on the trimmed
+ * draft, before the cap.
  */
-function toRowEntry(
-  entry: ComposerShortcut,
-  base: ComposerShortcut,
-  drafts: Drafts,
-): ComposerShortcut | null {
-  // Edited is judged on the trimmed draft, before the cap: an untouched
-  // hand-edited label longer than the cap is not cut by a mere focus and blur.
+function toRowEntry(entry: ComposerShortcut, drafts: Drafts): ComposerShortcut | null {
   const label = drafts.label.trim();
-  const text = drafts.text.trim();
   const next: ComposerShortcut = {
-    label: label !== base.label ? toLabel(label) : entry.label,
-    text: text !== base.text ? text : entry.text,
+    label: label !== entry.label ? toLabel(label) : entry.label,
+    text: drafts.text.trim(),
   };
   if (!next.label || !next.text) return null;
   return next;
@@ -69,11 +55,6 @@ function toRowEntry(
 
 function sameShortcut(a: ComposerShortcut, b: ComposerShortcut): boolean {
   return a.label === b.label && a.text === b.text;
-}
-
-/** What `useRowIds` follows a shortcut by: both halves. */
-function shortcutIdentity(entry: ComposerShortcut): string {
-  return JSON.stringify([entry.label, entry.text]);
 }
 
 const inputStyle = {
@@ -85,53 +66,47 @@ const inputStyle = {
 function ShortcutRow({
   entry,
   index,
+  listKey,
   onCommit,
   onRemove,
 }: {
   entry: ComposerShortcut;
   index: number;
+  /** The whole stored list, serialized: it changes whenever the list does. */
+  listKey: string;
   onCommit: (next: ComposerShortcut) => void;
   onRemove: () => void;
 }) {
   const [label, setLabel] = useState(entry.label);
   const [text, setText] = useState(entry.text);
-  const [base, setBase] = useState(entry);
-  const [focused, setFocused] = useState(false);
+  // The list the drafts were last filled from.
+  const [syncedKey, setSyncedKey] = useState(listKey);
 
   const restoreDrafts = (from: ComposerShortcut) => {
-    setBase(from);
     setLabel(from.label);
     setText(from.text);
   };
 
   /**
-   * The stored entry can change under the row — another tab's write to this
-   * same shortcut (rows are keyed by entry, so a removal elsewhere moves the
-   * row instead of handing it a different shortcut) — so the drafts follow
-   * it, UNLESS the user is mid-edit here (focus in the row and a draft differs
-   * from its base): then only the untouched field follows. Adjusted during
-   * render so stale drafts never paint.
+   * ANY change of the stored list — this tab's own commit or another tab's
+   * write — puts every row's drafts back to the stored entry, a row being
+   * edited included: its edit is dropped rather than risk landing on a
+   * different shortcut, since rows are keyed by position. Compared by value:
+   * the codec hands back a fresh array on every read. Adjusted during render,
+   * so stale drafts never paint.
    */
-  if (entry.label !== base.label || entry.text !== base.text) {
-    const drafts = { label, text };
-    const was = draftsOf(base);
-    const editing = focused && !sameDrafts(drafts, was);
-    if (sameDrafts(drafts, draftsOf(entry))) setBase(entry);
-    else if (!editing) restoreDrafts(entry);
-    else {
-      setBase(entry);
-      if (drafts.label === was.label) setLabel(entry.label);
-      if (drafts.text === was.text) setText(entry.text);
-    }
+  if (listKey !== syncedKey) {
+    setSyncedKey(listKey);
+    restoreDrafts(entry);
   }
 
   const commit = () => {
-    const next = toRowEntry(entry, base, { label, text });
+    const next = toRowEntry(entry, { label, text });
     if (!next) {
       restoreDrafts(entry);
       return;
     }
-    if (next.label === entry.label && next.text === entry.text) return;
+    if (sameShortcut(next, entry)) return;
     onCommit(next);
   };
 
@@ -139,10 +114,6 @@ function ShortcutRow({
     <li
       className="flex flex-wrap items-start gap-2"
       data-testid={`shortcut-row-${index}`}
-      onFocus={() => setFocused(true)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
-      }}
     >
       <input
         aria-label={`Shortcut ${index + 1} label`}
@@ -198,7 +169,7 @@ export function ShortcutSettings() {
     setNewText("");
   };
 
-  const rowIds = useRowIds(shortcuts, shortcutIdentity);
+  const listKey = JSON.stringify(shortcuts);
 
   /**
    * Writes over the entry the row showed, and only while it is still at
@@ -228,12 +199,11 @@ export function ShortcutSettings() {
       </span>
       <ul className="space-y-1">
         {shortcuts.map((entry, index) => (
-          // Keyed by entry, not position: a row's edit must follow its
-          // shortcut when another tab removes an earlier one (`useRowIds`).
           <ShortcutRow
-            key={rowIds[index]}
+            key={index}
             entry={entry}
             index={index}
+            listKey={listKey}
             onCommit={(next) => commitAt(index, entry, next)}
             onRemove={() => removeAt(index, entry)}
           />

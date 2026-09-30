@@ -8,7 +8,6 @@ import {
 } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { fixWholeLine, resolveRunLoop } from "./launcherRunLoop";
-import { useRowIds } from "./useRowIds";
 
 /**
  * The launcher row's editor: one row per stored entry, plus a form that appends
@@ -87,49 +86,21 @@ function promptFlagDraftOf(entry: TerminalLauncher): string {
 
 type Drafts = { name: string; command: string; promptFlag: string; runLoop: string };
 
-function draftsOf(entry: TerminalLauncher): Drafts {
-  return {
-    name: entry.name,
-    command: entry.command,
-    promptFlag: promptFlagDraftOf(entry),
-    runLoop: runLoopDraftOf(entry),
-  };
-}
-
-function sameDrafts(a: Drafts, b: Drafts): boolean {
-  return (
-    a.name === b.name &&
-    a.command === b.command &&
-    a.promptFlag === b.promptFlag &&
-    a.runLoop === b.runLoop
-  );
-}
-
 /**
  * Builds a row's next entry from its drafts, or `null` when a required half is
- * blank. A field counts as edited when its draft differs from `base` — the
- * entry the drafts were last filled from — and only edited fields are applied,
- * on top of the CURRENT `entry`. So an untouched field never grows a key, and
- * a field another tab changed while this row was being edited keeps that
- * change instead of being written back with the row's stale draft.
+ * blank. The drafts were filled from `entry` — every change of the stored list
+ * refills them — so a flag or run-loop draft that still matches the entry is
+ * untouched, and an untouched one never grows a key: an absent key means the
+ * name's shipped default, and a mere focus and blur must not pin it.
  */
-function toRowEntry(
-  entry: TerminalLauncher,
-  base: TerminalLauncher,
-  drafts: Drafts,
-): TerminalLauncher | null {
-  const name = drafts.name.trim();
-  const command = drafts.command.trim();
-  const next: TerminalLauncher = {
-    name: name !== base.name ? name : entry.name,
-    command: command !== base.command ? command : entry.command,
-  };
+function toRowEntry(entry: TerminalLauncher, drafts: Drafts): TerminalLauncher | null {
+  const next: TerminalLauncher = { name: drafts.name.trim(), command: drafts.command.trim() };
   if (!next.name || !next.command) return null;
   const flag = drafts.promptFlag.trim();
-  if (flag !== promptFlagDraftOf(base).trim()) next.promptFlag = flag;
+  if (flag !== promptFlagDraftOf(entry).trim()) next.promptFlag = flag;
   else if (entry.promptFlag !== undefined) next.promptFlag = entry.promptFlag;
   const loop = drafts.runLoop.trim();
-  if (loop !== runLoopDraftOf(base).trim()) next.runLoop = loop;
+  if (loop !== runLoopDraftOf(entry).trim()) next.runLoop = loop;
   else if (entry.runLoop !== undefined) next.runLoop = entry.runLoop;
   return next;
 }
@@ -141,11 +112,6 @@ function sameEntry(a: TerminalLauncher, b: TerminalLauncher): boolean {
     a.promptFlag === b.promptFlag &&
     a.runLoop === b.runLoop
   );
-}
-
-/** What `useRowIds` follows a launcher by: the two halves that make it one. */
-function launcherIdentity(entry: TerminalLauncher): string {
-  return JSON.stringify([entry.name, entry.command]);
 }
 
 const inputStyle = {
@@ -169,11 +135,14 @@ const NOT_OFFERED = "not offered for runs";
 function LauncherRow({
   entry,
   index,
+  listKey,
   onCommit,
   onRemove,
 }: {
   entry: TerminalLauncher;
   index: number;
+  /** The whole stored list, serialized: it changes whenever the list does. */
+  listKey: string;
   onCommit: (next: TerminalLauncher) => void;
   onRemove: () => void;
 }) {
@@ -181,13 +150,10 @@ function LauncherRow({
   const [command, setCommand] = useState(entry.command);
   const [promptFlag, setPromptFlag] = useState(promptFlagDraftOf(entry));
   const [runLoop, setRunLoop] = useState(runLoopDraftOf(entry));
-  // The entry the drafts were last filled from, and whether focus is inside
-  // the row. Together they say whether the row holds an edit in progress.
-  const [base, setBase] = useState(entry);
-  const [focused, setFocused] = useState(false);
+  // The list the drafts were last filled from.
+  const [syncedKey, setSyncedKey] = useState(listKey);
 
   const restoreDrafts = (from: TerminalLauncher) => {
-    setBase(from);
     setName(from.name);
     setCommand(from.command);
     setPromptFlag(promptFlagDraftOf(from));
@@ -195,39 +161,22 @@ function LauncherRow({
   };
 
   /**
-   * The stored entry can change under the row — another tab's write to this
-   * same launcher (the row is keyed by entry, so a removal elsewhere moves the
-   * row rather than handing it a different launcher) — so the drafts follow
-   * it, UNLESS the user is mid-edit here: focus is in the row and a draft
-   * differs from what it was filled from. Then only the untouched fields
-   * follow; the edit is kept (and applied on top of the new entry by
-   * `toRowEntry`), and the rest catch up once focus leaves the row. Adjusted
-   * during render rather than in an effect, so the stale drafts never paint. A
-   * rejected edit restores them directly: the entry did not change there, so
-   * nothing here would.
+   * ANY change of the stored list — this tab's own commit or another tab's
+   * write — puts every row's drafts back to the stored entry, a row being
+   * edited included: its edit is dropped. Rows are keyed by position, and a
+   * position says which launcher it holds only until the list changes, so an
+   * edit kept across a change could land on a different launcher. Dropped,
+   * never misdirected. Compared by value, not reference: the codec hands back
+   * a fresh array on every read. Adjusted during render rather than in an
+   * effect, so the stale drafts never paint.
    */
-  if (!sameEntry(entry, base)) {
-    const drafts = { name, command, promptFlag, runLoop };
-    const was = draftsOf(base);
-    const now = draftsOf(entry);
-    const editing = focused && !sameDrafts(drafts, was);
-    if (sameDrafts(drafts, now)) setBase(entry);
-    else if (!editing) restoreDrafts(entry);
-    else {
-      // Mid-edit: a field the user has not touched follows the new entry, so
-      // another tab's rename shows while the command is being typed; a touched
-      // field keeps its draft. The base moves on with the entry, so a touched
-      // field still reads as edited and an untouched one does not.
-      setBase(entry);
-      if (drafts.name === was.name) setName(now.name);
-      if (drafts.command === was.command) setCommand(now.command);
-      if (drafts.promptFlag === was.promptFlag) setPromptFlag(now.promptFlag);
-      if (drafts.runLoop === was.runLoop) setRunLoop(now.runLoop);
-    }
+  if (listKey !== syncedKey) {
+    setSyncedKey(listKey);
+    restoreDrafts(entry);
   }
 
   const commit = () => {
-    const next = toRowEntry(entry, base, { name, command, promptFlag, runLoop });
+    const next = toRowEntry(entry, { name, command, promptFlag, runLoop });
     if (!next) {
       restoreDrafts(entry);
       return;
@@ -287,10 +236,6 @@ function LauncherRow({
     <li
       className="flex flex-wrap items-start gap-2"
       data-testid={`launcher-row-${index}`}
-      onFocus={() => setFocused(true)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
-      }}
     >
       <input
         aria-label={`Launcher ${index + 1} name`}
@@ -458,14 +403,14 @@ export function LauncherSettings() {
     setNewPromptFlag("");
     setNewRunLoop("");
   };
-  const rowIds = useRowIds(launchers, launcherIdentity);
+  const listKey = JSON.stringify(launchers);
 
   /**
    * Writes `next` over the entry the row showed — `shown`, at `index` — and
-   * only if that entry is still there. The rows are keyed by entry (see
-   * `useRowIds`), so the row's index is its entry's; the check is for a write
-   * that landed after the row last rendered, which would otherwise put the
-   * edit onto whatever now sits at that index. That write drops the edit.
+   * only if that entry is still there. A change of the list resets every row
+   * (see `LauncherRow`), so this is for a write that landed after the row last
+   * rendered — a blur racing it — which would otherwise put the edit onto
+   * whatever now sits at that index. That write drops the edit.
    */
   const commitAt = (index: number, shown: TerminalLauncher, next: TerminalLauncher) => {
     setLaunchers((current) =>
@@ -490,12 +435,11 @@ export function LauncherSettings() {
       </span>
       <ul className="space-y-1">
         {launchers.map((entry, index) => (
-          // Keyed by entry, not position: a row's edit must follow its
-          // launcher when another tab removes an earlier one (`useRowIds`).
           <LauncherRow
-            key={rowIds[index]}
+            key={index}
             entry={entry}
             index={index}
+            listKey={listKey}
             onCommit={(next) => commitAt(index, entry, next)}
             onRemove={() => removeAt(index, entry)}
           />

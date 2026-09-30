@@ -144,18 +144,36 @@ describe("ShortcutSettings", () => {
       return screen.getAllByRole("textbox", { name: /^Shortcut \d+ text$/ }) as HTMLInputElement[];
     }
 
-    it("a kept edit follows its shortcut when an earlier row is removed", async () => {
+    /**
+     * Any change of the stored list resets every row's drafts, the row being
+     * typed into included — even when the write left that row's own shortcut
+     * alone. An edit is dropped rather than risk landing on another entry.
+     */
+    it("an outside change resets a row being edited", async () => {
       const user = userEvent.setup();
-      writePreference(preferences.composerShortcuts, [a, b, c]);
+      writePreference(preferences.composerShortcuts, [a, b]);
       render(<ShortcutSettings />);
 
-      await user.click(textFields()[1]);
-      await user.type(textFields()[1], " --edited");
-      act(() => writePreference(preferences.composerShortcuts, [b, c]));
+      await user.click(textFields()[0]);
+      await user.type(textFields()[0], " X");
+      act(() => writePreference(preferences.composerShortcuts, [a, { label: "B2", text: "beta" }]));
 
-      expect(textFields().map((f) => f.value)).toEqual(["beta --edited", "gamma"]);
+      expect(textFields()[0]).toHaveValue("alpha");
+      expect(textFields()[0]).toHaveFocus();
+      expect(labelFields().map((f) => f.value)).toEqual(["A", "B2"]);
+    });
+
+    it("a blur after an outside change writes nothing", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.composerShortcuts, [a, b]);
+      render(<ShortcutSettings />);
+
+      await user.click(textFields()[0]);
+      await user.type(textFields()[0], " X");
+      act(() => writePreference(preferences.composerShortcuts, [a, { label: "B2", text: "beta" }]));
       await user.click(document.body);
-      expect(stored()).toEqual([{ label: "B", text: "beta --edited" }, c]);
+
+      expect(stored()).toEqual([a, { label: "B2", text: "beta" }]);
     });
 
     it("an edit to a row removed elsewhere is dropped and writes nothing", async () => {
@@ -218,21 +236,6 @@ describe("ShortcutSettings", () => {
       fireEvent.click(remove);
 
       expect(stored()).toEqual([b]);
-    });
-
-    it("a label changed elsewhere survives a text edit on the same row", async () => {
-      const user = userEvent.setup();
-      writePreference(preferences.composerShortcuts, [a, b]);
-      render(<ShortcutSettings />);
-
-      await user.click(textFields()[1]);
-      await user.type(textFields()[1], " --edited");
-      act(() => writePreference(preferences.composerShortcuts, [a, { label: "B2", text: "beta" }]));
-
-      expect(labelFields()[1]).toHaveValue("B2");
-      expect(textFields()[1]).toHaveValue("beta --edited");
-      await user.click(document.body);
-      expect(stored()).toEqual([a, { label: "B2", text: "beta --edited" }]);
     });
   });
 
