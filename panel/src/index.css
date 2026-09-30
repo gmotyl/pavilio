@@ -2088,6 +2088,107 @@ input[type="checkbox"] {
   box-shadow: inset 0 -1px 0 var(--accent);
 }
 
+/* The objective box: the textarea over a mirror layer that tints the
+   template's placeholders while it is focused. Both sit in one grid cell, so
+   the box is as tall as the taller of the two and their lines coincide; the
+   mirror copies the textarea's font, padding and wrapping exactly, and the
+   textarea's own text goes transparent so only the caret and selection show. */
+.objective-field {
+  position: relative;
+  display: grid;
+  /* Room for the copy button in the top-right corner. */
+  padding-right: 26px;
+}
+
+.objective-field > .run-banner-objective,
+.objective-field-overlay {
+  grid-area: 1 / 1;
+}
+
+.objective-field-overlay {
+  margin: 1px 0;
+  padding: 0;
+  color: var(--text-primary);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.objective-field-overlay mark {
+  color: var(--accent);
+  background: transparent;
+}
+
+.objective-field[data-editing] > .run-banner-objective {
+  color: transparent;
+  caret-color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.objective-field-copy {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.objective-field-copy:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+
+.objective-field-copy:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.objective-field-copied {
+  position: absolute;
+  top: 1px;
+  right: 22px;
+  font-size: 10px;
+  color: var(--green);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.objective-field-copied[data-on] {
+  opacity: 1;
+}
+
+.run-banner-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.objective-override-reset {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.objective-override-reset:hover {
+  text-decoration: underline;
+}
+
 .run-banner-progress {
   position: relative;
   display: flex;
@@ -2181,5 +2282,10 @@ input[type="checkbox"] {
   .boot-legend,
   .boot-legend * {
     animation: none;
+  }
+
+  /* The copy acknowledgement appears and goes without a fade. */
+  .objective-field-copied {
+    transition: none;
   }
 }

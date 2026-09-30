@@ -8,6 +8,7 @@ import { preferences, type TerminalLauncher } from "../../../preferences/declara
 import {
   __resetPreferenceStoreForTests,
   PREFERENCE_PATCH_DEBOUNCE_MS,
+  readPreference,
   writePreference,
 } from "../../../preferences/store";
 import { writeOverride } from "../../../preferences/overridable";
@@ -88,13 +89,8 @@ describe("RunBanner", () => {
     expect(objective().value).not.toMatch(/\{(change|path|project)\}/);
   });
 
-  it("an edit to the objective is used for the send and stored nowhere", async () => {
+  it("an edit to the objective is saved for this project and used for the send", async () => {
     const user = userEvent.setup();
-    // Nothing is written before the snapshot: a write here would queue its own
-    // debounced PATCH and land inside the window this test watches.
-    const before = structuredClone(globals.__PAVILIO_PREFS__);
-    const localBefore = localStorage.length;
-    fetchMock.mockClear();
     const onRun = renderBanner(vi.fn());
 
     await user.clear(objective());
@@ -103,12 +99,8 @@ describe("RunBanner", () => {
 
     expect(onRun).toHaveBeenCalledTimes(1);
     expect(onRun).toHaveBeenCalledWith("claude '/goal Only do task 7'");
-    // No preference moved: the document, browser storage and the PATCH
-    // channel are all exactly as they were before the edit.
-    expect(globals.__PAVILIO_PREFS__).toEqual(before);
-    expect(localStorage.length).toBe(localBefore);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(fetchMock).not.toHaveBeenCalled();
+    // The one-send rule is withdrawn: the edit is this project's objective now.
+    expect(readPreference(preferences.taskPromptOverride, "pavilio")).toBe("Only do task 7");
   });
 
   it("a launcher with no run loop is not offered", () => {
@@ -203,6 +195,8 @@ describe("RunBanner", () => {
     const user = userEvent.setup();
     const onRun = renderBanner(vi.fn());
 
+    // Collapsing takes focus from the box, which saves the edit.
+    await user.click(objective());
     fireEvent.change(objective(), { target: { value: "Kept across the fold" } });
     await user.click(screen.getByRole("button", { name: "Collapse run banner" }));
     await user.click(screen.getByRole("button", { name: "Expand run banner" }));
@@ -390,7 +384,7 @@ describe("RunBanner", () => {
     renderBanner();
 
     const foot = screen.getByTestId("run-banner-foot").textContent ?? "";
-    expect(foot).toContain("editable for this send");
+    expect(foot).toContain("saved for this project");
     expect(foot).toContain("⌘↵");
   });
 });

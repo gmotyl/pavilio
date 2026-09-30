@@ -1,10 +1,15 @@
-import { useId, useState, type KeyboardEvent } from "react";
+import { useId, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Play } from "lucide-react";
 
 import { preferences, type TerminalLauncher } from "../../preferences/declarations";
-import { readOverridable } from "../../preferences/overridable";
-import { usePreference, useScopedPreference } from "../../preferences/usePreference";
+import { usePreference } from "../../preferences/usePreference";
 import { resolveRunLoop } from "../agents/launcherRunLoop";
+import {
+  ObjectiveField,
+  ObjectiveOverrideMarker,
+  useObjectiveTemplate,
+  type ObjectiveFieldHandle,
+} from "./ObjectiveField";
 import { composeRunLine, resolveObjective, runLineParts, takesPrompt } from "./runPrompt";
 import type { TaskListStatus } from "./taskList";
 
@@ -13,10 +18,10 @@ import type { TaskListStatus } from "./taskList";
  * how much is left, which CLI a run would start, and the objective it would
  * start with — shown RESOLVED, so what is read is what is sent.
  *
- * The objective is editable for one send and stored nowhere. The template it
- * was resolved from is a preference — a workspace default with a per-project
- * override — whose editor is future work; an edit here that wrote back would
- * turn a one-off tweak into every later run's default.
+ * The objective is a saved field ({@link ObjectiveField}): an edit becomes
+ * this project's objective when the box loses focus, and a Run while it still
+ * has focus saves first and sends what was typed. The workspace default is
+ * edited in Settings; the banner writes only the project's override.
  *
  * The launcher's run loop is drawn around the objective, dimmed and never
  * editable: it belongs to the launcher entry, not to the template, and it
@@ -99,24 +104,11 @@ function resolvePick(
 export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
   const [launchers] = usePreference(preferences.terminalLaunchers);
   const [expanded, setExpanded] = usePreference(preferences.plansBannerExpanded);
-  // Subscribed for the re-render only; the value is read through
-  // `readOverridable`, which owns the "project's, else the workspace's" rule.
-  usePreference(preferences.taskPromptDefault);
-  useScopedPreference(preferences.taskPromptOverride, project);
-  const template = project
-    ? readOverridable(preferences.taskPromptDefault, preferences.taskPromptOverride, project)
-    : preferences.taskPromptDefault.default;
-
-  const resolved = resolveObjective(template, { change: status.changeId, path, project });
-
-  // The editable draft follows a CHANGED resolution — another file, another
-  // template — and nothing else, so an edit survives re-renders and the fold.
-  const [draft, setDraft] = useState(resolved);
-  const [draftFor, setDraftFor] = useState(resolved);
-  if (draftFor !== resolved) {
-    setDraftFor(resolved);
-    setDraft(resolved);
-  }
+  const template = useObjectiveTemplate(project);
+  const vars = { change: status.changeId, path, project };
+  const resolved = resolveObjective(template, vars);
+  // Mounted only while expanded; collapsed, the stored objective is sent.
+  const field = useRef<ObjectiveFieldHandle>(null);
 
   const options = runnable(launchers);
   const [remembered, setRemembered] = usePreference(preferences.plansRunLauncher);
@@ -140,21 +132,22 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
   // field neither gates Run nor pretends to be part of the line.
   const fields = launcher ? lineFields(launcher) : null;
   const usesObjective = fields ? takesPrompt(fields.runLoop) : true;
-  const canRun = Boolean(launcher) && (!usesObjective || draft.trim() !== "") && !busy;
+  // A blank edit is not blank to send: saving it clears the override, and the
+  // workspace default is what runs. So only the stored objective gates Run.
+  const canRun = Boolean(launcher) && (!usesObjective || resolved.trim() !== "") && !busy;
 
   const run = () => {
     if (!canRun || !fields) return;
-    const result = onRun(composeRunLine(fields.command, fields.promptFlag, fields.runLoop, draft));
+    // Save a focused edit first, and send what it resolves to — not this
+    // render's `resolved`, which predates the save.
+    const objective = field.current?.commit() ?? resolved;
+    if (usesObjective && objective.trim() === "") return;
+    const result = onRun(
+      composeRunLine(fields.command, fields.promptFlag, fields.runLoop, objective),
+    );
     if (result && typeof (result as Promise<unknown>).finally === "function") {
       setBusy(true);
       void (result as Promise<unknown>).catch(() => undefined).finally(() => setBusy(false));
-    }
-  };
-
-  const onObjectiveKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      run();
     }
   };
 
@@ -247,16 +240,12 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
         >
           {wrapper.before}
         </span>
-        <textarea
-          className="run-banner-objective"
-          aria-label="Objective"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={onObjectiveKey}
-          rows={2}
-          spellCheck={false}
+        <ObjectiveField
+          ref={field}
+          vars={vars}
+          onSubmit={run}
           disabled={!usesObjective}
-          aria-describedby={usesObjective ? undefined : noPromptNote}
+          describedBy={usesObjective ? undefined : noPromptNote}
         />
         <span
           className="run-banner-wrap"
@@ -292,9 +281,12 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
       </div>
       <div className="run-banner-foot" data-testid="run-banner-foot">
         {/* A disabled objective is neither editable nor reached by ⌘↵. */}
-        {usesObjective
-          ? "editable for this send · ⌘↵ to run · opens a new terminal"
-          : "opens a new terminal"}
+        <span>
+          {usesObjective
+            ? "saved for this project · ⌘↵ to run · opens a new terminal"
+            : "opens a new terminal"}
+        </span>
+        <ObjectiveOverrideMarker project={project} />
       </div>
     </section>
   );
