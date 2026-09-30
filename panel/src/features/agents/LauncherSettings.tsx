@@ -236,7 +236,7 @@ function LauncherRow({
           className="text-sm px-2 py-1 rounded w-full font-mono"
           style={
             state.kind === "wholeLine"
-              ? { ...inputStyle, borderColor: "var(--status-error, #e57373)" }
+              ? { ...inputStyle, borderColor: "var(--red)" }
               : isDefault
                 ? { ...inputStyle, borderStyle: "dashed" }
                 : inputStyle
@@ -271,7 +271,7 @@ function LauncherRow({
           <p
             className="text-xs mt-0.5"
             role="alert"
-            style={{ color: "var(--status-error, #e57373)" }}
+            style={{ color: "var(--red)" }}
           >
             This looks like a whole command line — the command is added for you.{" "}
             <button

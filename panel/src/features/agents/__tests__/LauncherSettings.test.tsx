@@ -553,6 +553,18 @@ describe("LauncherSettings", () => {
       expect(within(row(1)).queryByText(/looks like a whole command line/)).toBeNull();
     });
 
+    it("a whole-line warning uses the panel's own red", () => {
+      writePreference(preferences.terminalLaunchers, [
+        { name: "claude", command: "claude", runLoop: 'claude "/goal now {prompt}"' },
+      ]);
+
+      render(<LauncherSettings />);
+      // `--red` is declared in index.css; the old `--status-error` never was,
+      // so its fallback hex was all that ever rendered.
+      expect(runLoopFields()[0].style.borderColor).toBe("var(--red)");
+      expect(within(row(0)).getByRole("alert").style.color).toBe("var(--red)");
+    });
+
     it("a blank name or command is still rejected", async () => {
       const user = userEvent.setup();
 
