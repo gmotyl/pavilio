@@ -197,6 +197,62 @@ describe("ObjectiveField", () => {
     expect(objective()).toBeInTheDocument();
   });
 
+  it("an edit is saved to the project it was made in", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.taskPromptDefault, TEMPLATE);
+    writeOverride(preferences.taskPromptOverride, "b's own {project}", "b");
+    const { rerender } = render(
+      <RunBanner status={STATUS} project="a" path={PATH} onRun={vi.fn()} />,
+    );
+
+    await user.click(objective());
+    await user.clear(objective());
+    await user.type(objective(), "a's edit");
+    // The tab moves on to project b (back/forward, a programmatic navigate)
+    // while the box still has focus.
+    rerender(<RunBanner status={STATUS} project="b" path={PATH} onRun={vi.fn()} />);
+    // The draft does not travel: the box is b's template, still focused.
+    expect(objective()).toHaveFocus();
+    expect(objective().value).toBe("b's own {project}");
+    await user.tab();
+
+    expect(override("a")).toBe("a's edit");
+    expect(override("b")).toBe("b's own {project}");
+    expect(objective().value).toBe("b's own b");
+  });
+
+  it("an unedited focus follows a project switch", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.taskPromptDefault, TEMPLATE);
+    writeOverride(preferences.taskPromptOverride, "b's own", "b");
+    const { rerender } = render(
+      <RunBanner status={STATUS} project="a" path={PATH} onRun={vi.fn()} />,
+    );
+
+    await user.click(objective());
+    rerender(<RunBanner status={STATUS} project="b" path={PATH} onRun={vi.fn()} />);
+    expect(objective().value).toBe("b's own");
+    await user.type(objective(), " more");
+    await user.tab();
+
+    expect(override("a")).toBeNull();
+    expect(override("b")).toBe("b's own more");
+  });
+
+  it("unmounting while focused saves the pending edit", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <RunBanner status={STATUS} project="pavilio" path={PATH} onRun={vi.fn()} />,
+    );
+
+    await user.click(objective());
+    await user.clear(objective());
+    await user.type(objective(), "left mid-edit");
+    unmount();
+
+    expect(override()).toBe("left mid-edit");
+  });
+
   it("an unchanged blur writes nothing", async () => {
     const user = userEvent.setup();
     renderBanner();

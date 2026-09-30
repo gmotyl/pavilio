@@ -2,6 +2,7 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -33,6 +34,12 @@ import { resolveObjective } from "./runPrompt";
  * A Run while the box still has focus must not race the blur: the banner calls
  * {@link ObjectiveFieldHandle.commit}, which saves and hands back the objective
  * to send in the same turn.
+ *
+ * An edit belongs to the project it was STARTED in. The Plans tab is not keyed
+ * by project, so the tab can move to another project while the box keeps
+ * focus (back/forward, a programmatic navigate): the pending edit is then saved
+ * to the project it was made in, and the box starts over on the new project's
+ * template — a draft never crosses projects. Unmounting mid-edit saves too.
  */
 
 /** The substitutions an objective template is resolved with. */
@@ -110,6 +117,9 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
     // What the draft is compared with to decide whether anything changed: the
     // template when focus arrived, or the text a Run last committed.
     const baseline = useRef(template);
+    // The project the edit in progress belongs to, taken when focus arrived.
+    // Saves go here, never to whatever project the latest render names.
+    const editProject = useRef(vars.project);
 
     // The pending edit, saved; returns what it resolves to. Read through refs
     // and fresh preference reads, so a Run in the same event as a blur sends
@@ -121,10 +131,11 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
 
     const commitDraft = (): string => {
       if (editingRef.current && draftRef.current !== baseline.current) {
-        save(vars.project, draftRef.current);
+        const project = editProject.current;
+        save(project, draftRef.current);
         // A cleared override reads back as the workspace default; the box
         // keeps showing what is now stored.
-        const stored = readTemplate(vars.project);
+        const stored = readTemplate(project);
         baseline.current = stored;
         if (draftRef.current.trim() === "") {
           draftRef.current = stored;
@@ -140,7 +151,28 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
 
     useImperativeHandle(ref, () => ({ commit: commitDraft }));
 
+    // The project moved under a focused box: the pending edit goes to the
+    // project it was made in, and editing restarts on the new one's template.
+    // A layout effect, so the old draft is never painted under the new project.
+    useLayoutEffect(() => {
+      if (!editingRef.current || editProject.current === vars.project) return;
+      commitDraft();
+      const next = readTemplate(vars.project);
+      editProject.current = vars.project;
+      baseline.current = next;
+      draftRef.current = next;
+      setDraft(next);
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on the project alone
+    }, [vars.project]);
+
+    // Unmounted mid-edit (the banner collapses, the change is closed): no blur
+    // arrives, so the pending edit is saved here.
+    const commitRef = useRef(commitDraft);
+    commitRef.current = commitDraft;
+    useEffect(() => () => void commitRef.current(), []);
+
     const onFocus = () => {
+      editProject.current = vars.project;
       baseline.current = template;
       setDraft(template);
       setEditing(true);
