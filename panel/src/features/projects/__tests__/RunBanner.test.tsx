@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { RunBanner } from "../RunBanner";
@@ -469,5 +469,50 @@ describe("RunBanner", () => {
     const foot = screen.getByTestId("run-banner-foot").textContent ?? "";
     expect(foot).toContain("saved for this project");
     expect(foot).toContain("⌘↵");
+  });
+});
+
+describe("RunBanner, done", () => {
+  const DONE: TaskListStatus = { changeId: STATUS.changeId, total: 6, remaining: 0 };
+
+  function renderDone(onRun = vi.fn()) {
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    render(
+      <MemoryRouter>
+        <RunBanner status={DONE} project="pavilio" path={PATH} onRun={onRun} />
+      </MemoryRouter>,
+    );
+    return onRun;
+  }
+
+  it("the done banner shows a check, the count and a full green bar", () => {
+    renderDone();
+
+    const banner = screen.getByRole("status", { name: "Change done" });
+    expect(within(banner).getByText("All 6 tasks done")).toBeInTheDocument();
+    expect(within(banner).getByTestId("run-banner-done-icon")).toBeInTheDocument();
+    const bar = within(banner).getByRole("progressbar", { name: "Tasks done" });
+    expect(bar).toHaveAttribute("aria-valuenow", "6");
+    expect(bar).toHaveAttribute("aria-valuemax", "6");
+    expect(bar.querySelectorAll("[data-segment]")).toHaveLength(6);
+    expect(bar.querySelectorAll('[data-segment="done"]')).toHaveLength(6);
+    expect(screen.queryByRole("region", { name: "Run this change" })).toBeNull();
+  });
+
+  it("the done banner offers no run", () => {
+    // Collapsed or not, the done banner is the same: the preference is not read.
+    for (const expanded of [true, false]) {
+      writePreference(preferences.plansBannerExpanded, expanded);
+      const onRun = renderDone();
+
+      expect(screen.getByText("All 6 tasks done")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+      expect(screen.queryByRole("group", { name: "CLI" })).toBeNull();
+      expect(screen.queryByRole("textbox", { name: "Objective" })).toBeNull();
+      expect(screen.queryByTestId("run-banner-chevron")).toBeNull();
+      expect(screen.queryAllByRole("button")).toHaveLength(0);
+      expect(onRun).not.toHaveBeenCalled();
+      cleanup();
+    }
   });
 });

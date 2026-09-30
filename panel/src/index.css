@@ -2022,6 +2022,22 @@ input[type="checkbox"] {
   flex: 1;
 }
 
+/* A finished change: the accent edge turns green with the check and the bar,
+   and the row carries only the icon and the count. */
+.run-banner[data-done] {
+  border-left-color: var(--green);
+}
+
+.run-banner[data-done] .run-banner-top {
+  gap: 7px;
+  margin-bottom: 0;
+}
+
+.run-banner-done-icon {
+  flex: none;
+  color: var(--green);
+}
+
 .run-banner-chevron {
   display: inline-flex;
   align-items: center;

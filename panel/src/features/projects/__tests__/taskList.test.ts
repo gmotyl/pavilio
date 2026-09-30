@@ -21,11 +21,15 @@ describe("taskListStatus", () => {
     });
   });
 
-  it("a fully checked list is not runnable", () => {
-    expect(taskListStatus(TASKS, list(4, 0))).toBeNull();
+  it("a fully checked list returns a done status", () => {
+    expect(taskListStatus(TASKS, list(6, 0))).toEqual({
+      changeId: "2026-09-28-commands-in-context",
+      total: 6,
+      remaining: 0,
+    });
   });
 
-  it("a file with no checkboxes is not runnable", () => {
+  it("a file with no checkboxes is still not a task list", () => {
     expect(taskListStatus(TASKS, "# Tasks\n\n- a plain item\n")).toBeNull();
     expect(taskListStatus(TASKS, "")).toBeNull();
   });
@@ -74,7 +78,10 @@ describe("taskListStatus", () => {
     const content = ["- [x] real", "```md", "- [ ] example", "```", "~~~", "- [ ] tilde", "~~~"].join(
       "\n",
     );
-    expect(taskListStatus(TASKS, content)).toBeNull();
+    // Only the real box counts: one, checked — the fenced ones are not work left.
+    expect(taskListStatus(TASKS, content)).toMatchObject({ total: 1, remaining: 0 });
+    // Boxes only inside fences: no checkbox at all, so no task list.
+    expect(taskListStatus(TASKS, ["```md", "- [ ] example", "```"].join("\n"))).toBeNull();
   });
 
   it("does not count bracket text that is not a list checkbox", () => {

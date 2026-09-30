@@ -314,8 +314,10 @@ export default function PlansTab({ projectName }: Props) {
     ? (filesByPath.get(selectedPath)?.relativeToProjectsDir ?? undefined)
     : undefined;
 
-  // A change's tasks.md with work left gets the run banner; the path it is
-  // handed is workspace-relative, the form the objective template names.
+  // A change's tasks.md with a checkbox gets the banner — the run banner with
+  // work left, the done banner once every box is checked (a status is not by
+  // itself runnable). The path it is handed is workspace-relative, the form
+  // the objective template names.
   const runStatus =
     selectedPath && fileContent !== null ? taskListStatus(selectedPath, fileContent) : null;
   const runPath = selectedPath

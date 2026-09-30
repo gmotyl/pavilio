@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, Play } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Play } from "lucide-react";
 
 import { preferences, type TerminalLauncher } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
@@ -15,8 +15,11 @@ import { resolveObjective, runLineParts, takesPrompt } from "./runPrompt";
 import type { TaskListStatus } from "./taskList";
 
 /**
- * The banner above a change's `tasks.md` while it still has unchecked boxes:
- * how much is left, which CLI a run would start, and the objective it would
+ * The banner above a change's `tasks.md`. Once every box is checked it is the
+ * DONE banner ({@link DoneBanner}): a check, the count and a full bar, and
+ * nothing to run or collapse.
+ *
+ * While boxes are unchecked it is the run banner: how much is left, which CLI a run would start, and the objective it would
  * start with — shown RESOLVED, so what is read is what is sent.
  *
  * The objective is a saved field ({@link ObjectiveField}): an edit becomes
@@ -104,7 +107,60 @@ function resolvePick(
   return at < 0 ? 0 : at;
 }
 
-export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
+export function RunBanner(props: RunBannerProps) {
+  // Decided before any hook: the done banner reads no preference, so the
+  // remembered collapse and CLI never touch it.
+  if (props.status.remaining === 0) return <DoneBanner total={props.status.total} />;
+  return <ActiveRunBanner {...props} />;
+}
+
+/** How many of the tasks are done: one segment per task, or one fill past {@link MAX_SEGMENTS}. */
+function TaskProgress({ total, done }: { total: number; done: number }) {
+  return (
+    <div
+      className="run-banner-progress"
+      role="progressbar"
+      aria-label="Tasks done"
+      aria-valuemin={0}
+      aria-valuemax={total}
+      aria-valuenow={done}
+    >
+      {total <= MAX_SEGMENTS ? (
+        Array.from({ length: total }, (_, index) => (
+          <i key={index} data-segment={index < done ? "done" : "open"} />
+        ))
+      ) : (
+        <i className="run-banner-progress-fill" style={{ width: `${(done / total) * 100}%` }} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * A finished change: the check and the count, and the bar full. It offers no
+ * CLI, objective, Run or chevron — there is nothing left to run — and, having
+ * no collapse, it is the same whether the run banner was last left open or not.
+ */
+function DoneBanner({ total }: { total: number }) {
+  return (
+    <section className="run-banner" data-done="" role="status" aria-label="Change done">
+      <div className="run-banner-top">
+        <CheckCircle2
+          size={14}
+          className="run-banner-done-icon"
+          data-testid="run-banner-done-icon"
+          aria-hidden="true"
+        />
+        <span className="run-banner-title">
+          All {total} {total === 1 ? "task" : "tasks"} done
+        </span>
+      </div>
+      <TaskProgress total={total} done={total} />
+    </section>
+  );
+}
+
+function ActiveRunBanner({ status, project, path, onRun }: RunBannerProps) {
   const [launchers] = usePreference(preferences.terminalLaunchers);
   const [expanded, setExpanded] = usePreference(preferences.plansBannerExpanded);
   const template = useObjectiveTemplate(project);
@@ -281,25 +337,7 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
           This launcher's run loop takes no prompt
         </div>
       )}
-      <div
-        className="run-banner-progress"
-        role="progressbar"
-        aria-label="Tasks done"
-        aria-valuemin={0}
-        aria-valuemax={status.total}
-        aria-valuenow={done}
-      >
-        {status.total <= MAX_SEGMENTS ? (
-          Array.from({ length: status.total }, (_, index) => (
-            <i key={index} data-segment={index < done ? "done" : "open"} />
-          ))
-        ) : (
-          <i
-            className="run-banner-progress-fill"
-            style={{ width: `${(done / status.total) * 100}%` }}
-          />
-        )}
-      </div>
+      <TaskProgress total={status.total} done={done} />
       <div className="run-banner-foot" data-testid="run-banner-foot">
         {/* A disabled objective is neither editable nor reached by ⌘↵; a
             blocked launcher's objective is still saved, but runs nowhere. */}
