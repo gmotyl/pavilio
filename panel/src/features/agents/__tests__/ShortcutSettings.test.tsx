@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ShortcutSettings } from "../ShortcutSettings";
@@ -133,6 +133,59 @@ describe("ShortcutSettings", () => {
     expect(globals.__PAVILIO_PREFS__![KEY]).toBeUndefined();
     expect(okLabel.value).toBe("OK");
     expect(stored()).toEqual(SHIPPED);
+  });
+
+  describe("a write from elsewhere", () => {
+    const a = { label: "A", text: "alpha" };
+    const b = { label: "B", text: "beta" };
+    const c = { label: "C", text: "gamma" };
+
+    function textFields(): HTMLInputElement[] {
+      return screen.getAllByRole("textbox", { name: /^Shortcut \d+ text$/ }) as HTMLInputElement[];
+    }
+
+    it("a kept edit follows its shortcut when an earlier row is removed", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.composerShortcuts, [a, b, c]);
+      render(<ShortcutSettings />);
+
+      await user.click(textFields()[1]);
+      await user.type(textFields()[1], " --edited");
+      act(() => writePreference(preferences.composerShortcuts, [b, c]));
+
+      expect(textFields().map((f) => f.value)).toEqual(["beta --edited", "gamma"]);
+      await user.click(document.body);
+      expect(stored()).toEqual([{ label: "B", text: "beta --edited" }, c]);
+    });
+
+    it("an edit to a row removed elsewhere is dropped and writes nothing", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.composerShortcuts, [a, b, c]);
+      render(<ShortcutSettings />);
+
+      await user.click(textFields()[1]);
+      await user.type(textFields()[1], " --edited");
+      act(() => writePreference(preferences.composerShortcuts, [a, c]));
+
+      expect(textFields().map((f) => f.value)).toEqual(["alpha", "gamma"]);
+      await user.click(document.body);
+      expect(stored()).toEqual([a, c]);
+    });
+
+    it("a label changed elsewhere survives a text edit on the same row", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.composerShortcuts, [a, b]);
+      render(<ShortcutSettings />);
+
+      await user.click(textFields()[1]);
+      await user.type(textFields()[1], " --edited");
+      act(() => writePreference(preferences.composerShortcuts, [a, { label: "B2", text: "beta" }]));
+
+      expect(labelFields()[1]).toHaveValue("B2");
+      expect(textFields()[1]).toHaveValue("beta --edited");
+      await user.click(document.body);
+      expect(stored()).toEqual([a, { label: "B2", text: "beta --edited" }]);
+    });
   });
 
   it("the list is workspace-wide", async () => {

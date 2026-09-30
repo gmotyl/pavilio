@@ -3,6 +3,7 @@ import { Plus, X } from "lucide-react";
 
 import { preferences, type ComposerShortcut } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { useRowIds } from "./useRowIds";
 
 /**
  * The composer shortcuts' editor: one row per stored quick reply, plus a form
@@ -52,6 +53,15 @@ function toRowEntry(
   return next;
 }
 
+function sameShortcut(a: ComposerShortcut, b: ComposerShortcut): boolean {
+  return a.label === b.label && a.text === b.text;
+}
+
+/** What `useRowIds` follows a shortcut by: both halves. */
+function shortcutIdentity(entry: ComposerShortcut): string {
+  return JSON.stringify([entry.label, entry.text]);
+}
+
 const inputStyle = {
   background: "var(--bg-surface)",
   color: "var(--text-primary)",
@@ -81,16 +91,24 @@ function ShortcutRow({
   };
 
   /**
-   * The stored entry can change under the row — another tab's write, or a
-   * removal shifting later rows up — so the drafts follow it, UNLESS the user
-   * is mid-edit here (focus in the row and a draft differs from its base).
-   * Adjusted during render so stale drafts never paint.
+   * The stored entry can change under the row — another tab's write to this
+   * same shortcut (rows are keyed by entry, so a removal elsewhere moves the
+   * row instead of handing it a different shortcut) — so the drafts follow
+   * it, UNLESS the user is mid-edit here (focus in the row and a draft differs
+   * from its base): then only the untouched field follows. Adjusted during
+   * render so stale drafts never paint.
    */
   if (entry.label !== base.label || entry.text !== base.text) {
     const drafts = { label, text };
-    const editing = focused && !sameDrafts(drafts, draftsOf(base));
+    const was = draftsOf(base);
+    const editing = focused && !sameDrafts(drafts, was);
     if (sameDrafts(drafts, draftsOf(entry))) setBase(entry);
     else if (!editing) restoreDrafts(entry);
+    else {
+      setBase(entry);
+      if (drafts.label === was.label) setLabel(entry.label);
+      if (drafts.text === was.text) setText(entry.text);
+    }
   }
 
   const commit = () => {
@@ -165,12 +183,27 @@ export function ShortcutSettings() {
     setNewText("");
   };
 
-  const commitAt = (index: number, next: ComposerShortcut) => {
-    setShortcuts((current) => current.map((entry, i) => (i === index ? next : entry)));
+  const rowIds = useRowIds(shortcuts, shortcutIdentity);
+
+  /**
+   * Writes over the entry the row showed, and only while it is still at
+   * `index`: a write that landed after the row last rendered drops the edit
+   * rather than putting it onto whatever now sits there.
+   */
+  const commitAt = (index: number, shown: ComposerShortcut, next: ComposerShortcut) => {
+    setShortcuts((current) =>
+      current[index] !== undefined && sameShortcut(current[index], shown)
+        ? current.map((entry, i) => (i === index ? next : entry))
+        : current,
+    );
   };
 
-  const removeAt = (index: number) => {
-    setShortcuts((current) => current.filter((_, i) => i !== index));
+  const removeAt = (index: number, shown: ComposerShortcut) => {
+    setShortcuts((current) =>
+      current[index] !== undefined && sameShortcut(current[index], shown)
+        ? current.filter((_, i) => i !== index)
+        : current,
+    );
   };
 
   return (
@@ -180,14 +213,14 @@ export function ShortcutSettings() {
       </span>
       <ul className="space-y-1">
         {shortcuts.map((entry, index) => (
-          // Index keys: two entries may share a label, and the order is the
-          // user's, so position is the only stable identity.
+          // Keyed by entry, not position: a row's edit must follow its
+          // shortcut when another tab removes an earlier one (`useRowIds`).
           <ShortcutRow
-            key={index}
+            key={rowIds[index]}
             entry={entry}
             index={index}
-            onCommit={(next) => commitAt(index, next)}
-            onRemove={() => removeAt(index)}
+            onCommit={(next) => commitAt(index, entry, next)}
+            onRemove={() => removeAt(index, entry)}
           />
         ))}
       </ul>

@@ -738,6 +738,75 @@ describe("LauncherSettings", () => {
       expect(runLoopFields()[0]).toHaveValue("/goal again {prompt}");
     });
 
+    /**
+     * Rows are not keyed by position: a row's edit belongs to the ENTRY it
+     * started from, so a removal elsewhere that shifts that entry up one place
+     * carries the edit with it — onto the same launcher at its new index — and
+     * never onto whichever launcher now sits at the old index.
+     */
+    it("a kept edit follows its launcher when an earlier row is removed elsewhere", async () => {
+      const user = userEvent.setup();
+      const a = { name: "alpha", command: "alpha" };
+      const b = { name: "beta", command: "beta" };
+      const c = { name: "gamma", command: "gamma" };
+      writePreference(preferences.terminalLaunchers, [a, b, c]);
+      render(<LauncherSettings />);
+
+      await user.click(commandFields()[1]);
+      await user.type(commandFields()[1], " --edited");
+      act(() => writePreference(preferences.terminalLaunchers, [b, c]));
+
+      // The edit moved up with beta; gamma's row shows gamma.
+      expect(commandFields().map((f) => f.value)).toEqual(["beta --edited", "gamma"]);
+      expect(nameFields().map((f) => f.value)).toEqual(["beta", "gamma"]);
+
+      await user.click(document.body);
+      expect(stored()).toEqual([{ name: "beta", command: "beta --edited" }, c]);
+    });
+
+    it("an edit to a row removed elsewhere is dropped and writes nothing", async () => {
+      const user = userEvent.setup();
+      const a = { name: "alpha", command: "alpha" };
+      const b = { name: "beta", command: "beta" };
+      const c = { name: "gamma", command: "gamma" };
+      writePreference(preferences.terminalLaunchers, [a, b, c]);
+      render(<LauncherSettings />);
+
+      await user.click(commandFields()[1]);
+      await user.type(commandFields()[1], " --edited");
+      act(() => writePreference(preferences.terminalLaunchers, [a, c]));
+
+      expect(commandFields().map((f) => f.value)).toEqual(["alpha", "gamma"]);
+      await user.click(document.body);
+      expect(stored()).toEqual([a, c]);
+    });
+
+    it("a name changed elsewhere survives a command edit on the same row", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.terminalLaunchers, [
+        { name: "alpha", command: "alpha" },
+        { name: "beta", command: "beta" },
+      ]);
+      render(<LauncherSettings />);
+
+      await user.click(commandFields()[1]);
+      await user.type(commandFields()[1], " --edited");
+      act(() =>
+        writePreference(preferences.terminalLaunchers, [
+          { name: "alpha", command: "alpha" },
+          { name: "beta2", command: "beta" },
+        ]),
+      );
+
+      expect(nameFields()[1]).toHaveValue("beta2");
+      expect(commandFields()[1]).toHaveValue("beta --edited");
+      await user.click(document.body);
+      expect(stored()).toEqual([
+        { name: "alpha", command: "alpha" },
+        { name: "beta2", command: "beta --edited" },
+      ]);
+    });
+
     it("an unfocused row follows it", () => {
       writePreference(preferences.terminalLaunchers, [
         { name: "claude", command: "claude", runLoop: "/goal {prompt}" },

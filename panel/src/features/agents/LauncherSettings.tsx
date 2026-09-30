@@ -8,6 +8,7 @@ import {
 } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { fixWholeLine, resolveRunLoop } from "./launcherRunLoop";
+import { useRowIds } from "./useRowIds";
 
 /**
  * The launcher row's editor: one row per stored entry, plus a form that appends
@@ -23,8 +24,7 @@ import { fixWholeLine, resolveRunLoop } from "./launcherRunLoop";
  * EVERY CONTROL IS NAMED BY ITS ROW. A screen reader reads only the accessible
  * name, so three rows of "Launcher name" / "Launcher command" told a user which
  * field they were in and nothing about which launcher — and `Remove ${name}`
- * identified nothing at all when two entries shared a name, which the index
- * keys below say is legal. The row's 1-based position goes in every one of
+ * identified nothing at all when two entries shared a name, which is legal. The row's 1-based position goes in every one of
  * them, remove button included; the position is what the user sees, so it is
  * what they are told.
  *
@@ -143,6 +143,11 @@ function sameEntry(a: TerminalLauncher, b: TerminalLauncher): boolean {
   );
 }
 
+/** What `useRowIds` follows a launcher by: the two halves that make it one. */
+function launcherIdentity(entry: TerminalLauncher): string {
+  return JSON.stringify([entry.name, entry.command]);
+}
+
 const inputStyle = {
   background: "var(--bg-surface)",
   color: "var(--text-primary)",
@@ -190,20 +195,34 @@ function LauncherRow({
   };
 
   /**
-   * The stored entry can change under the row — another tab's write, or a
-   * removal shifting every later row up one index — so the drafts follow it,
-   * UNLESS the user is mid-edit here: focus is in the row and a draft differs
-   * from what it was filled from. That edit is kept (and applied on top of the
-   * new entry by `toRowEntry`), and the drafts catch up once focus leaves the
-   * row. Adjusted during render rather than in an effect, so the stale drafts
+   * The stored entry can change under the row — another tab's write to this
+   * same launcher (the row is keyed by entry, so a removal elsewhere moves the
+   * row rather than handing it a different launcher) — so the drafts follow
+   * it, UNLESS the user is mid-edit here: focus is in the row and a draft
+   * differs from what it was filled from. Then only the untouched fields
+   * follow; the edit is kept (and applied on top of the new entry by
+   * `toRowEntry`), and the rest catch up once focus leaves the row. Adjusted during render rather than in an effect, so the stale drafts
    * never paint. A rejected edit restores them directly: the entry did not
    * change there, so nothing here would.
    */
   if (!sameEntry(entry, base)) {
     const drafts = { name, command, promptFlag, runLoop };
-    const editing = focused && !sameDrafts(drafts, draftsOf(base));
-    if (sameDrafts(drafts, draftsOf(entry))) setBase(entry);
+    const was = draftsOf(base);
+    const now = draftsOf(entry);
+    const editing = focused && !sameDrafts(drafts, was);
+    if (sameDrafts(drafts, now)) setBase(entry);
     else if (!editing) restoreDrafts(entry);
+    else {
+      // Mid-edit: a field the user has not touched follows the new entry, so
+      // another tab's rename shows while the command is being typed; a touched
+      // field keeps its draft. The base moves on with the entry, so a touched
+      // field still reads as edited and an untouched one does not.
+      setBase(entry);
+      if (drafts.name === was.name) setName(now.name);
+      if (drafts.command === was.command) setCommand(now.command);
+      if (drafts.promptFlag === was.promptFlag) setPromptFlag(now.promptFlag);
+      if (drafts.runLoop === was.runLoop) setRunLoop(now.runLoop);
+    }
   }
 
   const commit = () => {
@@ -438,12 +457,29 @@ export function LauncherSettings() {
     setNewPromptFlag("");
     setNewRunLoop("");
   };
-  const commitAt = (index: number, next: TerminalLauncher) => {
-    setLaunchers((current) => current.map((entry, i) => (i === index ? next : entry)));
+  const rowIds = useRowIds(launchers, launcherIdentity);
+
+  /**
+   * Writes `next` over the entry the row showed — `shown`, at `index` — and
+   * only if that entry is still there. The rows are keyed by entry (see
+   * `useRowIds`), so the row's index is its entry's; the check is for a write
+   * that landed after the row last rendered, which would otherwise put the
+   * edit onto whatever now sits at that index. That write drops the edit.
+   */
+  const commitAt = (index: number, shown: TerminalLauncher, next: TerminalLauncher) => {
+    setLaunchers((current) =>
+      current[index] !== undefined && sameEntry(current[index], shown)
+        ? current.map((entry, i) => (i === index ? next : entry))
+        : current,
+    );
   };
 
-  const removeAt = (index: number) => {
-    setLaunchers((current) => current.filter((_, i) => i !== index));
+  const removeAt = (index: number, shown: TerminalLauncher) => {
+    setLaunchers((current) =>
+      current[index] !== undefined && sameEntry(current[index], shown)
+        ? current.filter((_, i) => i !== index)
+        : current,
+    );
   };
 
   return (
@@ -453,14 +489,14 @@ export function LauncherSettings() {
       </span>
       <ul className="space-y-1">
         {launchers.map((entry, index) => (
-          // Index keys: two entries may carry the same name, and the list's
-          // order is the user's, so position is the only stable identity.
+          // Keyed by entry, not position: a row's edit must follow its
+          // launcher when another tab removes an earlier one (`useRowIds`).
           <LauncherRow
-            key={index}
+            key={rowIds[index]}
             entry={entry}
             index={index}
-            onCommit={(next) => commitAt(index, next)}
-            onRemove={() => removeAt(index)}
+            onCommit={(next) => commitAt(index, entry, next)}
+            onRemove={() => removeAt(index, entry)}
           />
         ))}
       </ul>
