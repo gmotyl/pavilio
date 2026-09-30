@@ -12,6 +12,8 @@ import {
 } from "../../../preferences/store";
 import { writeOverride } from "../../../preferences/overridable";
 import { storageKey } from "../../../preferences/types";
+import { MemoryRouter } from "react-router-dom";
+import { taskRunLine } from "../runPrompt";
 
 /**
  * The banner's objective box as a saved, per-project field: resolved text
@@ -52,8 +54,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderBanner(onRun: (runLine: string) => void = vi.fn()) {
-  render(<RunBanner status={STATUS} project="pavilio" path={PATH} onRun={onRun} />);
+function renderBanner(onRun: (runLine: string | null) => void = vi.fn()) {
+  render(
+    <MemoryRouter>
+      <RunBanner
+        status={STATUS}
+        project="pavilio"
+        path={PATH}
+        onRun={(run) => onRun(taskRunLine(run.launcher, run.objective))}
+      />
+    </MemoryRouter>,
+  );
   return onRun;
 }
 

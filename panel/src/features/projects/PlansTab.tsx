@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ClipboardList } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
+import type { TerminalLauncher } from "../../preferences/declarations";
 import {
   clearLastSectionFile,
   writeLastSectionFile,
@@ -25,6 +26,7 @@ import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
 import { RunBanner } from "./RunBanner";
 import { startTaskRun } from "./startTaskRun";
+import { taskRunLine } from "./runPrompt";
 import { taskListStatus } from "./taskList";
 import { workspaceRelativePath } from "./workspaceRelativePath";
 import { dispatchTerminalFocus } from "../terminal/useTerminalSessions";
@@ -329,7 +331,12 @@ export default function PlansTab({ projectName }: Props) {
     selectedPathRef.current = selectedPath;
   }, [selectedPath]);
   const onRun = useCallback(
-    (runLine: string) => {
+    ({ launcher, objective }: { launcher: TerminalLauncher; objective: string }) => {
+      // Composed here from the launcher's resolved run loop, and refused when
+      // it has none ready: the banner already disables Run for a whole-line
+      // launcher, and this keeps one from ever reaching a session regardless.
+      const runLine = taskRunLine(launcher, objective);
+      if (runLine === null) return;
       const startedFrom = selectedPathRef.current;
       return startTaskRun({ project: projectName, runLine }).then(
         (sessionId) => {

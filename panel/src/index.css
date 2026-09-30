@@ -2068,6 +2068,18 @@ input[type="checkbox"] {
   white-space: pre-wrap;
 }
 
+/* In the wrapper's place when the launcher's run loop is a whole command
+   line: why Run is off, and where to fix it. */
+.run-banner-blocked {
+  color: var(--yellow);
+  margin-bottom: 4px;
+}
+
+.run-banner-blocked-link {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .run-banner-objective {
   display: block;
   width: 100%;

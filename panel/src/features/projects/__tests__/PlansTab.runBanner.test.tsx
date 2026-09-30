@@ -147,6 +147,43 @@ describe("PlansTab run banner", () => {
     expect(await screen.findByText("terminal view")).toBeTruthy();
   });
 
+  it("a flagged launcher's line reaches the new session", async () => {
+    writePreference(preferences.terminalLaunchers, [
+      { name: "opencode", command: "opencode", runLoop: "{prompt}", promptFlag: "--prompt" },
+    ]);
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    const objective = screen.getByRole("textbox", { name: "Objective" }) as HTMLTextAreaElement;
+    expect(objective.value).not.toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
+    // startTaskRun types this line and its Enter into the session it creates.
+    expect(vi.mocked(startTaskRun).mock.calls[0][0]).toEqual({
+      project: "alokai",
+      runLine: `opencode --prompt '${objective.value}'`,
+    });
+  });
+
+  it("a whole-line launcher never creates a session", async () => {
+    writePreference(preferences.terminalLaunchers, [
+      { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+    ]);
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    expect(screen.getByTestId("run-banner-blocked")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    const objective = screen.getByRole("textbox", { name: "Objective" });
+    fireEvent.keyDown(objective, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(objective, { key: "Enter", metaKey: true });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(vi.mocked(startTaskRun)).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/terminal"))).toBe(false);
+    expect(screen.queryByText("terminal view")).toBeNull();
+  });
+
   it("a failed run is reported in the banner's place", async () => {
     vi.mocked(startTaskRun).mockRejectedValueOnce(new Error("Could not create a terminal"));
     open(ACTIVE_TASKS);

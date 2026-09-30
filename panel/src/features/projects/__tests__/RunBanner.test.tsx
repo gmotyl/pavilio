@@ -13,6 +13,8 @@ import {
 } from "../../../preferences/store";
 import { writeOverride } from "../../../preferences/overridable";
 import { storageKey } from "../../../preferences/types";
+import { MemoryRouter } from "react-router-dom";
+import { taskRunLine } from "../runPrompt";
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
@@ -45,8 +47,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function renderBanner(onRun: (runLine: string) => void = vi.fn()) {
-  render(<RunBanner status={STATUS} project="pavilio" path={PATH} onRun={onRun} />);
+/**
+ * `onRun` receives the launcher and the objective; the spy is handed the line
+ * the Plans tab would compose from them, so what is asserted is what is sent.
+ */
+function renderBanner(onRun: (runLine: string | null) => void = vi.fn()) {
+  render(
+    <MemoryRouter>
+      <RunBanner
+        status={STATUS}
+        project="pavilio"
+        path={PATH}
+        onRun={(run) => onRun(taskRunLine(run.launcher, run.objective))}
+      />
+    </MemoryRouter>,
+  );
   return onRun;
 }
 
@@ -103,16 +118,80 @@ describe("RunBanner", () => {
     expect(readPreference(preferences.taskPromptOverride, "pavilio")).toBe("Only do task 7");
   });
 
-  it("a launcher with no run loop is not offered", () => {
+  it("only launchers with a ready run loop are offered", () => {
     writePreference(preferences.terminalLaunchers, [
+      // A PR #131 default reads as the shipped one: ready.
       LAUNCHERS[0],
-      { name: "codex", command: "codex" },
+      // No run loop and no shipped default for the name: none.
+      { name: "mytool", command: "mytool" },
+      // Blank, even under a shipped name: none.
+      { name: "codex", command: "codex", runLoop: "" },
       { name: "blank", command: "blank", runLoop: "   " },
-      LAUNCHERS[2],
+      // A whole line of the user's own: offered, so choosing it shows why it cannot run.
+      { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+      // No run loop key under a shipped name: the shipped default, ready.
+      { name: "opencode", command: "opencode" },
     ]);
     renderBanner();
 
-    expect(cliOptions()).toEqual(["claude", "opencode"]);
+    expect(cliOptions()).toEqual(["claude", "mine", "opencode"]);
+  });
+
+  it("the wrapper is the composed line", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, [
+      { name: "codex", command: "codex --no-daemon" },
+      { name: "opencode", command: "opencode" },
+    ]);
+    const onRun = renderBanner(vi.fn());
+
+    expect(screen.getByTestId("run-banner-wrapper-before").textContent).toBe(
+      "codex --no-daemon '/goal ",
+    );
+    expect(screen.getByTestId("run-banner-wrapper-after").textContent).toBe("'");
+
+    await user.click(screen.getByRole("button", { name: "opencode" }));
+    expect(screen.getByTestId("run-banner-wrapper-before").textContent).toBe(
+      "opencode --prompt '",
+    );
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(onRun).toHaveBeenCalledWith(`opencode --prompt '${objective().value}'`);
+  });
+
+  it("a whole-line launcher shows the warning and cannot run", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, [
+      LAUNCHERS[0],
+      { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+    ]);
+    writePreference(preferences.plansRunLauncher, "mine");
+    const onRun = renderBanner(vi.fn());
+
+    expect(screen.getByRole("button", { name: "mine" })).toHaveAttribute("aria-pressed", "true");
+    const warning = screen.getByTestId("run-banner-blocked");
+    expect(warning.textContent).toMatch(/whole command line/i);
+    expect(within(warning).getByRole("link", { name: /settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    // The warning takes the wrapper's place: no line is drawn that would not run.
+    expect(screen.queryByTestId("run-banner-wrapper-before")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-banner-wrapper-after")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    await user.click(objective());
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(onRun).not.toHaveBeenCalled();
+
+    // Collapsed, the row still refuses.
+    await user.click(screen.getByTestId("run-banner-chevron"));
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+
+    // Back on a ready launcher, the wrapper and Run return.
+    await user.click(screen.getByRole("button", { name: "claude" }));
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
   });
 
   it("moving the switch redraws the wrapper and leaves the objective alone", async () => {
@@ -240,13 +319,14 @@ describe("RunBanner", () => {
 
     expect(screen.getByRole("button", { name: "codex" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun.mock.calls[0][0]).toMatch(/^codex '\/goal /);
+    const [{ launcher, objective: sent }] = onRun.mock.calls[0];
+    expect(taskRunLine(launcher, sent)).toMatch(/^codex '\/goal /);
   });
 
   it("a remembered CLI that is no longer runnable falls back to the first", () => {
     writePreference(preferences.terminalLaunchers, [
       LAUNCHERS[0],
-      { name: "codex", command: "codex" },
+      { name: "codex", command: "codex", runLoop: "" },
       LAUNCHERS[2],
     ]);
     writePreference(preferences.plansRunLauncher, "codex");
@@ -323,7 +403,10 @@ describe("RunBanner", () => {
   });
 
   it("offers no run when no launcher has a run loop", () => {
-    writePreference(preferences.terminalLaunchers, [{ name: "claude", command: "claude" }]);
+    writePreference(preferences.terminalLaunchers, [
+      { name: "claude", command: "claude", runLoop: "" },
+      { name: "mytool", command: "mytool" },
+    ]);
     renderBanner();
 
     expect(screen.queryByRole("group", { name: "CLI" })).not.toBeInTheDocument();

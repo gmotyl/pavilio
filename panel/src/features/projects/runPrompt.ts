@@ -8,6 +8,9 @@
  * variables (this change, this file, this project) and the launcher's wrapper.
  */
 
+import type { TerminalLauncher } from "../../preferences/declarations";
+import { resolveRunLoop } from "../agents/launcherRunLoop";
+
 const PROMPT = "{prompt}";
 
 /** Substitutes `{change}`, `{path}` and `{project}` into the stored objective template. */
@@ -117,4 +120,17 @@ export function runLineParts(
   const lead = `${head(command, promptFlag)}${first}`;
   if (rest.length === 0) return { before: `${lead}'`, after: "" };
   return { before: lead, after: `${rest.join(OBJECTIVE_MARKER)}'` };
+}
+
+/**
+ * The line a task run types for `launcher`, built from its RESOLVED run loop
+ * and flag ({@link resolveRunLoop}) — or null when it has none ready: a
+ * launcher not offered for runs, or one whose run loop is a whole command
+ * line, which would spawn the CLI inside its own argument. Null is never
+ * spawned.
+ */
+export function taskRunLine(launcher: TerminalLauncher, objective: string): string | null {
+  const state = resolveRunLoop(launcher);
+  if (state.kind !== "ready") return null;
+  return composeRunLine(launcher.command, state.promptFlag, state.runLoop, objective);
 }

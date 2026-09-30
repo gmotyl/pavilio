@@ -1,16 +1,17 @@
 import { useId, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { ChevronDown, ChevronRight, Play } from "lucide-react";
 
 import { preferences, type TerminalLauncher } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-import { resolveRunLoop } from "../agents/launcherRunLoop";
+import { resolveRunLoop, type RunLoopState } from "../agents/launcherRunLoop";
 import {
   ObjectiveField,
   ObjectiveOverrideMarker,
   useObjectiveTemplate,
   type ObjectiveFieldHandle,
 } from "./ObjectiveField";
-import { composeRunLine, resolveObjective, runLineParts, takesPrompt } from "./runPrompt";
+import { resolveObjective, runLineParts, takesPrompt } from "./runPrompt";
 import type { TaskListStatus } from "./taskList";
 
 /**
@@ -23,11 +24,19 @@ import type { TaskListStatus } from "./taskList";
  * has focus saves first and sends what was typed. The workspace default is
  * edited in Settings; the banner writes only the project's override.
  *
- * The launcher's run loop is drawn around the objective, dimmed and never
- * editable: it belongs to the launcher entry, not to the template, and it
- * redraws when the CLI switch moves. A run loop with no `{prompt}` sends no
- * objective, so the field is disabled and says so rather than being dropped
- * silently.
+ * The launcher's line is drawn around the objective, dimmed and never
+ * editable: `command [flag] '` and the rest of its RESOLVED run loop
+ * (`resolveRunLoop`), so a list saved before the run loop existed, or one
+ * holding PR #131's whole-line defaults, draws what it will send. It belongs
+ * to the launcher entry, not to the template, and it redraws when the CLI
+ * switch moves. A run loop with no `{prompt}` sends no objective, so the field
+ * is disabled and says so rather than being dropped silently.
+ *
+ * The switch offers every launcher with a run loop — ready ones, and ones
+ * whose run loop is a whole command line (it starts with the command's own
+ * word). The latter is offered only so choosing it says what is wrong: the
+ * warning takes the wrapper's place, and Run and ⌘↵ do nothing, since the
+ * line would spawn the CLI inside its own argument.
  *
  * The switch remembers the last CLI picked, by name, for every change
  * (`plansRunLauncher`), so a run is not a question asked every time.
@@ -36,8 +45,8 @@ import type { TaskListStatus } from "./taskList";
  * and the collapsed row keeps the count, the switch and Run, so a plan that is
  * only being read costs a single row and can still be started from it.
  *
- * This component composes the line; it does not spawn anything. `onRun`
- * receives the whole run line and owns the session.
+ * This component does not spawn anything. `onRun` receives the chosen
+ * launcher and the objective, composes the line and owns the session.
  */
 export interface RunBannerProps {
   status: TaskListStatus;
@@ -52,36 +61,30 @@ export interface RunBannerProps {
    */
   path: string;
   /**
-   * Called with the composed run line. A returned promise disables Run until
+   * Called with the chosen launcher — always one whose run loop resolves
+   * ready — and the objective to send. A returned promise disables Run until
    * it settles, so one click cannot start two sessions.
    */
-  onRun: (runLine: string) => void | Promise<unknown>;
+  onRun: (run: { launcher: TerminalLauncher; objective: string }) => void | Promise<unknown>;
 }
+
+/** Why a whole-line launcher cannot run, in the banner and on its disabled Run. */
+const BLOCKED_TEXT = "This launcher's run loop is a whole command line";
 
 /** Past this many tasks one segment per task is thinner than the gap between them. */
 const MAX_SEGMENTS = 48;
 
-/** The launchers a run can use: those whose run loop is not blank. */
-function runnable(launchers: TerminalLauncher[]): (TerminalLauncher & { runLoop: string })[] {
-  return launchers.filter(
-    (entry): entry is TerminalLauncher & { runLoop: string } => Boolean(entry.runLoop?.trim()),
-  );
-}
+type Offered = { launcher: TerminalLauncher; state: Exclude<RunLoopState, { kind: "none" }> };
 
 /**
- * The command, flag and run loop a launcher's line is built from: its resolved
- * run loop when it has one ready, else its raw fields. A stopgap until the
- * banner offers only resolved launchers.
+ * The launchers the CLI switch offers, each with its resolved run loop: ready
+ * ones and whole-line ones, never those not offered for runs.
  */
-function lineFields(launcher: TerminalLauncher & { runLoop: string }) {
-  const state = resolveRunLoop(launcher);
-  return state.kind === "ready"
-    ? { command: launcher.command, promptFlag: state.promptFlag, runLoop: state.runLoop }
-    : {
-        command: launcher.command,
-        promptFlag: launcher.promptFlag ?? "",
-        runLoop: launcher.runLoop,
-      };
+function offered(launchers: TerminalLauncher[]): Offered[] {
+  return launchers.flatMap((launcher) => {
+    const state = resolveRunLoop(launcher);
+    return state.kind === "none" ? [] : [{ launcher, state }];
+  });
 }
 
 /**
@@ -91,7 +94,7 @@ function lineFields(launcher: TerminalLauncher & { runLoop: string }) {
  * else — nothing picked, or the pick gone or no longer runnable — the first.
  */
 function resolvePick(
-  options: TerminalLauncher[],
+  options: { name: string }[],
   picked: { index: number; name: string } | null,
   remembered: string | null,
 ): number {
@@ -110,13 +113,17 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
   // Mounted only while expanded; collapsed, the stored objective is sent.
   const field = useRef<ObjectiveFieldHandle>(null);
 
-  const options = runnable(launchers);
+  const entries = offered(launchers);
+  const options = entries.map((entry) => entry.launcher);
   const [remembered, setRemembered] = usePreference(preferences.plansRunLauncher);
   // This banner's own pick carries its position too, so of two launchers that
   // share a name the one clicked stays checked; the preference keeps the name.
   const [picked, setPicked] = useState<{ index: number; name: string } | null>(null);
   const pickedIndex = resolvePick(options, picked, remembered);
   const launcher = options[pickedIndex];
+  const state = entries[pickedIndex]?.state;
+  const ready = state?.kind === "ready" ? state : null;
+  const blocked = state?.kind === "wholeLine";
   const pick = (index: number) => {
     // The pressed one again changes nothing, so it writes nothing: with no CLI
     // remembered yet it would otherwise store the default nobody chose.
@@ -128,23 +135,21 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
 
   const [busy, setBusy] = useState(false);
   const noPromptNote = useId();
+  const blockedNote = useId();
   // A run loop with nowhere to put the objective sends it nowhere, so the
   // field neither gates Run nor pretends to be part of the line.
-  const fields = launcher ? lineFields(launcher) : null;
-  const usesObjective = fields ? takesPrompt(fields.runLoop) : true;
+  const usesObjective = ready ? takesPrompt(ready.runLoop) : true;
   // A blank edit is not blank to send: saving it clears the override, and the
   // workspace default is what runs. So only the stored objective gates Run.
-  const canRun = Boolean(launcher) && (!usesObjective || resolved.trim() !== "") && !busy;
+  const canRun = Boolean(ready) && (!usesObjective || resolved.trim() !== "") && !busy;
 
   const run = () => {
-    if (!canRun || !fields) return;
+    if (!canRun || !launcher) return;
     // Save a focused edit first, and send what it resolves to — not this
     // render's `resolved`, which predates the save.
     const objective = field.current?.commit() ?? resolved;
     if (usesObjective && objective.trim() === "") return;
-    const result = onRun(
-      composeRunLine(fields.command, fields.promptFlag, fields.runLoop, objective),
-    );
+    const result = onRun({ launcher, objective });
     if (result && typeof (result as Promise<unknown>).finally === "function") {
       setBusy(true);
       void (result as Promise<unknown>).catch(() => undefined).finally(() => setBusy(false));
@@ -199,6 +204,8 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
         className="run-banner-run"
         data-testid="run-banner-run"
         disabled={!canRun}
+        title={blocked ? BLOCKED_TEXT : undefined}
+        aria-describedby={blocked && expanded ? blockedNote : undefined}
         onClick={run}
       >
         <Play size={11} aria-hidden="true" />
@@ -218,8 +225,8 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
     );
   }
 
-  const wrapper = fields
-    ? runLineParts(fields.command, fields.promptFlag, fields.runLoop)
+  const wrapper = ready
+    ? runLineParts(launcher.command, ready.promptFlag, ready.runLoop)
     : { before: "", after: "" };
 
   return (
@@ -231,15 +238,27 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
         {controls}
       </div>
       <div className="run-banner-prompt" data-testid="run-banner-prompt">
+        {/* A whole-line run loop draws no line: it would not be the one sent,
+            since none is. What is wrong, and where to fix it, stands instead. */}
+        {blocked && (
+          <div className="run-banner-blocked" data-testid="run-banner-blocked" id={blockedNote}>
+            {BLOCKED_TEXT} — fix it in{" "}
+            <Link to="/settings" className="run-banner-blocked-link">
+              Settings
+            </Link>
+          </div>
+        )}
         {/* The launcher's, not the template's: drawn, never editable, and
             hidden from assistive tech, which reads the field by its name. */}
-        <span
-          className="run-banner-wrap"
-          data-testid="run-banner-wrapper-before"
-          aria-hidden="true"
-        >
-          {wrapper.before}
-        </span>
+        {!blocked && (
+          <span
+            className="run-banner-wrap"
+            data-testid="run-banner-wrapper-before"
+            aria-hidden="true"
+          >
+            {wrapper.before}
+          </span>
+        )}
         <ObjectiveField
           ref={field}
           vars={vars}
@@ -247,13 +266,15 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
           disabled={!usesObjective}
           describedBy={usesObjective ? undefined : noPromptNote}
         />
-        <span
-          className="run-banner-wrap"
-          data-testid="run-banner-wrapper-after"
-          aria-hidden="true"
-        >
-          {wrapper.after}
-        </span>
+        {!blocked && (
+          <span
+            className="run-banner-wrap"
+            data-testid="run-banner-wrapper-after"
+            aria-hidden="true"
+          >
+            {wrapper.after}
+          </span>
+        )}
       </div>
       {!usesObjective && (
         <div className="run-banner-note" id={noPromptNote}>
@@ -280,11 +301,14 @@ export function RunBanner({ status, project, path, onRun }: RunBannerProps) {
         )}
       </div>
       <div className="run-banner-foot" data-testid="run-banner-foot">
-        {/* A disabled objective is neither editable nor reached by ⌘↵. */}
+        {/* A disabled objective is neither editable nor reached by ⌘↵; a
+            blocked launcher's objective is still saved, but runs nowhere. */}
         <span>
-          {usesObjective
-            ? "saved for this project · ⌘↵ to run · opens a new terminal"
-            : "opens a new terminal"}
+          {blocked
+            ? "saved for this project"
+            : usesObjective
+              ? "saved for this project · ⌘↵ to run · opens a new terminal"
+              : "opens a new terminal"}
         </span>
         <ObjectiveOverrideMarker project={project} />
       </div>
