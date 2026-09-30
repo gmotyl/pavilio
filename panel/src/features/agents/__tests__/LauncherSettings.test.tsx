@@ -787,6 +787,32 @@ describe("LauncherSettings", () => {
       expect(stored()).toEqual([a, c]);
     });
 
+    /**
+     * The probe: `alpha` is being edited while one write elsewhere removes it
+     * AND renames `beta`. `beta2` then sits where `alpha` was; the row must not
+     * take it as `alpha` edited in place, or the blur writes alpha's edit over
+     * beta's command.
+     */
+    it("an edit to a row removed elsewhere is not carried onto a renamed neighbour", async () => {
+      const user = userEvent.setup();
+      const a = { name: "alpha", command: "alpha" };
+      const b = { name: "beta", command: "beta" };
+      const c = { name: "gamma", command: "gamma" };
+      writePreference(preferences.terminalLaunchers, [a, b, c]);
+      render(<LauncherSettings />);
+
+      await user.click(commandFields()[0]);
+      await user.type(commandFields()[0], " X");
+      act(() =>
+        writePreference(preferences.terminalLaunchers, [{ name: "beta2", command: "beta" }, c]),
+      );
+
+      expect(nameFields().map((f) => f.value)).toEqual(["beta2", "gamma"]);
+      expect(commandFields().map((f) => f.value)).toEqual(["beta", "gamma"]);
+      await user.click(document.body);
+      expect(stored()).toEqual([{ name: "beta2", command: "beta" }, c]);
+    });
+
     it("a name changed elsewhere survives a command edit on the same row", async () => {
       const user = userEvent.setup();
       writePreference(preferences.terminalLaunchers, [

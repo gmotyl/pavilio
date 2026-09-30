@@ -21,12 +21,25 @@ import { useState } from "react";
  *    (the probe: `[a, b, c]` → `[b, c]` keeps `b`'s and `c`'s rows);
  * 3. same index, any identity, if that previous row is still unused — the
  *    entry was edited in place, here or in another tab (a rename of `b` is
- *    still `b`'s row).
+ *    still `b`'s row). ONLY while the list kept its length and pass 2 moved
+ *    nothing: a position says which entry it holds only when no entry was
+ *    added, removed or shifted. Otherwise one write that removes `a` and
+ *    renames `b` (`[a, b, c]` → `[b2, c]`) would hand `b2` the row of `a` —
+ *    and `a`'s in-progress edit, which the blur would write over `b`. The
+ *    settings' commit guard cannot catch that: it compares against the entry
+ *    the row shows, which is already `b2`.
  *
  * Anything left gets a fresh id, and a previous id left unmatched is a removed
  * row. Between duplicates the earlier previous entry wins, so removing the
  * first of two identical entries elsewhere may drop an edit on the second one
- * — dropped, never misdirected.
+ * — dropped, never misdirected. So does a rename elsewhere in the same write
+ * as a removal: the renamed entry's row starts fresh.
+ *
+ * A pass-3 match changes the row's identity under it. A row with a pending
+ * edit keeps its draft for every field the user edited and takes the new
+ * value for the rest — so a field changed BOTH here and elsewhere keeps the
+ * local draft, and the blur writes it over the other tab's change. That is
+ * the rows' rule for any write elsewhere, not special to pass 3.
  */
 export function reconcileRowIds<T>(
   previous: readonly T[],
@@ -47,17 +60,21 @@ export function reconcileRowIds<T>(
       used[i] = true;
     }
   });
+  // Pass 1 took every same-index match, so a pass-2 match is always a move.
+  let moved = false;
   keys.forEach((key, i) => {
     if (ids[i] !== undefined) return;
     const j = previousKeys.findIndex((k, index) => !used[index] && k === key);
     if (j === -1) return;
     ids[i] = previousIds[j];
     used[j] = true;
+    moved = true;
   });
+  const inPlace = !moved && previous.length === list.length;
   let fresh = nextId;
   const resolved = ids.map((id, i) => {
     if (id !== undefined) return id;
-    if (i < previous.length && !used[i]) {
+    if (inPlace && !used[i]) {
       used[i] = true;
       return previousIds[i];
     }

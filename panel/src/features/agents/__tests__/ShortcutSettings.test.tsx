@@ -172,6 +172,24 @@ describe("ShortcutSettings", () => {
       expect(stored()).toEqual([a, c]);
     });
 
+    /** The probe: `A` removed and `B` renamed in one write while `A` is edited. */
+    it("an edit to a row removed elsewhere is not carried onto a renamed neighbour", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.composerShortcuts, [a, b, c]);
+      render(<ShortcutSettings />);
+
+      await user.click(textFields()[0]);
+      await user.type(textFields()[0], " X");
+      act(() =>
+        writePreference(preferences.composerShortcuts, [{ label: "B2", text: "beta" }, c]),
+      );
+
+      expect(labelFields().map((f) => f.value)).toEqual(["B2", "C"]);
+      expect(textFields().map((f) => f.value)).toEqual(["beta", "gamma"]);
+      await user.click(document.body);
+      expect(stored()).toEqual([{ label: "B2", text: "beta" }, c]);
+    });
+
     it("a label changed elsewhere survives a text edit on the same row", async () => {
       const user = userEvent.setup();
       writePreference(preferences.composerShortcuts, [a, b]);
