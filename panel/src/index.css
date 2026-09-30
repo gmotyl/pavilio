@@ -1500,11 +1500,18 @@ input[type="checkbox"] {
   text-overflow: ellipsis;
 }
 
-/* A thumb, not a pointer: each quick reply is a real touch target on a phone.
-   The row's flex items stretch, so the `/ skills` chip beside it grows too. */
+/* A thumb, not a pointer: every chip in the composer row — `/ skills`, each
+   quick reply, each attachment — is a real touch target on a phone on its own,
+   not only when a taller neighbour happens to stretch its line. Selected as
+   the row's children (all chips but the floating picker) rather than by
+   `.answer-pane-composer-chip`, so that class keeps the single rule the pane's
+   chrome-height test reads its desktop metrics from. */
 @media (max-width: 767px) {
-  .answer-pane-shortcut-chip {
+  .answer-pane-composer-chips > :not(.command-picker) {
     min-height: 32px;
+  }
+
+  .answer-pane-shortcut-chip {
     padding: 4px 12px;
   }
 }

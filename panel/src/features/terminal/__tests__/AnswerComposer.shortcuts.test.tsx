@@ -282,13 +282,19 @@ describe("AnswerComposer shortcut chips", () => {
     expect(Array.from(row.children).map((chip) => chip.textContent?.trim())).toEqual(["/ skills"]);
   });
 
-  it("shortcut chips are touch-sized on a phone", () => {
+  it("every composer chip is touch-sized on a phone", () => {
     withShortcuts([{ label: "A label twenty-four long", text: "yes" }]);
     renderComposer();
     expect(shortcut(0)).toHaveClass("answer-pane-shortcut-chip");
+    // The height rule is on every child of the chip row but the floating
+    // picker, so the `/ skills` chip and an attachment meet it without a
+    // taller neighbour.
+    const row = shortcut(0).parentElement;
+    expect(row).toHaveClass("answer-pane-composer-chips");
+    expect(screen.getByRole("button", { name: "/ skills" }).parentElement).toBe(row);
 
     // At least 32px tall under the touch viewport's media query.
-    const touch = declarationsOf(touchBlocks(), ".answer-pane-shortcut-chip");
+    const touch = declarationsOf(touchBlocks(), ".answer-pane-composer-chips > :not(.command-picker)");
     expect(parseFloat(touch["min-height"] ?? "0")).toBeGreaterThanOrEqual(32);
 
     // A long label is cut with an ellipsis rather than widening the row.
