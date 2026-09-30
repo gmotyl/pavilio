@@ -24,9 +24,9 @@ import { useRowIds } from "./useRowIds";
  * EVERY CONTROL IS NAMED BY ITS ROW. A screen reader reads only the accessible
  * name, so three rows of "Launcher name" / "Launcher command" told a user which
  * field they were in and nothing about which launcher — and `Remove ${name}`
- * identified nothing at all when two entries shared a name, which is legal. The row's 1-based position goes in every one of
- * them, remove button included; the position is what the user sees, so it is
- * what they are told.
+ * identified nothing at all when two entries shared a name, which is legal.
+ * The row's 1-based position goes in every one of them, remove button
+ * included; the position is what the user sees, so it is what they are told.
  *
  * An entry needs both halves: the name is the pill's label and the command is
  * what the PTY receives, so a blank either side is not an entry. A rejected
@@ -201,9 +201,10 @@ function LauncherRow({
    * it, UNLESS the user is mid-edit here: focus is in the row and a draft
    * differs from what it was filled from. Then only the untouched fields
    * follow; the edit is kept (and applied on top of the new entry by
-   * `toRowEntry`), and the rest catch up once focus leaves the row. Adjusted during render rather than in an effect, so the stale drafts
-   * never paint. A rejected edit restores them directly: the entry did not
-   * change there, so nothing here would.
+   * `toRowEntry`), and the rest catch up once focus leaves the row. Adjusted
+   * during render rather than in an effect, so the stale drafts never paint. A
+   * rejected edit restores them directly: the entry did not change there, so
+   * nothing here would.
    */
   if (!sameEntry(entry, base)) {
     const drafts = { name, command, promptFlag, runLoop };
