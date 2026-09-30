@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
-import { preferences } from "../../preferences/declarations";
+import { preferences, type ComposerShortcut } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 import { toast } from "../../lib/toast";
 import {
   armRetryOffer,
@@ -19,6 +20,7 @@ import { dismissAttentionOnArrival } from "./attentionArrival";
 import { CommandPicker, type CommandPickerHandle } from "./CommandPicker";
 import type { SkillEntry } from "./commandSource";
 import { expandCommand } from "./expandCommand";
+import { useTerminalConnection } from "./useTerminalConnection";
 
 /**
  * How far the composer may be dragged, and how far one arrow key moves it.
@@ -398,6 +400,15 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    * `answerWaiting` — is on `answerRetry`.
    */
   const retryOffered = useRetryOffered(sessionId);
+  /** The quick replies the chip row carries, in the order Settings lists them. */
+  const [shortcuts] = usePreference(preferences.composerShortcuts);
+  /**
+   * The shortcut chips are disabled while the socket is down: a one-press reply
+   * the user cannot see go is a reply that may land after they have moved on.
+   * `unattached` (no pooled instance in this browser) is not "down" — the
+   * write is still attempted, exactly as the send button attempts it.
+   */
+  const offline = useTerminalConnection(sessionId) === "disconnected";
   /** The mobile auto-grow effect's own handle on the field — see below. */
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   /**
@@ -672,6 +683,19 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // WRITE changes — the field, the draft store and `consumeDraft`'s
     // comparison all keep `reply`, so the user's text is never rewritten.
     const outgoing = expandCommand(reply, knownSkills.current);
+    // The draft is spent by DELIVERY — see `consumeDraft` and the note on this
+    // component — and a shortcut, which goes through the same write, spends none.
+    writeToPty(outgoing, () => consumeDraft(reply));
+  };
+
+  /**
+   * The write both a submit and a shortcut chip make: `body`, then its
+   * submitting return, through `submitToPty`, with the retry ticket, the
+   * in-flight count and the refusal notice every send carries. `onSpent` runs
+   * where the body is delivered — the submit spends its draft there; a
+   * shortcut has no draft to spend.
+   */
+  const writeToPty = (outgoing: string, onSpent?: () => void): void => {
     // The last submit's verdict is spent the moment a new one is made, and
     // this one has no verdict yet.
     setFailure(null);
@@ -713,7 +737,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         // The frame is on the socket, which is the first moment this reply
         // exists anywhere but in this browser — so this is the moment it stops
         // being a draft.
-        consumeDraft(reply);
+        onSpent?.();
         // With this send's generation, so a report that has been overtaken —
         // three seconds in the reconnect wait is long enough for the user to
         // press Enter again — cannot write its baseline into the ticket the
@@ -757,6 +781,22 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     // is fair: the reply IS on the far side, it simply has not been run, so
     // the wait is about something the agent can still be given with one
     // keypress in the terminal, and the notice says exactly that.
+  };
+
+  /**
+   * A shortcut chip: its text, then Enter, through the same write the send
+   * button makes — and nothing else.
+   *
+   * The text goes VERBATIM: a shortcut that reads `/pavilio-grill` is a
+   * literal reply, never a skill to expand (`expandCommand` is the draft's
+   * business only). The draft is neither read nor spent, so a half-written
+   * reply survives the press; an open picker is left open for the same
+   * reason, because it is about that draft and the draft has not changed.
+   * The chip's mousedown is prevented, so the field keeps the focus.
+   */
+  const sendShortcut = (shortcut: ComposerShortcut): void => {
+    if (offline) return;
+    writeToPty(shortcut.text);
   };
 
   /**
@@ -943,6 +983,24 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           >
             <b>/</b> skills
           </button>
+          {/* The quick replies, in list order, between the picker's door and
+              the attachments. Named by the label the chip shows; the tooltip
+              says the whole label and exactly what goes. */}
+          {shortcuts.map((shortcut, index) => (
+            <button
+              key={`${index}-${shortcut.label}`}
+              type="button"
+              className="answer-pane-composer-chip answer-pane-shortcut-chip"
+              data-testid={`answer-pane-shortcut-${index}-${sessionId}`}
+              title={`${shortcut.label} — sends “${shortcut.text}”`}
+              disabled={offline}
+              // Keep the focus (and the caret) in the field.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => sendShortcut(shortcut)}
+            >
+              <span className="answer-pane-shortcut-label">{shortcut.label}</span>
+            </button>
+          ))}
           {attachments.map((path, index) => (
               <span
                 key={path}

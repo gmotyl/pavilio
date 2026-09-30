@@ -1465,6 +1465,50 @@ input[type="checkbox"] {
   color: var(--text-primary);
 }
 
+/* A composer shortcut: a one-press quick reply, after the `/ skills` chip and
+   before the attachments. The same neutral pill as the skills chip — it is a
+   control, not a file — capped in width so a 24-character label cannot widen
+   the row; the label inside it carries the ellipsis (a flex container's bare
+   text is an anonymous item that `text-overflow` never reaches). */
+.answer-pane-shortcut-chip {
+  flex: none;
+  max-width: 14em;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.answer-pane-shortcut-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+/* Down socket: the press would send nowhere, so the chip says so. */
+.answer-pane-shortcut-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.answer-pane-shortcut-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A thumb, not a pointer: each quick reply is a real touch target on a phone.
+   The row's flex items stretch, so the `/ skills` chip beside it grows too. */
+@media (max-width: 767px) {
+  .answer-pane-shortcut-chip {
+    min-height: 32px;
+    padding: 4px 12px;
+  }
+}
+
 /* The one control that survives the mobile collapse: on a phone there is no
    Shift+Enter to explain and no grip to drag, so this is the whole affordance. */
 .answer-pane-composer-send {

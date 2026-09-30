@@ -87,6 +87,9 @@ const reconnectOnActivate = vi.hoisted(() => vi.fn<(sessionId: string) => void>(
 vi.mock("../terminalInstances", () => ({
   sendDismiss: (sessionId: string) => sendDismiss(sessionId),
   reconnectOnActivate: (sessionId: string) => reconnectOnActivate(sessionId),
+  // The composer's shortcut chips read the socket's liveness; a live one.
+  getConnectionState: () => "connected",
+  onConnectionChange: () => () => {},
 }));
 
 // Nothing is synthesized in this file: the bar draws no segments and the
