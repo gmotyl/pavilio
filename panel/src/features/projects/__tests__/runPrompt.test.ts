@@ -2,7 +2,13 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
-import { composeRunLine, resolveObjective, runLineParts, takesPrompt } from "../runPrompt";
+import {
+  composeRunLine,
+  resolveObjective,
+  runLineParts,
+  takesPrompt,
+  taskRunLine,
+} from "../runPrompt";
 
 const VARS = {
   change: "2026-09-28-commands-in-context",
@@ -169,5 +175,23 @@ describe("takesPrompt", () => {
   it("is true only for a run loop that has a placeholder", () => {
     expect(takesPrompt('claude "/goal {prompt}"')).toBe(true);
     expect(takesPrompt("claude --continue")).toBe(false);
+  });
+});
+
+describe("taskRunLine", () => {
+  it("is null for a launcher whose run loop is not ready", () => {
+    // A whole shell line starting with the command's own word.
+    expect(
+      taskRunLine({ name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' }, "go"),
+    ).toBeNull();
+    // Not offered for runs: a name the panel does not ship, with no run loop.
+    expect(taskRunLine({ name: "mine", command: "tool" }, "go")).toBeNull();
+    expect(taskRunLine({ name: "mine", command: "tool", runLoop: "  " }, "go")).toBeNull();
+  });
+
+  it("composes the line for a ready launcher", () => {
+    expect(
+      taskRunLine({ name: "mine", command: "tool", runLoop: "/goal {prompt}", promptFlag: "" }, "go"),
+    ).toBe("tool '/goal go'");
   });
 });

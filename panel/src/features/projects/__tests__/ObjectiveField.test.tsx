@@ -351,12 +351,38 @@ describe("ObjectiveField", () => {
     fireEvent.mouseDown(objective());
     act(() => objective().focus());
     act(() => objective().blur());
-    fireEvent.mouseUp(document);
     expect(objective().value).not.toBe(template);
 
-    // A later keyboard focus swaps at once, not on some release.
+    // A later keyboard focus swaps at once — before any release arrives, so
+    // only the blur can have dropped the press it would otherwise wait on.
     act(() => objective().focus());
     expect(objective().value).toBe(template);
+    // The late release changes nothing.
+    fireEvent.mouseUp(document);
+    expect(objective().value).toBe(template);
+  });
+
+  it("a backward drag keeps its direction", async () => {
+    const template = "Do {change} at {path} in {project}.";
+    writePreference(preferences.taskPromptDefault, template);
+    renderBanner();
+    const resolved = objective().value;
+    const at = resolved.indexOf(" at ") + 1;
+    const inPath = resolved.indexOf(PATH) + 5;
+
+    // Dragged right to left: the focus end (the caret) is the START.
+    fireEvent.mouseDown(objective());
+    act(() => objective().focus());
+    objective().setSelectionRange(at, inPath, "backward");
+    fireEvent.mouseUp(document);
+
+    expect(objective().value).toBe(template);
+    const afterPath = template.indexOf("{path}") + "{path}".length;
+    expect([objective().selectionStart, objective().selectionEnd]).toEqual([
+      template.indexOf(" at ") + 1,
+      afterPath,
+    ]);
+    expect(objective().selectionDirection).toBe("backward");
   });
 
   it("the mirror scrolls with the textarea", async () => {

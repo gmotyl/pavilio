@@ -182,8 +182,10 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
 
     const textarea = useRef<HTMLTextAreaElement>(null);
     const overlay = useRef<HTMLDivElement>(null);
-    // Where the caret goes once the template replaces the resolved text.
-    const caret = useRef<[number, number] | null>(null);
+    // Where the caret goes once the template replaces the resolved text —
+    // with the selection's direction, so a backward drag keeps its caret at
+    // the start.
+    const caret = useRef<[number, number, "forward" | "backward" | "none"] | null>(null);
 
     const latestVars = useRef(vars);
     latestVars.current = vars;
@@ -206,6 +208,7 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
       caret.current = [
         templateOffset(start, current, box.selectionStart),
         templateOffset(start, current, box.selectionEnd),
+        box.selectionDirection ?? "none",
       ];
       setDraft(start);
       setEditing(true);
