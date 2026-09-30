@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { TerminalsSurface } from "../TerminalsSurface";
 import type { LayoutPreset, TileLayout } from "../tileLayout";
@@ -44,8 +44,12 @@ vi.mock("../TerminalLayoutGrid", () => ({
     return <div data-testid="grid" />;
   },
 }));
+const shortcutBarProps = vi.fn();
 vi.mock("../TerminalShortcutBar", () => ({
-  TerminalShortcutBar: () => <div data-testid="shortcut-bar" />,
+  TerminalShortcutBar: (props: Record<string, unknown>) => {
+    shortcutBarProps(props);
+    return <div data-testid="shortcut-bar" />;
+  },
 }));
 vi.mock("../TerminalSpineDrawer", () => ({ TerminalSpineDrawer: () => <div /> }));
 
@@ -55,14 +59,16 @@ function Harness({
   onApplyPreset,
   focusedId = null,
   sessions = [],
+  handles,
 }: {
   tiles?: TileLayout;
   onPlace?: (layout: TileLayout) => void;
   onApplyPreset?: (preset: LayoutPreset) => void;
   focusedId?: string | null;
   sessions?: SessionMeta[];
+  handles?: Map<string, TerminalHandle>;
 }) {
-  const ref = useRef<Map<string, TerminalHandle>>(new Map());
+  const ref = useRef<Map<string, TerminalHandle>>(handles ?? new Map());
   return (
     <TerminalsSurface
       currentProject="vector"
@@ -221,7 +227,7 @@ describe("TerminalsSurface shortcut bar visibility", () => {
     forgetAnswerPane("other");
   });
 
-  it("the shortcut bar is absent while a rendered session's answer pane is open", () => {
+  it("the shortcut bar is absent while a visible session's answer pane is open", () => {
     setAnswerPaneOpen("s1", true);
 
     render(<Harness sessions={[session("s1"), session("s2")]} />);
@@ -249,5 +255,127 @@ describe("TerminalsSurface shortcut bar visibility", () => {
     render(<Harness sessions={[session("s1"), session("s2")]} />);
 
     expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  // On mobile every session stays mounted and one is shown; a hidden session's
+  // pane can auto-open when its agent answers, and must not take the bar away
+  // from the terminal on screen.
+  it("a pane open on a hidden session does not withhold the shortcut bar", () => {
+    setAnswerPaneOpen("s2", true);
+
+    render(
+      <Harness focusedId="s1" sessions={[session("s1"), session("s2")]} />,
+    );
+
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  it("the visible session's open pane withholds the bar and closing it brings it back", () => {
+    setAnswerPaneOpen("s1", true);
+
+    render(
+      <Harness focusedId="s1" sessions={[session("s1"), session("s2")]} />,
+    );
+    expect(screen.queryByTestId("shortcut-bar")).toBeNull();
+
+    act(() => setAnswerPaneOpen("s1", false));
+
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  it("switching onto a session with an open pane withholds the bar", () => {
+    setAnswerPaneOpen("s2", true);
+    const sessions = [session("s1"), session("s2")];
+
+    const { rerender } = render(
+      <Harness focusedId="s1" sessions={sessions} />,
+    );
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+
+    rerender(<Harness focusedId="s2" sessions={sessions} />);
+    expect(screen.queryByTestId("shortcut-bar")).toBeNull();
+
+    rerender(<Harness focusedId="s1" sessions={sessions} />);
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  it("with nothing focused the first session's pane decides", () => {
+    const sessions = [session("s1"), session("s2")];
+    setAnswerPaneOpen("s1", true);
+
+    const { rerender } = render(<Harness sessions={sessions} />);
+    expect(screen.queryByTestId("shortcut-bar")).toBeNull();
+
+    act(() => {
+      setAnswerPaneOpen("s1", false);
+      setAnswerPaneOpen("s2", true);
+    });
+    rerender(<Harness sessions={sessions} />);
+
+    expect(screen.queryByTestId("shortcut-bar")).not.toBeNull();
+  });
+
+  it("the shortcut bar sends to the visible session when the stored focus is stale", () => {
+    const handle = (id: string) => ({
+      sessionId: id,
+      send: vi.fn(),
+      focus: vi.fn(),
+      getBufferSnapshot: vi.fn(),
+    });
+    const s1 = handle("s1");
+    const s2 = handle("s2");
+    const gone = handle("gone");
+    const handles = new Map<string, TerminalHandle>([
+      ["s1", s1 as unknown as TerminalHandle],
+      ["s2", s2 as unknown as TerminalHandle],
+      ["gone", gone as unknown as TerminalHandle],
+    ]);
+    const sessions = [session("s1"), session("s2")];
+    const bar = () =>
+      shortcutBarProps.mock.calls.at(-1)![0] as {
+        onSend: (data: string) => void;
+        onToggleKeyboard: () => void;
+      };
+
+    const { rerender } = render(
+      <Harness focusedId="gone" sessions={sessions} handles={handles} />,
+    );
+    bar().onSend("\x1b");
+    bar().onToggleKeyboard();
+
+    expect(s1.send).toHaveBeenCalledWith("\x1b");
+    expect(s1.focus).toHaveBeenCalled();
+    expect(gone.send).not.toHaveBeenCalled();
+    expect(gone.focus).not.toHaveBeenCalled();
+
+    rerender(<Harness focusedId="s2" sessions={sessions} handles={handles} />);
+    bar().onSend("\t");
+
+    expect(s2.send).toHaveBeenCalledWith("\t");
+  });
+
+  it("the shortcut bar sends nothing when there are no sessions", () => {
+    const gone = {
+      sessionId: "gone",
+      send: vi.fn(),
+      focus: vi.fn(),
+      getBufferSnapshot: vi.fn(),
+    };
+    const handles = new Map<string, TerminalHandle>([
+      ["gone", gone as unknown as TerminalHandle],
+    ]);
+
+    render(<Harness focusedId="gone" sessions={[]} handles={handles} />);
+    const bar = shortcutBarProps.mock.calls.at(-1)![0] as {
+      onSend: (data: string) => void;
+      onToggleKeyboard: () => void;
+    };
+
+    expect(() => {
+      bar.onSend("x");
+      bar.onToggleKeyboard();
+    }).not.toThrow();
+    expect(gone.send).not.toHaveBeenCalled();
+    expect(gone.focus).not.toHaveBeenCalled();
   });
 });
