@@ -657,6 +657,59 @@ describe("LauncherSettings", () => {
     });
   });
 
+  describe("display details", () => {
+    it("a shipped default is dashed and a stored value is not", () => {
+      writePreference(preferences.terminalLaunchers, [
+        { name: "claude", command: "claude" },
+        { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
+        { name: "opencode", command: "opencode" },
+      ]);
+
+      render(<LauncherSettings />);
+      // Dashed is the "shipped default" marker the help text points at.
+      expect(runLoopFields()[0].style.borderStyle).toBe("dashed");
+      expect(runLoopFields()[1].style.borderStyle).not.toBe("dashed");
+      // A defaulted flag gets the same marker; a name with no flag to default does not.
+      expect(promptFlagFields()[2].style.borderStyle).toBe("dashed");
+      expect(promptFlagFields()[0].style.borderStyle).not.toBe("dashed");
+    });
+
+    it("the help text says what the run loop and the prompt flag are", () => {
+      render(<LauncherSettings />);
+      const help = screen.getByText(/The pills on a cell/);
+      const text = help.textContent!.replace(/\s+/g, " ");
+      expect(text).toContain("The run loop is the text the CLI receives when a task run starts");
+      expect(text).toContain("{prompt} standing for the objective");
+      expect(text).toContain("no quotes or shell syntax");
+      expect(text).toContain("The prompt flag is how the command takes that text");
+      expect(text).toContain("leave it blank when the prompt is a plain argument");
+      expect(text).toContain("A dashed field is the shipped default");
+      expect(text).toContain("don't offer for runs");
+    });
+
+    it("a stored legacy whole line displays as the shipped default", () => {
+      writePreference(preferences.terminalLaunchers, [
+        { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+        { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
+      ]);
+
+      render(<LauncherSettings />);
+      for (const [index, placeholder] of [
+        [0, "/goal {prompt}"],
+        [1, "{prompt}"],
+      ] as const) {
+        expect(runLoopFields()[index]).toHaveValue("");
+        expect(runLoopFields()[index]).toHaveAttribute("placeholder", placeholder);
+        expect(runLoopFields()[index].style.borderStyle).toBe("dashed");
+        expect(within(row(index)).getByText("shipped default")).toBeInTheDocument();
+        // The old default written back is not the user's whole line.
+        expect(within(row(index)).queryByRole("alert")).toBeNull();
+      }
+      // The legacy opencode line carried its own flag; the shipped one shows.
+      expect(promptFlagFields()[1]).toHaveAttribute("placeholder", "--prompt");
+    });
+  });
+
   describe("a write from elsewhere", () => {
     it("does not clobber a row being edited", async () => {
       const user = userEvent.setup();

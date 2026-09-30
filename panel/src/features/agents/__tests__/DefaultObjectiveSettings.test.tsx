@@ -106,6 +106,41 @@ describe("DefaultObjectiveSettings", () => {
     expect(field().value).toBe(SHIPPED);
   });
 
+  it("a whitespace-only objective clears it", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.taskPromptDefault, "Custom {path}.");
+    render(<DefaultObjectiveSettings />);
+
+    await user.clear(field());
+    await user.type(field(), "   ");
+    await user.tab();
+
+    expect(KEY in globals.__PAVILIO_PREFS__!).toBe(false);
+    expect(field().value).toBe(SHIPPED);
+  });
+
+  it("emptying it with nothing stored shows the shipped objective again", async () => {
+    const user = userEvent.setup();
+    render(<DefaultObjectiveSettings />);
+
+    expect(field().value).toBe(SHIPPED);
+    await user.clear(field());
+    await user.tab();
+
+    // Nothing was stored, so the clear notifies no change; the field still
+    // goes back to the shipped text rather than sitting empty.
+    expect(KEY in globals.__PAVILIO_PREFS__!).toBe(false);
+    expect(field().value).toBe(SHIPPED);
+  });
+
+  it("the help text names the placeholders and how to restore the default", () => {
+    render(<DefaultObjectiveSettings />);
+    const text = screen.getByTestId("default-objective-help").textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("What a task run asks for");
+    expect(text).toContain("{change}, {path} and {project} filled in at send time");
+    expect(text).toContain("Empty it to restore the shipped default.");
+  });
+
   it("an unchanged blur writes nothing", async () => {
     const user = userEvent.setup();
     render(<DefaultObjectiveSettings />);
