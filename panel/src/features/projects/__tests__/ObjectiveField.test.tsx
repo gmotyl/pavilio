@@ -282,6 +282,25 @@ describe("ObjectiveField", () => {
     expect(clickAt(0, resolved.length)).toEqual([0, template.length]);
   });
 
+  it("a pointer's caret is mapped once the browser has placed it", async () => {
+    const template = "Do {change} at {path} in {project}.";
+    writePreference(preferences.taskPromptDefault, template);
+    renderBanner();
+    const resolved = objective().value;
+    const inPath = resolved.indexOf(PATH) + 5;
+
+    // Chrome's order for a click: mousedown, focus with the selection not yet
+    // moved, THEN the caret at the offset hit-tested on the resolved text.
+    fireEvent.mouseDown(objective());
+    act(() => objective().focus());
+    objective().setSelectionRange(inPath, inPath);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+    expect(objective().value).toBe(template);
+    const afterPath = template.indexOf("{path}") + "{path}".length;
+    expect([objective().selectionStart, objective().selectionEnd]).toEqual([afterPath, afterPath]);
+  });
+
   it("the mirror scrolls with the textarea", async () => {
     const user = userEvent.setup();
     renderBanner();

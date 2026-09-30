@@ -172,27 +172,55 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
     // arrives, so the pending edit is saved here.
     const commitRef = useRef(commitDraft);
     commitRef.current = commitDraft;
-    useEffect(() => () => void commitRef.current(), []);
+    useEffect(
+      () => () => {
+        if (pendingStart.current) clearTimeout(pendingStart.current);
+        commitRef.current();
+      },
+      [],
+    );
 
     const textarea = useRef<HTMLTextAreaElement>(null);
     const overlay = useRef<HTMLDivElement>(null);
     // Where the caret goes once the template replaces the resolved text.
     const caret = useRef<[number, number] | null>(null);
 
-    const onFocus = () => {
-      editProject.current = vars.project;
-      baseline.current = template;
-      // A click placed the selection on the resolved text; the same numbers
-      // name other characters in the template, so map them across.
+    const latestVars = useRef(vars);
+    latestVars.current = vars;
+    // A press on the idle box: its focus is followed by the browser placing
+    // the caret, hit-tested on the resolved text.
+    const pressed = useRef(false);
+    const pendingStart = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const beginEditing = () => {
+      pendingStart.current = null;
       const box = textarea.current;
-      caret.current = box
-        ? [
-            templateOffset(template, vars, box.selectionStart),
-            templateOffset(template, vars, box.selectionEnd),
-          ]
-        : null;
-      setDraft(template);
+      if (!box || document.activeElement !== box) return;
+      const current = latestVars.current;
+      const start = readTemplate(current.project);
+      editProject.current = current.project;
+      baseline.current = start;
+      // The selection sits on the resolved text; the same numbers name other
+      // characters in the template, so map them across.
+      caret.current = [
+        templateOffset(start, current, box.selectionStart),
+        templateOffset(start, current, box.selectionEnd),
+      ];
+      setDraft(start);
       setEditing(true);
+    };
+
+    const onFocus = () => {
+      if (!pressed.current) {
+        beginEditing();
+        return;
+      }
+      // Chrome fires focus BEFORE it moves the caret to the click, and then
+      // applies an offset measured on the resolved text to whatever the box
+      // holds — clamped to the shorter template. So a press swaps only once
+      // the browser has placed the caret.
+      pressed.current = false;
+      pendingStart.current = setTimeout(beginEditing, 0);
     };
 
     useLayoutEffect(() => {
@@ -257,6 +285,9 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
           className="run-banner-objective"
           aria-label="Objective"
           value={shown}
+          onMouseDown={() => {
+            if (!editingRef.current) pressed.current = true;
+          }}
           onFocus={onFocus}
           onBlur={onBlur}
           onChange={(event) => setDraft(event.target.value)}
