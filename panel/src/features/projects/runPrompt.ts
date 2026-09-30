@@ -21,6 +21,36 @@ export function resolveObjective(
 }
 
 /**
+ * Maps an offset in the RESOLVED objective to the same place in its template,
+ * for a caret that has to survive the box swapping one for the other. The
+ * template is a run of literal text and placeholders; each placeholder expands
+ * to its value. Literal text maps one to one, shifted by what the placeholders
+ * before it grew or shrank by. An offset strictly inside a placeholder's value
+ * — or at its end — maps to the end of the placeholder's token, since the
+ * value has no counterpart position in the token; right before a value is
+ * right before its token.
+ */
+export function templateOffset(
+  template: string,
+  vars: { change: string; path: string; project: string },
+  resolvedOffset: number,
+): number {
+  let resolved = 0;
+  let at = 0;
+  for (const match of template.matchAll(/\{(change|path|project)\}/g)) {
+    const literal = match.index - at;
+    if (resolvedOffset <= resolved + literal) return at + (resolvedOffset - resolved);
+    resolved += literal;
+    at = match.index;
+    const value = vars[match[1] as keyof typeof vars].length;
+    if (resolvedOffset <= resolved + value) return at + match[0].length;
+    resolved += value;
+    at += match[0].length;
+  }
+  return Math.min(template.length, at + (resolvedOffset - resolved));
+}
+
+/**
  * Folds line breaks and every other control character to spaces. The line is
  * typed into a PTY, where each is a keystroke: a newline is a return, and a
  * return inside an open quote leaves the shell at a continuation prompt rather

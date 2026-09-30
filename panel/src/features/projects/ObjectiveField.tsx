@@ -14,7 +14,7 @@ import { preferences } from "../../preferences/declarations";
 import { clearOverride, readOverridable, writeOverride } from "../../preferences/overridable";
 import { readPreference } from "../../preferences/store";
 import { usePreference, useScopedPreference } from "../../preferences/usePreference";
-import { resolveObjective } from "./runPrompt";
+import { resolveObjective, templateOffset } from "./runPrompt";
 
 /**
  * The run banner's objective box: a saved, per-project field over the
@@ -171,12 +171,31 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
     commitRef.current = commitDraft;
     useEffect(() => () => void commitRef.current(), []);
 
+    const textarea = useRef<HTMLTextAreaElement>(null);
+    // Where the caret goes once the template replaces the resolved text.
+    const caret = useRef<[number, number] | null>(null);
+
     const onFocus = () => {
       editProject.current = vars.project;
       baseline.current = template;
+      // A click placed the selection on the resolved text; the same numbers
+      // name other characters in the template, so map them across.
+      const box = textarea.current;
+      caret.current = box
+        ? [
+            templateOffset(template, vars, box.selectionStart),
+            templateOffset(template, vars, box.selectionEnd),
+          ]
+        : null;
       setDraft(template);
       setEditing(true);
     };
+
+    useLayoutEffect(() => {
+      if (!editing || !caret.current) return;
+      textarea.current?.setSelectionRange(...caret.current);
+      caret.current = null;
+    }, [editing]);
 
     const onBlur = () => {
       commitDraft();
@@ -226,6 +245,7 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
           </div>
         )}
         <textarea
+          ref={textarea}
           className="run-banner-objective"
           aria-label="Objective"
           value={shown}

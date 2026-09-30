@@ -253,6 +253,35 @@ describe("ObjectiveField", () => {
     expect(override()).toBe("left mid-edit");
   });
 
+  it("clicking into the objective puts the caret where it was clicked", () => {
+    const template = "Do {change} at {path} in {project}.";
+    writePreference(preferences.taskPromptDefault, template);
+    renderBanner();
+    const resolved = objective().value;
+
+    // Where a click lands on the idle, resolved text, then focus arrives and
+    // the value swaps to the template.
+    const clickAt = (start: number, end = start) => {
+      act(() => objective().blur());
+      objective().setSelectionRange(start, end);
+      act(() => objective().focus());
+      expect(objective().value).toBe(template);
+      return [objective().selectionStart, objective().selectionEnd];
+    };
+
+    // In literal text: shifted by what the placeholders before it expanded to.
+    const at = resolved.indexOf(" at ") + 2;
+    expect(clickAt(at)).toEqual([template.indexOf(" at ") + 2, template.indexOf(" at ") + 2]);
+    // Inside a placeholder's value: the end of its token.
+    const inPath = resolved.indexOf(PATH) + 5;
+    const afterPath = template.indexOf("{path}") + "{path}".length;
+    expect(clickAt(inPath)).toEqual([afterPath, afterPath]);
+    // Right before a value: before its token.
+    expect(clickAt(3)).toEqual([3, 3]);
+    // A range maps both ends; the very end stays the end.
+    expect(clickAt(0, resolved.length)).toEqual([0, template.length]);
+  });
+
   it("an unchanged blur writes nothing", async () => {
     const user = userEvent.setup();
     renderBanner();
