@@ -18,7 +18,7 @@
  * pane is rendered into declares its own `clientHeight`. That is the fact the
  * component reads in a browser too, off the same element.
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,6 +28,7 @@ import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import type { UtteranceQueue } from "../../speech/utteranceQueue";
+import { ANSWER_COMPOSER_BOUNDS } from "../AnswerComposer";
 import {
   ANSWER_PANE_BODY_FLOOR,
   ANSWER_PANE_COMPOSER_CHROME,
@@ -482,13 +483,14 @@ describe("the answer pane's floor", () => {
   });
 
   /**
-   * The chrome constant against the stylesheet. jsdom does no layout, so this
-   * is a LOWER bound built from what the CSS declares — every fixed height,
-   * padding, border and margin of the rows it counts, and one font-size of
-   * line box per text row (a line box is never shorter than its font). If a
-   * row grows in the CSS past what the constant allows, this fails.
+   * The chrome the stylesheet declares, as a LOWER bound. jsdom does no layout,
+   * so this is built from what the CSS declares — every fixed height, padding,
+   * border and margin of the rows it counts, and one font-size of line box per
+   * text row (a line box is never shorter than its font). The chip row is
+   * counted unconditionally: it is always drawn, with at least the `/ skills`
+   * chip in it.
    */
-  it("the chrome constant is at least what the stylesheet declares", () => {
+  const declaredChrome = (): number => {
     const pad = (selector: string, side: "top" | "bottom"): number => {
       const decl = cssRule(selector).replace(/\/\*[\s\S]*?\*\//g, "");
       const m = /(?:^|;)\s*padding\s*:\s*([^;]+)/.exec(decl);
@@ -512,15 +514,47 @@ describe("the answer pane's floor", () => {
       pad(".answer-pane-hint", "top") +
       pad(".answer-pane-hint", "bottom") +
       cssPx(".answer-pane-hint", "font-size");
-    const declared =
+    return (
       cssPx(".answer-pane-grip", "height") +
       chipRow +
       meta +
       hint +
-      cssPx(".answer-pane-drag", "height");
+      cssPx(".answer-pane-drag", "height")
+    );
+  };
 
+  /** If a row grows in the CSS past what the constant allows, this fails. */
+  it("the chrome constant is at least what the stylesheet declares", () => {
+    const declared = declaredChrome();
     expect(declared).toBeGreaterThan(60); // vacuity guard: the rows were found
     expect(ANSWER_PANE_COMPOSER_CHROME).toBeGreaterThanOrEqual(declared);
+  });
+
+  it("the pane floor still covers the composer's chrome", () => {
+    const { min } = ANSWER_COMPOSER_BOUNDS;
+    const fallback = preferences.answerComposerHeight.default;
+    for (const field of [min, fallback]) {
+      act(() => writePreference(preferences.answerComposerHeight, field, PROJECT));
+      renderPane();
+      // The chip row is drawn with nothing attached: the `/ skills` chip and
+      // the shortcut chips are always in it, so its height is always chrome.
+      const chipRow = pane().querySelector(".answer-pane-chip-row");
+      expect(chipRow, "the chip row is always drawn").not.toBeNull();
+      expect(
+        chipRow!.querySelector(`[data-testid="answer-pane-skills-chip-${SESSION}"]`),
+      ).not.toBeNull();
+      expect(
+        chipRow!.querySelector(`[data-testid="answer-pane-shortcut-0-${SESSION}"]`),
+      ).not.toBeNull();
+
+      // At the floor, the drag row is still inside the pane: every fixed row
+      // (chip row included) plus the field plus the body's one line fits.
+      const floor = dragToFloor();
+      expect(floor).toBe(minPaneHeight(true, field));
+      expect(floor).toBe(ANSWER_PANE_COMPOSER_CHROME + field + ANSWER_PANE_BODY_FLOOR);
+      expect(floor).toBeGreaterThanOrEqual(declaredChrome() + field + ANSWER_PANE_BODY_FLOOR);
+      cleanup();
+    }
   });
 });
 

@@ -94,8 +94,9 @@ const PANE_HEIGHT_STEP = 24;
  * The pane's rows that are neither the body nor the composer's field row
  * (whose stored height already includes its own 13px of padding), with the
  * composer on: the grip (7), the chip row (~35: 8px padding, 1px seam, the
- * chip and its 4px margin), the meta row, the key hint and the pane's drag row
- * (7). Measured in a browser at 97px — 159px of fixed chrome at the default
+ * chip and its 4px margin — always drawn, since the `/ skills` chip and the
+ * shortcut chips sit in it with nothing attached), the meta row, the key hint
+ * and the pane's drag row (7). Measured in a browser at 97px — 159px of fixed chrome at the default
  * 62px field, 145px at the 48px floor.
  * Pinned against the stylesheet by `AnswerPane.resize.test.tsx`.
  */
