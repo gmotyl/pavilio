@@ -362,6 +362,27 @@ describe("ObjectiveField", () => {
     expect(objective().value).toBe(template);
   });
 
+  it("typing after a keyboard refocus survives a late release of the lost press", async () => {
+    const template = "Do {change} at {path} in {project}.";
+    writePreference(preferences.taskPromptDefault, template);
+    renderBanner();
+
+    // A press whose focus left before its release, then a keyboard refocus.
+    fireEvent.mouseDown(objective());
+    act(() => objective().focus());
+    act(() => objective().blur());
+    act(() => objective().focus());
+    expect(objective().value).toBe(template);
+
+    // Typed before the old press's button comes up, anywhere on the page.
+    fireEvent.change(objective(), { target: { value: `${template} Typed.` } });
+    // The blur removed the window listener waiting on that release, so it
+    // cannot swap the template back in over the typing.
+    fireEvent.mouseUp(document);
+
+    expect(objective().value).toBe(`${template} Typed.`);
+  });
+
   it("a backward drag keeps its direction", async () => {
     const template = "Do {change} at {path} in {project}.";
     writePreference(preferences.taskPromptDefault, template);

@@ -9,8 +9,31 @@ import {
   preferences,
   type TerminalLauncher,
 } from "../../../preferences/declarations";
-import { readPreference, writePreference } from "../../../preferences/store";
+import {
+  PREFERENCE_PATCH_DEBOUNCE_MS,
+  readPreference,
+  writePreference,
+} from "../../../preferences/store";
 import { storageKey } from "../../../preferences/types";
+
+/**
+ * The realtime channel, with a hand on its frames: jsdom has no WebSocket, and
+ * the store only cares that a `preferences-change` frame arrives (the pattern
+ * `preferences/__tests__/usePreference.test.tsx` uses). The rest of the module
+ * stays real.
+ */
+const { frameListeners } = vi.hoisted(() => ({
+  frameListeners: new Set<(frame: { type: string; [key: string]: unknown }) => void>(),
+}));
+
+vi.mock("../../realtime/channel", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../realtime/channel")>()),
+  subscribeRealtime: (listener: (frame: { type: string; [key: string]: unknown }) => void) => {
+    frameListeners.add(listener);
+    return () => frameListeners.delete(listener);
+  },
+  __resetRealtimeChannelForTests: () => frameListeners.clear(),
+}));
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
@@ -841,6 +864,60 @@ describe("LauncherSettings", () => {
       fireEvent.click(remove);
 
       expect(stored()).toEqual([b]);
+    });
+
+    /**
+     * The echo. The server broadcasts every write to every tab, this one
+     * included, and the refetch it triggers hands back the SAME list as a new
+     * array. The rows reset on a change of the list's VALUE (`listKey` is the
+     * serialized list), so the echo of a commit must not wipe what is being
+     * typed into the next field by then.
+     */
+    it("the echo of this tab's own write does not wipe the next field's draft", async () => {
+      const user = userEvent.setup();
+      const a = { name: "alpha", command: "alpha" };
+      const b = { name: "beta", command: "beta" };
+      writePreference(preferences.terminalLaunchers, [a, b]);
+      // The server answers PATCHes and serves back whatever this tab now holds —
+      // the document with its own write applied, as the echo's refetch sees it.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) =>
+          url === "/api/preferences.js"
+            ? new Response(
+                `window.__PAVILIO_PREFS__ = ${JSON.stringify(globals.__PAVILIO_PREFS__)};\n`,
+                { status: 200 },
+              )
+            : new Response('{"ok":true}', { status: 200 }),
+        ),
+      );
+      render(<LauncherSettings />);
+
+      await user.click(commandFields()[0]);
+      await user.type(commandFields()[0], " --one");
+      await user.click(commandFields()[1]);
+      expect(stored()).toEqual([{ name: "alpha", command: "alpha --one" }, b]);
+      // The PATCH goes out and acks, so the refetch below answers from the
+      // server's copy — a fresh array — rather than this tab's pending value.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, PREFERENCE_PATCH_DEBOUNCE_MS + 60));
+      });
+      await user.type(commandFields()[1], " --two");
+
+      await act(async () => {
+        for (const listener of [...frameListeners]) {
+          listener({ type: "preferences-change", keys: [KEY] });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(commandFields()[1]).toHaveValue("beta --two");
+      expect(commandFields()[1]).toHaveFocus();
+      await user.click(document.body);
+      expect(stored()).toEqual([
+        { name: "alpha", command: "alpha --one" },
+        { name: "beta", command: "beta --two" },
+      ]);
     });
 
     it("an unfocused row follows it", () => {

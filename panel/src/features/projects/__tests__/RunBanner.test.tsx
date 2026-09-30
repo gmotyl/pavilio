@@ -515,4 +515,20 @@ describe("RunBanner, done", () => {
       cleanup();
     }
   });
+  it("a one-task change reads in the singular", () => {
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    render(
+      <MemoryRouter>
+        <RunBanner
+          status={{ changeId: STATUS.changeId, total: 1, remaining: 0 }}
+          project="pavilio"
+          path={PATH}
+          onRun={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    const banner = screen.getByRole("status", { name: "Change done" });
+    expect(within(banner).getByText("All 1 task done")).toBeInTheDocument();
+  });
 });
