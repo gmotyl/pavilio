@@ -56,6 +56,16 @@ function commandFields(): HTMLInputElement[] {
   return screen.getAllByRole("textbox", { name: /^Launcher \d+ command$/ }) as HTMLInputElement[];
 }
 
+function promptFlagFields(): HTMLInputElement[] {
+  return screen.getAllByRole("textbox", {
+    name: /^Launcher \d+ prompt flag$/,
+  }) as HTMLInputElement[];
+}
+
+function row(index: number): HTMLElement {
+  return screen.getByTestId(`launcher-row-${index}`);
+}
+
 function runLoopFields(): HTMLInputElement[] {
   return screen.getAllByRole("textbox", { name: /^Launcher \d+ run loop$/ }) as HTMLInputElement[];
 }
@@ -241,7 +251,14 @@ describe("LauncherSettings", () => {
       await user.clear(runLoopFields()[2]);
       await user.tab();
 
-      expect(stored()[2]).toEqual({ name: "opencode", command: "opencode" });
+      // An explicit "" — not an absent key, which would now read as the
+      // shipped default — and the flag the row carried survives the edit.
+      expect(stored()[2]).toEqual({
+        name: "opencode",
+        command: "opencode",
+        promptFlag: "--prompt",
+        runLoop: "",
+      });
       expect(stored()).toHaveLength(4);
     });
 
@@ -377,6 +394,189 @@ describe("LauncherSettings", () => {
       expect(after[0]).not.toBe(firstEntry);
       expect(DEFAULT_TERMINAL_LAUNCHERS[0]).toBe(firstEntry);
       expect(DEFAULT_TERMINAL_LAUNCHERS).toEqual(DEFAULTS);
+    });
+  });
+  describe("prompt flag and shipped defaults", () => {
+    it("a row edits the prompt flag", async () => {
+      const user = userEvent.setup();
+
+      render(<LauncherSettings />);
+      expect(promptFlagFields().map((field) => field.value)).toEqual(["", "", "--prompt"]);
+
+      await user.type(promptFlagFields()[0], "-p");
+      await user.tab();
+      expect(stored()[0]).toEqual({
+        name: "claude",
+        command: "claude",
+        promptFlag: "-p",
+        runLoop: "/goal {prompt}",
+      });
+
+      // Clearing a flag the user had set is a choice: positional, stored "".
+      await user.clear(promptFlagFields()[2]);
+      await user.tab();
+      expect(stored()[2]).toEqual({
+        name: "opencode",
+        command: "opencode",
+        promptFlag: "",
+        runLoop: "{prompt}",
+      });
+
+      // A row whose flag field was never touched does not grow a flag key.
+      await user.clear(commandFields()[1]);
+      await user.type(commandFields()[1], "codex --no-daemon");
+      await user.tab();
+      expect(stored()[1]).toEqual({
+        name: "codex",
+        command: "codex --no-daemon",
+        runLoop: "/goal {prompt}",
+      });
+
+      // The add form takes a flag too.
+      await user.type(screen.getByRole("textbox", { name: "New launcher name" }), "oc");
+      await user.type(screen.getByRole("textbox", { name: "New launcher command" }), "opencode");
+      await user.type(
+        screen.getByRole("textbox", { name: "New launcher prompt flag" }),
+        "--prompt",
+      );
+      await user.click(screen.getByRole("button", { name: "Add launcher" }));
+      expect(stored().at(-1)).toEqual({ name: "oc", command: "opencode", promptFlag: "--prompt" });
+    });
+
+    it("a missing run loop shows the shipped default and writes nothing", async () => {
+      const user = userEvent.setup();
+      globals.__PAVILIO_PREFS__ = {
+        ...globals.__PAVILIO_PREFS__,
+        [KEY]: [
+          { name: "claude", command: "claude" },
+          { name: "resume", command: "claude --resume" },
+          { name: "opencode", command: "opencode" },
+        ],
+      };
+
+      render(<LauncherSettings />);
+      // The default is a placeholder, not a value: typing replaces it.
+      expect(runLoopFields()[0]).toHaveValue("");
+      expect(runLoopFields()[0]).toHaveAttribute("placeholder", "/goal {prompt}");
+      expect(within(row(0)).getByText("shipped default")).toBeInTheDocument();
+      // An unknown name has no default to show.
+      expect(runLoopFields()[1]).toHaveAttribute("placeholder", "not offered for runs");
+      expect(within(row(1)).queryByText("shipped default")).toBeNull();
+      // The flag's default is shown the same way.
+      expect(promptFlagFields()[2]).toHaveValue("");
+      expect(promptFlagFields()[2]).toHaveAttribute("placeholder", "--prompt");
+
+      // Editing another column writes neither a run loop nor a flag.
+      await user.clear(commandFields()[0]);
+      await user.type(commandFields()[0], "claude --verbose");
+      await user.tab();
+      expect(stored()[0]).toEqual({ name: "claude", command: "claude --verbose" });
+      await user.click(runLoopFields()[2]);
+      await user.tab();
+      expect(stored()[2]).toEqual({ name: "opencode", command: "opencode" });
+
+      // Typing into the field stores what was typed.
+      await user.type(runLoopFields()[0], "/goal now {{prompt}");
+      await user.tab();
+      expect(stored()[0]).toEqual({
+        name: "claude",
+        command: "claude --verbose",
+        runLoop: "/goal now {prompt}",
+      });
+      expect(within(row(0)).queryByText("shipped default")).toBeNull();
+    });
+
+    it("clearing a run loop offers to restore the default", async () => {
+      const user = userEvent.setup();
+
+      render(<LauncherSettings />);
+      await user.clear(runLoopFields()[0]);
+      await user.tab();
+
+      expect(stored()[0]).toEqual({ name: "claude", command: "claude", runLoop: "" });
+      expect(runLoopFields()[0]).toHaveAttribute("placeholder", "not offered for runs");
+      expect(within(row(0)).getByText("not offered for runs")).toBeInTheDocument();
+
+      await user.click(
+        within(row(0)).getByRole("button", { name: /restore default/i }),
+      );
+      // Restoring removes the key, so the name's default applies again.
+      expect(stored()[0]).toEqual({ name: "claude", command: "claude" });
+      expect("runLoop" in stored()[0]).toBe(false);
+      expect(runLoopFields()[0]).toHaveAttribute("placeholder", "/goal {prompt}");
+      expect(within(row(0)).getByText("shipped default")).toBeInTheDocument();
+      expect(within(row(0)).queryByRole("button", { name: /restore default/i })).toBeNull();
+
+      // An unknown name cleared to "" has nothing to restore.
+      await user.type(screen.getByRole("textbox", { name: "New launcher name" }), "resume");
+      await user.type(
+        screen.getByRole("textbox", { name: "New launcher command" }),
+        "claude --resume",
+      );
+      await user.type(
+        screen.getByRole("textbox", { name: "New launcher run loop" }),
+        "go on",
+      );
+      await user.click(screen.getByRole("button", { name: "Add launcher" }));
+      await user.clear(runLoopFields()[3]);
+      await user.tab();
+      expect(stored()[3]).toEqual({ name: "resume", command: "claude --resume", runLoop: "" });
+      expect(within(row(3)).queryByRole("button", { name: /restore default/i })).toBeNull();
+    });
+
+    it("a whole-line run loop is flagged and fixed", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.terminalLaunchers, [
+        { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+        { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "goal: x {prompt}"' },
+      ]);
+
+      render(<LauncherSettings />);
+      expect(
+        within(row(0)).queryByText(/looks like a whole command line/),
+      ).toBeNull();
+      expect(
+        within(row(1)).getByText(
+          "This looks like a whole command line — the command is added for you.",
+        ),
+      ).toBeInTheDocument();
+
+      await user.click(within(row(1)).getByRole("button", { name: /^Fix/ }));
+      expect(stored()[1]).toEqual({
+        name: "opencode",
+        command: "opencode",
+        promptFlag: "--prompt",
+        runLoop: "goal: x {prompt}",
+      });
+      expect(runLoopFields()[1]).toHaveValue("goal: x {prompt}");
+      expect(promptFlagFields()[1]).toHaveValue("--prompt");
+      expect(within(row(1)).queryByText(/looks like a whole command line/)).toBeNull();
+    });
+
+    it("a blank name or command is still rejected", async () => {
+      const user = userEvent.setup();
+
+      render(<LauncherSettings />);
+      // A dirty flag draft WITHOUT a blur, so no commit has run for it yet.
+      fireEvent.change(promptFlagFields()[0], { target: { value: "-p" } });
+      await user.clear(nameFields()[0]);
+      await user.tab();
+      expect(stored()).toEqual(DEFAULTS);
+      expect(nameFields()[0]).toHaveValue("claude");
+      expect(promptFlagFields()[0]).toHaveValue("");
+
+      await user.clear(commandFields()[2]);
+      await user.tab();
+      expect(stored()).toEqual(DEFAULTS);
+      expect(commandFields()[2]).toHaveValue("opencode");
+
+      // A flag and a run loop do not rescue an add without a name.
+      await user.type(screen.getByRole("textbox", { name: "New launcher command" }), "x");
+      await user.type(screen.getByRole("textbox", { name: "New launcher prompt flag" }), "-p");
+      await user.type(screen.getByRole("textbox", { name: "New launcher run loop" }), "go");
+      await user.click(screen.getByRole("button", { name: "Add launcher" }));
+      expect(stored()).toEqual(DEFAULTS);
+      expect(nameFields()).toHaveLength(3);
     });
   });
 });

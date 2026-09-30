@@ -69,6 +69,29 @@ describe("resolveRunLoop", () => {
     ).toEqual({ kind: "ready", runLoop: "{prompt}", promptFlag: "--prompt", source: "default" });
   });
 
+  it("the old opencode whole line keeps its flag over a stored blank one", () => {
+    // `opencode --prompt "{prompt}"` carried the flag inside the line, so a
+    // blank `promptFlag` saved next to it (an editor writing the row back)
+    // must not turn the default positional.
+    expect(
+      resolveRunLoop({
+        name: "opencode",
+        command: "opencode",
+        promptFlag: "",
+        runLoop: 'opencode --prompt "{prompt}"',
+      }),
+    ).toEqual({ kind: "ready", runLoop: "{prompt}", promptFlag: "--prompt", source: "default" });
+    // A flag the user actually set still wins.
+    expect(
+      resolveRunLoop({
+        name: "opencode",
+        command: "opencode",
+        promptFlag: "-p",
+        runLoop: 'opencode --prompt "{prompt}"',
+      }),
+    ).toMatchObject({ promptFlag: "-p" });
+  });
+
   it("a run loop starting with its own command is a whole line", () => {
     const stored = 'codex --no-daemon "/goal {prompt}"';
     expect(

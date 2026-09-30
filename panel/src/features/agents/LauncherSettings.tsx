@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
 import { Plus, X } from "lucide-react";
 
-import { preferences, type TerminalLauncher } from "../../preferences/declarations";
+import {
+  DEFAULT_TERMINAL_LAUNCHERS,
+  preferences,
+  type TerminalLauncher,
+} from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { fixWholeLine, resolveRunLoop } from "./launcherRunLoop";
 
 /**
  * The launcher row's editor: one row per stored entry, plus a form that appends
@@ -28,23 +33,82 @@ import { usePreference } from "../../preferences/usePreference";
  * edit puts the stored value back into the field rather than leaving the user
  * looking at text the panel did not keep.
  *
- * The run loop is NOT a third required half. It is the whole command line a
- * task run spawns, and an agent with no goal mode has no honest value for it —
- * so a blank one is saved, as an entry with no `runLoop` key at all, and that
- * launcher is simply not offered for a run.
+ * The prompt flag and the run loop are NOT required halves, and an ABSENT key
+ * means something: "use this name's shipped default" (see `launcherRunLoop.ts`).
+ * So a row only ever writes a key the user edited. A run loop the user clears
+ * is stored as `""` — not offered for runs — and **restore default** removes
+ * the key again; a flag the user clears is stored as `""` — positional. A
+ * default shown in a field is its placeholder, never its value, so typing
+ * replaces it and leaving it alone writes nothing.
  */
 
 /**
- * Builds a fresh entry from the form's drafts, or `null` when a required half
- * is blank. A blank run loop is left off rather than stored as `""`, so an
- * entry saved without one has the same shape as one stored before the column.
+ * Builds a fresh entry from the add form's drafts, or `null` when a required
+ * half is blank. A blank flag or run loop is left off rather than stored as
+ * `""`: a new entry the user gave none gets its name's defaults, if any.
  */
-function toEntry(name: string, command: string, runLoop: string): TerminalLauncher | null {
+function toEntry(
+  name: string,
+  command: string,
+  promptFlag: string,
+  runLoop: string,
+): TerminalLauncher | null {
   const entry: TerminalLauncher = { name: name.trim(), command: command.trim() };
   if (!entry.name || !entry.command) return null;
+  const flag = promptFlag.trim();
+  if (flag) entry.promptFlag = flag;
   const loop = runLoop.trim();
   if (loop) entry.runLoop = loop;
   return entry;
+}
+
+/** The shipped entry for a name, or undefined for a name the panel does not ship. */
+function shippedFor(name: string): TerminalLauncher | undefined {
+  return DEFAULT_TERMINAL_LAUNCHERS.find((entry) => entry.name === name);
+}
+
+/**
+ * What the run-loop field holds for a stored entry. A run loop that resolves
+ * to the shipped default — key absent, or one of the legacy whole lines — is
+ * shown as the placeholder, so its value is empty.
+ */
+function runLoopDraftOf(entry: TerminalLauncher): string {
+  const state = resolveRunLoop(entry);
+  if (state.kind === "ready" && state.source === "default") return "";
+  return entry.runLoop ?? "";
+}
+
+function promptFlagDraftOf(entry: TerminalLauncher): string {
+  return entry.promptFlag ?? "";
+}
+
+/**
+ * Builds a row's next entry from its drafts, or `null` when a required half is
+ * blank. The optional keys are carried over exactly as stored unless their
+ * field was edited, so an untouched field never grows a key.
+ */
+function toRowEntry(
+  entry: TerminalLauncher,
+  drafts: { name: string; command: string; promptFlag: string; runLoop: string },
+): TerminalLauncher | null {
+  const next: TerminalLauncher = { name: drafts.name.trim(), command: drafts.command.trim() };
+  if (!next.name || !next.command) return null;
+  const flag = drafts.promptFlag.trim();
+  if (flag !== promptFlagDraftOf(entry).trim()) next.promptFlag = flag;
+  else if (entry.promptFlag !== undefined) next.promptFlag = entry.promptFlag;
+  const loop = drafts.runLoop.trim();
+  if (loop !== runLoopDraftOf(entry).trim()) next.runLoop = loop;
+  else if (entry.runLoop !== undefined) next.runLoop = entry.runLoop;
+  return next;
+}
+
+function sameEntry(a: TerminalLauncher, b: TerminalLauncher): boolean {
+  return (
+    a.name === b.name &&
+    a.command === b.command &&
+    a.promptFlag === b.promptFlag &&
+    a.runLoop === b.runLoop
+  );
 }
 
 const inputStyle = {
@@ -52,6 +116,18 @@ const inputStyle = {
   color: "var(--text-primary)",
   border: "1px solid var(--border-subtle)",
 } as const;
+
+const linkButtonStyle = {
+  color: "var(--accent)",
+  background: "none",
+  border: 0,
+  padding: 0,
+  textDecoration: "underline",
+  cursor: "pointer",
+  font: "inherit",
+} as const;
+
+const NOT_OFFERED = "not offered for runs";
 
 function LauncherRow({
   entry,
@@ -66,7 +142,15 @@ function LauncherRow({
 }) {
   const [name, setName] = useState(entry.name);
   const [command, setCommand] = useState(entry.command);
-  const [runLoop, setRunLoop] = useState(entry.runLoop ?? "");
+  const [promptFlag, setPromptFlag] = useState(promptFlagDraftOf(entry));
+  const [runLoop, setRunLoop] = useState(runLoopDraftOf(entry));
+
+  const restoreDrafts = () => {
+    setName(entry.name);
+    setCommand(entry.command);
+    setPromptFlag(promptFlagDraftOf(entry));
+    setRunLoop(runLoopDraftOf(entry));
+  };
 
   /**
    * The stored entry can change under a row that is not being edited — another
@@ -74,32 +158,42 @@ function LauncherRow({
    * drafts follow it. A rejected edit restores them directly instead: the entry
    * did not change there, so nothing would re-run this.
    */
-  useEffect(() => {
-    setName(entry.name);
-    setCommand(entry.command);
-    setRunLoop(entry.runLoop ?? "");
-  }, [entry.name, entry.command, entry.runLoop]);
+  useEffect(restoreDrafts, [entry.name, entry.command, entry.promptFlag, entry.runLoop]);
 
   const commit = () => {
-    const next = toEntry(name, command, runLoop);
+    const next = toRowEntry(entry, { name, command, promptFlag, runLoop });
     if (!next) {
-      setName(entry.name);
-      setCommand(entry.command);
-      setRunLoop(entry.runLoop ?? "");
+      restoreDrafts();
       return;
     }
-    if (
-      next.name === entry.name &&
-      next.command === entry.command &&
-      (next.runLoop ?? "") === (entry.runLoop ?? "")
-    ) {
-      return;
-    }
+    if (sameEntry(next, entry)) return;
     onCommit(next);
   };
 
+  /** Removes the run-loop key, so the name's shipped default applies again. */
+  const restoreDefault = () => {
+    const next = { ...entry };
+    delete next.runLoop;
+    onCommit(next);
+  };
+
+  // Read off the STORED entry, not the drafts: the markers describe what a run
+  // would do now, and an uncommitted draft does nothing yet.
+  const state = resolveRunLoop(entry);
+  const shipped = shippedFor(entry.name);
+  const isDefault = state.kind === "ready" && state.source === "default";
+  const canRestore = state.kind === "none" && entry.runLoop !== undefined && Boolean(shipped?.runLoop);
+  const runLoopPlaceholder = isDefault ? state.runLoop : state.kind === "none" ? NOT_OFFERED : "";
+  const defaultFlag =
+    state.kind === "ready"
+      ? state.promptFlag
+      : entry.promptFlag === undefined
+        ? (shipped?.promptFlag ?? "")
+        : "";
+  const promptFlagPlaceholder = defaultFlag || "positional";
+
   return (
-    <li className="flex items-center gap-2">
+    <li className="flex items-start gap-2" data-testid={`launcher-row-${index}`}>
       <input
         aria-label={`Launcher ${index + 1} name`}
         data-testid={`launcher-name-${index}`}
@@ -121,16 +215,77 @@ function LauncherRow({
         spellCheck={false}
       />
       <input
-        aria-label={`Launcher ${index + 1} run loop`}
-        data-testid={`launcher-run-loop-${index}`}
-        value={runLoop}
-        onChange={(e) => setRunLoop(e.target.value)}
+        aria-label={`Launcher ${index + 1} prompt flag`}
+        data-testid={`launcher-prompt-flag-${index}`}
+        value={promptFlag}
+        onChange={(e) => setPromptFlag(e.target.value)}
         onBlur={commit}
-        placeholder="no run loop"
-        className="text-sm px-2 py-1 rounded flex-1 font-mono"
+        placeholder={promptFlagPlaceholder}
+        className="text-sm px-2 py-1 rounded w-24 font-mono"
         style={inputStyle}
         spellCheck={false}
       />
+      <div className="flex-1 min-w-0">
+        <input
+          aria-label={`Launcher ${index + 1} run loop`}
+          data-testid={`launcher-run-loop-${index}`}
+          value={runLoop}
+          onChange={(e) => setRunLoop(e.target.value)}
+          onBlur={commit}
+          placeholder={runLoopPlaceholder}
+          className="text-sm px-2 py-1 rounded w-full font-mono"
+          style={
+            state.kind === "wholeLine"
+              ? { ...inputStyle, borderColor: "var(--status-error, #e57373)" }
+              : isDefault
+                ? { ...inputStyle, borderStyle: "dashed" }
+                : inputStyle
+          }
+          spellCheck={false}
+        />
+        {isDefault && (
+          <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+            shipped default
+          </p>
+        )}
+        {state.kind === "none" && (
+          <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+            <span>{NOT_OFFERED}</span>
+            {canRestore && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  data-testid={`launcher-restore-run-loop-${index}`}
+                  aria-label={`Restore default run loop for launcher ${index + 1}`}
+                  onClick={restoreDefault}
+                  style={linkButtonStyle}
+                >
+                  restore default
+                </button>
+              </>
+            )}
+          </p>
+        )}
+        {state.kind === "wholeLine" && (
+          <p
+            className="text-xs mt-0.5"
+            role="alert"
+            style={{ color: "var(--status-error, #e57373)" }}
+          >
+            This looks like a whole command line — the command is added for you.{" "}
+            <button
+              type="button"
+              data-testid={`launcher-fix-run-loop-${index}`}
+              aria-label={`Fix run loop for launcher ${index + 1}`}
+              onClick={() => onCommit(fixWholeLine(entry))}
+              style={linkButtonStyle}
+            >
+              Fix
+            </button>
+          </p>
+        )}
+      </div>
       <button
         type="button"
         aria-label={`Remove launcher ${index + 1}: ${entry.name}`}
@@ -155,17 +310,18 @@ export function LauncherSettings() {
   const [launchers, setLaunchers] = usePreference(preferences.terminalLaunchers);
   const [newName, setNewName] = useState("");
   const [newCommand, setNewCommand] = useState("");
+  const [newPromptFlag, setNewPromptFlag] = useState("");
   const [newRunLoop, setNewRunLoop] = useState("");
 
   const add = () => {
-    const entry = toEntry(newName, newCommand, newRunLoop);
+    const entry = toEntry(newName, newCommand, newPromptFlag, newRunLoop);
     if (!entry) return;
     setLaunchers((current) => [...current, entry]);
     setNewName("");
     setNewCommand("");
+    setNewPromptFlag("");
     setNewRunLoop("");
   };
-
   const commitAt = (index: number, next: TerminalLauncher) => {
     setLaunchers((current) => current.map((entry, i) => (i === index ? next : entry)));
   };
@@ -214,11 +370,21 @@ export function LauncherSettings() {
           spellCheck={false}
         />
         <input
+          aria-label="New launcher prompt flag"
+          data-testid="launcher-new-prompt-flag"
+          value={newPromptFlag}
+          onChange={(e) => setNewPromptFlag(e.target.value)}
+          placeholder="prompt flag"
+          className="text-sm px-2 py-1 rounded w-24 font-mono"
+          style={inputStyle}
+          spellCheck={false}
+        />
+        <input
           aria-label="New launcher run loop"
           data-testid="launcher-new-run-loop"
           value={newRunLoop}
           onChange={(e) => setNewRunLoop(e.target.value)}
-          placeholder='run loop, e.g. claude "/goal {prompt}"'
+          placeholder="run loop, e.g. /goal {prompt}"
           className="text-sm px-2 py-1 rounded flex-1 font-mono"
           style={inputStyle}
           spellCheck={false}
@@ -243,9 +409,12 @@ export function LauncherSettings() {
       <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
         The pills on a cell that has not spoken yet. The name is the label; the
         command is sent to the terminal verbatim, with a trailing return. The
-        run loop is the whole command line a task run spawns, with{" "}
-        <code>{"{prompt}"}</code> standing for the objective; leave it blank and
-        the launcher is not offered for a run.
+        run loop is the text the CLI receives when a task run starts, with{" "}
+        <code>{"{prompt}"}</code> standing for the objective — plain text, no
+        quotes or shell syntax. The prompt flag is how the command takes that
+        text: leave it blank when the prompt is a plain argument. A dashed field
+        is the shipped default; clear a run loop and that launcher is not
+        offered for a run.
       </p>
     </div>
   );

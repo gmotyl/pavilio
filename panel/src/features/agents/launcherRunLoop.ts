@@ -63,7 +63,12 @@ export function resolveRunLoop(launcher: TerminalLauncher): RunLoopState {
   const stored = launcher.runLoop;
   if (stored === undefined || stored === LEGACY_WHOLE_LINES[launcher.name]) {
     if (!fallback?.runLoop) return { kind: "none" };
-    return { kind: "ready", runLoop: fallback.runLoop, promptFlag, source: "default" };
+    // A legacy whole line carried its own flag (`opencode --prompt "…"`), so a
+    // blank flag stored beside it is not a choice of positional: the shipped
+    // flag still applies. A non-blank stored flag is the user's and wins.
+    const flag =
+      stored !== undefined && !promptFlag ? (fallback.promptFlag ?? "").trim() : promptFlag;
+    return { kind: "ready", runLoop: fallback.runLoop, promptFlag: flag, source: "default" };
   }
   if (!stored.trim()) return { kind: "none" };
   if (isWholeLine(launcher.command, stored)) return { kind: "wholeLine", stored };
