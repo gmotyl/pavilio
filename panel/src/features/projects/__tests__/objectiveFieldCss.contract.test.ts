@@ -53,4 +53,11 @@ describe("the objective box's mirror stays aligned", () => {
   it("the mirror clips rather than scrolling on its own", () => {
     expect(declarations(".objective-field-overlay").get("overflow")).toBe("hidden");
   });
+
+  it("the resolved preview is visually hidden but read", () => {
+    const preview = declarations(".objective-field-preview");
+    expect(preview.get("position")).toBe("absolute");
+    expect(preview.get("clip-path")).toBe("inset(50%)");
+    expect(preview.get("display")).toBeUndefined();
+  });
 });

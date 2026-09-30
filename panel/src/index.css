@@ -2134,6 +2134,17 @@ input[type="checkbox"] {
   overflow-wrap: anywhere;
 }
 
+/* The resolved objective while the template is being edited: read by a
+   screen reader through the textarea's description, never painted. */
+.objective-field-preview {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .objective-field-copy {
   position: absolute;
   top: -2px;

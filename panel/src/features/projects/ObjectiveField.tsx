@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useEffect,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
@@ -25,7 +26,9 @@ import { resolveObjective, templateOffset } from "./runPrompt";
  * textarea cannot hold marked-up children, so the tint is a mirror layer drawn
  * behind a transparent-text textarea with the same font, padding and wrapping;
  * only the caret and the selection are the textarea's own. The mirror is
- * `aria-hidden`: assistive tech reads the one field, by its name.
+ * `aria-hidden`: assistive tech reads the one field, by its name — and, while
+ * focused on the template, is told what it resolves to by a visually-hidden
+ * preview the field is described by.
  *
  * Leaving the box saves it, and only when the text changed. Text equal to the
  * workspace default, or blank, CLEARS the project's override rather than
@@ -231,6 +234,9 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
     };
 
     const shown = editing ? draft : resolveObjective(template, vars);
+    const previewId = useId();
+    const description =
+      [describedBy, editing ? previewId : null].filter(Boolean).join(" ") || undefined;
 
     return (
       <div className="objective-field" data-editing={editing || undefined}>
@@ -263,8 +269,15 @@ export const ObjectiveField = forwardRef<ObjectiveFieldHandle, ObjectiveFieldPro
           rows={2}
           spellCheck={false}
           disabled={disabled}
-          aria-describedby={describedBy}
+          aria-describedby={description}
         />
+        {editing && (
+          // What the template being edited sends, for a screen reader: the
+          // mirror is hidden from it and the value is the raw template.
+          <span id={previewId} className="objective-field-preview">
+            {resolveObjective(draft, vars)}
+          </span>
+        )}
         <button
           type="button"
           className="objective-field-copy"

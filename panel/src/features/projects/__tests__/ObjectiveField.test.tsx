@@ -294,6 +294,41 @@ describe("ObjectiveField", () => {
     expect(overlay.scrollTop).toBe(30);
   });
 
+  it("a blank stored objective gates Run", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.taskPromptDefault, "   ");
+    const onRun = renderBanner(vi.fn());
+
+    const run = screen.getByRole("button", { name: "Run" });
+    expect(run).toBeDisabled();
+    await user.click(run);
+    // Nor does ⌘/Ctrl+Enter inside the box get past the gate.
+    objective().focus();
+    fireEvent.keyDown(objective(), { key: "Enter", ctrlKey: true });
+    expect(onRun).not.toHaveBeenCalled();
+  });
+
+  it("focused, the box is described by the objective it resolves to", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.taskPromptDefault, TEMPLATE);
+    renderBanner();
+
+    // Idle, the value already is what will be sent.
+    expect(objective()).not.toHaveAttribute("aria-describedby");
+
+    await user.click(objective());
+    await user.type(objective(), " now");
+    const id = objective().getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    const preview = document.getElementById(id!);
+    expect(preview?.textContent).toBe(`${RESOLVED} now`);
+    expect(preview).toHaveClass("objective-field-preview");
+    expect(objective()).toHaveAccessibleDescription(`${RESOLVED} now`);
+
+    await user.tab();
+    expect(objective()).not.toHaveAttribute("aria-describedby");
+  });
+
   it("an unchanged blur writes nothing", async () => {
     const user = userEvent.setup();
     renderBanner();
