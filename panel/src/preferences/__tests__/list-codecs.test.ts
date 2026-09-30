@@ -47,6 +47,20 @@ describe("composer.shortcuts codec", () => {
     expect(read()).toEqual(DEFAULT_COMPOSER_SHORTCUTS);
   });
 
+  it("a non-array stored value falls back to the default", () => {
+    seed(KEY, { label: "Yes", text: "yes" });
+    expect(read()).toEqual(DEFAULT_COMPOSER_SHORTCUTS);
+  });
+
+  it("a shortcut whose label or text is only whitespace is dropped", () => {
+    seed(KEY, [
+      { label: "  ", text: "yes" },
+      { label: "OK", text: "ok" },
+      { label: "Go", text: " \t " },
+    ]);
+    expect(read()).toEqual([{ label: "OK", text: "ok" }]);
+  });
+
   it("an empty list stays empty", () => {
     seed(KEY, []);
     expect(read()).toEqual([]);
@@ -86,6 +100,20 @@ describe("terminal.launchers codec", () => {
   it("a stored null falls back to the default", () => {
     seed(KEY, null);
     expect(read()).toEqual(DEFAULT_TERMINAL_LAUNCHERS);
+  });
+
+  it("a non-array stored value falls back to the default", () => {
+    seed(KEY, { name: "claude", command: "claude" });
+    expect(read()).toEqual(DEFAULT_TERMINAL_LAUNCHERS);
+  });
+
+  it("a launcher whose name or command is only whitespace is dropped", () => {
+    seed(KEY, [
+      { name: "  ", command: "claude" },
+      { name: "codex", command: "codex" },
+      { name: "opencode", command: "  " },
+    ]);
+    expect(read()).toEqual([{ name: "codex", command: "codex" }]);
   });
 
   it("an empty list stays empty", () => {

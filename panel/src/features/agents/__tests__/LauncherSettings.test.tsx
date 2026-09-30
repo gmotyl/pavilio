@@ -839,6 +839,43 @@ describe("LauncherSettings", () => {
       ]);
     });
 
+    /**
+     * The write guards. A write elsewhere that lands after the row last
+     * rendered — the store notified, React not yet re-rendered — leaves the
+     * row's handlers holding the entry it SHOWED. Written at its index without
+     * the guard, the edit (or the removal) would hit whatever sits there now.
+     * `writePreference` outside `act` is that gap: the hook's latest value moves
+     * at once, the render waits.
+     */
+    it("an edit committed after a write elsewhere moved its entry writes nothing", async () => {
+      const user = userEvent.setup();
+      const a = { name: "alpha", command: "alpha" };
+      const b = { name: "beta", command: "beta" };
+      writePreference(preferences.terminalLaunchers, [a, b]);
+      render(<LauncherSettings />);
+
+      await user.click(commandFields()[0]);
+      await user.type(commandFields()[0], " X");
+      const field = commandFields()[0];
+      writePreference(preferences.terminalLaunchers, [b]);
+      fireEvent.blur(field);
+
+      expect(stored()).toEqual([b]);
+    });
+
+    it("a removal clicked after a write elsewhere moved its entry removes nothing", () => {
+      const a = { name: "alpha", command: "alpha" };
+      const b = { name: "beta", command: "beta" };
+      writePreference(preferences.terminalLaunchers, [a, b]);
+      render(<LauncherSettings />);
+
+      const remove = screen.getByTestId("launcher-remove-0");
+      writePreference(preferences.terminalLaunchers, [b]);
+      fireEvent.click(remove);
+
+      expect(stored()).toEqual([b]);
+    });
+
     it("an unfocused row follows it", () => {
       writePreference(preferences.terminalLaunchers, [
         { name: "claude", command: "claude", runLoop: "/goal {prompt}" },

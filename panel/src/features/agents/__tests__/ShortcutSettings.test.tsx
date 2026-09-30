@@ -190,6 +190,36 @@ describe("ShortcutSettings", () => {
       expect(stored()).toEqual([{ label: "B2", text: "beta" }, c]);
     });
 
+    /**
+     * The write guards: a write elsewhere that the store has notified but React
+     * has not yet rendered (`writePreference` outside `act`) leaves the row's
+     * handlers holding the entry it showed; they must not hit its successor.
+     */
+    it("an edit committed after a write elsewhere moved its entry writes nothing", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.composerShortcuts, [a, b]);
+      render(<ShortcutSettings />);
+
+      await user.click(textFields()[0]);
+      await user.type(textFields()[0], " X");
+      const field = textFields()[0];
+      writePreference(preferences.composerShortcuts, [b]);
+      fireEvent.blur(field);
+
+      expect(stored()).toEqual([b]);
+    });
+
+    it("a removal clicked after a write elsewhere moved its entry removes nothing", () => {
+      writePreference(preferences.composerShortcuts, [a, b]);
+      render(<ShortcutSettings />);
+
+      const remove = screen.getByTestId("shortcut-remove-0");
+      writePreference(preferences.composerShortcuts, [b]);
+      fireEvent.click(remove);
+
+      expect(stored()).toEqual([b]);
+    });
+
     it("a label changed elsewhere survives a text edit on the same row", async () => {
       const user = userEvent.setup();
       writePreference(preferences.composerShortcuts, [a, b]);
