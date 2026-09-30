@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Plus, X } from "lucide-react";
 
 import {
@@ -85,22 +85,51 @@ function promptFlagDraftOf(entry: TerminalLauncher): string {
   return entry.promptFlag ?? "";
 }
 
+type Drafts = { name: string; command: string; promptFlag: string; runLoop: string };
+
+function draftsOf(entry: TerminalLauncher): Drafts {
+  return {
+    name: entry.name,
+    command: entry.command,
+    promptFlag: promptFlagDraftOf(entry),
+    runLoop: runLoopDraftOf(entry),
+  };
+}
+
+function sameDrafts(a: Drafts, b: Drafts): boolean {
+  return (
+    a.name === b.name &&
+    a.command === b.command &&
+    a.promptFlag === b.promptFlag &&
+    a.runLoop === b.runLoop
+  );
+}
+
 /**
  * Builds a row's next entry from its drafts, or `null` when a required half is
- * blank. The optional keys are carried over exactly as stored unless their
- * field was edited, so an untouched field never grows a key.
+ * blank. A field counts as edited when its draft differs from `base` — the
+ * entry the drafts were last filled from — and only edited fields are applied,
+ * on top of the CURRENT `entry`. So an untouched field never grows a key, and
+ * a field another tab changed while this row was being edited keeps that
+ * change instead of being written back with the row's stale draft.
  */
 function toRowEntry(
   entry: TerminalLauncher,
-  drafts: { name: string; command: string; promptFlag: string; runLoop: string },
+  base: TerminalLauncher,
+  drafts: Drafts,
 ): TerminalLauncher | null {
-  const next: TerminalLauncher = { name: drafts.name.trim(), command: drafts.command.trim() };
+  const name = drafts.name.trim();
+  const command = drafts.command.trim();
+  const next: TerminalLauncher = {
+    name: name !== base.name ? name : entry.name,
+    command: command !== base.command ? command : entry.command,
+  };
   if (!next.name || !next.command) return null;
   const flag = drafts.promptFlag.trim();
-  if (flag !== promptFlagDraftOf(entry).trim()) next.promptFlag = flag;
+  if (flag !== promptFlagDraftOf(base).trim()) next.promptFlag = flag;
   else if (entry.promptFlag !== undefined) next.promptFlag = entry.promptFlag;
   const loop = drafts.runLoop.trim();
-  if (loop !== runLoopDraftOf(entry).trim()) next.runLoop = loop;
+  if (loop !== runLoopDraftOf(base).trim()) next.runLoop = loop;
   else if (entry.runLoop !== undefined) next.runLoop = entry.runLoop;
   return next;
 }
@@ -147,26 +176,40 @@ function LauncherRow({
   const [command, setCommand] = useState(entry.command);
   const [promptFlag, setPromptFlag] = useState(promptFlagDraftOf(entry));
   const [runLoop, setRunLoop] = useState(runLoopDraftOf(entry));
+  // The entry the drafts were last filled from, and whether focus is inside
+  // the row. Together they say whether the row holds an edit in progress.
+  const [base, setBase] = useState(entry);
+  const [focused, setFocused] = useState(false);
 
-  const restoreDrafts = () => {
-    setName(entry.name);
-    setCommand(entry.command);
-    setPromptFlag(promptFlagDraftOf(entry));
-    setRunLoop(runLoopDraftOf(entry));
+  const restoreDrafts = (from: TerminalLauncher) => {
+    setBase(from);
+    setName(from.name);
+    setCommand(from.command);
+    setPromptFlag(promptFlagDraftOf(from));
+    setRunLoop(runLoopDraftOf(from));
   };
 
   /**
-   * The stored entry can change under a row that is not being edited — another
-   * tab's write, or a removal shifting every later row up one index — so the
-   * drafts follow it. A rejected edit restores them directly instead: the entry
-   * did not change there, so nothing would re-run this.
+   * The stored entry can change under the row — another tab's write, or a
+   * removal shifting every later row up one index — so the drafts follow it,
+   * UNLESS the user is mid-edit here: focus is in the row and a draft differs
+   * from what it was filled from. That edit is kept (and applied on top of the
+   * new entry by `toRowEntry`), and the drafts catch up once focus leaves the
+   * row. Adjusted during render rather than in an effect, so the stale drafts
+   * never paint. A rejected edit restores them directly: the entry did not
+   * change there, so nothing here would.
    */
-  useEffect(restoreDrafts, [entry.name, entry.command, entry.promptFlag, entry.runLoop]);
+  if (!sameEntry(entry, base)) {
+    const drafts = { name, command, promptFlag, runLoop };
+    const editing = focused && !sameDrafts(drafts, draftsOf(base));
+    if (sameDrafts(drafts, draftsOf(entry))) setBase(entry);
+    else if (!editing) restoreDrafts(entry);
+  }
 
   const commit = () => {
-    const next = toRowEntry(entry, { name, command, promptFlag, runLoop });
+    const next = toRowEntry(entry, base, { name, command, promptFlag, runLoop });
     if (!next) {
-      restoreDrafts();
+      restoreDrafts(entry);
       return;
     }
     if (sameEntry(next, entry)) return;
@@ -221,7 +264,14 @@ function LauncherRow({
     entry.promptFlag.trim() !== shipped?.promptFlag;
 
   return (
-    <li className="flex flex-wrap items-start gap-2" data-testid={`launcher-row-${index}`}>
+    <li
+      className="flex flex-wrap items-start gap-2"
+      data-testid={`launcher-row-${index}`}
+      onFocus={() => setFocused(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+      }}
+    >
       <input
         aria-label={`Launcher ${index + 1} name`}
         data-testid={`launcher-name-${index}`}

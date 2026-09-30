@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { LauncherSettings } from "../LauncherSettings";
@@ -654,6 +654,70 @@ describe("LauncherSettings", () => {
       await user.click(screen.getByRole("button", { name: "Add launcher" }));
       expect(stored()).toEqual(DEFAULTS);
       expect(nameFields()).toHaveLength(3);
+    });
+  });
+
+  describe("a write from elsewhere", () => {
+    it("does not clobber a row being edited", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.terminalLaunchers, [
+        { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+      ]);
+      render(<LauncherSettings />);
+
+      await user.click(commandFields()[0]);
+      await user.type(commandFields()[0], " --verbose");
+      act(() =>
+        writePreference(preferences.terminalLaunchers, [
+          { name: "claude", command: "claude", runLoop: "/goal again {prompt}" },
+        ]),
+      );
+
+      // The field being typed into keeps its text.
+      expect(commandFields()[0]).toHaveValue("claude --verbose");
+
+      // Leaving the row applies only the edited field, on top of the other
+      // tab's write: its run loop is not overwritten with the stale draft.
+      await user.click(document.body);
+      expect(stored()).toEqual([
+        { name: "claude", command: "claude --verbose", runLoop: "/goal again {prompt}" },
+      ]);
+      expect(runLoopFields()[0]).toHaveValue("/goal again {prompt}");
+    });
+
+    it("an unfocused row follows it", () => {
+      writePreference(preferences.terminalLaunchers, [
+        { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+      ]);
+      render(<LauncherSettings />);
+
+      act(() =>
+        writePreference(preferences.terminalLaunchers, [
+          { name: "claude", command: "claude -c", runLoop: "/goal again {prompt}" },
+        ]),
+      );
+      expect(commandFields()[0]).toHaveValue("claude -c");
+      expect(runLoopFields()[0]).toHaveValue("/goal again {prompt}");
+    });
+
+    it("a focused row with no edit follows it", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.terminalLaunchers, [
+        { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+      ]);
+      render(<LauncherSettings />);
+
+      await user.click(commandFields()[0]);
+      act(() =>
+        writePreference(preferences.terminalLaunchers, [
+          { name: "claude", command: "claude -c", runLoop: "/goal {prompt}" },
+        ]),
+      );
+      expect(commandFields()[0]).toHaveValue("claude -c");
+      await user.tab();
+      expect(stored()).toEqual([
+        { name: "claude", command: "claude -c", runLoop: "/goal {prompt}" },
+      ]);
     });
   });
 

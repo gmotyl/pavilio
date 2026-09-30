@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import AgentSettings from "../AgentSettings";
@@ -114,5 +114,39 @@ describe("DefaultObjectiveSettings", () => {
     await user.tab();
 
     expect(KEY in globals.__PAVILIO_PREFS__!).toBe(false);
+  });
+
+  describe("a write from elsewhere", () => {
+    it("does not clobber an edit in progress", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.taskPromptDefault, "Stored {path}.");
+      render(<DefaultObjectiveSettings />);
+
+      await user.click(field());
+      await user.type(field(), " Mine");
+      act(() => writePreference(preferences.taskPromptDefault, "Other tab {change}."));
+
+      // The focused, edited field keeps the user's text…
+      expect(field().value).toBe("Stored {path}. Mine");
+      // …and leaving it saves that text as the last word.
+      await user.tab();
+      expect(globals.__PAVILIO_PREFS__![KEY]).toBe("Stored {path}. Mine");
+      expect(field().value).toBe("Stored {path}. Mine");
+    });
+
+    it("a focused field with no edit follows it, and so does an unfocused one", async () => {
+      const user = userEvent.setup();
+      writePreference(preferences.taskPromptDefault, "Stored {path}.");
+      render(<DefaultObjectiveSettings />);
+
+      act(() => writePreference(preferences.taskPromptDefault, "First {change}."));
+      expect(field().value).toBe("First {change}.");
+
+      await user.click(field());
+      act(() => writePreference(preferences.taskPromptDefault, "Second {change}."));
+      expect(field().value).toBe("Second {change}.");
+      await user.tab();
+      expect(globals.__PAVILIO_PREFS__![KEY]).toBe("Second {change}.");
+    });
   });
 });

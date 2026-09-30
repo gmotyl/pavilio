@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { preferences } from "../../preferences/declarations";
 import { clearPreference } from "../../preferences/store";
@@ -16,10 +16,20 @@ import { usePreference } from "../../preferences/usePreference";
 export function DefaultObjectiveSettings() {
   const [template, setTemplate] = usePreference(preferences.taskPromptDefault);
   const [draft, setDraft] = useState(template);
+  // The stored value the draft was last filled from, and whether the field has
+  // focus: together they say whether an edit is in progress.
+  const [base, setBase] = useState(template);
+  const [focused, setFocused] = useState(false);
 
-  // The stored value can change under an unfocused field — another tab's
-  // write, or the clear below — so the draft follows it.
-  useEffect(() => setDraft(template), [template]);
+  // The stored value can change under the field — another tab's write, or the
+  // clear below — so the draft follows it, UNLESS the user is mid-edit (focused
+  // and changed from what it was filled from). That edit is kept, and saving
+  // it on blur is the user's last word; a clean draft catches up on blur.
+  // Adjusted during render rather than in an effect, so stale text never paints.
+  if (template !== base && !(focused && draft !== base)) {
+    setBase(template);
+    setDraft(template);
+  }
 
   const commit = () => {
     if (draft === template) return;
@@ -47,7 +57,11 @@ export function DefaultObjectiveSettings() {
         data-testid="default-objective"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          commit();
+        }}
         rows={2}
         className="w-full text-sm px-2 py-1 rounded font-mono resize-y"
         style={{
