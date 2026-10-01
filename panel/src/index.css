@@ -1866,8 +1866,22 @@ input[type="checkbox"] {
   pointer-events: none;
 }
 
+/* The right padding is the corner's: Copy as Markdown sits over the body's
+   top-right, and without it the first line runs under the icon. */
 .answer-pane-text {
   min-width: 0;
+  padding-right: 20px;
+}
+
+/* Copy as Markdown, pinned to the pane's top-right corner. A child of the pane
+   (itself positioned), not of the scroll box, so it does not move with the
+   text, and stacked above the body. Always visible — there is no hover to wait
+   for on touch, and the answer is always there to copy. */
+.answer-pane-copy-all {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 3;
 }
 
 /* The spoken block carries `data-speaking` for tests and semantics, but draws

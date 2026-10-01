@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Pause, Play } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
+import { CopyIconButton } from "../shell/CopyIconButton";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { ANSWER_PANE_FULL_HEIGHT, preferences } from "../../preferences/declarations";
@@ -792,6 +793,19 @@ export function AnswerPane({
           </>
         )}
       </div>
+      {/* Copy as Markdown: the answer's SOURCE, with its `#`, links and fences
+          intact. Pinned to the pane's corner OUTSIDE the scroll box, so it
+          stays put while the text scrolls and is always visible (touch
+          included). Absent while the body waits: what it would copy is the
+          answer the wait has already handed away. The button stops its own
+          click, so a copy never reaches anything that plays. After the body
+          in the DOM: absolutely positioned, it is no row of the column, and
+          the body stays the column's first row. */}
+      {answer && !waiting ? (
+        <span className="answer-pane-copy-all">
+          <CopyIconButton value={answer.text} label="Copy answer as Markdown" />
+        </span>
+      ) : null}
       {/* The pane's switch, directly under the text and ABOVE the composer.
           design.md's order, and the reason for it: the composer is the reply,
           so the switch that decides what the pane does belongs with the pane
