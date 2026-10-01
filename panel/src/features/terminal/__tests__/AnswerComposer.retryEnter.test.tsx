@@ -139,6 +139,7 @@ let connectionState: ConnectionState = "connected";
 // The pool is somebody else's subject and jsdom has no socket under any of it.
 // What is replaced is exactly the entry points this gesture reaches.
 vi.mock("../terminalInstances", () => ({
+  bracketedPasteOn: () => false,
   sendDismiss: () => {},
   reconnectOnActivate: () => {},
   getConnectionState: () => connectionState,

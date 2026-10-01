@@ -73,6 +73,7 @@ let connectionState: ConnectionState = "disconnected";
 // this. What is replaced is exactly the entry points this gesture reaches, so
 // the handshake can be answered by hand.
 vi.mock("../terminalInstances", () => ({
+  bracketedPasteOn: () => false,
   sendDismiss: () => {},
   reconnectOnActivate: () => {},
   getConnectionState: () => connectionState,

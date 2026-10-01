@@ -36,6 +36,32 @@
  * already decided on. Nothing here reads or changes the answer pane's waiting
  * state, whose exits stay the events `answerWaiting.ts` documents.
  *
+ * ## Why the body goes as a bracketed paste
+ *
+ * Splitting the return off is not enough for codex. Its composer treats an
+ * Enter that arrives within `PASTE_ENTER_SUPPRESS_WINDOW` — 120 ms — of a
+ * paste-like burst of input as a newline, not a submit, and our body arriving
+ * as one fast chunk IS such a burst: {@link SUBMIT_RETURN_MS} lands well inside
+ * the window, so a reply from the answer composer sat in codex's prompt as a
+ * new line instead of running. Lengthening the gap past 120 ms would make
+ * every send feel lagged and would still be a guess about someone else's
+ * timing.
+ *
+ * What codex does honour is a REAL paste: after a bracketed paste it runs
+ * `clear_after_explicit_paste`, which drops the burst state, so the Enter that
+ * follows submits. So when the cell has asked for bracketed paste (DECSET 2004,
+ * read off the cell's own xterm by `bracketedPasteOn`), the body is sent the
+ * way the terminal would send a paste — between `ESC[200~` and `ESC[201~` —
+ * with any `ESC[201~` already inside it removed, because an embedded end marker
+ * would close the paste early and hand the rest to the TUI as keystrokes. A
+ * cell that never asked for the mode gets the body raw, exactly as before:
+ * the markers would reach it as literal text. The return is untouched — still
+ * its own frame, still {@link SUBMIT_RETURN_MS} behind.
+ *
+ * The mode is read when the body is WRITTEN, not when the submit was asked
+ * for, because a queued submit is written later and the TUI may have changed
+ * its mind in between.
+ *
  * ## Why the queue
  *
  * Two submits in quick succession — the send button pressed twice, a pill and
@@ -175,6 +201,7 @@
  */
 
 import {
+  bracketedPasteOn,
   getConnectionState,
   hasExited,
   onConnectionChange,
@@ -183,6 +210,19 @@ import {
 
 /** The submitting return itself — the key the TUI runs a line on. */
 const RETURN = "\r";
+
+/** The bracketed-paste markers a terminal wraps a paste in (DECSET 2004). */
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
+
+/**
+ * The frame `body` is written as: a bracketed paste when the cell has mode
+ * 2004 on (see "Why the body goes as a bracketed paste" above), else verbatim.
+ */
+function bodyFrame(sessionId: string, body: string): string {
+  if (!bracketedPasteOn(sessionId)) return body;
+  return PASTE_START + body.replaceAll(PASTE_END, "") + PASTE_END;
+}
 
 /**
  * How long the return waits behind its body.
@@ -525,7 +565,9 @@ function reconnectAndRetry(sessionId: string, submission: Submission): void {
   reconnectWaits.set(sessionId, stopWaiting);
 }
 
-function write(sessionId: string, submission: Submission): void {
+function write(sessionId: string, queued: Submission): void {
+  // Framed here, at the write, so the reconnect retry resends the same frame.
+  const submission = { ...queued, body: bodyFrame(sessionId, queued.body) };
   if (submission.send(submission.body)) {
     deliver(sessionId, submission);
     return;
@@ -548,8 +590,10 @@ function write(sessionId: string, submission: Submission): void {
  * call time — and one of them wraps it (the answer pane). `sessionId` is only
  * the queue's key.
  *
- * `body` is written verbatim and is never trimmed or split: its newlines are
- * the user's, and a per-line write would submit each line separately.
+ * `body` is never trimmed or split: its newlines are the user's, and a
+ * per-line write would submit each line separately. It is written verbatim,
+ * or as one bracketed paste when the cell has mode 2004 on (see "Why the body
+ * goes as a bracketed paste" above).
  *
  * `report` is how a caller hears what became of the submit — see
  * {@link SubmitReport}. Every member is optional because not every caller has
