@@ -90,6 +90,14 @@ const SAMPLES: Record<string, readonly unknown[]> = {
     ],
   ],
   "terminal.grid": [[], [{ id: "sess-1", x: 0, y: 0, w: 1, h: 1 }]],
+  "composer.shortcuts": [
+    [],
+    [{ label: "Yes", text: "yes" }],
+    [
+      { label: "Go on", text: "continue" },
+      { label: "240", text: "/pavilio-grill" },
+    ],
+  ],
 
   // ── json whose payload can be a BARE STRING — the shape that breaks a
   //    bridge keyed off the declared default rather than off the codec ─────
@@ -101,7 +109,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 42;
+const DECLARATION_COUNT = 43;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

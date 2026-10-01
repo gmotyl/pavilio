@@ -8,6 +8,7 @@ import { __resetPreferenceStoreForTests, readPreference, writePreference } from 
  * comparing it against itself would assert nothing at all.
  */
 const PORTABLE = [
+  "composer.shortcuts",
   "fileList.paneWidth",
   "fileList.sidebarCollapsed",
   "fileList.sort",
@@ -95,6 +96,14 @@ const NOT_YET_DECLARED: readonly string[] = [];
  * change flips it.
  */
 const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
+  [
+    "composer.shortcuts",
+    [
+      { label: "Yes", text: "yes" },
+      { label: "OK", text: "ok" },
+    ],
+    "global",
+  ],
   ["fileList.paneWidth", 288, "global"],
   ["fileList.sidebarCollapsed", false, "global"],
   ["fileList.sort", { sortKey: "date", sortDir: "desc" }, "global"],
@@ -113,7 +122,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["plans.runBanner.launcher", null, "global"],
   [
     "plans.taskPrompt",
-    "Implement all tasks in {path}; done when every task is checked and tests + lint pass.",
+    "pavilio-execute-plan Implement all tasks in {path}; done when every task is checked and tests + lint pass.",
     "global",
   ],
   // `null` is "no override": the read falls through to `plans.taskPrompt`.
@@ -147,9 +156,9 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   [
     "terminal.launchers",
     [
-      { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
-      { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
-      { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
+      { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+      { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
+      { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
     ],
     "global",
   ],
@@ -327,9 +336,9 @@ describe("the launcher list and the answer composer", () => {
     // that export IS the declared default, so comparing it to itself would
     // assert nothing — including that the order survived the read.
     expect(readPreference(preferences.terminalLaunchers)).toEqual([
-      { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
-      { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
-      { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
+      { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+      { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
+      { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
     ]);
   });
 

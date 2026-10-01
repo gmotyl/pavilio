@@ -8,6 +8,9 @@
  * variables (this change, this file, this project) and the launcher's wrapper.
  */
 
+import type { TerminalLauncher } from "../../preferences/declarations";
+import { resolveRunLoop } from "../agents/launcherRunLoop";
+
 const PROMPT = "{prompt}";
 
 /** Substitutes `{change}`, `{path}` and `{project}` into the stored objective template. */
@@ -20,61 +23,75 @@ export function resolveObjective(
   return template.replace(/\{(change|path|project)\}/g, (_, name: keyof typeof vars) => vars[name]);
 }
 
-type QuoteState = "bare" | "single" | "double";
-
 /**
- * The objective, written so the shell hands it to the CLI as the text the
- * user saw, for whichever quoting the run loop put around `{prompt}`.
- *
- * Line breaks and every other control character fold to spaces first: the
- * line is typed into a PTY, where each is a keystroke. A newline is a return,
- * and a return inside an open quote leaves the shell at a continuation prompt
- * rather than starting the agent; a tab asks for completion; ESC, ^C, ^D and
- * DEL edit or abort the line being typed.
+ * Maps an offset in the RESOLVED objective to the same place in its template,
+ * for a caret that has to survive the box swapping one for the other. The
+ * template is a run of literal text and placeholders; each placeholder expands
+ * to its value. Literal text maps one to one, shifted by what the placeholders
+ * before it grew or shrank by. An offset strictly inside a placeholder's value
+ * — or at its end — maps to the end of the placeholder's token, since the
+ * value has no counterpart position in the token; right before a value is
+ * right before its token.
  */
-function quoteFor(state: QuoteState, objective: string): string {
-  const text = objective.replace(/\r\n|[\u0000-\u001f\u007f]/g, " ");
-  if (state === "double") {
-    // Inside "…" these four keep a meaning: `"` ends the string, `$` and a
-    // backtick expand, `\` escapes. `!` is worse — an interactive bash or zsh
-    // history-expands it, and a backslash before it stays in the text — so a
-    // bang steps out into a single-quoted `'!'`, where it is inert in both.
-    return text.replace(/(["\\$`])/g, "\\$1").replace(/!/g, `"'!'"`);
+export function templateOffset(
+  template: string,
+  vars: { change: string; path: string; project: string },
+  resolvedOffset: number,
+): number {
+  let resolved = 0;
+  let at = 0;
+  for (const match of template.matchAll(/\{(change|path|project)\}/g)) {
+    const literal = match.index - at;
+    if (resolvedOffset <= resolved + literal) return at + (resolvedOffset - resolved);
+    resolved += literal;
+    at = match.index;
+    const value = vars[match[1] as keyof typeof vars].length;
+    if (resolvedOffset <= resolved + value) return at + match[0].length;
+    resolved += value;
+    at += match[0].length;
   }
-  // Inside '…' nothing is special but the closing quote, spelt `'\''`.
-  const single = text.replace(/'/g, `'\\''`);
-  // A bare `{prompt}` gets a single-quoted word of its own, so the objective
-  // stays one argument.
-  return state === "single" ? single : `'${single}'`;
+  return Math.min(template.length, at + (resolvedOffset - resolved));
 }
 
-/** Substitutes `{prompt}` into the launcher's run loop. */
-export function composeRunLine(runLoop: string, objective: string): string {
-  // A small scan rather than a split: the escaping depends on the quote the
-  // run loop has open AT the placeholder, which only a left-to-right read of
-  // the shell's own quoting rules can tell.
-  let out = "";
-  let state: QuoteState = "bare";
-  let i = 0;
-  while (i < runLoop.length) {
-    if (runLoop.startsWith(PROMPT, i)) {
-      out += quoteFor(state, objective);
-      i += PROMPT.length;
-      continue;
-    }
-    const ch = runLoop[i];
-    if (ch === "\\" && state !== "single") {
-      // An escaped character is copied as-is and cannot open or close a quote.
-      out += runLoop.slice(i, i + 2);
-      i += 2;
-      continue;
-    }
-    if (ch === "'" && state !== "double") state = state === "single" ? "bare" : "single";
-    else if (ch === '"' && state !== "single") state = state === "double" ? "bare" : "double";
-    out += ch;
-    i += 1;
-  }
-  return out;
+/**
+ * Folds line breaks and every other control character to spaces. The line is
+ * typed into a PTY, where each is a keystroke: a newline is a return, and a
+ * return inside an open quote leaves the shell at a continuation prompt rather
+ * than starting the agent; a tab asks for completion; ESC, ^C, ^D and DEL edit
+ * or abort the line being typed.
+ */
+function fold(text: string): string {
+  return text.replace(/\r\n|[\u0000-\u001f\u007f]/g, " ");
+}
+
+/**
+ * Text written inside a single-quoted shell word. Inside '…' nothing is
+ * special but the closing quote, spelt `'\''` — not `$`, not a backtick, and
+ * not `!`, which an interactive bash or zsh leaves alone there.
+ */
+function inSingleQuotes(text: string): string {
+  return fold(text).replace(/'/g, `'\\''`);
+}
+
+/** `command [promptFlag] '` — everything the line holds before the start prompt's text. */
+function head(command: string, promptFlag: string): string {
+  return `${[command.trim(), promptFlag.trim()].filter(Boolean).join(" ")} '`;
+}
+
+/**
+ * `command [promptFlag] '<runLoop with objective>'` — the start prompt
+ * single-quoted as one argument after control characters fold to spaces.
+ * Every `{prompt}` is filled with the same objective; a run loop without one
+ * is still sent, as one quoted argument of its own.
+ */
+export function composeRunLine(
+  command: string,
+  promptFlag: string,
+  runLoop: string,
+  objective: string,
+): string {
+  const segments = runLoop.split(PROMPT).map(inSingleQuotes);
+  return `${head(command, promptFlag)}${segments.join(inSingleQuotes(objective))}'`;
 }
 
 /** Whether the launcher's run loop has anywhere to put the objective. */
@@ -86,17 +103,34 @@ export function takesPrompt(runLoop: string): boolean {
 export const OBJECTIVE_MARKER = "«objective»";
 
 /**
- * The launcher's wrapper, cut at the first `{prompt}`, for drawing around the
- * editable objective. A run loop with no placeholder is all wrapper. A later
- * `{prompt}` is drawn as {@link OBJECTIVE_MARKER}, since `composeRunLine`
- * fills every one and the drawing must not show a placeholder the sent line
- * will not contain.
+ * The composed line around the editable objective, for drawing: `before` +
+ * the objective + `after` is exactly what {@link composeRunLine} sends for an
+ * objective with nothing to escape, because both are built from the same
+ * head and the same escaped run-loop segments. A run loop with no placeholder
+ * is all wrapper. A later `{prompt}` is drawn as {@link OBJECTIVE_MARKER},
+ * since the send fills every one and the drawing must not show a placeholder
+ * the sent line will not contain.
  */
-export function splitRunLoop(runLoop: string): { before: string; after: string } {
-  const at = runLoop.indexOf(PROMPT);
-  if (at < 0) return { before: runLoop, after: "" };
-  return {
-    before: runLoop.slice(0, at),
-    after: runLoop.slice(at + PROMPT.length).split(PROMPT).join(OBJECTIVE_MARKER),
-  };
+export function runLineParts(
+  command: string,
+  promptFlag: string,
+  runLoop: string,
+): { before: string; after: string } {
+  const [first, ...rest] = runLoop.split(PROMPT).map(inSingleQuotes);
+  const lead = `${head(command, promptFlag)}${first}`;
+  if (rest.length === 0) return { before: `${lead}'`, after: "" };
+  return { before: lead, after: `${rest.join(OBJECTIVE_MARKER)}'` };
+}
+
+/**
+ * The line a task run types for `launcher`, built from its RESOLVED run loop
+ * and flag ({@link resolveRunLoop}) — or null when it has none ready: a
+ * launcher not offered for runs, or one whose run loop is a whole command
+ * line, which would spawn the CLI inside its own argument. Null is never
+ * spawned.
+ */
+export function taskRunLine(launcher: TerminalLauncher, objective: string): string | null {
+  const state = resolveRunLoop(launcher);
+  if (state.kind !== "ready") return null;
+  return composeRunLine(launcher.command, state.promptFlag, state.runLoop, objective);
 }

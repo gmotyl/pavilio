@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { RunBanner } from "../RunBanner";
@@ -8,10 +8,13 @@ import { preferences, type TerminalLauncher } from "../../../preferences/declara
 import {
   __resetPreferenceStoreForTests,
   PREFERENCE_PATCH_DEBOUNCE_MS,
+  readPreference,
   writePreference,
 } from "../../../preferences/store";
 import { writeOverride } from "../../../preferences/overridable";
 import { storageKey } from "../../../preferences/types";
+import { MemoryRouter } from "react-router-dom";
+import { taskRunLine } from "../runPrompt";
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
@@ -44,8 +47,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function renderBanner(onRun: (runLine: string) => void = vi.fn()) {
-  render(<RunBanner status={STATUS} project="pavilio" path={PATH} onRun={onRun} />);
+/**
+ * `onRun` receives the launcher and the objective; the spy is handed the line
+ * the Plans tab would compose from them, so what is asserted is what is sent.
+ */
+function renderBanner(onRun: (runLine: string | null) => void = vi.fn()) {
+  render(
+    <MemoryRouter>
+      <RunBanner
+        status={STATUS}
+        project="pavilio"
+        path={PATH}
+        onRun={(run) => onRun(taskRunLine(run.launcher, run.objective))}
+      />
+    </MemoryRouter>,
+  );
   return onRun;
 }
 
@@ -88,13 +104,8 @@ describe("RunBanner", () => {
     expect(objective().value).not.toMatch(/\{(change|path|project)\}/);
   });
 
-  it("an edit to the objective is used for the send and stored nowhere", async () => {
+  it("an edit to the objective is saved for this project and used for the send", async () => {
     const user = userEvent.setup();
-    // Nothing is written before the snapshot: a write here would queue its own
-    // debounced PATCH and land inside the window this test watches.
-    const before = structuredClone(globals.__PAVILIO_PREFS__);
-    const localBefore = localStorage.length;
-    fetchMock.mockClear();
     const onRun = renderBanner(vi.fn());
 
     await user.clear(objective());
@@ -102,25 +113,85 @@ describe("RunBanner", () => {
     await user.click(screen.getByRole("button", { name: "Run" }));
 
     expect(onRun).toHaveBeenCalledTimes(1);
-    expect(onRun).toHaveBeenCalledWith('claude "/goal Only do task 7"');
-    // No preference moved: the document, browser storage and the PATCH
-    // channel are all exactly as they were before the edit.
-    expect(globals.__PAVILIO_PREFS__).toEqual(before);
-    expect(localStorage.length).toBe(localBefore);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onRun).toHaveBeenCalledWith("claude '/goal Only do task 7'");
+    // The one-send rule is withdrawn: the edit is this project's objective now.
+    expect(readPreference(preferences.taskPromptOverride, "pavilio")).toBe("Only do task 7");
   });
 
-  it("a launcher with no run loop is not offered", () => {
+  it("only launchers with a ready run loop are offered", () => {
     writePreference(preferences.terminalLaunchers, [
+      // A PR #131 default reads as the shipped one: ready.
       LAUNCHERS[0],
-      { name: "codex", command: "codex" },
+      // No run loop and no shipped default for the name: none.
+      { name: "mytool", command: "mytool" },
+      // Blank, even under a shipped name: none.
+      { name: "codex", command: "codex", runLoop: "" },
       { name: "blank", command: "blank", runLoop: "   " },
-      LAUNCHERS[2],
+      // A whole line of the user's own: offered, so choosing it shows why it cannot run.
+      { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+      // No run loop key under a shipped name: the shipped default, ready.
+      { name: "opencode", command: "opencode" },
     ]);
     renderBanner();
 
-    expect(cliOptions()).toEqual(["claude", "opencode"]);
+    expect(cliOptions()).toEqual(["claude", "mine", "opencode"]);
+  });
+
+  it("the wrapper is the composed line", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, [
+      { name: "codex", command: "codex --no-daemon" },
+      { name: "opencode", command: "opencode" },
+    ]);
+    const onRun = renderBanner(vi.fn());
+
+    expect(screen.getByTestId("run-banner-wrapper-before").textContent).toBe(
+      "codex --no-daemon '/goal ",
+    );
+    expect(screen.getByTestId("run-banner-wrapper-after").textContent).toBe("'");
+
+    await user.click(screen.getByRole("button", { name: "opencode" }));
+    expect(screen.getByTestId("run-banner-wrapper-before").textContent).toBe(
+      "opencode --prompt '",
+    );
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(onRun).toHaveBeenCalledWith(`opencode --prompt '${objective().value}'`);
+  });
+
+  it("a whole-line launcher shows the warning and cannot run", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.terminalLaunchers, [
+      LAUNCHERS[0],
+      { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+    ]);
+    writePreference(preferences.plansRunLauncher, "mine");
+    const onRun = renderBanner(vi.fn());
+
+    expect(screen.getByRole("button", { name: "mine" })).toHaveAttribute("aria-pressed", "true");
+    const warning = screen.getByTestId("run-banner-blocked");
+    expect(warning.textContent).toMatch(/whole command line/i);
+    expect(within(warning).getByRole("link", { name: /settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    // The warning takes the wrapper's place: no line is drawn that would not run.
+    expect(screen.queryByTestId("run-banner-wrapper-before")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-banner-wrapper-after")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    await user.click(objective());
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(onRun).not.toHaveBeenCalled();
+
+    // Collapsed, the row still refuses.
+    await user.click(screen.getByTestId("run-banner-chevron"));
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+
+    // Back on a ready launcher, the wrapper and Run return.
+    await user.click(screen.getByRole("button", { name: "claude" }));
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
   });
 
   it("moving the switch redraws the wrapper and leaves the objective alone", async () => {
@@ -132,7 +203,7 @@ describe("RunBanner", () => {
     await user.click(screen.getByRole("button", { name: "codex" }));
     await user.clear(objective());
     await user.type(objective(), "My objective");
-    expect(wrapper()).toBe('codex "/goal ');
+    expect(wrapper()).toBe("codex '/goal ");
 
     await user.click(screen.getByRole("button", { name: "opencode" }));
 
@@ -140,12 +211,12 @@ describe("RunBanner", () => {
       "aria-pressed",
       "true",
     );
-    expect(wrapper()).toBe('opencode --prompt "');
-    expect(screen.getByTestId("run-banner-wrapper-after").textContent).toBe('"');
+    expect(wrapper()).toBe("opencode --prompt '");
+    expect(screen.getByTestId("run-banner-wrapper-after").textContent).toBe("'");
     expect(objective().value).toBe("My objective");
 
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun).toHaveBeenCalledWith('opencode --prompt "My objective"');
+    expect(onRun).toHaveBeenCalledWith("opencode --prompt 'My objective'");
   });
 
   it("the wrapper is not editable", () => {
@@ -183,7 +254,7 @@ describe("RunBanner", () => {
     await user.click(screen.getByRole("button", { name: "codex" }));
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(onRun).toHaveBeenCalledWith(
-      `codex "/goal Implement all tasks in ${PATH}; done when every task is checked and tests + lint pass."`,
+      `codex '/goal pavilio-execute-plan Implement all tasks in ${PATH}; done when every task is checked and tests + lint pass.'`,
     );
     // The fold itself is the one remembered toggle.
     expect(globals.__PAVILIO_PREFS__![storageKey(preferences.plansBannerExpanded)]).toBe(false);
@@ -203,13 +274,15 @@ describe("RunBanner", () => {
     const user = userEvent.setup();
     const onRun = renderBanner(vi.fn());
 
+    // Collapsing takes focus from the box, which saves the edit.
+    await user.click(objective());
     fireEvent.change(objective(), { target: { value: "Kept across the fold" } });
     await user.click(screen.getByRole("button", { name: "Collapse run banner" }));
     await user.click(screen.getByRole("button", { name: "Expand run banner" }));
 
     expect(objective().value).toBe("Kept across the fold");
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun).toHaveBeenCalledWith('claude "/goal Kept across the fold"');
+    expect(onRun).toHaveBeenCalledWith("claude '/goal Kept across the fold'");
   });
 
   it("Ctrl+Enter in the objective runs it", async () => {
@@ -246,13 +319,14 @@ describe("RunBanner", () => {
 
     expect(screen.getByRole("button", { name: "codex" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun.mock.calls[0][0]).toMatch(/^codex "\/goal /);
+    const [{ launcher, objective: sent }] = onRun.mock.calls[0];
+    expect(taskRunLine(launcher, sent)).toMatch(/^codex '\/goal /);
   });
 
   it("a remembered CLI that is no longer runnable falls back to the first", () => {
     writePreference(preferences.terminalLaunchers, [
       LAUNCHERS[0],
-      { name: "codex", command: "codex" },
+      { name: "codex", command: "codex", runLoop: "" },
       LAUNCHERS[2],
     ]);
     writePreference(preferences.plansRunLauncher, "codex");
@@ -276,7 +350,7 @@ describe("RunBanner", () => {
     expect(cliOptions()).toEqual(["opencode", "claude", "codex"]);
     expect(screen.getByRole("button", { name: "codex" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun.mock.calls[0][0]).toMatch(/^codex "\/goal /);
+    expect(onRun.mock.calls[0][0]).toMatch(/^codex '\/goal /);
   });
 
   it("the CLI switch is toggle buttons: one pressed, each reached by Tab and picked by Space", async () => {
@@ -300,13 +374,13 @@ describe("RunBanner", () => {
     expect(buttons[2]).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(buttons[2]).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("run-banner-wrapper-before").textContent).toBe('opencode --prompt "');
+    expect(screen.getByTestId("run-banner-wrapper-before").textContent).toBe("opencode --prompt '");
   });
 
   it("a run loop that takes no prompt disables the objective and says so", async () => {
     const user = userEvent.setup();
     writePreference(preferences.terminalLaunchers, [
-      { name: "resume", command: "claude", runLoop: "claude --continue" },
+      { name: "resume", command: "claude", runLoop: "/continue" },
     ]);
     const onRun = renderBanner(vi.fn());
 
@@ -314,22 +388,25 @@ describe("RunBanner", () => {
     expect(screen.getByText("This launcher's run loop takes no prompt")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Run" }));
     // What is read is what is sent: the run loop alone, no objective.
-    expect(onRun).toHaveBeenCalledWith("claude --continue");
+    expect(onRun).toHaveBeenCalledWith("claude '/continue'");
   });
 
   it("a later placeholder in the run loop is drawn as the objective, not as raw text", () => {
     writePreference(preferences.terminalLaunchers, [
-      { name: "tool", command: "tool", runLoop: 'tool "{prompt}" --title "{prompt}"' },
+      { name: "tool", command: "tool", runLoop: "{prompt} --title {prompt}" },
     ]);
     renderBanner();
 
     const after = screen.getByTestId("run-banner-wrapper-after").textContent;
-    expect(after).toBe('" --title "«objective»"');
+    expect(after).toBe(" --title «objective»'");
     expect(after).not.toContain("{prompt}");
   });
 
   it("offers no run when no launcher has a run loop", () => {
-    writePreference(preferences.terminalLaunchers, [{ name: "claude", command: "claude" }]);
+    writePreference(preferences.terminalLaunchers, [
+      { name: "claude", command: "claude", runLoop: "" },
+      { name: "mytool", command: "mytool" },
+    ]);
     renderBanner();
 
     expect(screen.queryByRole("group", { name: "CLI" })).not.toBeInTheDocument();
@@ -362,7 +439,7 @@ describe("RunBanner", () => {
   it("a run loop with no prompt stays runnable when the template resolves to blank", async () => {
     const user = userEvent.setup();
     writePreference(preferences.terminalLaunchers, [
-      { name: "resume", command: "claude", runLoop: "claude --continue" },
+      { name: "resume", command: "claude", runLoop: "/continue" },
     ]);
     writePreference(preferences.taskPromptDefault, "   ");
     const onRun = renderBanner(vi.fn());
@@ -370,12 +447,12 @@ describe("RunBanner", () => {
     expect(objective().value.trim()).toBe("");
     expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Run" }));
-    expect(onRun).toHaveBeenCalledWith("claude --continue");
+    expect(onRun).toHaveBeenCalledWith("claude '/continue'");
   });
 
   it("the footer offers no editing or shortcut while the objective is disabled", () => {
     writePreference(preferences.terminalLaunchers, [
-      { name: "resume", command: "claude", runLoop: "claude --continue" },
+      { name: "resume", command: "claude", runLoop: "/continue" },
     ]);
     renderBanner();
 
@@ -390,7 +467,68 @@ describe("RunBanner", () => {
     renderBanner();
 
     const foot = screen.getByTestId("run-banner-foot").textContent ?? "";
-    expect(foot).toContain("editable for this send");
+    expect(foot).toContain("saved for this project");
     expect(foot).toContain("⌘↵");
+  });
+});
+
+describe("RunBanner, done", () => {
+  const DONE: TaskListStatus = { changeId: STATUS.changeId, total: 6, remaining: 0 };
+
+  function renderDone(onRun = vi.fn()) {
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    render(
+      <MemoryRouter>
+        <RunBanner status={DONE} project="pavilio" path={PATH} onRun={onRun} />
+      </MemoryRouter>,
+    );
+    return onRun;
+  }
+
+  it("the done banner shows a check, the count and a full green bar", () => {
+    renderDone();
+
+    const banner = screen.getByRole("status", { name: "Change done" });
+    expect(within(banner).getByText("All 6 tasks done")).toBeInTheDocument();
+    expect(within(banner).getByTestId("run-banner-done-icon")).toBeInTheDocument();
+    const bar = within(banner).getByRole("progressbar", { name: "Tasks done" });
+    expect(bar).toHaveAttribute("aria-valuenow", "6");
+    expect(bar).toHaveAttribute("aria-valuemax", "6");
+    expect(bar.querySelectorAll("[data-segment]")).toHaveLength(6);
+    expect(bar.querySelectorAll('[data-segment="done"]')).toHaveLength(6);
+    expect(screen.queryByRole("region", { name: "Run this change" })).toBeNull();
+  });
+
+  it("the done banner offers no run", () => {
+    // Collapsed or not, the done banner is the same: the preference is not read.
+    for (const expanded of [true, false]) {
+      writePreference(preferences.plansBannerExpanded, expanded);
+      const onRun = renderDone();
+
+      expect(screen.getByText("All 6 tasks done")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+      expect(screen.queryByRole("group", { name: "CLI" })).toBeNull();
+      expect(screen.queryByRole("textbox", { name: "Objective" })).toBeNull();
+      expect(screen.queryByTestId("run-banner-chevron")).toBeNull();
+      expect(screen.queryAllByRole("button")).toHaveLength(0);
+      expect(onRun).not.toHaveBeenCalled();
+      cleanup();
+    }
+  });
+  it("a one-task change reads in the singular", () => {
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    render(
+      <MemoryRouter>
+        <RunBanner
+          status={{ changeId: STATUS.changeId, total: 1, remaining: 0 }}
+          project="pavilio"
+          path={PATH}
+          onRun={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    const banner = screen.getByRole("status", { name: "Change done" });
+    expect(within(banner).getByText("All 1 task done")).toBeInTheDocument();
   });
 });

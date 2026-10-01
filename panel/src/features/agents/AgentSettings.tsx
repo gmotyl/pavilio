@@ -5,6 +5,8 @@ import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 import { VoiceSelect } from "../speech/VoiceSelect";
 import { AutoOpenAnswerToggle } from "../speech/AutoOpenAnswerToggle";
 import { LauncherSettings } from "./LauncherSettings";
+import { DefaultObjectiveSettings } from "./DefaultObjectiveSettings";
+import { ShortcutSettings } from "./ShortcutSettings";
 
 interface SettingsFile {
   name: string;
@@ -489,6 +491,12 @@ export default function AgentSettings() {
         </div>
         <div className="mt-4">
           <LauncherSettings />
+        </div>
+        <div className="mt-4">
+          <DefaultObjectiveSettings />
+        </div>
+        <div className="mt-4">
+          <ShortcutSettings />
         </div>
       </section>
 

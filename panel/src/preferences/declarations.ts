@@ -24,7 +24,7 @@
  * features, so pulling a feature module in at runtime would invert that — and
  * would close a cycle the moment those features start reading the registry.
  */
-import { bool, json, num, oneOf, optionalStr, str } from "./codecs";
+import { bool, json, listOf, num, oneOf, optionalStr, str } from "./codecs";
 import { definePreference, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
@@ -52,16 +52,45 @@ export interface TimeReportPrefs {
 export interface TerminalLauncher {
   name: string;
   command: string;
-  /** Whole command line a task run spawns; `{prompt}` is the objective. Blank = not offered for a run. */
+  /** How the command takes a start prompt; blank/absent = positional. */
+  promptFlag?: string;
+  /** Start-prompt text the CLI receives; `{prompt}` is the objective. "" = not offered. */
   runLoop?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFilled(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * A stored launcher, rebuilt from its known fields, or `null` when it is not
+ * one: the name and the command are required non-blank strings (a pill with no
+ * label or no command is not a launcher). An optional field that is not a
+ * string is dropped rather than failing the entry — its absence already means
+ * "use this name's default" — and `""` is kept, since it means something.
+ */
+function toTerminalLauncher(value: unknown): TerminalLauncher | null {
+  if (!isRecord(value) || !isFilled(value.name) || !isFilled(value.command)) return null;
+  const entry: TerminalLauncher = { name: value.name, command: value.command };
+  if (typeof value.promptFlag === "string") entry.promptFlag = value.promptFlag;
+  if (typeof value.runLoop === "string") entry.runLoop = value.runLoop;
+  return entry;
 }
 
 /**
  * The launcher row an empty workspace opens with — the three agents the panel
  * is used to drive, each named after its own binary. Each carries the run
- * loop a task run spawns: one whole command line rather than panel-side rules,
- * because whether there is a `/goal`, whether the prompt is positional or a
- * flag, and where the quotes go all differ between the agents at once.
+ * loop a task run hands its CLI: plain start-prompt text, never shell syntax.
+ * The panel builds the shell line itself as `command [promptFlag] '<text>'`,
+ * so the only per-agent differences left here are the CLI's own mode syntax
+ * (`/goal`) and whether the prompt is positional or behind a flag.
+ *
+ * `features/agents/launcherRunLoop.ts` also reads this list BY NAME as the
+ * shipped default for an entry stored without a `runLoop` / `promptFlag` key.
  *
  * Exported so the settings surface can offer "back to the defaults" without a
  * second copy of the list. Treat it as frozen: `readPreference` hands the
@@ -69,21 +98,51 @@ export interface TerminalLauncher {
  * pushes onto the value it read would rewrite the defaults for the session.
  */
 export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
-  { name: "claude", command: "claude", runLoop: 'claude "/goal {prompt}"' },
-  { name: "codex", command: "codex", runLoop: 'codex "/goal {prompt}"' },
-  { name: "opencode", command: "opencode", runLoop: 'opencode --prompt "{prompt}"' },
+  { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+  { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
+  { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
+];
+
+/** One quick-reply chip in the answer composer: what it reads, and what it sends. */
+export interface ComposerShortcut {
+  label: string;
+  text: string;
+}
+
+/**
+ * The longest label a shortcut keeps: the label is a chip in the composer's
+ * row, and a sentence-long chip pushes the others out of it. Enforced by the
+ * editor (the field's `maxLength`, and a cut on save), not by the codec — a
+ * longer hand-edited label still reads back as written.
+ */
+export const COMPOSER_SHORTCUT_LABEL_MAX = 24;
+
+/** A stored shortcut rebuilt from its two fields, or `null`: both must be non-blank strings. */
+function toComposerShortcut(value: unknown): ComposerShortcut | null {
+  if (!isRecord(value) || !isFilled(value.label) || !isFilled(value.text)) return null;
+  return { label: value.label, text: value.text };
+}
+
+/**
+ * The quick replies an empty workspace opens with. Treat it as frozen, like
+ * `DEFAULT_TERMINAL_LAUNCHERS`: `readPreference` hands it back BY REFERENCE
+ * when nothing is stored, so every editor builds a new array and new entries.
+ */
+export const DEFAULT_COMPOSER_SHORTCUTS: ComposerShortcut[] = [
+  { label: "Yes", text: "yes" },
+  { label: "OK", text: "ok" },
 ];
 
 /**
  * The objective a task run hands its agent when neither the workspace nor the
  * project has written one. The OBJECTIVE only: no `/goal` and no quotes, which
  * belong to the launcher's run loop. `{change}`, `{path}` and `{project}` are
- * substituted at send time. Worded after the example in the change's proposal
- * (`/goal Implement all tasks in openspec/changes/<id>/tasks.md; …`), with the
- * path left to `{path}` so it names the file actually on screen.
+ * substituted at send time. It opens with the skill that executes a plan, so
+ * the agent is told HOW to work the tasks as well as which file holds them;
+ * the path is left to `{path}` so it names the file actually on screen.
  */
 export const DEFAULT_TASK_PROMPT =
-  "Implement all tasks in {path}; done when every task is checked and tests + lint pass.";
+  "pavilio-execute-plan Implement all tasks in {path}; done when every task is checked and tests + lint pass.";
 
 /**
  * The voice the panel speaks with when nothing is stored. It lives here, not
@@ -447,7 +506,8 @@ export const preferences = {
     key: "terminal.launchers", // was: nothing — the row was a hardcoded array
     scope: "global",
     default: DEFAULT_TERMINAL_LAUNCHERS,
-    codec: json<TerminalLauncher[]>(),
+    // Validated, not `json`: the list is hand-editable and every reader maps it.
+    codec: listOf(toTerminalLauncher),
     portable: true,
   }),
   terminalDrawerOpen: definePreference({
@@ -540,6 +600,19 @@ export const preferences = {
     scope: "global",
     default: true,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The composer's quick-reply chips, one JSON value like the launcher row:
+   * the list is ordered and its length is the user's. Global and portable —
+   * a reply like "yes" is a habit of its owner, not a fact about a project.
+   */
+  composerShortcuts: definePreference<ComposerShortcut[]>({
+    key: "composer.shortcuts", // was: nothing — the chips are new
+    scope: "global",
+    default: DEFAULT_COMPOSER_SHORTCUTS,
+    // Validated, not `json`: the list is hand-editable and every reader maps it.
+    codec: listOf(toComposerShortcut),
     portable: true,
   }),
   /**

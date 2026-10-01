@@ -1465,6 +1465,57 @@ input[type="checkbox"] {
   color: var(--text-primary);
 }
 
+/* A composer shortcut: a one-press quick reply, after the `/ skills` chip and
+   before the attachments. The same neutral pill as the skills chip — it is a
+   control, not a file — capped in width so a 24-character label cannot widen
+   the row; the label inside it carries the ellipsis (a flex container's bare
+   text is an anonymous item that `text-overflow` never reaches). */
+.answer-pane-shortcut-chip {
+  flex: none;
+  max-width: 14em;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.answer-pane-shortcut-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+/* Down socket: the press would send nowhere, so the chip says so. */
+.answer-pane-shortcut-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.answer-pane-shortcut-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A thumb, not a pointer: every chip in the composer row — `/ skills`, each
+   quick reply, each attachment — is a real touch target on a phone on its own,
+   not only when a taller neighbour happens to stretch its line. Selected as
+   the row's children (all chips but the floating picker) rather than by
+   `.answer-pane-composer-chip`, so that class keeps the single rule the pane's
+   chrome-height test reads its desktop metrics from. */
+@media (max-width: 767px) {
+  .answer-pane-composer-chips > :not(.command-picker) {
+    min-height: 32px;
+  }
+
+  .answer-pane-shortcut-chip {
+    padding: 4px 12px;
+  }
+}
+
 /* The one control that survives the mobile collapse: on a phone there is no
    Shift+Enter to explain and no grip to drag, so this is the whole affordance. */
 .answer-pane-composer-send {
@@ -1878,62 +1929,6 @@ input[type="checkbox"] {
   right: 10px;
 }
 
-/* The picker's callout — the settled mockup's "door teach" — standing just
-   above the composer's chip row and pointing down at the `/ skills` chip.
-
-   Accent-bordered on the accent's dim ground, where the band's two are
-   elevated-grey: this one names a control of the PANE, not of the row, and it
-   is the one of the three that does something when followed.
-
-   `BootLegend` writes `bottom` and `left` inline from the chip row's measured
-   box, so the stub below lands on the chip whatever height the grip left the
-   field at. The `bottom` here is only the unmeasured fallback — the chip row
-   sits about this far up at the composer's default height. The width is capped
-   by the cell as well as by the mockup's 300px, so a narrow cell keeps it
-   inside its edges. It takes the pointer back like the band does; nothing
-   under it is live, since it only ever stands over an empty pane. */
-.boot-legend-door {
-  position: absolute;
-  bottom: 120px;
-  left: 12px;
-  max-width: min(300px, calc(100% - 22px));
-  padding: 7px 9px;
-  border-radius: 7px;
-  border: 1px solid var(--accent);
-  background: var(--accent-dim);
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.45;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
-  pointer-events: auto;
-  animation: boot-legend-in 180ms ease-out both;
-}
-
-/* The stub: from the box's bottom edge (past its 1px border) down to the CHIP,
-   over the chip's left half — across `DOOR_GAP` and the chip's own offset
-   inside the row, which `BootLegend` writes as `--boot-legend-door-reach`. The
-   fallback is the unmeasured case: 10px of gap plus the row's 9px above the
-   chip (8px padding, 1px seam). */
-.boot-legend-door::after {
-  content: "";
-  position: absolute;
-  left: 22px;
-  bottom: calc(-1px - var(--boot-legend-door-reach, 19px));
-  width: 1px;
-  height: var(--boot-legend-door-reach, 19px);
-  background: var(--accent);
-}
-
-.boot-legend-door b {
-  display: block;
-  margin-bottom: 2px;
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-
 /* ── THE RUN BANNER ───────────────────────────────────────────────────────────
 
    Above a change's `tasks.md` while it has unchecked boxes. The accent rule on
@@ -1976,6 +1971,22 @@ input[type="checkbox"] {
 
 .run-banner-grow {
   flex: 1;
+}
+
+/* A finished change: the accent edge turns green with the check and the bar,
+   and the row carries only the icon and the count. */
+.run-banner[data-done] {
+  border-left-color: var(--green);
+}
+
+.run-banner[data-done] .run-banner-top {
+  gap: 7px;
+  margin-bottom: 0;
+}
+
+.run-banner-done-icon {
+  flex: none;
+  color: var(--green);
 }
 
 .run-banner-chevron {
@@ -2068,10 +2079,24 @@ input[type="checkbox"] {
   white-space: pre-wrap;
 }
 
+/* In the wrapper's place when the launcher's run loop is a whole command
+   line: why Run is off, and where to fix it. */
+.run-banner-blocked {
+  color: var(--yellow);
+  margin-bottom: 4px;
+}
+
+.run-banner-blocked-link {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .run-banner-objective {
   display: block;
   width: 100%;
-  resize: vertical;
+  /* Grows with its content; a hand-dragged height would leave the objective
+     box's mirror layer behind. */
+  resize: none;
   field-sizing: content;
   min-height: 1.5em;
   margin: 1px 0;
@@ -2086,6 +2111,123 @@ input[type="checkbox"] {
 
 .run-banner-objective:focus-visible {
   box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+/* The objective box: the textarea over a mirror layer that tints the
+   template's placeholders while it is focused. Both sit in one grid cell, so
+   the box is as tall as the taller of the two and their lines coincide; the
+   mirror copies the textarea's font, padding and wrapping exactly, and the
+   textarea's own text goes transparent so only the caret and selection show. */
+.objective-field {
+  position: relative;
+  display: grid;
+  /* Room for the copy button in the top-right corner. */
+  padding-right: 26px;
+}
+
+.objective-field > .run-banner-objective,
+.objective-field-overlay {
+  grid-area: 1 / 1;
+  /* The same gutter on both, so a scrollbar on the textarea never narrows its
+     lines while the mirror's stay wide. */
+  scrollbar-gutter: stable;
+}
+
+.objective-field-overlay {
+  margin: 1px 0;
+  padding: 0;
+  color: var(--text-primary);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  /* Clipped, not scrolled on its own: its scrollTop follows the textarea's. */
+  overflow: hidden;
+}
+
+.objective-field-overlay mark {
+  color: var(--accent);
+  background: transparent;
+}
+
+.objective-field[data-editing] > .run-banner-objective {
+  color: transparent;
+  caret-color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The resolved objective while the template is being edited: read by a
+   screen reader through the textarea's description, never painted. */
+.objective-field-preview {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.objective-field-copy {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.objective-field-copy:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+
+.objective-field-copy:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.objective-field-copied {
+  position: absolute;
+  top: 1px;
+  right: 22px;
+  font-size: 10px;
+  color: var(--green);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.objective-field-copied[data-on] {
+  opacity: 1;
+}
+
+.run-banner-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.objective-override-reset {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.objective-override-reset:hover {
+  text-decoration: underline;
 }
 
 .run-banner-progress {
@@ -2181,5 +2323,10 @@ input[type="checkbox"] {
   .boot-legend,
   .boot-legend * {
     animation: none;
+  }
+
+  /* The copy acknowledgement appears and goes without a fade. */
+  .objective-field-copied {
+    transition: none;
   }
 }

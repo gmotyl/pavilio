@@ -125,6 +125,12 @@ const FIXTURES: Record<string, Fixture> = {
   "speech.voice": { value: "en-GB-RyanNeural" },
   "speech.answerPane.autoOpen": { value: true },
   "speech.answerComposer.on": { value: false },
+  "composer.shortcuts": {
+    value: [
+      { label: "Go on", text: "continue" },
+      { label: "Yes", text: "yes" },
+    ],
+  },
   // Non-portable, and the two entries on that tier naming no session: the
   // speech surface's measurements, each read against this window's viewport.
   // `project`-scoped as well, so each needs a scope argument. The two axes are
@@ -228,8 +234,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(42);
-    expect(portable.length).toBe(33);
+    expect(ALL_PREFERENCES.length).toBe(43);
+    expect(portable.length).toBe(34);
     expect(machineLocal.length).toBe(9);
     expect(sessionTier.length).toBe(3);
     // The portable arm of the union forbids `browserStore`; this says the

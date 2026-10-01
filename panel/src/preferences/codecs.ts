@@ -82,3 +82,30 @@ export const optionalStr: PreferenceCodec<string | null> = {
   },
   storesText: true,
 };
+
+/**
+ * A JSON list whose entries are checked one by one — for a hand-editable list
+ * every consumer `.map`s, where `json<T[]>()` would hand `{}` or `5` straight
+ * to a `.map` and take the surface down.
+ *
+ * `entry` returns the usable entry built from a parsed value, or `null` for
+ * one that is not. So: not an array → throw (the store falls back to the
+ * declared default); an unusable entry → dropped, the rest kept in order; a
+ * list that HAD entries and kept none → throw, because that is a corrupted
+ * list rather than a choice. An empty array is a choice — the user cleared the
+ * list — and reads back empty.
+ */
+export function listOf<T>(entry: (value: unknown) => T | null): PreferenceCodec<T[]> {
+  return {
+    parse(raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) throw new Error(`not a list: ${raw}`);
+      const kept = parsed.map(entry).filter((value): value is T => value !== null);
+      if (parsed.length > 0 && kept.length === 0) throw new Error(`no usable entry: ${raw}`);
+      return kept;
+    },
+    serialize(value) {
+      return JSON.stringify(value);
+    },
+  };
+}

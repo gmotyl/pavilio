@@ -80,6 +80,9 @@ vi.mock("../terminalInstances", () => {
     // asserted, and `autoplay.integration.test.tsx`, which has always carried
     // it.
     sendDismiss: () => {},
+    // The composer's shortcut chips read the socket's liveness; a live one.
+    getConnectionState: () => "connected",
+    onConnectionChange: () => () => {},
     THEME: new Proxy({}, { get: () => "#000000" }),
     followBottomAcrossResize: (_terminal: unknown, fit: () => void) => fit(),
   };

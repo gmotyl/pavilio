@@ -13,7 +13,8 @@ const CHECKBOX = /^[ \t]*[-*+][ \t]+\[([ xX])\](?:[ \t]|$)/;
 const FENCE = /^[ \t]*(`{3,}|~{3,})/;
 
 /** `null` unless: basename is `tasks.md`, the path contains `changes/<id>/`, it is NOT under
- *  `changes/archive/`, and at least one `- [ ]` is unchecked.
+ *  `changes/archive/`, and it holds at least one checkbox. A list with every box checked is
+ *  a status too, with `remaining: 0` — a finished change, not a runnable one.
  *
  *  Checkboxes inside fenced code blocks are examples, not work, and are not counted. */
 export function taskListStatus(path: string, content: string): TaskListStatus | null {
@@ -40,6 +41,6 @@ export function taskListStatus(path: string, content: string): TaskListStatus | 
     if (box[1] === " ") remaining++;
   }
 
-  if (remaining === 0) return null;
+  if (total === 0) return null;
   return { changeId, total, remaining };
 }
