@@ -278,11 +278,7 @@ const list = (): HTMLElement => {
   return element;
 };
 
-/**
- * By tag, not by role: a matched heading carries `role="button"` (it is a
- * jump), so the `heading` role is no longer what it exposes. The contract's
- * criterion is the element — `# Heading` becomes an `h1`.
- */
+/** By tag: the contract's criterion is the element — `# Heading` becomes an `h1`. */
 const h1 = (): HTMLElement => {
   const element = prose().querySelector("h1");
   if (!(element instanceof HTMLElement)) throw new Error("no h1 in the body");
@@ -293,6 +289,10 @@ const speaking = (): HTMLElement[] => blocks().filter((block) => block.hasAttrib
 
 const segment = (index: number): HTMLElement =>
   screen.getByTestId(`answer-pane-seg-cell-a-${index}`);
+
+/** A unit's Play button — see `AnswerPane.play.test.tsx`. */
+const playButton = (index: number): HTMLElement =>
+  screen.getByTestId(`answer-pane-play-cell-a-${index}`);
 
 /**
  * jsdom has no layout, and the follow step is nothing but layout: "does the
@@ -524,44 +524,34 @@ describe("AnswerPane", () => {
     }
   });
 
-  it("a block click and a segment click both jump to the unit", () => {
+  it("a segment click jumps to the unit and a block click does not", () => {
     const h = harness(MARKDOWN, null);
     const speech = makeSpeech(h);
     render(paneElement(speech));
 
+    // The text is text: reading starts from a Play button, never from a block.
     fireEvent.click(h1());
-    expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 0);
-
-    // The third paragraph is the second block of unit 2.
     fireEvent.click(screen.getByText(/^The third paragraph/));
-    expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
+    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
 
     fireEvent.click(segment(1));
     expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
-    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(3);
+    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
   });
 
-  it("Enter on a focused block jumps", () => {
+  it("a speakable block is neither a button nor a tab stop", () => {
     const h = harness(MARKDOWN, null);
     const speech = makeSpeech(h);
     render(paneElement(speech));
 
     const block = screen.getByText(/^The first paragraph/);
-    expect(block).toHaveAttribute("role", "button");
-    expect(block).toHaveAttribute("tabindex", "0");
-    block.focus();
-    expect(document.activeElement).toBe(block);
+    expect(block).toHaveAttribute("data-unit", "1");
+    expect(block).not.toHaveAttribute("role");
+    expect(block).not.toHaveAttribute("tabindex");
 
     fireEvent.keyDown(block, { key: "Enter" });
-    expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
-
-    // Space too, and it must not scroll the body.
-    const space = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
-    act(() => {
-      block.dispatchEvent(space);
-    });
-    expect(space.defaultPrevented).toBe(true);
-    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(block, { key: " " });
+    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
   it("a code block is inert", () => {
@@ -686,8 +676,9 @@ describe("AnswerPane", () => {
     expect(cell.mouseDown).not.toHaveBeenCalled();
     expect(cell.click).not.toHaveBeenCalled();
     expect(cell.dragStart).not.toHaveBeenCalled();
-    // The clicks still did their own work inside the pane.
-    expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 0);
+    // The segment click still did its own work inside the pane; the heading
+    // is text and starts nothing.
+    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
     expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
   });
 
@@ -804,7 +795,7 @@ describe("AnswerPane", () => {
     expect(terminalSawKey).toHaveBeenCalledTimes(1);
   });
 
-  it("Enter on a link inside a block follows the link, not the jump", () => {
+  it("Enter on a link inside a block follows the link and plays nothing", () => {
     const linked = [
       "# Deploy plan",
       "",
@@ -817,19 +808,16 @@ describe("AnswerPane", () => {
 
     const link = screen.getByRole("link", { name: "the deploy guide" });
     const paragraph = link.closest("p");
-    // The paragraph is a matched block — the guard is what keeps the link out.
+    // The paragraph is a matched block, and still plain text.
     expect(paragraph).toHaveAttribute("data-unit", "1");
-    expect(paragraph).toHaveAttribute("role", "button");
+    expect(paragraph).not.toHaveAttribute("role");
 
     link.focus();
     expect(document.activeElement).toBe(link);
     fireEvent.keyDown(link, { key: "Enter" });
     fireEvent.keyDown(link, { key: " " });
-    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
-
-    // Enter on the block itself is still the jump.
     fireEvent.keyDown(paragraph!, { key: "Enter" });
-    expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
+    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
   it("a new utterance swaps the text in place", () => {
@@ -888,8 +876,8 @@ describe("AnswerPane", () => {
       expect(distinct).toEqual([distinct[0], distinct[0] + 1, distinct[0] + 2]);
 
       for (const item of items()) {
-        expect(item).toHaveAttribute("role", "button");
-        expect(item).toHaveAttribute("tabindex", "0");
+        expect(item).not.toHaveAttribute("role");
+        expect(item).not.toHaveAttribute("tabindex");
       }
 
       // The container is not a block: no mark, no role, no tab stop.
@@ -899,7 +887,7 @@ describe("AnswerPane", () => {
       expect(list()).not.toHaveAttribute("data-speaking");
     });
 
-    it("clicking a list item jumps to its unit", () => {
+    it("a list item's Play jumps to its unit", () => {
       const h = harness(LIST_MARKDOWN, null);
       const expectedUnit = expectedUnitIn(h);
       const speech = makeSpeech(h);
@@ -907,10 +895,13 @@ describe("AnswerPane", () => {
 
       for (const index of [3, 0, 5]) {
         const item = items()[index];
+        // The item itself is text.
         fireEvent.click(item);
+        expect(speech.onJumpToUnit).not.toHaveBeenCalled();
+        fireEvent.click(playButton(expectedUnit(item)));
         expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", expectedUnit(item));
+        vi.mocked(speech.onJumpToUnit).mockClear();
       }
-      expect(speech.onJumpToUnit).toHaveBeenCalledTimes(3);
     });
 
     it("clicking the list container jumps nowhere", () => {

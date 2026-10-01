@@ -27,11 +27,12 @@ export function CopyIconButton({
 
   const onClick = async (event: MouseEvent<HTMLButtonElement>) => {
     // Copying is never also a request to whatever the button happens to sit
-    // inside. The answer pane resolves clicks with a delegated handler that
-    // maps the closest `[data-unit]` ancestor to a speech unit, so a copy
-    // button rendered inside a spoken block — a fenced block nested in a list
-    // item or a blockquote — would otherwise restart the voice at that unit.
-    // Synchronous and first: after an `await` the event is no longer dispatching.
+    // inside. The answer pane once resolved any click in a spoken block to a
+    // jump, so a copy button inside one — a fenced block nested in a list item
+    // or a blockquote — restarted the voice. That handler is gone (reading now
+    // starts from a Play button), but a copy button can still land inside an
+    // ancestor that reacts to clicks, so the guard stays. Synchronous and
+    // first: after an `await` the event is no longer dispatching.
     event.stopPropagation();
     if (!(await copyToClipboard(value))) return;
     setCopied(true);

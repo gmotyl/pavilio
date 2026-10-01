@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { Pause, Play } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
@@ -23,7 +24,7 @@ import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { unplayedSinceLastPlayed } from "../speech/unreadAnswers";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { getStoredVoice } from "../speech/voices";
-import { type UnitToBlocks, layoutRail, matchableBlocks } from "./layoutRail";
+import { type UnitToBlocks, alignToSegments, layoutRail, matchableBlocks } from "./layoutRail";
 import { matchUnitsToBlocks } from "./matchUnitsToBlocks";
 import { segmentStateFor } from "./segmentState";
 
@@ -71,8 +72,8 @@ function readCacheVersion(): number {
   return cacheVersion;
 }
 
-/** The three attributes a matched block carries, and the one the spoken block adds. */
-const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as const;
+/** The attribute a matched block carries, and the one the spoken block adds. */
+const BLOCK_ATTRIBUTES = ["data-unit", "data-speaking"] as const;
 
 /**
  * How short the pane may be dragged, and how far one arrow key moves it.
@@ -161,30 +162,39 @@ export function minPaneHeight(composerOn: boolean, composerHeight: number): numb
  * marks cannot be expressed as props before render: nothing knows which `p`
  * is unit 2 until it exists. A layout effect after each render reads the
  * matchable blocks of the renderer's `.prose` root, matches their
- * `textContent` against the units' `source`, and sets `data-unit`, `role`,
- * `tabindex` and `data-speaking` on the elements themselves. It first strips
+ * `textContent` against the units' `source`, and sets `data-unit` and
+ * `data-speaking` on the elements themselves. It first strips
  * those attributes from every marked element, because react-markdown reuses
  * elements across a content change and React never touches attributes it did
  * not set. Those blocks are not simply the `.prose` children: a list is one
  * element to react-markdown but one paragraph per item to the voice, so
- * `matchableBlocks` flattens each list to its items and the marks — and the
- * jump — land on the `li`, never on the `ul` that only holds them.
+ * `matchableBlocks` flattens each list to its items and the marks land on the
+ * `li`, never on the `ul` that only holds them.
  *
- * ## Why blocks are buttons and the rail segments are not
+ * ## Why reading starts from a Play button, and the text is just text
  *
- * The scrubber's segments claim no role and take no tab stop: fifteen phantom
- * buttons on a bar that is on by default would be noise (see the note on the
- * bar). The pane is different — it is opened deliberately, and its blocks are
- * already what the eye is on — so a matched block gets `role="button"`,
- * `tabIndex={0}` and Enter/Space, and a jump is one keystroke from reading.
- * The rail beside it mirrors the scrubber exactly: a pointer affordance, no
- * role, `aria-hidden`, with the same segment states from the same
- * `segmentStateFor`. Unmatched blocks — code, tables, diagrams, anything
- * speech turned into a sentinel — stay plain elements. Accepted residue: a
- * matched `li` carries `role="button"`, which overrides its `listitem` role and
- * so takes the `ul`'s list semantics — the count, the position — away from
- * assistive tech; the pane's block-as-button pattern costs a container its
- * meaning here for the first time, and the jump is judged worth it.
+ * The blocks used to be the jump: a matched block was `role="button"` with a
+ * tab stop, and a delegated click anywhere inside it — a link included —
+ * started the voice there. So a link in an answer could not be followed
+ * without also being read to, and selecting a sentence restarted the unit.
+ * Now the blocks are plain elements and each unit has a real `<button>` in
+ * the rail column — Enter and Space are the browser's, no handler of ours —
+ * labelled "Play from here", or "Pause" on the unit the voice is reading.
+ *
+ * On a pointer device a unit's Play shows only while its block (or the button
+ * itself) is hovered or holds focus: one `hoveredUnit`, fed by delegated
+ * `pointerover` / `focusin` on the body, because the blocks are react-markdown's
+ * and cannot carry handlers of their own. The button carries `data-shown`; the
+ * stylesheet does the rest, including `hover: none`, where every Play is shown
+ * dimmed because there is no hover to reveal it. A unit's Play is laid out from
+ * its rail segment's geometry (`alignToSegments`), so it exists exactly where
+ * a segment does: code, tables, diagrams — anything speech turned into a
+ * sentinel — are no unit's and have no Play beside them.
+ *
+ * The rail beside the text mirrors the scrubber exactly: a pointer affordance,
+ * no role, `aria-hidden`, with the same segment states from the same
+ * `segmentStateFor`. The Play buttons are what the keyboard and assistive tech
+ * get instead of fifteen phantom segment buttons.
  *
  * ## Why the rail is laid out from the blocks, imperatively
  *
@@ -284,6 +294,9 @@ export function AnswerPane({
   const bodyRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
+  const playsRef = useRef<HTMLDivElement>(null);
+  /** The unit whose block (or Play) the pointer or focus is on — see the note on the component. */
+  const [hoveredUnit, setHoveredUnit] = useState<number | null>(null);
   /** The last mapping the marks were drawn from, for a re-layout the observer asks for. */
   const unitToBlocksRef = useRef<UnitToBlocks>([]);
   // The observer callback outlives its closure and needs the current units
@@ -508,7 +521,8 @@ export function AnswerPane({
   // the wait ends one render later — and on that commit there is no `.prose`
   // to mark, so the pass bails out having spent the `text` change. The column
   // that comes back next carries identical deps and would never be marked
-  // again: no jump, no tab stop, no highlight, until the pane was remounted.
+  // again: no rail, no Play beside its block, no highlight, until the pane
+  // was remounted.
   // (Regression: "the block marks are lost after the first reply".)
   useLayoutEffect(() => {
     const prose = bodyRef.current?.querySelector<HTMLElement>(".prose");
@@ -536,12 +550,11 @@ export function AnswerPane({
       const unit = blockToUnit[blockIndex];
       if (unit === null) return;
       child.setAttribute("data-unit", String(unit));
-      child.setAttribute("role", "button");
-      child.setAttribute("tabindex", "0");
       if (unit === unitIndex) child.setAttribute("data-speaking", "");
     });
     // The marks moved or the text changed: the rail follows in the same commit.
     layoutRail(bodyRef.current, railRef.current, unitToBlocks, units);
+    alignToSegments(railRef.current, playsRef.current);
   }, [text, units, unitIndex, waiting]);
 
   // Re-lay the rail when the body or the text column changes size — see the
@@ -554,7 +567,9 @@ export function AnswerPane({
     const observer = new ResizeObserver(() => {
       const b = bodyRef.current;
       const r = railRef.current;
-      if (b && r) layoutRail(b, r, unitToBlocksRef.current, unitsRef.current);
+      if (!b || !r) return;
+      layoutRail(b, r, unitToBlocksRef.current, unitsRef.current);
+      alignToSegments(r, playsRef.current);
     });
     observer.observe(body);
     if (textRef.current) observer.observe(textRef.current);
@@ -592,12 +607,22 @@ export function AnswerPane({
     [speech, sessionId],
   );
 
-  /** The matched block an event happened in, if any. */
-  const blockOf = (target: EventTarget | null): HTMLElement | null => {
+  /**
+   * The unit an event happened over: the matched block it is inside, or the
+   * Play button it is on — so moving from a block onto its own button keeps
+   * that button shown instead of flickering it off.
+   */
+  const unitAt = (target: EventTarget | null): number | null => {
     if (!(target instanceof Element)) return null;
-    const block = target.closest<HTMLElement>("[data-unit]");
-    return block && bodyRef.current?.contains(block) ? block : null;
+    const marked = target.closest<HTMLElement>("[data-unit], [data-play-unit]");
+    if (!marked || !bodyRef.current?.contains(marked)) return null;
+    return Number(marked.dataset.unit ?? marked.dataset.playUnit);
   };
+
+  // Whether the voice is reading this cell right now — the bar's own test for
+  // offering Pause, so the two controls never disagree.
+  const cellState = speech.stateFor(sessionId);
+  const voiceIsReading = cellState === "speaking" || cellState === "stalled";
 
   /**
    * The height to apply, or null to leave the stylesheet's four insets alone —
@@ -655,19 +680,14 @@ export function AnswerPane({
         ref={bodyRef}
         className="answer-pane-body"
         data-testid={`answer-pane-body-${sessionId}`}
-        // Delegated: the blocks are react-markdown's elements, so their
-        // handlers live here, on the ancestor that outlives them.
-        onClick={(e) => {
-          const block = blockOf(e.target);
-          if (block) jumpTo(Number(block.dataset.unit));
-        }}
-        onKeyDown={(e) => {
-          if (e.key !== "Enter" && e.key !== " ") return;
-          const block = blockOf(e.target);
-          if (!block || block !== e.target) return;
-          // Space would scroll the body; the block is a button now.
-          if (e.key === " ") e.preventDefault();
-          jumpTo(Number(block.dataset.unit));
+        // Delegated: the blocks are react-markdown's elements, so what the
+        // pointer and focus are over is read here, on the ancestor that
+        // outlives them. This only reveals a Play; nothing here plays.
+        onPointerOver={(e) => setHoveredUnit(unitAt(e.target))}
+        onPointerLeave={() => setHoveredUnit(null)}
+        onFocus={(e) => setHoveredUnit(unitAt(e.target))}
+        onBlur={(e) => {
+          if (!bodyRef.current?.contains(e.relatedTarget as Node | null)) setHoveredUnit(null);
         }}
       >
         {waiting ? (
@@ -684,6 +704,10 @@ export function AnswerPane({
               onActivate={() => releaseAnswer(sessionId)}
             />
           ) : null}
+          {/* The rail column: the segments, and the Play buttons over them.
+              Not positioned itself, so the body stays the `offsetParent` the
+              rail's geometry is measured against. */}
+          <div className="answer-pane-gutter">
           {/* The scrubber turned vertical: a pointer affordance, not a row of
               buttons — see the note on the component. Each segment is placed by
               `layoutRail` to span its unit's blocks. */}
@@ -712,6 +736,30 @@ export function AnswerPane({
                 </div>
               );
             })}
+          </div>
+          {/* One Play per unit, each level with the top of its segment — see
+              `alignToSegments`. The k-th button is unit k's. */}
+          <div ref={playsRef} className="answer-pane-plays">
+            {units.map((_unit, index) => {
+              const playing = voiceIsReading && index === unitIndex;
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  className="answer-pane-play"
+                  data-testid={`answer-pane-play-${sessionId}-${index}`}
+                  data-play-unit={index}
+                  data-shown={playing || index === hoveredUnit ? "" : undefined}
+                  data-playing={playing ? "" : undefined}
+                  aria-label={playing ? "Pause" : "Play from here"}
+                  title={playing ? "Pause" : "Play from here"}
+                  onClick={() => (playing ? speech.onPause(sessionId) : jumpTo(index))}
+                >
+                  {playing ? <Pause aria-hidden /> : <Play aria-hidden />}
+                </button>
+              );
+            })}
+          </div>
           </div>
           <div ref={textRef} className="answer-pane-text">
             {answer ? <MarkdownRenderer content={answer.text} /> : null}

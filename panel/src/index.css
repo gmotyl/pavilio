@@ -1701,6 +1701,80 @@ input[type="checkbox"] {
 .answer-pane-rail {
   position: relative;
   align-self: stretch;
+  grid-area: 1 / 1;
+}
+
+/* The rail column: the rail and the Play layer stacked in one grid cell. NOT
+   positioned, so the body stays the `offsetParent` of the rail — the origin
+   `layoutRail` measures the blocks against. */
+.answer-pane-gutter {
+  display: grid;
+  align-self: stretch;
+}
+
+/* The Play layer over the rail. Transparent to the pointer, so a segment stays
+   clickable everywhere a button is not. */
+.answer-pane-plays {
+  position: relative;
+  grid-area: 1 / 1;
+  pointer-events: none;
+}
+
+/* One unit's Play, level with the top of its segment (`alignToSegments`
+   writes `top`). Hidden until its unit is hovered or focused, or is the one
+   being read — then it is Pause. */
+.answer-pane-play {
+  position: absolute;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--speech-seg);
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 120ms ease, border-color 120ms ease;
+}
+
+.answer-pane-play svg {
+  width: 12px;
+  height: 12px;
+}
+
+.answer-pane-play:hover {
+  border-color: var(--speech-seg);
+}
+
+.answer-pane-play[data-shown],
+.answer-pane-play:focus-visible {
+  opacity: 1;
+}
+
+.answer-pane-play:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.answer-pane-play[data-playing] {
+  background: color-mix(in srgb, var(--speech-seg) 18%, var(--bg-elevated));
+  border-color: var(--speech-seg);
+}
+
+/* Touch has no hover to reveal a Play with, so every one is shown, dimmed;
+   the one being read is Pause at full strength. */
+@media (hover: none) {
+  .answer-pane-play {
+    opacity: 0.4;
+  }
+
+  .answer-pane-play[data-playing] {
+    opacity: 1;
+  }
 }
 
 .answer-pane-seg {
@@ -1761,18 +1835,8 @@ input[type="checkbox"] {
   min-width: 0;
 }
 
-/* A matched block is a jump: hint at it on hover and focus. */
-.answer-pane-text .prose [data-unit] {
-  border-radius: 6px;
-  cursor: pointer;
-  outline: none;
-  transition: background-color 120ms ease;
-}
-
-.answer-pane-text .prose [data-unit]:hover,
-.answer-pane-text .prose [data-unit]:focus-visible {
-  background: rgba(255, 255, 255, 0.05);
-}
+/* A matched block is text, not a jump: no pointer cursor, no hover tint.
+   Reading starts from the block's Play button in the rail column. */
 
 /* The spoken block carries `data-speaking` for tests and semantics, but draws
    nothing of its own: the rail's playing segment and playhead beside it are
