@@ -82,7 +82,7 @@ function installMatchMedia(mobile: boolean): void {
   });
 }
 
-/** Served out of order on purpose: the picker must show them alphabetically. */
+/** Served out of order on purpose: the picker must impose its own order. */
 const SKILLS: SkillEntry[] = [
   {
     name: "pavilio-grill",
@@ -417,7 +417,8 @@ describe("CommandPicker", () => {
     expect(screen.getByText(/Enter insert/)).toBeInTheDocument();
     await user.keyboard("{Enter}");
 
-    expect(field().value).toBe("/pavilio-execute-plan");
+    // Every name matches "pav" equally; the shortest ranks first.
+    expect(field().value).toBe("/pavilio-grill");
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -499,13 +500,13 @@ describe("CommandPicker", () => {
     await user.click(field());
     await user.keyboard("/sess");
     const listed = await options();
-    // pavilio-compact is listed first, by its description only.
+    // Ranked: the name match first, pavilio-compact (description only) below.
     expect(listed.map((o) => o.getAttribute("data-name"))).toEqual([
-      "pavilio-compact",
       "pavilio-session-start",
+      "pavilio-compact",
     ]);
-    expect(listed[0]).toHaveAttribute("aria-selected", "false");
-    expect(listed[1]).toHaveAttribute("aria-selected", "true");
+    expect(listed[0]).toHaveAttribute("aria-selected", "true");
+    expect(listed[1]).toHaveAttribute("aria-selected", "false");
   });
 
   it("a bare segment is not highlighted and Enter sends it", async () => {
@@ -545,13 +546,13 @@ describe("CommandPicker", () => {
     await user.keyboard("/session");
     const listed = await options();
     expect(listed.map((o) => o.getAttribute("data-name"))).toEqual([
-      "pavilio-compact",
       "pavilio-session-start",
+      "pavilio-compact",
     ]);
     expect(field()).not.toHaveAttribute("aria-activedescendant");
     await user.keyboard("{ArrowUp}{Enter}");
 
-    expect(field().value).toBe("/pavilio-session-start");
+    expect(field().value).toBe("/pavilio-compact");
     expect(send).not.toHaveBeenCalled();
   });
 
