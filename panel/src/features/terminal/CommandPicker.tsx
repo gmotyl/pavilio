@@ -70,12 +70,9 @@ export interface CommandPickerProps {
  * ## Why the highlight wraps
  *
  * Up from the first entry goes to the last and Down from the last to the
- * first, so a short list never dead-ends a keypress. With nothing highlighted,
- * Down lands on the first entry and Up on the last — any entry, a
- * description-only match included, and Enter then picks it. The highlight
- * returns to the first entry — the best ranked match, see `filterSkills` —
- * whenever the query changes, because the list it indexed into is a different
- * list now.
+ * first, so a short list never dead-ends a keypress. The highlight returns to
+ * the first entry — the best ranked match, see `filterSkills` — whenever the
+ * query changes, because the list it indexed into is a different list now.
  *
  * ## Why the best match is always highlighted
  *
@@ -134,9 +131,7 @@ export function CommandPicker({
         }
         if (matches.length === 0) return true;
         const step = key === "ArrowDown" ? 1 : -1;
-        // From no highlight, Down is the first entry and Up the last.
-        const from = index >= 0 ? index : step === 1 ? -1 : 0;
-        setActive((from + step + matches.length) % matches.length);
+        setActive((index + step + matches.length) % matches.length);
         return true;
       },
     }),
