@@ -141,6 +141,6 @@ Ready for next session!
 
 - **Automatic Session Tracking:** Each `session end` creates a progress file and commits automatically
 - **Project Context:** Commands automatically detect which project you're working on
-- **Quill Integration:** `/pavilio-note meeting-name` searches for meetings and creates notes from minutes
+- **Notetaker Integration (Quill, Wispr Flow):** `/pavilio-note meeting-name` searches every connected notetaker MCP for meetings and creates notes from minutes
 - **No Manual File Management:** Everything is organized by the template structure
 - **Resume Anywhere:** `resume [project]` loads context from your last session

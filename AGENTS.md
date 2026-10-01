@@ -112,8 +112,8 @@ All local skills live under [`skills/`](skills/), each as `skills/<name>/SKILL.m
 - [`pavilio-memo`](skills/pavilio-memo/SKILL.md) — quick capture a thought or note (`/pavilio-memo`)
 - [`pavilio-memo-explain`](skills/pavilio-memo-explain/SKILL.md) — explain a concept/flow as a mermaid memo (`/pavilio-memo-explain`)
 - [`pavilio-pr-explain`](skills/pavilio-pr-explain/SKILL.md) — explain a PR/branch/commit-range as a diagram-rich memo, built from the diff (`/pavilio-pr-explain`)
-- [`pavilio-note`](skills/pavilio-note/SKILL.md) — process meeting transcripts; Quill-aware (`/pavilio-note`)
-- [`pavilio-note-batch`](skills/pavilio-note-batch/SKILL.md) — batch-process unprocessed Quill meetings (`/pavilio-note-batch`)
+- [`pavilio-note`](skills/pavilio-note/SKILL.md) — process meeting transcripts; pulls from Quill and/or Wispr Flow MCP (`/pavilio-note`)
+- [`pavilio-note-batch`](skills/pavilio-note-batch/SKILL.md) — batch-process unprocessed Quill / Wispr Flow meetings (`/pavilio-note-batch`)
 - [`pavilio-question`](skills/pavilio-question/SKILL.md) — query project knowledge base (`/pavilio-question`)
 - [`pavilio-bootstrap`](skills/pavilio-bootstrap/SKILL.md) — initialize `PROJECT.md` + `_index.json` (`/pavilio-bootstrap`)
 

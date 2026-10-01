@@ -1,6 +1,6 @@
 ---
 name: pavilio-note
-description: Process a meeting transcript into structured project notes, refresh STATUS.md / DECISIONS.md / _index.json (and PROJECT.md only when a stable fact changed), and propose Todoist follow-ups. Use when the user invokes `/pavilio-note`, says "process the transcript", or references a meeting name to pull from Quill/Fathom. Polish content with English section headers; verbatim transcript is preserved.
+description: Process a meeting transcript into structured project notes, refresh STATUS.md / DECISIONS.md / _index.json (and PROJECT.md only when a stable fact changed), and propose Todoist follow-ups. Use when the user invokes `/pavilio-note`, says "process the transcript", or references a meeting name to pull from Quill/Wispr Flow/Fathom. Polish content with English section headers; verbatim transcript is preserved.
 ---
 
 # Meeting Processing
@@ -20,10 +20,10 @@ The user will provide the transcript. Your process is:
 3. **Select Transcript Source**:
    - Ask user: "How would you like to provide the transcript?"
    - Read the global registry at `projects/.processed_transcripts.json` (create empty `{ "processed": [] }` if missing) — see **Processed Transcripts Registry Rules**
-   - Fetch the last 10 meeting titles from Quill MCP, filter out any whose `meeting_id` (or `source_id`) is already in the registry, and present the first 5 unprocessed ones as a numbered list (include meeting date and time converted to local timezone Europe/Warsaw). Offer manual paste or cancel as additional options.
-   - If Quill MCP: Call quill MCP to get the transcript
+   - Query **every available notetaker MCP** (see **Notetaker Sources** below — currently Quill and Wispr Flow). For each one: fetch its last 10 meetings, filter out any whose `(source, source_id)` is already in the registry. Merge the survivors from all sources, sort newest first, and present the first 5 as a numbered list tagged with their source (include meeting date and time converted to local timezone Europe/Warsaw), e.g. `1. [2026-10-01 08:39] Proces fabryki (quill)`. Offer manual paste or cancel as additional options.
+   - If a meeting is picked: fetch its transcript from the MCP it came from
    - If Manual: Ask user to paste transcript
-   - Fall back to Manual if Quill MCP is unavailable or has no unprocessed meetings
+   - Fall back to Manual if no notetaker MCP is available or none has unprocessed meetings. Having only one notetaker (or none) is a normal setup, not an error — just say which sources were checked.
    - **Note**: same filtering logic applies to any other transcript-providing MCP (Fathom, etc.) — always check the registry before listing
 4. **Check for known participants** (see **Participant Recognition Rules** below):
    - Read `projects/projectname/_index.json`, `projects/projectname/PROJECT.md` and `projects/projectname/STATUS.md` if they exist
@@ -86,15 +86,26 @@ Greg: Agreed. Let's start with the API redesign.
 
 ---
 
+### Notetaker Sources
+
+A user may have any subset of these notetakers connected — both, one, or none. Detect each one by whether its tools are available in the session (search the tool list / ToolSearch for the keyword); never treat a missing notetaker as a failure.
+
+| Source (`source` value) | Detect tools by keyword | List meetings | Get transcript | Id field → `source_id` |
+| ----------------------- | ----------------------- | ------------- | -------------- | ---------------------- |
+| `quill`                 | `quill`                 | `search_meetings` / list tool | `get_transcript` | meeting id |
+| `wispr`                 | `wispr` (Wispr Flow, `https://api.wisprflow.ai/connect/mcp`) | its list/search meetings or notes tool | its transcript/note-content tool | meeting/note id |
+
+Tool names differ between agents (`mcp__quill__…`, `mcp__claude_ai_Wispr_Flow__…`, `wispr-flow_…`), so match on the keyword, then pick the list and transcript tools by their descriptions. A connector that shows only an `authenticate` tool is **not available** — mention it once ("Wispr Flow is connected but not authenticated — run /mcp to sign in") and continue with the other sources.
+
+The same meeting can be recorded by both notetakers. When two entries from different sources start within ±5 min of each other and have similar titles, show them as one row listing both sources (`(quill + wispr)`), prefer the Quill transcript (speaker-labelled), and on write record **both** `(source, source_id)` pairs in the registry so neither resurfaces.
+
 ### Fallback Logic
 
-If Quill MCP is selected but fails:
+If the chosen notetaker MCP fails while fetching:
 
 ```
-Error: Quill MCP server is unavailable.
-Would you like to paste the transcript manually instead? [Y/n]
-→ If yes: Prompt for manual paste
-→ If no: Exit with error
+Error: <Source> MCP server is unavailable.
+Would you like to pick a meeting from another notetaker, or paste the transcript manually? [other/paste/cancel]
 ```
 
 ---
@@ -520,7 +531,7 @@ When analyzing the transcript, actively look for:
 
 ### Processed Transcripts Registry Rules
 
-A global registry at `projects/.processed_transcripts.json` tracks every transcript that has been turned into a note, regardless of which project it landed in. Its purpose is to prevent re-processing the same Quill/Fathom/etc. meeting and to keep the "last N transcripts" picker showing only fresh ones.
+A global registry at `projects/.processed_transcripts.json` tracks every transcript that has been turned into a note, regardless of which project it landed in. Its purpose is to prevent re-processing the same Quill/Wispr Flow/Fathom/etc. meeting and to keep the "last N transcripts" picker showing only fresh ones.
 
 **Location:** `projects/.processed_transcripts.json` (single file, shared across all projects)
 
@@ -545,8 +556,8 @@ A global registry at `projects/.processed_transcripts.json` tracks every transcr
 
 **Field meanings:**
 
-- `source` — MCP/tool that provided the transcript: `quill`, `fathom`, `manual`, etc.
-- `source_id` — stable identifier returned by the MCP (e.g. Quill meeting id, Fathom recording id). Use this for deduplication.
+- `source` — MCP/tool that provided the transcript: `quill`, `wispr`, `fathom`, `manual`, etc.
+- `source_id` — stable identifier returned by the MCP (e.g. Quill meeting id, Wispr Flow meeting/note id, Fathom recording id). Use this for deduplication.
 - `title` — meeting title at the time of processing
 - `meeting_date` — original meeting timestamp in ISO 8601 with timezone
 - `processed_date` — date the note was generated (YYYY-MM-DD)
@@ -557,7 +568,7 @@ A global registry at `projects/.processed_transcripts.json` tracks every transcr
 
 1. Open `projects/.processed_transcripts.json`. If missing, treat as `{ "processed": [] }`.
 2. Build a set of `(source, source_id)` pairs from the `processed` array.
-3. After fetching N meetings from the MCP, drop any whose `(source, source_id)` is in that set.
+3. After fetching N meetings from each available notetaker MCP, drop any whose `(source, source_id)` is in that set.
 4. Display the first 5 remaining meetings to the user.
 
 **Write flow (step 10.5):**
