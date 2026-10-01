@@ -28,8 +28,9 @@ const RUN_BONUS = 2;
  * on a segment start (index 0 or right after `-`) and RUN_BONUS when it
  * directly follows the previous matched char.
  *
- * Every alignment is considered, not just the greedy leftmost one, so `grl`
- * lands on the `gr` run of `pavilio-grill` rather than on a scattered `g`.
+ * Every alignment is considered, not just the greedy leftmost one, so `st`
+ * lands on the `st` run that opens `start` in `pavilio-session-start` rather
+ * than on session's `s` and a stray `t` after it.
  * best[i] is the top score with the current query char matched at name[i].
  */
 function nameScore(name: string, q: string): number | null {

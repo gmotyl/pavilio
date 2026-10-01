@@ -98,7 +98,8 @@ describe("filterSkills", () => {
   });
 
   it("segment starts outrank scattered letters", () => {
-    // Both have "g", "r", "l" on a segment start + run; the shorter wins.
+    // Only "g" opens a segment; "r" continues the run and "l" follows it.
+    // memo-grill matches the same way, so the shorter name wins.
     expect(names(filterSkills(REAL, "grl"))[0]).toBe("pavilio-grill");
     // "m" and "g" both open segments in memo-grill, but "g" is buried
     // mid-word in manager: segment starts beat the shorter name.
@@ -106,6 +107,25 @@ describe("filterSkills", () => {
       "pavilio-memo-grill",
       "pavilio-manager",
     ]);
+  });
+
+  it("scores the best alignment, not the leftmost one", () => {
+    // Greedy leftmost would take session's "s" and start's "t" apart (5), the
+    // same as safety-review's, and the alphabetical tie-break would put
+    // safety first. The best alignment is start's own "st" run (7).
+    const list = [
+      skill("pavilio-safety-review", "Review a change for safety"),
+      skill("pavilio-session-start", "Starts or resumes a project session"),
+    ];
+    expect(names(filterSkills(list, "st"))).toEqual([
+      "pavilio-session-start",
+      "pavilio-safety-review",
+    ]);
+  });
+
+  it("breaks an equal score and length alphabetically", () => {
+    const list = [skill("pavilio-note-sync"), skill("pavilio-note-push")];
+    expect(names(filterSkills(list, "note"))).toEqual(["pavilio-note-push", "pavilio-note-sync"]);
   });
 
   it("description-only matches sit below every name match", () => {
