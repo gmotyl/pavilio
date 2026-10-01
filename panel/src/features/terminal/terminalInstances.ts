@@ -332,6 +332,16 @@ export function hasExited(sessionId: string): boolean {
 }
 
 /**
+ * True when the live xterm for `sessionId` has bracketed-paste mode (DECSET
+ * 2004) on; false when it is off or no instance is pooled. The program in the
+ * PTY toggles it, so this is the program's own claim that it parses the
+ * `ESC[200~` / `ESC[201~` markers around a paste.
+ */
+export function bracketedPasteOn(sessionId: string): boolean {
+  return instances.get(sessionId)?.terminal.modes.bracketedPasteMode ?? false;
+}
+
+/**
  * Subscribe to connection-state changes for a session. Fires on the ws
  * open / close / error events, on reopen()'s identity swap, and when the
  * instance is destroyed ("unattached"). Does NOT fire synchronously on
