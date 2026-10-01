@@ -271,17 +271,18 @@ export function minPaneHeight(composerOn: boolean, composerHeight: number): numb
  * `projectOfSession`, which answers `null` there precisely so that nothing is
  * written under a name no one will read back.
  *
- * ## Why the pane scrolls once per unit, and never on a tick
+ * ## Why the pane scrolls once, on mount, and never while it reads
  *
- * Following is a `useLayoutEffect` on the unit index alone. When the index
- * changes (or the pane mounts mid-run, which is the same moment for a pane
- * that was closed), and only when the body overflows, it scrolls the body so
- * the unit's first block sits a third of the way down — in the layout pass,
- * after the marks, so the frame that paints the new unit is already scrolled
- * to it and the reader never sees the old `scrollTop` for a frame. No
- * `scroll` listener, no follow state: a reader who scrolls ahead is left
- * alone until the next unit starts — the one moment being pulled back is
- * what the reader wants.
+ * Following is a `useLayoutEffect` that runs when the pane mounts and at no
+ * other time. A pane opened while a unit is playing, whose body overflows,
+ * scrolls the body once so that unit's first block sits a third of the way
+ * down — in the layout pass, after the marks, so the first frame is already
+ * there and the reader never sees the top of the answer and then a jump.
+ * After that the scroll position is the reader's: a unit boundary moves the
+ * block mark and the rail's playhead, never the text, and neither does the
+ * body being rebuilt on the way out of a wait. Pulling the text along under
+ * someone who is reading, or who has scrolled elsewhere on purpose, costs
+ * more than the mark and the playhead already say about where the voice is.
  */
 export function AnswerPane({
   sessionId,
@@ -598,12 +599,13 @@ export function AnswerPane({
     // re-laying itself after the first reply.
   }, [waiting]);
 
-  // Follow the voice: once per unit, on the boundary or on a mid-run mount,
-  // and only when there is somewhere to scroll to. Never on a tick — the
-  // snapshot above does not change inside a unit, so this never runs then.
-  // A layout effect, declared after the marking one: the `data-unit` it looks
-  // up is set in the same pass, and the scroll lands before paint, so the
-  // boundary never shows a frame at the old `scrollTop` and then a snap.
+  // Land on the voice once, when the pane mounts mid-run, and only when there
+  // is somewhere to scroll to. Never again while it stays open — not on a unit
+  // boundary, not on a tick, not when the body comes back from a wait: the
+  // mark and the playhead follow the voice, the scroll position is the
+  // reader's. A layout effect, declared after the marking one: the
+  // `data-unit` it looks up is set in the same pass, and the scroll lands
+  // before the first paint.
   useLayoutEffect(() => {
     const body = bodyRef.current;
     if (unitIndex === null || !body) return;
@@ -611,12 +613,10 @@ export function AnswerPane({
     const block = body.querySelector<HTMLElement>(`[data-unit="${unitIndex}"]`);
     if (!block) return;
     body.scrollTo({ top: Math.max(0, block.offsetTop - body.clientHeight / 3) });
-    // `waiting` for the same reason the marking effect has it: the column the
-    // blocks live in is rebuilt on the way out of a wait, and a reply that
-    // lands mid-unit changes no index. Without it the body would sit at the
-    // top of the new answer while the voice read somewhere further down, until
-    // the next unit boundary happened to come along.
-  }, [unitIndex, waiting]);
+    // Mount only, deliberately: `unitIndex` is read as it stands when the pane
+    // opens, and a later change must not bring this back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const jumpTo = useCallback(
     (unit: number): void => {

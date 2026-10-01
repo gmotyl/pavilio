@@ -24,6 +24,7 @@ import {
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { segmentStateFor } from "../segmentState";
 import { AnswerPane } from "../AnswerPane";
+import { __resetAnswerWaitingForTests, beginWaiting, noteTransport } from "../answerWaiting";
 
 // mermaid pulls in a browser-only rendering stack; what matters here is that
 // the fence reaches the diagram component, not what mermaid draws.
@@ -428,6 +429,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __resetAnswerWaitingForTests();
   restoreLayout();
   vi.unstubAllGlobals();
 });
@@ -945,27 +947,46 @@ describe("AnswerPane", () => {
   });
 
   /**
-   * Following the voice. The pane moves at ONE moment — the unit boundary —
-   * and only when there is somewhere to move to. Inside a unit nothing moves,
-   * and a reader who scrolled ahead is left alone until the next unit starts.
+   * Following the voice. The pane moves at ONE moment — when it mounts while a
+   * unit is playing — and only when there is somewhere to move to. A unit
+   * boundary moves the mark and the playhead, never the text: the reader's
+   * scroll position is theirs for as long as the pane stays open.
    */
   describe("following", () => {
-    it("scrolls once to the new unit when the text overflows", () => {
+    it("a unit change does not scroll the pane", () => {
       overflowing();
       const h = harness(MARKDOWN, null);
       render(paneElement(makeSpeech(h)));
       // Nothing is playing: nothing to follow.
       expect(scrolls()).toEqual([]);
 
-      // Unit 0 is the heading, block 0 at the top: a third of a screen above
-      // it is off the top, so the target clamps at 0.
       h.progress.set({ unitIndex: 0, unitTime: 0, unitDuration: null });
-      expect(scrolls()).toEqual([0]);
+      expect(speaking().map((b) => b.tagName)).toEqual(["H1"]);
 
-      // Unit 2 starts at block 3 (h1, p, pre, p, p): 300 − 300 / 3.
+      // Unit 2 is the two paragraphs after the fence (h1, p, pre, p, p): the
+      // mark and the playhead move there, the body stays where it is.
       h.progress.set({ unitIndex: 2, unitTime: 0, unitDuration: null });
-      expect(scrolls()).toEqual([0, 3 * BLOCK_TOP - layout.clientHeight / 3]);
-      expect(scrollTo).toHaveBeenCalledTimes(2);
+      expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+      expect(segment(2).contains(screen.getByTestId("answer-pane-head-cell-a"))).toBe(true);
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("does not scroll when the body is rebuilt on the way out of a wait mid-unit", () => {
+      overflowing();
+      const h = harness(MARKDOWN, { unitIndex: 2, unitTime: 0, unitDuration: null });
+      render(paneElement(makeSpeech(h)));
+      // The mount itself lands on the spoken block — pinned below.
+      scrollTo.mockClear();
+
+      act(() => beginWaiting("cell-a", "u-1"));
+      expect(screen.queryByTestId("answer-pane-waiting-cell-a")).toBeInTheDocument();
+
+      // A transport press hands the body back while unit 2 is still playing:
+      // the column is rebuilt and marked again, and nothing scrolls.
+      act(() => noteTransport("cell-a"));
+      expect(screen.queryByTestId("answer-pane-waiting-cell-a")).toBeNull();
+      expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+      expect(scrollTo).not.toHaveBeenCalled();
     });
 
     it("does not scroll when the answer fits", () => {
