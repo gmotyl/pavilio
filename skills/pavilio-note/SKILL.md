@@ -21,7 +21,7 @@ The user will provide the transcript. Your process is:
    - Ask user: "How would you like to provide the transcript?"
    - Read the global registry at `projects/.processed_transcripts.json` (create empty `{ "processed": [] }` if missing) — see **Processed Transcripts Registry Rules**
    - Query **every available notetaker MCP** (see **Notetaker Sources** below — currently Quill and Wispr Flow). For each one: fetch its last 10 meetings, filter out any whose `(source, source_id)` is already in the registry. Merge the survivors from all sources, sort newest first, and present the first 5 as a numbered list tagged with their source (include meeting date and time converted to local timezone Europe/Warsaw), e.g. `1. [2026-10-01 08:39] Proces fabryki (quill)`. Offer manual paste or cancel as additional options.
-   - If a meeting is picked: fetch its transcript from the MCP it came from
+   - If a meeting is picked: fetch its transcript from the MCP it came from. **If the source is `wispr`, switch to the Ready-Summary Path** (see below) — skip steps 4–9 entirely.
    - If Manual: Ask user to paste transcript
    - Fall back to Manual if no notetaker MCP is available or none has unprocessed meetings. Having only one notetaker (or none) is a normal setup, not an error — just say which sources were checked.
    - **Note**: same filtering logic applies to any other transcript-providing MCP (Fathom, etc.) — always check the registry before listing
@@ -93,11 +93,38 @@ A user may have any subset of these notetakers connected — both, one, or none.
 | Source (`source` value) | Detect tools by keyword | List meetings | Get transcript | Id field → `source_id` |
 | ----------------------- | ----------------------- | ------------- | -------------- | ---------------------- |
 | `quill`                 | `quill`                 | `search_meetings` / list tool | `get_transcript` | meeting id |
-| `wispr`                 | `wispr` (Wispr Flow, `https://api.wisprflow.ai/connect/mcp`) | its list/search meetings or notes tool | its transcript/note-content tool | meeting/note id |
+| `wispr`                 | `wispr` (Wispr Flow, `https://api.wisprflow.ai/connect/mcp`) | `search_meetings` (no query → most recent; `since`/`until` for a day) | `get_meeting` with `view_transcript` (paged) — also returns the ready `summary` | meeting id (UUID) |
 
-Tool names differ between agents (`mcp__quill__…`, `mcp__claude_ai_Wispr_Flow__…`, `wispr-flow_…`), so match on the keyword, then pick the list and transcript tools by their descriptions. A connector that shows only an `authenticate` tool is **not available** — mention it once ("Wispr Flow is connected but not authenticated — run /mcp to sign in") and continue with the other sources.
+Tool names differ between agents (`mcp__quill__…`, `mcp__wispr-flow__…`, `mcp__claude_ai_Wispr_Flow__…`, `wispr-flow_…`), so match on the keyword, then pick the list and transcript tools by their descriptions. A connector that shows only an `authenticate` tool is **not available** — mention it once ("Wispr Flow is connected but not authenticated — run /mcp to sign in") and continue with the other sources.
 
-The same meeting can be recorded by both notetakers. When two entries from different sources start within ±5 min of each other and have similar titles, show them as one row listing both sources (`(quill + wispr)`), prefer the Quill transcript (speaker-labelled), and on write record **both** `(source, source_id)` pairs in the registry so neither resurfaces.
+The same meeting can be recorded by both notetakers. When two entries from different sources start within ±5 min of each other and have similar titles, show them as one row listing both sources (`(quill + wispr)`), process it via **Wispr** (Ready-Summary Path — no transcript analysis), and on write record **both** `(source, source_id)` pairs in the registry so neither resurfaces.
+
+### Ready-Summary Path (Wispr Flow)
+
+Wispr Flow already summarizes the meeting. Do **not** analyze the transcript a second time — copy Wispr's summary and transcript **1:1**, in whatever language they come in (English is fine; the Polish language rule does not apply on this path). This replaces steps 4–9; steps 10–15 still run, fed from the summary only.
+
+1. **Fetch:** `get_meeting(meeting_id, view_transcript={char_limit: 40000})`. While the transcript ends with a `(...truncated … start_char=N...)` marker, call again with `view_transcript.start_char=N` and concatenate. Strip only the tool's framing lines (`<<<PARTICIPANT NAMES … >>>`, `<<<END TRANSCRIPT>>>`, truncation markers) — nothing else. Optionally `get_meeting_participants_enriched(meeting_id)` for the attendee list.
+2. **No participant mapping or confirmation.** `Speaker 1/2` stay as Wispr wrote them. Do not ask the user to confirm participants.
+3. **shortname / datetime:** shortname from Wispr `title` (often empty → from the first sentence of `summary`), ≤ 4 words, snake_case. `datetime` = meeting `start` converted from UTC to Europe/Warsaw.
+4. **Note `.md`** (`projects/<projectname>/notes/[datetime]_[shortname].md`), nothing invented:
+   ```markdown
+   # <title or shortname>
+
+   - **Date:** <start–end, Europe/Warsaw>
+   - **Source:** Wispr Flow · [notes](<share_link>)
+   - **Participants:** <from get_meeting_participants_enriched, if fetched>
+
+   <Wispr `summary` pasted verbatim>
+
+   ## Transcript
+
+   [`[datetime]_transcript_shortname.txt`](./log/[datetime]_transcript_shortname.txt)
+   ```
+   The **Detailed Summary Formatting Rules** do not apply to this note.
+5. **Transcript `.txt`** (`notes/log/`): the concatenated transcript, verbatim.
+6. **STATUS / DECISIONS / _index** (step 10.3–10.4): derive from the summary only — `### Decisions Made` → append to `DECISIONS.md` and STATUS Recent Decisions; topic headings → STATUS Current Focus / `_index.json` topics. Copy bullets as written; don't re-read the transcript to refine them.
+7. **Todoist** (steps 11–14): offer the `### Next Steps` items owned by the user (the `self` participant / user's name) plus unowned ones.
+8. **Registry:** `source: "wispr"`, `source_id: <meeting id>`. Batch-mode JSON output is unchanged.
 
 ### Fallback Logic
 

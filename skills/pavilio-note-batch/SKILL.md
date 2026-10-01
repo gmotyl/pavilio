@@ -17,7 +17,7 @@ Read `projects/.processed_transcripts.json` (missing → treat as `{ "processed"
 
 Spawn ONE general-purpose subagent with these instructions (include the exclusion set inline):
 
-1. For **each available notetaker** (detect by tool keyword `quill` / `wispr`; a connector exposing only `authenticate` counts as unavailable — note it in `unavailable_sources`), list the last 10 meetings. Tag each with its `source` (`quill` | `wispr`). Drop any whose `(source, id)` is in the exclusion set. Merge all sources, newest first. If the same meeting appears in both (start within ±5 min, similar title), keep one row with both ids (`also_ids: [{source, id}]`) and use the Quill transcript.
+1. For **each available notetaker** (detect by tool keyword `quill` / `wispr`; a connector exposing only `authenticate` counts as unavailable — note it in `unavailable_sources`), list the last 10 meetings. Tag each with its `source` (`quill` | `wispr`). Drop any whose `(source, id)` is in the exclusion set. Merge all sources, newest first. If the same meeting appears in both (start within ±5 min, similar title), keep one row with `source: "wispr"` and the Quill id in `also_ids: [{source, id}]` — Wispr's ready summary means no transcript analysis.
 2. **Disk verification (the registry can be stale — notes are also created outside batch mode and sessions sometimes skip the registry write).** For each remaining meeting, convert its start time to Europe/Warsaw and search all projects' note dirs for an existing note with a matching date+time filename prefix:
    ```bash
    # meeting at 2026-07-01T13:53 → try both filename conventions (notes live ONLY in projects/<name>/notes/)
@@ -71,6 +71,8 @@ Group selected meetings by resolved project:
 Each subagent prompt:
 
 > Read and follow the instructions in the `pavilio-note` skill (`skills/pavilio-note/SKILL.md`) exactly, with this input: projectname=`<project>` `-yolo` `--source <source>` `--meeting-id <meeting_id>` `--transcript-file projects/.tmp_transcripts/<meeting_id>.txt`. Your final message must be ONLY the Batch Mode JSON output defined in that skill.
+
+For `source: wispr` meetings the subagent takes pavilio-note's **Ready-Summary Path** (summary + transcript copied 1:1, no analysis); it fetches the summary itself with `get_meeting` (no `view_transcript`) and still uses the tmp transcript file.
 
 Parse each subagent's JSON result. A subagent that errors or returns `status: error` does not stop the others.
 
