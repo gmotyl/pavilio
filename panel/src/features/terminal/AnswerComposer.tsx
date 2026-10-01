@@ -17,7 +17,7 @@ import { submitToPty, type SubmitFailure } from "./ptySubmit";
 import { projectOfSession } from "./sessionProject";
 import { reconnectOnActivate } from "./terminalInstances";
 import { dismissAttentionOnArrival } from "./attentionArrival";
-import { CommandPicker, type CommandPickerHandle } from "./CommandPicker";
+import { CommandPicker, type CommandPickerHandle, type PickerKey } from "./CommandPicker";
 import type { SkillEntry } from "./commandSource";
 import { expandCommand } from "./expandCommand";
 import { useTerminalConnection } from "./useTerminalConnection";
@@ -128,6 +128,27 @@ function slashToken(text: string, at: number): string | null {
   return /^\/\S*/.exec(text.slice(at))?.[0] ?? null;
 }
 
+/**
+ * Where a single `/` was just typed at a word start, or null when the change
+ * from `before` to `after` is anything else.
+ *
+ * Only a one-character insertion counts — a keystroke, not a paste — and only
+ * when the slash has the draft's start or whitespace before it: `cd /tmp`
+ * opening the picker is the accepted cost, `see src/` must not. Typing `/` over
+ * a selection replaces it, so the length does not grow by one and it stays text.
+ *
+ * The slash must also have whitespace or the draft's end after it: in
+ * `fix /note` the picker would read `note` as its query and a pick would
+ * replace the user's own word.
+ */
+function slashTypedAt(before: string, after: string, caret: number): number | null {
+  const at = caret - 1;
+  if (after.length !== before.length + 1 || at < 0 || after[at] !== "/") return null;
+  if (after.slice(0, at) + after.slice(caret) !== before) return null;
+  if (caret < after.length && !/\s/.test(after[caret])) return null;
+  return at === 0 || /\s/.test(after[at - 1]) ? at : null;
+}
+
 /** The file a path ends in — the chip's whole text. */
 function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -184,6 +205,11 @@ export interface AnswerComposerProps {
  * which is the one thing a stray keystroke must not be able to do. Whitespace
  * counts as empty for the same reason — but what is SENT is never trimmed: the
  * text is the user's, and leading indentation in a pasted snippet is theirs too.
+ *
+ * While the command picker is open Enter is the picker's and never a send: it
+ * inserts the highlighted skill, or closes the picker when nothing matches (a
+ * literal `/clear`), and the NEXT Enter sends. A send that went out mid-search
+ * would carry a half-typed query to the agent as if it were the reply.
 
  * ## Why the return is not part of the text that is sent
  *
@@ -415,11 +441,11 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    * Where the command picker's `/token` starts in the draft, or null while the
    * picker is closed.
    *
-   * A typed `/` opens the picker only on an empty draft (per the spec), so
-   * there it is 0; the `/ skills` chip puts its `/` at the caret, or opens on
-   * the `/token` already under it, so there it can be anywhere (see
-   * `openPickerFromChip`). The query, the close rule and the insertion below
-   * all read the token from this one position.
+   * A typed `/` opens the picker wherever it lands at a word start (see
+   * `slashTypedAt`), and the `/ skills` chip puts its `/` at the caret, or
+   * opens on the `/token` already under it (see `openPickerFromChip`), so it
+   * can be anywhere in the draft. The query, the close rule and the insertion
+   * below all read the token from this one position.
    *
    * The picker is open only while a `/token` is still at this position AND the
    * caret is inside it (see `onChange`). That is the close rule the trimmed
@@ -603,6 +629,12 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     placeCaret(pickerAt + short.length);
     setDraft(sessionId, next);
     setText(next);
+    setPickerAt(null);
+    setActiveOption(null);
+  };
+
+  /** Close the picker, keeping the draft — Escape, or an Enter with nothing to pick. */
+  const closePicker = (): void => {
     setPickerAt(null);
     setActiveOption(null);
   };
@@ -868,7 +900,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    // While the picker is open it takes Escape, Enter and the arrows AHEAD of
+    // While the picker is open it takes Escape, Enter, Tab and the arrows AHEAD of
     // everything below, and gives them back the moment it closes (D3). Never
     // during IME composition: an Enter or Escape there belongs to the input
     // method (committing or cancelling the candidate), not to the list.
@@ -879,21 +911,22 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         // keeps its `/`, so a slash meant literally survives.
         e.preventDefault();
         e.stopPropagation();
-        setPickerAt(null);
-        setActiveOption(null);
+        closePicker();
         return;
       }
+      // Enter is always the picker's: it picks the highlighted entry, or —
+      // with nothing to pick, e.g. `/clear` — closes the picker and keeps the
+      // draft, so a second Enter is the send. Tab picks too, but only when
+      // there is something to pick; otherwise it stays the browser's focus
+      // move. Shift+Tab is never the picker's.
       const owned =
-        (e.key === "Enter" && !e.shiftKey) || e.key === "ArrowUp" || e.key === "ArrowDown";
-      if (owned && pickerRef.current?.handleKey(e.key as "Enter" | "ArrowUp" | "ArrowDown")) {
+        (e.key === "Enter" && !e.shiftKey) ||
+        (e.key === "Tab" && !e.shiftKey) ||
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown";
+      if (owned && pickerRef.current?.handleKey(e.key as PickerKey)) {
         e.preventDefault();
         return;
-      }
-      // An Enter the picker declined (nothing highlighted, e.g. `/clear`) is a
-      // send: the picker goes with the draft it was filtering on.
-      if (owned && e.key === "Enter") {
-        setPickerAt(null);
-        setActiveOption(null);
       }
     }
     // Shift+Enter is the textarea's own business, and so is every other key.
@@ -979,6 +1012,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               id={pickerId}
               query={pickerToken.slice(1)}
               onPick={pick}
+              onClose={closePicker}
               onActiveChange={setActiveOption}
               onSkillsLoaded={learnSkills}
             />
@@ -1069,13 +1103,18 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               // A keystroke places its own caret; one still pending from a pick
               // must never be applied on top of it.
               pendingCaret.current = null;
-              // The picker opens on a `/` typed into an EMPTY draft and nowhere
-              // else — `see src/` is a path, not a command (spec: "A slash
-              // inside the text is just text"). Once open it stays open only
-              // while its `/token` survives with the caret inside it; a space
-              // after the token, deleting the slash, or moving past it closes it.
+              // The picker opens on a single typed `/` that lands at a word
+              // start — the draft's start or right after whitespace — anywhere
+              // in the text, and is anchored there. A `/` inside a word stays
+              // text (`see src/` is a path, not a command), so does one typed
+              // right before a word (a pick would replace that word), and a
+              // paste — any change of more than one character — never opens
+              // it. Once open it stays open only while its `/token` survives
+              // with the caret inside it; a space after the token, deleting
+              // the slash, or moving past it closes it.
               if (pickerAt === null) {
-                if (text === "" && next === "/") setPickerAt(0);
+                const at = slashTypedAt(text, next, e.target.selectionStart);
+                if (at !== null) setPickerAt(at);
               } else {
                 const token = slashToken(next, pickerAt);
                 const caret = e.target.selectionStart;

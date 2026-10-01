@@ -18,6 +18,32 @@ const ALL: SkillEntry[] = [
 
 const names = (list: SkillEntry[]) => list.map((s) => s.name);
 
+// Resembles the workspace's real skill list, so ranking is exercised against
+// realistic competitors (shared `pavilio-` prefix, repeated segments).
+const REAL: SkillEntry[] = [
+  skill("pavilio-writing-plans", "Write a bite-sized, contract-style implementation plan"),
+  skill("pavilio-note", "Process a meeting transcript into structured project notes"),
+  skill("pavilio-archive-plan", "Archive a shipped change OpenSpec-style"),
+  skill("pavilio-audit", "Deep, evidence-based repository audit"),
+  skill("pavilio-bootstrap", "Generate PROJECT.md, STATUS.md and _index.json"),
+  skill("pavilio-code-review", "Two-axis review of the diff between HEAD and a fixed point"),
+  skill("pavilio-compact", "Package the session's remaining work into a handoff file"),
+  skill("pavilio-create-skill", "Scaffold a new workspace skill"),
+  skill("pavilio-execute-plan", "Orchestrate execution of a written implementation plan"),
+  skill("pavilio-memo-grill", "Grill a technical documentation topic one question at a time"),
+  skill("pavilio-grill", "Stress-test an idea or plan into a sharp design"),
+  skill("pavilio-handoff", "Delegate a described task by prebaking a handoff file"),
+  skill("pavilio-manager", "Proactive managing developer/architect advisor"),
+  skill("pavilio-memo", "Capture a quick thought or note for a project"),
+  skill("pavilio-memo-explain", "Create a memo with mermaid diagrams"),
+  skill("pavilio-note-batch", "Batch-process unprocessed meetings"),
+  skill("pavilio-question", "Answer questions from accumulated project notes"),
+  skill("pavilio-resume", "Execute a handoff file prebaked by pavilio-manager"),
+  skill("pavilio-search", "Gather a project's accumulated context"),
+  skill("pavilio-session-end", "Verify session progress is captured"),
+  skill("pavilio-session-start", "Starts or resumes a project session"),
+];
+
 describe("filterSkills", () => {
   it("an empty query returns every skill alphabetically", () => {
     expect(names(filterSkills(ALL, ""))).toEqual([
@@ -53,16 +79,73 @@ describe("filterSkills", () => {
     expect(filterSkills(ALL, "zzz-nothing")).toEqual([]);
   });
 
-  it("results stay alphabetical rather than scored", () => {
-    // "tempo" matches on both name and description (exact name, even), the
-    // others on one field each. A scoring filter would rank "tempo" first;
-    // alphabetical order must win.
+  it("ranks a whole-segment match first and shorter names above longer", () => {
     const list = [
-      skill("zeta", "mentions tempo in passing"),
-      skill("tempo", "Tempo Timesheet Helper"),
-      skill("alpha-tempo", ""),
+      skill("pavilio-note-batch", "Batch-process unprocessed meetings"),
+      skill("pavilio-memo", "Capture a quick thought for a project"),
+      skill("pavilio-note", "Process a meeting transcript"),
     ];
-    expect(names(filterSkills(list, "tempo"))).toEqual(["alpha-tempo", "tempo", "zeta"]);
+    expect(names(filterSkills(list, "note"))).toEqual(["pavilio-note", "pavilio-note-batch"]);
+    expect(names(filterSkills(REAL, "compact"))[0]).toBe("pavilio-compact");
+  });
+
+  it("matches characters in order across segments", () => {
+    const result = names(filterSkills(REAL, "pvnote"));
+    expect(result[0]).toBe("pavilio-note");
+    expect(result).toContain("pavilio-note-batch");
+    // Out of order is no match: "e" before "n" is not a subsequence of "note".
+    expect(names(filterSkills([skill("pavilio-note")], "pveton"))).toEqual([]);
+  });
+
+  it("segment starts outrank scattered letters", () => {
+    // Only "g" opens a segment; "r" continues the run and "l" follows it.
+    // memo-grill matches the same way, so the shorter name wins.
+    expect(names(filterSkills(REAL, "grl"))[0]).toBe("pavilio-grill");
+    // "m" and "g" both open segments in memo-grill, but "g" is buried
+    // mid-word in manager: segment starts beat the shorter name.
+    expect(names(filterSkills(REAL, "mg")).slice(0, 2)).toEqual([
+      "pavilio-memo-grill",
+      "pavilio-manager",
+    ]);
+  });
+
+  it("scores the best alignment, not the leftmost one", () => {
+    // Greedy leftmost would take session's "s" and start's "t" apart (5), the
+    // same as safety-review's, and the alphabetical tie-break would put
+    // safety first. The best alignment is start's own "st" run (7).
+    const list = [
+      skill("pavilio-safety-review", "Review a change for safety"),
+      skill("pavilio-session-start", "Starts or resumes a project session"),
+    ];
+    expect(names(filterSkills(list, "st"))).toEqual([
+      "pavilio-session-start",
+      "pavilio-safety-review",
+    ]);
+  });
+
+  it("breaks an equal score and length alphabetically", () => {
+    const list = [skill("pavilio-note-sync"), skill("pavilio-note-push")];
+    expect(names(filterSkills(list, "note"))).toEqual(["pavilio-note-push", "pavilio-note-sync"]);
+  });
+
+  it("description-only matches sit below every name match", () => {
+    const list = [
+      skill("pavilio-note", "Process a meeting transcript into notes"),
+      skill("whisper-transcript", "Speech to text"),
+    ];
+    expect(names(filterSkills(list, "transcript"))).toEqual([
+      "whisper-transcript",
+      "pavilio-note",
+    ]);
+  });
+
+  it("empty query is the full alphabetical list", () => {
+    const input = [...REAL];
+    const result = filterSkills(input, "");
+    expect(names(result)).toEqual(names(REAL).slice().sort());
+    expect(result).toHaveLength(REAL.length);
+    expect(names(input)).toEqual(names(REAL));
+    expect(result).not.toBe(input);
   });
 
   it("orders by code unit, independent of locale", () => {

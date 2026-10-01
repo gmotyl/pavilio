@@ -7,7 +7,9 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { Pause, Play } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
+import { CopyIconButton } from "../shell/CopyIconButton";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { ANSWER_PANE_FULL_HEIGHT, preferences } from "../../preferences/declarations";
@@ -23,7 +25,7 @@ import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { unplayedSinceLastPlayed } from "../speech/unreadAnswers";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { getStoredVoice } from "../speech/voices";
-import { type UnitToBlocks, layoutRail, matchableBlocks } from "./layoutRail";
+import { type UnitToBlocks, alignToSegments, layoutRail, matchableBlocks } from "./layoutRail";
 import { matchUnitsToBlocks } from "./matchUnitsToBlocks";
 import { segmentStateFor } from "./segmentState";
 
@@ -71,8 +73,8 @@ function readCacheVersion(): number {
   return cacheVersion;
 }
 
-/** The three attributes a matched block carries, and the one the spoken block adds. */
-const BLOCK_ATTRIBUTES = ["data-unit", "role", "tabindex", "data-speaking"] as const;
+/** The attribute a matched block carries, and the one the spoken block adds. */
+const BLOCK_ATTRIBUTES = ["data-unit", "data-speaking"] as const;
 
 /**
  * How short the pane may be dragged, and how far one arrow key moves it.
@@ -161,30 +163,42 @@ export function minPaneHeight(composerOn: boolean, composerHeight: number): numb
  * marks cannot be expressed as props before render: nothing knows which `p`
  * is unit 2 until it exists. A layout effect after each render reads the
  * matchable blocks of the renderer's `.prose` root, matches their
- * `textContent` against the units' `source`, and sets `data-unit`, `role`,
- * `tabindex` and `data-speaking` on the elements themselves. It first strips
+ * `textContent` against the units' `source`, and sets `data-unit` and
+ * `data-speaking` on the elements themselves. It first strips
  * those attributes from every marked element, because react-markdown reuses
  * elements across a content change and React never touches attributes it did
  * not set. Those blocks are not simply the `.prose` children: a list is one
  * element to react-markdown but one paragraph per item to the voice, so
- * `matchableBlocks` flattens each list to its items and the marks — and the
- * jump — land on the `li`, never on the `ul` that only holds them.
+ * `matchableBlocks` flattens each list to its items and the marks land on the
+ * `li`, never on the `ul` that only holds them.
  *
- * ## Why blocks are buttons and the rail segments are not
+ * ## Why reading starts from a Play button, and the text is just text
  *
- * The scrubber's segments claim no role and take no tab stop: fifteen phantom
- * buttons on a bar that is on by default would be noise (see the note on the
- * bar). The pane is different — it is opened deliberately, and its blocks are
- * already what the eye is on — so a matched block gets `role="button"`,
- * `tabIndex={0}` and Enter/Space, and a jump is one keystroke from reading.
- * The rail beside it mirrors the scrubber exactly: a pointer affordance, no
- * role, `aria-hidden`, with the same segment states from the same
- * `segmentStateFor`. Unmatched blocks — code, tables, diagrams, anything
- * speech turned into a sentinel — stay plain elements. Accepted residue: a
- * matched `li` carries `role="button"`, which overrides its `listitem` role and
- * so takes the `ul`'s list semantics — the count, the position — away from
- * assistive tech; the pane's block-as-button pattern costs a container its
- * meaning here for the first time, and the jump is judged worth it.
+ * The blocks used to be the jump: a matched block was `role="button"` with a
+ * tab stop, and a delegated click anywhere inside it — a link included —
+ * started the voice there. So a link in an answer could not be followed
+ * without also being read to, and selecting a sentence restarted the unit.
+ * Now the blocks are plain elements and each unit has a real button element in
+ * the rail column — Enter and Space are the browser's, no handler of ours —
+ * labelled "Read from here", or "Pause" on the unit the voice is reading.
+ *
+ * On a pointer device a unit's Play shows only while its block (or the button
+ * itself) is hovered or holds focus: one `hoveredUnit`, fed by delegated
+ * `pointerover` / `focusin` on the body, because the blocks are react-markdown's
+ * and cannot carry handlers of their own. The button carries `data-shown`; the
+ * stylesheet does the rest, including `hover: none`, where every Play is shown
+ * dimmed because there is no hover to reveal it. A unit's Play is laid out from
+ * its rail segment's geometry (`alignToSegments`), so it exists exactly where
+ * a segment does: code, tables, diagrams — anything speech turned into a
+ * sentinel — are no unit's and have no Play beside them. A fence that opens or
+ * closes the answer is the one exception to "no unit's": it is a unit of its
+ * own that matches no block, so it keeps its (minimum) segment but gets no
+ * Play (`blocklessUnits`) — there is no block to sit beside.
+ *
+ * The rail beside the text mirrors the scrubber exactly: a pointer affordance,
+ * no role, `aria-hidden`, with the same segment states from the same
+ * `segmentStateFor`. The Play buttons are what the keyboard and assistive tech
+ * get instead of fifteen phantom segment buttons.
  *
  * ## Why the rail is laid out from the blocks, imperatively
  *
@@ -258,17 +272,18 @@ export function minPaneHeight(composerOn: boolean, composerHeight: number): numb
  * `projectOfSession`, which answers `null` there precisely so that nothing is
  * written under a name no one will read back.
  *
- * ## Why the pane scrolls once per unit, and never on a tick
+ * ## Why the pane scrolls once, on mount, and never while it reads
  *
- * Following is a `useLayoutEffect` on the unit index alone. When the index
- * changes (or the pane mounts mid-run, which is the same moment for a pane
- * that was closed), and only when the body overflows, it scrolls the body so
- * the unit's first block sits a third of the way down — in the layout pass,
- * after the marks, so the frame that paints the new unit is already scrolled
- * to it and the reader never sees the old `scrollTop` for a frame. No
- * `scroll` listener, no follow state: a reader who scrolls ahead is left
- * alone until the next unit starts — the one moment being pulled back is
- * what the reader wants.
+ * Following is a `useLayoutEffect` that runs when the pane mounts and at no
+ * other time. A pane opened while a unit is playing, whose body overflows,
+ * scrolls the body once so that unit's first block sits a third of the way
+ * down — in the layout pass, after the marks, so the first frame is already
+ * there and the reader never sees the top of the answer and then a jump.
+ * After that the scroll position is the reader's: a unit boundary moves the
+ * block mark and the rail's playhead, never the text, and neither does the
+ * body being rebuilt on the way out of a wait. Pulling the text along under
+ * someone who is reading, or who has scrolled elsewhere on purpose, costs
+ * more than the mark and the playhead already say about where the voice is.
  */
 export function AnswerPane({
   sessionId,
@@ -284,6 +299,16 @@ export function AnswerPane({
   const bodyRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
+  const playsRef = useRef<HTMLDivElement>(null);
+  /** The unit whose block (or Play) the pointer or focus is on — see the note on the component. */
+  const [hoveredUnit, setHoveredUnit] = useState<number | null>(null);
+  /**
+   * One character per unit, `x` where the unit matched no block: a fence that
+   * opens or closes the answer is a unit of its own (`⟦code⟧`) with nothing
+   * beside it to read from, so it gets no Play. A string, so the marking pass
+   * can set it on every run and React bails out when nothing changed.
+   */
+  const [blocklessUnits, setBlocklessUnits] = useState("");
   /** The last mapping the marks were drawn from, for a re-layout the observer asks for. */
   const unitToBlocksRef = useRef<UnitToBlocks>([]);
   // The observer callback outlives its closure and needs the current units
@@ -508,7 +533,8 @@ export function AnswerPane({
   // the wait ends one render later — and on that commit there is no `.prose`
   // to mark, so the pass bails out having spent the `text` change. The column
   // that comes back next carries identical deps and would never be marked
-  // again: no jump, no tab stop, no highlight, until the pane was remounted.
+  // again: no rail, no Play beside its block, no highlight, until the pane
+  // was remounted.
   // (Regression: "the block marks are lost after the first reply".)
   useLayoutEffect(() => {
     const prose = bodyRef.current?.querySelector<HTMLElement>(".prose");
@@ -532,17 +558,24 @@ export function AnswerPane({
     );
     unitToBlocksRef.current = unitToBlocks;
     unitsRef.current = units;
+    setBlocklessUnits(unitToBlocks.map((blocks) => (blocks.length === 0 ? "x" : "-")).join(""));
     children.forEach((child, blockIndex) => {
       const unit = blockToUnit[blockIndex];
       if (unit === null) return;
       child.setAttribute("data-unit", String(unit));
-      child.setAttribute("role", "button");
-      child.setAttribute("tabindex", "0");
       if (unit === unitIndex) child.setAttribute("data-speaking", "");
     });
     // The marks moved or the text changed: the rail follows in the same commit.
     layoutRail(bodyRef.current, railRef.current, unitToBlocks, units);
+    alignToSegments(railRef.current, playsRef.current);
   }, [text, units, unitIndex, waiting]);
+
+  // A blockless unit's Play turns into a placeholder one render after the
+  // marking pass found it, so the buttons that layer holds are new elements
+  // with no `top` yet: line them up again, still before paint.
+  useLayoutEffect(() => {
+    alignToSegments(railRef.current, playsRef.current);
+  }, [blocklessUnits]);
 
   // Re-lay the rail when the body or the text column changes size — see the
   // note on the component. The pane's own boxes, never the xterm container.
@@ -554,7 +587,9 @@ export function AnswerPane({
     const observer = new ResizeObserver(() => {
       const b = bodyRef.current;
       const r = railRef.current;
-      if (b && r) layoutRail(b, r, unitToBlocksRef.current, unitsRef.current);
+      if (!b || !r) return;
+      layoutRail(b, r, unitToBlocksRef.current, unitsRef.current);
+      alignToSegments(r, playsRef.current);
     });
     observer.observe(body);
     if (textRef.current) observer.observe(textRef.current);
@@ -565,12 +600,13 @@ export function AnswerPane({
     // re-laying itself after the first reply.
   }, [waiting]);
 
-  // Follow the voice: once per unit, on the boundary or on a mid-run mount,
-  // and only when there is somewhere to scroll to. Never on a tick — the
-  // snapshot above does not change inside a unit, so this never runs then.
-  // A layout effect, declared after the marking one: the `data-unit` it looks
-  // up is set in the same pass, and the scroll lands before paint, so the
-  // boundary never shows a frame at the old `scrollTop` and then a snap.
+  // Land on the voice once, when the pane mounts mid-run, and only when there
+  // is somewhere to scroll to. Never again while it stays open — not on a unit
+  // boundary, not on a tick, not when the body comes back from a wait: the
+  // mark and the playhead follow the voice, the scroll position is the
+  // reader's. A layout effect, declared after the marking one: the
+  // `data-unit` it looks up is set in the same pass, and the scroll lands
+  // before the first paint.
   useLayoutEffect(() => {
     const body = bodyRef.current;
     if (unitIndex === null || !body) return;
@@ -578,12 +614,10 @@ export function AnswerPane({
     const block = body.querySelector<HTMLElement>(`[data-unit="${unitIndex}"]`);
     if (!block) return;
     body.scrollTo({ top: Math.max(0, block.offsetTop - body.clientHeight / 3) });
-    // `waiting` for the same reason the marking effect has it: the column the
-    // blocks live in is rebuilt on the way out of a wait, and a reply that
-    // lands mid-unit changes no index. Without it the body would sit at the
-    // top of the new answer while the voice read somewhere further down, until
-    // the next unit boundary happened to come along.
-  }, [unitIndex, waiting]);
+    // Mount only, deliberately: `unitIndex` is read as it stands when the pane
+    // opens, and a later change must not bring this back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const jumpTo = useCallback(
     (unit: number): void => {
@@ -592,12 +626,22 @@ export function AnswerPane({
     [speech, sessionId],
   );
 
-  /** The matched block an event happened in, if any. */
-  const blockOf = (target: EventTarget | null): HTMLElement | null => {
+  /**
+   * The unit an event happened over: the matched block it is inside, or the
+   * Play button it is on — so moving from a block onto its own button keeps
+   * that button shown instead of flickering it off.
+   */
+  const unitAt = (target: EventTarget | null): number | null => {
     if (!(target instanceof Element)) return null;
-    const block = target.closest<HTMLElement>("[data-unit]");
-    return block && bodyRef.current?.contains(block) ? block : null;
+    const marked = target.closest<HTMLElement>("[data-unit], [data-play-unit]");
+    if (!marked || !bodyRef.current?.contains(marked)) return null;
+    return Number(marked.dataset.unit ?? marked.dataset.playUnit);
   };
+
+  // Whether the voice is reading this cell right now — the bar's own test for
+  // offering Pause, so the two controls never disagree.
+  const cellState = speech.stateFor(sessionId);
+  const voiceIsReading = cellState === "speaking" || cellState === "stalled";
 
   /**
    * The height to apply, or null to leave the stylesheet's four insets alone —
@@ -655,19 +699,14 @@ export function AnswerPane({
         ref={bodyRef}
         className="answer-pane-body"
         data-testid={`answer-pane-body-${sessionId}`}
-        // Delegated: the blocks are react-markdown's elements, so their
-        // handlers live here, on the ancestor that outlives them.
-        onClick={(e) => {
-          const block = blockOf(e.target);
-          if (block) jumpTo(Number(block.dataset.unit));
-        }}
-        onKeyDown={(e) => {
-          if (e.key !== "Enter" && e.key !== " ") return;
-          const block = blockOf(e.target);
-          if (!block || block !== e.target) return;
-          // Space would scroll the body; the block is a button now.
-          if (e.key === " ") e.preventDefault();
-          jumpTo(Number(block.dataset.unit));
+        // Delegated: the blocks are react-markdown's elements, so what the
+        // pointer and focus are over is read here, on the ancestor that
+        // outlives them. This only reveals a Play; nothing here plays.
+        onPointerOver={(e) => setHoveredUnit(unitAt(e.target))}
+        onPointerLeave={() => setHoveredUnit(null)}
+        onFocus={(e) => setHoveredUnit(unitAt(e.target))}
+        onBlur={(e) => {
+          if (!bodyRef.current?.contains(e.relatedTarget as Node | null)) setHoveredUnit(null);
         }}
       >
         {waiting ? (
@@ -684,34 +723,69 @@ export function AnswerPane({
               onActivate={() => releaseAnswer(sessionId)}
             />
           ) : null}
-          {/* The scrubber turned vertical: a pointer affordance, not a row of
-              buttons — see the note on the component. Each segment is placed by
-              `layoutRail` to span its unit's blocks. */}
-          <div ref={railRef} className="answer-pane-rail" aria-hidden="true">
-            {units.map((unit, index) => {
-              const state = segmentStateFor({
-                index,
-                playingIndex: unitIndex,
-                cache: speechCacheState(unit.text, { voice }),
-              });
-              return (
-                <div
-                  key={index}
-                  className="answer-pane-seg"
-                  data-segment={state}
-                  data-testid={`answer-pane-seg-${sessionId}-${index}`}
-                  title={`Unit ${index + 1} of ${units.length}`}
-                  onClick={() => jumpTo(index)}
-                >
-                  {state === "playing" ? (
-                    <span
-                      className="answer-pane-head"
-                      data-testid={`answer-pane-head-${sessionId}`}
-                    />
-                  ) : null}
-                </div>
-              );
-            })}
+          {/* The rail column: the segments, and the Play buttons over them.
+              Not positioned itself, so the body stays the `offsetParent` the
+              rail's geometry is measured against. */}
+          <div className="answer-pane-gutter">
+            {/* The scrubber turned vertical: a pointer affordance, not a row of
+                buttons — see the note on the component. Each segment is placed by
+                `layoutRail` to span its unit's blocks. */}
+            <div ref={railRef} className="answer-pane-rail" aria-hidden="true">
+              {units.map((unit, index) => {
+                const state = segmentStateFor({
+                  index,
+                  playingIndex: unitIndex,
+                  cache: speechCacheState(unit.text, { voice }),
+                });
+                return (
+                  <div
+                    key={index}
+                    className="answer-pane-seg"
+                    data-segment={state}
+                    data-testid={`answer-pane-seg-${sessionId}-${index}`}
+                    title={`Unit ${index + 1} of ${units.length}`}
+                    onClick={() => jumpTo(index)}
+                  >
+                    {state === "playing" ? (
+                      <span
+                        className="answer-pane-head"
+                        data-testid={`answer-pane-head-${sessionId}`}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            {/* One Play per unit, each level with the top of its segment — see
+                `alignToSegments`. The k-th button is unit k's. */}
+            <div ref={playsRef} className="answer-pane-plays">
+              {units.map((_unit, index) => {
+                // No block, no Play: nothing sits beside it to read from (the
+                // segment still jumps there, the bar still pauses it). A bare
+                // placeholder keeps the k-th child unit k's for
+                // `alignToSegments`.
+                if (blocklessUnits[index] === "x") {
+                  return <span key={index} hidden />;
+                }
+                const playing = voiceIsReading && index === unitIndex;
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    className="answer-pane-play"
+                    data-testid={`answer-pane-play-${sessionId}-${index}`}
+                    data-play-unit={index}
+                    data-shown={playing || index === hoveredUnit ? "" : undefined}
+                    data-playing={playing ? "" : undefined}
+                    aria-label={playing ? "Pause" : "Read from here"}
+                    title={playing ? "Pause" : "Read from here"}
+                    onClick={() => (playing ? speech.onPause(sessionId) : jumpTo(index))}
+                  >
+                    {playing ? <Pause aria-hidden /> : <Play aria-hidden />}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div ref={textRef} className="answer-pane-text">
             {answer ? <MarkdownRenderer content={answer.text} /> : null}
@@ -719,6 +793,19 @@ export function AnswerPane({
           </>
         )}
       </div>
+      {/* Copy as Markdown: the answer's SOURCE, with its `#`, links and fences
+          intact. Pinned to the pane's corner OUTSIDE the scroll box, so it
+          stays put while the text scrolls and is always visible (touch
+          included). Absent while the body waits: what it would copy is the
+          answer the wait has already handed away. The button stops its own
+          click, so a copy never reaches anything that plays. After the body
+          in the DOM: absolutely positioned, it is no row of the column, and
+          the body stays the column's first row. */}
+      {answer && !waiting ? (
+        <span className="answer-pane-copy-all">
+          <CopyIconButton value={answer.text} label="Copy answer as Markdown" />
+        </span>
+      ) : null}
       {/* The pane's switch, directly under the text and ABOVE the composer.
           design.md's order, and the reason for it: the composer is the reply,
           so the switch that decides what the pane does belongs with the pane

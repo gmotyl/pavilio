@@ -20,9 +20,15 @@ vi.mock("@xterm/xterm", () => {
             | undefined,
       },
     };
+    // xterm's mode flags. The fake parses only DECSET/DECRST 2004 out of what
+    // it is written, which is all bracketedPasteOn() reads.
+    modes = { bracketedPasteMode: false };
     loadAddon = vi.fn();
     open = vi.fn();
-    write = vi.fn();
+    write = vi.fn((data: string) => {
+      if (data.includes("\x1b[?2004h")) this.modes.bracketedPasteMode = true;
+      if (data.includes("\x1b[?2004l")) this.modes.bracketedPasteMode = false;
+    });
     focus = vi.fn();
     scrollLines = vi.fn();
     dispose = vi.fn();
@@ -130,6 +136,25 @@ describe("terminalInstances", () => {
     mod.acquireTerminal("test-session");
     expect(createdSockets).toHaveLength(1);
     expect(createdSockets[0].url).toMatch(/\/ws\/terminal\/test-session$/);
+  });
+
+  it("bracketedPasteOn follows DECSET 2004 on and off", async () => {
+    const mod = await import("../terminalInstances");
+    mod.acquireTerminal("test-session");
+    const output = (data: string) =>
+      createdSockets[0].onmessage?.({
+        data: JSON.stringify({ type: "output", data }),
+      } as MessageEvent);
+    expect(mod.bracketedPasteOn("test-session")).toBe(false);
+    output("\x1b[?2004h");
+    expect(mod.bracketedPasteOn("test-session")).toBe(true);
+    output("\x1b[?2004l");
+    expect(mod.bracketedPasteOn("test-session")).toBe(false);
+  });
+
+  it("bracketedPasteOn is false for an unknown session", async () => {
+    const mod = await import("../terminalInstances");
+    expect(mod.bracketedPasteOn("no-such-session")).toBe(false);
   });
 
   /**

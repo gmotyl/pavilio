@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MarkdownRenderer from "../MarkdownRenderer";
 import { copyToClipboard } from "../../../lib/clipboard";
@@ -100,12 +100,107 @@ describe("MarkdownRenderer code block copy", () => {
 
     await waitFor(() => expect(screen.getByTestId("mermaid")).toBeTruthy());
     expect(screen.queryByLabelText("Copy code")).toBeNull();
+    expect(screen.queryByLabelText("Copy")).toBeNull();
   });
 
-  it("inline code has no copy button", () => {
-    renderMd("A paragraph with `inline code` in it.\n");
+  it("inline code gets a copy chip", () => {
+    const { container } = renderMd("Turn on `mode 2004` first.\n");
 
+    const chip = screen.getByLabelText("Copy");
+    // The chip rides on the span itself, inside an inline wrapper, so the
+    // sentence keeps flowing around it; it is not a fenced block's button.
+    const wrap = chip.closest(".inline-code-wrap")!;
+    expect(wrap).toBeTruthy();
+    expect(wrap.tagName).toBe("SPAN");
+    expect(wrap.querySelector("code")).toHaveTextContent("mode 2004");
+    expect(container.querySelector(".code-block")).toBeNull();
     expect(screen.queryByLabelText("Copy code")).toBeNull();
+  });
+
+  it("inline copy chip copies the span text", async () => {
+    renderMd("Turn on `mode 2004` first.\n");
+
+    fireEvent.click(screen.getByLabelText("Copy"));
+
+    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
+    expect(copy).toHaveBeenCalledWith("mode 2004");
+  });
+
+  it("code inside a fenced block gets no inline chip", () => {
+    // A fence's `code` goes through the same override as an inline span; only
+    // the fence's own button may land inside the `.code-block`.
+    const { container } = renderMd(["```", "plain text", "```", ""].join("\n"));
+
+    const block = container.querySelector(".code-block")!;
+    expect(block.querySelectorAll("button")).toHaveLength(1);
+    expect(container.querySelector(".inline-code-wrap")).toBeNull();
+    expect(screen.queryByLabelText("Copy")).toBeNull();
+  });
+
+  it("an empty fence gets no inline chip", () => {
+    // An empty fence's `code` holds no text at all — not even the trailing
+    // newline a filled fence carries — so the text cannot tell it from a code
+    // span. Its `pre` can: with or without a language, the fence keeps its one
+    // button and nothing inside it is an inline chip.
+    for (const fence of [["```", "```", ""], ["```ts", "```", ""]]) {
+      const { container, unmount } = renderMd(fence.join("\n"));
+
+      const block = container.querySelector(".code-block")!;
+      expect(block).toBeTruthy();
+      expect(block.querySelectorAll("button")).toHaveLength(1);
+      expect(container.querySelector(".inline-code-wrap")).toBeNull();
+      expect(screen.queryByLabelText("Copy")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("raw pre code gets no inline chip", () => {
+    // rehype-raw turns HTML in the note into real elements, and a one-line
+    // `<pre><code>` has no newline in it either. It is a block all the same.
+    const { container } = renderMd("<pre><code>one line</code></pre>\n");
+
+    const block = container.querySelector(".code-block")!;
+    expect(block).toBeTruthy();
+    expect(block.querySelectorAll("button")).toHaveLength(1);
+    expect(container.querySelector(".inline-code-wrap")).toBeNull();
+    expect(screen.queryByLabelText("Copy")).toBeNull();
+    // The marker that tells the two apart is a prop, never an attribute.
+    expect(container.querySelector("code")).not.toHaveAttribute("isfencedblock");
+    expect(container.querySelector("code")).not.toHaveAttribute("isFencedBlock");
+  });
+
+  it("a raw data-block attribute on inline code is not the block marker", () => {
+    // rehype-raw passes the note's own attributes through as props; one that
+    // happens to share the marker's old name must neither make inline code a
+    // block nor be swallowed on its way to the DOM.
+    const { container } = renderMd('Run <code data-block="false">ls</code> now.\n');
+
+    expect(container.querySelector(".inline-code-wrap")).toBeTruthy();
+    expect(screen.getByLabelText("Copy")).toBeTruthy();
+    expect(container.querySelector("code")).toHaveAttribute("data-block", "false");
+  });
+
+  it("the inline chip inside a link does not follow it", async () => {
+    function Where() {
+      return <div data-testid="where">{useLocation().pathname}</div>;
+    }
+    // A relative link with a basePath goes through the in-app `a` override,
+    // whose click handler navigates; the chip must reach neither it nor the
+    // browser's own link activation.
+    render(
+      <MemoryRouter initialEntries={["/start"]}>
+        <MarkdownRenderer content={"See [`mode 2004`](other.md).\n"} basePath="proj/NOTE.md" />
+        <Where />
+      </MemoryRouter>,
+    );
+
+    const chip = screen.getByLabelText("Copy");
+    expect(chip.closest("a")).toBeTruthy();
+    // `fireEvent` returns false when a handler called `preventDefault()`.
+    expect(fireEvent.click(chip)).toBe(false);
+
+    await waitFor(() => expect(copy).toHaveBeenCalledWith("mode 2004"));
+    expect(screen.getByTestId("where")).toHaveTextContent("/start");
   });
 
   it("the button is a sibling of the pre, not inside it", () => {

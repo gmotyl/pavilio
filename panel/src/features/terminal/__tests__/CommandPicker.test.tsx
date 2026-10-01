@@ -2,8 +2,10 @@
  * The command picker at the composer: a `/` at the start of an empty draft
  * opens a filtering list of the workspace's skills, and while it is open the
  * composer offers it Up, Down and Enter first, and closes it on Escape before
- * Escape can close the pane. Enter it takes only while an entry is highlighted
- * (or the list is still loading); otherwise the draft is sent as typed.
+ * Escape can close the pane. The best ranked entry is always highlighted, and
+ * Enter in an open picker never sends: it picks, closes the picker when nothing
+ * matches, or does nothing while the list loads. A literal `/command` is sent
+ * with Escape, then Enter.
  *
  * Asserted through `AnswerPane`, like `AnswerComposer.test.tsx`, because two of
  * the criteria are about keys the PANE owns — Escape closes the pane from its
@@ -11,6 +13,7 @@
  * them first and give them back. A harness that rendered the picker alone
  * could not see either handover.
  */
+import { act, createRef } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -20,6 +23,7 @@ import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import type { GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
+import { CommandPicker, type CommandPickerHandle } from "../CommandPicker";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
 import type { SkillEntry } from "../commandSource";
 import { __resetPtySubmitForTests } from "../ptySubmit";
@@ -82,7 +86,7 @@ function installMatchMedia(mobile: boolean): void {
   });
 }
 
-/** Served out of order on purpose: the picker must show them alphabetically. */
+/** Served out of order on purpose: the picker must impose its own order. */
 const SKILLS: SkillEntry[] = [
   {
     name: "pavilio-grill",
@@ -119,11 +123,16 @@ const SESSION_START: SkillEntry = {
   path: "skills/pavilio-session-start/SKILL.md",
 };
 
-/** Named so that `compact` is a whole segment; `session` is in its description. */
-const COMPACT: SkillEntry = {
-  name: "pavilio-compact",
-  description: "Package the session into a handoff",
-  path: "skills/pavilio-compact/SKILL.md",
+/** `note` is a whole segment of both names — the `/note` + Enter that once sent. */
+const NOTE: SkillEntry = {
+  name: "pavilio-note",
+  description: "Process a meeting transcript",
+  path: "skills/pavilio-note/SKILL.md",
+};
+const NOTE_BATCH: SkillEntry = {
+  name: "pavilio-note-batch",
+  description: "Batch-process meetings",
+  path: "skills/pavilio-note-batch/SKILL.md",
 };
 
 /** What `/api/skills` answers with; null holds the answer back (still loading). */
@@ -375,7 +384,7 @@ describe("CommandPicker", () => {
     expect(field().selectionEnd).toBe("/pavilio-grill".length);
   });
 
-  it("a CLI built-in with no name match is sent on Enter", async () => {
+  it("Enter with no match closes the picker and does not send", async () => {
     const user = userEvent.setup();
     renderPane();
 
@@ -384,11 +393,32 @@ describe("CommandPicker", () => {
     await screen.findByText("No skill matches.");
     await user.keyboard("{Enter}");
 
-    await expectSubmitted("/clear");
     expect(picker()).not.toBeInTheDocument();
+    expect(field().value).toBe("/clear");
+    expect(send).not.toHaveBeenCalled();
+    // The picker is closed now, so the next Enter sends the command as typed.
+    await user.keyboard("{Enter}");
+    await expectSubmitted("/clear");
   });
 
-  it("a description-only match is listed but Enter sends", async () => {
+  it("highlights the first ranked entry for a whole-segment query", async () => {
+    served = [...SKILLS, NOTE_BATCH, NOTE];
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(field());
+    await user.keyboard("/note");
+    const listed = await options();
+    expect(listed[0]).toHaveAttribute("data-name", "pavilio-note");
+    expect(listed[0]).toHaveAttribute("aria-selected", "true");
+    expect(field()).toHaveAttribute("aria-activedescendant", listed[0].id);
+    await user.keyboard("{Enter}");
+
+    expect(field().value).toBe("/pavilio-note");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("a description-only match is highlighted and Enter picks it", async () => {
     served = [...SKILLS, SESSION_START];
     const user = userEvent.setup();
     renderPane();
@@ -397,13 +427,11 @@ describe("CommandPicker", () => {
     await user.keyboard("/resume");
     const listed = await options();
     expect(listed.map((o) => o.getAttribute("data-name"))).toEqual(["pavilio-session-start"]);
-    // Listed, not highlighted: Enter has nothing to pick, and says so.
-    expect(listed[0]).toHaveAttribute("aria-selected", "false");
-    expect(field()).not.toHaveAttribute("aria-activedescendant");
-    expect(screen.getByText(/Enter send/)).toBeInTheDocument();
+    expect(listed[0]).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Enter}");
 
-    await expectSubmitted("/resume");
+    expect(field().value).toBe("/pavilio-session-start");
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("a name fragment is highlighted and Enter picks", async () => {
@@ -417,37 +445,9 @@ describe("CommandPicker", () => {
     expect(screen.getByText(/Enter insert/)).toBeInTheDocument();
     await user.keyboard("{Enter}");
 
-    expect(field().value).toBe("/pavilio-execute-plan");
+    // Every name matches "pav" equally; the shortest ranks first.
+    expect(field().value).toBe("/pavilio-grill");
     expect(send).not.toHaveBeenCalled();
-  });
-
-  it("a CLI built-in equal to a skill's segment is sent on Enter", async () => {
-    served = [...SKILLS, COMPACT];
-    const user = userEvent.setup();
-    renderPane();
-
-    await user.click(field());
-    await user.keyboard("/compact");
-    const listed = await options();
-    // Listed by its name, yet a whole segment is not a prefix of one: no highlight.
-    expect(listed.map((o) => o.getAttribute("data-name"))).toEqual(["pavilio-compact"]);
-    expect(listed[0]).toHaveAttribute("aria-selected", "false");
-    expect(field()).not.toHaveAttribute("aria-activedescendant");
-    await user.keyboard("{Enter}");
-
-    await expectSubmitted("/compact");
-  });
-
-  it("/help, with no match at all, is sent on Enter", async () => {
-    const user = userEvent.setup();
-    renderPane();
-
-    await user.click(field());
-    await user.keyboard("/help");
-    await screen.findByText("No skill matches.");
-    await user.keyboard("{Enter}");
-
-    await expectSubmitted("/help");
   });
 
   it("a strict segment prefix is highlighted", async () => {
@@ -491,24 +491,7 @@ describe("CommandPicker", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("the highlight is the first entry the rule accepts, not the first listed", async () => {
-    served = [...SKILLS, COMPACT, SESSION_START];
-    const user = userEvent.setup();
-    renderPane();
-
-    await user.click(field());
-    await user.keyboard("/sess");
-    const listed = await options();
-    // pavilio-compact is listed first, by its description only.
-    expect(listed.map((o) => o.getAttribute("data-name"))).toEqual([
-      "pavilio-compact",
-      "pavilio-session-start",
-    ]);
-    expect(listed[0]).toHaveAttribute("aria-selected", "false");
-    expect(listed[1]).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("a bare segment is not highlighted and Enter sends it", async () => {
+  it("a bare segment is highlighted and Enter picks it", async () => {
     const user = userEvent.setup();
     renderPane();
 
@@ -516,56 +499,10 @@ describe("CommandPicker", () => {
     await user.keyboard("/question");
     const [only] = await options();
     expect(only).toHaveAttribute("data-name", "pavilio-question");
-    expect(only).toHaveAttribute("aria-selected", "false");
+    expect(only).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Enter}");
 
-    await expectSubmitted("/question");
-  });
-
-  it("arrowing onto a bare-segment match lets Enter pick it", async () => {
-    const user = userEvent.setup();
-    renderPane();
-
-    await user.click(field());
-    await user.keyboard("/question");
-    await options();
-    await user.keyboard("{ArrowDown}{Enter}");
-
     expect(field().value).toBe("/pavilio-question");
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it("Up with nothing highlighted lands on the last entry", async () => {
-    served = [...SKILLS, COMPACT, SESSION_START];
-    const user = userEvent.setup();
-    renderPane();
-
-    await user.click(field());
-    // A whole segment of one name, a description word of the other: no highlight.
-    await user.keyboard("/session");
-    const listed = await options();
-    expect(listed.map((o) => o.getAttribute("data-name"))).toEqual([
-      "pavilio-compact",
-      "pavilio-session-start",
-    ]);
-    expect(field()).not.toHaveAttribute("aria-activedescendant");
-    await user.keyboard("{ArrowUp}{Enter}");
-
-    expect(field().value).toBe("/pavilio-session-start");
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it("arrowing onto a description match lets Enter pick it", async () => {
-    served = [...SKILLS, SESSION_START];
-    const user = userEvent.setup();
-    renderPane();
-
-    await user.click(field());
-    await user.keyboard("/resume");
-    await options();
-    await user.keyboard("{ArrowDown}{Enter}");
-
-    expect(field().value).toBe("/pavilio-session-start");
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -688,5 +625,99 @@ describe("CommandPicker", () => {
 
     expect(picker()).toBeInTheDocument();
     expect((await options()).length).toBe(3);
+  });
+});
+
+/**
+ * The picker's handle on its own: what `handleKey` returns and calls is the
+ * contract the composer builds on, and Tab is not wired into the composer yet.
+ */
+describe("CommandPicker.handleKey", () => {
+  const onPick = vi.fn();
+  const onPickerClose = vi.fn();
+
+  function renderPicker(query: string) {
+    const ref = createRef<CommandPickerHandle>();
+    render(
+      <CommandPicker
+        ref={ref}
+        id="picker"
+        query={query}
+        onPick={onPick}
+        onClose={onPickerClose}
+        onActiveChange={() => {}}
+      />,
+    );
+    const press = (key: "ArrowUp" | "ArrowDown" | "Enter" | "Tab"): boolean => {
+      let consumed = false;
+      act(() => {
+        consumed = ref.current!.handleKey(key);
+      });
+      return consumed;
+    };
+    return { press };
+  }
+
+  beforeEach(() => {
+    onPick.mockClear();
+    onPickerClose.mockClear();
+  });
+
+  it("Enter with no match closes instead of declining", async () => {
+    const { press } = renderPicker("clear");
+    await screen.findByText("No skill matches.");
+
+    expect(press("Enter")).toBe(true);
+    expect(onPickerClose).toHaveBeenCalledTimes(1);
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it("Enter while loading is swallowed", async () => {
+    served = null;
+    const { press } = renderPicker("pav");
+    await screen.findByText("Loading skills…");
+
+    expect(press("Enter")).toBe(true);
+    expect(onPick).not.toHaveBeenCalled();
+    expect(onPickerClose).not.toHaveBeenCalled();
+  });
+
+  it("ArrowDown then Enter picks the second entry", async () => {
+    const { press } = renderPicker("");
+    await options();
+
+    press("ArrowDown");
+    expect(press("Enter")).toBe(true);
+    expect(onPick).toHaveBeenCalledWith("pavilio-grill");
+  });
+
+  it("Tab picks the highlighted entry", async () => {
+    const { press } = renderPicker("gri");
+    await options();
+
+    expect(press("Tab")).toBe(true);
+    expect(onPick).toHaveBeenCalledWith("pavilio-grill");
+    expect(onPickerClose).not.toHaveBeenCalled();
+  });
+
+  it("Tab with no highlight is declined", async () => {
+    const noMatch = renderPicker("clear");
+    await screen.findByText("No skill matches.");
+    expect(noMatch.press("Tab")).toBe(false);
+
+    served = null;
+    const loading = renderPicker("pav");
+    await screen.findByText("Loading skills…");
+    expect(loading.press("Tab")).toBe(false);
+
+    expect(onPick).not.toHaveBeenCalled();
+    expect(onPickerClose).not.toHaveBeenCalled();
+  });
+
+  it("foot hint says Enter close when nothing matches", async () => {
+    renderPicker("clear");
+    await screen.findByText("No skill matches.");
+
+    expect(screen.getByText("↑↓ move · Enter close · Esc close")).toBeInTheDocument();
   });
 });

@@ -51,6 +51,7 @@ let connectionState: ConnectionState = "disconnected";
 // — the composer's own focus repair and dismiss, and the three `ptySubmit`
 // asks the pool for — so the handshake can be answered by hand.
 vi.mock("../terminalInstances", () => ({
+  bracketedPasteOn: () => false,
   sendDismiss: () => {},
   reconnectOnActivate: () => {},
   getConnectionState: () => connectionState,

@@ -184,3 +184,21 @@ export function layoutRail(
     previousEnd = top + height;
   });
 }
+
+/**
+ * Puts each unit's Play button level with the top of its rail segment, so it
+ * sits beside the first line of the unit's first block — the segment's
+ * geometry, reused rather than measured a second time. Run after
+ * {@link layoutRail}, which is what wrote the segments' `top`. The k-th child
+ * of `plays` is unit k's button, as the k-th child of `rail` is its segment.
+ */
+export function alignToSegments(rail: HTMLElement | null, plays: HTMLElement | null): void {
+  if (!rail || !plays) return;
+  const buttons = Array.from(plays.children).filter(
+    (child): child is HTMLElement => child instanceof HTMLElement,
+  );
+  Array.from(rail.children).forEach((segment, index) => {
+    const button = buttons[index];
+    if (button && segment instanceof HTMLElement) button.style.top = segment.style.top;
+  });
+}

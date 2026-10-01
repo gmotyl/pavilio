@@ -13,8 +13,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests, submitToPty } from "../ptySubmit";
 
+/** Whether the cell under test has DECSET 2004 on; off unless a test says so. */
+let pasteMode = false;
+
+vi.mock("../terminalInstances", async (importActual) => ({
+  ...(await importActual<typeof import("../terminalInstances")>()),
+  bracketedPasteOn: () => pasteMode,
+}));
+
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
+
 beforeEach(() => {
   __resetPtySubmitForTests();
+  pasteMode = false;
   vi.useFakeTimers();
 });
 
@@ -184,5 +196,57 @@ describe("submitToPty when a caller's own callback throws", () => {
     const live = vi.fn((_data: string) => true);
     submitToPty("cell-a", live, "second");
     expect(live.mock.calls).toEqual([["second"]]);
+  });
+});
+
+/**
+ * codex reads an Enter that arrives within 120 ms of a paste-like burst as a
+ * newline (`PASTE_ENTER_SUPPRESS_WINDOW`), and our return trails the body by
+ * only {@link SUBMIT_RETURN_MS}. A REAL bracketed paste clears that state
+ * (`clear_after_explicit_paste`), so a cell that asked for mode 2004 is sent
+ * the body the way a terminal would send a paste.
+ */
+describe("submitToPty to a bracketed-paste TUI", () => {
+  it("wraps the body in bracketed-paste markers when the cell has mode 2004 on", () => {
+    pasteMode = true;
+    const send = vi.fn((_data: string) => true);
+
+    submitToPty("cell-a", send, "yes");
+
+    expect(send.mock.calls).toEqual([[`${PASTE_START}yes${PASTE_END}`]]);
+  });
+
+  it("writes the body raw when bracketed paste is off", () => {
+    const send = vi.fn((_data: string) => true);
+
+    submitToPty("cell-a", send, "yes");
+    vi.advanceTimersByTime(SUBMIT_RETURN_MS);
+
+    expect(send.mock.calls).toEqual([["yes"], ["\r"]]);
+  });
+
+  it("strips a paste-end marker from the body before wrapping", () => {
+    pasteMode = true;
+    const send = vi.fn((_data: string) => true);
+
+    submitToPty("cell-a", send, `before${PASTE_END}after`);
+
+    // A marker left in would end the paste early and hand the rest of the
+    // body to the TUI as keystrokes.
+    const [[frame]] = send.mock.calls;
+    expect(frame).toBe(`${PASTE_START}beforeafter${PASTE_END}`);
+    expect(frame.slice(PASTE_START.length, -PASTE_END.length)).not.toContain(PASTE_END);
+  });
+
+  it("the return still follows as its own frame after SUBMIT_RETURN_MS", () => {
+    pasteMode = true;
+    const send = vi.fn((_data: string) => true);
+
+    submitToPty("cell-a", send, "yes");
+    vi.advanceTimersByTime(SUBMIT_RETURN_MS - 1);
+    expect(send.mock.calls).toEqual([[`${PASTE_START}yes${PASTE_END}`]]);
+
+    vi.advanceTimersByTime(1);
+    expect(send.mock.calls).toEqual([[`${PASTE_START}yes${PASTE_END}`], ["\r"]]);
   });
 });

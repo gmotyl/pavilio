@@ -846,14 +846,20 @@ describe("the marks on the answer that comes back", () => {
     expect(within(body()).getByText(NEXT_ANSWER)).toBeInTheDocument();
 
     // The reply's block carries the whole affordance again: the unit it was
-    // spoken from, the role and the tab stop that make it clickable and
-    // reachable, and the highlight that says it is the one being read.
+    // spoken from, the Play beside it that reads from there, and the
+    // highlight that says it is the one being read.
     const after = markedBlocks();
     expect(after).toHaveLength(1);
     expect(after[0]).toHaveAttribute("data-unit", "0");
-    expect(after[0]).toHaveAttribute("role", "button");
-    expect(after[0]).toHaveAttribute("tabindex", "0");
     expect(after[0]).toHaveAttribute("data-speaking", "");
+    // The Play renders from the units whether or not anything was marked, so
+    // its presence proves nothing: its `top` is written only by the re-layout
+    // (`alignToSegments`, from the segment `layoutRail` placed), and the
+    // column that came back is a new one that starts without it.
+    const playButton = screen.getByTestId(`answer-pane-play-${SESSION}-0`);
+    const segment = screen.getByTestId(`answer-pane-seg-${SESSION}-0`);
+    expect(segment.style.top).not.toBe("");
+    expect(playButton.style.top).toBe(segment.style.top);
   });
 });
 

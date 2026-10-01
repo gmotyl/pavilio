@@ -26,6 +26,7 @@ import type { ConnectionState } from "../terminalInstances";
 // this — see `AnswerComposer.pendingRow.test.tsx` for the fuller version of
 // this same mock. Nothing here exercises a reconnect, so the stubs are inert.
 vi.mock("../terminalInstances", () => ({
+  bracketedPasteOn: () => false,
   sendDismiss: () => {},
   reconnectOnActivate: () => {},
   getConnectionState: () => "connected" as ConnectionState,

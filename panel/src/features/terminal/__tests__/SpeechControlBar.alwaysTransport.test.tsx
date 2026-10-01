@@ -52,6 +52,7 @@ vi.mock("../terminalInstances", () => {
   const holders = new Map<string, HTMLDivElement>();
 
   return {
+    bracketedPasteOn: () => false,
     acquireTerminal: (sessionId: string) => {
       let holder = holders.get(sessionId);
       if (!holder) {

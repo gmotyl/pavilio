@@ -10,7 +10,7 @@
  * store is driven by hand, which is what lets the "nothing re-renders inside a
  * unit" test notify with the same index and count.
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
@@ -24,6 +24,7 @@ import {
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { segmentStateFor } from "../segmentState";
 import { AnswerPane } from "../AnswerPane";
+import { __resetAnswerWaitingForTests, beginWaiting, noteTransport } from "../answerWaiting";
 
 // mermaid pulls in a browser-only rendering stack; what matters here is that
 // the fence reaches the diagram component, not what mermaid draws.
@@ -278,11 +279,7 @@ const list = (): HTMLElement => {
   return element;
 };
 
-/**
- * By tag, not by role: a matched heading carries `role="button"` (it is a
- * jump), so the `heading` role is no longer what it exposes. The contract's
- * criterion is the element — `# Heading` becomes an `h1`.
- */
+/** By tag: the contract's criterion is the element — `# Heading` becomes an `h1`. */
 const h1 = (): HTMLElement => {
   const element = prose().querySelector("h1");
   if (!(element instanceof HTMLElement)) throw new Error("no h1 in the body");
@@ -293,6 +290,10 @@ const speaking = (): HTMLElement[] => blocks().filter((block) => block.hasAttrib
 
 const segment = (index: number): HTMLElement =>
   screen.getByTestId(`answer-pane-seg-cell-a-${index}`);
+
+/** A unit's Play button — see `AnswerPane.play.test.tsx`. */
+const playButton = (index: number): HTMLElement =>
+  screen.getByTestId(`answer-pane-play-cell-a-${index}`);
 
 /**
  * jsdom has no layout, and the follow step is nothing but layout: "does the
@@ -428,6 +429,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount first: resetting the wait re-renders a mounted pane, and its
+  // ResizeObserver effect would then run after the stub below is gone.
+  cleanup();
+  __resetAnswerWaitingForTests();
   restoreLayout();
   vi.unstubAllGlobals();
 });
@@ -524,44 +529,34 @@ describe("AnswerPane", () => {
     }
   });
 
-  it("a block click and a segment click both jump to the unit", () => {
+  it("a segment click jumps to the unit and a block click does not", () => {
     const h = harness(MARKDOWN, null);
     const speech = makeSpeech(h);
     render(paneElement(speech));
 
+    // The text is text: reading starts from a Play button, never from a block.
     fireEvent.click(h1());
-    expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 0);
-
-    // The third paragraph is the second block of unit 2.
     fireEvent.click(screen.getByText(/^The third paragraph/));
-    expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
+    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
 
     fireEvent.click(segment(1));
     expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
-    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(3);
+    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
   });
 
-  it("Enter on a focused block jumps", () => {
+  it("a speakable block is neither a button nor a tab stop", () => {
     const h = harness(MARKDOWN, null);
     const speech = makeSpeech(h);
     render(paneElement(speech));
 
     const block = screen.getByText(/^The first paragraph/);
-    expect(block).toHaveAttribute("role", "button");
-    expect(block).toHaveAttribute("tabindex", "0");
-    block.focus();
-    expect(document.activeElement).toBe(block);
+    expect(block).toHaveAttribute("data-unit", "1");
+    expect(block).not.toHaveAttribute("role");
+    expect(block).not.toHaveAttribute("tabindex");
 
     fireEvent.keyDown(block, { key: "Enter" });
-    expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
-
-    // Space too, and it must not scroll the body.
-    const space = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
-    act(() => {
-      block.dispatchEvent(space);
-    });
-    expect(space.defaultPrevented).toBe(true);
-    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(block, { key: " " });
+    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
   it("a code block is inert", () => {
@@ -686,8 +681,9 @@ describe("AnswerPane", () => {
     expect(cell.mouseDown).not.toHaveBeenCalled();
     expect(cell.click).not.toHaveBeenCalled();
     expect(cell.dragStart).not.toHaveBeenCalled();
-    // The clicks still did their own work inside the pane.
-    expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 0);
+    // The segment click still did its own work inside the pane; the heading
+    // is text and starts nothing.
+    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
     expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
   });
 
@@ -804,7 +800,7 @@ describe("AnswerPane", () => {
     expect(terminalSawKey).toHaveBeenCalledTimes(1);
   });
 
-  it("Enter on a link inside a block follows the link, not the jump", () => {
+  it("Enter on a link inside a block follows the link and plays nothing", () => {
     const linked = [
       "# Deploy plan",
       "",
@@ -817,19 +813,16 @@ describe("AnswerPane", () => {
 
     const link = screen.getByRole("link", { name: "the deploy guide" });
     const paragraph = link.closest("p");
-    // The paragraph is a matched block — the guard is what keeps the link out.
+    // The paragraph is a matched block, and still plain text.
     expect(paragraph).toHaveAttribute("data-unit", "1");
-    expect(paragraph).toHaveAttribute("role", "button");
+    expect(paragraph).not.toHaveAttribute("role");
 
     link.focus();
     expect(document.activeElement).toBe(link);
     fireEvent.keyDown(link, { key: "Enter" });
     fireEvent.keyDown(link, { key: " " });
-    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
-
-    // Enter on the block itself is still the jump.
     fireEvent.keyDown(paragraph!, { key: "Enter" });
-    expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
+    expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
   it("a new utterance swaps the text in place", () => {
@@ -888,8 +881,8 @@ describe("AnswerPane", () => {
       expect(distinct).toEqual([distinct[0], distinct[0] + 1, distinct[0] + 2]);
 
       for (const item of items()) {
-        expect(item).toHaveAttribute("role", "button");
-        expect(item).toHaveAttribute("tabindex", "0");
+        expect(item).not.toHaveAttribute("role");
+        expect(item).not.toHaveAttribute("tabindex");
       }
 
       // The container is not a block: no mark, no role, no tab stop.
@@ -899,7 +892,7 @@ describe("AnswerPane", () => {
       expect(list()).not.toHaveAttribute("data-speaking");
     });
 
-    it("clicking a list item jumps to its unit", () => {
+    it("a list item's Play jumps to its unit", () => {
       const h = harness(LIST_MARKDOWN, null);
       const expectedUnit = expectedUnitIn(h);
       const speech = makeSpeech(h);
@@ -907,10 +900,13 @@ describe("AnswerPane", () => {
 
       for (const index of [3, 0, 5]) {
         const item = items()[index];
+        // The item itself is text.
         fireEvent.click(item);
+        expect(speech.onJumpToUnit).not.toHaveBeenCalled();
+        fireEvent.click(playButton(expectedUnit(item)));
         expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", expectedUnit(item));
+        vi.mocked(speech.onJumpToUnit).mockClear();
       }
-      expect(speech.onJumpToUnit).toHaveBeenCalledTimes(3);
     });
 
     it("clicking the list container jumps nowhere", () => {
@@ -954,27 +950,46 @@ describe("AnswerPane", () => {
   });
 
   /**
-   * Following the voice. The pane moves at ONE moment — the unit boundary —
-   * and only when there is somewhere to move to. Inside a unit nothing moves,
-   * and a reader who scrolled ahead is left alone until the next unit starts.
+   * Following the voice. The pane moves at ONE moment — when it mounts while a
+   * unit is playing — and only when there is somewhere to move to. A unit
+   * boundary moves the mark and the playhead, never the text: the reader's
+   * scroll position is theirs for as long as the pane stays open.
    */
   describe("following", () => {
-    it("scrolls once to the new unit when the text overflows", () => {
+    it("a unit change does not scroll the pane", () => {
       overflowing();
       const h = harness(MARKDOWN, null);
       render(paneElement(makeSpeech(h)));
       // Nothing is playing: nothing to follow.
       expect(scrolls()).toEqual([]);
 
-      // Unit 0 is the heading, block 0 at the top: a third of a screen above
-      // it is off the top, so the target clamps at 0.
       h.progress.set({ unitIndex: 0, unitTime: 0, unitDuration: null });
-      expect(scrolls()).toEqual([0]);
+      expect(speaking().map((b) => b.tagName)).toEqual(["H1"]);
 
-      // Unit 2 starts at block 3 (h1, p, pre, p, p): 300 − 300 / 3.
+      // Unit 2 is the two paragraphs after the fence (h1, p, pre, p, p): the
+      // mark and the playhead move there, the body stays where it is.
       h.progress.set({ unitIndex: 2, unitTime: 0, unitDuration: null });
-      expect(scrolls()).toEqual([0, 3 * BLOCK_TOP - layout.clientHeight / 3]);
-      expect(scrollTo).toHaveBeenCalledTimes(2);
+      expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+      expect(segment(2).contains(screen.getByTestId("answer-pane-head-cell-a"))).toBe(true);
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("does not scroll when the body is rebuilt on the way out of a wait mid-unit", () => {
+      overflowing();
+      const h = harness(MARKDOWN, { unitIndex: 2, unitTime: 0, unitDuration: null });
+      render(paneElement(makeSpeech(h)));
+      // The mount itself lands on the spoken block — pinned below.
+      scrollTo.mockClear();
+
+      act(() => beginWaiting("cell-a", "u-1"));
+      expect(screen.queryByTestId("answer-pane-waiting-cell-a")).toBeInTheDocument();
+
+      // A transport press hands the body back while unit 2 is still playing:
+      // the column is rebuilt and marked again, and nothing scrolls.
+      act(() => noteTransport("cell-a"));
+      expect(screen.queryByTestId("answer-pane-waiting-cell-a")).toBeNull();
+      expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+      expect(scrollTo).not.toHaveBeenCalled();
     });
 
     it("does not scroll when the answer fits", () => {

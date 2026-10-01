@@ -29,6 +29,7 @@ let connectionState: ConnectionState = "connected";
 const listeners = new Map<string, Set<(state: ConnectionState) => void>>();
 
 vi.mock("../terminalInstances", () => ({
+  bracketedPasteOn: () => false,
   sendDismiss: () => {},
   reconnectOnActivate: () => {},
   getConnectionState: () => connectionState,

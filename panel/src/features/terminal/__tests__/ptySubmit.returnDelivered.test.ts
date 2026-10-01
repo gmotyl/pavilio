@@ -53,6 +53,7 @@ function emit(sessionId: string, state: ConnectionState): void {
 }
 
 vi.mock("../terminalInstances", () => ({
+  bracketedPasteOn: () => false,
   getConnectionState: () => connectionState,
   hasExited: () => exited,
   reconnectSession: (sessionId: string) => {
