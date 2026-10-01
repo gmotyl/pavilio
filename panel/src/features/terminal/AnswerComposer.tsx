@@ -607,6 +607,12 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     setActiveOption(null);
   };
 
+  /** Close the picker, keeping the draft — Escape, or an Enter with nothing to pick. */
+  const closePicker = (): void => {
+    setPickerAt(null);
+    setActiveOption(null);
+  };
+
   /**
    * The `/ skills` chip: the same picker a typed `/` opens, reached by click.
    *
@@ -879,8 +885,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         // keeps its `/`, so a slash meant literally survives.
         e.preventDefault();
         e.stopPropagation();
-        setPickerAt(null);
-        setActiveOption(null);
+        closePicker();
         return;
       }
       const owned =
@@ -979,6 +984,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               id={pickerId}
               query={pickerToken.slice(1)}
               onPick={pick}
+              onClose={closePicker}
               onActiveChange={setActiveOption}
               onSkillsLoaded={learnSkills}
             />
