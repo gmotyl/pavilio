@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { lazy, Suspense, useMemo } from "react";
+import { Children, cloneElement, isValidElement, lazy, Suspense, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -41,6 +41,22 @@ function extractText(children: any): string {
   return String(children ?? "");
 }
 
+/**
+ * The prop the `pre` override puts on its `code` child, so the `code` override
+ * knows it is rendering a block. A prop, not an attribute: the `code` override
+ * takes it out before anything reaches the DOM.
+ */
+const BLOCK_PROP = "data-block";
+
+/** Mark every `code` element directly under a `pre` as a block. */
+function markBlockCode(children: ReactNode): ReactNode {
+  return Children.map(children, (child) => {
+    if (!isValidElement<{ node?: { tagName?: string } }>(child)) return child;
+    if (child.props.node?.tagName !== "code") return child;
+    return cloneElement(child, { [BLOCK_PROP]: true } as Record<string, unknown>);
+  });
+}
+
 export default function MarkdownRenderer({ content, basePath }: MarkdownRendererProps) {
   const navigate = useNavigate();
 
@@ -50,7 +66,12 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
     // projectsDir has no relative path, and used to lose every override with it,
     // which left its mermaid diagrams rendered as plain code blocks.
     const codeBlocks: Components = {
-      code: ({ className, children, ...props }) => {
+      code: ({ className, children, ...rest }) => {
+        // Out of the props before they are spread, so the marker never
+        // becomes an attribute on the `code` element.
+        const { [BLOCK_PROP]: isBlock, ...props } = rest as typeof rest & {
+          [BLOCK_PROP]?: boolean;
+        };
         if (/language-mermaid/.test(className || "")) {
           const chart = extractText(children).replace(/\n$/, "");
           return (
@@ -62,14 +83,15 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
           );
         }
         const code = <code className={className} {...props}>{children}</code>;
-        // react-markdown no longer says whether a `code` is inline, but the
-        // text does: a fence always ends in the newline `mdast-util-to-hast`
-        // appends (the one the `pre` override trims), while CommonMark turns
-        // every line ending inside a code span into a space. So a span with no
-        // newline is inline code, and gets its own copy chip; a fence's `code`
-        // keeps only the `pre`'s button.
+        // react-markdown no longer says whether a `code` is inline, and gives
+        // it no parent to ask, but the `pre` override sees its `code` child
+        // before this runs and marks it (see `markBlockCode`). That holds for
+        // the cases the text cannot tell apart: an empty fence, whose `code`
+        // has no text at all, and a raw `<pre><code>` on one line. Unmarked
+        // code is a span, and gets its own copy chip; a block's `code` keeps
+        // only the `pre`'s button.
+        if (isBlock) return code;
         const text = extractText(children);
-        if (text.includes("\n")) return code;
         return (
           // An inline wrapper, so the sentence keeps flowing; the chip is
           // positioned against it, out of the text flow (see `index.css`).
@@ -81,7 +103,8 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
           </span>
         );
       },
-      pre: ({ children, ...props }) => {
+      pre: ({ children: rawChildren, ...props }) => {
+        const children = markBlockCode(rawChildren);
         const child = (Array.isArray(children) ? children[0] : children) as any;
         // DEAD BRANCH — this is NOT the mermaid path. react-markdown hands
         // `pre` the *unrendered* element for the `code` node, so `child` here

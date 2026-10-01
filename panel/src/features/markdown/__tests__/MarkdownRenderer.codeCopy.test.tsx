@@ -137,6 +137,37 @@ describe("MarkdownRenderer code block copy", () => {
     expect(screen.queryByLabelText("Copy")).toBeNull();
   });
 
+  it("an empty fence gets no inline chip", () => {
+    // An empty fence's `code` holds no text at all — not even the trailing
+    // newline a filled fence carries — so the text cannot tell it from a code
+    // span. Its `pre` can: with or without a language, the fence keeps its one
+    // button and nothing inside it is an inline chip.
+    for (const fence of [["```", "```", ""], ["```ts", "```", ""]]) {
+      const { container, unmount } = renderMd(fence.join("\n"));
+
+      const block = container.querySelector(".code-block")!;
+      expect(block).toBeTruthy();
+      expect(block.querySelectorAll("button")).toHaveLength(1);
+      expect(container.querySelector(".inline-code-wrap")).toBeNull();
+      expect(screen.queryByLabelText("Copy")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("raw pre code gets no inline chip", () => {
+    // rehype-raw turns HTML in the note into real elements, and a one-line
+    // `<pre><code>` has no newline in it either. It is a block all the same.
+    const { container } = renderMd("<pre><code>one line</code></pre>\n");
+
+    const block = container.querySelector(".code-block")!;
+    expect(block).toBeTruthy();
+    expect(block.querySelectorAll("button")).toHaveLength(1);
+    expect(container.querySelector(".inline-code-wrap")).toBeNull();
+    expect(screen.queryByLabelText("Copy")).toBeNull();
+    // The marker that tells the two apart is a prop, never an attribute.
+    expect(container.querySelector("code")).not.toHaveAttribute("data-block");
+  });
+
   it("the inline chip inside a link does not follow it", async () => {
     function Where() {
       return <div data-testid="where">{useLocation().pathname}</div>;
