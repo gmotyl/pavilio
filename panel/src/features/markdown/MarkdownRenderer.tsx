@@ -61,7 +61,25 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
             </span>
           );
         }
-        return <code className={className} {...props}>{children}</code>;
+        const code = <code className={className} {...props}>{children}</code>;
+        // react-markdown no longer says whether a `code` is inline, but the
+        // text does: a fence always ends in the newline `mdast-util-to-hast`
+        // appends (the one the `pre` override trims), while CommonMark turns
+        // every line ending inside a code span into a space. So a span with no
+        // newline is inline code, and gets its own copy chip; a fence's `code`
+        // keeps only the `pre`'s button.
+        const text = extractText(children);
+        if (text.includes("\n")) return code;
+        return (
+          // An inline wrapper, so the sentence keeps flowing; the chip is
+          // positioned against it, out of the text flow (see `index.css`).
+          <span className="inline-code-wrap">
+            {code}
+            <span className="inline-code-copy">
+              <CopyIconButton value={text} label="Copy" />
+            </span>
+          </span>
+        );
       },
       pre: ({ children, ...props }) => {
         const child = (Array.isArray(children) ? children[0] : children) as any;

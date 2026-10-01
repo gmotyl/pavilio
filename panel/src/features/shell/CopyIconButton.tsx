@@ -32,8 +32,11 @@ export function CopyIconButton({
     // or a blockquote — restarted the voice. That handler is gone (reading now
     // starts from a Play button), but a copy button can still land inside an
     // ancestor that reacts to clicks, so the guard stays. Synchronous and
-    // first: after an `await` the event is no longer dispatching.
+    // first: after an `await` the event is no longer dispatching. The same goes
+    // for the browser's own default: an inline-code chip sits inside its link
+    // when the span is the link text, and a copy must not also follow it.
     event.stopPropagation();
+    event.preventDefault();
     if (!(await copyToClipboard(value))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
