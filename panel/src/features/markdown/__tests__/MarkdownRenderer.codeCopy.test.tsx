@@ -165,7 +165,19 @@ describe("MarkdownRenderer code block copy", () => {
     expect(container.querySelector(".inline-code-wrap")).toBeNull();
     expect(screen.queryByLabelText("Copy")).toBeNull();
     // The marker that tells the two apart is a prop, never an attribute.
-    expect(container.querySelector("code")).not.toHaveAttribute("data-block");
+    expect(container.querySelector("code")).not.toHaveAttribute("isfencedblock");
+    expect(container.querySelector("code")).not.toHaveAttribute("isFencedBlock");
+  });
+
+  it("a raw data-block attribute on inline code is not the block marker", () => {
+    // rehype-raw passes the note's own attributes through as props; one that
+    // happens to share the marker's old name must neither make inline code a
+    // block nor be swallowed on its way to the DOM.
+    const { container } = renderMd('Run <code data-block="false">ls</code> now.\n');
+
+    expect(container.querySelector(".inline-code-wrap")).toBeTruthy();
+    expect(screen.getByLabelText("Copy")).toBeTruthy();
+    expect(container.querySelector("code")).toHaveAttribute("data-block", "false");
   });
 
   it("the inline chip inside a link does not follow it", async () => {

@@ -45,8 +45,13 @@ function extractText(children: any): string {
  * The prop the `pre` override puts on its `code` child, so the `code` override
  * knows it is rendering a block. A prop, not an attribute: the `code` override
  * takes it out before anything reaches the DOM.
+ *
+ * camelCase on purpose: rehype-raw passes a note's own HTML attributes through
+ * as props, but the HTML parser lowercases their names, so no `<code …>` in a
+ * note can produce this one. A `data-*` name could, and would make inline code
+ * a block (and lose the author's attribute).
  */
-const BLOCK_PROP = "data-block";
+const BLOCK_PROP = "isFencedBlock";
 
 /** Mark every `code` element directly under a `pre` as a block. */
 function markBlockCode(children: ReactNode): ReactNode {
@@ -90,7 +95,7 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
         // has no text at all, and a raw `<pre><code>` on one line. Unmarked
         // code is a span, and gets its own copy chip; a block's `code` keeps
         // only the `pre`'s button.
-        if (isBlock) return code;
+        if (isBlock === true) return code;
         const text = extractText(children);
         return (
           // An inline wrapper, so the sentence keeps flowing; the chip is
