@@ -11,6 +11,7 @@
  * output, as in `AnswerPane.test.tsx`; the host is a stub.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
@@ -57,13 +58,14 @@ const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 function makeSpeech(
   progress: SpeechProgress | null = null,
   state: CellSpeechState = "ready",
+  markdown: string = MARKDOWN,
 ): { speech: GridSpeech; units: readonly SpeechUnit[] } {
   const queue: UtteranceQueue = utteranceQueueReducer(emptyUtteranceQueue, {
     type: "arrived",
-    utterance: { id: "u-1", sessionId: "cell-a", text: MARKDOWN, at: 1 },
+    utterance: { id: "u-1", sessionId: "cell-a", text: markdown, at: 1 },
     speaking: false,
   });
-  const units = prepare(MARKDOWN).units;
+  const units = prepare(markdown).units;
   const speech = {
     stateFor: vi.fn(() => state),
     queueFor: vi.fn(() => queue),
@@ -193,7 +195,7 @@ describe("AnswerPane Play buttons", () => {
     renderPane(speech);
 
     expect(play(2).tagName).toBe("BUTTON");
-    expect(play(2)).toHaveAccessibleName("Play from here");
+    expect(play(2)).toHaveAccessibleName("Read from here");
     fireEvent.click(play(2));
     expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
     fireEvent.click(play(0));
@@ -210,20 +212,26 @@ describe("AnswerPane Play buttons", () => {
     expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
   });
 
-  it("Play is keyboard operable", () => {
+  it("Play is keyboard operable", async () => {
+    const user = userEvent.setup();
     const { speech } = makeSpeech();
     renderPane(speech);
 
     // A real button: Enter and Space are the browser's, and they arrive as a
-    // click — which is exactly what jsdom cannot synthesize from a keydown, so
-    // the native element is the assertion and the click stands in for the key.
+    // click — no key handler of ours. user-event plays the browser's part.
     const button = play(1);
     expect(button).toHaveAttribute("type", "button");
     expect(button).not.toHaveAttribute("tabindex");
     button.focus();
     expect(document.activeElement).toBe(button);
-    fireEvent.click(button);
-    expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
+    await user.keyboard("{Enter}");
+    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
+    expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
+
+    play(2).focus();
+    await user.keyboard(" ");
+    expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
+    expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
 
     // Focus reveals it, like a hover does.
     fireEvent.focusIn(button);
@@ -236,7 +244,7 @@ describe("AnswerPane Play buttons", () => {
 
     expect(play(1)).toHaveAccessibleName("Pause");
     expect(play(1)).toHaveAttribute("data-playing");
-    expect(play(0)).toHaveAccessibleName("Play from here");
+    expect(play(0)).toHaveAccessibleName("Read from here");
     expect(shown()).toEqual([1]);
 
     fireEvent.click(play(1));
@@ -282,5 +290,46 @@ describe("AnswerPane Play buttons", () => {
     expect(codeBlock!.querySelector("[data-testid^='answer-pane-play']")).toBeNull();
     const fenceTop = `${codeBlock!.offsetTop}px`;
     for (const button of plays()) expect(button.style.top).not.toBe(fenceTop);
+  });
+
+  it("a unit with no block has no Play", () => {
+    // Each paragraph clears `UNIT_MIN_CHARS` on its own, so neither is packed
+    // with the fence and the fence is left a unit of its own at either end.
+    const fence = ["```ts", "const x = 1;", "```", ""];
+    const paragraphs = [
+      "The first paragraph explains why the deploy has to wait for the database migration to finish first, and why the old schema must stay readable until every pod has rolled over to the new release tonight.",
+      "",
+      "The second paragraph describes the rollback path in case the health checks fail after the switch, including how long the old pods stay warm before they are drained and who signs off on the rollback tonight.",
+      "",
+    ];
+    const opening = [...fence, ...paragraphs].join("\n");
+    const closing = [...paragraphs, ...fence].join("\n");
+
+    for (const markdown of [opening, closing]) {
+      const { speech, units } = makeSpeech(null, "ready", markdown);
+      const { unmount } = renderPane(speech);
+
+      // The precondition: the fence is a unit of its own that speaks no block.
+      const fenceUnit = units.findIndex((unit) => unit.source === "⟦code⟧");
+      expect(fenceUnit).toBeGreaterThanOrEqual(0);
+
+      // No Play for it — not hidden, not dimmed, not a tab stop: absent.
+      expect(screen.queryByTestId(`answer-pane-play-cell-a-${fenceUnit}`)).toBeNull();
+      expect(plays()).toHaveLength(units.length - 1);
+
+      // Its rail segment is still a jump.
+      fireEvent.click(screen.getByTestId(`answer-pane-seg-cell-a-${fenceUnit}`));
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", fenceUnit);
+
+      // Every other unit keeps its Play, beside its own block.
+      for (const block of Array.from(prose().querySelectorAll<HTMLElement>("[data-unit]"))) {
+        const unit = Number(block.getAttribute("data-unit"));
+        expect(unit).not.toBe(fenceUnit);
+        expect(play(unit).style.top).toBe(`${block.offsetTop}px`);
+        fireEvent.click(play(unit));
+        expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", unit);
+      }
+      unmount();
+    }
   });
 });

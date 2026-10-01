@@ -1870,9 +1870,6 @@ input[type="checkbox"] {
   min-width: 0;
 }
 
-/* A matched block is text, not a jump: no pointer cursor, no hover tint.
-   Reading starts from the block's Play button in the rail column. */
-
 /* The spoken block carries `data-speaking` for tests and semantics, but draws
    nothing of its own: the rail's playing segment and playhead beside it are
    the mark, and a tinted block on top of them was too loud (smoke test,

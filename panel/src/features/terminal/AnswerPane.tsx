@@ -179,7 +179,7 @@ export function minPaneHeight(composerOn: boolean, composerHeight: number): numb
  * without also being read to, and selecting a sentence restarted the unit.
  * Now the blocks are plain elements and each unit has a real `<button>` in
  * the rail column — Enter and Space are the browser's, no handler of ours —
- * labelled "Play from here", or "Pause" on the unit the voice is reading.
+ * labelled "Read from here", or "Pause" on the unit the voice is reading.
  *
  * On a pointer device a unit's Play shows only while its block (or the button
  * itself) is hovered or holds focus: one `hoveredUnit`, fed by delegated
@@ -189,7 +189,10 @@ export function minPaneHeight(composerOn: boolean, composerHeight: number): numb
  * dimmed because there is no hover to reveal it. A unit's Play is laid out from
  * its rail segment's geometry (`alignToSegments`), so it exists exactly where
  * a segment does: code, tables, diagrams — anything speech turned into a
- * sentinel — are no unit's and have no Play beside them.
+ * sentinel — are no unit's and have no Play beside them. A fence that opens or
+ * closes the answer is the one exception to "no unit's": it is a unit of its
+ * own that matches no block, so it keeps its (minimum) segment but gets no
+ * Play (`blocklessUnits`) — there is no block to sit beside.
  *
  * The rail beside the text mirrors the scrubber exactly: a pointer affordance,
  * no role, `aria-hidden`, with the same segment states from the same
@@ -297,6 +300,13 @@ export function AnswerPane({
   const playsRef = useRef<HTMLDivElement>(null);
   /** The unit whose block (or Play) the pointer or focus is on — see the note on the component. */
   const [hoveredUnit, setHoveredUnit] = useState<number | null>(null);
+  /**
+   * One character per unit, `x` where the unit matched no block: a fence that
+   * opens or closes the answer is a unit of its own (`⟦code⟧`) with nothing
+   * beside it to read from, so it gets no Play. A string, so the marking pass
+   * can set it on every run and React bails out when nothing changed.
+   */
+  const [blocklessUnits, setBlocklessUnits] = useState("");
   /** The last mapping the marks were drawn from, for a re-layout the observer asks for. */
   const unitToBlocksRef = useRef<UnitToBlocks>([]);
   // The observer callback outlives its closure and needs the current units
@@ -546,6 +556,7 @@ export function AnswerPane({
     );
     unitToBlocksRef.current = unitToBlocks;
     unitsRef.current = units;
+    setBlocklessUnits(unitToBlocks.map((blocks) => (blocks.length === 0 ? "x" : "-")).join(""));
     children.forEach((child, blockIndex) => {
       const unit = blockToUnit[blockIndex];
       if (unit === null) return;
@@ -556,6 +567,13 @@ export function AnswerPane({
     layoutRail(bodyRef.current, railRef.current, unitToBlocks, units);
     alignToSegments(railRef.current, playsRef.current);
   }, [text, units, unitIndex, waiting]);
+
+  // A blockless unit's Play turns into a placeholder one render after the
+  // marking pass found it, so the buttons that layer holds are new elements
+  // with no `top` yet: line them up again, still before paint.
+  useLayoutEffect(() => {
+    alignToSegments(railRef.current, playsRef.current);
+  }, [blocklessUnits]);
 
   // Re-lay the rail when the body or the text column changes size — see the
   // note on the component. The pane's own boxes, never the xterm container.
@@ -708,58 +726,65 @@ export function AnswerPane({
               Not positioned itself, so the body stays the `offsetParent` the
               rail's geometry is measured against. */}
           <div className="answer-pane-gutter">
-          {/* The scrubber turned vertical: a pointer affordance, not a row of
-              buttons — see the note on the component. Each segment is placed by
-              `layoutRail` to span its unit's blocks. */}
-          <div ref={railRef} className="answer-pane-rail" aria-hidden="true">
-            {units.map((unit, index) => {
-              const state = segmentStateFor({
-                index,
-                playingIndex: unitIndex,
-                cache: speechCacheState(unit.text, { voice }),
-              });
-              return (
-                <div
-                  key={index}
-                  className="answer-pane-seg"
-                  data-segment={state}
-                  data-testid={`answer-pane-seg-${sessionId}-${index}`}
-                  title={`Unit ${index + 1} of ${units.length}`}
-                  onClick={() => jumpTo(index)}
-                >
-                  {state === "playing" ? (
-                    <span
-                      className="answer-pane-head"
-                      data-testid={`answer-pane-head-${sessionId}`}
-                    />
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-          {/* One Play per unit, each level with the top of its segment — see
-              `alignToSegments`. The k-th button is unit k's. */}
-          <div ref={playsRef} className="answer-pane-plays">
-            {units.map((_unit, index) => {
-              const playing = voiceIsReading && index === unitIndex;
-              return (
-                <button
-                  key={index}
-                  type="button"
-                  className="answer-pane-play"
-                  data-testid={`answer-pane-play-${sessionId}-${index}`}
-                  data-play-unit={index}
-                  data-shown={playing || index === hoveredUnit ? "" : undefined}
-                  data-playing={playing ? "" : undefined}
-                  aria-label={playing ? "Pause" : "Play from here"}
-                  title={playing ? "Pause" : "Play from here"}
-                  onClick={() => (playing ? speech.onPause(sessionId) : jumpTo(index))}
-                >
-                  {playing ? <Pause aria-hidden /> : <Play aria-hidden />}
-                </button>
-              );
-            })}
-          </div>
+            {/* The scrubber turned vertical: a pointer affordance, not a row of
+                buttons — see the note on the component. Each segment is placed by
+                `layoutRail` to span its unit's blocks. */}
+            <div ref={railRef} className="answer-pane-rail" aria-hidden="true">
+              {units.map((unit, index) => {
+                const state = segmentStateFor({
+                  index,
+                  playingIndex: unitIndex,
+                  cache: speechCacheState(unit.text, { voice }),
+                });
+                return (
+                  <div
+                    key={index}
+                    className="answer-pane-seg"
+                    data-segment={state}
+                    data-testid={`answer-pane-seg-${sessionId}-${index}`}
+                    title={`Unit ${index + 1} of ${units.length}`}
+                    onClick={() => jumpTo(index)}
+                  >
+                    {state === "playing" ? (
+                      <span
+                        className="answer-pane-head"
+                        data-testid={`answer-pane-head-${sessionId}`}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            {/* One Play per unit, each level with the top of its segment — see
+                `alignToSegments`. The k-th button is unit k's. */}
+            <div ref={playsRef} className="answer-pane-plays">
+              {units.map((_unit, index) => {
+                // No block, no Play: nothing sits beside it to read from (the
+                // segment still jumps there, the bar still pauses it). A bare
+                // placeholder keeps the k-th child unit k's for
+                // `alignToSegments`.
+                if (blocklessUnits[index] === "x") {
+                  return <span key={index} hidden />;
+                }
+                const playing = voiceIsReading && index === unitIndex;
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    className="answer-pane-play"
+                    data-testid={`answer-pane-play-${sessionId}-${index}`}
+                    data-play-unit={index}
+                    data-shown={playing || index === hoveredUnit ? "" : undefined}
+                    data-playing={playing ? "" : undefined}
+                    aria-label={playing ? "Pause" : "Read from here"}
+                    title={playing ? "Pause" : "Read from here"}
+                    onClick={() => (playing ? speech.onPause(sessionId) : jumpTo(index))}
+                  >
+                    {playing ? <Pause aria-hidden /> : <Play aria-hidden />}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div ref={textRef} className="answer-pane-text">
             {answer ? <MarkdownRenderer content={answer.text} /> : null}
