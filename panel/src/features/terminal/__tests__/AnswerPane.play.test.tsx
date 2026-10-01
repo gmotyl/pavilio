@@ -52,6 +52,20 @@ const MARKDOWN = [
   "",
 ].join("\n");
 
+/**
+ * A fence and two long paragraphs, for an answer that opens or closes with
+ * code. Each paragraph clears `UNIT_MIN_CHARS` on its own, so neither is packed
+ * with the fence and the fence is left a unit of its own (`⟦code⟧`) that
+ * matches no block.
+ */
+const FENCE = ["```ts", "const x = 1;", "```", ""];
+const LONG_PARAGRAPHS = [
+  "The first paragraph explains why the deploy has to wait for the database migration to finish first, and why the old schema must stay readable until every pod has rolled over to the new release tonight.",
+  "",
+  "The second paragraph describes the rollback path in case the health checks fail after the switch, including how long the old pods stay warm before they are drained and who signs off on the rollback tonight.",
+  "",
+];
+
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 
@@ -106,10 +120,12 @@ const prose = (): HTMLElement => {
 const play = (unit: number): HTMLElement => screen.getByTestId(`answer-pane-play-cell-a-${unit}`);
 const plays = (): HTMLElement[] =>
   Array.from(document.querySelectorAll<HTMLElement>("[data-testid^='answer-pane-play-cell-a-']"));
+/** The units whose Play is shown, read off each button's own `data-play-unit` —
+ * not its position, which stops being its unit once a blockless unit has no button. */
 const shown = (): number[] =>
   plays()
-    .map((button, unit) => (button.hasAttribute("data-shown") ? unit : -1))
-    .filter((unit) => unit >= 0);
+    .filter((button) => button.hasAttribute("data-shown"))
+    .map((button) => Number(button.dataset.playUnit));
 
 /**
  * The one layout the pane needs, as in `AnswerPane.test.tsx`: the k-th direct
@@ -293,17 +309,8 @@ describe("AnswerPane Play buttons", () => {
   });
 
   it("a unit with no block has no Play", () => {
-    // Each paragraph clears `UNIT_MIN_CHARS` on its own, so neither is packed
-    // with the fence and the fence is left a unit of its own at either end.
-    const fence = ["```ts", "const x = 1;", "```", ""];
-    const paragraphs = [
-      "The first paragraph explains why the deploy has to wait for the database migration to finish first, and why the old schema must stay readable until every pod has rolled over to the new release tonight.",
-      "",
-      "The second paragraph describes the rollback path in case the health checks fail after the switch, including how long the old pods stay warm before they are drained and who signs off on the rollback tonight.",
-      "",
-    ];
-    const opening = [...fence, ...paragraphs].join("\n");
-    const closing = [...paragraphs, ...fence].join("\n");
+    const opening = [...FENCE, ...LONG_PARAGRAPHS].join("\n");
+    const closing = [...LONG_PARAGRAPHS, ...FENCE].join("\n");
 
     for (const markdown of [opening, closing]) {
       const { speech, units } = makeSpeech(null, "ready", markdown);
@@ -331,5 +338,38 @@ describe("AnswerPane Play buttons", () => {
       }
       unmount();
     }
+  });
+
+  it("every Play stays level with its segment across answer swaps", () => {
+    // A fence-first answer has a placeholder where unit 0's Play would be; the
+    // next answer has a real button there — a NEW element, created one render
+    // after the marking pass, with no `top` of its own until it is aligned.
+    const fenceFirst = [...FENCE, ...LONG_PARAGRAPHS].join("\n");
+    const first = makeSpeech(null, "ready", fenceFirst);
+    expect(first.units[0]?.source).toBe("⟦code⟧");
+    const normal = makeSpeech();
+
+    const view = renderPane(first.speech);
+    const rerenderWith = (speech: GridSpeech): void =>
+      view.rerender(
+        <MemoryRouter>
+          <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} send={() => true} />
+        </MemoryRouter>,
+      );
+    const expectLevel = (units: readonly SpeechUnit[], blockless: number[]): void => {
+      expect(plays()).toHaveLength(units.length - blockless.length);
+      for (const button of plays()) {
+        const unit = Number(button.dataset.playUnit);
+        const segment = screen.getByTestId(`answer-pane-seg-cell-a-${unit}`);
+        expect(segment.style.top).not.toBe("");
+        expect(button.style.top).toBe(segment.style.top);
+      }
+    };
+
+    expectLevel(first.units, [0]);
+    rerenderWith(normal.speech);
+    expectLevel(normal.units, []);
+    rerenderWith(first.speech);
+    expectLevel(first.units, [0]);
   });
 });
