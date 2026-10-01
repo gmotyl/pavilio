@@ -134,12 +134,18 @@ function slashToken(text: string, at: number): string | null {
  *
  * Only a one-character insertion counts — a keystroke, not a paste — and only
  * when the slash has the draft's start or whitespace before it: `cd /tmp`
- * opening the picker is the accepted cost, `see src/` must not.
+ * opening the picker is the accepted cost, `see src/` must not. Typing `/` over
+ * a selection replaces it, so the length does not grow by one and it stays text.
+ *
+ * The slash must also have whitespace or the draft's end after it: in
+ * `fix /note` the picker would read `note` as its query and a pick would
+ * replace the user's own word.
  */
 function slashTypedAt(before: string, after: string, caret: number): number | null {
   const at = caret - 1;
   if (after.length !== before.length + 1 || at < 0 || after[at] !== "/") return null;
   if (after.slice(0, at) + after.slice(caret) !== before) return null;
+  if (caret < after.length && !/\s/.test(after[caret])) return null;
   return at === 0 || /\s/.test(after[at - 1]) ? at : null;
 }
 
@@ -1100,11 +1106,12 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               // The picker opens on a single typed `/` that lands at a word
               // start — the draft's start or right after whitespace — anywhere
               // in the text, and is anchored there. A `/` inside a word stays
-              // text (`see src/` is a path, not a command), and a paste — any
-              // change of more than one character — never opens it. Once open
-              // it stays open only while its `/token` survives with the caret
-              // inside it; a space after the token, deleting the slash, or
-              // moving past it closes it.
+              // text (`see src/` is a path, not a command), so does one typed
+              // right before a word (a pick would replace that word), and a
+              // paste — any change of more than one character — never opens
+              // it. Once open it stays open only while its `/token` survives
+              // with the caret inside it; a space after the token, deleting
+              // the slash, or moving past it closes it.
               if (pickerAt === null) {
                 const at = slashTypedAt(text, next, e.target.selectionStart);
                 if (at !== null) setPickerAt(at);

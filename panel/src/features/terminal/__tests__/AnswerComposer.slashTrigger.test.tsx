@@ -133,6 +133,21 @@ describe("AnswerComposer slash trigger", () => {
     expect(field().value).toBe("see src/");
   });
 
+  it("a slash typed right before a word stays text", async () => {
+    const user = userEvent.setup();
+    renderComposer();
+
+    await user.click(field());
+    await user.keyboard("fix note");
+    caretAt("fix ".length);
+    await user.keyboard("/");
+
+    // The word after the slash would become the query, and a pick would
+    // replace it — the user's own text, gone.
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(field().value).toBe("fix /note");
+  });
+
   it("Enter with no match closes the picker and sends nothing", async () => {
     const user = userEvent.setup();
     renderComposer();
@@ -208,9 +223,11 @@ describe("AnswerComposer slash trigger", () => {
     renderComposer();
 
     await user.click(field());
-    await user.paste("a /b");
+    // Ending on the slash, so the caret sits right after it with nothing
+    // following — everything but the one-character check would let it open.
+    await user.paste("a /");
 
-    expect(field().value).toBe("a /b");
+    expect(field().value).toBe("a /");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 });
