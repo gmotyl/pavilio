@@ -16,6 +16,7 @@ The user will provide the transcript. Your process is:
 **Path anchor (read first):** every path below is relative to the **workspace repo root** (`git rev-parse --show-toplevel`). The repo is itself named `projects` and project folders live in its `projects/` subdirectory, so a project's notes dir is `<root>/projects/<projectname>/notes/` and transcripts go in `<root>/projects/<projectname>/notes/log/`. There is **no** `projects/<projectname>/projects/` — that layout is retired; never write there. Resolve `projectname` against `.projects.local.md` and confirm `projects/<projectname>/` exists before writing anything.
 
 1. **Check for `-yolo` flag** in input - if present, enable auto-accept mode (skip confirmations and participant confirmation)
+   - **Batch inputs** (passed by [[pavilio-note-batch]]): `--source <quill|wispr>`, `--meeting-id <id>`, `--transcript-file <path>`, optional `--also-ids <source:id,…>`. When present, skip step 3's picker: the meeting is fixed, `--source` is used verbatim as the registry `source`, and the transcript is read from `--transcript-file` (never re-fetched; move it into `notes/log/` as the `.txt`). Steps 11–15 (Todoist, commit) are skipped — the batch parent does them. The final message is ONLY the **Batch Mode output** JSON below.
 2. First get `projectname` from the user.
 3. **Select Transcript Source**:
    - Ask user: "How would you like to provide the transcript?"
@@ -103,7 +104,7 @@ The same meeting can be recorded by both notetakers. When two entries from diffe
 
 Wispr Flow already summarizes the meeting. Do **not** analyze the transcript a second time — copy Wispr's summary and transcript **1:1**, in whatever language they come in (English is fine; the Polish language rule does not apply on this path). This replaces steps 4–9; steps 10–15 still run, fed from the summary only.
 
-1. **Fetch:** `get_meeting(meeting_id, view_transcript={char_limit: 40000})`. While the transcript ends with a `(...truncated … start_char=N...)` marker, call again with `view_transcript.start_char=N` and concatenate. Strip only the tool's framing lines (`<<<PARTICIPANT NAMES … >>>`, `<<<END TRANSCRIPT>>>`, truncation markers) — nothing else. Optionally `get_meeting_participants_enriched(meeting_id)` for the attendee list.
+1. **Fetch:** in batch mode (`--transcript-file` given) call `get_meeting(meeting_id)` **without** `view_transcript` — only for the summary — and use the tmp file as the transcript. Otherwise `get_meeting(meeting_id, view_transcript={char_limit: 40000})`. While the transcript ends with a `(...truncated … start_char=N...)` marker, call again with `view_transcript.start_char=N` and concatenate. Strip only the tool's framing lines (`<<<PARTICIPANT NAMES … >>>`, `<<<END TRANSCRIPT>>>`, truncation markers) — nothing else. Optionally `get_meeting_participants_enriched(meeting_id)` for the attendee list.
 2. **No participant mapping or confirmation.** `Speaker 1/2` stay as Wispr wrote them. Do not ask the user to confirm participants.
 3. **shortname / datetime:** shortname from Wispr `title` (often empty → from the first sentence of `summary`), ≤ 4 words, snake_case. `datetime` = meeting `start` converted from UTC to Europe/Warsaw.
 4. **Note `.md`** (`projects/<projectname>/notes/[datetime]_[shortname].md`), nothing invented:
@@ -124,7 +125,20 @@ Wispr Flow already summarizes the meeting. Do **not** analyze the transcript a s
 5. **Transcript `.txt`** (`notes/log/`): the concatenated transcript, verbatim.
 6. **STATUS / DECISIONS / _index** (step 10.3–10.4): derive from the summary only — `### Decisions Made` → append to `DECISIONS.md` and STATUS Recent Decisions; topic headings → STATUS Current Focus / `_index.json` topics. Copy bullets as written; don't re-read the transcript to refine them.
 7. **Todoist** (steps 11–14): offer the `### Next Steps` items owned by the user (the `self` participant / user's name) plus unowned ones.
-8. **Registry:** `source: "wispr"`, `source_id: <meeting id>`. Batch-mode JSON output is unchanged.
+8. **Registry:** `source: "wispr"`, `source_id: <meeting id>` — plus one entry for the Quill id when the row was a merged `quill + wispr` duplicate (see Write flow). Batch Mode output is unchanged.
+
+### Batch Mode output
+
+With batch inputs, the final message is ONLY this JSON (no prose). Do not touch the registry or git — the parent does.
+
+```json
+{
+  "status": "ok | error",
+  "reason": "<only when error>",
+  "registry_entry": { "source": "<--source>", "source_id": "<--meeting-id>", "title": "...", "meeting_date": "<ISO, Europe/Warsaw>", "processed_date": "YYYY-MM-DD", "project": "<projectname>", "note_ref": "projects/<projectname>/notes/<file>.md" },
+  "todos": [{ "title": "Short title", "description": "Longer description" }]
+}
+```
 
 ### Fallback Logic
 
@@ -596,11 +610,11 @@ A global registry at `projects/.processed_transcripts.json` tracks every transcr
 1. Open `projects/.processed_transcripts.json`. If missing, treat as `{ "processed": [] }`.
 2. Build a set of `(source, source_id)` pairs from the `processed` array.
 3. After fetching N meetings from each available notetaker MCP, drop any whose `(source, source_id)` is in that set.
-4. Display the first 5 remaining meetings to the user.
+4. Display the first 5 remaining meetings to the user. A `quill + wispr` duplicate is dropped when **either** of its pairs is in the set.
 
 **Write flow (step 10.5):**
 
-1. After files are written successfully, append a new entry to `processed`.
+1. After files are written successfully, append a new entry to `processed`. When the meeting was a merged `quill + wispr` duplicate, append **one entry per pair** (same `note_ref`) so the mirrored notetaker's id never resurfaces.
 2. Update `last_updated` to today's date.
 3. If `source_id` is unknown (manual paste with no MCP linkage), skip the registry update — there's nothing to deduplicate.
 4. Do NOT remove old entries; the registry is append-only. Pruning, if ever needed, is a manual maintenance task.

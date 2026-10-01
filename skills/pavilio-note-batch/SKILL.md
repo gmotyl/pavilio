@@ -23,7 +23,7 @@ Spawn ONE general-purpose subagent with these instructions (include the exclusio
    # meeting at 2026-07-01T13:53 → try both filename conventions (notes live ONLY in projects/<name>/notes/)
    ls projects/*/notes/2026-07-01_1353* projects/*/notes/2026-07-01_13-53* 2>/dev/null
    ```
-   Also allow ±2 min in the HHMM part (recording start vs meeting start can drift). A match → the meeting is **already processed**: do NOT fetch its transcript; instead record `{"source", "meeting_id", "title", "meeting_date", "already_processed": true, "project": "<from matched path>", "note_ref": "<matched .md path>"}` for the registry backfill.
+   Also allow ±2 min in the HHMM part (recording start vs meeting start can drift). A match → the meeting is **already processed**: do NOT fetch its transcript; instead record `{"source", "meeting_id", "also_ids", "title", "meeting_date", "already_processed": true, "project": "<from matched path>", "note_ref": "<matched .md path>"}` for the registry backfill.
 3. Keep the first 5 meetings that survived BOTH filters (registry + disk). For each: fetch the transcript from its own source's MCP, write the verbatim transcript to `projects/.tmp_transcripts/<meeting_id>.txt` (create the dir if missing) using the Write tool.
 4. Build a keyword map: for every `projects/*/_index.json`, collect the project's `search_keywords` keys and `team` member names; also include each project folder name itself. (Skip non-project dirs without `_index.json`.)
 5. Score each transcript: case-insensitive count of keyword occurrences per project (e.g. `grep -ci`). Highest score wins. Confidence: `high` if best score ≥ 2× runner-up and ≥ 5 hits; `low` if best score < 3 hits; `?` if zero hits for all projects; otherwise `med`.
@@ -31,7 +31,7 @@ Spawn ONE general-purpose subagent with these instructions (include the exclusio
    ```json
    {
      "unprocessed": [{"source": "quill|wispr", "meeting_id": "...", "also_ids": [], "title": "...", "meeting_date": "<ISO, Europe/Warsaw>", "guessed_project": "<name or ?>", "confidence": "high|med|low|?"}],
-     "backfill": [{"source": "quill|wispr", "meeting_id": "...", "title": "...", "meeting_date": "<ISO, Europe/Warsaw>", "project": "...", "note_ref": "projects/<project>/.../<file>.md"}],
+     "backfill": [{"source": "quill|wispr", "meeting_id": "...", "also_ids": [], "title": "...", "meeting_date": "<ISO, Europe/Warsaw>", "project": "...", "note_ref": "projects/<project>/.../<file>.md"}],
      "checked_sources": ["quill", "wispr"],
      "unavailable_sources": [{"source": "wispr", "reason": "not authenticated"}]
    }
@@ -41,7 +41,7 @@ If the scout fails, or **no** notetaker MCP is available → tell the user "No n
 
 ### 3. Self-heal the registry
 
-If the scout's `backfill` array is non-empty: append each entry to `projects/.processed_transcripts.json` `processed` (schema: `source: <entry.source>`, `source_id: meeting_id`, plus `title`, `meeting_date`, `processed_date: today`, `project`, `note_ref`), update `last_updated`, and tell the user which meetings were found already processed on disk and backfilled. Do this BEFORE asking anything — even if the user later cancels, the registry fix should stick (it gets committed in step 8, or in its own commit if nothing is selected).
+If the scout's `backfill` array is non-empty: append each entry to `projects/.processed_transcripts.json` `processed` (schema: `source: <entry.source>`, `source_id: meeting_id`, plus `title`, `meeting_date`, `processed_date: today`, `project`, `note_ref`) — plus one entry per `also_ids` pair with the same `note_ref` — update `last_updated`, and tell the user which meetings were found already processed on disk and backfilled. Do this BEFORE asking anything — even if the user later cancels, the registry fix should stick (it gets committed in step 8, or in its own commit if nothing is selected).
 
 If `unprocessed` is empty → say so (mention any backfills) and stop, committing the registry fix if one happened.
 
@@ -72,7 +72,7 @@ Each subagent prompt:
 
 > Read and follow the instructions in the `pavilio-note` skill (`skills/pavilio-note/SKILL.md`) exactly, with this input: projectname=`<project>` `-yolo` `--source <source>` `--meeting-id <meeting_id>` `--transcript-file projects/.tmp_transcripts/<meeting_id>.txt`. Your final message must be ONLY the Batch Mode JSON output defined in that skill.
 
-For `source: wispr` meetings the subagent takes pavilio-note's **Ready-Summary Path** (summary + transcript copied 1:1, no analysis); it fetches the summary itself with `get_meeting` (no `view_transcript`) and still uses the tmp transcript file.
+For `source: wispr` meetings the subagent takes pavilio-note's **Ready-Summary Path** (summary + transcript copied 1:1, no analysis); per that path's batch rule it fetches only the summary with `get_meeting` (no `view_transcript`) and takes the transcript from `--transcript-file` — the scout's fetch stays the only one. Pass the merged Quill id as `--also-ids quill:<id>` when present.
 
 Parse each subagent's JSON result. A subagent that errors or returns `status: error` does not stop the others.
 
