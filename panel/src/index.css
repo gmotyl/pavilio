@@ -1870,7 +1870,9 @@ input[type="checkbox"] {
    top-right, and without it the first line runs under the icon. */
 .answer-pane-text {
   min-width: 0;
-  padding-right: 20px;
+  /* Clears the copy-all chip: 16px wide at 14px from the pane's edge, so it
+     reaches 30px in; the body's 12px plus this put the text 36px in. */
+  padding-right: 24px;
 }
 
 /* Copy as Markdown, pinned to the pane's top-right corner. A child of the pane
@@ -1880,7 +1882,8 @@ input[type="checkbox"] {
 .answer-pane-copy-all {
   position: absolute;
   top: 8px;
-  right: 10px;
+  /* Off a classic (non-overlay) scrollbar's track. */
+  right: 14px;
   z-index: 3;
 }
 

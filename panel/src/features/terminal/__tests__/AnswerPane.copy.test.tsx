@@ -6,7 +6,7 @@
  * The clipboard helper is mocked so the test reads exactly what the button
  * handed it; the host is a stub, the units real `prepare()` output.
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridSpeech } from "../../speech/types";
@@ -95,6 +95,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount first: resetting the wait re-renders a mounted pane, and its
+  // ResizeObserver effect would then run after the stub below is gone.
+  cleanup();
   __resetAnswerWaitingForTests();
   vi.unstubAllGlobals();
 });

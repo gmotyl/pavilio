@@ -178,7 +178,7 @@ export function minPaneHeight(composerOn: boolean, composerHeight: number): numb
  * tab stop, and a delegated click anywhere inside it — a link included —
  * started the voice there. So a link in an answer could not be followed
  * without also being read to, and selecting a sentence restarted the unit.
- * Now the blocks are plain elements and each unit has a real `<button>` in
+ * Now the blocks are plain elements and each unit has a real button element in
  * the rail column — Enter and Space are the browser's, no handler of ours —
  * labelled "Read from here", or "Pause" on the unit the voice is reading.
  *

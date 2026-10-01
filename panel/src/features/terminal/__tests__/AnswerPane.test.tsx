@@ -10,7 +10,7 @@
  * store is driven by hand, which is what lets the "nothing re-renders inside a
  * unit" test notify with the same index and count.
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
@@ -429,6 +429,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount first: resetting the wait re-renders a mounted pane, and its
+  // ResizeObserver effect would then run after the stub below is gone.
+  cleanup();
   __resetAnswerWaitingForTests();
   restoreLayout();
   vi.unstubAllGlobals();
