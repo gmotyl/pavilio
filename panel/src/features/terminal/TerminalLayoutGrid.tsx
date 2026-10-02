@@ -380,6 +380,8 @@ function TerminalCell({
    * one edit: every way of leaving the edit resets it.
    */
   const [pickerOpen, setPickerOpen] = useState(false);
+  /** The rename edit group (name field + colour picker). */
+  const groupRef = useRef<HTMLDivElement | null>(null);
 
   /**
    * The picker's own close requests (outside `mousedown`, trigger toggle).
@@ -393,15 +395,11 @@ function TerminalCell({
    */
   const onPickerOpenChange = useCallback((next: boolean) => {
     if (!next) {
-      const active = document.activeElement as HTMLElement | null;
+      // Any focused element inside the edit group other than the name field
+      // (e.g. the hex field) is about to vanish with the popover.
+      const active = document.activeElement;
       const input = nameInputRef.current;
-      if (
-        input &&
-        active &&
-        active !== input &&
-        active.closest('[role="dialog"]') &&
-        input.parentElement?.contains(active)
-      ) {
+      if (input && active && active !== input && groupRef.current?.contains(active)) {
         input.focus();
       }
     }
@@ -487,6 +485,7 @@ function TerminalCell({
           // must not end it. The commit-on-blur therefore lives here, on the
           // group's `focusout`, and only fires when focus leaves the group.
           <div
+            ref={groupRef}
             className="flex items-center gap-1.5 flex-1 min-w-0"
             onBlur={(e) => {
               if (blurHandledRef.current) {

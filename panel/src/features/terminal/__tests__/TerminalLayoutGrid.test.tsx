@@ -1077,6 +1077,25 @@ describe("TerminalLayoutGrid — colour picker inside the rename edit", () => {
     expect(onRename).not.toHaveBeenCalled();
   });
 
+  // The trigger toggle closes the popover (and the focused hex field) the same
+  // way an outside click does, so focus must be handed back to the name field.
+  it("toggling the colour control closed while the hex field is focused keeps editing and refocuses the name field", async () => {
+    const { user, input, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.click(trigger());
+
+    expect(dialog()).toBeNull();
+    expect(nameInput()).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(onRename).not.toHaveBeenCalled();
+
+    await user.click(document.body);
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+  });
+
   it("picking a preset keeps the rename open and refocuses the name field", async () => {
     const { user, input, onRename } = await enterRename();
     await user.click(trigger());
