@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
@@ -757,10 +758,13 @@ describe("TerminalLayoutGrid — what the cell header no longer carries", () => 
     expect(screen.getByRole("dialog")).toHaveTextContent("alpha");
     expect(onFocus).not.toHaveBeenCalled();
 
-    // Leaving the editing state takes the control with it.
-    fireEvent.keyDown(screen.getByTestId("terminal-cell-name-input-s-pick"), {
-      key: "Escape",
-    });
+    // Leaving the editing state takes the control with it. Escape is layered:
+    // the first closes the open picker, the second ends the edit.
+    const nameField = screen.getByTestId("terminal-cell-name-input-s-pick");
+    fireEvent.keyDown(nameField, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByTestId("terminal-cell-color-s-pick")).toBeInTheDocument();
+    fireEvent.keyDown(nameField, { key: "Escape" });
     expect(screen.queryByTestId("terminal-cell-color-s-pick")).toBeNull();
   });
 
@@ -946,6 +950,238 @@ describe("TerminalLayoutGrid — rename from the cell header", () => {
     dragOverAt(wrapper, 395, 235);
 
     expect(screen.queryAllByTestId(/^placement-preview-/)).toHaveLength(0);
+  });
+});
+
+describe("TerminalLayoutGrid — colour picker inside the rename edit", () => {
+  beforeEach(() => installProjectColors());
+
+  const settleColors = () => act(async () => {});
+
+  /**
+   * One cell, already in the rename state, with the name changed so a commit
+   * would be observable. jsdom does not move focus on `mousedown` by itself,
+   * which is how the original bug slipped; user-event does (and honours a
+   * prevented `mousedown`), so the gestures below go through it.
+   */
+  async function enterRename() {
+    const onRename = vi.fn();
+    const user = userEvent.setup();
+    renderGrid({
+      sessions: [makeSession({ id: "e1", name: "claude-a", project: "alpha" })],
+      focusedId: "e1",
+      onRename,
+    });
+    await settleColors();
+    await user.dblClick(screen.getByText("claude-a"));
+    const input = screen.getByTestId("terminal-cell-name-input-e1") as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, "builder");
+    expect(document.activeElement).toBe(input);
+    return { onRename, user, input };
+  }
+
+  const trigger = () => screen.getByTestId("terminal-cell-color-e1");
+  const nameInput = () => screen.queryByTestId("terminal-cell-name-input-e1");
+  const dialog = () => screen.queryByRole("dialog");
+  const headerBackground = () =>
+    (screen.getByTitle("Drag to place this terminal") as HTMLElement).style.background;
+
+  it("clicking the colour control in the rename state opens the picker (user-event)", async () => {
+    const { user, input, onRename } = await enterRename();
+
+    await user.click(trigger());
+
+    expect(dialog()).toBeInTheDocument();
+    expect(nameInput()).toBe(input);
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it("moving focus into the hex field keeps the rename open", async () => {
+    const { user, input, onRename } = await enterRename();
+    await user.click(trigger());
+
+    const hex = screen.getByLabelText("Custom hex");
+    await user.click(hex);
+
+    expect(document.activeElement).toBe(hex);
+    expect(nameInput()).toBe(input);
+    expect(dialog()).toBeInTheDocument();
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it("focus leaving the edit group commits the rename once", async () => {
+    const { user, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    // Focus goes nowhere (`relatedTarget` null) — the edit is over.
+    act(() => (document.activeElement as HTMLElement).blur());
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("e1", "builder");
+    expect(nameInput()).toBeNull();
+    expect(dialog()).toBeNull();
+  });
+
+  it("focus moving to an element outside the edit group commits the rename once", async () => {
+    const { onRename, input } = await enterRename();
+
+    fireEvent.blur(input, { relatedTarget: screen.getByTestId("terminal-cell-eye-e1") });
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("e1", "builder");
+    expect(nameInput()).toBeNull();
+  });
+
+  // The picker's outside-click close unmounts the popover — and the focused hex
+  // field with it — before the browser moves focus, so no focusout with an
+  // outside `relatedTarget` would ever reach the group without help.
+  it("outside click while the hex field is focused commits once", async () => {
+    const { user, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.click(document.body);
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("e1", "builder");
+    expect(nameInput()).toBeNull();
+    expect(dialog()).toBeNull();
+  });
+
+  it("clicking an outside button while the hex field is focused commits once", async () => {
+    const { user, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.click(screen.getByTestId("terminal-cell-eye-e1"));
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("e1", "builder");
+    expect(nameInput()).toBeNull();
+    // The eye opens the viewport dialog, so check the picker by its hex field.
+    expect(screen.queryByLabelText("Custom hex")).toBeNull();
+  });
+
+  it("clicking the name field while the hex field is focused closes the picker, keeps editing", async () => {
+    const { user, input, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.click(input);
+
+    expect(dialog()).toBeNull();
+    expect(nameInput()).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  // The trigger toggle closes the popover (and the focused hex field) the same
+  // way an outside click does, so focus must be handed back to the name field.
+  it("toggling the colour control closed while the hex field is focused keeps editing and refocuses the name field", async () => {
+    const { user, input, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.click(trigger());
+
+    expect(dialog()).toBeNull();
+    expect(nameInput()).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(onRename).not.toHaveBeenCalled();
+
+    await user.click(document.body);
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+  });
+
+  it("picking a preset keeps the rename open and refocuses the name field", async () => {
+    const { user, input, onRename } = await enterRename();
+    await user.click(trigger());
+    // Detour through the hex field first, so the refocus is the picker's doing
+    // and not focus that simply never left.
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.click(screen.getByTestId("project-color-preset-alpha-coral"));
+
+    await waitFor(() => expect(headerBackground()).toContain(rgb("#e06c75")));
+    expect(dialog()).toBeNull();
+    expect(nameInput()).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it("Escape closes the picker first, then cancels the rename", async () => {
+    const { user, input, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.keyboard("{Escape}");
+
+    expect(dialog()).toBeNull();
+    expect(nameInput()).toBe(input);
+    expect(document.activeElement).toBe(input);
+
+    await user.keyboard("{Escape}");
+
+    expect(nameInput()).toBeNull();
+    expect(screen.getByText("claude-a")).toBeInTheDocument();
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it("Escape in the name field with the picker open closes only the picker", async () => {
+    const { user, input, onRename } = await enterRename();
+    await user.click(trigger());
+    // The trigger keeps focus in the name field.
+    expect(document.activeElement).toBe(input);
+
+    await user.keyboard("{Escape}");
+
+    expect(dialog()).toBeNull();
+    expect(nameInput()).toBe(input);
+    expect(input).toHaveValue("builder");
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it("Escape with keyboard focus on the colour control closes only the picker", async () => {
+    const { user, input, onRename } = await enterRename();
+    await user.click(trigger());
+    act(() => trigger().focus());
+
+    await user.keyboard("{Escape}");
+
+    expect(dialog()).toBeNull();
+    expect(nameInput()).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it("re-entering the rename state starts with the picker closed", async () => {
+    const { user } = await enterRename();
+    await user.click(trigger());
+    expect(dialog()).toBeInTheDocument();
+
+    await user.keyboard("{Enter}");
+    expect(nameInput()).toBeNull();
+
+    await user.dblClick(screen.getByText("claude-a"));
+    expect(nameInput()).toBeInTheDocument();
+    expect(dialog()).toBeNull();
+  });
+
+  it("end to end: open picker, pick preset, Enter commits the new name", async () => {
+    const { user, onRename } = await enterRename();
+
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+    await user.click(screen.getByTestId("project-color-preset-alpha-teal"));
+    await user.keyboard("{Enter}");
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("e1", "builder");
+    expect(nameInput()).toBeNull();
+    await waitFor(() => expect(headerBackground()).toContain(rgb("#56b6c2")));
   });
 });
 

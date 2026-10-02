@@ -373,9 +373,48 @@ function TerminalCell({
   // fire a blur on the way out. Commit exactly once: whichever key handled
   // it raises this flag and the blur that follows is ignored.
   const blurHandledRef = useRef(false);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  /**
+   * The colour picker that rides the rename state, controlled from here so the
+   * name field's Escape can close it before cancelling anything. It belongs to
+   * one edit: every way of leaving the edit resets it.
+   */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /** The rename edit group (name field + colour picker). */
+  const groupRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * The picker's own close requests (outside `mousedown`, trigger toggle).
+   * Closing unmounts the popover, and a focused hex field with it, before the
+   * browser moves focus — browsers fire no blur for a removed element, so the
+   * group would never see focus leave and the edit would stay open with focus
+   * on `body`. Hand focus back to the name field first: the browser's default
+   * focus move that follows the `mousedown` then leaves *from* the name field,
+   * and the group's `focusout` commits (or, for a click on the name field
+   * itself, nothing happens and the edit stays).
+   */
+  const onPickerOpenChange = useCallback((next: boolean) => {
+    if (!next) {
+      // Any focused element inside the edit group other than the name field
+      // (e.g. the hex field) is about to vanish with the popover.
+      const active = document.activeElement;
+      const input = nameInputRef.current;
+      if (input && active && active !== input && groupRef.current?.contains(active)) {
+        input.focus();
+      }
+    }
+    setPickerOpen(next);
+  }, []);
+
+  const cancelRename = useCallback(() => {
+    blurHandledRef.current = true;
+    setPickerOpen(false);
+    setEditingName(false);
+  }, []);
 
   const commitRename = useCallback(
     (value: string) => {
+      setPickerOpen(false);
       setEditingName(false);
       const next = value.trim();
       if (next && next !== session.name) onRename?.(session.id, next);
@@ -441,8 +480,37 @@ function TerminalCell({
       >
         <TerminalActivityLed sessionId={session.id} />
         {editingName ? (
-          <>
+          // The edit group: the name field and the colour picker are one edit,
+          // so focus moving between them (the picker's hex field takes focus)
+          // must not end it. The commit-on-blur therefore lives here, on the
+          // group's `focusout`, and only fires when focus leaves the group.
+          <div
+            ref={groupRef}
+            className="flex items-center gap-1.5 flex-1 min-w-0"
+            onBlur={(e) => {
+              if (blurHandledRef.current) {
+                blurHandledRef.current = false;
+                return;
+              }
+              const next = e.relatedTarget as Node | null;
+              if (next && e.currentTarget.contains(next)) return;
+              commitRename(nameInputRef.current?.value ?? session.name);
+            }}
+            // Layered Escape, from anywhere in the group that is not the
+            // popover (it handles and stops its own): an open picker closes
+            // first and the edit stays; a closed one cancels the edit.
+            onKeyDown={(e) => {
+              if (e.key !== "Escape") return;
+              if (pickerOpen) {
+                setPickerOpen(false);
+                nameInputRef.current?.focus();
+              } else {
+                cancelRename();
+              }
+            }}
+          >
             <input
+              ref={nameInputRef}
               autoFocus
               defaultValue={session.name}
               data-testid={`terminal-cell-name-input-${session.id}`}
@@ -459,21 +527,13 @@ function TerminalCell({
                 e.preventDefault();
                 e.stopPropagation();
               }}
+              // Escape is the group's (see above); Enter stays here, since on
+              // the picker's buttons Enter means "press this button".
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   blurHandledRef.current = true;
                   commitRename(e.currentTarget.value);
-                } else if (e.key === "Escape") {
-                  blurHandledRef.current = true;
-                  setEditingName(false);
                 }
-              }}
-              onBlur={(e) => {
-                if (blurHandledRef.current) {
-                  blurHandledRef.current = false;
-                  return;
-                }
-                commitRename(e.target.value);
               }}
             />
             {/* Colour is a property of the project, not of this cell — the
@@ -486,8 +546,13 @@ function TerminalCell({
             <ProjectColorPicker
               project={session.project}
               testId={`terminal-cell-color-${session.id}`}
+              open={pickerOpen}
+              onOpenChange={onPickerOpenChange}
+              // Called before the popover closes, so the hex field's focusout
+              // already points back into the group and commits nothing.
+              onDismiss={() => nameInputRef.current?.focus()}
             />
-          </>
+          </div>
         ) : (
           // The header LABELS the session — the title a process publishes
           // while the panel's generated name still stands, the chosen name
@@ -500,6 +565,7 @@ function TerminalCell({
             onDoubleClick={(e) => {
               e.stopPropagation();
               blurHandledRef.current = false;
+              setPickerOpen(false);
               setEditingName(true);
             }}
           >

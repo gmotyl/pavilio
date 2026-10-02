@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Palette } from "lucide-react";
 
 import { toast } from "../../lib/toast";
@@ -56,7 +56,26 @@ interface Props {
   project: string;
   /** Test id for the trigger; hosts scope it per cell. */
   testId?: string;
+  /**
+   * Controlled open state. When defined the host owns it, and every open or
+   * close request goes through `onOpenChange` instead of internal state.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /**
+   * The picker was finished with — a colour applied or Escape — as opposed to
+   * abandoned by an outside click. Called *before* closing, so a host can move
+   * focus back while the popover (and its hex field) is still mounted.
+   */
+  onDismiss?: () => void;
 }
+
+/**
+ * Keep focus where it is. The rename field that hosts the picker in the grid
+ * commits on blur, so a button that took focus on `mousedown` would end the
+ * edit — and unmount the picker — before its click landed.
+ */
+const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
 /**
  * Set a *project's* colour, from wherever one of its sessions is shown.
@@ -76,9 +95,24 @@ interface Props {
  * with that project's name and stays selectable. There are more projects than
  * presets, so refusing duplicates would eventually leave a project colourless.
  */
-export function ProjectColorPicker({ project, testId }: Props) {
+export function ProjectColorPicker({
+  project,
+  testId,
+  open: openProp,
+  onOpenChange,
+  onDismiss,
+}: Props) {
   const { colors, colorFor, setColor } = useProjectColors();
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : openState;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (!controlled) setOpenState(next);
+      onOpenChange?.(next);
+    },
+    [controlled, onOpenChange],
+  );
   const [custom, setCustom] = useState("");
   const [error, setError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -94,7 +128,13 @@ export function ProjectColorPicker({ project, testId }: Props) {
     };
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
-  }, [open]);
+  }, [open, setOpen]);
+
+  /** Close as "finished with": tell the host first, then close. */
+  const dismiss = () => {
+    onDismiss?.();
+    setOpen(false);
+  };
 
   const current = colorFor(project);
 
@@ -114,7 +154,7 @@ export function ProjectColorPicker({ project, testId }: Props) {
 
   const apply = (hex: string) => {
     setError(null);
-    setOpen(false);
+    dismiss();
     // `setColor` rolls the optimistic value back and *rethrows* on failure, so
     // an uncaught call would surface as an unhandled rejection. The rollback is
     // silent on its own — a colour that quietly springs back looks like a bug —
@@ -159,9 +199,10 @@ export function ProjectColorPicker({ project, testId }: Props) {
         title={`Set colour for ${project}`}
         aria-label={`Set colour for ${project}`}
         aria-expanded={open}
+        onMouseDown={keepFocus}
         onClick={() => {
           setError(null);
-          setOpen((o) => !o);
+          setOpen(!open);
         }}
         // Identical to CellIconButton in TerminalLayoutGrid.tsx — a test pins
         // the two together so the control cannot shrink away from its row.
@@ -184,6 +225,14 @@ export function ProjectColorPicker({ project, testId }: Props) {
           role="dialog"
           aria-label={`Colour for ${project}`}
           data-testid="project-color-picker"
+          // Escape from anywhere in the popover, not only the hex field. It is
+          // stopped here so a host's own Escape (cancel the rename) does not
+          // also fire for the same key press.
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            e.stopPropagation();
+            dismiss();
+          }}
           className="absolute right-0 top-full z-50 mt-[2px] w-[212px] rounded-md p-2 shadow-lg"
           style={{
             background: "var(--bg-surface)",
@@ -212,6 +261,7 @@ export function ProjectColorPicker({ project, testId }: Props) {
                   title={label}
                   aria-label={label}
                   aria-pressed={selected}
+                  onMouseDown={keepFocus}
                   onClick={() => apply(preset.hex)}
                   className="flex flex-col gap-1 rounded p-1 text-left transition-colors"
                   style={{
@@ -257,7 +307,6 @@ export function ProjectColorPicker({ project, testId }: Props) {
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") applyCustom();
-                if (e.key === "Escape") setOpen(false);
               }}
               className="min-w-0 flex-1 rounded px-1.5 py-1 font-mono text-[11px]"
               style={{
@@ -269,6 +318,7 @@ export function ProjectColorPicker({ project, testId }: Props) {
             <button
               type="button"
               data-testid={`project-color-apply-${project}`}
+              onMouseDown={keepFocus}
               onClick={applyCustom}
               className="rounded px-2 py-1 text-[11px] transition-colors"
               style={{
