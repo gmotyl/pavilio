@@ -1,11 +1,11 @@
 ---
 name: pavilio-memo-explain
-description: Create a markdown memo with mermaid diagrams that explains a technical concept, flow, or design decision for a project. Use when the user invokes `/pavilio-memo-explain`, asks to "explain X graphically", "present this as a diagram", or wants a technical walkthrough captured as a memo. Writes to `projects/<project>/memo/YYYY-MM-DD_HHmm_slug.md` and embeds diagrams using standard mermaid conventions.
+description: Create a project memo with Mermaid diagrams explaining a technical concept, flow, or design decision. Use for `/pavilio-memo-explain`, graphical explanations, or technical walkthroughs. Builds on pavilio-memo for storage and panel links.
 ---
 
 # Memo Explain
 
-Create a markdown memo that explains a topic with embedded mermaid diagrams. Sibling of [[pavilio-memo]] — use this variant when the explanation benefits from a visual. Pick whichever mermaid type best fits the concept or question: flowchart, sequence, state machine, ERD, class, C4 architecture, git graph, gantt, or pie — not just a flowchart by default. Be extremely concise and sacrifise grammar fo the sake of concision.
+Create a markdown memo that explains a topic with embedded mermaid diagrams. **First read and apply the Shared memo contract in [pavilio-memo](../pavilio-memo/SKILL.md)** for project resolution, storage, filename/header, edits, and the returned panel link. This skill adds the explanatory body and diagrams. Pick whichever mermaid type best fits the concept or question: flowchart, sequence, state machine, ERD, class, C4 architecture, git graph, gantt, or pie — not just a flowchart by default. Be extremely concise.
 
 ## When to use
 
@@ -25,9 +25,8 @@ Create a markdown memo that explains a topic with embedded mermaid diagrams. Sib
 
 ### 1. Identify the project
 
-- Parse project name from the user message (e.g. "explain pavilio sidebar" → `pavilio`)
-- If unclear, ask the user or fall back to the project from this session's `/resume-session`
-- Read `projects/<project>/_index.json` and `PROJECT.md` for terminology and recent context
+- Resolve the project and memo through the base contract.
+- Read the resolved project's `PROJECT.md` and relevant context for the explanation.
 
 ### 2. Analyse the topic → pick diagrams by angle
 
@@ -58,21 +57,9 @@ Walk this checklist and include a diagram for every angle the topic genuinely ha
 
 ### 4. Write the memo
 
-**Location:** `projects/<project>/memo/YYYY-MM-DD_HHmm_<slug>.md`
-
-**Filename rules:**
-
-- Format: `YYYY-MM-DD_HHmm_<slug>.md`
-- Slug: max 4 words, snake_case, lowercase
-- Example: `2026-05-15_2210_right_sidebar_design.md`
-
-**Content template:**
+Use the base contract's destination and header. Append this explanatory body:
 
 ````markdown
-# <Title derived from the topic>
-
-> Captured: YYYY-MM-DD HH:mm
-
 <Paragraph or two framing the topic.>
 
 ## <Section per diagram or concept>
@@ -80,8 +67,6 @@ Walk this checklist and include a diagram for every angle the topic genuinely ha
 ```mermaid
 <diagram code>
 ```
-````
-
 <Optional commentary connecting the diagram back to the decisions or code.>
 
 ## Code references (optional)
@@ -95,7 +80,7 @@ Walk this checklist and include a diagram for every angle the topic genuinely ha
 ## Summary (optional)
 
 <One short paragraph or bullet list of the takeaways.>
-```
+````
 
 ### 5. Apply diagram conventions
 
@@ -107,7 +92,5 @@ Walk this checklist and include a diagram for every angle the topic genuinely ha
 
 ## Notes
 
-- Do NOT commit the file — just write it
-- Do NOT touch `PROJECT.md`, `_index.json`, or other index files
-- If a referenced project doesn't exist yet, ask before creating the folder
+- Return the saved memo's panel link using the base contract, with a one-line description of the explanation.
 - Multiple diagrams in one memo are fine when each clarifies a different angle (e.g. one structural, one temporal)
