@@ -573,7 +573,7 @@ describe("speak-response", () => {
 
   // SKIPPED: flaky under load, not wrong. It times two separately spawned
   // Node processes and asserts their difference exceeds 200ms against a
-  // 400ms `TRANSCRIPT_WAIT_MS` — a difference of two noisy measurements.
+  // 500ms `TRANSCRIPT_WAIT_MS` — a difference of two noisy measurements.
   // Standalone the file passes every time; inside the pre-push hook the
   // same suite takes ~227s instead of ~61s and this fires (seen as
   // "expected 89 to be greater than 200" and "expected 1 to be ...").

@@ -135,8 +135,11 @@ const BODY_MARGIN_BYTES = 1024;
  * normal turn costs. On expiry the hook says **nothing**: silence is the right
  * answer, because a stale answer sounds exactly like a current one and the
  * listener has no way to tell it is hearing the wrong turn.
+ *
+ * Raised from 400 ms: on WSL a real share of turns ran the hook for ~430 ms
+ * (the 400 ms wait expiring) and their answers never reached the pane.
  */
-const TRANSCRIPT_WAIT_MS = 400;
+const TRANSCRIPT_WAIT_MS = 500;
 const TRANSCRIPT_POLL_MS = 20;
 
 function readStdin() {
