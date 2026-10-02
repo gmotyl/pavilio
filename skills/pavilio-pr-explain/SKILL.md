@@ -1,6 +1,6 @@
 ---
 name: pavilio-pr-explain
-description: Explain a PR / branch / commit-range as a diagram-rich markdown memo, built mechanically FROM the diff. Use when the user invokes `/pavilio-pr-explain`, asks to "explain this PR/branch/changes graphically", or wants a visual walkthrough of what a change did. Writes to `projects/<project>/memo/YYYY-MM-DD_HHmm_slug.md` and embeds mermaid diagrams (flowchart + sequence always, plus class, ERD, C4, state, git-graph, gantt, pie where they add an angle) following [[pavilio-mermaid-chart]] conventions.
+description: Explain a PR / branch / commit-range as a diagram-rich memo built mechanically from the diff. Use for `/pavilio-pr-explain` or graphical walkthroughs of code changes. Builds on pavilio-memo for storage and panel links, and pavilio-mermaid-chart for diagrams.
 ---
 
 # PR Explain
@@ -10,6 +10,8 @@ Sibling of [[pavilio-memo-explain]] — that one explains a concept; this one ex
 specific PR / branch / commit range. Same output shape (a dated memo), same panel
 rendering rules ([[pavilio-mermaid-chart]]). Be extremely concise and sacrifise grammar
 fo the sake of concision.
+
+**First read and apply the Shared memo contract in [pavilio-memo](../pavilio-memo/SKILL.md)** for project resolution, destination, filename/header, edits, and panel links. This skill supplies the diff-based body, without repeating the base skill's quick-capture cleanup.
 
 ## When to use
 
@@ -29,8 +31,7 @@ fo the sake of concision.
 
 - `/pavilio-pr-explain [project] [ref]`. `ref` = branch, PR url/number, commit range
   (`main...feat/x`), or omitted (working tree / last commit).
-- Project: from the arg, else this session's resumed project, else `pwd`. Confirm the
-  project folder exists (see the path anchor in [[pavilio-session-start]]).
+- Resolve the notes project through the base memo contract; the code repository below is a separate input.
 - Find the repo: `projects/<project>/repos.json` / `PROJECT.md`, or the cwd repo.
 
 ### 2. Gather the diff mechanically (context-mode for big output)
@@ -86,16 +87,9 @@ Follow [[pavilio-mermaid-chart]]:
 
 ### 5. Write the memo — do NOT commit
 
-**Location:** `projects/<project>/memo/YYYY-MM-DD_HHmm_<slug>.md`
-(slug: max 4 words, snake_case; e.g. `vcpw101_webhook_pr`).
-
-**Template:**
+Use the base contract's destination and header, with `<Change> — explained` as the title. Append this body:
 
 ````markdown
-# <Change> — explained
-
-> Captured: YYYY-MM-DD HH:mm
-
 <1-2 lines: what the PR/branch is, its ref, and what it does. Flag which diagrams are
 grounded vs proposed/illustrative.>
 
@@ -114,13 +108,10 @@ grounded vs proposed/illustrative.>
 
 ### 6. Report
 
-Give the memo path + a one-line index of the diagrams. Offer to open it in the panel to
-verify the mermaid renders, or to add a missing angle (e.g. a sequence detail).
+Return the saved memo's panel link through the base contract, plus a one-line index of the diagrams.
 
 ## Notes
 
-- Do NOT commit the file. Do NOT touch `PROJECT.md`, `_index.json`, or index files.
 - Multiple diagrams are the point — but each must clarify a *different* angle.
-- If the referenced project folder doesn't exist, ask before creating it.
 - This skill lives in the pavilio skill set; changes to it PR upstream to `gmotyl/pavilio`,
   not the consumer repo (see the project's PR-target rule).
