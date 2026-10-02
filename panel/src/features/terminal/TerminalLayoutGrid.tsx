@@ -381,6 +381,33 @@ function TerminalCell({
    */
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  /**
+   * The picker's own close requests (outside `mousedown`, trigger toggle).
+   * Closing unmounts the popover, and a focused hex field with it, before the
+   * browser moves focus — browsers fire no blur for a removed element, so the
+   * group would never see focus leave and the edit would stay open with focus
+   * on `body`. Hand focus back to the name field first: the browser's default
+   * focus move that follows the `mousedown` then leaves *from* the name field,
+   * and the group's `focusout` commits (or, for a click on the name field
+   * itself, nothing happens and the edit stays).
+   */
+  const onPickerOpenChange = useCallback((next: boolean) => {
+    if (!next) {
+      const active = document.activeElement as HTMLElement | null;
+      const input = nameInputRef.current;
+      if (
+        input &&
+        active &&
+        active !== input &&
+        active.closest('[role="dialog"]') &&
+        input.parentElement?.contains(active)
+      ) {
+        input.focus();
+      }
+    }
+    setPickerOpen(next);
+  }, []);
+
   const cancelRename = useCallback(() => {
     blurHandledRef.current = true;
     setPickerOpen(false);
@@ -521,7 +548,7 @@ function TerminalCell({
               project={session.project}
               testId={`terminal-cell-color-${session.id}`}
               open={pickerOpen}
-              onOpenChange={setPickerOpen}
+              onOpenChange={onPickerOpenChange}
               // Called before the popover closes, so the hex field's focusout
               // already points back into the group and commits nothing.
               onDismiss={() => nameInputRef.current?.focus()}

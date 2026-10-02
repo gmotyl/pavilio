@@ -1034,6 +1034,49 @@ describe("TerminalLayoutGrid — colour picker inside the rename edit", () => {
     expect(nameInput()).toBeNull();
   });
 
+  // The picker's outside-click close unmounts the popover — and the focused hex
+  // field with it — before the browser moves focus, so no focusout with an
+  // outside `relatedTarget` would ever reach the group without help.
+  it("outside click while the hex field is focused commits once", async () => {
+    const { user, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.click(document.body);
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("e1", "builder");
+    expect(nameInput()).toBeNull();
+    expect(dialog()).toBeNull();
+  });
+
+  it("clicking an outside button while the hex field is focused commits once", async () => {
+    const { user, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.click(screen.getByTestId("terminal-cell-eye-e1"));
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("e1", "builder");
+    expect(nameInput()).toBeNull();
+    // The eye opens the viewport dialog, so check the picker by its hex field.
+    expect(screen.queryByLabelText("Custom hex")).toBeNull();
+  });
+
+  it("clicking the name field while the hex field is focused closes the picker, keeps editing", async () => {
+    const { user, input, onRename } = await enterRename();
+    await user.click(trigger());
+    await user.click(screen.getByLabelText("Custom hex"));
+
+    await user.click(input);
+
+    expect(dialog()).toBeNull();
+    expect(nameInput()).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
   it("picking a preset keeps the rename open and refocuses the name field", async () => {
     const { user, input, onRename } = await enterRename();
     await user.click(trigger());
