@@ -167,4 +167,157 @@ describe("ProjectColorPicker", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+  // A host editing the cell name keeps focus in its input while the picker is
+  // used; `fireEvent` returns false when a handler called `preventDefault`.
+  it("picker buttons do not take focus on mousedown", () => {
+    renderPicker({ project: "alpha" });
+
+    expect(fireEvent.mouseDown(screen.getByTestId("project-color-trigger"))).toBe(false);
+    const panel = openPicker();
+    expect(
+      fireEvent.mouseDown(within(panel).getByRole("button", { name: /^purple/i })),
+    ).toBe(false);
+    expect(
+      fireEvent.mouseDown(within(panel).getByRole("button", { name: /apply/i })),
+    ).toBe(false);
+  });
+
+  it("hex input still takes focus on mousedown", () => {
+    renderPicker({ project: "alpha" });
+    const panel = openPicker();
+
+    expect(fireEvent.mouseDown(within(panel).getByLabelText(/custom hex/i))).toBe(true);
+  });
+
+  it("controlled open follows the prop and reports changes", () => {
+    const onOpenChange = vi.fn();
+    const { rerender } = render(
+      <ProjectColorPicker
+        project="alpha"
+        testId="project-color-trigger"
+        open={false}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    const trigger = screen.getByTestId("project-color-trigger");
+
+    // Trigger reports, but the prop still owns the state.
+    fireEvent.click(trigger);
+    expect(onOpenChange).toHaveBeenLastCalledWith(true);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    rerender(
+      <ProjectColorPicker
+        project="alpha"
+        testId="project-color-trigger"
+        open
+        onOpenChange={onOpenChange}
+      />,
+    );
+    const panel = screen.getByRole("dialog");
+
+    fireEvent.click(trigger);
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    onOpenChange.mockClear();
+    fireEvent.keyDown(within(panel).getByLabelText(/custom hex/i), { key: "Escape" });
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    onOpenChange.mockClear();
+    fireEvent.mouseDown(document.body);
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    onOpenChange.mockClear();
+    fireEvent.click(within(panel).getByRole("button", { name: /^purple/i }));
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("applying a preset calls onDismiss before closing", () => {
+    const order: string[] = [];
+    const onDismiss = vi.fn(() => {
+      // Still mounted: the host can refocus before the hex field disappears.
+      order.push(screen.queryByRole("dialog") ? "dismiss:open" : "dismiss:closed");
+    });
+    const onOpenChange = vi.fn((open: boolean) => order.push(`open:${open}`));
+    render(
+      <ProjectColorPicker
+        project="alpha"
+        open
+        onOpenChange={onOpenChange}
+        onDismiss={onDismiss}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^purple/i }));
+
+    expect(order).toEqual(["dismiss:open", "open:false"]);
+  });
+
+  it("applying a custom hex calls onDismiss", async () => {
+    const onDismiss = vi.fn(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+    render(
+      <ProjectColorPicker
+        project="alpha"
+        testId="project-color-trigger"
+        onDismiss={onDismiss}
+      />,
+    );
+    const panel = openPicker();
+    fireEvent.change(within(panel).getByLabelText(/custom hex/i), {
+      target: { value: "#abc" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: /apply/i }));
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(colorWrites()).toHaveLength(1));
+  });
+
+  it("Escape anywhere in the popover closes it, dismisses, and stops propagation", () => {
+    const onDismiss = vi.fn();
+    const onHostKeyDown = vi.fn();
+    render(
+      <div onKeyDown={onHostKeyDown}>
+        <ProjectColorPicker
+          project="alpha"
+          testId="project-color-trigger"
+          onDismiss={onDismiss}
+        />
+      </div>,
+    );
+    const panel = openPicker();
+
+    // Not only the hex field: any element inside the popover can be the
+    // keydown target.
+    fireEvent.keyDown(within(panel).getByRole("button", { name: /^purple/i }), {
+      key: "Escape",
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onHostKeyDown).not.toHaveBeenCalled();
+  });
+
+  it("outside click closes without onDismiss", () => {
+    const onDismiss = vi.fn();
+    render(
+      <ProjectColorPicker
+        project="alpha"
+        testId="project-color-trigger"
+        onDismiss={onDismiss}
+      />,
+    );
+    openPicker();
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
 });
