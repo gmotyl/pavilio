@@ -131,7 +131,7 @@ const FIXTURES: Record<string, Fixture> = {
       { label: "Yes", text: "yes" },
     ],
   },
-  // Non-portable, and the two entries on that tier naming no session: the
+  // Non-portable, and two of the entries on that tier naming no session: the
   // speech surface's measurements, each read against this window's viewport.
   // `project`-scoped as well, so each needs a scope argument. The two axes are
   // independent — the scope says how many of these a browser keeps, the
@@ -140,6 +140,11 @@ const FIXTURES: Record<string, Fixture> = {
   "speech.answerComposer.height": { value: 148, scopeArg: "pavilio" },
   "speech.answerPane.height": { value: 412, scopeArg: "pavilio" },
   "speech.armedCell": { value: "sess-0b2e55d1" },
+
+  // ── Notifications ────────────────────────────────────────────────────────
+  // Non-portable and naming no session: the browser permission it pairs with
+  // is granted per device.
+  "notifications.on": { value: true },
 
   // ── Navigation memory (the session tier) ─────────────────────────────────
   "nav.lastPath": { value: "/project/pavilio/notes?note=a.md", scopeArg: "pavilio" },
@@ -234,9 +239,9 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(43);
+    expect(ALL_PREFERENCES.length).toBe(44);
     expect(portable.length).toBe(34);
-    expect(machineLocal.length).toBe(9);
+    expect(machineLocal.length).toBe(10);
     expect(sessionTier.length).toBe(3);
     // The portable arm of the union forbids `browserStore`; this says the
     // shipped table agrees with it, not merely that it type-checked.

@@ -686,6 +686,24 @@ export const preferences = {
     codec: json<string | null>(),
     portable: false,
   }),
+
+  // ── Notifications ────────────────────────────────────────────────────────
+  /**
+   * Whether this device raises a system notification when a hidden cell needs
+   * attention. OFF by default: the switch is only useful once the browser has
+   * granted permission, and that prompt is the user's to raise.
+   *
+   * NOT portable: the permission it pairs with is per device. Carried to a
+   * machine that never granted it, an "on" would be a switch that does
+   * nothing — or one that prompts on a device the user never chose.
+   */
+  notificationsOn: definePreference({
+    key: "notifications.on", // was: nothing — notifications are new
+    scope: "global",
+    default: false,
+    codec: bool,
+    portable: false,
+  }),
   // ── Navigation memory ────────────────────────────────────────────────────
   // Machine local, and narrower still: `sessionStorage`, not `localStorage`.
   // `features/shell/lastPath.ts` uses the session store on purpose, and
