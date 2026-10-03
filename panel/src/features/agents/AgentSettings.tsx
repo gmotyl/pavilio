@@ -4,6 +4,7 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 import { VoiceSelect } from "../speech/VoiceSelect";
 import { AutoOpenAnswerToggle } from "../speech/AutoOpenAnswerToggle";
+import { NotificationsToggle } from "../notifications/NotificationsToggle";
 import { LauncherSettings } from "./LauncherSettings";
 import { DefaultObjectiveSettings } from "./DefaultObjectiveSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
@@ -488,6 +489,9 @@ export default function AgentSettings() {
         <VoiceSelect />
         <div className="mt-4">
           <AutoOpenAnswerToggle />
+        </div>
+        <div className="mt-4">
+          <NotificationsToggle />
         </div>
         <div className="mt-4">
           <LauncherSettings />
