@@ -70,8 +70,11 @@ const TLDR_PARAGRAPH_RE = /^[ \t]*\*\*TLDR:?\*\*/i;
  * Underscores count as emphasis only when the run is bounded by non-word
  * characters — `PAVILIO_TERMINAL_ID` must survive intact, because `strip.ts` has
  * already decided that short identifiers are worth speaking.
+ *
+ * Exported so the notification preview strips markers by the same rules instead
+ * of keeping a copy that drifts.
  */
-function removeMarkers(text: string): string {
+export function removeMarkers(text: string): string {
   return text
     .split("\n")
     .map((line) => line.replace(HEADING_LINE_RE, "$1"))

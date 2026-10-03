@@ -7,12 +7,14 @@
  * the notification carries the answer's gist rather than a bare "an agent
  * finished".
  *
- * The preview reuses the speech filter, `stripToSpeakableText`, instead of a
- * second stripper: one place decides what of an answer is worth surfacing.
- * Its removal sentinels (`⟦code⟧`, `⟦table⟧`, …) survive into the preview as
- * written — they name what was skipped and are not markdown.
+ * The preview reuses the speech filter, `stripToSpeakableText`, and the speech
+ * marker remover, `removeMarkers`, instead of a second stripper: one place
+ * decides what of an answer is worth surfacing. The filter's removal sentinels
+ * (`⟦code⟧`, `⟦table⟧`, …) are turned into a plain word in parentheses, so the
+ * preview still says what was skipped without showing the sentinel syntax.
  */
-import { stripToSpeakableText } from "../speech/strip";
+import { removeMarkers } from "../speech/prepare";
+import { SENTINEL, stripToSpeakableText } from "../speech/strip";
 
 /**
  * Longest preview line, ellipsis included. Lock screens and notification
@@ -30,15 +32,24 @@ export interface NotificationCopy {
 }
 
 /**
- * Drops the heading `#` and emphasis markers `stripToSpeakableText`
- * deliberately leaves for the speech unit builder — on a screen they are
- * plain markdown noise.
+ * The word each removal kind reads as on screen. Keyed by `SENTINEL`'s own
+ * kinds, so adding a kind in `strip.ts` fails the type check here until it has
+ * a word.
  */
-function removeMarkers(text: string): string {
-  return text
-    .replace(/^ {0,3}#{1,6}[ \t]+/gm, "")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*/g, "");
+const PLACEHOLDER: Readonly<Record<keyof typeof SENTINEL, string>> = {
+  code: "(code)",
+  table: "(table)",
+  html: "(HTML)",
+  image: "(image)",
+  link: "(link)",
+  expr: "(expression)",
+};
+
+/** Built from {@link SENTINEL} so the matched kinds cannot drift from it. */
+const SENTINEL_RE = new RegExp(`⟦(${Object.keys(SENTINEL).join("|")})⟧`, "g");
+
+function replaceSentinels(text: string): string {
+  return text.replace(SENTINEL_RE, (_, kind: keyof typeof SENTINEL) => PLACEHOLDER[kind]);
 }
 
 /** Cuts `text` to the bound on a word boundary, ellipsis included. */
@@ -57,7 +68,9 @@ function truncate(text: string): string {
 }
 
 function previewOf(utterance: string): string {
-  const plain = removeMarkers(stripToSpeakableText(utterance)).replace(/\s+/g, " ").trim();
+  const plain = replaceSentinels(removeMarkers(stripToSpeakableText(utterance)))
+    .replace(/\s+/g, " ")
+    .trim();
   return truncate(plain);
 }
 
@@ -66,7 +79,8 @@ export function notificationText(input: {
   latestUtterance?: string;
 }): NotificationCopy {
   const { session, latestUtterance } = input;
-  const heading = session.title || session.name;
+  // Collapsed so a multi-line title cannot push the preview off line two.
+  const heading = (session.title?.trim() || session.name).replace(/\s+/g, " ");
   const preview = latestUtterance ? previewOf(latestUtterance) : "";
 
   return {

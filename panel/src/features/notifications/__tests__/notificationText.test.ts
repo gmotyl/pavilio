@@ -98,6 +98,45 @@ describe("notificationText", () => {
     }
   });
 
+  it("names what was skipped with a plain word instead of a sentinel", () => {
+    const latestUtterance = [
+      "Here is the result.",
+      "",
+      "| cell | state |",
+      "| --- | ----- |",
+      "| one  | armed |",
+      "",
+      "```ts",
+      "const order = useTerminalOrdering();",
+      "```",
+      "",
+      "All __done__ and _shipped_.",
+    ].join("\n");
+
+    const line = preview(notificationText({ session, latestUtterance }).body)!;
+
+    expect(line).not.toContain("⟦");
+    expect(line).not.toContain("⟧");
+    expect(line).toContain("(table)");
+    expect(line).toContain("(code)");
+    expect(line).toContain("All done and shipped.");
+  });
+
+  it("keeps the heading on one line when the title spans several", () => {
+    const copy = notificationText({
+      session: { ...session, title: "  Fix the\n  reader   bar \n" },
+      latestUtterance: "Done.",
+    });
+
+    expect(copy.body).toBe("Fix the reader bar\nDone.");
+  });
+
+  it("falls back to the session name when the title is blank", () => {
+    const copy = notificationText({ session: { ...session, title: "  \n " } });
+
+    expect(copy.body).toBe("claude-3");
+  });
+
   it("omits the preview entirely when the session has never spoken", () => {
     const copy = notificationText({ session: { ...session, title: "Fix the reader bar" } });
 
