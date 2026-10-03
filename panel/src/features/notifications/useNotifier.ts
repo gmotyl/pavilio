@@ -33,8 +33,17 @@
  * where nothing was registered. No support, a failed registration or a
  * rejected `showNotification` all end in silence: the in-page LED and favicon
  * still say the same thing.
+ *
+ * ## The way back
+ *
+ * A tap on a notification is answered by the service worker, which focuses a
+ * panel window and posts it a `NotificationClickMessage`. This hook listens
+ * for that message on `navigator.serviceWorker` and hands it to
+ * `arriveFromNotification`, with the session list it already holds as the
+ * answer to "does that session still exist".
  */
 import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { usePanelSpeech } from "../speech/SpeechHostProvider";
 import { newestUtteranceId, type UtteranceQueue } from "../speech/utteranceQueue";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
@@ -45,6 +54,7 @@ import {
   type ActivityState,
 } from "../terminal/useTerminalActivityChannel";
 import { notificationText } from "./notificationText";
+import { arriveFromNotification, isNotificationClickMessage } from "./notificationClickTarget";
 import { getNotificationsEnabled, notificationsAvailability } from "./notificationsEnabled";
 import { registerPanelServiceWorker } from "./registerServiceWorker";
 import { shouldNotify } from "./shouldNotify";
@@ -56,6 +66,12 @@ export interface NotifierOptions {
    * the terminal only.
    */
   latestUtteranceFor?: (sessionId: string) => string | undefined;
+  /**
+   * The router's navigate, for a tapped notification. A parameter rather than
+   * `useNavigate` here so the hook stays usable without a router; without it a
+   * tap still focuses the window, it just does not move the page.
+   */
+  navigate?: (path: string) => void;
 }
 
 /** The registration that can show notifications, or null where there is none. */
@@ -82,14 +98,33 @@ export function useNotifier(options: NotifierOptions = {}): void {
   // a title published after subscribing, or a newer answer, is what is shown.
   const sessionsRef = useRef(new Map<string, SessionMeta>());
   const latestUtteranceForRef = useRef(options.latestUtteranceFor);
+  const navigateRef = useRef(options.navigate);
   useEffect(() => {
     sessionsRef.current = new Map(sessions.map((s) => [s.id, s]));
     latestUtteranceForRef.current = options.latestUtteranceFor;
+    navigateRef.current = options.navigate;
   });
 
   const registrationRef = useRef<Promise<ServiceWorkerRegistration | null> | null>(null);
   useEffect(() => {
     registrationRef.current = activeRegistration().catch(() => null);
+  }, []);
+
+  // A tapped notification, posted back by the worker. Bound once; reads the
+  // session list and navigate through refs at the moment of the message.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    const container = navigator.serviceWorker;
+    if (typeof container.addEventListener !== "function") return;
+    const onMessage = (event: MessageEvent) => {
+      if (!isNotificationClickMessage(event.data)) return;
+      arriveFromNotification(event.data, {
+        projectOf: (sessionId) => sessionsRef.current.get(sessionId)?.project,
+        navigate: (path) => navigateRef.current?.(path),
+      });
+    };
+    container.addEventListener("message", onMessage);
+    return () => container.removeEventListener("message", onMessage);
   }, []);
 
   /** Last state seen per session; absent means never seen. */
@@ -170,11 +205,15 @@ function newestUtteranceText(queue: UtteranceQueue): string | undefined {
  * the preview line is the newest answer the speech channel holds for the cell —
  * the channel is the panel's only reader of the utterance stream, and its
  * queues are React state inside the host, not a store readable from outside it.
+ * It is inside `BrowserRouter` too, which is where a tapped notification's
+ * navigation comes from.
  */
 export function Notifier(): null {
   const speech = usePanelSpeech();
+  const navigate = useNavigate();
   useNotifier({
     latestUtteranceFor: (sessionId) => newestUtteranceText(speech.queueFor(sessionId)),
+    navigate,
   });
   return null;
 }

@@ -5,6 +5,13 @@ vi.mock("../../terminal/useAllTerminalSessions", () => ({
   useAllTerminalSessions: vi.fn(),
 }));
 
+// The arrival rule is the terminal feature's, and pinned in
+// `attentionDismiss.test.tsx`; here only the call is asserted.
+const dismissAttentionOnArrival = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
+vi.mock("../../terminal/attentionArrival", () => ({
+  dismissAttentionOnArrival: (sessionId: string) => dismissAttentionOnArrival(sessionId),
+}));
+
 /**
  * Every unsubscribe the notifier is handed, by session id, so a test can see
  * that a session leaving the list really dropped its subscription. The real
@@ -34,6 +41,15 @@ import {
   _resetForTests,
   type ActivityState,
 } from "../../terminal/useTerminalActivityChannel";
+import {
+  readTerminalFocus,
+  TERMINAL_FOCUS_EVENT,
+  type TerminalFocusEventDetail,
+} from "../../terminal/useTerminalSessions";
+import {
+  NOTIFICATION_CLICK_MESSAGE_TYPE,
+  type NotificationClickMessage,
+} from "../notificationClickTarget";
 import { notificationText } from "../notificationText";
 import { setNotificationsEnabled } from "../notificationsEnabled";
 import { useNotifier } from "../useNotifier";
@@ -69,14 +85,24 @@ function withSessions(sessions: SessionMeta[]): void {
 function stubServiceWorker() {
   const showNotification = vi.fn().mockResolvedValue(undefined);
   const registration = { showNotification } as unknown as ServiceWorkerRegistration;
+  // An EventTarget, so the worker's `message` events can be dispatched at it.
+  const container = Object.assign(new EventTarget(), {
+    register: vi.fn().mockResolvedValue(registration),
+    ready: Promise.resolve(registration),
+  });
   Object.defineProperty(navigator, "serviceWorker", {
-    value: {
-      register: vi.fn().mockResolvedValue(registration),
-      ready: Promise.resolve(registration),
-    },
+    value: container,
     configurable: true,
   });
   return showNotification;
+}
+
+/** What the worker posts when a notification is tapped and a window exists. */
+async function postClick(message: NotificationClickMessage): Promise<void> {
+  await act(async () => {
+    navigator.serviceWorker.dispatchEvent(new MessageEvent("message", { data: message }));
+    await Promise.resolve();
+  });
 }
 
 function setVisibility(state: DocumentVisibilityState): void {
@@ -104,6 +130,7 @@ async function flush(): Promise<void> {
 beforeEach(() => {
   _resetForTests();
   unsubscribesBySession.clear();
+  dismissAttentionOnArrival.mockReset();
   setVisibility("hidden");
   setNotificationsEnabled(true);
   vi.stubGlobal("Notification", { permission: "granted" });
@@ -248,5 +275,93 @@ describe("useNotifier", () => {
     unmount();
     expect(warn).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
+  });
+});
+
+describe("tapping a notification", () => {
+  it("navigates and dismisses attention for a session that still exists", async () => {
+    stubServiceWorker();
+    withSessions([session("s1", { project: "my project" })]);
+    const navigate = vi.fn();
+    const focused: TerminalFocusEventDetail[] = [];
+    const onFocus = (e: Event) =>
+      focused.push((e as CustomEvent<TerminalFocusEventDetail>).detail);
+    window.addEventListener(TERMINAL_FOCUS_EVENT, onFocus);
+
+    try {
+      renderHook(() => useNotifier({ navigate }));
+      await flush();
+
+      await postClick({
+        type: NOTIFICATION_CLICK_MESSAGE_TYPE,
+        sessionId: "s1",
+        project: "my project",
+      });
+      // The focus broadcast goes out on the next tick, after the navigation,
+      // as every other cross-project jump in the panel does it.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(navigate).toHaveBeenCalledWith("/project/my%20project/iterm");
+      // Persisted before navigating, so the project's surface mounts on it.
+      expect(readTerminalFocus("my project")).toBe("s1");
+      expect(focused).toEqual([{ project: "my project", sessionId: "s1" }]);
+      expect(dismissAttentionOnArrival).toHaveBeenCalledWith("s1");
+    } finally {
+      window.removeEventListener(TERMINAL_FOCUS_EVENT, onFocus);
+    }
+  });
+
+  it("navigates to the project without error when the session is gone", async () => {
+    stubServiceWorker();
+    withSessions([session("s1")]);
+    const navigate = vi.fn();
+    const warn = vi.spyOn(console, "warn");
+    const error = vi.spyOn(console, "error");
+    const focused = vi.fn();
+    window.addEventListener(TERMINAL_FOCUS_EVENT, focused);
+
+    try {
+      renderHook(() => useNotifier({ navigate }));
+      await flush();
+
+      await postClick({
+        type: NOTIFICATION_CLICK_MESSAGE_TYPE,
+        sessionId: "gone",
+        project: "pavilio",
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(navigate).toHaveBeenCalledWith("/project/pavilio/iterm");
+      expect(readTerminalFocus("pavilio")).not.toBe("gone");
+      expect(focused).not.toHaveBeenCalled();
+      expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(TERMINAL_FOCUS_EVENT, focused);
+    }
+  });
+
+  it("ignores messages that are not a notification click", async () => {
+    stubServiceWorker();
+    withSessions([session("s1")]);
+    const navigate = vi.fn();
+
+    renderHook(() => useNotifier({ navigate }));
+    await flush();
+
+    await act(async () => {
+      navigator.serviceWorker.dispatchEvent(
+        new MessageEvent("message", { data: { type: "something-else", sessionId: "s1" } }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
   });
 });

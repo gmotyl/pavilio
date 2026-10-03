@@ -576,3 +576,86 @@ describe("attention clears from the OS media session", () => {
     expect(sendDismiss).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The system notification raised for a session is the sixth door's mirror:
+ * whatever door the user arrives through, `dismissAttentionOnArrival` closes
+ * that session's outstanding notification along with the LED, so the two go
+ * out together and neither outlives the other.
+ */
+describe("arrival closes the session's notification", () => {
+  type FakeNotification = { tag: string; close: ReturnType<typeof vi.fn> };
+
+  /** A fake registration holding outstanding notifications, filtered by tag as the browser does. */
+  function stubRegistration(outstanding: FakeNotification[]) {
+    const getNotifications = vi.fn(async (filter?: { tag?: string }) =>
+      outstanding.filter((n) => !filter?.tag || n.tag === filter.tag),
+    );
+    const getRegistration = vi.fn().mockResolvedValue({ getNotifications });
+    Object.defineProperty(navigator, "serviceWorker", {
+      value: { getRegistration },
+      configurable: true,
+    });
+    return { getRegistration, getNotifications };
+  }
+
+  const notification = (tag: string): FakeNotification => ({ tag, close: vi.fn() });
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  }
+
+  beforeEach(resetArrivalHarness);
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "serviceWorker");
+  });
+
+  it("closes the session's notification when the user arrives at the cell", async () => {
+    const mine = notification("cell-a");
+    const other = notification("cell-b");
+    const { getNotifications } = stubRegistration([mine, other]);
+    setActivity("cell-a", "attention");
+    setActivity("cell-b", "attention");
+    renderBar("cell-a");
+
+    // Through a real door, not the helper: every door gets this for free.
+    fireEvent.click(play("cell-a"));
+    await settle();
+
+    expect(sendDismiss).toHaveBeenCalledWith("cell-a");
+    expect(getNotifications).toHaveBeenCalledWith({ tag: "cell-a" });
+    expect(mine.close).toHaveBeenCalledTimes(1);
+    expect(other.close).not.toHaveBeenCalled();
+  });
+
+  it("stays a no-op for a session that is not in attention", async () => {
+    const busy = notification("cell-busy");
+    const idle = notification("cell-idle");
+    const { getRegistration } = stubRegistration([busy, idle]);
+    setActivity("cell-busy", "busy");
+    setActivity("cell-idle", "idle");
+
+    dismissAttentionOnArrival("cell-busy");
+    dismissAttentionOnArrival("cell-idle");
+    await settle();
+
+    expect(sendDismiss).not.toHaveBeenCalled();
+    expect(getRegistration).not.toHaveBeenCalled();
+    expect(busy.close).not.toHaveBeenCalled();
+    expect(idle.close).not.toHaveBeenCalled();
+  });
+
+  it("dismisses without throwing when the registration cannot be read", async () => {
+    const getRegistration = vi.fn().mockRejectedValue(new Error("no worker"));
+    Object.defineProperty(navigator, "serviceWorker", {
+      value: { getRegistration },
+      configurable: true,
+    });
+    setActivity("cell-a", "attention");
+
+    expect(() => dismissAttentionOnArrival("cell-a")).not.toThrow();
+    await settle();
+
+    expect(sendDismiss).toHaveBeenCalledWith("cell-a");
+  });
+});

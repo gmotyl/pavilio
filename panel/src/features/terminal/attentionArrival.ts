@@ -1,3 +1,4 @@
+import { closeSessionNotifications } from "../notifications/registerServiceWorker";
 import { sendDismiss } from "./terminalInstances";
 import { getActivityState } from "./useTerminalActivityChannel";
 
@@ -82,8 +83,29 @@ import { getActivityState } from "./useTerminalActivityChannel";
  * `terminalInstances.test.ts`, which pins that. A dropped dismiss costs a stale
  * LED until the next activity broadcast, which is not worth a toast over a
  * gesture the user made for another reason entirely.
+ *
+ * ## The system notification goes out with the LED
+ *
+ * A session that wanted you while the panel was hidden may also have raised a
+ * system notification (`features/notifications`), tagged with its session id.
+ * Closing it is part of THIS rule rather than a sixth door beside it, so every
+ * door above — and tapping the notification itself — puts out both together,
+ * and neither can outlive the other.
+ *
+ * It sits behind the same `attention` check, deliberately. The rule outside
+ * `attention` stays a no-op exactly as before: the spec closes a notification
+ * on "a gesture that already dismisses attention", and the composer's focus,
+ * which fires constantly, should not go to the service worker for nothing. A
+ * notification is raised only on the edge INTO `attention`, so one still
+ * showing for a session that has since left it is stale news that the next
+ * attention edge replaces (same tag) or the user swipes away. That trade was
+ * taken over widening the rule.
+ *
+ * `closeSessionNotifications` is fire-and-forget and never throws, so the
+ * rule stays synchronous and silent for every existing caller.
  */
 export function dismissAttentionOnArrival(sessionId: string): void {
   if (getActivityState(sessionId) !== "attention") return;
   sendDismiss(sessionId);
+  closeSessionNotifications(sessionId);
 }

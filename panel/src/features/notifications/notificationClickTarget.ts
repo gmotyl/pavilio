@@ -1,0 +1,81 @@
+/**
+ * Where a tapped notification takes the user, page side.
+ *
+ * The service worker (`public/sw.js`) handles the tap: it closes the
+ * notification and either focuses a panel window and posts it a
+ * {@link NotificationClickMessage}, or — with no window running — opens one at
+ * {@link projectTerminalsPath}. The worker is plain JS served from `public/`
+ * and cannot import this module, so it carries its own copies of the message
+ * type and the path; `notificationClickTarget.test.ts` loads the shipped
+ * worker and holds both copies to the ones exported here.
+ *
+ * A cell is a position in a grid, not a route — the router addresses projects,
+ * not cells — which is why the cell travels in the message and not in the URL.
+ */
+import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
+import { dispatchTerminalFocus, writeTerminalFocus } from "../terminal/useTerminalSessions";
+
+export const NOTIFICATION_CLICK_MESSAGE_TYPE = "pavilio-notification-click";
+
+/** Posted by the service worker to a focused client; handled by useNotifier. */
+export interface NotificationClickMessage {
+  type: "pavilio-notification-click";
+  sessionId: string;
+  project: string;
+}
+
+export function isNotificationClickMessage(data: unknown): data is NotificationClickMessage {
+  if (typeof data !== "object" || data === null) return false;
+  const message = data as Record<string, unknown>;
+  return (
+    message.type === NOTIFICATION_CLICK_MESSAGE_TYPE &&
+    typeof message.sessionId === "string" &&
+    typeof message.project === "string"
+  );
+}
+
+/**
+ * The project's terminal tab — where a session's cell lives. The same target
+ * `QuickTerminalModal` and the phone sidebar use to land on a session, rather
+ * than the bare `/project/<name>`, which `ProjectRedirect` may resolve to notes:
+ * tapping a session's notification and landing anywhere but its terminals
+ * would miss the point of the tap. Percent-encoded, because a project name may
+ * hold a space or a `#`.
+ */
+export function projectTerminalsPath(project: string): string {
+  return `/project/${encodeURIComponent(project)}/iterm`;
+}
+
+export interface ArrivalDeps {
+  /** The session's project if it still exists, else undefined. */
+  projectOf: (sessionId: string) => string | undefined;
+  navigate: (path: string) => void;
+}
+
+/**
+ * The page's half of a tap: go to the project and, when the session is still
+ * there, focus its cell and count the tap as arriving at it.
+ *
+ * The cell is focused the way every other cross-project jump does it
+ * (`QuickTerminalModal.openDotTarget`, the spine drawer): persist the focus
+ * for the project first, so a surface that mounts on the navigation reads it,
+ * then navigate, then broadcast on the next tick for a surface that is already
+ * mounted on that project and will not remount.
+ *
+ * A session that is gone (panel restarted, cell closed) lands on the project
+ * and says nothing: a closed cell is the passage of time, not an error.
+ */
+export function arriveFromNotification(
+  message: NotificationClickMessage,
+  { projectOf, navigate }: ArrivalDeps,
+): void {
+  const project = projectOf(message.sessionId);
+  if (project === undefined) {
+    navigate(projectTerminalsPath(message.project));
+    return;
+  }
+  writeTerminalFocus(project, message.sessionId);
+  navigate(projectTerminalsPath(project));
+  setTimeout(() => dispatchTerminalFocus(project, message.sessionId), 0);
+  dismissAttentionOnArrival(message.sessionId);
+}

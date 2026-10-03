@@ -27,3 +27,30 @@ export async function registerPanelServiceWorker(): Promise<ServiceWorkerRegistr
     return null;
   }
 }
+
+/**
+ * Closes any outstanding notification raised for `sessionId` (its tag is the
+ * session id — see `notificationText`).
+ *
+ * Fire-and-forget and synchronous to call: it never throws and never rejects,
+ * because its caller is the arrival rule, which runs inside click, focus and
+ * key handlers that must not learn about service workers. No support, no
+ * registration, or a browser that refuses `getNotifications` all end in
+ * silence; the worst case is a notification the user swipes away themselves.
+ */
+export function closeSessionNotifications(sessionId: string): void {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  try {
+    void navigator.serviceWorker
+      .getRegistration(WORKER_SCOPE)
+      .then((registration) => registration?.getNotifications({ tag: sessionId }))
+      .then((outstanding) => {
+        for (const notification of outstanding ?? []) notification.close();
+      })
+      .catch(() => {
+        // Nothing to close, or no way to reach it: see above.
+      });
+  } catch {
+    // A container without `getRegistration` (a partial stub, an old engine).
+  }
+}
