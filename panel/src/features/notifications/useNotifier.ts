@@ -41,9 +41,18 @@
  * for that message on `navigator.serviceWorker` and hands it to
  * `arriveFromNotification`, with the session list it already holds as the
  * answer to "does that session still exist".
+ *
+ * With no panel window running, the worker opens one instead, at the
+ * project's terminals with the session in a `?notification=` parameter. On
+ * mount the hook reads that parameter from the location it is given and, once
+ * the session list holds the session, runs the same arrival as a posted click.
+ * The list may load after mount, so it waits: a loaded (non-empty) list without
+ * the session, or {@link COLD_START_WAIT_MS} without one, ends the wait in
+ * silence. Either way the parameter is replaced out of the URL, so a reload
+ * does not arrive a second time.
  */
 import { useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { usePanelSpeech } from "../speech/SpeechHostProvider";
 import { newestUtteranceId, type UtteranceQueue } from "../speech/utteranceQueue";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
@@ -54,7 +63,13 @@ import {
   type ActivityState,
 } from "../terminal/useTerminalActivityChannel";
 import { notificationText } from "./notificationText";
-import { arriveFromNotification, isNotificationClickMessage } from "./notificationClickTarget";
+import {
+  arriveFromNotification,
+  isNotificationClickMessage,
+  NOTIFICATION_CLICK_MESSAGE_TYPE,
+  notificationSessionFrom,
+  withoutNotificationSession,
+} from "./notificationClickTarget";
 import { getNotificationsEnabled, notificationsAvailability } from "./notificationsEnabled";
 import { registerPanelServiceWorker } from "./registerServiceWorker";
 import { shouldNotify } from "./shouldNotify";
@@ -71,7 +86,38 @@ export interface NotifierOptions {
    * `useNavigate` here so the hook stays usable without a router; without it a
    * tap still focuses the window, it just does not move the page.
    */
-  navigate?: (path: string) => void;
+  navigate?: (path: string, options?: { replace?: boolean }) => void;
+  /**
+   * The router's location at mount, read once for a cold start's
+   * `?notification=` parameter. Without it no cold start is recognised.
+   */
+  location?: { pathname: string; search: string; hash?: string };
+}
+
+/**
+ * How long a cold start waits for the session list before giving up. The
+ * store's first fetch normally answers in well under a second; this only
+ * bounds the case where no list ever arrives (or it is genuinely empty).
+ */
+export const COLD_START_WAIT_MS = 10_000;
+
+interface ColdStart {
+  sessionId: string;
+  pathname: string;
+  search: string;
+  hash: string;
+}
+
+function coldStartFrom(location: NotifierOptions["location"]): ColdStart | null {
+  if (!location) return null;
+  const sessionId = notificationSessionFrom(location.search);
+  if (sessionId === null) return null;
+  return {
+    sessionId,
+    pathname: location.pathname,
+    search: location.search,
+    hash: location.hash ?? "",
+  };
 }
 
 /** The registration that can show notifications, or null where there is none. */
@@ -125,6 +171,48 @@ export function useNotifier(options: NotifierOptions = {}): void {
     };
     container.addEventListener("message", onMessage);
     return () => container.removeEventListener("message", onMessage);
+  }, []);
+
+  // A cold start: the worker opened this window with the tapped session in the
+  // URL. Read once, at mount; cleared as soon as it is settled either way.
+  const coldStartRef = useRef<ColdStart | null | undefined>(undefined);
+  if (coldStartRef.current === undefined) coldStartRef.current = coldStartFrom(options.location);
+
+  useEffect(() => {
+    const pending = coldStartRef.current;
+    if (!pending) return;
+    const replace = (path: string) => navigateRef.current?.(path, { replace: true });
+    const found = sessions.find((s) => s.id === pending.sessionId);
+    if (found) {
+      coldStartRef.current = null;
+      // The arrival's own navigation lands on the project's terminals without
+      // the parameter, replacing the cold-start entry.
+      arriveFromNotification(
+        { type: NOTIFICATION_CLICK_MESSAGE_TYPE, sessionId: found.id, project: found.project },
+        { projectOf: () => found.project, navigate: replace },
+      );
+      return;
+    }
+    // An empty list before the store's first load means "not known yet"; a
+    // non-empty one without the session means it is gone.
+    if (sessions.length > 0) {
+      coldStartRef.current = null;
+      replace(pending.pathname + withoutNotificationSession(pending.search) + pending.hash);
+    }
+  }, [sessions]);
+
+  useEffect(() => {
+    if (!coldStartRef.current) return;
+    const timer = setTimeout(() => {
+      const pending = coldStartRef.current;
+      if (!pending) return;
+      coldStartRef.current = null;
+      navigateRef.current?.(
+        pending.pathname + withoutNotificationSession(pending.search) + pending.hash,
+        { replace: true },
+      );
+    }, COLD_START_WAIT_MS);
+    return () => clearTimeout(timer);
   }, []);
 
   /** Last state seen per session; absent means never seen. */
@@ -206,14 +294,16 @@ function newestUtteranceText(queue: UtteranceQueue): string | undefined {
  * the channel is the panel's only reader of the utterance stream, and its
  * queues are React state inside the host, not a store readable from outside it.
  * It is inside `BrowserRouter` too, which is where a tapped notification's
- * navigation comes from.
+ * navigation, and a cold start's `?notification=` location, come from.
  */
 export function Notifier(): null {
   const speech = usePanelSpeech();
   const navigate = useNavigate();
+  const location = useLocation();
   useNotifier({
     latestUtteranceFor: (sessionId) => newestUtteranceText(speech.queueFor(sessionId)),
     navigate,
+    location,
   });
   return null;
 }

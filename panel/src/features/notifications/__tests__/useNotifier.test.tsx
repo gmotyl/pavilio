@@ -1,4 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../terminal/useAllTerminalSessions", () => ({
@@ -52,7 +54,7 @@ import {
 } from "../notificationClickTarget";
 import { notificationText } from "../notificationText";
 import { setNotificationsEnabled } from "../notificationsEnabled";
-import { useNotifier } from "../useNotifier";
+import { COLD_START_WAIT_MS, useNotifier } from "../useNotifier";
 
 const useAllTerminalSessionsMock = useAllTerminalSessions as unknown as ReturnType<
   typeof vi.fn
@@ -384,6 +386,131 @@ describe("tapping a notification", () => {
     });
 
     expect(navigate).not.toHaveBeenCalled();
+    expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+  });
+});
+
+describe("a cold start from a tapped notification", () => {
+  /**
+   * The page the worker opens when no panel window was running: a real router
+   * at the worker's URL, with the notifier wired to it the way `Notifier` is.
+   * Returns the router's location, so a test sees the URL it ends on.
+   */
+  function renderAt(url: string) {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <MemoryRouter initialEntries={[url]}>{children}</MemoryRouter>
+    );
+    return renderHook(
+      () => {
+        const navigate = useNavigate();
+        const location = useLocation();
+        useNotifier({ navigate, location });
+        return location;
+      },
+      { wrapper },
+    );
+  }
+
+  it("focuses and dismisses the tapped session once the list loads, then clears the param", async () => {
+    stubServiceWorker();
+    // The list is not known yet at mount: the store fetches it after.
+    withSessions([]);
+    const focused: TerminalFocusEventDetail[] = [];
+    const onFocus = (e: Event) =>
+      focused.push((e as CustomEvent<TerminalFocusEventDetail>).detail);
+    window.addEventListener(TERMINAL_FOCUS_EVENT, onFocus);
+
+    try {
+      const { result, rerender } = renderAt("/project/my%20project/iterm?notification=s%201");
+      await flush();
+      expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+      expect(result.current.search).toBe("?notification=s%201");
+
+      withSessions([
+        session("s0", { project: "my project" }),
+        session("s 1", { project: "my project" }),
+      ]);
+      rerender();
+      await flush();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(readTerminalFocus("my project")).toBe("s 1");
+      expect(focused).toEqual([{ project: "my project", sessionId: "s 1" }]);
+      expect(dismissAttentionOnArrival).toHaveBeenCalledTimes(1);
+      expect(dismissAttentionOnArrival).toHaveBeenCalledWith("s 1");
+      // Stripped, so a reload does not arrive a second time.
+      expect(result.current.pathname).toBe("/project/my%20project/iterm");
+      expect(result.current.search).toBe("");
+
+      // A later list change does not replay the arrival.
+      withSessions([session("s 1", { project: "my project" })]);
+      rerender();
+      await flush();
+      expect(dismissAttentionOnArrival).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(TERMINAL_FOCUS_EVENT, onFocus);
+    }
+  });
+
+  it("clears the param without error when the loaded list lacks the session", async () => {
+    stubServiceWorker();
+    withSessions([session("s1")]);
+    const warn = vi.spyOn(console, "warn");
+    const error = vi.spyOn(console, "error");
+    const focused = vi.fn();
+    window.addEventListener(TERMINAL_FOCUS_EVENT, focused);
+
+    try {
+      const { result } = renderAt("/project/pavilio/iterm?notification=gone");
+      await flush();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(result.current.pathname).toBe("/project/pavilio/iterm");
+      expect(result.current.search).toBe("");
+      expect(readTerminalFocus("pavilio")).not.toBe("gone");
+      expect(focused).not.toHaveBeenCalled();
+      expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(TERMINAL_FOCUS_EVENT, focused);
+    }
+  });
+
+  it("gives up and clears the param when no list ever arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      stubServiceWorker();
+      withSessions([]);
+
+      const { result } = renderAt("/project/pavilio/iterm?notification=s1");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COLD_START_WAIT_MS - 1);
+      });
+      expect(result.current.search).toBe("?notification=s1");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(result.current.search).toBe("");
+      expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a URL without the param alone", async () => {
+    stubServiceWorker();
+    withSessions([session("s1")]);
+
+    const { result } = renderAt("/project/pavilio/iterm?view=grid");
+    await flush();
+
+    expect(result.current.search).toBe("?view=grid");
     expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
   });
 });

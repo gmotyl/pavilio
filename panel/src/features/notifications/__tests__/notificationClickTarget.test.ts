@@ -11,6 +11,7 @@ import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import {
   NOTIFICATION_CLICK_MESSAGE_TYPE,
+  notificationArrivalPath,
   projectTerminalsPath,
   type NotificationClickMessage,
 } from "../notificationClickTarget";
@@ -102,14 +103,27 @@ describe("notificationclick in sw.js", () => {
     expect(clients.openWindow).not.toHaveBeenCalled();
   });
 
-  it("opens a window at the project when none is running", async () => {
+  it("opens a window at the project, carrying the session, when none is running", async () => {
     const { clients, click } = loadWorker([fakeClient("https://other.example/")]);
 
-    const notification = await click({ sessionId: "s1", project: "a b#c" });
+    const notification = await click({ sessionId: "s 1&x", project: "a b#c" });
 
     expect(notification.close).toHaveBeenCalledTimes(1);
-    expect(clients.openWindow).toHaveBeenCalledWith(projectTerminalsPath("a b#c"));
+    // The session rides in the URL so the cold-started page can still arrive
+    // at it: there is no window to post the message to.
+    expect(clients.openWindow).toHaveBeenCalledWith(notificationArrivalPath("a b#c", "s 1&x"));
+    expect(notificationArrivalPath("a b#c", "s 1&x")).toBe(
+      "/project/a%20b%23c/iterm?notification=s%201%26x",
+    );
     expect(projectTerminalsPath("a b#c")).toBe("/project/a%20b%23c/iterm");
+  });
+
+  it("opens the project's terminals when the notification carries no session", async () => {
+    const { clients, click } = loadWorker([]);
+
+    await click({ project: "pavilio" });
+
+    expect(clients.openWindow).toHaveBeenCalledWith(projectTerminalsPath("pavilio"));
   });
 
   it("still posts when the browser refuses to focus the window", async () => {

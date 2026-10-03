@@ -4,13 +4,15 @@
  * The service worker (`public/sw.js`) handles the tap: it closes the
  * notification and either focuses a panel window and posts it a
  * {@link NotificationClickMessage}, or — with no window running — opens one at
- * {@link projectTerminalsPath}. The worker is plain JS served from `public/`
- * and cannot import this module, so it carries its own copies of the message
- * type and the path; `notificationClickTarget.test.ts` loads the shipped
- * worker and holds both copies to the ones exported here.
+ * {@link notificationArrivalPath}. The worker is plain JS served from
+ * `public/` and cannot import this module, so it carries its own copies of the
+ * message type and the paths; `notificationClickTarget.test.ts` loads the
+ * shipped worker and holds the copies to the ones exported here.
  *
  * A cell is a position in a grid, not a route — the router addresses projects,
- * not cells — which is why the cell travels in the message and not in the URL.
+ * not cells — which is why the cell normally travels in the message. Only a
+ * cold start, with no window to post to, carries it in the URL instead, as a
+ * one-shot query parameter the page consumes and strips (`useNotifier`).
  */
 import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
 import { dispatchTerminalFocus, writeTerminalFocus } from "../terminal/useTerminalSessions";
@@ -44,6 +46,31 @@ export function isNotificationClickMessage(data: unknown): data is NotificationC
  */
 export function projectTerminalsPath(project: string): string {
   return `/project/${encodeURIComponent(project)}/iterm`;
+}
+
+/** Query parameter a cold-started page reads the tapped session from. */
+export const NOTIFICATION_SESSION_PARAM = "notification";
+
+/**
+ * Where the worker opens a window when none is running: the project's
+ * terminals, carrying the tapped session so the page can still arrive at it.
+ */
+export function notificationArrivalPath(project: string, sessionId: string): string {
+  return `${projectTerminalsPath(project)}?${NOTIFICATION_SESSION_PARAM}=${encodeURIComponent(sessionId)}`;
+}
+
+/** The tapped session a cold-start URL carries, or null when it carries none. */
+export function notificationSessionFrom(search: string): string | null {
+  const sessionId = new URLSearchParams(search).get(NOTIFICATION_SESSION_PARAM);
+  return sessionId ? sessionId : null;
+}
+
+/** `search` without the cold-start parameter, other parameters kept ("" when none are left). */
+export function withoutNotificationSession(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete(NOTIFICATION_SESSION_PARAM);
+  const rest = params.toString();
+  return rest ? `?${rest}` : "";
 }
 
 export interface ArrivalDeps {

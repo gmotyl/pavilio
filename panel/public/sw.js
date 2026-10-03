@@ -29,17 +29,23 @@ self.addEventListener("activate", (event) => {
  * (`notificationClickTarget.ts`), because a cell is a position in a grid, not
  * a route the worker could open. So the worker closes the notification and
  * then either focuses a panel window and posts it the session, or — with no
- * window running — opens one at the session's project.
+ * window running — opens one at the session's project, with the session in
+ * the URL so the cold-started page can still arrive at it.
  *
- * This file cannot import from `src/`, so the message type and the path below
- * are copies of `NOTIFICATION_CLICK_MESSAGE_TYPE` and `projectTerminalsPath`
- * in `notificationClickTarget.ts`; `notificationClickTarget.test.ts` runs this
- * very file and holds the two to each other.
+ * This file cannot import from `src/`, so the message type and the paths below
+ * are copies of `NOTIFICATION_CLICK_MESSAGE_TYPE`, `projectTerminalsPath` and
+ * `notificationArrivalPath` in `notificationClickTarget.ts`;
+ * `notificationClickTarget.test.ts` runs this very file and holds them to
+ * each other.
  */
 const NOTIFICATION_CLICK_MESSAGE_TYPE = "pavilio-notification-click";
 
 function projectTerminalsPath(project) {
   return "/project/" + encodeURIComponent(project) + "/iterm";
+}
+
+function notificationArrivalPath(project, sessionId) {
+  return projectTerminalsPath(project) + "?notification=" + encodeURIComponent(sessionId);
 }
 
 /** Panel windows only: never a client of another origin. Focused, then visible, first. */
@@ -81,7 +87,12 @@ async function arriveAt(data) {
     return;
   }
 
-  await self.clients.openWindow(project ? projectTerminalsPath(project) : "/");
+  const path = !project
+    ? "/"
+    : sessionId
+      ? notificationArrivalPath(project, sessionId)
+      : projectTerminalsPath(project);
+  await self.clients.openWindow(path);
 }
 
 self.addEventListener("notificationclick", (event) => {
