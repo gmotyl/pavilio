@@ -55,7 +55,8 @@
  *
  * The arrival's dismiss of the session's attention is retried until the cell's
  * socket is open (`dismissAttentionWhenReady`); this hook cancels that wait
- * when a newer tap arrives or it unmounts.
+ * when a newer tap arrives, the user leaves the arrived project, or it
+ * unmounts.
  */
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -162,13 +163,35 @@ export function useNotifier(options: NotifierOptions = {}): void {
   });
 
   // The wait for the latest tap's dismiss to land (see `arriveFromNotification`).
-  // A newer tap supersedes it; unmounting abandons it.
+  // A newer tap supersedes it, leaving the arrived project abandons it, and so
+  // does unmounting.
   const cancelArrivalRef = useRef<() => void>(() => {});
-  const arrive = (message: NotificationClickMessage, deps: ArrivalDeps) => {
-    cancelArrivalRef.current();
-    cancelArrivalRef.current = arriveFromNotification(message, deps);
+  /** `/project/<name>/` of the project the pending wait arrived at. */
+  const arrivalPrefixRef = useRef<string | null>(null);
+  const cancelArrival = () => {
+    const cancel = cancelArrivalRef.current;
+    cancelArrivalRef.current = () => {};
+    arrivalPrefixRef.current = null;
+    cancel();
   };
-  useEffect(() => () => cancelArrivalRef.current(), []);
+  const arrive = (message: NotificationClickMessage, deps: ArrivalDeps) => {
+    cancelArrival();
+    const project = deps.projectOf(message.sessionId);
+    cancelArrivalRef.current = arriveFromNotification(message, deps);
+    if (project !== undefined) {
+      arrivalPrefixRef.current = `/project/${encodeURIComponent(project)}/`;
+    }
+  };
+  useEffect(() => () => cancelArrival(), []);
+
+  // A user who leaves the arrived project has moved on: a dismiss landing
+  // later would put out an LED they are no longer looking at.
+  const pathname = options.location?.pathname;
+  useEffect(() => {
+    const prefix = arrivalPrefixRef.current;
+    if (prefix === null || pathname === undefined) return;
+    if (!pathname.startsWith(prefix)) cancelArrival();
+  }, [pathname]);
 
   const registrationRef = useRef<Promise<ServiceWorkerRegistration | null> | null>(null);
   useEffect(() => {

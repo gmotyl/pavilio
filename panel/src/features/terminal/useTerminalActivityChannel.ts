@@ -49,6 +49,11 @@ export function _applyEventForTests(ev: IncomingEvent): void {
   applyEvent(ev);
 }
 
+/** How many listeners are subscribed to a session, so a test can see a leak. */
+export function _activityListenerCountForTests(sessionId: string): number {
+  return listeners.get(sessionId)?.size ?? 0;
+}
+
 function connect(): void {
   if (typeof window === "undefined") return;
   try {
