@@ -54,7 +54,7 @@ describe("registerPanelServiceWorker", () => {
   it("ships a service worker with no fetch handler", () => {
     const source = readFileSync(swPath, "utf-8");
 
-    expect(source).not.toMatch(/addEventListener\(\s*["']fetch["']/);
+    expect(source).not.toMatch(/addEventListener\(\s*["'`]fetch["'`]/);
     expect(source).not.toMatch(/\bonfetch\b/);
     expect(source).not.toMatch(/\bcaches\./);
   });
