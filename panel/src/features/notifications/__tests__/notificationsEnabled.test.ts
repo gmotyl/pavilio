@@ -67,6 +67,18 @@ describe("the per-device notifications switch", () => {
     expect(getNotificationsEnabled()).toBe(false);
     expect(globals.__PAVILIO_PREFS__).toEqual(before);
   });
+
+  it("reports off when storage refuses the write", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // An INSTANCE spy, as above: a full quota or a private-mode refusal.
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+
+    expect(setNotificationsEnabled(true)).toBe(false);
+    expect(setItem).toHaveBeenCalled();
+    expect(getNotificationsEnabled()).toBe(false);
+  });
 });
 
 describe("notification permission", () => {

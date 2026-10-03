@@ -28,10 +28,14 @@ export function getNotificationsEnabled(): boolean {
   return readPreference(preferences.notificationsOn);
 }
 
-/** Stores the switch on this device and returns the value now in effect. */
+/**
+ * Stores the switch on this device and returns the value now in effect — read
+ * back after the write, because storage may refuse it (full quota, private
+ * mode) and the registry swallows that refusal.
+ */
 export function setNotificationsEnabled(on: boolean): boolean {
   writePreference(preferences.notificationsOn, on);
-  return on;
+  return getNotificationsEnabled();
 }
 
 /** The permission in effect right now, or "unsupported" without the API. */

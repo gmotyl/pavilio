@@ -83,6 +83,21 @@ describe("NotificationsToggle", () => {
     expect(screen.queryByText(BLOCKED)).toBeNull();
   });
 
+  it("stays off when the switch could not be stored", async () => {
+    const user = userEvent.setup();
+    const answer = deferredPrompt();
+    // Granted, but storage refused the write: the value in effect is off.
+    vi.mocked(setNotificationsEnabled).mockImplementation(() => false);
+    render(<NotificationsToggle />);
+
+    await user.click(toggle());
+    vi.mocked(notificationsAvailability).mockReturnValue("granted");
+    answer("granted");
+
+    await vi.waitFor(() => expect(setNotificationsEnabled).toHaveBeenCalledWith(true));
+    expect(toggle()).not.toBeChecked();
+  });
+
   it("returns to off and explains the block when permission is refused", async () => {
     const user = userEvent.setup();
     const answer = deferredPrompt();
