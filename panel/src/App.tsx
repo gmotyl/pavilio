@@ -23,6 +23,7 @@ import { useHostModeRoot } from "./features/host-mode/useHostModeRoot";
 import ToastHost from "./components/ToastHost";
 import { TimeTrackingProvider } from "./features/time/TimeTrackingProvider";
 import { SpeechHostProvider } from "./features/speech/SpeechHostProvider";
+import { Notifier } from "./features/notifications/useNotifier";
 
 function AppShell() {
   const { authRequired, authenticated, loading, recheck } = useAuthStatus();
@@ -56,6 +57,11 @@ function AppShell() {
                 the drawer Layout mounts, so the two terminals surfaces that can
                 be on screen at once share one player and one channel. */}
             <SpeechHostProvider>
+            {/* The favicon's sibling for when the tab is not being looked at:
+                same activity channel, same session list. Inside the speech
+                host, unlike FaviconUpdater, because the notification previews
+                the cell's newest answer, which only the host holds. */}
+            <Notifier />
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
