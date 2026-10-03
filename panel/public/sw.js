@@ -87,5 +87,10 @@ async function arriveAt(data) {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   // Keep the worker alive until the window is focused or opened.
-  event.waitUntil(arriveAt(event.notification.data));
+  event.waitUntil(
+    arriveAt(event.notification.data).catch(() => {
+      // matchAll/openWindow can reject (no window allowed, worker shutting
+      // down); there is nothing left to do, but never surface it unhandled.
+    }),
+  );
 });

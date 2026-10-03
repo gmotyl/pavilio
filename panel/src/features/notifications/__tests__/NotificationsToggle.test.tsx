@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { NotificationsToggle } from "../NotificationsToggle";
@@ -50,15 +50,17 @@ beforeEach(() => {
 });
 
 describe("NotificationsToggle", () => {
-  it("requests permission when switched on", async () => {
-    const user = userEvent.setup();
+  it("requests permission when switched on", () => {
     render(<NotificationsToggle />);
     expect(toggle()).toHaveAttribute("id", "notifications-enabled");
     expect(screen.getByTestId("notifications-enabled")).toBe(toggle());
     expect(toggle()).not.toBeChecked();
 
-    await user.click(toggle());
+    fireEvent.click(toggle());
 
+    // Asserted with no await after the click: browsers only honour a prompt
+    // raised inside the user gesture, so the request must already be out by
+    // the time the click handler returns.
     expect(requestNotificationsPermission).toHaveBeenCalledTimes(1);
   });
 
@@ -92,7 +94,7 @@ describe("NotificationsToggle", () => {
     vi.mocked(notificationsAvailability).mockReturnValue("denied");
     answer("denied");
 
-    expect(await screen.findByText(BLOCKED)).toHaveTextContent(/site settings/i);
+    expect(await screen.findByText(BLOCKED)).toHaveTextContent(/site or app settings/i);
     expect(toggle()).not.toBeChecked();
     expect(setNotificationsEnabled).not.toHaveBeenCalledWith(true);
   });

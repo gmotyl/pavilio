@@ -364,4 +364,26 @@ describe("tapping a notification", () => {
     expect(navigate).not.toHaveBeenCalled();
     expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
   });
+
+  it("stops listening for clicks once unmounted", async () => {
+    stubServiceWorker();
+    withSessions([session("s1")]);
+    const navigate = vi.fn();
+
+    const { unmount } = renderHook(() => useNotifier({ navigate }));
+    await flush();
+    unmount();
+
+    await postClick({
+      type: NOTIFICATION_CLICK_MESSAGE_TYPE,
+      sessionId: "s1",
+      project: "pavilio",
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+  });
 });

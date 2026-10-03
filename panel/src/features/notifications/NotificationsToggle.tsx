@@ -75,7 +75,7 @@ export function NotificationsToggle() {
         {unsupported
           ? "This browser can't show notifications here — it needs a secure (https) origin or the installed app."
           : availability === "denied"
-            ? "Notifications are blocked by your browser — allow them in the site settings (lock icon in the address bar)."
+            ? "Notifications are blocked by your browser — allow them in the site or app settings."
             : "Applies to this device only; the browser asks for permission the first time."}
       </p>
     </div>
