@@ -74,12 +74,32 @@ export interface RemoveMarkersOptions {
   keepLiteralAsterisks?: boolean;
 }
 
-/** `**bold**` whose delimiters hug the text, as markdown's flanking rule asks. */
-const FLANKED_BOLD_RE = /\*\*(?=[^\s*])([^*]*?[^\s*])\*\*/g;
-/** `*em*` whose delimiters hug the text. */
-const FLANKED_EM_RE = /\*(?=[^\s*])([^*\n]*?[^\s*])\*/g;
-/** A `*` with no operand on one side or the other — a stray marker or a bullet. */
-const STRAY_ASTERISK_RE = /(?<![\p{L}\p{N}][ \t]*)\*|\*(?![ \t]*[\p{L}\p{N}])/gu;
+/*
+ * The preview's emphasis: delimiters hug the text, as markdown's flanking rule
+ * asks, AND never sit inside a word. CommonMark does allow intraword `*`
+ * emphasis, but in an agent's answer `2*3 and 4*5` or `a*b*c` is arithmetic far
+ * more often than it is `2<em>3 and 4</em>5`, and a preview that reads literally
+ * is the safer mistake.
+ */
+/** `**bold**`, flanked and not intraword. */
+const FLANKED_BOLD_RE = /(?<![\p{L}\p{N}_])\*\*(?=[^\s*])([^*]*?[^\s*])\*\*(?![\p{L}\p{N}_])/gu;
+/** `*em*`, flanked and not intraword. */
+const FLANKED_EM_RE = /(?<![\p{L}\p{N}_*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\p{L}\p{N}_*])/gu;
+/** A `*` between two tight operands: `4*5`, `a*b`, `(a)*(b)`. */
+const TIGHT_PRODUCT_RE = /(?<=[\p{L}\p{N})\]])\*(?=[\p{L}\p{N}(\[])/uy;
+/**
+ * A `*` with whitespace on both sides, after something on its line: `5 * -3`.
+ * Requiring that something is what tells it from an indented list bullet.
+ */
+const SPACED_OPERATOR_RE = /(?<=\S[^\S\n]*[ \t])\*(?=[ \t])/uy;
+
+/** True when the `*` at `at` reads as an operator rather than a stray marker. */
+function isOperatorAsterisk(text: string, at: number): boolean {
+  return [TIGHT_PRODUCT_RE, SPACED_OPERATOR_RE].some((re) => {
+    re.lastIndex = at;
+    return re.test(text);
+  });
+}
 
 /**
  * Removes every markdown marker that is still standing. Ordering is what makes
@@ -104,7 +124,9 @@ export function removeMarkers(text: string, options: RemoveMarkersOptions = {}):
     .replace(/__([^_]+)__/g, "$1")
     .replace(keep ? FLANKED_EM_RE : /\*([^*\n]+)\*/g, "$1")
     .replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, "$1")
-    .replace(keep ? STRAY_ASTERISK_RE : /\*/g, "");
+    .replace(/\*/g, (star, at: number, whole: string) =>
+      keep && isOperatorAsterisk(whole, at) ? star : "",
+    );
 }
 
 /** The removal kinds `strip.ts` names, borrowed rather than re-declared. */

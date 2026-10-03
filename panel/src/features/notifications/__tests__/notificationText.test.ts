@@ -131,6 +131,15 @@ describe("notificationText", () => {
     expect(preview(copy.body)).toBe("So 2 * 3 = 6, a * b is the product, and 4*5 = 20.");
   });
 
+  it("does not read emphasis across products or drop a spaced operator", () => {
+    const copy = notificationText({
+      session,
+      latestUtterance: "2*3 and 4*5, a*b*c, 5 * -3 and (a) * (b).",
+    });
+
+    expect(preview(copy.body)).toBe("2*3 and 4*5, a*b*c, 5 * -3 and (a) * (b).");
+  });
+
   it("still unwraps bold and emphasis, and drops list bullets", () => {
     const copy = notificationText({
       session,
