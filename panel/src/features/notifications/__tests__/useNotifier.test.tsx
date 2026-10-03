@@ -5,6 +5,28 @@ vi.mock("../../terminal/useAllTerminalSessions", () => ({
   useAllTerminalSessions: vi.fn(),
 }));
 
+/**
+ * Every unsubscribe the notifier is handed, by session id, so a test can see
+ * that a session leaving the list really dropped its subscription. The real
+ * channel still does the work: the wrapper only records.
+ */
+const unsubscribesBySession = vi.hoisted(() => new Map<string, ReturnType<typeof vi.fn>[]>());
+
+vi.mock("../../terminal/useTerminalActivityChannel", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../terminal/useTerminalActivityChannel")>();
+  return {
+    ...actual,
+    subscribeActivity: (sessionId: string, fn: (state: ActivityState) => void) => {
+      const unsub = vi.fn(actual.subscribeActivity(sessionId, fn));
+      const list = unsubscribesBySession.get(sessionId) ?? [];
+      list.push(unsub);
+      unsubscribesBySession.set(sessionId, list);
+      return unsub;
+    },
+  };
+});
+
 import { useAllTerminalSessions } from "../../terminal/useAllTerminalSessions";
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import {
@@ -81,6 +103,7 @@ async function flush(): Promise<void> {
 
 beforeEach(() => {
   _resetForTests();
+  unsubscribesBySession.clear();
   setVisibility("hidden");
   setNotificationsEnabled(true);
   vi.stubGlobal("Notification", { permission: "granted" });
@@ -176,7 +199,11 @@ describe("useNotifier", () => {
     await publish("s1", "attention");
     expect(showNotification).toHaveBeenCalledTimes(1);
 
-    // The closed session's subscription is gone.
+    // The closed session's subscription is gone: its unsubscribe ran, and a
+    // state it publishes now reaches nothing of the notifier's.
+    const s2Unsubs = unsubscribesBySession.get("s2") ?? [];
+    expect(s2Unsubs).toHaveLength(1);
+    expect(s2Unsubs[0]).toHaveBeenCalledTimes(1);
     await publish("s2", "attention");
     expect(showNotification).toHaveBeenCalledTimes(1);
 
@@ -190,6 +217,15 @@ describe("useNotifier", () => {
     await publish("s1", "busy");
     await publish("s1", "attention");
     expect(showNotification).toHaveBeenCalledTimes(3);
+
+    // s2 comes back while sitting in attention. Leaving the list made the
+    // notifier forget it, and nothing it published while gone was recorded, so
+    // this is a first sight in attention: one notification for it.
+    withSessions([session("s1"), session("s3"), session("s2")]);
+    rerender();
+    await flush();
+    expect(showNotification).toHaveBeenCalledTimes(4);
+    expect((showNotification.mock.calls[3][1] as NotificationOptions).tag).toBe("s2");
   });
 
   it("does nothing when there is no service worker registration", async () => {
