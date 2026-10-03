@@ -830,9 +830,32 @@ describe("removeMarkers", () => {
 
   it("still unwraps emphasis and drops bullets in the preview", () => {
     expect(preview("**bold**, *em* and (*aside*)")).toBe("bold, em and (aside)");
-    // Only the marker goes; the preview collapses the whitespace it leaves.
-    expect(preview("* first\n  * nested")).toBe(" first\n   nested");
+    expect(preview("**bold** and *em*")).toBe("bold and em");
+    expect(preview("__bold__ and _em_")).toBe("bold and em");
+    // The marker and its gap go; the indent stays for the preview to collapse.
+    expect(preview("* item")).toBe("item");
+    expect(preview("* first\n  * nested")).toBe("first\n  nested");
+    expect(preview("- first\n  - nested")).toBe("first\n  nested");
     expect(preview("*em* then 2*3")).toBe("em then 2*3");
+  });
+
+  it("never drops a lone asterisk from the preview", () => {
+    // Every case here is one an operand-recognition rule once missed. The rule
+    // is now that nothing but a bullet or an emphasis pair loses its `*`.
+    for (const text of [
+      "(a + b) * c",
+      "5*-3",
+      "2*3 and 4*5",
+      "a*b*c",
+      "5 * -3",
+      "(a) * (b)",
+      "x *= 2",
+      "a ** b",
+      "see note*",
+      "*nix and 3 * 4",
+    ]) {
+      expect(preview(text)).toBe(text);
+    }
   });
 
   it("leaves speech's default sweep exactly as it was", () => {

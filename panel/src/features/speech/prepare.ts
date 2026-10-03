@@ -64,12 +64,14 @@ const TLDR_PARAGRAPH_RE = /^[ \t]*\*\*TLDR:?\*\*/i;
 
 export interface RemoveMarkersOptions {
   /**
-   * Keep a `*` that reads as text rather than markup — one with an operand on
-   * both sides on the same line, as in `2 * 3`, `a * b` or `4*5`. Emphasis
-   * then needs its delimiters to hug the text (`*em*`, not `* 3 = 6, a *`), so
-   * a pair of multiplication signs is not mistaken for it. Off for speech,
-   * where a spoken "asterisk" is noise either way; on for the notification
-   * preview, which is read.
+   * Never drop a lone `*`. Only two things lose their asterisks: an emphasis
+   * pair whose delimiters hug the text and do not sit inside a word (`*em*`,
+   * `**bold**`, not `* 3 = 6, a *` or `2*3 and 4*5`), and a list bullet at the
+   * start of a line. Every other `*` is left exactly where it is — guessing
+   * which ones are operators (`(a + b) * c`, `5*-3`, …) was a rule that kept
+   * missing cases, and a stray `*` in a read preview costs nothing. Off for
+   * speech, where a spoken "asterisk" is noise either way; on for the
+   * notification preview, which is read.
    */
   keepLiteralAsterisks?: boolean;
 }
@@ -85,26 +87,17 @@ export interface RemoveMarkersOptions {
 const FLANKED_BOLD_RE = /(?<![\p{L}\p{N}_])\*\*(?=[^\s*])([^*]*?[^\s*])\*\*(?![\p{L}\p{N}_])/gu;
 /** `*em*`, flanked and not intraword. */
 const FLANKED_EM_RE = /(?<![\p{L}\p{N}_*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\p{L}\p{N}_*])/gu;
-/** A `*` between two tight operands: `4*5`, `a*b`, `(a)*(b)`. */
-const TIGHT_PRODUCT_RE = /(?<=[\p{L}\p{N})\]])\*(?=[\p{L}\p{N}(\[])/uy;
 /**
- * A `*` with whitespace on both sides, after something on its line: `5 * -3`.
- * Requiring that something is what tells it from an indented list bullet.
+ * A list bullet: `* ` or `- ` opening a line, possibly indented. The indent is
+ * kept (group 1); the marker and the gap after it go.
  */
-const SPACED_OPERATOR_RE = /(?<=\S[^\S\n]*[ \t])\*(?=[ \t])/uy;
-
-/** True when the `*` at `at` reads as an operator rather than a stray marker. */
-function isOperatorAsterisk(text: string, at: number): boolean {
-  return [TIGHT_PRODUCT_RE, SPACED_OPERATOR_RE].some((re) => {
-    re.lastIndex = at;
-    return re.test(text);
-  });
-}
+const BULLET_RE = /^([ \t]*)[*-][ \t]+/gm;
 
 /**
  * Removes every markdown marker that is still standing. Ordering is what makes
  * it safe: the paired forms are unwrapped before the sweep for stray markers, so
- * `**bold**` becomes `bold` rather than losing its content.
+ * `**bold**` becomes `bold` rather than losing its content. In keep mode that
+ * final sweep removes list bullets only.
  *
  * Underscores count as emphasis only when the run is bounded by non-word
  * characters — `PAVILIO_TERMINAL_ID` must survive intact, because `strip.ts` has
@@ -124,9 +117,7 @@ export function removeMarkers(text: string, options: RemoveMarkersOptions = {}):
     .replace(/__([^_]+)__/g, "$1")
     .replace(keep ? FLANKED_EM_RE : /\*([^*\n]+)\*/g, "$1")
     .replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, "$1")
-    .replace(/\*/g, (star, at: number, whole: string) =>
-      keep && isOperatorAsterisk(whole, at) ? star : "",
-    );
+    .replace(keep ? BULLET_RE : /\*/g, keep ? "$1" : "");
 }
 
 /** The removal kinds `strip.ts` names, borrowed rather than re-declared. */

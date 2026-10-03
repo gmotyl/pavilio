@@ -140,6 +140,15 @@ describe("notificationText", () => {
     expect(preview(copy.body)).toBe("2*3 and 4*5, a*b*c, 5 * -3 and (a) * (b).");
   });
 
+  it("keeps an asterisk that no operand rule would recognise", () => {
+    const copy = notificationText({
+      session,
+      latestUtterance: "Compute (a + b) * c, then 5*-3.",
+    });
+
+    expect(preview(copy.body)).toBe("Compute (a + b) * c, then 5*-3.");
+  });
+
   it("still unwraps bold and emphasis, and drops list bullets", () => {
     const copy = notificationText({
       session,
