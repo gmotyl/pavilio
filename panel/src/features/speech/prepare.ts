@@ -62,6 +62,25 @@ const HEADING_LINE_RE = /^ {0,3}#{1,6}[ \t]+(.*)$/;
 /** A paragraph opening with `**TLDR:**` (or `**TLDR**`). */
 const TLDR_PARAGRAPH_RE = /^[ \t]*\*\*TLDR:?\*\*/i;
 
+export interface RemoveMarkersOptions {
+  /**
+   * Keep a `*` that reads as text rather than markup — one with an operand on
+   * both sides on the same line, as in `2 * 3`, `a * b` or `4*5`. Emphasis
+   * then needs its delimiters to hug the text (`*em*`, not `* 3 = 6, a *`), so
+   * a pair of multiplication signs is not mistaken for it. Off for speech,
+   * where a spoken "asterisk" is noise either way; on for the notification
+   * preview, which is read.
+   */
+  keepLiteralAsterisks?: boolean;
+}
+
+/** `**bold**` whose delimiters hug the text, as markdown's flanking rule asks. */
+const FLANKED_BOLD_RE = /\*\*(?=[^\s*])([^*]*?[^\s*])\*\*/g;
+/** `*em*` whose delimiters hug the text. */
+const FLANKED_EM_RE = /\*(?=[^\s*])([^*\n]*?[^\s*])\*/g;
+/** A `*` with no operand on one side or the other — a stray marker or a bullet. */
+const STRAY_ASTERISK_RE = /(?<![\p{L}\p{N}][ \t]*)\*|\*(?![ \t]*[\p{L}\p{N}])/gu;
+
 /**
  * Removes every markdown marker that is still standing. Ordering is what makes
  * it safe: the paired forms are unwrapped before the sweep for stray markers, so
@@ -72,18 +91,20 @@ const TLDR_PARAGRAPH_RE = /^[ \t]*\*\*TLDR:?\*\*/i;
  * already decided that short identifiers are worth speaking.
  *
  * Exported so the notification preview strips markers by the same rules instead
- * of keeping a copy that drifts.
+ * of keeping a copy that drifts; the preview passes
+ * {@link RemoveMarkersOptions.keepLiteralAsterisks}.
  */
-export function removeMarkers(text: string): string {
+export function removeMarkers(text: string, options: RemoveMarkersOptions = {}): string {
+  const keep = options.keepLiteralAsterisks === true;
   return text
     .split("\n")
     .map((line) => line.replace(HEADING_LINE_RE, "$1"))
     .join("\n")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(keep ? FLANKED_BOLD_RE : /\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
-    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(keep ? FLANKED_EM_RE : /\*([^*\n]+)\*/g, "$1")
     .replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, "$1")
-    .replace(/\*/g, "");
+    .replace(keep ? STRAY_ASTERISK_RE : /\*/g, "");
 }
 
 /** The removal kinds `strip.ts` names, borrowed rather than re-declared. */

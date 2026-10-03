@@ -12,6 +12,7 @@
  * decides what of an answer is worth surfacing. The filter's removal sentinels
  * (`⟦code⟧`, `⟦table⟧`, …) are turned into a plain word in parentheses, so the
  * preview still says what was skipped without showing the sentinel syntax.
+ * Unlike speech, the preview is read, so a literal `*` (`2 * 3`) is kept.
  */
 import { removeMarkers } from "../speech/prepare";
 import { SENTINEL, stripToSpeakableText } from "../speech/strip";
@@ -68,7 +69,9 @@ function truncate(text: string): string {
 }
 
 function previewOf(utterance: string): string {
-  const plain = replaceSentinels(removeMarkers(stripToSpeakableText(utterance)))
+  const plain = replaceSentinels(
+    removeMarkers(stripToSpeakableText(utterance), { keepLiteralAsterisks: true }),
+  )
     .replace(/\s+/g, " ")
     .trim();
   return truncate(plain);

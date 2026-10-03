@@ -122,6 +122,24 @@ describe("notificationText", () => {
     expect(line).toContain("All done and shipped.");
   });
 
+  it("keeps a literal asterisk in the preview", () => {
+    const copy = notificationText({
+      session,
+      latestUtterance: "So 2 * 3 = 6, a * b is the product, and 4*5 = 20.",
+    });
+
+    expect(preview(copy.body)).toBe("So 2 * 3 = 6, a * b is the product, and 4*5 = 20.");
+  });
+
+  it("still unwraps bold and emphasis, and drops list bullets", () => {
+    const copy = notificationText({
+      session,
+      latestUtterance: "**bold** and *em* stay readable.\n\n* first item\n  * nested item",
+    });
+
+    expect(preview(copy.body)).toBe("bold and em stay readable. first item. nested item.");
+  });
+
   it("keeps the heading on one line when the title spans several", () => {
     const copy = notificationText({
       session: { ...session, title: "  Fix the\n  reader   bar \n" },
