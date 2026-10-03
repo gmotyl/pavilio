@@ -49,7 +49,13 @@
  * The list may load after mount, so it waits: a loaded (non-empty) list without
  * the session, or {@link COLD_START_WAIT_MS} without one, ends the wait in
  * silence. Either way the parameter is replaced out of the URL, so a reload
- * does not arrive a second time.
+ * does not arrive a second time — unless the user has already navigated away
+ * from that URL during the wait, in which case the arrival is dropped and the
+ * page is left where they put it.
+ *
+ * The arrival's dismiss of the session's attention is retried until the cell's
+ * socket is open (`dismissAttentionWhenReady`); this hook cancels that wait
+ * when a newer tap arrives or it unmounts.
  */
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -65,8 +71,10 @@ import {
 import { notificationText } from "./notificationText";
 import {
   arriveFromNotification,
+  type ArrivalDeps,
   isNotificationClickMessage,
   NOTIFICATION_CLICK_MESSAGE_TYPE,
+  type NotificationClickMessage,
   notificationSessionFrom,
   withoutNotificationSession,
 } from "./notificationClickTarget";
@@ -145,11 +153,22 @@ export function useNotifier(options: NotifierOptions = {}): void {
   const sessionsRef = useRef(new Map<string, SessionMeta>());
   const latestUtteranceForRef = useRef(options.latestUtteranceFor);
   const navigateRef = useRef(options.navigate);
+  const locationRef = useRef(options.location);
   useEffect(() => {
     sessionsRef.current = new Map(sessions.map((s) => [s.id, s]));
     latestUtteranceForRef.current = options.latestUtteranceFor;
     navigateRef.current = options.navigate;
+    locationRef.current = options.location;
   });
+
+  // The wait for the latest tap's dismiss to land (see `arriveFromNotification`).
+  // A newer tap supersedes it; unmounting abandons it.
+  const cancelArrivalRef = useRef<() => void>(() => {});
+  const arrive = (message: NotificationClickMessage, deps: ArrivalDeps) => {
+    cancelArrivalRef.current();
+    cancelArrivalRef.current = arriveFromNotification(message, deps);
+  };
+  useEffect(() => () => cancelArrivalRef.current(), []);
 
   const registrationRef = useRef<Promise<ServiceWorkerRegistration | null> | null>(null);
   useEffect(() => {
@@ -164,7 +183,7 @@ export function useNotifier(options: NotifierOptions = {}): void {
     if (typeof container.addEventListener !== "function") return;
     const onMessage = (event: MessageEvent) => {
       if (!isNotificationClickMessage(event.data)) return;
-      arriveFromNotification(event.data, {
+      arrive(event.data, {
         projectOf: (sessionId) => sessionsRef.current.get(sessionId)?.project,
         navigate: (path) => navigateRef.current?.(path),
       });
@@ -178,16 +197,32 @@ export function useNotifier(options: NotifierOptions = {}): void {
   const coldStartRef = useRef<ColdStart | null | undefined>(undefined);
   if (coldStartRef.current === undefined) coldStartRef.current = coldStartFrom(options.location);
 
+  // True while the page is still where the worker opened it. A user who moved
+  // elsewhere during the wait has answered the tap themselves: settling it
+  // late would yank them back, so the pending arrival is dropped instead.
+  const stillAtColdStart = (pending: ColdStart): boolean => {
+    const current = locationRef.current;
+    return (
+      current !== undefined &&
+      current.pathname === pending.pathname &&
+      notificationSessionFrom(current.search) === pending.sessionId
+    );
+  };
+
   useEffect(() => {
     const pending = coldStartRef.current;
     if (!pending) return;
+    if (!stillAtColdStart(pending)) {
+      coldStartRef.current = null;
+      return;
+    }
     const replace = (path: string) => navigateRef.current?.(path, { replace: true });
     const found = sessions.find((s) => s.id === pending.sessionId);
     if (found) {
       coldStartRef.current = null;
       // The arrival's own navigation lands on the project's terminals without
       // the parameter, replacing the cold-start entry.
-      arriveFromNotification(
+      arrive(
         { type: NOTIFICATION_CLICK_MESSAGE_TYPE, sessionId: found.id, project: found.project },
         { projectOf: () => found.project, navigate: replace },
       );
@@ -207,6 +242,7 @@ export function useNotifier(options: NotifierOptions = {}): void {
       const pending = coldStartRef.current;
       if (!pending) return;
       coldStartRef.current = null;
+      if (!stillAtColdStart(pending)) return;
       navigateRef.current?.(
         pending.pathname + withoutNotificationSession(pending.search) + pending.hash,
         { replace: true },

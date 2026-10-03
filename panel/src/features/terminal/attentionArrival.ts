@@ -1,6 +1,6 @@
 import { closeSessionNotifications } from "../notifications/registerServiceWorker";
 import { sendDismiss } from "./terminalInstances";
-import { getActivityState } from "./useTerminalActivityChannel";
+import { getActivityState, subscribeActivity } from "./useTerminalActivityChannel";
 
 /**
  * The user has arrived at this cell: clear its attention LED if one is lit.
@@ -84,6 +84,14 @@ import { getActivityState } from "./useTerminalActivityChannel";
  * LED until the next activity broadcast, which is not worth a toast over a
  * gesture the user made for another reason entirely.
  *
+ * Silent is not the same as blind, though: `sendDismiss` reports whether the
+ * frame was written, and one door needs that. Every door above is a gesture
+ * inside a running page, where the cell's socket is already open. The one
+ * that is not is a notification tapped with no panel running: that page is
+ * opened for the tap, and the tap is processed before the cell has a socket —
+ * or before the channel has even said the session is waiting. {@link dismissAttentionWhenReady} is the same
+ * rule for that door, retried until it lands.
+ *
  * ## The system notification goes out with the LED
  *
  * A session that wanted you while the panel was hidden may also have raised a
@@ -108,4 +116,57 @@ export function dismissAttentionOnArrival(sessionId: string): void {
   if (getActivityState(sessionId) !== "attention") return;
   sendDismiss(sessionId);
   closeSessionNotifications(sessionId);
+}
+
+/**
+ * The rule as one attempt that only counts when the frame went out. A miss
+ * leaves the notification alone too: retried every few hundred milliseconds,
+ * closing it on every miss would be a service-worker round trip per tick for a
+ * notification the tap has already closed.
+ */
+function dismissIfReady(sessionId: string): boolean {
+  if (getActivityState(sessionId) !== "attention") return false;
+  if (!sendDismiss(sessionId)) return false;
+  closeSessionNotifications(sessionId);
+  return true;
+}
+
+/** How often {@link dismissAttentionWhenReady} looks again for an open socket. */
+export const ARRIVAL_RETRY_MS = 250;
+
+/**
+ * The arrival rule for a page that is still starting: keep applying
+ * {@link dismissAttentionOnArrival}'s rule until it actually sends, or `timeoutMs`
+ * passes. Returns a cancel function; calling it after the rule landed or gave
+ * up is harmless.
+ *
+ * Two facts may be missing when the arrival happens: the channel may not have
+ * said the session is in `attention` yet (retried on every state it publishes
+ * for the session), and the cell may not have acquired its terminal and opened
+ * its socket yet (nothing announces that to this module, so it is polled every
+ * `retryMs`). It sends at most once; a session that never gets there — it was
+ * dismissed elsewhere, or its cell never mounts — is let go in silence, for
+ * the same reason a dropped dismiss is silent everywhere else.
+ */
+export function dismissAttentionWhenReady(
+  sessionId: string,
+  { timeoutMs, retryMs = ARRIVAL_RETRY_MS }: { timeoutMs: number; retryMs?: number },
+): () => void {
+  if (dismissIfReady(sessionId)) return () => {};
+
+  let settled = false;
+  const stop = () => {
+    if (settled) return;
+    settled = true;
+    unsubscribe();
+    clearInterval(interval);
+    clearTimeout(timeout);
+  };
+  const attempt = () => {
+    if (!settled && dismissIfReady(sessionId)) stop();
+  };
+  const unsubscribe = subscribeActivity(sessionId, attempt);
+  const interval = setInterval(attempt, retryMs);
+  const timeout = setTimeout(stop, timeoutMs);
+  return stop;
 }

@@ -14,7 +14,7 @@
  * cold start, with no window to post to, carries it in the URL instead, as a
  * one-shot query parameter the page consumes and strips (`useNotifier`).
  */
-import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
+import { dismissAttentionWhenReady } from "../terminal/attentionArrival";
 import { dispatchTerminalFocus, writeTerminalFocus } from "../terminal/useTerminalSessions";
 
 export const NOTIFICATION_CLICK_MESSAGE_TYPE = "pavilio-notification-click";
@@ -91,18 +91,30 @@ export interface ArrivalDeps {
  *
  * A session that is gone (panel restarted, cell closed) lands on the project
  * and says nothing: a closed cell is the passage of time, not an error.
+ *
+ * The tap counts as arriving through `dismissAttentionWhenReady`, not the
+ * plain rule: the cell being arrived at is often not mounted yet — a project
+ * this page has not shown, or a page the worker has just opened — so its
+ * socket does not exist at the moment of the tap. Returns the cancel for that
+ * wait, for the caller to run when it unmounts or a newer tap supersedes it.
  */
 export function arriveFromNotification(
   message: NotificationClickMessage,
   { projectOf, navigate }: ArrivalDeps,
-): void {
+): () => void {
   const project = projectOf(message.sessionId);
   if (project === undefined) {
     navigate(projectTerminalsPath(message.project));
-    return;
+    return () => {};
   }
   writeTerminalFocus(project, message.sessionId);
   navigate(projectTerminalsPath(project));
   setTimeout(() => dispatchTerminalFocus(project, message.sessionId), 0);
-  dismissAttentionOnArrival(message.sessionId);
+  return dismissAttentionWhenReady(message.sessionId, { timeoutMs: ARRIVAL_DISMISS_WAIT_MS });
 }
+
+/**
+ * How long a tap keeps trying to dismiss the session's attention: long enough
+ * for a cold-started page to load its sessions and open the cell's socket.
+ */
+export const ARRIVAL_DISMISS_WAIT_MS = 10_000;

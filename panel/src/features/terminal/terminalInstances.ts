@@ -1113,13 +1113,20 @@ export function reconnectAllDisconnected(): number {
   return ids.length;
 }
 
-export function sendDismiss(sessionId: string): void {
+/**
+ * Asks the server to clear the session's attention state. Silent either way;
+ * the boolean only says whether a frame was written, for a caller that has to
+ * retry until the socket exists (`dismissAttentionWhenReady`).
+ */
+export function sendDismiss(sessionId: string): boolean {
   const inst = instances.get(sessionId);
-  if (!inst) return;
+  if (!inst) return false;
   const currentWs = inst.ws;
   if (currentWs && currentWs.readyState === WebSocket.OPEN) {
     currentWs.send(JSON.stringify({ type: "dismiss-attention" }));
+    return true;
   }
+  return false;
 }
 
 export function acquireTerminal(sessionId: string): LiveTerminal {

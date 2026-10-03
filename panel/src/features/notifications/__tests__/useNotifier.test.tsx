@@ -8,10 +8,16 @@ vi.mock("../../terminal/useAllTerminalSessions", () => ({
 }));
 
 // The arrival rule is the terminal feature's, and pinned in
-// `attentionDismiss.test.tsx`; here only the call is asserted.
-const dismissAttentionOnArrival = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
+// `attentionDismiss.test.tsx`; here only the call is asserted. That the
+// retried form really lands once the cell's socket opens is pinned against the
+// real rule and pool in `useNotifier.coldStartDismiss.test.tsx`.
+const dismissAttentionWhenReady = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
+const cancelArrival = vi.hoisted(() => vi.fn<() => void>());
 vi.mock("../../terminal/attentionArrival", () => ({
-  dismissAttentionOnArrival: (sessionId: string) => dismissAttentionOnArrival(sessionId),
+  dismissAttentionWhenReady: (sessionId: string) => {
+    dismissAttentionWhenReady(sessionId);
+    return cancelArrival;
+  },
 }));
 
 /**
@@ -132,7 +138,8 @@ async function flush(): Promise<void> {
 beforeEach(() => {
   _resetForTests();
   unsubscribesBySession.clear();
-  dismissAttentionOnArrival.mockReset();
+  dismissAttentionWhenReady.mockReset();
+  cancelArrival.mockReset();
   setVisibility("hidden");
   setNotificationsEnabled(true);
   vi.stubGlobal("Notification", { permission: "granted" });
@@ -309,7 +316,7 @@ describe("tapping a notification", () => {
       // Persisted before navigating, so the project's surface mounts on it.
       expect(readTerminalFocus("my project")).toBe("s1");
       expect(focused).toEqual([{ project: "my project", sessionId: "s1" }]);
-      expect(dismissAttentionOnArrival).toHaveBeenCalledWith("s1");
+      expect(dismissAttentionWhenReady).toHaveBeenCalledWith("s1");
     } finally {
       window.removeEventListener(TERMINAL_FOCUS_EVENT, onFocus);
     }
@@ -340,7 +347,7 @@ describe("tapping a notification", () => {
       expect(navigate).toHaveBeenCalledWith("/project/pavilio/iterm");
       expect(readTerminalFocus("pavilio")).not.toBe("gone");
       expect(focused).not.toHaveBeenCalled();
-      expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+      expect(dismissAttentionWhenReady).not.toHaveBeenCalled();
       expect(warn).not.toHaveBeenCalled();
       expect(error).not.toHaveBeenCalled();
     } finally {
@@ -364,7 +371,7 @@ describe("tapping a notification", () => {
     });
 
     expect(navigate).not.toHaveBeenCalled();
-    expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+    expect(dismissAttentionWhenReady).not.toHaveBeenCalled();
   });
 
   it("stops listening for clicks once unmounted", async () => {
@@ -386,7 +393,7 @@ describe("tapping a notification", () => {
     });
 
     expect(navigate).not.toHaveBeenCalled();
-    expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+    expect(dismissAttentionWhenReady).not.toHaveBeenCalled();
   });
 });
 
@@ -405,10 +412,22 @@ describe("a cold start from a tapped notification", () => {
         const navigate = useNavigate();
         const location = useLocation();
         useNotifier({ navigate, location });
+        userNavigate = navigate;
         return location;
       },
       { wrapper },
     );
+  }
+
+  /** The router's navigate, as the user would drive it from elsewhere in the page. */
+  let userNavigate: (path: string) => void = () => {};
+
+  /** The user goes somewhere else while the cold start is still waiting. */
+  async function userGoesTo(path: string): Promise<void> {
+    await act(async () => {
+      userNavigate(path);
+      await Promise.resolve();
+    });
   }
 
   it("focuses and dismisses the tapped session once the list loads, then clears the param", async () => {
@@ -423,7 +442,7 @@ describe("a cold start from a tapped notification", () => {
     try {
       const { result, rerender } = renderAt("/project/my%20project/iterm?notification=s%201");
       await flush();
-      expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+      expect(dismissAttentionWhenReady).not.toHaveBeenCalled();
       expect(result.current.search).toBe("?notification=s%201");
 
       withSessions([
@@ -438,8 +457,8 @@ describe("a cold start from a tapped notification", () => {
 
       expect(readTerminalFocus("my project")).toBe("s 1");
       expect(focused).toEqual([{ project: "my project", sessionId: "s 1" }]);
-      expect(dismissAttentionOnArrival).toHaveBeenCalledTimes(1);
-      expect(dismissAttentionOnArrival).toHaveBeenCalledWith("s 1");
+      expect(dismissAttentionWhenReady).toHaveBeenCalledTimes(1);
+      expect(dismissAttentionWhenReady).toHaveBeenCalledWith("s 1");
       // Stripped, so a reload does not arrive a second time.
       expect(result.current.pathname).toBe("/project/my%20project/iterm");
       expect(result.current.search).toBe("");
@@ -448,7 +467,7 @@ describe("a cold start from a tapped notification", () => {
       withSessions([session("s 1", { project: "my project" })]);
       rerender();
       await flush();
-      expect(dismissAttentionOnArrival).toHaveBeenCalledTimes(1);
+      expect(dismissAttentionWhenReady).toHaveBeenCalledTimes(1);
     } finally {
       window.removeEventListener(TERMINAL_FOCUS_EVENT, onFocus);
     }
@@ -473,7 +492,7 @@ describe("a cold start from a tapped notification", () => {
       expect(result.current.search).toBe("");
       expect(readTerminalFocus("pavilio")).not.toBe("gone");
       expect(focused).not.toHaveBeenCalled();
-      expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+      expect(dismissAttentionWhenReady).not.toHaveBeenCalled();
       expect(warn).not.toHaveBeenCalled();
       expect(error).not.toHaveBeenCalled();
     } finally {
@@ -497,10 +516,80 @@ describe("a cold start from a tapped notification", () => {
         await vi.advanceTimersByTimeAsync(1);
       });
       expect(result.current.search).toBe("");
-      expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+      expect(dismissAttentionWhenReady).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("drops the arrival when the user moved away before the session showed up", async () => {
+    stubServiceWorker();
+    withSessions([]);
+
+    const { result, rerender } = renderAt("/project/pavilio/iterm?notification=s1");
+    await flush();
+    await userGoesTo("/project/other/notes");
+
+    withSessions([session("s1")]);
+    rerender();
+    await flush();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(result.current.pathname).toBe("/project/other/notes");
+    expect(result.current.search).toBe("");
+    expect(readTerminalFocus("pavilio")).not.toBe("s1");
+    expect(dismissAttentionWhenReady).not.toHaveBeenCalled();
+  });
+
+  it("does not strip back to the cold-start URL when a late list lacks the session", async () => {
+    stubServiceWorker();
+    withSessions([]);
+
+    const { result, rerender } = renderAt("/project/pavilio/iterm?notification=gone");
+    await flush();
+    await userGoesTo("/project/other/notes?view=list");
+
+    withSessions([session("s1")]);
+    rerender();
+    await flush();
+
+    expect(result.current.pathname).toBe("/project/other/notes");
+    expect(result.current.search).toBe("?view=list");
+  });
+
+  it("does not strip back to the cold-start URL when the wait times out after the user moved", async () => {
+    vi.useFakeTimers();
+    try {
+      stubServiceWorker();
+      withSessions([]);
+
+      const { result } = renderAt("/project/pavilio/iterm?notification=s1");
+      await userGoesTo("/project/other/notes");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COLD_START_WAIT_MS);
+      });
+
+      expect(result.current.pathname).toBe("/project/other/notes");
+      expect(result.current.search).toBe("");
+      expect(dismissAttentionWhenReady).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("abandons the dismiss wait when unmounted", async () => {
+    stubServiceWorker();
+    withSessions([session("s1")]);
+
+    const { unmount } = renderAt("/project/pavilio/iterm?notification=s1");
+    await flush();
+    expect(dismissAttentionWhenReady).toHaveBeenCalledWith("s1");
+    expect(cancelArrival).not.toHaveBeenCalled();
+
+    unmount();
+    expect(cancelArrival).toHaveBeenCalledTimes(1);
   });
 
   it("leaves a URL without the param alone", async () => {
@@ -511,6 +600,6 @@ describe("a cold start from a tapped notification", () => {
     await flush();
 
     expect(result.current.search).toBe("?view=grid");
-    expect(dismissAttentionOnArrival).not.toHaveBeenCalled();
+    expect(dismissAttentionWhenReady).not.toHaveBeenCalled();
   });
 });
