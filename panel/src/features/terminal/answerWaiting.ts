@@ -124,6 +124,9 @@
  * turn ends, so the arrival is the agent stopping, and nothing is owed back.
  * The PTY repainting for a moment afterwards is the tail of that spell, not new
  * work; only a session that leaves `busy` and comes back starts a fresh one.
+ * That holds for the send's re-open too: a send that ends AFTER an arrival
+ * (the cursor reaching a reply that landed while the voice was still reading)
+ * finds the spell already ended and owes nothing back.
  *
  * The send's re-open is the ordinary path, not a corner case: *type a reply
  * while the agent is working* opens with a window pending, spends it on the
@@ -205,11 +208,12 @@
  * decision answers better than any clock.
  *
  * The quiet window asks *has the agent stopped?*, and nothing the user does
- * answers that. So it is cancelled by exactly two things: the session going
- * busy again (*no, it was a gap*), and an answer arriving (*yes* — the Stop
- * hook said so outright, see {@link noteNewestAnswer}). Neither is a gesture,
- * so it carries no debt: nothing spends it, there is nothing to owe back, and
- * `endSend` stays about the busy window alone.
+ * answers that. So it is cancelled only by the question being answered or
+ * abandoned: the session going busy again (*no, it was a gap*), the session
+ * going `idle` or an answer arriving (*yes* — told outright rather than waited
+ * for, see {@link noteNewestAnswer}), and the entry being dropped. None of
+ * these is a gesture, so it carries no debt: nothing spends it, there is
+ * nothing to owe back, and `endSend` stays about the busy window alone.
  *
  * These are the TWO clocks in this module, and they decide one thing each:
  * whether a busy spell was real, and whether a quiet spell was. Every other
@@ -638,9 +642,11 @@ function openQuietWindow(sessionId: string, entry: Entry): void {
  * {@link noteNewestAnswer} re-opens nothing.)
  *
  * Conditioned on the agent, never on "a send happened": `activity === "busy"`
- * is the debt, and a send on an idle session took none on. `agentArmed` is the
- * other exclusion — a claim already granted needs no window to grant it again,
- * and scheduling one would only burn a timer to reach the state it is in.
+ * is the debt, and a send on an idle session took none on. `agentArmed` is one
+ * exclusion — a claim already granted needs no window to grant it again, and
+ * scheduling one would only burn a timer to reach the state it is in.
+ * `answered` is the other: an arrival since the spell began has ended it, so
+ * there is no working agent left to owe a window to.
  *
  * Why HERE and not on the arrival alone: a send ends in more than one way, and
  * the one that matters most (`noteUtterance`) is not the one the send began
@@ -657,8 +663,11 @@ function openQuietWindow(sessionId: string, entry: Entry): void {
  * that is right rather than accidental: *Next* is enabled only when the cell
  * has something newer to step onto, which is the "a new utterance arrives for
  * the cell" this function exists for, and the wave it hands back one window
- * later is a true statement about an agent that is still working. `answerWaiting.guards.test.ts`
- * pins both presses.
+ * later is a true statement about an agent that is still working — as long as
+ * no answer has ended the spell since. Once one has ({@link Entry.answered}),
+ * the session still reading `busy` is that spell's tail, the window is not
+ * re-opened, and a send ending after the arrival leaves the body on the reply.
+ * `answerWaiting.guards.test.ts` pins both presses.
  */
 function endSend(sessionId: string, entry: Entry): void {
   entry.send = null;
@@ -872,7 +881,10 @@ export function noteAgentStarting(sessionId: string): void {
   // The body has handed over by the user's own decision, so there is nothing
   // left for the activity trigger to be patient about — the deferral protects
   // a sentence an AGENT interrupted, and the user interrupting themselves is
-  // not that.
+  // not that. Observable in one corner only: a send shrunk to its mark by a
+  // transport press, with the agent's claim deferred behind a sentence — there
+  // `derive` reads `agentArmed && !deferred` and this press is what hands the
+  // body over.
   entry.deferred = false;
   // ...nor anything left for it to be suspicious about. A user gesture is
   // never debounced, and a window it overtakes is SPENT rather than left to
