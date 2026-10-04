@@ -45,6 +45,18 @@ const CURRENT_TEXT = "Testing works.";
 const ANNOUNCEMENT = "Using pavilio-grill to sharpen this into a design.";
 const ANSWER = "Verified before asking: node-side edge-tts works from the worktree.";
 
+/**
+ * What Claude Code hands the hook directly, as the `Stop` payload's
+ * `last_assistant_message` — built from its in-memory message list, so it is the
+ * one source that cannot be a turn behind. Deliberately *different* from every
+ * answer sitting in the transcripts below, so each payload test asserts which
+ * source was consulted.
+ */
+const PAYLOAD_ANSWER = "Payload answer: the stop hook now reads the turn from memory.";
+
+/** Mirror of `TRANSCRIPT_WAIT_MS` in `speak-response.mjs`. */
+const TRANSCRIPT_WAIT_MS = 500;
+
 /** A real user turn: the human's own message, recorded as a plain string. */
 function userTurn(text: string) {
   return { type: "user", message: { role: "user", content: text } };
@@ -263,6 +275,17 @@ function stopPayload(transcriptPath: string) {
     hook_event_name: "Stop",
     stop_hook_active: false,
   };
+}
+
+/**
+ * A `Stop` payload that also carries `last_assistant_message`. `message` is
+ * `unknown` on purpose: the fallback cases send it as something other than a
+ * filled-in string. A `null` transcript path drops `transcript_path` entirely.
+ */
+function stopPayloadWith(transcriptPath: string | null, message: unknown) {
+  const { transcript_path: _omitted, ...rest } = stopPayload("");
+  const base = transcriptPath === null ? rest : { ...rest, transcript_path: transcriptPath };
+  return message === undefined ? base : { ...base, last_assistant_message: message };
 }
 
 beforeEach(() => {
@@ -730,5 +753,108 @@ describe("speak-response", () => {
       sessionId: TERMINAL_ID,
       text: CURRENT_TEXT,
     });
+  });
+
+  it("posts the payload's answer, not the older one still sitting in the transcript", async () => {
+    // The race the payload exists to beat: the transcript still ends at this
+    // turn's user message, behind the previous turn's answer.
+    await listenAsPanel();
+    const transcript = writeTranscript("stale-with-payload.jsonl", [
+      userTurn("say one sentence"),
+      assistantTextStopping(PREVIOUS_TEXT, "end_turn"),
+      userTurn("test"),
+    ]);
+
+    const result = await run(stopPayloadWith(transcript, PAYLOAD_ANSWER));
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: PAYLOAD_ANSWER,
+    });
+  });
+
+  it("posts the payload's answer without waiting for the transcript", async () => {
+    // A stale transcript would hold the hook for the full wait before falling
+    // silent. With the answer in the payload it must not be read at all.
+    await listenAsPanel();
+    const transcript = writeTranscript("stale-timed.jsonl", [
+      userTurn("say one sentence"),
+      assistantTextStopping(PREVIOUS_TEXT, "end_turn"),
+      userTurn("test"),
+    ]);
+
+    const started = Date.now();
+    const result = await run(stopPayloadWith(transcript, PAYLOAD_ANSWER));
+    const elapsed = Date.now() - started;
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body).text).toBe(PAYLOAD_ANSWER);
+    // Process start-up included, and still inside the wait alone.
+    expect(elapsed).toBeLessThan(TRANSCRIPT_WAIT_MS);
+  });
+
+  it("posts the payload's answer without needing the transcript at all", async () => {
+    await listenAsPanel();
+
+    const result = await run(stopPayloadWith(null, PAYLOAD_ANSWER));
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: PAYLOAD_ANSWER,
+    });
+  });
+
+  it("falls back to the transcript when the payload's answer is empty or not a string", async () => {
+    // Posting "" would replace the pane's last good answer with nothing; a
+    // non-string is a build this hook does not understand. Either way the
+    // transcript is read exactly as before.
+    await listenAsPanel();
+
+    for (const message of ["", "   \n\t ", 42, undefined]) {
+      captured = [];
+      const result = await run(stopPayloadWith(FIXTURE, message));
+      expect(result.status).toBe(0);
+      expect(captured).toHaveLength(1);
+      expect(JSON.parse(captured[0].body)).toEqual({
+        sessionId: TERMINAL_ID,
+        text: LAST_TEXT,
+      });
+    }
+  });
+
+  it("trims the payload's answer", async () => {
+    await listenAsPanel();
+
+    const result = await run(stopPayloadWith(null, `\n  ${PAYLOAD_ANSWER}  \n\n`));
+
+    expect(result.status).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(JSON.parse(captured[0].body).text).toBe(PAYLOAD_ANSWER);
+  });
+
+  it("keeps a long payload answer inside the route's cap", async () => {
+    // Same inflating characters as the transcript cap test: a payload answer is
+    // capped by the serialized body, exactly like a transcript answer.
+    const unit = 'He said "no" — path C:\\tmp\\x\n';
+    const hugeText = `PAYLOAD ${unit.repeat(12_000)}`.trim();
+
+    await listenAsCappedPanel();
+
+    const result = await run(stopPayloadWith(null, hugeText));
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(answered).toEqual([204]);
+    expect(captured).toHaveLength(1);
+    expect(rawBodyBytes).not.toBeNull();
+    expect(rawBodyBytes!).toBeLessThanOrEqual(MAX_UTTERANCE_BYTES);
+    const { text } = JSON.parse(captured[0].body) as { text: string };
+    expect(text.length).toBeGreaterThan(1_000);
+    expect(hugeText.startsWith(text)).toBe(true);
   });
 });
