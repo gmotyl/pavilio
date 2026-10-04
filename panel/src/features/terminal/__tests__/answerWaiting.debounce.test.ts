@@ -183,11 +183,10 @@ describe("the debounce on the agent's claim to the body", () => {
     vi.advanceTimersByTime(DEBOUNCE - 1000);
     expect(handedOver()).toBe(false);
 
-    // What happens after that moment depends on whether the agent is still
-    // working, and belongs to `answerWaiting.mount` ("an answer landing inside
-    // the window"): a still-busy session gets a FRESH window, because an agent
-    // that answered and carried on is still working and the server will not
-    // say so twice. Here it stops, so the answer keeps the body for good.
+    // No fresh window replaces it, busy or not (ADR 0018 — the arrival is the
+    // agent stopping; the still-busy case is `answerWaiting.mount`'s "an answer
+    // landing inside the window" and `answerWaiting.arrival`'s). Here the
+    // session goes idle too, and the answer keeps the body for good.
     activity("idle");
     vi.advanceTimersByTime(10 * 60 * 1000);
     expect(handedOver()).toBe(false);

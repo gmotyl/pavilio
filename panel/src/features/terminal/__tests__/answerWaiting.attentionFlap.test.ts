@@ -134,8 +134,9 @@ describe("a working agent's pane does not oscillate", () => {
     noteSpeaking(SESSION, true);
     vi.advanceTimersByTime(DEBOUNCE + 500);
 
-    // The claim is armed but deferred against the sentence being read, so the
-    // body keeps the answer. This half was never broken.
+    // The body keeps the answer: the arrival ended this first spell outright
+    // (ADR 0018), and every later spell's claim is deferred against the
+    // sentence being read. This half was never broken.
     expect(handedOver()).toBe(false);
 
     const whileReading: boolean[] = [];

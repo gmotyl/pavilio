@@ -20,21 +20,20 @@
  * The rest of this file is the other end of the same window: the TWO things
  * that cancel one, and what each of them owes afterwards.
  *
- * An answer landing inside a window cancels it, and that is right — the answer
- * is the better outcome and deserves an uninterrupted moment on screen. But a
- * session that is STILL busy afterwards is an agent that is genuinely still
- * working, and the server will not re-broadcast a state it never left. So the
- * arrival opens a FRESH window rather than spending the spell: the answer gets
- * its moment, and the wave comes back one window later.
+ * An answer landing inside a window cancels it, and since ADR 0018 that is the
+ * end of the spell: the answer is the agent STOPPING (the Stop hook posted it),
+ * so no fresh window is opened while the session stays busy — output that
+ * continues is the tail of the spell that just ended. (ADR 0016 re-opened one
+ * here, and the answer vanished under the wave one window later while the
+ * voice was still reading it.)
  *
  * A SEND inside a window cancels it too, for its own reason — the user's
- * decision is a better answer to "is this real?" than any clock — and owes the
- * same thing at the same moment. The send's wait ends (the reply lands, or the
- * agent goes idle); if the agent is still busy at that point, the spell it
- * overtook was real work all along, nothing will re-announce it, and the wave
- * would otherwise be gone for the rest of the run. So the END of a send
- * re-opens a window exactly as an arrival does. "Type a reply while the agent
- * is working" is an ordinary path, which is the whole reason the symmetry
+ * decision is a better answer to "is this real?" than any clock — and that one
+ * IS owed back. The send's wait ends (the reply lands, or the agent goes idle);
+ * if the agent is still busy at that point, the spell it overtook was real work
+ * all along, nothing will re-announce it, and the wave would otherwise be gone
+ * for the rest of the run. So the END of a send re-opens a window. "Type a
+ * reply while the agent is working" is an ordinary path, which is why it
  * matters.
  *
  * ## Why the effect-order test mounts a tree
@@ -213,7 +212,7 @@ describe("the window a cell gets when it mounts onto a busy agent", () => {
 });
 
 describe("an answer landing inside the window", () => {
-  it("an answer arriving mid-window returns the wave once the window passes", () => {
+  it("an answer arriving mid-window keeps the wave away while the spell stays busy", () => {
     watchSessionActivity(SESSION);
     noteNewestAnswer(SESSION, "u-0");
 
@@ -227,15 +226,15 @@ describe("an answer landing inside the window", () => {
     vi.advanceTimersByTime(DEBOUNCE - 1);
     expect(handedOver()).toBe(false);
 
-    // ...but the agent never stopped, and the server will not say so again.
-    // A fresh window was opened by the arrival, so the wave comes back one
-    // window later rather than never.
+    // ...and no fresh window replaces it (ADR 0018, superseding 0016's
+    // re-open): the arrival is the agent STOPPING, and output that merely
+    // continues this busy spell is its tail, not new work. Only a session that
+    // leaves `busy` and comes back earns the wave again.
     vi.advanceTimersByTime(1);
-    expect(handedOver()).toBe(true);
-
-    // And it stays: this is an agent that is genuinely working.
+    expect(handedOver()).toBe(false);
     vi.advanceTimersByTime(10 * 60 * 1000);
-    expect(handedOver()).toBe(true);
+    expect(handedOver()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("an answer arriving mid-window leaves no wave if the agent then stops", () => {
@@ -255,7 +254,7 @@ describe("an answer landing inside the window", () => {
 });
 
 /**
- * The same hole as the arrival's, on the other path that cancels a window.
+ * The hole a cancelled window leaves, on the path that still owes it back.
  *
  * The agent is already working, so a window is pending. The user types a reply
  * — ordinary, not exotic — and `beginWaiting` cancels that window, rightly: it
@@ -289,8 +288,8 @@ describe("a send inside the window", () => {
     expect(getAnswerWaiting(SESSION).pending).toBe(false);
     expect(handedOver()).toBe(false);
 
-    // So the end of the send re-opens a window, exactly as an arrival does:
-    // the answer gets its uninterrupted moment on screen...
+    // So the end of the send re-opens a window: the answer gets its
+    // uninterrupted moment on screen...
     vi.advanceTimersByTime(DEBOUNCE - 1);
     expect(handedOver()).toBe(false);
 

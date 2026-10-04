@@ -243,7 +243,7 @@ describe("a launcher press begins a wait", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("a still-busy agent gets a window back when the starting wait ends", () => {
+  it("a still-busy agent gets no window back when an answer ends the starting wait", () => {
     watchSessionActivity(SESSION);
     noteNewestAnswer(SESSION, null);
 
@@ -256,15 +256,16 @@ describe("a launcher press begins a wait", () => {
     noteAgentStarting(SESSION);
     expect(vi.getTimerCount()).toBe(0);
 
-    // The answer lands and the starting wait is over — but the agent is still
-    // working, and the server will not re-broadcast a state it never left.
+    // The answer lands and the starting wait is over. The session is still
+    // busy, but the arrival IS the agent stopping (ADR 0018): the PTY output
+    // that continues is the tail of the spell that just ended.
     noteNewestAnswer(SESSION, "u-1");
     expect(handedOver()).toBe(false);
 
-    // So the press owes the window back: the answer gets its uninterrupted
-    // moment, and the working agent re-earns the body one window later.
-    vi.advanceTimersByTime(DEBOUNCE);
-    expect(handedOver()).toBe(true);
-    expect(getAnswerWaiting(SESSION).pending).toBe(false);
+    // So the press owes no window back, and the answer keeps the body for as
+    // long as this spell lasts. Only a fresh busy spell earns the wave again.
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(10 * DEBOUNCE);
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
   });
 });

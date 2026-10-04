@@ -8,10 +8,13 @@
  *
  * - `endStarting`'s `if (!entry.starting) return;` — remove it and an arrival
  *   on a cell that never pressed a launcher schedules a window on the press's
- *   account (0 timers becomes 1),
- * - `noteAgentStarting`'s `entry.deferred = false` — remove it and a press made
- *   while the voice is reading over a working agent loses the wave at the
- *   moment its own arrival lands,
+ *   account (0 timers becomes 1). `endStarting` is gone since ADR 0018 — the
+ *   arrival is the agent stopping and owes no window to anyone — and the
+ *   witness is kept as the rule's: an arrival schedules nothing,
+ * - `noteAgentStarting`'s `entry.deferred = false` — under ADR 0016 removing it
+ *   made a press made while the voice is reading over a working agent lose the
+ *   wave at the moment its own arrival landed. Since ADR 0018 the arrival ends
+ *   the wave anyway, and the test now pins that,
  * - `watchSessionActivity`'s `!entry.starting` — which did not exist until this
  *   file was written, and is the durable half of the rule the other two serve:
  *   a user gesture is never overtaken by a window, INCLUDING across the
@@ -181,21 +184,17 @@ describe("an arrival never pays a debt a launcher press never took on", () => {
     beginWaiting(SESSION, "u-0");
     expect(vi.getTimerCount()).toBe(0);
 
-    // The answer lands. There is no window to cancel, so `noteNewestAnswer`'s
-    // own re-open declines — correctly, for its own debt.
+    // The answer lands. An arrival re-opens nothing on its own account — it is
+    // the agent stopping (ADR 0018) — and ending the starting wait owes no
+    // window either: nothing was ever pressed here. The send's own debt is
+    // `endSend`'s to pay, from the site that knows a send was outstanding.
     noteNewestAnswer(SESSION, "u-1");
-
-    // ...and `endStarting`, which this arrival also runs, must decline too.
-    // Nothing was ever pressed here, so no press is owed a window back; the
-    // send's own debt is `endSend`'s to pay, from the site that knows a send
-    // was outstanding. Without the `!entry.starting` guard this reads 1: a
-    // cell that never touched a launcher gets a window on the press's account.
     expect(vi.getTimerCount()).toBe(0);
   });
 });
 
 describe("a launcher press drops the playback deferral for good", () => {
-  it("the wave survives the arrival when the press was made mid-sentence", () => {
+  it("the arrival ends the wave even when the press was made mid-sentence", () => {
     watchSessionActivity(SESSION);
     noteNewestAnswer(SESSION, null);
 
@@ -213,17 +212,17 @@ describe("a launcher press drops the playback deferral for good", () => {
     noteAgentStarting(SESSION);
     expect(handedOver()).toBe(true);
 
-    // The answer the press was waiting for. It ends the STARTING wait — and
-    // the agent is still busy and still armed, so the body passes straight to
-    // the agent's own claim rather than back to the answer.
-    //
-    // This is where `noteAgentStarting`'s `entry.deferred = false` earns its
-    // keep. Left standing, the deferral survives the press it had nothing to
-    // do with and `derive` answers this arrival with SETTLED: the wave the
-    // user's own press raised disappears the moment their agent speaks, for a
-    // playback that started before either.
+    // The answer the press was waiting for. It ends the STARTING wait and,
+    // being the agent stopping (ADR 0018), the agent's own armed claim with
+    // it: the body renders the answer although the session is still busy.
+    // (Under ADR 0016 the claim survived the arrival, and this was where the
+    // dropped deferral showed — the body passed straight to the wave.)
     noteNewestAnswer(SESSION, "u-1");
-    expect(handedOver()).toBe(true);
+    expect(handedOver()).toBe(false);
+
+    // ...and output continuing this spell does not bring the wave back.
+    vi.advanceTimersByTime(10 * DEBOUNCE);
+    expect(handedOver()).toBe(false);
   });
 });
 
@@ -246,20 +245,19 @@ describe("a remount does not overtake a launcher press", () => {
     watchSessionActivity(SESSION);
 
     // `send` was never the only gesture worth protecting. A window opened here
-    // fires a moment later, hands the agent a claim the press had already
-    // cancelled, and the arrival that follows then ends the starting wait onto
-    // that claim instead of onto the answer — so the cell's first reply loses
-    // the uninterrupted moment the press bought it.
+    // would fire a moment later and hand the agent a claim the press had
+    // already cancelled — a clock deciding a question the user had answered.
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(DEBOUNCE);
     expect(handedOver()).toBe(true);
 
-    // The press's own debt is still paid where it always was — at the end of
-    // the starting wait, by `endStarting`.
+    // The arrival ends the starting wait as the agent STOPPING (ADR 0018):
+    // the press owes no window back, and output continuing this busy spell
+    // does not bring the wave back.
     noteNewestAnswer(SESSION, "u-1");
     expect(handedOver()).toBe(false);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(DEBOUNCE);
-    expect(handedOver()).toBe(true);
+    expect(handedOver()).toBe(false);
   });
 });
