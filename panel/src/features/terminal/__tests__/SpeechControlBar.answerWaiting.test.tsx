@@ -29,6 +29,7 @@ import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utterance
 import { SpeechControlBar } from "../SpeechControlBar";
 import {
   __resetAnswerWaitingForTests,
+  beginWaiting,
   getAnswerWaiting,
   watchSessionActivity,
   isAnswerHeld,
@@ -340,6 +341,33 @@ describe("the bar tells the waiting store when an answer lands", () => {
 
     expect(bodyHandedOver()).toBe(false);
     expect(speech.onNewestAnswer).not.toHaveBeenCalled();
+  });
+
+  it("a reply landing in one commit on a still-busy agent does not bring the wave back", () => {
+    // The reply moves the cursor AND the newest answer in the same render, so
+    // both of the bar's effects push in one commit: `noteUtterance` (the end
+    // of the send) and `noteNewestAnswer` (the arrival). Whichever runs first,
+    // the arrival has ended the spell, and the end of the send owes it no
+    // window — so the order the effects are declared in carries no weight.
+    const cell: Cell = { state: "ready", queue: WITH_HISTORY };
+    const speech = makeSpeech(cell);
+    const { rerender } = render(barTree(speech));
+
+    activity("busy", 2);
+    expect(bodyHandedOver()).toBe(true);
+    act(() => {
+      beginWaiting(SESSION, "u-1");
+    });
+
+    cell.queue = queueWith({ previous: [answer("u-0"), answer("u-1")], current: answer("u-2") });
+    rerender(barTree(speech));
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
+
+    // The PTY is still busy: no transition, so nothing may re-arm the wave.
+    act(() => {
+      vi.advanceTimersByTime(10 * DEBOUNCE);
+    });
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
   });
 });
 

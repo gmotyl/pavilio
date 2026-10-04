@@ -110,6 +110,8 @@ describe("an arriving answer ends the wave", () => {
 
     noteNewestAnswer(SESSION, "u-1");
     expect(snapshot()).toEqual(SETTLED);
+    // Cancelled outright, not merely left to fire into a settled entry.
+    expect(vi.getTimerCount()).toBe(0);
 
     // The window had nothing left to decide, so its elapsing changes nothing.
     vi.advanceTimersByTime(DEBOUNCE);
@@ -185,6 +187,65 @@ describe("an arriving answer ends the wave", () => {
     // The send's own way out.
     noteUtterance(SESSION, "u-1");
     expect(snapshot()).toEqual(SETTLED);
+  });
+
+  it("a send ending after the arrival does not bring the wave back", () => {
+    // The cursor lags the newest answer: the user sent while the voice was
+    // still reading, so the reply is appended to the queue (the arrival) and
+    // the cursor reaches it only later, when playback gets there (the end of
+    // the send). The PTY is still busy throughout.
+    waveUp();
+    beginWaiting(SESSION, "u-0");
+    expect(snapshot()).toEqual(BODY_HANDED_OVER);
+
+    noteNewestAnswer(SESSION, "u-1");
+    noteUtterance(SESSION, "u-1");
+    expect(snapshot()).toEqual(SETTLED);
+
+    // The end of the send owes no window back: the arrival already ended the
+    // spell that window would have weighed.
+    vi.advanceTimersByTime(DEBOUNCE);
+    expect(snapshot()).toEqual(SETTLED);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a fresh busy spell after a send that ended past the arrival still brings the wave back", () => {
+    waveUp();
+    beginWaiting(SESSION, "u-0");
+    noteNewestAnswer(SESSION, "u-1");
+    noteUtterance(SESSION, "u-1");
+    vi.advanceTimersByTime(DEBOUNCE);
+    expect(snapshot()).toEqual(SETTLED);
+
+    activity("idle");
+    activity("busy");
+    vi.advanceTimersByTime(DEBOUNCE);
+    expect(snapshot()).toEqual(AGENT_HAS_THE_BODY);
+  });
+
+  it("a remount after the arrival does not bring the wave back", () => {
+    waveUp();
+    noteNewestAnswer(SESSION, "u-1");
+
+    // A layout change re-opens the watch on a session still busy with the
+    // answered spell's tail. That is not a session that went busy again.
+    watchSessionActivity(SESSION);
+    vi.advanceTimersByTime(DEBOUNCE);
+    expect(snapshot()).toEqual(SETTLED);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a send made after the arrival is still owed its window back", () => {
+    waveUp();
+    noteNewestAnswer(SESSION, "u-1");
+
+    // New work on a PTY that never left busy. The send ends WITHOUT an arrival
+    // of its own — a Previous press moves the cursor off the id it was sent on
+    // — and the agent is still working, so the wave comes back a window later.
+    beginWaiting(SESSION, "u-1");
+    noteUtterance(SESSION, "u-0");
+    vi.advanceTimersByTime(DEBOUNCE);
+    expect(snapshot()).toEqual(AGENT_HAS_THE_BODY);
   });
 
   it("the same answer reported twice changes nothing", () => {

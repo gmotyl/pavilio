@@ -383,6 +383,21 @@ interface Entry {
    */
   agentArmed: boolean;
   /**
+   * An answer has arrived since the session last went busy (or since the user
+   * last sent), so the spell it was part of has ENDED even though `activity`
+   * may still read `busy`. Set by {@link noteNewestAnswer}; cleared by the next
+   * transition into busy, which is a fresh spell, and by `beginWaiting`, which
+   * is the user starting new work the arrival cannot speak for.
+   *
+   * It exists for the two places that would otherwise re-open a window on a
+   * still-busy session — {@link endSend} and {@link watchSessionActivity} —
+   * neither of which can tell the tail of an answered spell from work in
+   * progress by `activity` alone. Without it, a reply the cursor reaches AFTER
+   * it arrived (the voice was still reading when it landed) ends the send on a
+   * busy PTY, re-opens the window, and the wave covers the reply being read.
+   */
+  answered: boolean;
+  /**
    * The pending debounce window, or `null` when none is running. Kept as a
    * handle rather than a boolean because every way out of the window — going
    * idle, an answer landing, a send, the session being destroyed — has to
@@ -648,7 +663,7 @@ function openQuietWindow(sessionId: string, entry: Entry): void {
 function endSend(sessionId: string, entry: Entry): void {
   entry.send = null;
   entry.markOnly = false;
-  if (entry.activity !== "busy" || entry.agentArmed) return;
+  if (entry.activity !== "busy" || entry.agentArmed || entry.answered) return;
   openDebounceWindow(sessionId, entry);
 }
 
@@ -659,6 +674,8 @@ function onActivity(sessionId: string, state: ActivityState): void {
   if (!entry || state === entry.activity) return;
   entry.activity = state;
   if (state === "busy") {
+    // A fresh spell: whatever answer ended the last one says nothing about it.
+    entry.answered = false;
     // The one thing that cancels a quiet window, and the only answer it was
     // ever waiting for: the silence was a gap between bursts, so nothing about
     // the body changes and the pane does not flicker.
@@ -714,6 +731,7 @@ function ensureEntry(sessionId: string): Entry {
     starting: false,
     activity: getActivityState(sessionId),
     agentArmed: false,
+    answered: false,
     debounce: null,
     quiet: null,
     speaking: false,
@@ -793,7 +811,8 @@ export function watchSessionActivity(sessionId: string): void {
     entry.activity === "busy" &&
     entry.send === null &&
     !entry.starting &&
-    !entry.agentArmed
+    !entry.agentArmed &&
+    !entry.answered
   ) {
     openDebounceWindow(sessionId, entry);
   }
@@ -828,6 +847,10 @@ export function beginWaiting(sessionId: string, sentOn: string | null): void {
   // hold up here would let `derive` answer the send with MARK_ONLY — the old
   // answer on the body, no wave, for the whole reply.
   entry.held = false;
+  // A send is new work, so an answer that landed before it no longer speaks
+  // for the spell: if the agent is still working when this send ends without
+  // an arrival of its own, the window it spent is owed back as usual.
+  entry.answered = false;
   publish(sessionId);
 }
 
@@ -994,6 +1017,11 @@ export function noteNewestAnswer(sessionId: string, newestId: string | null): bo
   // out is `noteUtterance` comparing against the id it was sent on.
   cancelDebounce(entry);
   cancelQuiet(entry);
+  // ...and remembered, so that nothing re-opens a window on this spell's tail:
+  // a send ending AFTER this (the cursor reaching the reply later than the
+  // reply arrived) and a remount's watch both ask `answered` first. That also
+  // makes the bar's two effects order-independent when both land in one commit.
+  entry.answered = true;
   const wasHeld = entry.held;
   endBusySpell(entry);
   publish(sessionId);
