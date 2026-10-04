@@ -14,7 +14,8 @@
  * - `noteAgentStarting`'s `entry.deferred = false` — under ADR 0016 removing it
  *   made a press made while the voice is reading over a working agent lose the
  *   wave at the moment its own arrival landed. Since ADR 0018 the arrival ends
- *   the wave anyway, and the test now pins that,
+ *   the wave anyway, and the test now pins that; the line's live witness is a
+ *   press over a send shrunk to its mark, where it alone hands over the body,
  * - `watchSessionActivity`'s `!entry.starting` — which did not exist until this
  *   file was written, and is the durable half of the rule the other two serve:
  *   a user gesture is never overtaken by a window, INCLUDING across the
@@ -223,6 +224,31 @@ describe("a launcher press drops the playback deferral for good", () => {
     // ...and output continuing this spell does not bring the wave back.
     vi.advanceTimersByTime(10 * DEBOUNCE);
     expect(handedOver()).toBe(false);
+  });
+
+  it("a press over a send shrunk to its mark hands the deferred claim the body", () => {
+    // The one corner where the line is observable today: with a send pending,
+    // `derive` asks the agent's claim as `agentArmed && !deferred`, and the
+    // press is what clears `deferred`. (`starting` is not read while a send is
+    // pending, so it cannot carry the handover on its own.)
+    watchSessionActivity(SESSION);
+    noteNewestAnswer(SESSION, "u-1");
+
+    noteSpeaking(SESSION, true);
+    beginWaiting(SESSION, "u-1");
+    // A transport press SHRINKS the send to its mark: the body is the answer's.
+    noteTransport(SESSION);
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: true });
+
+    // The agent goes to work and outlives the window, mid-sentence: the claim
+    // is granted but deferred, so the body stays on the answer.
+    activity("busy");
+    vi.advanceTimersByTime(DEBOUNCE);
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: true });
+
+    // The launcher press drops the deferral, and the armed claim takes the body.
+    noteAgentStarting(SESSION);
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: true });
   });
 });
 

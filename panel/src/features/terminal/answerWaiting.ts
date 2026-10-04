@@ -683,7 +683,11 @@ function onActivity(sessionId: string, state: ActivityState): void {
   if (!entry || state === entry.activity) return;
   entry.activity = state;
   if (state === "busy") {
-    // A fresh spell: whatever answer ended the last one says nothing about it.
+    // A fresh spell: whatever answer ended the last one says nothing about it,
+    // so this spell owes again. That is the flag's stated meaning, and the
+    // line is defensive rather than load-bearing: the window opened just below
+    // already covers this spell, and `beginWaiting` clears the flag before any
+    // send can reach `endSend`, so no snapshot depends on it today.
     entry.answered = false;
     // The one thing that cancels a quiet window, and the only answer it was
     // ever waiting for: the silence was a gap between bursts, so nothing about
