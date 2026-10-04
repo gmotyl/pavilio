@@ -54,9 +54,6 @@ const ANSWER = "Verified before asking: node-side edge-tts works from the worktr
  */
 const PAYLOAD_ANSWER = "Payload answer: the stop hook now reads the turn from memory.";
 
-/** Mirror of `TRANSCRIPT_WAIT_MS` in `speak-response.mjs`. */
-const TRANSCRIPT_WAIT_MS = 500;
-
 /** A real user turn: the human's own message, recorded as a plain string. */
 function userTurn(text: string) {
   return { type: "user", message: { role: "user", content: text } };
@@ -776,24 +773,27 @@ describe("speak-response", () => {
   });
 
   it("posts the payload's answer without waiting for the transcript", async () => {
-    // A stale transcript would hold the hook for the full wait before falling
-    // silent. With the answer in the payload it must not be read at all.
+    // Order, proven without a stopwatch: this transcript already holds a
+    // finished, current-turn answer, so reading it would succeed at once with
+    // no wait to expire. A hook that consulted the transcript first and used
+    // the payload only as a fallback would post CURRENT_TEXT; only one that
+    // takes the payload before the transcript posts PAYLOAD_ANSWER. (The stale
+    // test above cannot tell the two apart: its wait expires and the fallback
+    // lands on the payload either way.)
     await listenAsPanel();
-    const transcript = writeTranscript("stale-timed.jsonl", [
-      userTurn("say one sentence"),
-      assistantTextStopping(PREVIOUS_TEXT, "end_turn"),
+    const transcript = writeTranscript("current-with-payload.jsonl", [
       userTurn("test"),
+      assistantTextStopping(CURRENT_TEXT, "end_turn"),
     ]);
 
-    const started = Date.now();
     const result = await run(stopPayloadWith(transcript, PAYLOAD_ANSWER));
-    const elapsed = Date.now() - started;
 
     expect(result.status).toBe(0);
     expect(captured).toHaveLength(1);
-    expect(JSON.parse(captured[0].body).text).toBe(PAYLOAD_ANSWER);
-    // Process start-up included, and still inside the wait alone.
-    expect(elapsed).toBeLessThan(TRANSCRIPT_WAIT_MS);
+    expect(JSON.parse(captured[0].body)).toEqual({
+      sessionId: TERMINAL_ID,
+      text: PAYLOAD_ANSWER,
+    });
   });
 
   it("posts the payload's answer without needing the transcript at all", async () => {

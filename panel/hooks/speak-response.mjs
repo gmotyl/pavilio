@@ -3,10 +3,11 @@
  * Claude Code `Stop` hook: emit the agent's finished response to the panel.
  *
  * Reads the hook payload as JSON on stdin, takes the **current turn's answer**
- * from it — `last_assistant_message`, or the transcript it names when that field
- * is missing — and POSTs `{ sessionId, text }` to `POST /api/speech/utterance`. The panel keeps it as
- * the latest utterance for that session and broadcasts it to open tabs; the
- * browser does the preparation and the synthesis. Nothing is synthesized here.
+ * from it — `last_assistant_message`, or the transcript it names when that
+ * field is missing — and POSTs `{ sessionId, text }` to
+ * `POST /api/speech/utterance`. The panel keeps it as the latest utterance for
+ * that session and broadcasts it to open tabs; the browser does the
+ * preparation and the synthesis. Nothing is synthesized here.
  *
  * ## Which turn — the payload first, the transcript only as a fallback
  *
