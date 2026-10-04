@@ -62,25 +62,62 @@ const HEADING_LINE_RE = /^ {0,3}#{1,6}[ \t]+(.*)$/;
 /** A paragraph opening with `**TLDR:**` (or `**TLDR**`). */
 const TLDR_PARAGRAPH_RE = /^[ \t]*\*\*TLDR:?\*\*/i;
 
+export interface RemoveMarkersOptions {
+  /**
+   * Never drop a lone `*`. Only two things lose their asterisks: an emphasis
+   * pair whose delimiters hug the text and do not sit inside a word (`*em*`,
+   * `**bold**`, not `* 3 = 6, a *` or `2*3 and 4*5`), and a list bullet at the
+   * start of a line. Every other `*` is left exactly where it is — guessing
+   * which ones are operators (`(a + b) * c`, `5*-3`, …) was a rule that kept
+   * missing cases, and a stray `*` in a read preview costs nothing. Off for
+   * speech, where a spoken "asterisk" is noise either way; on for the
+   * notification preview, which is read.
+   */
+  keepLiteralAsterisks?: boolean;
+}
+
+/*
+ * The preview's emphasis: delimiters hug the text, as markdown's flanking rule
+ * asks, AND never sit inside a word. CommonMark does allow intraword `*`
+ * emphasis, but in an agent's answer `2*3 and 4*5` or `a*b*c` is arithmetic far
+ * more often than it is `2<em>3 and 4</em>5`, and a preview that reads literally
+ * is the safer mistake.
+ */
+/** `**bold**`, flanked and not intraword. */
+const FLANKED_BOLD_RE = /(?<![\p{L}\p{N}_])\*\*(?=[^\s*])([^*]*?[^\s*])\*\*(?![\p{L}\p{N}_])/gu;
+/** `*em*`, flanked and not intraword. */
+const FLANKED_EM_RE = /(?<![\p{L}\p{N}_*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\p{L}\p{N}_*])/gu;
+/**
+ * A list bullet: `* ` or `- ` opening a line, possibly indented. The indent is
+ * kept (group 1); the marker and the gap after it go.
+ */
+const BULLET_RE = /^([ \t]*)[*-][ \t]+/gm;
+
 /**
  * Removes every markdown marker that is still standing. Ordering is what makes
  * it safe: the paired forms are unwrapped before the sweep for stray markers, so
- * `**bold**` becomes `bold` rather than losing its content.
+ * `**bold**` becomes `bold` rather than losing its content. In keep mode that
+ * final sweep removes list bullets only.
  *
  * Underscores count as emphasis only when the run is bounded by non-word
  * characters — `PAVILIO_TERMINAL_ID` must survive intact, because `strip.ts` has
  * already decided that short identifiers are worth speaking.
+ *
+ * Exported so the notification preview strips markers by the same rules instead
+ * of keeping a copy that drifts; the preview passes
+ * {@link RemoveMarkersOptions.keepLiteralAsterisks}.
  */
-function removeMarkers(text: string): string {
+export function removeMarkers(text: string, options: RemoveMarkersOptions = {}): string {
+  const keep = options.keepLiteralAsterisks === true;
   return text
     .split("\n")
     .map((line) => line.replace(HEADING_LINE_RE, "$1"))
     .join("\n")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(keep ? FLANKED_BOLD_RE : /\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
-    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(keep ? FLANKED_EM_RE : /\*([^*\n]+)\*/g, "$1")
     .replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, "$1")
-    .replace(/\*/g, "");
+    .replace(keep ? BULLET_RE : /\*/g, keep ? "$1" : "");
 }
 
 /** The removal kinds `strip.ts` names, borrowed rather than re-declared. */

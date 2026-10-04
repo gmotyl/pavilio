@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyPronunciation } from "../pronunciation";
-import { UNIT_MAX_CHARS, UNIT_MIN_CHARS, prepare } from "../prepare";
+import { UNIT_MAX_CHARS, UNIT_MIN_CHARS, prepare, removeMarkers } from "../prepare";
 
 /** Five short paragraphs, each well under the packing floor. */
 const short = (n: number): string => `Short paragraph ${n} about the panel and its speech units.`;
@@ -810,5 +810,59 @@ describe("prepare", () => {
     // floor), and no unit carries the whole list.
     expect(body.some((unit) => unit.chars >= UNIT_MIN_CHARS)).toBe(true);
     expect(body.some((unit) => unit.source === spokenItems.join(" "))).toBe(false);
+  });
+});
+
+describe("removeMarkers", () => {
+  const preview = (text: string) => removeMarkers(text, { keepLiteralAsterisks: true });
+
+  it("keeps products whose operands touch the asterisk in the preview", () => {
+    expect(preview("2*3 and 4*5")).toBe("2*3 and 4*5");
+    expect(preview("a*b*c")).toBe("a*b*c");
+    expect(preview("(a)*(b)")).toBe("(a)*(b)");
+  });
+
+  it("keeps an asterisk with whitespace on both sides in the preview", () => {
+    expect(preview("5 * -3")).toBe("5 * -3");
+    expect(preview("(a) * (b)")).toBe("(a) * (b)");
+    expect(preview("2 * 3 = 6")).toBe("2 * 3 = 6");
+  });
+
+  it("still unwraps emphasis and drops bullets in the preview", () => {
+    expect(preview("**bold**, *em* and (*aside*)")).toBe("bold, em and (aside)");
+    expect(preview("**bold** and *em*")).toBe("bold and em");
+    expect(preview("__bold__ and _em_")).toBe("bold and em");
+    // The marker and its gap go; the indent stays for the preview to collapse.
+    expect(preview("* item")).toBe("item");
+    expect(preview("* first\n  * nested")).toBe("first\n  nested");
+    expect(preview("- first\n  - nested")).toBe("first\n  nested");
+    expect(preview("*em* then 2*3")).toBe("em then 2*3");
+  });
+
+  it("never drops a lone asterisk from the preview", () => {
+    // Every case here is one an operand-recognition rule once missed. The rule
+    // is now that nothing but a bullet or an emphasis pair loses its `*`.
+    for (const text of [
+      "(a + b) * c",
+      "5*-3",
+      "2*3 and 4*5",
+      "a*b*c",
+      "5 * -3",
+      "(a) * (b)",
+      "x *= 2",
+      "a ** b",
+      "see note*",
+      "*nix and 3 * 4",
+    ]) {
+      expect(preview(text)).toBe(text);
+    }
+  });
+
+  it("leaves speech's default sweep exactly as it was", () => {
+    // Speech never says "asterisk": every `*` goes, products included.
+    expect(removeMarkers("2*3 and 4*5")).toBe("23 and 45");
+    expect(removeMarkers("a*b*c")).toBe("abc");
+    expect(removeMarkers("5 * -3")).toBe("5  -3");
+    expect(removeMarkers("**bold**, *em* and * bullet")).toBe("bold, em and  bullet");
   });
 });

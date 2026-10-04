@@ -46,7 +46,8 @@ const PORTABLE = [
 
 /**
  * Values that name something the other machine does not have — most of them a
- * live session id, with one exception. `speech.answerComposer.height` and
+ * live session id, with two exceptions. `notifications.on` names no session:
+ * it pairs with a browser permission granted per device. `speech.answerComposer.height` and
  * `speech.answerPane.height` name no session at all; they are the speech
  * surface's two measurements, kept per browser because each is read against
  * THIS window's viewport — the composer's against the pane it is spent from,
@@ -63,6 +64,7 @@ const MACHINE_LOCAL = [
   "nav.lastFile",
   "nav.lastPath",
   "nav.lastReposQuery",
+  "notifications.on",
   "speech.answerComposer.height",
   "speech.answerPane.height",
   "speech.armedCell",
@@ -116,6 +118,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["nav.lastFile", null, "project"],
   ["nav.lastPath", null, "project"],
   ["nav.lastReposQuery", null, "project"],
+  // Off until this device opts in: the permission it pairs with is per device.
+  ["notifications.on", false, "global"],
   // Open until the chevron is pressed: an unset collapse preference is expanded.
   ["plans.runBanner.expanded", true, "global"],
   // `null` is "nothing picked yet": the banner takes the first runnable launcher.
