@@ -29,6 +29,7 @@ import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utterance
 import { SpeechControlBar } from "../SpeechControlBar";
 import {
   __resetAnswerWaitingForTests,
+  beginWaiting,
   getAnswerWaiting,
   watchSessionActivity,
   isAnswerHeld,
@@ -340,6 +341,72 @@ describe("the bar tells the waiting store when an answer lands", () => {
 
     expect(bodyHandedOver()).toBe(false);
     expect(speech.onNewestAnswer).not.toHaveBeenCalled();
+  });
+
+  it("a reply landing in one commit on a still-busy agent does not bring the wave back", () => {
+    // The reply moves the cursor AND the newest answer in the same render, so
+    // both of the bar's effects push in one commit: `noteUtterance` (the end
+    // of the send) and `noteNewestAnswer` (the arrival). In the order the bar
+    // declares them the send ends first and the arrival then cancels the
+    // window that re-opened, so this passes even without `endSend` asking
+    // `answered`. What it guards is a REORDERING of those effects: arrival
+    // first, the end of the send must not re-open a window on the spell's
+    // tail. The shape that needs `answered` in the declared order is the
+    // next test's.
+    const cell: Cell = { state: "ready", queue: WITH_HISTORY };
+    const speech = makeSpeech(cell);
+    const { rerender } = render(barTree(speech));
+
+    activity("busy", 2);
+    expect(bodyHandedOver()).toBe(true);
+    act(() => {
+      beginWaiting(SESSION, "u-1");
+    });
+
+    cell.queue = queueWith({ previous: [answer("u-0"), answer("u-1")], current: answer("u-2") });
+    rerender(barTree(speech));
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
+
+    // The PTY is still busy: no transition, so nothing may re-arm the wave.
+    act(() => {
+      vi.advanceTimersByTime(10 * DEBOUNCE);
+    });
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
+  });
+
+  it("a reply the cursor reaches a commit after it arrived does not bring the wave back", () => {
+    // The voice is still reading the previous answer when the reply lands, so
+    // the reducer appends it to `pending` and leaves the cursor where it was:
+    // the arrival is pushed in one commit, and the send stays open because the
+    // id under the cursor is still the one it was sent on. Only when the
+    // reading ends does the cursor move onto the reply — a LATER commit, with
+    // the arrival's cancel long since spent — and it is then `endSend` alone
+    // that must not re-open a window on the spell's tail.
+    const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
+    const speech = makeSpeech(cell);
+    const { rerender } = render(barTree(speech));
+
+    activity("busy", 2);
+    act(() => {
+      beginWaiting(SESSION, "u-1");
+    });
+
+    cell.queue = queueWith({ ...WITH_HISTORY, pending: [answer("u-2")] });
+    rerender(barTree(speech));
+    // The arrival ended the spell, but not the send: the reply is not on the
+    // body yet, so the wait keeps it.
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: true });
+
+    cell.state = "ready";
+    cell.queue = queueWith({ previous: [answer("u-0"), answer("u-1")], current: answer("u-2") });
+    rerender(barTree(speech));
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
+
+    // The PTY is still busy: no transition, so nothing may re-arm the wave.
+    act(() => {
+      vi.advanceTimersByTime(10 * DEBOUNCE);
+    });
+    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
   });
 });
 

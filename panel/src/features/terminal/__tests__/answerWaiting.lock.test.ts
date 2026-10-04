@@ -234,11 +234,11 @@ describe("the answer pane when the user steps back", () => {
     // for itself, because it owns no cursor and may not reach for one.
     expect(noteNewestAnswer(SESSION, "u-2")).toBe(true);
 
-    // The hold is gone. The session is still busy, so the body is the agent's
-    // again — Task 4's rule, which this task was told not to change — and the
-    // answer the surface just snapped to is what the body renders the moment
-    // the agent stops.
-    expect(handedOver()).toBe(true);
+    // The hold is gone, and the body renders the answer the surface just
+    // snapped to AT ONCE, busy or not: an arriving answer is the agent
+    // stopping (ADR 0018), so there is no agent claim left for the release to
+    // hand the body back to.
+    expect(handedOver()).toBe(false);
     activity("idle");
     expect(handedOver()).toBe(false);
 
@@ -283,9 +283,10 @@ describe("the answer pane when the user steps back", () => {
     expect(noteNewestAnswer(SESSION, "u-1")).toBe(false);
     expect(handedOver()).toBe(false);
 
-    // The next genuinely different id IS the arrival.
+    // The next genuinely different id IS the arrival — and, being the agent
+    // stopping (ADR 0018), it hands the body to that answer while still busy.
     expect(noteNewestAnswer(SESSION, "u-2")).toBe(true);
-    expect(handedOver()).toBe(true);
+    expect(handedOver()).toBe(false);
   });
 
   it("releases on an answer that lands in `pending` while the voice is reading", () => {
@@ -318,7 +319,9 @@ describe("the answer pane when the user steps back", () => {
     // the hold would stand through the whole reply.
     expect(queue.current?.id).toBe("u-1");
     expect(noteNewestAnswer(SESSION, newestId())).toBe(true);
-    expect(handedOver()).toBe(true);
+    // Released onto the answer, not onto the wave: the arrival ended the busy
+    // spell (ADR 0018).
+    expect(handedOver()).toBe(false);
   });
 
   it("releases when the session goes idle", () => {
@@ -421,7 +424,9 @@ describe("the answer pane when the user steps back", () => {
     holdAnswer(SESSION);
     expect(noteNewestAnswer(SESSION, "u-1")).toBe(false);
     expect(noteNewestAnswer(SESSION, "u-2")).toBe(true);
-    expect(handedOver()).toBe(true);
+    // The arrival ends the busy spell too (ADR 0018), so the body is the
+    // answer's — and, the point of this test, no timer was scheduled for it.
+    expect(handedOver()).toBe(false);
 
     holdAnswer(SESSION);
     beginWaiting(SESSION, "u-2");
