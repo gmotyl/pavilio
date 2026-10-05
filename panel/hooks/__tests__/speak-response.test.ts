@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -237,6 +244,8 @@ function run(
     PAVILIO_PANEL_URL: panelUrl,
     // The suite owns the token: never inherit one from the developer's shell.
     PANEL_TOKEN: undefined,
+    // The diagnostic log goes to the scratch dir, never the developer's ~/.panel.
+    PANEL_AUTH_STATE_DIR: scratch,
     ...env,
   };
   for (const key of Object.keys(childEnv)) {
@@ -856,5 +865,157 @@ describe("speak-response", () => {
     const { text } = JSON.parse(captured[0].body) as { text: string };
     expect(text.length).toBeGreaterThan(1_000);
     expect(hugeText.startsWith(text)).toBe(true);
+  });
+});
+
+/** The diagnostic log the hook writes into the scratch state dir. */
+function logPath(): string {
+  return join(scratch, "speak-response.jsonl");
+}
+
+function logLines(): Record<string, unknown>[] {
+  if (!existsSync(logPath())) return [];
+  return readFileSync(logPath(), "utf8")
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+describe("speak-response diagnostic log", () => {
+  it("records a payload answer: its source, length and the panel's status", async () => {
+    await listenAsPanel();
+
+    const result = await run(stopPayloadWith(null, PAYLOAD_ANSWER));
+
+    expect(result.status).toBe(0);
+    const lines = logLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      emitter: "claude",
+      sessionId: TERMINAL_ID,
+      payloadField: "string",
+      source: "payload",
+      chars: PAYLOAD_ANSWER.length,
+      status: 204,
+    });
+    expect(typeof lines[0].ts).toBe("string");
+    expect(typeof lines[0].ms).toBe("number");
+  });
+
+  it("never writes the answer itself", async () => {
+    await listenAsPanel();
+
+    await run(stopPayloadWith(null, PAYLOAD_ANSWER));
+
+    expect(readFileSync(logPath(), "utf8")).not.toContain("Payload answer");
+  });
+
+  it("records a transcript fallback and why the payload was not used", async () => {
+    await listenAsPanel();
+
+    await run(stopPayload(FIXTURE));
+
+    expect(logLines()[0]).toMatchObject({
+      payloadField: "absent",
+      source: "transcript",
+      chars: LAST_TEXT.length,
+      status: 204,
+    });
+  });
+
+  it("records an empty payload field as empty, not absent", async () => {
+    await listenAsPanel();
+
+    await run(stopPayloadWith(FIXTURE, "   "));
+
+    expect(logLines()[0]).toMatchObject({
+      payloadField: "empty",
+      source: "transcript",
+    });
+  });
+
+  it("records a silent turn with the reason it stayed silent", async () => {
+    await listenAsPanel();
+    const transcript = writeTranscript("stale.jsonl", [
+      userTurn("say one sentence"),
+      assistantText(PREVIOUS_TEXT),
+      userTurn("test"),
+    ]);
+
+    await run(stopPayload(transcript));
+
+    expect(captured).toHaveLength(0);
+    const [line] = logLines();
+    expect(line).toMatchObject({ source: "none", reason: "transcript-stale" });
+    expect(line).not.toHaveProperty("status");
+  });
+
+  it("records an unreadable transcript", async () => {
+    await listenAsPanel();
+
+    await run(stopPayload(join(scratch, "missing.jsonl")));
+
+    expect(logLines()[0]).toMatchObject({
+      source: "none",
+      reason: "transcript-unreadable",
+    });
+  });
+
+  it("records a payload with no transcript path to fall back on", async () => {
+    await listenAsPanel();
+
+    await run(stopPayloadWith(null, undefined));
+
+    expect(logLines()[0]).toMatchObject({
+      source: "none",
+      reason: "no-transcript-path",
+    });
+  });
+
+  it("records a POST that never reached the panel", async () => {
+    panelUrl = await unusedPanelUrl();
+
+    const result = await run(stopPayloadWith(null, PAYLOAD_ANSWER));
+
+    expect(result.status).toBe(0);
+    const [line] = logLines();
+    expect(line).toMatchObject({ source: "payload" });
+    expect(line).not.toHaveProperty("status");
+    expect(typeof line.error).toBe("string");
+  });
+
+  it("writes nothing outside a panel terminal", async () => {
+    await listenAsPanel();
+
+    await run(stopPayloadWith(null, PAYLOAD_ANSWER), {
+      PAVILIO_TERMINAL_ID: undefined,
+    });
+
+    expect(existsSync(logPath())).toBe(false);
+  });
+
+  it("rotates the log once it outgrows its cap", async () => {
+    await listenAsPanel();
+    writeFileSync(logPath(), `${"x".repeat(1024 * 1024)}\n`);
+
+    await run(stopPayloadWith(null, PAYLOAD_ANSWER));
+
+    expect(existsSync(`${logPath()}.1`)).toBe(true);
+    expect(logLines()).toHaveLength(1);
+  });
+
+  it("still speaks when the log cannot be written", async () => {
+    await listenAsPanel();
+    // A file where the state dir should be: every write under it fails.
+    const blocked = join(scratch, "not-a-dir");
+    writeFileSync(blocked, "");
+
+    const result = await run(stopPayloadWith(null, PAYLOAD_ANSWER), {
+      PANEL_AUTH_STATE_DIR: blocked,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(captured).toHaveLength(1);
   });
 });
