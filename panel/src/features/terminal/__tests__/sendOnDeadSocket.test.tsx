@@ -40,11 +40,11 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import ToastHost from "../../../components/ToastHost";
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
-import { getToastSnapshot, dismissToast } from "../../../lib/toast";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
+import AlertHost from "../../alerts/AlertHost";
+import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
@@ -181,7 +181,7 @@ beforeEach(async () => {
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
   __resetComposerDraftsForTests();
-  dismissToast();
+  __resetAlertsForTests();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   installMatchMedia(false);
   await seedSessions([session(SESSION, PROJECT)]);
@@ -437,7 +437,7 @@ describe("a submit on a dead socket", () => {
 describe("a launcher pill on a dead socket", () => {
   /**
    * The bar alone, which is where the pills live before a cell has spoken —
-   * with `ToastHost` beside it, because what the pills promise is that the
+   * with `AlertHost` beside it, because what the pills promise is that the
    * refusal is ANNOUNCED. Asserting the store alone would have rested that
    * claim on the host's own suite rather than on this path, which is the same
    * reason `AnswerComposer.paste.test.tsx` mounts it for its failed upload.
@@ -454,7 +454,7 @@ describe("a launcher pill on a dead socket", () => {
           onToggleAnswer={() => {}}
           send={send}
         />
-        <ToastHost />
+        <AlertHost />
       </MemoryRouter>,
     );
   }
@@ -471,16 +471,23 @@ describe("a launcher pill on a dead socket", () => {
     fireEvent.click(await screen.findByTestId(`speech-bar-launch-${SESSION}-0`));
 
     // The pills have no pane of their own to write into, so they say it where
-    // the panel says everything else — the toast host, which is a live region.
-    const announced = await screen.findByTestId("toast");
+    // the panel says everything else — the alert host, which is a live region.
+    const announced = await screen.findByTestId("alert");
     expect(announced).toHaveTextContent(/not sent/i);
     // In a live region rather than merely on screen: nothing draws a pill's
-    // attention to itself, so a screen reader has to be told.
-    expect(announced).toHaveAttribute("role", "status");
-    expect(announced).toHaveAttribute("aria-live", "polite");
+    // attention to itself, so a screen reader has to be told. An error card
+    // is `role="alert"`, an implicitly assertive live region.
+    expect(announced).toHaveAttribute("role", "alert");
     // The store still carries the severity the host paints from — the only
     // part of "this is an error" that never reaches the text.
-    expect(getToastSnapshot()?.kind).toBe("error");
+    expect(getAlertsSnapshot()).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        title: "Not sent — the terminal is not connected: claude",
+        detail: undefined,
+        persistent: false,
+      }),
+    ]);
   });
 
   it("leaves every launcher on the row when the command was not sent", async () => {

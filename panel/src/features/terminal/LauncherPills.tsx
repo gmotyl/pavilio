@@ -1,6 +1,6 @@
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-import { toast } from "../../lib/toast";
+import { alerts } from "../alerts/store";
 import { setAnswerPaneOpen } from "./answerPaneState";
 import { clearRetryTicket } from "./answerRetry";
 import { noteAgentStarting } from "./answerWaiting";
@@ -52,8 +52,8 @@ function sessionStartCommand(sessionId: string): string {
  * flashed, the command was dropped in silence, and the user waited on an agent
  * that had never been asked.
  *
- * The toast is where it is said because the pills have no surface of their own
- * — they ARE the speech row, one line of buttons — and `ToastHost` is already
+ * An alert is where it is said because the pills have no surface of their own
+ * — they ARE the speech row, one line of buttons — and `AlertHost` is already
  * the panel's way of reporting a background failure, in a live region a screen
  * reader picks up. The answer composer says its own refusals in the pane
  * instead, because there the news is about text the user can still see.
@@ -128,7 +128,7 @@ function runCommand(
       onDelivered?.();
     },
     onFailed: (stage) => {
-      toast.error(
+      alerts.error(
         stage === "body"
           ? `Not sent — the terminal is not connected: ${command}`
           : `Not submitted — the terminal disconnected: ${command}`,

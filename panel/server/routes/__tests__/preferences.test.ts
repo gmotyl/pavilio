@@ -60,6 +60,14 @@ afterEach(() => {
   dir = "";
 });
 
+/** Replace the loaded document with `doc` written to disk, as a boot would. */
+function loadFile(doc: Record<string, unknown>): string {
+  const raw = JSON.stringify(doc);
+  writeFileSync(target(), raw, "utf8");
+  loadPreferences(target());
+  return raw;
+}
+
 /**
  * Run the served script the way a browser would — as a standalone program with
  * a `window` to assign to — and hand back what it assigned. Evaluating it is
@@ -145,6 +153,21 @@ describe("GET /api/preferences.js", () => {
     // The sandbox saw no second script element and nothing else was assigned.
     expect(window.pwned).toBeUndefined();
   });
+  it("preferences.js declares the read-only flag", async () => {
+    const app = makeApp();
+
+    // A newer panel's file: this panel will not write it, and the page must
+    // know before any application code runs.
+    loadFile({ version: 2, newShape: { left: 240 } });
+    const newer = await request(app).get("/api/preferences.js");
+    expect(newer.text).toContain("window.__PAVILIO_PREFS_READONLY__ = true;");
+    expect(evaluateScript(newer.text).__PAVILIO_PREFS_READONLY__).toBe(true);
+
+    loadFile({ version: 1 });
+    const current = await request(app).get("/api/preferences.js");
+    expect(current.text).toContain("window.__PAVILIO_PREFS_READONLY__ = false;");
+    expect(evaluateScript(current.text).__PAVILIO_PREFS_READONLY__).toBe(false);
+  });
 });
 
 describe("PATCH /api/preferences", () => {
@@ -157,7 +180,7 @@ describe("PATCH /api/preferences", () => {
       .send({ "shell.leftSidebar.expanded": "false", "panes.left": "240", stale: null });
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
+    expect(res.body).toEqual({ ok: true, persisted: true });
 
     expect(broadcast).toHaveBeenCalledTimes(1);
     const frame = broadcast.mock.calls[0][0] as { type: string; keys: string[] };
@@ -214,7 +237,7 @@ describe("PATCH /api/preferences", () => {
       const res = await request(app).patch("/api/preferences").send(body);
       // Still a success: the caller asked for nothing and got it.
       expect(res.status, JSON.stringify(body)).toBe(200);
-      expect(res.body).toEqual({ ok: true });
+      expect(res.body).toEqual({ ok: true, persisted: true });
     }
 
     expect(broadcast).not.toHaveBeenCalled();
@@ -225,6 +248,52 @@ describe("PATCH /api/preferences", () => {
     // file is never created. A store call would have produced one here.
     await flushPreferences();
     expect(existsSync(target())).toBe(false);
+  });
+
+  it("PATCH against a newer-version file answers persisted false and leaves the file untouched", async () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const raw = loadFile({ version: 2, newShape: { left: 240 } });
+
+      const res = await request(makeApp()).patch("/api/preferences").send({ theme: "dark" });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ok: true, persisted: false });
+
+      // Disk refused, memory and the other tabs still updated for the session.
+      await flushPreferences();
+      expect(readFileSync(target(), "utf8")).toBe(raw);
+      expect(getPreferences()).toEqual({ version: 2, newShape: { left: 240 }, theme: "dark" });
+      expect(broadcast).toHaveBeenCalledTimes(1);
+      expect(broadcast.mock.calls[0][0]).toEqual({ type: "preferences-change", keys: ["theme"] });
+    } finally {
+      warnings.mockRestore();
+    }
+  });
+
+  it("PATCH against a current file answers persisted true", async () => {
+    loadFile({ version: 1 });
+
+    const res = await request(makeApp()).patch("/api/preferences").send({ theme: "dark" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, persisted: true });
+  });
+
+  it("an empty PATCH still reports persisted", async () => {
+    const app = makeApp();
+
+    // The early return for a patch that names no keys must carry the flag too,
+    // in both directions.
+    loadFile({ version: 1 });
+    const current = await request(app).patch("/api/preferences").send({});
+    expect(current.status).toBe(200);
+    expect(current.body).toEqual({ ok: true, persisted: true });
+
+    loadFile({ version: 2 });
+    const newer = await request(app).patch("/api/preferences").send({});
+    expect(newer.status).toBe(200);
+    expect(newer.body).toEqual({ ok: true, persisted: false });
   });
 
   it("pending writes are flushed on shutdown", async () => {

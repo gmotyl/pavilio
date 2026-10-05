@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Palette } from "lucide-react";
 
-import { toast } from "../../lib/toast";
+import { alerts } from "../alerts/store";
 import { useProjectColors } from "./useProjectColors";
 
 /**
@@ -160,7 +160,7 @@ export function ProjectColorPicker({
     // silent on its own — a colour that quietly springs back looks like a bug —
     // so say what happened, in the app's usual failure channel.
     void setColor(project, hex).catch(() => {
-      toast.error(`Could not save the colour for ${project}`);
+      alerts.error(`Could not save the colour for ${project}`);
     });
   };
 

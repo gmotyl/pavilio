@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { toast } from "../../lib/toast";
+import { alerts } from "../alerts/store";
 import { observeTransition } from "./attention";
 
 export interface AutoSyncStatus {
@@ -31,8 +31,8 @@ export function useAutoSyncStatus(pollMs = 15000) {
       const entered = observeTransition(next);
       if (entered) {
         const message = `${ATTENTION_TEXT[entered]}${next.detail ? ` (${next.detail})` : ""}`;
-        if (entered === "stale") toast.info(message);
-        else toast.error(message);
+        if (entered === "stale") alerts.info(message);
+        else alerts.error(message);
       }
       setStatus(next);
     } catch (e) {

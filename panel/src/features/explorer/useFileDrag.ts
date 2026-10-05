@@ -1,5 +1,5 @@
 import { useState, type DragEvent } from "react";
-import { toast } from "../../lib/toast";
+import { alerts } from "../alerts/store";
 
 const PAVILIO_FILE_MIME = "application/x-pavilio-file";
 
@@ -67,23 +67,23 @@ export function useFileDropTarget(
           });
           const body: MoveResponse = await res.json();
           if (!res.ok) {
-            toast.error(`Move failed: ${body.error ?? "unknown error"}`);
+            alerts.error(`Move failed: ${body.error ?? "unknown error"}`);
             onMoved?.({ ...body, error: body.error ?? "unknown error" } as MoveResponse);
             return;
           }
           const filename = from.split("/").pop() ?? from;
           if (body.noop) {
-            toast.info(`${filename} is already in ${targetDir}/`);
+            alerts.info(`${filename} is already in ${targetDir}/`);
           } else if (body.renamed) {
             const finalName = body.to.split("/").pop();
-            toast.success(`Moved ${filename} → ${targetDir}/${finalName} (renamed — collision)`);
+            alerts.success(`Moved ${filename} → ${targetDir}/${finalName} (renamed — collision)`);
           } else {
-            toast.success(`Moved ${filename} → ${targetDir}/`);
+            alerts.success(`Moved ${filename} → ${targetDir}/`);
           }
           onMoved?.(body);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          toast.error(`Move failed: ${msg}`);
+          alerts.error(`Move failed: ${msg}`);
         }
       },
     },

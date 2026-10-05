@@ -17,7 +17,7 @@ const EMPTY: Record<string, string> = Object.freeze({});
  * Every chip, cell header, mobile dot and drawer row asks for a colour, so a
  * `useEffect` fetch inside the hook would put one request per terminal on the
  * wire. The store fetches once on the first subscription and fans the result
- * out through `useSyncExternalStore`, the same idiom as `lib/toast.ts` and
+ * out through `useSyncExternalStore`, the same idiom as `features/alerts/store.ts` and
  * `terminalInstances`.
  */
 let colors: Record<string, string> = EMPTY;

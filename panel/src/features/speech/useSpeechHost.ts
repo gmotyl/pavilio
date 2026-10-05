@@ -39,7 +39,7 @@
  *   user cut short was not listened to)
  * - another cell took over → `Ready` (*not* heard — this is the trap)
  * - the browser refused → `Ready`
- * - the synthesizer gave up → `Ready`, plus a toast
+ * - the synthesizer gave up → `Ready`, plus an error alert
  *
  * So the outcome is not read off the promise at all. Each `play` gets a {@link
  * Run} whose `outcome` starts `"pending"`, and whoever *ends* it early stamps
@@ -51,7 +51,7 @@
  * see that the four endings were told apart deliberately.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "../../lib/toast";
+import { alerts } from "../alerts/store";
 import { prepare } from "./prepare";
 import { synthesizeSpeech } from "./synth";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
@@ -115,7 +115,7 @@ function rememberAutoplayed(remembered: Set<string>, utteranceId: string): void 
  * like a finished answer, so without the stamp it would be indistinguishable
  * from having been listened to — silence, and a cell marked heard. It is not
  * `"refused"`: that one is the browser declining, and it is deliberately
- * toast-free.
+ * alert-free.
  */
 type RunOutcome = "pending" | "superseded" | "stopped" | "refused" | "failed";
 
@@ -317,11 +317,11 @@ export function useSpeechHost(): SpeechHost {
     if (run?.sessionId === error.sessionId) run.outcome = "failed";
 
     // A systemic synthesis failure has no pip to fall back to — the player has
-    // already stopped — so a toast is the only thing that tells the user the
+    // already stopped — so an alert is the only thing that tells the user the
     // silence is a failure rather than the end of the answer. Every kind must
     // land somewhere: a handler that returns early also suppresses the player's
     // own `console.error` fallback, which only runs when there is no handler.
-    toast.error("Speech stopped — the voice could not be synthesized.");
+    alerts.error("Speech stopped — the voice could not be synthesized.");
   }, []);
 
   const player = useSpeechPlayer({ onError });

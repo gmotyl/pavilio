@@ -7,15 +7,15 @@
  * grip as the pane's bottom edge — and a field rendered alone would have been
  * pinning a component no user meets. None of that applies to a paste: the
  * clipboard reaches the textarea and nothing above it participates. What IS
- * mounted alongside is `ToastHost`, because "the failure is surfaced" is a
+ * mounted alongside is `AlertHost`, because "the failure is surfaced" is a
  * claim about the panel's real notification surface rather than about a spy.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ToastHost from "../../../components/ToastHost";
-import { dismissToast } from "../../../lib/toast";
+import AlertHost from "../../alerts/AlertHost";
+import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { AnswerComposer } from "../AnswerComposer";
 import { __resetPtySubmitForTests } from "../ptySubmit";
 
@@ -66,7 +66,7 @@ function renderComposer() {
   return render(
     <>
       <AnswerComposer sessionId="cell-a" send={send} onSubmitted={onSubmitted} />
-      <ToastHost />
+      <AlertHost />
     </>,
   );
 }
@@ -108,7 +108,7 @@ beforeEach(() => {
   onSubmitted.mockClear();
   __resetPtySubmitForTests();
   fetchFn.mockReset();
-  dismissToast();
+  __resetAlertsForTests();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   vi.stubGlobal("fetch", fetchFn);
   installMatchMedia();
@@ -164,10 +164,18 @@ describe("AnswerComposer paste", () => {
 
     fireEvent.paste(field(), { clipboardData: imageClipboard(shot()) });
 
-    // The panel's own toast, not a console line: a paste that silently did
+    // The panel's own alert, not a console line: a paste that silently did
     // nothing is indistinguishable from a paste that was ignored.
-    const toast = await screen.findByTestId("toast");
-    expect(toast).toHaveTextContent(/pasted image/i);
+    const alert = await screen.findByTestId("alert");
+    expect(alert).toHaveTextContent("Could not save the pasted image");
+    expect(getAlertsSnapshot()).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        title: "Could not save the pasted image",
+        detail: undefined,
+        persistent: false,
+      }),
+    ]);
 
     // And the field is exactly as the user left it.
     expect(field().value).toBe("look at please");
