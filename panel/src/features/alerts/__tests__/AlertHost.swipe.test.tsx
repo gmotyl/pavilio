@@ -121,6 +121,111 @@ describe("AlertHost swipe", () => {
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
+  it("a slow drag under the distance threshold snaps back", () => {
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.warning("standing", { persistent: true, onDismiss });
+    });
+    const card = cards()[0];
+
+    // 0.3 × width is under the 0.35 distance; over 1 s it is far too slow to flick.
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
+    advance(1000);
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 100 + 0.3 * CARD_WIDTH });
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: 100 + 0.3 * CARD_WIDTH });
+
+    advance(PAST_SLIDE_OUT);
+    expect(cards()).toEqual([card]);
+    expect(card.style.transform).toBe("");
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("a short drag under the velocity threshold snaps back", () => {
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.warning("standing", { persistent: true, onDismiss });
+    });
+    const card = cards()[0];
+
+    // 0.1 × width in 100 ms is 0.4 px/ms, under 0.6 px/ms.
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
+    advance(100);
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 100 - 0.1 * CARD_WIDTH });
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: 100 - 0.1 * CARD_WIDTH });
+
+    advance(PAST_SLIDE_OUT);
+    expect(cards()).toEqual([card]);
+    expect(card.style.transform).toBe("");
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("a tiny twitch does not dismiss", () => {
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.warning("standing", { persistent: true, onDismiss });
+    });
+    const card = cards()[0];
+
+    // 1 px within the same millisecond reads as a huge velocity; it is a tap.
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 101 });
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: 101 });
+
+    advance(PAST_SLIDE_OUT);
+    expect(cards()).toEqual([card]);
+    expect(card.style.transform).toBe("");
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("pointercancel snaps back without dismissing", () => {
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.warning("standing", { persistent: true, onDismiss });
+    });
+    const card = cards()[0];
+
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 100 + 0.6 * CARD_WIDTH });
+    expect(card.style.transform).toBe(`translateX(${0.6 * CARD_WIDTH}px)`);
+    fireEvent.pointerCancel(card, { pointerId: 1, clientX: 100 + 0.6 * CARD_WIDTH });
+
+    advance(PAST_SLIDE_OUT);
+    expect(cards()).toEqual([card]);
+    expect(card.style.transform).toBe("");
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("a card folded mid slide-out is dismissed once", () => {
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.warning("standing", { persistent: true, id: "swiped", onDismiss });
+    });
+    const card = cards()[0];
+
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 100 + 0.5 * CARD_WIDTH });
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: 100 + 0.5 * CARD_WIDTH });
+
+    // Three transients land above it during the 160 ms slide-out and fold it.
+    advance(50);
+    act(() => {
+      alerts.info("one");
+      alerts.info("two");
+      alerts.info("three");
+    });
+
+    advance(PAST_SLIDE_OUT);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(cards().map((c) => c.getAttribute("data-alert-id"))).not.toContain("swiped");
+    expect(cards()).toHaveLength(3);
+    expect(screen.queryByTestId("alert-more")).toBeNull();
+  });
+
   it("a press on × does not start a drag", () => {
     const onDismiss = vi.fn();
     render(<AlertHost />);

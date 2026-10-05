@@ -25,6 +25,11 @@ const VISIBLE_CAP = 3;
 const SWIPE_DISTANCE = 0.35;
 /** ...as does one faster than this, in px/ms over the whole drag. */
 const SWIPE_VELOCITY = 0.6;
+/**
+ * ...but only once the pointer has travelled this far, in px: a 1px jitter
+ * inside one millisecond reads as a huge velocity and is a tap, not a flick.
+ */
+const FLICK_MIN_PX = 8;
 /** Matches the `[data-swipe="leaving"]` transition in index.css. */
 const SLIDE_OUT_MS = 160;
 
@@ -200,7 +205,9 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
     const el = e.currentTarget;
     const dx = e.clientX - d.x;
     const dt = Math.max(1, Date.now() - d.t);
-    const past = Math.abs(dx) > SWIPE_DISTANCE * d.width || Math.abs(dx) / dt > SWIPE_VELOCITY;
+    const dist = Math.abs(dx);
+    const past =
+      dist > SWIPE_DISTANCE * d.width || (dist >= FLICK_MIN_PX && dist / dt > SWIPE_VELOCITY);
     if (cancelled || !past) {
       el.dataset.swipe = "settling";
       el.style.transform = "";
