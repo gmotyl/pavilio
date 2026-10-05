@@ -231,6 +231,50 @@ describe("AlertHost", () => {
     expect(titles()).toEqual([]);
   });
 
+  it("a hovered card that gets folded resumes its countdown", () => {
+    render(<AlertHost />);
+    act(() => {
+      for (const n of [1, 2, 3]) alerts.info(`a${n}`, { id: `a${n}` });
+    });
+
+    advance(1000);
+    const a1 = cards().find((c) => titleOf(c) === "a1")!;
+    fireEvent.pointerEnter(a1); // a1 holds at 1000 elapsed
+    advance(2000); // 3000
+
+    // a1 folds behind "+1 more" while hovered: no pointerleave ever arrives.
+    act(() => {
+      alerts.info("a4", { id: "a4" });
+    });
+    expect(titles()).toEqual(["a4", "a3", "a2"]);
+
+    advance(1000); // 4000: a2 and a3 expire, a1 is shown again
+    expect(titles()).toEqual(["a4", "a1"]);
+    advance(1999); // 5999: a1 has run 3999 of its 4000
+    expect(titles()).toEqual(["a4", "a1"]);
+    advance(1); // 6000
+    expect(titles()).toEqual(["a4"]);
+  });
+
+  it("timers are cleared when an entry is removed early and when the host unmounts", () => {
+    const { unmount } = render(<AlertHost />);
+    act(() => {
+      alerts.info("a", { id: "a" });
+      alerts.info("b", { id: "b" });
+      alerts.warning("standing", { persistent: true });
+    });
+    // One clock per transient entry; the persistent one has none.
+    expect(vi.getTimerCount()).toBe(2);
+
+    act(() => {
+      alerts.dismiss("a");
+    });
+    expect(vi.getTimerCount()).toBe(1);
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("error uses role alert, others role status", () => {
     render(<AlertHost />);
     act(() => {
