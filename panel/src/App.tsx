@@ -20,7 +20,7 @@ import { BreadcrumbActionsProvider } from "./features/shell/Breadcrumbs";
 import { FloatingActionProvider, Layout } from "./features/shell/Layout";
 import { useVisualViewport } from "./features/shell/useVisualViewport";
 import { useHostModeRoot } from "./features/host-mode/useHostModeRoot";
-import ToastHost from "./components/ToastHost";
+import AlertHost from "./features/alerts/AlertHost";
 import { TimeTrackingProvider } from "./features/time/TimeTrackingProvider";
 import { SpeechHostProvider } from "./features/speech/SpeechHostProvider";
 import { Notifier } from "./features/notifications/useNotifier";
@@ -85,7 +85,7 @@ function AppShell() {
               </Routes>
             </Layout>
             </SpeechHostProvider>
-            <ToastHost />
+            <AlertHost />
             </TerminalDrawerProvider>
           </FloatingActionProvider>
         </BreadcrumbActionsProvider>

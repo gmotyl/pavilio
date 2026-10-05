@@ -33,7 +33,7 @@
  * arrive a gap after the click, and `onDelivered` is the only honest signal. A
  * press whose frame never lands must open nothing: the pane would be claiming
  * an agent had been asked for when the command never left the browser. The
- * refused case here therefore pins the pane AND the wait, not just the toast.
+ * refused case here therefore pins the pane AND the wait, not just the alert.
  *
  * The socket stand-in reports delivery the way the real one does — `send`
  * returns whether the frame reached an OPEN socket — and `term.accept` is what

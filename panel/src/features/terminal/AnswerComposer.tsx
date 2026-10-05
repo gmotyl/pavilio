@@ -3,7 +3,7 @@ import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { preferences, type ComposerShortcut } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-import { toast } from "../../lib/toast";
+import { alerts } from "../alerts/store";
 import {
   armRetryOffer,
   beginRetryTicket,
@@ -238,7 +238,7 @@ export interface AnswerComposerProps {
  * A failed upload says so. The terminal's handler can afford its silence — the
  * user is watching a pty that visibly did not change — but here the field would
  * simply sit there, and a paste that quietly did nothing is indistinguishable
- * from a clipboard that held nothing. `toast.error` is the panel's own way of
+ * from a clipboard that held nothing. `alerts.error` is the panel's own way of
  * saying it, the one the file explorer's failed moves already use.
  *
  * ## Why a refused send keeps the text
@@ -956,7 +956,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     const to = e.currentTarget.selectionEnd;
     void uploadPastedImage(image, sessionId).then((path) => {
       if (path === null) {
-        toast.error("Could not save the pasted image");
+        alerts.error("Could not save the pasted image");
         return;
       }
       // Spliced into the field as it is NOW, not as it was when the paste was

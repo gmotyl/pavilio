@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { toast } from "../../lib/toast";
+import { alerts } from "../alerts/store";
 import type { ScriptEntry } from "./useWorkspaceScripts";
 
 function lastNonEmptyLine(s: string | undefined | null): string {
@@ -21,20 +21,20 @@ export function useRunProjectScript(projectName: string) {
         );
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          toast.error(
+          alerts.error(
             `${entry.label} failed: ${data?.error ?? `HTTP ${res.status}`}`,
           );
         } else if (data?.ok) {
-          toast.success(
+          alerts.success(
             data.matched ? `${entry.label}: ${data.matched}` : `${entry.label} done`,
           );
         } else {
-          toast.error(
+          alerts.error(
             `${entry.label} failed: ${lastNonEmptyLine(data?.output) || "exit non-zero"}`,
           );
         }
       } catch (e) {
-        toast.error(`${entry.label} failed: ${(e as Error).message}`);
+        alerts.error(`${entry.label} failed: ${(e as Error).message}`);
       } finally {
         setPending(null);
       }

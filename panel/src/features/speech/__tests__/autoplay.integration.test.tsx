@@ -403,11 +403,16 @@ import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import ProjectTerminalsSurface from "../../terminal/ProjectTerminalsSurface";
 import TerminalsPage from "../../../pages/TerminalsPage";
 import { SpeechHostProvider } from "../SpeechHostProvider";
-import { dismissToast, getToastSnapshot } from "../../../lib/toast";
+import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { prepare } from "../prepare";
 import { setStoredArmedSession, setStoredVoice } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { clearPreference } from "../../../preferences/store";
+
+/** The newest alert, which is the one a failure under test just raised. */
+function lastAlert() {
+  return getAlertsSnapshot().at(-1);
+}
 
 /** Every `<audio>` element the panel drove — criterion 7 is that there is one. */
 const elements: HTMLMediaElement[] = [];
@@ -680,9 +685,9 @@ beforeEach(() => {
   // one test's choice would otherwise still be in force in the next.
   clearPreference(preferences.speechVoice);
   hosts.reset();
-  // The toast store is a module singleton, so a toast raised by one test would
+  // The alert store is a module singleton, so an alert raised by one test would
   // otherwise still be standing in the next one.
-  dismissToast();
+  __resetAlertsForTests();
   prepareCalls.length = 0;
   elements.length = 0;
   played.length = 0;
@@ -867,12 +872,12 @@ describe("autoplay — refusal and synthesis failure", () => {
 
     await waitFor(() => expect(speakState("cell-a")).toBe("ready"));
     expect(speakState("cell-a")).not.toBe("heard");
-    // A refusal is reported by the pip, not by a toast: the two kinds of
+    // A refusal is reported by the pip, not by an alert: the two kinds of
     // failure have two different surfaces and must not borrow each other's.
-    expect(getToastSnapshot()).toBeNull();
+    expect(getAlertsSnapshot()).toHaveLength(0);
   });
 
-  it("three consecutive synthesis failures are surfaced with a toast", async () => {
+  it("three consecutive synthesis failures are surfaced with an alert", async () => {
     // `spec.md`: three consecutive unit failures stop playback AND surface the
     // failure. Without a handler for `kind: "synthesis"` the stop reaches
     // neither the user nor the console — a present handler suppresses the
@@ -885,8 +890,12 @@ describe("autoplay — refusal and synthesis failure", () => {
     await arm("cell-a");
     await emitUtterance("cell-a", "a1", markdown);
 
-    await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
-    expect(getToastSnapshot()?.text).toMatch(/speech/i);
+    await waitFor(() => expect(lastAlert()?.kind).toBe("error"));
+    expect(lastAlert()).toMatchObject({
+      title: "Speech stopped — the voice could not be synthesized.",
+      detail: undefined,
+      persistent: false,
+    });
     // Consecutive is the point: the run gives up inside the first three units
     // rather than hammering the synthesizer through all twelve. Nothing beyond
     // them is warmed either, but only because the synthesizer is down for
@@ -903,7 +912,7 @@ describe("autoplay — refusal and synthesis failure", () => {
   it("a one-unit answer that synthesizes to nothing is reported, not marked heard", async () => {
     // Greg's dead button: one unit means one failure, three short of the
     // ladder's stop rule, so the run ends the way a finished answer ends. No
-    // sound, no toast, and a cell flipped to `heard` — the pip that should be
+    // sound, no alert, and a cell flipped to `heard` — the pip that should be
     // inviting the retry that works is gone.
     const markdown = "One sentence, and the synthesizer is down.";
     expect(prepare(markdown).units).toHaveLength(1);
@@ -913,8 +922,12 @@ describe("autoplay — refusal and synthesis failure", () => {
     await arm("cell-a");
     await emitUtterance("cell-a", "a1", markdown);
 
-    await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
-    expect(getToastSnapshot()?.text).toMatch(/speech/i);
+    await waitFor(() => expect(lastAlert()?.kind).toBe("error"));
+    expect(lastAlert()).toMatchObject({
+      title: "Speech stopped — the voice could not be synthesized.",
+      detail: undefined,
+      persistent: false,
+    });
     expect(played).toEqual([]);
     // Ready, so the pip still invites the click that usually works.
     expect(speakState("cell-a")).toBe("ready");
@@ -930,7 +943,7 @@ describe("autoplay — refusal and synthesis failure", () => {
     await arm("cell-a");
     await emitUtterance("cell-a", "a1", markdown);
 
-    await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
+    await waitFor(() => expect(lastAlert()?.kind).toBe("error"));
     expect(played).toEqual([]);
     expect(speakState("cell-a")).toBe("ready");
     expect(synth.requests).toHaveLength(2);
@@ -938,7 +951,7 @@ describe("autoplay — refusal and synthesis failure", () => {
 
   it("a run that spoke before it failed is not heard either", async () => {
     // Half an answer is exactly as unfinished as none of it: the run never
-    // reached its last unit, so it lands `ready` with the failure toasted.
+    // reached its last unit, so it lands `ready` with the failure alerted.
     // This used to assert `heard` — the amendment's "systemic failure leaves
     // the cell ready" is what changed it, and it also closes follow-up #19.
     const markdown = shortResponse(4);
@@ -956,7 +969,7 @@ describe("autoplay — refusal and synthesis failure", () => {
     expect(played).toEqual([`blob:${prepared.units[0].text}`]);
     await endRun();
 
-    await waitFor(() => expect(getToastSnapshot()?.kind).toBe("error"));
+    await waitFor(() => expect(lastAlert()?.kind).toBe("error"));
     expect(speakState("cell-a")).toBe("ready");
   });
 });
@@ -1617,10 +1630,10 @@ describe("warming the first unit on arrival", () => {
     await renderProjectSurface();
     await emitUtterance("cell-b", "b1", "The synthesizer is down while this arrives.");
 
-    // The warm rejected inside `prefetchSpeech`, which swallows it: no toast,
+    // The warm rejected inside `prefetchSpeech`, which swallows it: no alert,
     // no state change, and the cell is still the click's to retry.
     expect(synth.requests).toEqual(["The synthesizer is down while this arrives."]);
-    expect(getToastSnapshot()).toBeNull();
+    expect(getAlertsSnapshot()).toHaveLength(0);
     expect(played).toEqual([]);
     expect(speakState("cell-b")).toBe("ready");
   });
