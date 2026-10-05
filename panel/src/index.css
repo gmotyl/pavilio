@@ -2390,6 +2390,49 @@ input[type="checkbox"] {
   cursor: not-allowed;
 }
 
+/* ── ALERTS ───────────────────────────────────────────────────────────────────
+
+   The panel-wide alert stack (`features/alerts/AlertHost.tsx`). Everything
+   static is inline in the TSX; only the motion lives here. The countdown bar
+   is drawing only: the host's timers run whether or not it animates, and a
+   card shown late gets a negative `animation-delay` so its bar starts where
+   its clock is. Stopped under `prefers-reduced-motion` in the query at the
+   foot of the file. */
+@keyframes alert-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes alert-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.alert-card {
+  animation: alert-drop-in 160ms ease-out;
+}
+
+.alert-countdown {
+  transform-origin: left center;
+  animation-name: alert-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.alert-card[data-paused="1"] .alert-countdown {
+  animation-play-state: paused;
+}
+
 /* ── REDUCED MOTION, LAST IN THE FILE ─────────────────────────────────────────
 
    The one `prefers-reduced-motion` query in this stylesheet — and the note on
@@ -2441,5 +2484,11 @@ input[type="checkbox"] {
   /* The copy acknowledgement appears and goes without a fade. */
   .objective-field-copied {
     transition: none;
+  }
+
+  /* Alerts arrive without the drop and keep no moving bar; their timers run. */
+  .alert-card,
+  .alert-countdown {
+    animation: none;
   }
 }

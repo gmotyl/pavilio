@@ -9,7 +9,6 @@ import {
   type AlertEntry,
   type AlertKind,
 } from "./store";
-import "./alerts.css";
 
 /** Cards shown before the rest fold into the "+N more" pill. */
 const VISIBLE_CAP = 3;
