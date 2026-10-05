@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X, type LucideIcon } from "lucide-react";
 import {
   ALERT_DURATION_MS,
@@ -12,6 +20,17 @@ import {
 
 /** Cards shown before the rest fold into the "+N more" pill. */
 const VISIBLE_CAP = 3;
+
+/** A release past this share of the card's width dismisses it. */
+const SWIPE_DISTANCE = 0.35;
+/** ...as does one faster than this, in px/ms over the whole drag. */
+const SWIPE_VELOCITY = 0.6;
+/** Matches the `[data-swipe="leaving"]` transition in index.css. */
+const SLIDE_OUT_MS = 160;
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+}
 
 const palette: Record<AlertKind, { color: string; icon: LucideIcon }> = {
   error: { color: "var(--red)", icon: AlertCircle },
@@ -103,9 +122,16 @@ export default function AlertHost() {
 interface AlertCardProps {
   entry: AlertEntry;
   paused: boolean;
-  /** Hover reports; the host owns the clock this pauses. */
+  /** Hover and drag reports; the host owns the clock this pauses. */
   onPausedChange: (id: string, paused: boolean) => void;
   elapsedOf: (id: string, seq: number) => number;
+}
+
+interface Drag {
+  pointerId: number;
+  x: number;
+  t: number;
+  width: number;
 }
 
 function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps) {
@@ -113,26 +139,108 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
   const { color, icon: Icon } = palette[entry.kind];
   const duration = ALERT_DURATION_MS[entry.kind];
   const bar = useRef<HTMLDivElement>(null);
+  const hovered = useRef(false);
+  const drag = useRef<Drag | null>(null);
+  /** Set between a swipe past the threshold and the store removal. */
+  const leaving = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Hovering, dragging and sliding out each hold the countdown, so a card
+  // cannot expire from under the pointer or mid-swipe.
+  const reportPaused = () =>
+    onPausedChange(id, hovered.current || drag.current !== null || leaving.current !== null);
 
   // Folding unmounts a hovered card without a pointerleave; release its pause.
   useEffect(() => () => onPausedChange(id, false), [id, onPausedChange]);
+
+  // A card unmounted mid slide-out (folded by a new push) was still swiped away.
+  useEffect(
+    () => () => {
+      if (leaving.current === null) return;
+      clearTimeout(leaving.current);
+      leaving.current = null;
+      userDismissAlert(id);
+    },
+    [id],
+  );
 
   // A card shown late (expanded from the fold) starts its bar where the clock is.
   useLayoutEffect(() => {
     if (bar.current) bar.current.style.animationDelay = `-${elapsedOf(id, seq)}ms`;
   }, [id, seq, elapsedOf]);
 
+  // The drag writes the card's transform straight to the DOM: React owns no
+  // `transform` in the style prop, so a re-render mid-drag leaves it alone.
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (leaving.current !== null || drag.current !== null) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    // × keeps its click; a press on it never turns into a drag.
+    if ((e.target as Element).closest("button")) return;
+    const el = e.currentTarget;
+    drag.current = { pointerId: e.pointerId, x: e.clientX, t: Date.now(), width: el.getBoundingClientRect().width };
+    try {
+      el.setPointerCapture?.(e.pointerId);
+    } catch {
+      // No capture (synthetic pointer): the card still tracks moves over itself.
+    }
+    el.dataset.swipe = "dragging";
+    reportPaused();
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    e.currentTarget.style.transform = `translateX(${e.clientX - d.x}px)`;
+  };
+
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const d = drag.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    drag.current = null;
+    const el = e.currentTarget;
+    const dx = e.clientX - d.x;
+    const dt = Math.max(1, Date.now() - d.t);
+    const past = Math.abs(dx) > SWIPE_DISTANCE * d.width || Math.abs(dx) / dt > SWIPE_VELOCITY;
+    if (cancelled || !past) {
+      el.dataset.swipe = "settling";
+      el.style.transform = "";
+    } else if (prefersReducedMotion()) {
+      userDismissAlert(id);
+      return;
+    } else {
+      el.dataset.swipe = "leaving";
+      el.style.transform = `translateX(${Math.sign(dx) * (d.width + 24)}px)`;
+      el.style.opacity = "0";
+      leaving.current = setTimeout(() => {
+        leaving.current = null;
+        userDismissAlert(id);
+      }, SLIDE_OUT_MS);
+    }
+    reportPaused();
+  };
+
   return (
     <div
       data-testid="alert"
+      data-alert-id={id}
       data-kind={entry.kind}
       data-paused={paused ? "1" : "0"}
       role={entry.kind === "error" ? "alert" : "status"}
-      onPointerEnter={() => onPausedChange(id, true)}
-      onPointerLeave={() => onPausedChange(id, false)}
+      onPointerEnter={() => {
+        hovered.current = true;
+        reportPaused();
+      }}
+      onPointerLeave={() => {
+        hovered.current = false;
+        reportPaused();
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={(e) => endDrag(e, false)}
+      onPointerCancel={(e) => endDrag(e, true)}
       className="alert-card relative flex items-start gap-2 overflow-hidden rounded-lg px-3 py-2 text-sm shadow-lg"
       style={{
         pointerEvents: "auto",
+        touchAction: "pan-y",
         background: "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
         borderLeft: `3px solid ${color}`,

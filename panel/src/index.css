@@ -2397,7 +2397,7 @@ input[type="checkbox"] {
    is drawing only: the host's timers run whether or not it animates, and a
    card shown late gets a negative `animation-delay` so its bar starts where
    its clock is. Stopped under `prefers-reduced-motion` in the query at the
-   foot of the file. */
+   foot of the file, along with the swipe's snap-back and slide-out. */
 @keyframes alert-drop-in {
   from {
     opacity: 0;
@@ -2431,6 +2431,24 @@ input[type="checkbox"] {
 
 .alert-card[data-paused="1"] .alert-countdown {
   animation-play-state: paused;
+}
+
+/* Swipe (`data-swipe` is written by the card's pointer handlers). While the
+   pointer drags, the card follows it with no transition; a short release
+   eases back, a dismissing one slides off and fades before the store drops
+   it. `SLIDE_OUT_MS` in AlertHost.tsx waits out the 160ms here. */
+.alert-card[data-swipe="dragging"] {
+  user-select: none;
+}
+
+.alert-card[data-swipe="settling"] {
+  transition: transform 160ms ease-out;
+}
+
+.alert-card[data-swipe="leaving"] {
+  transition:
+    transform 160ms ease-in,
+    opacity 160ms ease-in;
 }
 
 /* ── REDUCED MOTION, LAST IN THE FILE ─────────────────────────────────────────
@@ -2490,5 +2508,10 @@ input[type="checkbox"] {
   .alert-card,
   .alert-countdown {
     animation: none;
+  }
+
+  /* A short drag jumps back; a dismissing swipe removes the card at once. */
+  .alert-card[data-swipe] {
+    transition: none;
   }
 }
