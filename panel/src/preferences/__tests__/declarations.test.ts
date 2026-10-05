@@ -65,6 +65,7 @@ const MACHINE_LOCAL = [
   "nav.lastPath",
   "nav.lastReposQuery",
   "notifications.on",
+  "preferences.readOnlyAlert.dismissed",
   "speech.answerComposer.height",
   "speech.answerPane.height",
   "speech.armedCell",
@@ -120,6 +121,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["nav.lastReposQuery", null, "project"],
   // Off until this device opts in: the permission it pairs with is per device.
   ["notifications.on", false, "global"],
+  // Not dismissed until this tab dismisses it: the alert shows on every fresh tab.
+  ["preferences.readOnlyAlert.dismissed", false, "global"],
   // Open until the chevron is pressed: an unset collapse preference is expanded.
   ["plans.runBanner.expanded", true, "global"],
   // `null` is "nothing picked yet": the banner takes the first runnable launcher.
@@ -242,6 +245,9 @@ describe("the declaration table", () => {
     for (const key of ["nav.lastPath", "nav.lastFile", "nav.lastReposQuery"]) {
       expect(keyOf(key).browserStore, key).toBe("session");
     }
+    // The read-only alert's dismissal lasts one tab session by design: a new
+    // tab while the file is still read-only must say so again.
+    expect(keyOf("preferences.readOnlyAlert.dismissed").browserStore).toBe("session");
 
     // The tier stays narrow: nothing else opts in, and every opt-in is
     // machine-local (a portable value has no browser store to choose).
@@ -250,6 +256,7 @@ describe("the declaration table", () => {
       "nav.lastFile",
       "nav.lastPath",
       "nav.lastReposQuery",
+      "preferences.readOnlyAlert.dismissed",
     ]);
     expect(session.filter((d) => d.portable)).toEqual([]);
   });

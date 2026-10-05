@@ -46,6 +46,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "time.form.resetAutoOnSave": [true, false],
   "plans.runBanner.expanded": [true, false],
   "notifications.on": [true, false],
+  "preferences.readOnlyAlert.dismissed": [true, false],
 
   // ── num ─────────────────────────────────────────────────────────────────
   "terminal.drawer.width": [480, 0, 1, 1024, 23.5, -1],
@@ -110,7 +111,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 44;
+const DECLARATION_COUNT = 45;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

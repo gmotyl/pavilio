@@ -150,6 +150,9 @@ const FIXTURES: Record<string, Fixture> = {
   "nav.lastPath": { value: "/project/pavilio/notes?note=a.md", scopeArg: "pavilio" },
   "nav.lastFile": { value: "/abs/plan.md", scopeArg: "pavilio:plans" },
   "nav.lastReposQuery": { value: "preferences", scopeArg: "pavilio" },
+  // Whether this tab has dismissed the read-only alert: the tab session is the
+  // whole lifetime of that answer, so it lives in the session tier too.
+  "preferences.readOnlyAlert.dismissed": { value: true },
 
   // ── Time ─────────────────────────────────────────────────────────────────
   "time.report": {
@@ -239,10 +242,10 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(44);
+    expect(ALL_PREFERENCES.length).toBe(45);
     expect(portable.length).toBe(34);
-    expect(machineLocal.length).toBe(10);
-    expect(sessionTier.length).toBe(3);
+    expect(machineLocal.length).toBe(11);
+    expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the
     // shipped table agrees with it, not merely that it type-checked.
     expect(portable.filter((def) => def.browserStore !== undefined)).toEqual([]);

@@ -33,6 +33,22 @@ declare global {
   // `var`, not `const`/`let`: only a `var` declaration puts the name on
   // `globalThis`, which is how this is read (there may be no `window`).
   var __PAVILIO_PREFS__: Record<string, unknown> | undefined;
+  /**
+   * `true` when the server found a preferences file written by a newer panel
+   * and will not write it. Injected by `GET /api/preferences.js` next to
+   * `__PAVILIO_PREFS__`. See `preferencesReadOnly`.
+   */
+  var __PAVILIO_PREFS_READONLY__: boolean | undefined;
+}
+
+/**
+ * Whether the server reported the preferences file as read-only for this
+ * panel process. Only an explicit `true` counts: an absent global (an older
+ * server, a failed script) reads as `false` — no false alarm, and the
+ * write-refusal interlock for an absent document is a separate matter.
+ */
+export function preferencesReadOnly(): boolean {
+  return globalThis.__PAVILIO_PREFS_READONLY__ === true;
 }
 
 /**

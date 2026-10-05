@@ -21,6 +21,7 @@ import { FloatingActionProvider, Layout } from "./features/shell/Layout";
 import { useVisualViewport } from "./features/shell/useVisualViewport";
 import { useHostModeRoot } from "./features/host-mode/useHostModeRoot";
 import AlertHost from "./features/alerts/AlertHost";
+import PreferencesReadOnlyAlert from "./features/alerts/PreferencesReadOnlyAlert";
 import { TimeTrackingProvider } from "./features/time/TimeTrackingProvider";
 import { SpeechHostProvider } from "./features/speech/SpeechHostProvider";
 import { Notifier } from "./features/notifications/useNotifier";
@@ -86,6 +87,7 @@ function AppShell() {
             </Layout>
             </SpeechHostProvider>
             <AlertHost />
+            <PreferencesReadOnlyAlert />
             </TerminalDrawerProvider>
           </FloatingActionProvider>
         </BreadcrumbActionsProvider>

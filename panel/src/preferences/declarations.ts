@@ -739,6 +739,23 @@ export const preferences = {
     browserStore: "session",
   }),
 
+  // ── Preferences file ─────────────────────────────────────────────────────
+  /**
+   * Whether this tab has dismissed the "preferences are read-only" alert.
+   * Session tier on purpose: the dismissal lasts one tab session, so a fresh
+   * tab opened while the file is still read-only says so again. Never
+   * portable — and it could not be: a read-only file is exactly the one the
+   * server will not write.
+   */
+  readOnlyAlertDismissed: definePreference({
+    key: "preferences.readOnlyAlert.dismissed", // was: nothing — the alert is new
+    scope: "global",
+    default: false,
+    codec: bool,
+    portable: false,
+    browserStore: "session",
+  }),
+
   // ── Time ─────────────────────────────────────────────────────────────────
   // Both share the busy accumulator's `pavilio.time.` prefix and neither is the
   // accumulator: `pavilio.time.<project>` stays raw localStorage, undeclared.
