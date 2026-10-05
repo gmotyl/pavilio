@@ -1,0 +1,168 @@
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, X, type LucideIcon } from "lucide-react";
+import {
+  ALERT_DURATION_MS,
+  alerts,
+  getAlertsSnapshot,
+  subscribeAlerts,
+  userDismissAlert,
+  type AlertEntry,
+  type AlertKind,
+} from "./store";
+import "./alerts.css";
+
+/** Cards shown before the rest fold into the "+N more" pill. */
+const VISIBLE_CAP = 3;
+
+const palette: Record<AlertKind, { color: string; icon: LucideIcon }> = {
+  error: { color: "var(--red)", icon: AlertCircle },
+  warning: { color: "var(--yellow)", icon: AlertTriangle },
+  info: { color: "var(--blue)", icon: Info },
+  success: { color: "var(--green)", icon: CheckCircle2 },
+};
+
+/**
+ * Transient entries newest first, then persistent entries newest first, so a
+ * passing alert always lands above a standing warning and leaves without
+ * moving it. "Newest" is store order: a refresh keeps its slot.
+ */
+function order(entries: readonly AlertEntry[]): AlertEntry[] {
+  const newestFirst = entries.slice().reverse();
+  return [...newestFirst.filter((e) => !e.persistent), ...newestFirst.filter((e) => e.persistent)];
+}
+
+/**
+ * The panel-wide alert stack. Mounted outside `<Routes>`, so it survives
+ * navigation; the store it reads lives outside React altogether.
+ */
+export default function AlertHost() {
+  const entries = useSyncExternalStore(subscribeAlerts, getAlertsSnapshot, getAlertsSnapshot);
+  const [expanded, setExpanded] = useState(false);
+
+  const ordered = order(entries);
+  // Collapse back once the overflow is gone, so the next overflow folds again.
+  if (expanded && ordered.length <= VISIBLE_CAP) setExpanded(false);
+  const visible = expanded ? ordered : ordered.slice(0, VISIBLE_CAP);
+  const hidden = ordered.length - visible.length;
+
+  if (ordered.length === 0) return null;
+
+  return (
+    <div
+      data-testid="alert-region"
+      className="flex flex-col gap-2"
+      style={{
+        position: "fixed",
+        top: 12,
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: "min(520px, calc(100vw - 24px))",
+        zIndex: 60,
+        pointerEvents: "none",
+      }}
+    >
+      {visible.map((entry) => (
+        <AlertCard key={entry.id} entry={entry} />
+      ))}
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="self-center rounded-full px-3 py-1 text-xs shadow"
+          style={{
+            pointerEvents: "auto",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
+            color: "var(--text-secondary)",
+          }}
+        >
+          +{hidden} more
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AlertCard({ entry }: { entry: AlertEntry }) {
+  const [paused, setPaused] = useState(false);
+  const { color, icon: Icon } = palette[entry.kind];
+  const duration = ALERT_DURATION_MS[entry.kind];
+  useCountdown(entry, duration, paused);
+
+  return (
+    <div
+      data-testid="alert"
+      data-kind={entry.kind}
+      data-paused={paused ? "1" : "0"}
+      role={entry.kind === "error" ? "alert" : "status"}
+      onPointerEnter={() => setPaused(true)}
+      onPointerLeave={() => setPaused(false)}
+      className="alert-card relative flex items-start gap-2 overflow-hidden rounded-lg px-3 py-2 text-sm shadow-lg"
+      style={{
+        pointerEvents: "auto",
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
+        borderLeft: `3px solid ${color}`,
+        color: "var(--text-primary)",
+      }}
+    >
+      <Icon size={16} style={{ color, flexShrink: 0, marginTop: 2 }} />
+      <div className="min-w-0 flex-1">
+        <div data-testid="alert-title" className="break-words">
+          {entry.title}
+        </div>
+        {entry.detail && (
+          <div className="mt-0.5 break-words text-xs" style={{ color: "var(--text-muted)" }}>
+            {entry.detail}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => userDismissAlert(entry.id)}
+        aria-label="Dismiss"
+        className="ml-2 rounded p-1 transition-colors"
+        style={{ color: "var(--text-muted)" }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      >
+        <X size={14} />
+      </button>
+      {!entry.persistent && (
+        <div
+          // A new seq is a refresh: remount the bar so its animation restarts.
+          key={entry.seq}
+          data-testid="alert-countdown"
+          aria-hidden
+          className="alert-countdown absolute bottom-0 left-0 h-[2px] w-full"
+          style={{ background: color, animationDuration: `${duration}ms` }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Expires a transient entry after its kind's duration, holding the clock while
+ * `paused`. A new `seq` (a refresh of the same id) restarts from full. Expiry
+ * goes through `alerts.dismiss`, which by contract does not call `onDismiss`.
+ */
+function useCountdown(entry: AlertEntry, duration: number, paused: boolean): void {
+  const remaining = useRef(duration);
+  const seenSeq = useRef(entry.seq);
+  const { id, seq, persistent } = entry;
+
+  useEffect(() => {
+    if (seenSeq.current !== seq) {
+      seenSeq.current = seq;
+      remaining.current = duration;
+    }
+    if (persistent || paused) return;
+    const startedAt = Date.now();
+    const timer = setTimeout(() => alerts.dismiss(id), remaining.current);
+    return () => {
+      clearTimeout(timer);
+      remaining.current -= Date.now() - startedAt;
+    };
+  }, [id, seq, persistent, paused, duration]);
+}
