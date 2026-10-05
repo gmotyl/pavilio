@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X, type LucideIcon } from "lucide-react";
 import {
   ALERT_DURATION_MS,
@@ -38,6 +38,18 @@ function order(entries: readonly AlertEntry[]): AlertEntry[] {
 export default function AlertHost() {
   const entries = useSyncExternalStore(subscribeAlerts, getAlertsSnapshot, getAlertsSnapshot);
   const [expanded, setExpanded] = useState(false);
+  const [pausedIds, setPausedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const elapsedOf = useAlertClocks(entries, pausedIds);
+
+  const setPaused = useCallback((id: string, paused: boolean) => {
+    setPausedIds((prev) => {
+      if (prev.has(id) === paused) return prev;
+      const next = new Set(prev);
+      if (paused) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   const ordered = order(entries);
   // Collapse back once the overflow is gone, so the next overflow folds again.
@@ -62,7 +74,13 @@ export default function AlertHost() {
       }}
     >
       {visible.map((entry) => (
-        <AlertCard key={entry.id} entry={entry} />
+        <AlertCard
+          key={entry.id}
+          entry={entry}
+          paused={pausedIds.has(entry.id)}
+          onPausedChange={setPaused}
+          elapsedOf={elapsedOf}
+        />
       ))}
       {hidden > 0 && (
         <button
@@ -83,11 +101,27 @@ export default function AlertHost() {
   );
 }
 
-function AlertCard({ entry }: { entry: AlertEntry }) {
-  const [paused, setPaused] = useState(false);
+interface AlertCardProps {
+  entry: AlertEntry;
+  paused: boolean;
+  /** Hover reports; the host owns the clock this pauses. */
+  onPausedChange: (id: string, paused: boolean) => void;
+  elapsedOf: (id: string, seq: number) => number;
+}
+
+function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps) {
+  const { id, seq } = entry;
   const { color, icon: Icon } = palette[entry.kind];
   const duration = ALERT_DURATION_MS[entry.kind];
-  useCountdown(entry, duration, paused);
+  const bar = useRef<HTMLDivElement>(null);
+
+  // Folding unmounts a hovered card without a pointerleave; release its pause.
+  useEffect(() => () => onPausedChange(id, false), [id, onPausedChange]);
+
+  // A card shown late (expanded from the fold) starts its bar where the clock is.
+  useLayoutEffect(() => {
+    if (bar.current) bar.current.style.animationDelay = `-${elapsedOf(id, seq)}ms`;
+  }, [id, seq, elapsedOf]);
 
   return (
     <div
@@ -95,8 +129,8 @@ function AlertCard({ entry }: { entry: AlertEntry }) {
       data-kind={entry.kind}
       data-paused={paused ? "1" : "0"}
       role={entry.kind === "error" ? "alert" : "status"}
-      onPointerEnter={() => setPaused(true)}
-      onPointerLeave={() => setPaused(false)}
+      onPointerEnter={() => onPausedChange(id, true)}
+      onPointerLeave={() => onPausedChange(id, false)}
       className="alert-card relative flex items-start gap-2 overflow-hidden rounded-lg px-3 py-2 text-sm shadow-lg"
       style={{
         pointerEvents: "auto",
@@ -132,6 +166,7 @@ function AlertCard({ entry }: { entry: AlertEntry }) {
         <div
           // A new seq is a refresh: remount the bar so its animation restarts.
           key={entry.seq}
+          ref={bar}
           data-testid="alert-countdown"
           aria-hidden
           className="alert-countdown absolute bottom-0 left-0 h-[2px] w-full"
@@ -142,27 +177,82 @@ function AlertCard({ entry }: { entry: AlertEntry }) {
   );
 }
 
+interface Clock {
+  seq: number;
+  /** Full run for the entry's kind. */
+  duration: number;
+  /** Time left when the clock last stopped. */
+  remaining: number;
+  /** Set while running. */
+  startedAt: number | null;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+function stop(clock: Clock): void {
+  if (clock.timer === null || clock.startedAt === null) return;
+  clearTimeout(clock.timer);
+  clock.remaining -= Date.now() - clock.startedAt;
+  clock.timer = null;
+  clock.startedAt = null;
+}
+
 /**
- * Expires a transient entry after its kind's duration, holding the clock while
- * `paused`. A new `seq` (a refresh of the same id) restarts from full. Expiry
- * goes through `alerts.dismiss`, which by contract does not call `onDismiss`.
+ * One clock per live transient entry, owned by the host rather than the card,
+ * so an entry folded behind "+N more" (whose card is unmounted) still counts
+ * down and keeps its elapsed time when shown again. A clock runs unless its id
+ * is in `pausedIds`; a new `seq` (a refresh of the same id) restarts it from
+ * full. Expiry goes through `alerts.dismiss`, which by contract does not call
+ * `onDismiss`.
+ *
+ * Returns how long an entry's current clock has run, for drawing its bar.
  */
-function useCountdown(entry: AlertEntry, duration: number, paused: boolean): void {
-  const remaining = useRef(duration);
-  const seenSeq = useRef(entry.seq);
-  const { id, seq, persistent } = entry;
+function useAlertClocks(
+  entries: readonly AlertEntry[],
+  pausedIds: ReadonlySet<string>,
+): (id: string, seq: number) => number {
+  const clocks = useRef(new Map<string, Clock>());
 
   useEffect(() => {
-    if (seenSeq.current !== seq) {
-      seenSeq.current = seq;
-      remaining.current = duration;
+    const map = clocks.current;
+    const live = new Set<string>();
+    for (const entry of entries) {
+      if (entry.persistent) continue;
+      const { id, seq } = entry;
+      live.add(id);
+      let clock = map.get(id);
+      if (clock && clock.seq !== seq) {
+        stop(clock);
+        clock = undefined;
+      }
+      if (!clock) {
+        const duration = ALERT_DURATION_MS[entry.kind];
+        clock = { seq, duration, remaining: duration, startedAt: null, timer: null };
+        map.set(id, clock);
+      }
+      if (pausedIds.has(id)) {
+        stop(clock);
+      } else if (clock.timer === null) {
+        clock.startedAt = Date.now();
+        clock.timer = setTimeout(() => alerts.dismiss(id), Math.max(0, clock.remaining));
+      }
     }
-    if (persistent || paused) return;
-    const startedAt = Date.now();
-    const timer = setTimeout(() => alerts.dismiss(id), remaining.current);
-    return () => {
-      clearTimeout(timer);
-      remaining.current -= Date.now() - startedAt;
-    };
-  }, [id, seq, persistent, paused, duration]);
+    for (const [id, clock] of map) {
+      if (live.has(id)) continue;
+      stop(clock);
+      map.delete(id);
+    }
+  }, [entries, pausedIds]);
+
+  // Unmount stops (and banks) every clock; a remount resumes them.
+  useEffect(() => {
+    const map = clocks.current;
+    return () => map.forEach(stop);
+  }, []);
+
+  return useCallback((id: string, seq: number) => {
+    const clock = clocks.current.get(id);
+    if (!clock || clock.seq !== seq) return 0;
+    const running = clock.startedAt === null ? 0 : Date.now() - clock.startedAt;
+    return Math.max(0, clock.duration - clock.remaining + running);
+  }, []);
 }

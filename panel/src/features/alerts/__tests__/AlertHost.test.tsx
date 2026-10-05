@@ -148,6 +148,89 @@ describe("AlertHost", () => {
     expect(titles()).toEqual([]);
   });
 
+  it("a folded card keeps counting down", () => {
+    render(<AlertHost />);
+    act(() => {
+      for (const n of [1, 2, 3]) alerts.info(`a${n}`, { id: `a${n}` });
+    });
+
+    advance(3000);
+    act(() => {
+      alerts.info("a4", { id: "a4" });
+    });
+    // a1 is folded behind "+1 more" now; its clock must not reset or stop.
+    expect(titles()).toEqual(["a4", "a3", "a2"]);
+
+    advance(999); // 3999
+    fireEvent.click(screen.getByRole("button", { name: "+1 more" }));
+    expect(titles()).toEqual(["a4", "a3", "a2", "a1"]);
+    // Its bar picks up where the clock is, not from full.
+    const a1 = cards().find((c) => titleOf(c) === "a1")!;
+    expect(within(a1).getByTestId("alert-countdown").style.animationDelay).toBe("-3999ms");
+    advance(1); // 4000
+    expect(titles()).toEqual(["a4"]);
+    advance(3000); // 7000
+    expect(titles()).toEqual([]);
+  });
+
+  it("hidden cards expire on time while collapsed", () => {
+    render(<AlertHost />);
+    act(() => {
+      for (const n of [1, 2, 3, 4, 5]) alerts.info(`a${n}`, { id: `a${n}` });
+    });
+
+    advance(2000);
+    fireEvent.click(screen.getByRole("button", { name: "+2 more" }));
+    expect(titles()).toEqual(["a5", "a4", "a3", "a2", "a1"]);
+
+    advance(1999); // 3999
+    expect(titles()).toHaveLength(5);
+    advance(1); // 4000
+    expect(titles()).toEqual([]);
+  });
+
+  it("a collapsed overflow expires without ever being shown", () => {
+    render(<AlertHost />);
+    act(() => {
+      for (const n of [1, 2, 3, 4, 5]) alerts.info(`a${n}`, { id: `a${n}` });
+    });
+
+    advance(4000);
+    expect(titles()).toEqual([]);
+    expect(screen.queryByRole("button", { name: /more/ })).toBeNull();
+  });
+
+  it("expiry does not call onDismiss", () => {
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("i", { onDismiss });
+    });
+
+    advance(4000);
+    expect(titles()).toEqual([]);
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("hovering one card pauses only that card", () => {
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("a");
+      alerts.info("b");
+    });
+
+    const a = cards().find((c) => titleOf(c) === "a")!;
+    fireEvent.pointerEnter(a);
+    advance(4000);
+    expect(titles()).toEqual(["a"]);
+
+    fireEvent.pointerLeave(cards()[0]);
+    advance(3999);
+    expect(titles()).toEqual(["a"]);
+    advance(1);
+    expect(titles()).toEqual([]);
+  });
+
   it("error uses role alert, others role status", () => {
     render(<AlertHost />);
     act(() => {
