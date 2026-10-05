@@ -103,6 +103,7 @@ export default function AlertHost() {
       {hidden > 0 && (
         <button
           type="button"
+          data-testid="alert-more"
           onClick={() => setExpanded(true)}
           className="self-center rounded-full px-3 py-1 text-xs shadow"
           style={{
@@ -260,6 +261,7 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
       </div>
       <button
         type="button"
+        data-testid="alert-dismiss"
         onClick={() => userDismissAlert(entry.id)}
         aria-label="Dismiss"
         className="ml-2 rounded p-1 transition-colors"
