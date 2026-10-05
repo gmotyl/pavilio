@@ -18,6 +18,7 @@ import {
   getPreferences,
   patchPreferences,
   flushPreferences,
+  isReadOnly,
   _resetPreferencesForTests,
 } from "../preferences-store.js";
 
@@ -579,5 +580,41 @@ describe("document version", () => {
       version: 2,
       newShape: { left: 240 },
     });
+  });
+
+  it("isReadOnly is false for current, missing and malformed files", () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    freshDir();
+
+    // missing
+    loadPreferences(file());
+    expect(isReadOnly()).toBe(false);
+
+    // current
+    writeFileSync(file(), JSON.stringify({ version: 1, theme: "dark" }), "utf8");
+    loadPreferences(file());
+    expect(isReadOnly()).toBe(false);
+
+    // malformed document, and a malformed version inside a valid one
+    writeFileSync(file(), "{ not json", "utf8");
+    loadPreferences(file());
+    expect(isReadOnly()).toBe(false);
+    writeFileSync(file(), JSON.stringify({ version: "2", theme: "dark" }), "utf8");
+    loadPreferences(file());
+    expect(isReadOnly()).toBe(false);
+
+    expect(warnings).not.toHaveBeenCalled();
+  });
+
+  it("isReadOnly is true for a newer-version file", () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    freshDir();
+    writeFileSync(file(), JSON.stringify({ version: 2, newShape: { left: 240 } }), "utf8");
+    loadPreferences(file());
+
+    expect(isReadOnly()).toBe(true);
+    expect(isReadOnly()).toBe(true);
+    // A predicate, not a gate: asking does not spend canWrite's one-time warning.
+    expect(warnings).not.toHaveBeenCalled();
   });
 });

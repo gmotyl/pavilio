@@ -55,7 +55,7 @@ const unstorableWarned = new Set<string>();
  * keep the panel from starting.
  *
  * A `version` this panel does not know (any integer above `CURRENT_VERSION`)
- * is kept exactly as found and makes the store read-only — see `canWrite`.
+ * is kept exactly as found and makes the store read-only — see `isReadOnly`.
  */
 export function loadPreferences(path: string): PreferencesDoc {
   targetPath = path;
@@ -173,14 +173,21 @@ function normalizeVersion(value: unknown): number {
 }
 
 /**
- * Whether this panel may rewrite the loaded document. A file stamped with a
- * newer version was written by a newer panel and is shared — through the data
- * repo — with the machine running it; rewriting it in this panel's format
- * would hand that machine back a v1-labelled file full of v2-shaped data.
- * Refusing costs this session's changes; coercing costs the other panel's.
+ * Whether the loaded document is one this panel must not rewrite. A file
+ * stamped with a newer version was written by a newer panel and is shared —
+ * through the data repo — with the machine running it; rewriting it in this
+ * panel's format would hand that machine back a v1-labelled file full of
+ * v2-shaped data. Refusing costs this session's changes; coercing costs the
+ * other panel's. Pure: callers may ask as often as they like without spending
+ * `canWrite`'s one-time warning.
  */
+export function isReadOnly(): boolean {
+  return doc.version !== CURRENT_VERSION;
+}
+
+/** `!isReadOnly()`, plus a one-time warning the first time a write is refused. */
 function canWrite(): boolean {
-  if (doc.version === CURRENT_VERSION) return true;
+  if (!isReadOnly()) return true;
   if (!refusalLogged) {
     refusalLogged = true;
     console.warn(

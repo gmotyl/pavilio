@@ -14,7 +14,7 @@
 import { Router } from "express";
 import { homedir } from "node:os";
 import { getConfig } from "../config.js";
-import { getPreferences, patchPreferences } from "../lib/preferences-store.js";
+import { getPreferences, isReadOnly, patchPreferences } from "../lib/preferences-store.js";
 import { broadcast } from "../watcher.js";
 
 const preferencesRouter = Router();
@@ -80,7 +80,10 @@ preferencesRouter.get("/preferences.js", (_req, res) => {
     `window.__PAVILIO_HOME__ = ${toScriptLiteral(homedir())};\n` +
     `window.__PAVILIO_TUNING__ = ${toScriptLiteral({
       answerWaveDebounceMs: getConfig().answerWaveDebounceMs,
-    })};\n`;
+    })};\n` +
+    // Whether this session's changes reach the file at all. Its own global for
+    // the same reason as `__PAVILIO_TUNING__`: no PATCH can ever reach it.
+    `window.__PAVILIO_PREFS_READONLY__ = ${toScriptLiteral(isReadOnly())};\n`;
 
   res.setHeader("Content-Type", "application/javascript; charset=utf-8");
   // The document changes on every patch and this script is the page's only
@@ -104,14 +107,17 @@ preferencesRouter.patch("/preferences", (req, res) => {
   // schedule a write of a byte-identical file, and the frame below would wake
   // every open tab to re-read an empty list of keys. Still a 200: the caller
   // asked for nothing and nothing is what it got.
-  if (keys.length === 0) return res.json({ ok: true });
+  // `persisted` says whether the change will reach the file or only this
+  // session's memory (a newer panel's file is never rewritten — see
+  // `isReadOnly`). Reported on every 200, this one included.
+  if (keys.length === 0) return res.json({ ok: true, persisted: !isReadOnly() });
 
   patchPreferences(body as Record<string, unknown>);
 
   // Every other open panel tab holds the same document in memory; this is how
   // they learn which keys to re-read.
   broadcast({ type: "preferences-change", keys });
-  res.json({ ok: true });
+  res.json({ ok: true, persisted: !isReadOnly() });
 });
 
 export default preferencesRouter;
