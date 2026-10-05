@@ -27,9 +27,11 @@ describe("alert store", () => {
 
   it("a repeated id refreshes in place instead of stacking", () => {
     alerts.warning("first", { id: "x", detail: "one" });
-    const before = getAlertsSnapshot()[0];
+    const beforeSnapshot = getAlertsSnapshot();
+    const before = beforeSnapshot[0];
     const returned = alerts.warning("second", { id: "x", detail: "two" });
     const snap = getAlertsSnapshot();
+    expect(snap).not.toBe(beforeSnapshot);
     expect(returned).toBe("x");
     expect(snap).toHaveLength(1);
     expect(snap[0]).toMatchObject({ id: "x", title: "second", detail: "two" });
