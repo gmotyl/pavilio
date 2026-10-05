@@ -2,13 +2,36 @@
 /*
  * Claude Code `Stop` hook: emit the agent's finished response to the panel.
  *
- * Reads the hook payload as JSON on stdin, opens the transcript it names, takes
- * the **current turn's assistant text message** out of it, and POSTs
- * `{ sessionId, text }` to `POST /api/speech/utterance`. The panel keeps it as
- * the latest utterance for that session and broadcasts it to open tabs; the
- * browser does the preparation and the synthesis. Nothing is synthesized here.
+ * Reads the hook payload as JSON on stdin, takes the **current turn's answer**
+ * from it — `last_assistant_message`, or the transcript it names when that
+ * field is missing — and POSTs `{ sessionId, text }` to
+ * `POST /api/speech/utterance`. The panel keeps it as the latest utterance for
+ * that session and broadcasts it to open tabs; the browser does the
+ * preparation and the synthesis. Nothing is synthesized here.
  *
- * ## Which turn — the transcript is not finished when this fires
+ * ## Which turn — the payload first, the transcript only as a fallback
+ *
+ * The primary source is the payload's `last_assistant_message`. Claude Code
+ * builds it from its **in-memory** message list at the moment the hook fires,
+ * so it is the current turn's answer by construction — the transcript is
+ * written from that same list, later. See `payloadResponseText`.
+ *
+ * It is primary because the transcript cannot be trusted to have caught up in
+ * time. Measured on WSL on 2026-10-04: turns ran the hook for 432 ms and 553 ms
+ * — the transcript wait expiring — and their answers never reached the pane,
+ * even after that wait had already been raised once. No wait short enough to
+ * sit in the agent's critical path closes that race; reading memory removes it.
+ *
+ * Do NOT simplify this back to a plain file read because "the transcript has
+ * the answer anyway". It has it eventually, not when this runs, and a stale
+ * answer sounds exactly like a current one.
+ *
+ * The field is optional in Claude Code's hook schema and older builds omit it,
+ * so the transcript path below remains as the fallback, unchanged. An empty or
+ * non-string field falls back too: posting "" would replace the pane's last
+ * good answer with nothing.
+ *
+ * ### The fallback — the transcript is not finished when this fires
  *
  * The `Stop` hook runs at the end of the turn, but Claude Code appends the
  * turn's assistant message to `transcript_path` asynchronously, so the file can
@@ -342,6 +365,20 @@ async function currentResponseText(transcriptPath) {
   }
 }
 
+/**
+ * The answer Claude Code put in the payload itself, as `last_assistant_message`:
+ * the trimmed text, or `null` when the field is absent, not a string, or empty
+ * after trimming — every one of which falls back to the transcript. Same shape
+ * as `speak-response-codex.mjs`'s, duplicated rather than shared because each
+ * emitter is one self-contained file.
+ */
+function payloadResponseText(payload) {
+  const message = payload?.last_assistant_message;
+  if (typeof message !== "string") return null;
+  const text = message.trim();
+  return text === "" ? null : text;
+}
+
 /** Bytes this pair will actually put on the wire — exactly what `post` sends. */
 function bodyBytes(sessionId, text) {
   return Buffer.byteLength(JSON.stringify({ sessionId, text }), "utf8");
@@ -418,10 +455,14 @@ async function main() {
   } catch {
     return;
   }
-  const transcriptPath = payload?.transcript_path;
-  if (typeof transcriptPath !== "string" || transcriptPath === "") return;
-
-  const text = await currentResponseText(transcriptPath);
+  // The payload first: it cannot be a turn behind, and it costs no wait. Only
+  // without it is the transcript needed at all — see "Which turn" above.
+  let text = payloadResponseText(payload);
+  if (text === null) {
+    const transcriptPath = payload?.transcript_path;
+    if (typeof transcriptPath !== "string" || transcriptPath === "") return;
+    text = await currentResponseText(transcriptPath);
+  }
   if (text === null) return;
 
   await post(sessionId, trimToCap(sessionId, text));
