@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { useContext } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -250,5 +250,58 @@ describe("MarkdownViewer html handling", () => {
     // One toolbar, not two: the breadcrumb slot must not also mount a copy
     // button for the same file.
     expect(screen.getAllByTestId("markdown-viewer-copy-path")).toHaveLength(1);
+  });
+  it("does not hand the previous mockup's source to the next one while it loads", async () => {
+    const SECOND = "pavilio/mockups/other.html";
+    let releaseSecond: (() => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const url = String(input);
+        const json = (body: unknown) =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        if (url.startsWith("/api/system")) {
+          return json({ wslDistro: null, workspaceRoot: WORKSPACE_ROOT });
+        }
+        if (url.includes("other.html")) {
+          // Held open: the switch is in flight for the rest of the test
+          await new Promise<void>((r) => (releaseSecond = r));
+          return json({ content: "<p>second</p>", absolutePath: "/x/other.html" });
+        }
+        return json({ content: MOCKUP_SOURCE, absolutePath: MOCKUP_ABSOLUTE });
+      }),
+    );
+    const writeText = spyClipboard();
+    function GoNext() {
+      const navigate = useNavigate();
+      return <button data-testid="go-next" onClick={() => navigate(`/view/${SECOND}`)} />;
+    }
+    render(
+      <BreadcrumbActionsProvider>
+        <BreadcrumbSlot />
+        <MemoryRouter initialEntries={[`/view/${MOCKUP_PATH}`]}>
+          <GoNext />
+          <Routes>
+            <Route path="/view/*" element={<MarkdownViewer />} />
+          </Routes>
+        </MemoryRouter>
+      </BreadcrumbActionsProvider>,
+    );
+    const first = await screen.findByTestId("markdown-viewer-copy-content");
+    await waitFor(() => expect(first).not.toBeDisabled());
+
+    fireEvent.click(screen.getByTestId("go-next"));
+    await waitFor(() => expect(releaseSecond).toBeDefined());
+
+    const during = screen.queryByTestId("markdown-viewer-copy-content");
+    if (during) {
+      expect(during).toBeDisabled();
+      fireEvent.click(during);
+    }
+    expect(writeText).not.toHaveBeenCalledWith(MOCKUP_SOURCE);
+    releaseSecond?.();
   });
 });

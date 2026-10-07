@@ -1,5 +1,5 @@
 import { useLocation } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useActiveFile } from "../explorer/useActiveFile";
 import MockupFrame from "../projects/MockupFrame";
 import {
@@ -50,14 +50,22 @@ export default function MarkdownViewer() {
   const [wide, toggleWide] = useWideMode("viewer");
   const { lastMessage } = useWebSocket();
 
+  // The path the latest read is for: a slower read of the previous file must
+  // not land on top of this one.
+  const currentPath = useRef(filePath);
+  currentPath.current = filePath;
+
   const fetchContent = async () => {
+    const path = filePath;
     // A raster image only needs its absolute path — the frame loads it from
     // the raw route — so its bytes are never read as text. An SVG is text and
     // is read in full so Copy content has its source.
-    const url = buildReadUrl(filePath);
-    const res = await fetch(isRasterImage(filePath) ? metaReadUrl(url) : url);
+    const url = buildReadUrl(path);
+    const res = await fetch(isRasterImage(path) ? metaReadUrl(url) : url);
+    if (currentPath.current !== path) return;
     if (res.ok) {
       const data = await res.json();
+      if (currentPath.current !== path) return;
       setContent(data.content);
       setAbsolutePath(data.absolutePath);
     }
@@ -65,6 +73,10 @@ export default function MarkdownViewer() {
   };
 
   useEffect(() => {
+    // A switch drops the previous file's text first, so neither the mockup
+    // frame's Copy content nor the breadcrumb toolbar can copy it meanwhile.
+    setLoading(true);
+    setContent("");
     fetchContent();
   }, [filePath]);
 
