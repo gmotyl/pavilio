@@ -27,8 +27,11 @@ interface Calls {
 function stubFetch({
   externalCounts = {},
   importResult,
+  serverDates = ["2026-10-07"],
 }: {
   externalCounts?: Record<string, number>;
+  /** What `/mockups/today` answers, call by call; the last one repeats. */
+  serverDates?: string[];
   importResult?: (names: string[]) => Array<{
     name: string;
     relativePath: string;
@@ -37,8 +40,13 @@ function stubFetch({
   }>;
 } = {}): Calls {
   const calls: Calls = { inspect: [], importBodies: [] };
+  let todayCalls = 0;
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
+    if (url.endsWith("/mockups/today")) {
+      const date = serverDates[Math.min(todayCalls++, serverDates.length - 1)];
+      return { ok: true, json: async () => ({ date }) } as Response;
+    }
     const body = init?.body as FormData;
     const names = body ? body.getAll("files").map((f) => (f as File).name) : [];
     if (url.endsWith("/mockups/inspect")) {
@@ -81,6 +89,15 @@ function renderDialog(files: File[], onImported = vi.fn(), onClose = vi.fn()) {
 
 const rows = () => screen.getAllByTestId("mockup-import-row");
 
+/** Import is held until the server's date is known, so wait for it first. */
+async function clickConfirm(times = 1) {
+  const confirm = screen.getByTestId("mockup-import-confirm") as HTMLButtonElement;
+  await waitFor(() => expect(confirm.disabled).toBe(false));
+  await act(async () => {
+    for (let i = 0; i < times; i++) fireEvent.click(confirm);
+  });
+}
+
 describe("MockupImportDialog", () => {
   beforeEach(() => {
     __resetAlertsForTests();
@@ -108,7 +125,9 @@ describe("MockupImportDialog", () => {
     renderDialog([makeFile("Frame 12.png", { type: "image/png" }), makeFile("Hero Page.jpeg")]);
 
     const [png, jpeg] = rows();
-    expect(within(png).getByTestId("mockup-import-prefix").textContent).toBe("2026-10-07-");
+    await waitFor(() =>
+      expect(within(png).getByTestId("mockup-import-prefix").textContent).toBe("2026-10-07-"),
+    );
     expect((within(png).getByTestId("mockup-import-slug") as HTMLInputElement).value).toBe(
       "frame-12",
     );
@@ -160,9 +179,7 @@ describe("MockupImportDialog", () => {
     expect(within(huge).queryByTestId("mockup-import-slug")).toBeNull();
     expect(within(ok).queryByTestId("mockup-import-rejected")).toBeNull();
 
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
-    });
+    await clickConfirm();
 
     expect(calls.importBodies).toHaveLength(1);
     const sent = calls.importBodies[0];
@@ -182,9 +199,7 @@ describe("MockupImportDialog", () => {
     });
     const { onImported } = renderDialog([makeFile("fake.png"), makeFile("real.svg")]);
 
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
-    });
+    await clickConfirm();
 
     // The rest of the batch still lands.
     expect(onImported).toHaveBeenCalledWith(["pavilio/mockups/2026-10-07-real.svg"]);
@@ -202,9 +217,7 @@ describe("MockupImportDialog", () => {
     fireEvent.change(screen.getByTestId("mockup-import-slug"), {
       target: { value: "Account Details / Mobile!!" },
     });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
-    });
+    await clickConfirm();
     expect(calls.importBodies[0].getAll("slugs")).toEqual(["Account Details / Mobile!!"]);
   });
 
@@ -242,9 +255,7 @@ describe("MockupImportDialog", () => {
     }
     expect(screen.getByTestId("mockup-import-confirm").textContent).toBe("Import 50");
 
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
-    });
+    await clickConfirm();
     const sent = calls.importBodies[0].getAll("files").map((f) => (f as File).name);
     expect(sent).toHaveLength(MOCKUP_MAX_FILES);
     expect(sent).not.toContain(`f${MOCKUP_MAX_FILES}.png`);
@@ -271,9 +282,7 @@ describe("MockupImportDialog", () => {
     expect(within(all[6]).queryByTestId("mockup-import-rejected")).toBeNull();
     expect(screen.getByTestId("mockup-import-confirm").textContent).toBe("Import 6");
 
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
-    });
+    await clickConfirm();
     const sent = calls.importBodies[0].getAll("files").map((f) => (f as File).name);
     expect(sent).not.toContain("big5.png");
     expect(sent).toContain("small.png");
@@ -299,14 +308,74 @@ describe("MockupImportDialog", () => {
     );
   });
 
+  it("holds Import while the server's date is pending and shows no concrete date", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) =>
+        String(input).endsWith("/mockups/today")
+          ? new Promise<Response>(() => {})
+          : Promise.resolve({ ok: true, json: async () => ({ files: [] }) } as Response),
+      ),
+    );
+    renderDialog([makeFile("a.png")]);
+
+    const prefix = screen.getByTestId("mockup-import-prefix");
+    // Not the browser's date: it may not be the one the server saves with.
+    expect(prefix.textContent).toBe("YYYY-MM-DD-");
+    expect(prefix.getAttribute("title")).toBe("Date is set by the server");
+    expect((screen.getByTestId("mockup-import-confirm") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows a placeholder date and still imports when the server's date fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith("/mockups/today"))
+          return { ok: false, json: async () => ({}) } as Response;
+        return {
+          ok: true,
+          json: async () => ({
+            files: [{ name: "a.png", relativePath: "pavilio/mockups/2026-10-07-a.png", ok: true }],
+          }),
+        } as Response;
+      }),
+    );
+    const { onImported } = renderDialog([makeFile("a.png")]);
+
+    await clickConfirm();
+    expect(screen.getByTestId("mockup-import-prefix").textContent).toBe("YYYY-MM-DD-");
+    // The saved name comes from the server's answer, not the placeholder.
+    expect(onImported).toHaveBeenCalledWith(["pavilio/mockups/2026-10-07-a.png"]);
+  });
+
+  it("re-checks the date on confirm and stops when it changed", async () => {
+    // Opened before the server's midnight, confirmed after it.
+    const calls = stubFetch({ serverDates: ["2026-10-07", "2026-10-08"] });
+    const { onImported } = renderDialog([makeFile("a.png")]);
+    await waitFor(() =>
+      expect(screen.getByTestId("mockup-import-prefix").textContent).toBe("2026-10-07-"),
+    );
+
+    await clickConfirm();
+    // Nothing is sent under a name the dialog did not show…
+    expect(calls.importBodies).toHaveLength(0);
+    expect(onImported).not.toHaveBeenCalled();
+    // …the new date is shown, and the user is told to check and confirm again.
+    expect(screen.getByTestId("mockup-import-prefix").textContent).toBe("2026-10-08-");
+    const alerts = getAlertsSnapshot();
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].kind).toBe("warning");
+    expect(alerts[0].detail).toContain("2026-10-08");
+
+    await clickConfirm();
+    expect(calls.importBodies).toHaveLength(1);
+  });
+
   it("sends one import however fast confirm is clicked", async () => {
     const calls = stubFetch();
     renderDialog([makeFile("a.png")]);
 
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
-      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
-    });
+    await clickConfirm(2);
     expect(calls.importBodies).toHaveLength(1);
   });
 
@@ -327,9 +396,7 @@ describe("MockupImportDialog", () => {
     expect(signals.inspect).toBeDefined();
     expect(signals.inspect!.aborted).toBe(false);
 
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
-    });
+    await clickConfirm();
     expect(signals.inspect!.aborted).toBe(true);
   });
 
@@ -345,11 +412,13 @@ describe("MockupImportDialog", () => {
     expect(document.activeElement).toBe(screen.getByTestId("mockup-import-dialog"));
   });
 
-  it("keeps Tab inside the dialog", () => {
+  it("keeps Tab inside the dialog", async () => {
     stubFetch();
     renderDialog([makeFile("a.png")]);
     const slug = screen.getByTestId("mockup-import-slug");
-    const confirm = screen.getByTestId("mockup-import-confirm");
+    const confirm = screen.getByTestId("mockup-import-confirm") as HTMLButtonElement;
+    // Import is the last stop once the server's date is in.
+    await waitFor(() => expect(confirm.disabled).toBe(false));
 
     confirm.focus();
     fireEvent.keyDown(confirm, { key: "Tab" });
@@ -422,9 +491,7 @@ describe("MockupImportDialog", () => {
     );
     const { onClose, onImported } = renderDialog([makeFile("a.png")]);
 
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
-    });
+    await clickConfirm();
     const confirm = screen.getByTestId("mockup-import-confirm") as HTMLButtonElement;
     expect(confirm.textContent).toBe("Importing…");
     expect(confirm.getAttribute("aria-busy")).toBe("true");

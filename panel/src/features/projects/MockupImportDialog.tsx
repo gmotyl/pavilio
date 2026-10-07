@@ -45,7 +45,8 @@ function Row({
   onSlug,
 }: {
   row: MockupImportRow;
-  prefix: string;
+  /** Null when the server's date is not known: a placeholder, not a guess. */
+  prefix: string | null;
   onSlug: (slug: string) => void;
 }) {
   return (
@@ -71,9 +72,19 @@ function Row({
         ) : (
           <>
             <label className="flex items-center mt-1 text-[12.5px] font-mono min-w-0">
-              <span data-testid="mockup-import-prefix" style={MUTED}>
-                {prefix}
-              </span>
+              {prefix ? (
+                <span data-testid="mockup-import-prefix" style={MUTED}>
+                  {prefix}
+                </span>
+              ) : (
+                <span
+                  data-testid="mockup-import-prefix"
+                  title="Date is set by the server"
+                  style={{ ...MUTED, opacity: 0.6 }}
+                >
+                  YYYY-MM-DD-
+                </span>
+              )}
               <input
                 data-testid="mockup-import-slug"
                 aria-label={`Name for ${row.file.name}`}
@@ -119,8 +130,8 @@ function Row({
  */
 export default function MockupImportDialog({ project, files, onClose, onImported }: Props) {
   // `prefix` is the server's date (what the file will be saved with) once it
-  // answers, the browser's until then.
-  const { rows, acceptedCount, setSlug, submit, submitting, prefix } = useMockupImport({
+  // answers; Import waits for that answer, and a placeholder stands in if none comes.
+  const { rows, acceptedCount, setSlug, submit, submitting, prefix, datePending } = useMockupImport({
     project,
     files,
     onImported,
@@ -235,7 +246,7 @@ export default function MockupImportDialog({ project, files, onClose, onImported
             type="button"
             data-testid="mockup-import-confirm"
             onClick={() => void submit()}
-            disabled={acceptedCount === 0 || submitting}
+            disabled={acceptedCount === 0 || submitting || datePending}
             aria-busy={submitting}
             className="px-3 py-1.5 rounded-md text-[12.5px] font-semibold disabled:opacity-50"
             style={{

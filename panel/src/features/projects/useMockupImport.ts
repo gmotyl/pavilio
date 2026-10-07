@@ -51,10 +51,22 @@ function basename(name: string) {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
-/** `YYYY-MM-DD-` in local time — the prefix the server puts on every import. */
-export function todayPrefix(now = new Date()) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-`;
+/**
+ * The server's local date (`YYYY-MM-DD`), which it prefixes every import
+ * with; null when it cannot be had. The browser's own date is never a stand-in:
+ * from another time zone it names a file that will not be saved.
+ */
+async function fetchServerDate(project: string, signal?: AbortSignal): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(project)}/mockups/today`, {
+      signal,
+    });
+    if (!res.ok) return null;
+    const date = ((await res.json()) as { date?: unknown }).date;
+    return typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+  } catch {
+    return null;
+  }
 }
 
 const canPreview = () => typeof URL.createObjectURL === "function";
@@ -106,26 +118,22 @@ export function useMockupImport({
   // Synchronous twin of `submitting`: two clicks in one frame send one import.
   const submittingRef = useRef(false);
   const inspectAbort = useRef<AbortController | null>(null);
-  const [serverDate, setServerDate] = useState<string | null>(null);
+  // undefined while the first answer is pending, null if it never came.
+  const [serverDate, setServerDate] = useState<string | null | undefined>(undefined);
 
-  // The server prefixes imports with ITS local date; show that one, not the
-  // browser's (they differ when the panel is opened from another time zone).
-  // The browser's date is the placeholder until — or if never — it answers.
+  // The server prefixes imports with ITS local date. Import waits for it
+  // (briefly); without it the dialog shows no date rather than a guessed one,
+  // and the saved names still come back from the import itself.
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/projects/${encodeURIComponent(project)}/mockups/today`, {
-      signal: controller.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const date = ((await res.json()) as { date?: unknown }).date;
-        if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) setServerDate(date);
-      })
-      .catch(() => {});
+    void fetchServerDate(project, controller.signal).then((date) => {
+      if (!controller.signal.aborted) setServerDate(date);
+    });
     return () => controller.abort();
   }, [project]);
-  const [browserPrefix] = useState(() => todayPrefix());
-  const prefix = serverDate ? `${serverDate}-` : browserPrefix;
+  const datePending = serverDate === undefined;
+  /** `YYYY-MM-DD-`, or null when the server's date is not known. */
+  const prefix = serverDate ? `${serverDate}-` : null;
 
   // Thumbnails: made in an effect (not during render) so the cleanup that
   // revokes them pairs with exactly the URLs it created.
@@ -193,15 +201,27 @@ export function useMockupImport({
       .filter(({ r }) => !r.rejected);
     if (accepted.length === 0 || submittingRef.current) return;
     submittingRef.current = true;
-    // The warnings are advisory; once importing, the inspect upload is waste.
-    inspectAbort.current?.abort();
-    const body = new FormData();
-    for (const { r, slug } of accepted) {
-      body.append("files", r.file);
-      body.append("slugs", slug);
-    }
     setSubmitting(true);
     try {
+      // A dialog left open across the server's midnight shows yesterday's
+      // names: re-check, and stop for a second look when the date moved.
+      const latest = await fetchServerDate(project);
+      if (latest) {
+        setServerDate(latest);
+        if (serverDate && latest !== serverDate) {
+          alerts.warning("The date changed", {
+            detail: `Imports are now named ${latest}-… — check the names and import again.`,
+          });
+          return;
+        }
+      }
+      // The warnings are advisory; once importing, the inspect upload is waste.
+      inspectAbort.current?.abort();
+      const body = new FormData();
+      for (const { r, slug } of accepted) {
+        body.append("files", r.file);
+        body.append("slugs", slug);
+      }
       const res = await fetch(
         `/api/projects/${encodeURIComponent(project)}/mockups/import`,
         { method: "POST", body },
@@ -228,9 +248,9 @@ export function useMockupImport({
       submittingRef.current = false;
       setSubmitting(false);
     }
-  }, [base, slugs, project, onImported]);
+  }, [base, slugs, project, onImported, serverDate]);
 
-  return { rows, acceptedCount, setSlug, submit, submitting, prefix };
+  return { rows, acceptedCount, setSlug, submit, submitting, prefix, datePending };
 }
 
 /** Whether a drag carries files from the OS (not a panel row being moved). */
