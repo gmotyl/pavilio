@@ -155,6 +155,8 @@ describe("copying a mockup's content", () => {
       .filter((url) => url.startsWith("/api/files/read/pavilio/mockups/"));
     expect(reads.length).toBeGreaterThan(0);
     for (const url of reads) expect(url).not.toContain("meta=1");
+    // Capped: a huge existing svg is not read in full just for Copy content
+    for (const url of reads) expect(url).toContain("maxBytes=");
   });
 
   it("copies an html mockup's source", async () => {

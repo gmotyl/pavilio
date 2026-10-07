@@ -2,11 +2,7 @@ import { useLocation } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { useActiveFile } from "../explorer/useActiveFile";
 import MockupFrame from "../projects/MockupFrame";
-import {
-  isMockupFile,
-  isRasterImage,
-  metaReadUrl,
-} from "../projects/mockupFiles";
+import { isMockupFile, isRasterImage, viewerReadUrl } from "../projects/mockupFiles";
 import ViewerActions from "../projects/ViewerActions";
 import { relativeToWorkspace } from "../projects/relativeToWorkspace";
 import { useWorkspaceRoot } from "../projects/useWorkspaceRoot";
@@ -58,10 +54,12 @@ export default function MarkdownViewer() {
   const fetchContent = async () => {
     const path = filePath;
     // A raster image only needs its absolute path — the frame loads it from
-    // the raw route — so its bytes are never read as text. An SVG is text and
-    // is read in full so Copy content has its source.
+    // the raw route — so its bytes are never read as text. An HTML/SVG file is
+    // text and is read for Copy content, up to a size cap — except cross-root,
+    // where it is shown as source text and so is read in full.
     const url = buildReadUrl(path);
-    const res = await fetch(isRasterImage(path) ? metaReadUrl(url) : url);
+    const crossRootText = path.split("/")[0] === "_root" && !isRasterImage(path);
+    const res = await fetch(crossRootText ? url : viewerReadUrl(path, url));
     if (currentPath.current !== path) return;
     if (res.ok) {
       const data = await res.json();

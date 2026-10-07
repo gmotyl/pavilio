@@ -179,6 +179,8 @@ describe("MarkdownViewer html handling", () => {
         .mock.calls.map(([input]) => String(input))
         .filter((url) => url.startsWith("/api/files/read/"));
       for (const url of reads) expect(url).not.toContain("meta=1");
+      // …but capped, so a huge existing file is not read in full for Copy content
+      for (const url of reads) expect(url).toContain("maxBytes=");
       unmount();
       vi.unstubAllGlobals();
     }

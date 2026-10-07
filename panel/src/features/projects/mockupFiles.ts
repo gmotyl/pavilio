@@ -36,6 +36,24 @@ export const metaReadUrl = (readUrl: string) =>
   `${readUrl}${readUrl.includes("?") ? "&" : "?"}meta=1`;
 
 /**
+ * Largest HTML/SVG mockup whose source a viewer reads for Copy content. The
+ * frame renders from the raw route either way; above this the read returns
+ * no content (Copy content is off) instead of loading the whole file.
+ */
+export const MOCKUP_MAX_SOURCE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * The read for a file a viewer opens: meta-only for a raster mockup (its
+ * bytes are not text), capped at `MOCKUP_MAX_SOURCE_BYTES` for an HTML/SVG
+ * one, plain for everything else.
+ */
+export const viewerReadUrl = (path: string, readUrl: string) => {
+  if (isRasterImage(path)) return metaReadUrl(readUrl);
+  if (!isMockupFile(path)) return readUrl;
+  return `${readUrl}${readUrl.includes("?") ? "&" : "?"}maxBytes=${MOCKUP_MAX_SOURCE_BYTES}`;
+};
+
+/**
  * Import limits — mirrors the server's `MOCKUP_MAX_BYTES` so an oversized file
  * is rejected in the dialog instead of after its upload.
  */

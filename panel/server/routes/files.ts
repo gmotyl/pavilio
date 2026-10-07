@@ -62,8 +62,16 @@ router.get("/read/*path", (req, res) => {
   // it: viewers of image mockups need the path, and an image's bytes decoded
   // as utf-8 are garbage on the wire.
   const metaOnly = req.query.meta === "1";
-  const readContent = (path: string) =>
-    metaOnly ? "" : readFileSync(path, "utf-8");
+  // ?maxBytes=N — skip the (synchronous) read of a file larger than N and
+  // flag it `tooLarge`: mockup viewers only want the source for Copy content,
+  // and a huge SVG/HTML already in the workspace must not stall the server.
+  const maxBytesParam = typeof req.query.maxBytes === "string" ? req.query.maxBytes : "";
+  const maxBytes = /^\d+$/.test(maxBytesParam) ? Number(maxBytesParam) : null;
+  const read = (path: string): { content: string; tooLarge?: true } => {
+    if (metaOnly) return { content: "" };
+    if (maxBytes !== null && statSync(path).size > maxBytes) return { content: "", tooLarge: true };
+    return { content: readFileSync(path, "utf-8") };
+  };
 
   // ?root=<id> — explicit cross-root read (checked first, before legacy prefixes)
   const rootParam = typeof req.query.root === "string" ? req.query.root : "";
@@ -76,8 +84,7 @@ router.get("/read/*path", (req, res) => {
     if (!existsSync(candidate)) {
       return res.status(404).json({ error: "File not found" });
     }
-    const content = readContent(candidate);
-    return res.json({ path: relativePath, absolutePath: candidate, content });
+    return res.json({ path: relativePath, absolutePath: candidate, ...read(candidate) });
   }
 
   // Support _skills/ prefix for skill SKILL.md files
@@ -119,8 +126,7 @@ router.get("/read/*path", (req, res) => {
     return res.status(404).json({ error: "File not found" });
   }
 
-  const content = readContent(absolutePath);
-  res.json({ path: relativePath, absolutePath, content });
+  res.json({ path: relativePath, absolutePath, ...read(absolutePath) });
 });
 
 // Serve raw files (images, etc.) with correct MIME type
