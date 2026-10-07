@@ -302,6 +302,24 @@ vi.mock("../../realtime/useWebSocket", async () => {
   };
 });
 
+/**
+ * The realtime channel's listeners, captured so a test can stage a RETURN — the
+ * socket coming back — and with it the channel's catch-up (ADR 0017). Nothing
+ * else here publishes on it, and the real one would open a socket.
+ */
+const realtime = vi.hoisted(() => ({
+  listeners: new Set<(frame: Record<string, unknown>) => void>(),
+}));
+vi.mock("../../realtime/channel", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../realtime/channel")>()),
+  subscribeRealtime: (listener: (frame: Record<string, unknown>) => void) => {
+    realtime.listeners.add(listener);
+    return () => {
+      realtime.listeners.delete(listener);
+    };
+  },
+}));
+
 // xterm cannot render in jsdom, and the pool's sockets are not this suite's
 // subject — the cell header and the bar are.
 //
@@ -1790,5 +1808,261 @@ describe("the control's colour and icon, end to end", () => {
     await waitFor(() => expect(speakState("cell-b")).toBe("speaking"));
     expect(speakState("cell-a")).toBe("ready");
     expect(speakIcon("cell-a")).toBe("speaker");
+  });
+});
+
+/**
+ * A return: the socket comes back, the channel re-asks `/latest`, and the
+ * panel server hands back an answer it retained while the tab was away.
+ */
+async function caughtUp(sessionId: string, id: string, text: string): Promise<void> {
+  global.fetch = vi.fn(
+    async () =>
+      ({
+        ok: true,
+        json: async () => ({ utterances: [{ id, sessionId, text, at: Date.now() }] }),
+      }) as Response,
+  ) as unknown as typeof fetch;
+  await act(async () => {
+    for (const listener of [...realtime.listeners]) listener({ type: "realtime-reconnect" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await drain();
+  });
+}
+
+/** Whether the panel's one element is audibly mid-unit — nothing ended it. */
+const lastPlayed = (): string | undefined => played.at(-1);
+
+describe("autoplay — the queue across cells", () => {
+  it("a competing autoplay answer waits for the speaking one", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "A first. A second.");
+    expect(played).toEqual(["blob:A first."]);
+
+    // B answers while A is mid-answer: A is NOT cut off.
+    await emitUtterance("cell-b", "b1", "B answer.");
+    expect(played).toEqual(["blob:A first."]);
+    expect(speakState("cell-a")).toBe("speaking");
+    expect(speakState("cell-b")).toBe("ready");
+
+    await endCurrentUnit();
+    expect(played).toEqual(["blob:A first.", "blob:A second."]);
+    expect(speakState("cell-a")).toBe("speaking");
+
+    // A's last unit ends: A is heard, and B starts on its own.
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:B answer."));
+    expect(speakState("cell-a")).toBe("heard");
+    expect(speakState("cell-b")).toBe("speaking");
+  });
+
+  it("answers for two autoplay cells in the same pass are both spoken, in order", async () => {
+    // The one route that lands two answers in ONE pass of the host: the mount
+    // hydration, committing every retained answer at once. It is not a
+    // catch-up, so it is not absorbed by the record — only by the lock gate,
+    // and the user here has already clicked before it lands.
+    setStoredSpeechMode("cell-a", "autoplay");
+    setStoredSpeechMode("cell-b", "autoplay");
+    let serve: (utterances: unknown[]) => void = () => {};
+    global.fetch = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          serve = (utterances) =>
+            resolve({ ok: true, json: async () => ({ utterances }) } as Response);
+        }),
+    ) as unknown as typeof fetch;
+
+    await renderProjectSurface();
+    // A gesture: round C's cycle, leaving its mode where it was.
+    await click(testIdFor("bar-autoplay", "cell-c"));
+    await click(testIdFor("bar-autoplay", "cell-c"));
+    await click(testIdFor("bar-autoplay", "cell-c"));
+
+    await act(async () => {
+      serve([
+        { id: "a1", sessionId: "cell-a", text: "From A.", at: 1 },
+        { id: "b1", sessionId: "cell-b", text: "From B.", at: 2 },
+      ]);
+      await drain();
+    });
+    // Both were owed in that one pass; the older speaks first…
+    expect(played).toEqual(["blob:From A."]);
+
+    // …and the other is not dropped: it speaks when A ends.
+    await endCurrentUnit();
+    await waitFor(() => expect(played).toEqual(["blob:From A.", "blob:From B."]));
+    expect(speakState("cell-a")).toBe("heard");
+    expect(speakState("cell-b")).toBe("speaking");
+  });
+
+  it("answers queued behind the speaking cell play in arrival order", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+    await arm("cell-c");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    await emitUtterance("cell-b", "b1", "From B.");
+    await emitUtterance("cell-c", "c1", "From C.");
+    expect(played).toEqual(["blob:From A."]);
+
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From C."));
+    expect(played).toEqual(["blob:From A.", "blob:From B.", "blob:From C."]);
+  });
+
+  it("the speaking cell's next answer keeps its arrival place in the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "A one.");
+    // A answers again while it is speaking — held behind its own run — and only
+    // then does B answer. A's second answer arrived first, so it speaks first.
+    await emitUtterance("cell-a", "a2", "A two.");
+    await emitUtterance("cell-b", "b1", "From B.");
+    expect(played).toEqual(["blob:A one."]);
+
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:A two."));
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    expect(played).toEqual(["blob:A one.", "blob:A two.", "blob:From B."]);
+  });
+
+  it("a manual play barges in and the queue resumes after it", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "A first. A second.");
+    await emitUtterance("cell-b", "b1", "From B.");
+    // C is not in autoplay: its answer waits for a click, and gets one.
+    await emitUtterance("cell-c", "c1", "From C.");
+    expect(played).toEqual(["blob:A first."]);
+
+    await click("terminal-cell-speak-cell-c");
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From C."));
+    // A was cut short, so it is unheard — and the queue did NOT jump in.
+    expect(speakState("cell-a")).toBe("ready");
+    expect(speakState("cell-c")).toBe("speaking");
+    expect(speakState("cell-b")).toBe("ready");
+
+    // C ends: the queue resumes with B.
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    expect(speakState("cell-c")).toBe("heard");
+
+    // B ends, and A — interrupted, not re-queued — stays silent and unheard.
+    const before = played.length;
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-b")).toBe("heard"));
+    expect(played).toHaveLength(before);
+    expect(speakState("cell-a")).toBe("ready");
+  });
+
+  it("a queued answer heard by hand before its turn is skipped", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    await emitUtterance("cell-b", "b1", "From B.");
+
+    // The user plays B themselves, all the way through.
+    await click("terminal-cell-speak-cell-b");
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-b")).toBe("heard"));
+
+    // Its queued turn is spent: nothing replays it.
+    expect(played).toEqual(["blob:From A.", "blob:From B."]);
+  });
+
+  it("pause holds the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "A first. A second.");
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("paused");
+
+    await emitUtterance("cell-b", "b1", "From B.");
+    // The paused run has not ended, so B waits — however long the pause.
+    expect(played).toEqual(["blob:A first."]);
+    expect(speakState("cell-a")).toBe("paused");
+    expect(speakState("cell-b")).toBe("ready");
+
+    // Resumed and played out: then B.
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("speaking");
+    await endCurrentUnit();
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    expect(speakState("cell-a")).toBe("heard");
+  });
+
+  it("leaving autoplay drops a queued answer", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    await emitUtterance("cell-b", "b1", "From B.");
+
+    // autoplay → off.
+    await click(testIdFor("bar-autoplay", "cell-b"));
+    expect(armed("cell-b")).toBe("off");
+
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
+    expect(played).toEqual(["blob:From A."]);
+    expect(speakState("cell-b")).toBe("ready");
+  });
+
+  it("an answer for an off or armed cell never enters the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    // B only armed: off → armed.
+    await click(testIdFor("bar-autoplay", "cell-b"));
+    expect(armed("cell-b")).toBe("armed");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    await emitUtterance("cell-b", "b1", "From B.");
+    await emitUtterance("cell-c", "c1", "From C.");
+
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
+    expect(played).toEqual(["blob:From A."]);
+    expect(speakState("cell-b")).toBe("ready");
+    expect(speakState("cell-c")).toBe("ready");
+  });
+
+  it("catch-up answers never enter the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    expect(speakState("cell-a")).toBe("speaking");
+
+    // B's answer is RECOVERED after a reconnect, not delivered live: shown,
+    // never spoken (ADR 0017) — not now, and not after A.
+    await caughtUp("cell-b", "b1", "Recovered for B.");
+    expect(speakState("cell-b")).toBe("ready");
+
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
+    expect(played).toEqual(["blob:From A."]);
+    expect(speakState("cell-b")).toBe("ready");
   });
 });

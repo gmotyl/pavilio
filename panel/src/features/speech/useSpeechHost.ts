@@ -53,6 +53,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { alerts } from "../alerts/store";
+import { createAutoplayQueue, type AutoplayQueue } from "./autoplayQueue";
 import { prepare } from "./prepare";
 import { synthesizeSpeech } from "./synth";
 import { createSynthesisWindow, type SynthesisWindow } from "./synthesisWindow";
@@ -224,6 +225,19 @@ export function useSpeechHost(): SpeechHost {
    * arming the cell again reaches it.
    */
   const preloadedRef = useRef<Set<string>>(new Set());
+  /**
+   * The answers autoplay cells are owed, across the grid, in arrival order —
+   * see `autoplayQueue.ts`. Per host for the same reason as the window: there
+   * is one host per panel, and one element for it to speak through.
+   */
+  const [autoplayQueue] = useState<AutoplayQueue>(createAutoplayQueue);
+  /**
+   * Bumped every time a run ends, however it ended: the autoplay queue's turn
+   * signal. A ref would not do — the queue must be asked AFTER the ending's
+   * own state (the cell marked heard, its backlog advanced) has rendered, and
+   * a state update lands in the same batch as `finishUtterance`.
+   */
+  const [runEnds, setRunEnds] = useState(0);
   const [preparingSessionIds, setPreparingSessionIds] =
     useState<ReadonlySet<string>>(NOTHING_PREPARING);
 
@@ -636,6 +650,10 @@ export function useSpeechHost(): SpeechHost {
 
       function finish(ended: Run): void {
         if (runRef.current === ended) runRef.current = null;
+        // Whatever the ending, the autoplay queue gets to ask whether it is
+        // its turn. A run another one superseded asks too, and is told no:
+        // the run that replaced it holds the element.
+        setRunEnds((count) => count + 1);
 
         // `heard` means the final unit played to its end, and nothing else.
         // Superseded, stopped, refused, failed — every ending that is not the
@@ -1122,11 +1140,34 @@ export function useSpeechHost(): SpeechHost {
   );
 
   /**
-   * Each autoplay cell with the utterance under its cursor, as one string so
-   * the effect below runs when any of them moves and not on every render.
+   * What each autoplay cell is owed by autoplay: the utterance under its cursor
+   * and, while the cursor is on `current`, the answers waiting behind it — in
+   * the order the cell would play them. The backlog is in here so that an
+   * answer arriving for the SPEAKING cell takes its turn in the autoplay queue
+   * at the moment it arrived, not at the moment its own run ended: otherwise an
+   * answer from another cell that landed later would be spoken first.
    */
-  const autoplayUnder = autoplaySessionIds
-    .map((sessionId) => `${sessionId}\u0000${utteranceFor(sessionId)?.id ?? ""}`)
+  const autoplayOwed = useCallback(
+    (sessionId: string): Utterance[] => {
+      const queue = queueFor(sessionId);
+      const under = utteranceUnderCursor(queue);
+      if (!under) return [];
+      return queue.cursor === 0 ? [under, ...queue.pending] : [under];
+    },
+    [queueFor],
+  );
+
+  /**
+   * Each autoplay cell with what it is owed, as one string so the effect below
+   * runs when any of them moves and not on every render.
+   */
+  const autoplayKey = autoplaySessionIds
+    .map(
+      (sessionId) =>
+        `${sessionId}\u0000${autoplayOwed(sessionId)
+          .map((utterance) => utterance.id)
+          .join("\u0000")}`,
+    )
     .join("\u0001");
 
   useEffect(() => {
@@ -1143,36 +1184,76 @@ export function useSpeechHost(): SpeechHost {
         continue;
       }
       const remembered = new Set<string>();
-      const under = utteranceFor(sessionId);
-      if (under) remembered.add(under.id);
+      for (const owed of autoplayOwed(sessionId)) remembered.add(owed.id);
       after.set(sessionId, remembered);
     }
+    // A cell that left autoplay gives up its turns: its answers stay unheard,
+    // waiting for a click like any other cell's.
+    for (const sessionId of before.keys()) {
+      if (!after.has(sessionId)) autoplayQueue.dropSession(sessionId);
+    }
     autoplayedRef.current = after;
-    // `utteranceFor` deliberately not a dependency: this must run when the set
+    // `autoplayOwed` deliberately not a dependency: this must run when the set
     // of autoplay cells changes, and only then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoplaySessionIds]);
 
   useEffect(() => {
-    // Every autoplay cell whose cursor sits on an utterance autoplay has not
-    // dealt with yet. Each is recorded; with no gesture yet they are absorbed —
-    // the browser would refuse anyway, and a tab that has just hydrated
-    // `/api/speech/latest` must not start talking on its own. Otherwise the
-    // last one is spoken: one `<audio>` element, so two starts in one pass
-    // would only cut each other off. (A queue across cells is a later task.)
-    let toSpeak: string | null = null;
+    // 1. Enqueue. Every utterance an autoplay cell is owed that autoplay has
+    //    not dealt with yet is recorded, and — with a gesture in hand — queued
+    //    for its turn, oldest first across the cells. With no gesture yet it is
+    //    ABSORBED instead: the browser would refuse anyway, and a tab that has
+    //    just hydrated `/api/speech/latest` must not start talking on its own.
+    //    A catch-up's recovered answers never get this far: the channel has
+    //    already recorded them (ADR 0017), so they are shown, never queued.
+    const arrived: Utterance[] = [];
     for (const sessionId of autoplaySessionIds) {
       const record = autoplayedRef.current.get(sessionId);
-      const under = utteranceFor(sessionId);
-      if (!record || !under || record.has(under.id)) continue;
-      rememberAutoplayed(record, under.id);
-      if (unlocked) toSpeak = sessionId;
+      if (!record) continue;
+      for (const owed of autoplayOwed(sessionId)) {
+        if (record.has(owed.id)) continue;
+        rememberAutoplayed(record, owed.id);
+        if (unlocked) arrived.push(owed);
+      }
     }
-    if (toSpeak) speak(toSpeak);
-    // Keyed on `autoplayUnder`, which already folds in `utteranceFor`'s answer
-    // for every autoplay cell.
+    // Stable, so answers that share a stamp keep the order they were found in.
+    arrived.sort((left, right) => left.at - right.at);
+    for (const { sessionId, id } of arrived) {
+      autoplayQueue.enqueue({ sessionId, utteranceId: id });
+    }
+
+    // 2. Dequeue — only between runs. A run that is still going, PAUSED
+    //    included (a pause does not end it), keeps the element; the queue
+    //    waits until it ends or a click replaces it. That is also what makes a
+    //    manual play a barge-in rather than a queue jump: it holds the element
+    //    until its own end, and only then does the queue resume.
+    if (runRef.current) return;
+    if (!unlocked) {
+      // No gesture: the head is absorbed exactly as an arrival is — recorded
+      // already, and no audio. Unreachable while `unlocked` only ever goes
+      // false → true, but the gate is the browser's, not this queue's.
+      while (autoplayQueue.next(() => true));
+      return;
+    }
+
+    // The oldest entry still worth speaking: its cell still in autoplay, the
+    // answer still under the cell's cursor (a newer arrival or a transport
+    // press moved it on), and not heard by hand in the meantime. Anything else
+    // is stale and dropped on the way.
+    const turn = autoplayQueue.next(
+      ({ sessionId, utteranceId }) =>
+        speechModeOf(sessionId) === "autoplay" &&
+        utteranceFor(sessionId)?.id === utteranceId &&
+        !heardFor(sessionId).has(utteranceId),
+    );
+    if (!turn) return;
+    const utterance = utteranceFor(turn.sessionId);
+    if (utterance) speakUtterance(turn.sessionId, utterance);
+    // Keyed on `autoplayKey`, which already folds in what every autoplay cell
+    // is owed, and on `runEnds`, which is the queue's turn signal. The reads
+    // above are this render's, which is the render either of them moved in.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoplayUnder, speak, unlocked]);
+  }, [autoplayKey, runEnds, speakUtterance, unlocked]);
 
   return useMemo(
     () => ({
