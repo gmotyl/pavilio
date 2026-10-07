@@ -30,8 +30,8 @@ function stubFetch({
   serverDates = ["2026-10-07"],
 }: {
   externalCounts?: Record<string, number>;
-  /** What `/mockups/today` answers, call by call; the last one repeats. */
-  serverDates?: string[];
+  /** What `/mockups/today` answers, call by call; the last one repeats. null fails. */
+  serverDates?: (string | null)[];
   importResult?: (names: string[]) => Array<{
     name: string;
     relativePath: string;
@@ -45,6 +45,7 @@ function stubFetch({
     const url = String(input);
     if (url.endsWith("/mockups/today")) {
       const date = serverDates[Math.min(todayCalls++, serverDates.length - 1)];
+      if (date === null) return { ok: false, json: async () => ({}) } as Response;
       return { ok: true, json: async () => ({ date }) } as Response;
     }
     const body = init?.body as FormData;
@@ -369,6 +370,28 @@ describe("MockupImportDialog", () => {
 
     await clickConfirm();
     expect(calls.importBodies).toHaveLength(1);
+  });
+
+  it("drops a shown date to the placeholder when the confirm-time re-check fails", async () => {
+    // The shown date can no longer be vouched for (the server's midnight may
+    // have passed), so it is not left on screen as if it were the saved name.
+    const calls = stubFetch({
+      serverDates: ["2026-10-07", null],
+      importResult: (names) =>
+        names.map((name) => ({ name, relativePath: `pavilio/mockups/2026-10-08-${name}`, ok: true })),
+    });
+    const { onImported } = renderDialog([makeFile("a.png")]);
+    await waitFor(() =>
+      expect(screen.getByTestId("mockup-import-prefix").textContent).toBe("2026-10-07-"),
+    );
+
+    await clickConfirm();
+    const prefix = screen.getByTestId("mockup-import-prefix");
+    expect(prefix.textContent).toBe("YYYY-MM-DD-");
+    expect(prefix.getAttribute("title")).toBe("Date is set by the server");
+    // The import still goes ahead; the saved names come from its answer.
+    expect(calls.importBodies).toHaveLength(1);
+    expect(onImported).toHaveBeenCalledWith(["pavilio/mockups/2026-10-08-a.png"]);
   });
 
   it("sends one import however fast confirm is clicked", async () => {

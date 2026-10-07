@@ -204,16 +204,17 @@ export function useMockupImport({
     setSubmitting(true);
     try {
       // A dialog left open across the server's midnight shows yesterday's
-      // names: re-check, and stop for a second look when the date moved.
+      // names: re-check, and stop for a second look when the date moved. A
+      // failed re-check drops the shown date to the placeholder — it can no
+      // longer be vouched for — and the import goes ahead, its saved names
+      // coming back in the answer, as when the date never arrived at all.
       const latest = await fetchServerDate(project);
-      if (latest) {
-        setServerDate(latest);
-        if (serverDate && latest !== serverDate) {
-          alerts.warning("The date changed", {
-            detail: `Imports are now named ${latest}-… — check the names and import again.`,
-          });
-          return;
-        }
+      setServerDate(latest);
+      if (latest && serverDate && latest !== serverDate) {
+        alerts.warning("The date changed", {
+          detail: `Imports are now named ${latest}-… — check the names and import again.`,
+        });
+        return;
       }
       // The warnings are advisory; once importing, the inspect upload is waste.
       inspectAbort.current?.abort();
