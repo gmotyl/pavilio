@@ -64,9 +64,20 @@ function resolveRelativeHref(href: string, basePath: string): string | null {
  * selects that root with `?root=<id>`, as the read route does.
  */
 function rawFileUrl(resolved: string): string {
-  const parts = resolved.split("/");
+  // The href may carry its own query and fragment: `root` joins that query,
+  // and the fragment stays last.
+  const hashAt = resolved.indexOf("#");
+  const fragment = hashAt >= 0 ? resolved.slice(hashAt) : "";
+  const beforeHash = hashAt >= 0 ? resolved.slice(0, hashAt) : resolved;
+  const queryAt = beforeHash.indexOf("?");
+  const path = queryAt >= 0 ? beforeHash.slice(0, queryAt) : beforeHash;
+  const query = queryAt >= 0 ? beforeHash.slice(queryAt + 1) : "";
+
+  const parts = path.split("/");
   if (parts[0] === "_root" && parts[1]) {
-    return `/api/files/raw/${parts.slice(2).join("/")}?root=${encodeURIComponent(parts[1])}`;
+    const params = new URLSearchParams(query);
+    params.set("root", parts[1]);
+    return `/api/files/raw/${parts.slice(2).join("/")}?${params.toString()}${fragment}`;
   }
   return `/api/files/raw/${resolved}`;
 }

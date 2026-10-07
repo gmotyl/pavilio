@@ -145,4 +145,26 @@ describe("MarkdownRenderer links that ask for another target", () => {
       "/api/files/raw/memo/img/s.png?root=skills",
     );
   });
+
+  it("merges the root selector into a cross-root href's own query and keeps its fragment", () => {
+    const { container } = renderMd(
+      [
+        "![shot](./img/s.png?v=1)",
+        `<a href="./assets/x.svg?v=2#frag" download>dl</a>`,
+        `<a href="./assets/y.svg#top" download>frag</a>`,
+      ].join("\n\n"),
+      "_root/skills/memo/SKILL.md",
+    );
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(
+      "/api/files/raw/memo/img/s.png?v=1&root=skills",
+    );
+    expect(screen.getByRole("link", { name: "dl" })).toHaveAttribute(
+      "href",
+      "/api/files/raw/memo/assets/x.svg?v=2&root=skills#frag",
+    );
+    expect(screen.getByRole("link", { name: "frag" })).toHaveAttribute(
+      "href",
+      "/api/files/raw/memo/assets/y.svg?root=skills#top",
+    );
+  });
 });
