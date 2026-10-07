@@ -170,7 +170,15 @@ interface Run {
   outcome: RunOutcome;
 }
 
-export function useSpeechHost(): SpeechHost {
+export interface SpeechHostOptions {
+  /**
+   * Every speakable answer the channel takes up; `recovered` for one read off
+   * `/latest` rather than a live frame. See `UtteranceChannelOptions.onAnswer`.
+   */
+  onAnswer?: (utterance: Utterance, recovered: boolean) => void;
+}
+
+export function useSpeechHost({ onAnswer }: SpeechHostOptions = {}): SpeechHost {
   const runRef = useRef<Run | null>(null);
   /**
    * The utterance the player was last handed. Not `runRef`, which is nulled the
@@ -393,6 +401,7 @@ export function useSpeechHost(): SpeechHost {
     preparingSessionIds,
     // A catch-up after a reconnect is SHOWN, never spoken: see ADR 0017.
     recordAutoplayed,
+    onAnswer,
   });
   const {
     autoplaySessionIds,

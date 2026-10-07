@@ -105,6 +105,9 @@ function serveLatest(utterances: Utterance[]) {
  */
 let recordAutoplayed = vi.fn();
 
+/** The host's answer listener: live frames and recoveries, told apart. */
+let onAnswer = vi.fn();
+
 /** The playback/synthesis inputs, as of whatever the variables now say. */
 const options = () => ({
   speakingSessionId: speaking,
@@ -112,6 +115,7 @@ const options = () => ({
   waitingForSynthesis: waiting,
   preparingSessionIds: preparing,
   recordAutoplayed,
+  onAnswer,
 });
 
 /** Renders the hook and lets the mount fetch settle, so no assertion races hydration. */
@@ -187,6 +191,7 @@ beforeEach(() => {
   waiting = false;
   preparing = new Set<string>();
   recordAutoplayed = vi.fn();
+  onAnswer = vi.fn();
   realtimeListeners.clear();
   serveLatest([]);
 });
@@ -1502,5 +1507,38 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
     expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+});
+
+describe("useUtteranceChannel — answers handed on", () => {
+  it("a live frame is handed on once; recoveries are marked recovered", async () => {
+    serveLatest([utterance("cell-a", "a1")]);
+    const { rerender } = await renderChannel();
+    // The mount hydration is a recovery, not news.
+    await waitFor(() => expect(onAnswer).toHaveBeenCalledWith(utterance("cell-a", "a1"), true));
+
+    lastMessage = frame(utterance("cell-b", "b1", 2_000));
+    await act(async () => {
+      rerender();
+    });
+    expect(onAnswer).toHaveBeenLastCalledWith(utterance("cell-b", "b1", 2_000), false);
+
+    // A re-delivery of a held answer and an answer with nothing to say are not news.
+    onAnswer.mockClear();
+    lastMessage = { ...frame(utterance("cell-b", "b1", 2_000)) };
+    await act(async () => {
+      rerender();
+    });
+    lastMessage = frame(codeOnly("cell-b", "b2", 3_000));
+    await act(async () => {
+      rerender();
+    });
+    expect(onAnswer).not.toHaveBeenCalled();
+
+    // A catch-up's answer is recovered.
+    serveLatest([utterance("cell-c", "c1", 4_000)]);
+    await reconnected();
+    expect(onAnswer).toHaveBeenCalledWith(utterance("cell-c", "c1", 4_000), true);
+    expect(onAnswer).toHaveBeenCalledTimes(1);
   });
 });

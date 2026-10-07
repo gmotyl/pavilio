@@ -17,12 +17,17 @@
  * a surface that forgets it leaves every cell `empty`, and its suite says so.
  * Letting the grid reach into this context itself would delete that signal.
  */
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
+import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
 import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
+import { getSessions } from "../terminal/sessionStore";
+import { useTerminalDrawerVisible } from "../terminal/useTerminalDrawer";
+import { readTerminalFocus } from "../terminal/useTerminalSessions";
+import { alertOnAnswer, focusedVisibleSessionIdFor } from "./answerAlert";
 import { useMediaSessionTransport } from "./useMediaSessionTransport";
 import { useSpeechHost } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
-import type { GridSpeech } from "./types";
+import type { GridSpeech, Utterance } from "./types";
 
 const SpeechHostContext = createContext<GridSpeech | null>(null);
 
@@ -30,9 +35,54 @@ interface Props {
   children: ReactNode;
 }
 
+/** What the answer alert reads off the router, kept current by {@link RouterBridge}. */
+interface RouterView {
+  navigate: ((path: string) => void) | null;
+  pathname: string;
+}
+
+/**
+ * Mirrors the router's navigate and pathname into the provider's ref. A child
+ * rather than hooks in the provider itself, because the provider is also
+ * mounted without a router — a surface's own suite — and the router hooks throw
+ * there; this is only rendered when a router is above.
+ */
+function RouterBridge({ view }: { view: { current: RouterView } }): null {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  // In an effect, so a render React throws away never runs the mirror ahead.
+  useEffect(() => {
+    view.current = { navigate, pathname };
+  }, [navigate, pathname, view]);
+  return null;
+}
+
 /** Mount once, above every terminals surface. See `App.tsx`. */
 export function SpeechHostProvider({ children }: Props) {
-  const speech = useSpeechHost();
+  // The answer alert (see `answerAlert.ts`): raised for a live arrival, read at
+  // the moment it lands — what is on screen then, the session list then.
+  const inRouter = useInRouterContext();
+  const routerView = useRef<RouterView>({ navigate: null, pathname: "" });
+  const drawerVisible = useTerminalDrawerVisible();
+  const drawerVisibleRef = useRef(drawerVisible);
+  useEffect(() => {
+    drawerVisibleRef.current = drawerVisible;
+  }, [drawerVisible]);
+  const onAnswer = useCallback((utterance: Utterance, recovered: boolean) => {
+    alertOnAnswer(utterance, recovered, {
+      sessionOf: (sessionId) => getSessions().find((session) => session.id === sessionId),
+      focusedVisibleSessionId: () =>
+        focusedVisibleSessionIdFor(
+          routerView.current.pathname,
+          drawerVisibleRef.current,
+          readTerminalFocus,
+        ),
+      documentVisible: () => document.visibilityState === "visible",
+      navigate: (path) => routerView.current.navigate?.(path),
+    });
+  }, []);
+
+  const speech = useSpeechHost({ onAnswer });
 
   // Here for the same reason the host is: `navigator.mediaSession` is one state
   // machine per DOCUMENT, so a transport mounted per surface would have the two
@@ -56,7 +106,10 @@ export function SpeechHostProvider({ children }: Props) {
   useSpeechKeys(speech, dismissAttentionOnArrival);
 
   return (
-    <SpeechHostContext.Provider value={speech}>{children}</SpeechHostContext.Provider>
+    <SpeechHostContext.Provider value={speech}>
+      {inRouter && <RouterBridge view={routerView} />}
+      {children}
+    </SpeechHostContext.Provider>
   );
 }
 

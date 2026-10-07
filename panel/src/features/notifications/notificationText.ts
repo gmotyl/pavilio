@@ -68,7 +68,11 @@ function truncate(text: string): string {
   return `${cut.trimEnd()}${ELLIPSIS}`;
 }
 
-function previewOf(utterance: string): string {
+/**
+ * An answer reduced to one plain-text line for a preview: the system
+ * notification's second line, and the in-page answer alert's detail.
+ */
+export function answerPreview(utterance: string): string {
   const plain = replaceSentinels(
     removeMarkers(stripToSpeakableText(utterance), { keepLiteralAsterisks: true }),
   )
@@ -77,14 +81,21 @@ function previewOf(utterance: string): string {
   return truncate(plain);
 }
 
+/**
+ * What a terminal is called on a notification or an alert: its published
+ * title, else its session name. Collapsed so a multi-line title stays one line.
+ */
+export function terminalLabel(session: { name: string; title?: string }): string {
+  return (session.title?.trim() || session.name).replace(/\s+/g, " ");
+}
+
 export function notificationText(input: {
   session: { id: string; name: string; project: string; title?: string };
   latestUtterance?: string;
 }): NotificationCopy {
   const { session, latestUtterance } = input;
-  // Collapsed so a multi-line title cannot push the preview off line two.
-  const heading = (session.title?.trim() || session.name).replace(/\s+/g, " ");
-  const preview = latestUtterance ? previewOf(latestUtterance) : "";
+  const heading = terminalLabel(session);
+  const preview = latestUtterance ? answerPreview(latestUtterance) : "";
 
   return {
     title: session.project,

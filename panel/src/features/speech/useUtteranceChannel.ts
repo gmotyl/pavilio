@@ -300,6 +300,14 @@ export interface UtteranceChannelOptions {
    * so the pulse, the pip and the unread count are all unaffected. See ADR 0017.
    */
   recordAutoplayed: (sessionId: string, utteranceId: string) => void;
+  /**
+   * Told about every speakable answer the channel takes up, once, outside any
+   * state updater. `recovered` is false only for a live `speech-utterance`
+   * frame; anything read off `/latest` — the mount hydration and a reconnect's
+   * catch-up alike — is recovered. The same line ADR 0017 draws for autoplay:
+   * a recovered answer is shown, never announced. The answer alert hangs off it.
+   */
+  onAnswer?: (utterance: Utterance, recovered: boolean) => void;
 }
 
 /**
@@ -452,6 +460,7 @@ export function useUtteranceChannel({
   waitingForSynthesis,
   preparingSessionIds,
   recordAutoplayed,
+  onAnswer,
 }: UtteranceChannelOptions): Channel {
   const { lastMessage } = useWebSocket();
   const [sessions, setSessions] = useState<Map<string, SessionSpeech>>(() => new Map());
@@ -499,6 +508,11 @@ export function useUtteranceChannel({
   useEffect(() => {
     recordAutoplayedRef.current = recordAutoplayed;
   }, [recordAutoplayed]);
+  /** `onAnswer`, mirrored so neither arrival effect re-runs when it changes identity. */
+  const onAnswerRef = useRef(onAnswer);
+  useEffect(() => {
+    onAnswerRef.current = onAnswer;
+  }, [onAnswer]);
   // Read once at mount, so a remount restores every cell's mode (DECISION 12).
   const [speechModes, setSpeechModes] =
     useState<Readonly<Record<string, SpeechMode>>>(getStoredSpeechModes);
@@ -626,6 +640,10 @@ export function useUtteranceChannel({
       return next;
     });
 
+    for (const { utterance, speakable } of taken) {
+      if (speakable) onAnswerRef.current?.(utterance, true);
+    }
+
     // Only a CATCH-UP is absorbed, never the mount fetch. A tab that has just
     // loaded has had no gesture either, and the host already absorbs a hydrated
     // arrival there for that reason; recording one from here would only clobber
@@ -642,6 +660,17 @@ export function useUtteranceChannel({
 
     const utterance = toUtterance(lastMessage);
     if (!utterance) return;
+
+    // Decided against the rendered state, outside the updater, which has to
+    // stay pure: the same two gates the updater applies — not a re-delivery,
+    // and something to say.
+    const held = sessionsRef.current.get(utterance.sessionId);
+    if (
+      !(held && queueHolds(held.queue, utterance.id)) &&
+      hasSomethingToSay(utterance.text, advanceLanguage(held?.language, utterance.text).lang)
+    ) {
+      onAnswerRef.current?.(utterance, false);
+    }
 
     setSessions((current) => {
       const existing = current.get(utterance.sessionId);
