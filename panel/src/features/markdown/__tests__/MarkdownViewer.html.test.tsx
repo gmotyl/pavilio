@@ -159,6 +159,31 @@ describe("MarkdownViewer html handling", () => {
     expect(screen.getAllByTestId("markdown-viewer-copy-path")).toHaveLength(1);
   });
 
+  it("view route copies an html or svg mockup's source", async () => {
+    for (const [path, source] of [
+      [MOCKUP_PATH, MOCKUP_SOURCE],
+      ["pavilio/mockups/icon.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>'],
+    ]) {
+      stubRead(source, `/root/git/prv/projects/projects/${path}`);
+      const writeText = spyClipboard();
+      const { unmount } = renderViewer(path);
+
+      const button = await screen.findByTestId("markdown-viewer-copy-content");
+      await waitFor(() => expect(button).not.toBeDisabled());
+      fireEvent.click(button);
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      expect(writeText).toHaveBeenLastCalledWith(source);
+      // The svg is read as text: no meta-only read
+      const reads = vi
+        .mocked(fetch)
+        .mock.calls.map(([input]) => String(input))
+        .filter((url) => url.startsWith("/api/files/read/"));
+      for (const url of reads) expect(url).not.toContain("meta=1");
+      unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("view route renders an uppercase svg through img", async () => {
     stubRead("", "/root/git/prv/projects/projects/pavilio/mockups/ICON.SVG");
     renderViewer("pavilio/mockups/ICON.SVG");

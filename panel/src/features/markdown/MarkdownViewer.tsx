@@ -4,7 +4,7 @@ import { useActiveFile } from "../explorer/useActiveFile";
 import MockupFrame from "../projects/MockupFrame";
 import {
   isMockupFile,
-  isMockupImage,
+  isRasterImage,
   metaReadUrl,
 } from "../projects/mockupFiles";
 import ViewerActions from "../projects/ViewerActions";
@@ -51,10 +51,11 @@ export default function MarkdownViewer() {
   const { lastMessage } = useWebSocket();
 
   const fetchContent = async () => {
-    // An image only needs its absolute path — the frame loads it from the raw
-    // route — so its bytes are never read as text.
+    // A raster image only needs its absolute path — the frame loads it from
+    // the raw route — so its bytes are never read as text. An SVG is text and
+    // is read in full so Copy content has its source.
     const url = buildReadUrl(filePath);
-    const res = await fetch(isMockupImage(filePath) ? metaReadUrl(url) : url);
+    const res = await fetch(isRasterImage(filePath) ? metaReadUrl(url) : url);
     if (res.ok) {
       const data = await res.json();
       setContent(data.content);
@@ -135,6 +136,7 @@ export default function MarkdownViewer() {
         <MockupFrame
           filePath={filePath}
           absolutePath={absolutePath}
+          content={content}
           testIdPrefix="markdown-viewer"
         />
       </div>

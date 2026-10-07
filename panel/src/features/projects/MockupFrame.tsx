@@ -2,7 +2,7 @@ import { useState } from "react";
 import ViewerActions from "./ViewerActions";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
-import { isMockupImage } from "./mockupFiles";
+import { isMockupImage, isRasterImage } from "./mockupFiles";
 
 /**
  * The widths the viewer can pin the frame to. `full` fills the pane; the
@@ -33,6 +33,11 @@ export interface MockupFrameProps {
   /** Index-relative path, e.g. "pavilio/mockups/x.html". Drives the iframe src. */
   filePath: string;
   absolutePath: string;
+  /**
+   * The file's source, for Copy content. Only a text mockup (HTML, SVG) has
+   * one; a raster image's is ignored. Null/undefined while it is loading.
+   */
+  content?: string | null;
   testIdPrefix?: string;
 }
 
@@ -84,6 +89,7 @@ const BUTTON_CLASS =
 export function MockupFrame({
   filePath,
   absolutePath,
+  content,
   testIdPrefix = "mockup-viewer",
 }: MockupFrameProps) {
   // The selected entry itself, not its id: the width then needs no lookup and
@@ -173,8 +179,8 @@ export function MockupFrame({
                 ? null
                 : mockupLink(relativePath, filePath, project)
           }
-          // No `content`: copy content stays disabled on every mockup, which a
-          // raster image needs — its bytes are not text.
+          // A raster image's bytes are not text: copy content stays disabled.
+          content={isRasterImage(filePath) ? null : content}
           testIdPrefix={testIdPrefix}
         />
       </div>

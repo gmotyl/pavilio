@@ -123,6 +123,25 @@ describe("MockupFrame with an image mockup", () => {
   });
 });
 
+describe("MockupFrame copy content", () => {
+  it("copies an svg mockup's text", async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+    render(<MockupFrame filePath={SVG_PATH} absolutePath={SVG_ABSOLUTE} content={svg} />);
+
+    const button = screen.getByTestId("mockup-viewer-copy-content");
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText).toHaveBeenLastCalledWith(svg);
+  });
+
+  it("never offers a raster's bytes as content", () => {
+    render(<MockupFrame filePath={PNG_PATH} absolutePath={PNG_ABSOLUTE} content="\u0089PNG" />);
+
+    expect(screen.getByTestId("mockup-viewer-copy-content")).toBeDisabled();
+  });
+});
+
 describe("MockupFrame copy link", () => {
   const ROOT = "/root/git/prv/projects/projects";
 

@@ -6,16 +6,17 @@ import {
   clearLastSectionFile,
   writeLastSectionFile,
 } from "../shell/lastPath";
-import { isMockupImage, metaReadUrl } from "./mockupFiles";
+import { isRasterImage, metaReadUrl } from "./mockupFiles";
 import { SPECIAL_SECTIONS } from "./sections";
 
 /**
- * The read for an open file. An image mockup only needs its absolute path (the
+ * The read for an open file. A raster mockup only needs its absolute path (the
  * frame loads it from the raw route), so its bytes are never decoded as text.
+ * An SVG is text and is read in full, so Copy content has its source.
  */
 const readUrl = (path: string) => {
   const url = `/api/files/read/${path}`;
-  return isMockupImage(path) ? metaReadUrl(url) : url;
+  return isRasterImage(path) ? metaReadUrl(url) : url;
 };
 
 interface Options {

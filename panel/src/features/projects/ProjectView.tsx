@@ -411,6 +411,9 @@ export default function ProjectView() {
                 <MockupFrame
                   filePath={selectedFile}
                   absolutePath={fileViewer.absolutePath}
+                  // Withheld while a switch is in flight: `content` still
+                  // holds the previous file's source.
+                  content={fileViewer.loading ? null : fileViewer.content}
                 />
               ) : (
                 <FileViewer
