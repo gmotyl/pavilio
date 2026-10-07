@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
-import { useFileIndex } from "../explorer/useFileIndex";
+import { refreshFileIndex, useFileIndex } from "../explorer/useFileIndex";
 import { useGitViewMode } from "../git/useGitViewMode";
 import RepoBlock from "./RepoBlock";
 import ProjectSearchBar from "./ProjectSearchBar";
@@ -13,6 +13,9 @@ import FileListSidebar from "./FileListSidebar";
 import MockupFrame from "./MockupFrame";
 import { isMockupFile } from "./mockupFiles";
 import MockupsEmptyState from "./MockupsEmptyState";
+import MockupImportButton from "./MockupImportButton";
+import MockupImportDialog from "./MockupImportDialog";
+import { useMockupDrop } from "./useMockupImport";
 import ContextTab from "./ContextTab";
 import PlansTab from "./PlansTab";
 import ReviewRules from "../qa/ReviewRules";
@@ -114,6 +117,25 @@ export default function ProjectView() {
   const fileViewer = useFileViewer({ project: name, section });
   const { selectedFile, setSelectedFile } = fileViewer;
   const { scripts } = useWorkspaceScripts();
+
+  // Mockup import: picked or dropped files open the dialog; each batch gets a
+  // fresh dialog instance (its key), so slugs and thumbnails never carry over.
+  const [importBatch, setImportBatch] = useState<{ id: number; files: File[] } | null>(
+    null,
+  );
+  const openImport = useCallback((picked: File[]) => {
+    setImportBatch((prev) => ({ id: (prev?.id ?? 0) + 1, files: picked }));
+  }, []);
+  const closeImport = useCallback(() => setImportBatch(null), []);
+  const onImported = useCallback(
+    (relativePaths: string[]) => {
+      setImportBatch(null);
+      refreshFileIndex();
+      if (relativePaths[0]) setSelectedFile(relativePaths[0]);
+    },
+    [setSelectedFile],
+  );
+  const mockupDrop = useMockupDrop(openImport);
 
   useEffect(() => {
     if (!name || section) return;
@@ -338,13 +360,32 @@ export default function ProjectView() {
       {/* Plans tab — legacy plan files plus coordinated OpenSpec changes */}
       {section === "plans" && <PlansTab projectName={name || ""} />}
 
-      {/* File sections (notes, memo, progress, qa) — list beside the viewer */}
+      {/* File sections (notes, memo, progress, qa) — list beside the viewer.
+          On mockups the whole list + detail is a drop target for imports. */}
       {section && !SPECIAL_SECTIONS.has(section) && (
+        <div
+          {...(section === "mockups"
+            ? { "data-testid": "mockups-drop-target", ...mockupDrop.dropProps }
+            : {})}
+          className={`rounded-md${
+            fillsHeight ? " md:flex-1 md:min-h-0 md:flex md:flex-col" : ""
+          }`}
+          style={
+            mockupDrop.dragging && section === "mockups"
+              ? { outline: "2px dashed var(--accent)", outlineOffset: 4 }
+              : undefined
+          }
+        >
         <FileListSidebar
           testId="section-files"
           title={sectionTitle(section)}
           fillHeight={fillsHeight}
           controls={sectionControls.controlsBar}
+          headerActions={
+            section === "mockups" ? (
+              <MockupImportButton onFiles={openImport} testId="mockups-import-button" />
+            ) : null
+          }
           sources={[
             {
               id: section,
@@ -380,13 +421,24 @@ export default function ProjectView() {
                 />
               )
             ) : mockupsEmpty ? (
-              <MockupsEmptyState projectName={name || ""} />
+              <MockupsEmptyState projectName={name || ""} onImportFiles={openImport} />
             ) : (
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
                 Select a file to view.
               </p>
             )
           }
+        />
+        </div>
+      )}
+
+      {importBatch && section === "mockups" && name && (
+        <MockupImportDialog
+          key={importBatch.id}
+          project={name}
+          files={importBatch.files}
+          onClose={closeImport}
+          onImported={onImported}
         />
       )}
 

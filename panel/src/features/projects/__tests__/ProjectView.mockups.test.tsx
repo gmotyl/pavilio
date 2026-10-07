@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 import ProjectView from "../ProjectView";
 import { mockFetchResponses } from "../../../test-utils";
@@ -269,5 +269,135 @@ describe("the mockup fill chain", () => {
     // Width and height are independent: the fill must not disturb the clamp.
     expect(classesOf(view())).toContain("max-w-5xl");
     expect(classesOf(view())).toEqual(expect.arrayContaining(VIEW_FILL));
+  });
+});
+
+/** Shows the router's query string so a test can read the `?file=` selection. */
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location-search">{location.search}</span>;
+}
+
+/**
+ * Like `renderMockups`, but the import endpoints are routed before the
+ * `/api/projects` prefix would swallow them, and the index can change after
+ * an import lands.
+ */
+function renderWithImport(
+  initialFiles: string[],
+  {
+    section = "mockups",
+    importResult,
+  }: {
+    section?: string;
+    importResult?: Array<{ name: string; relativePath: string; ok: boolean; error?: string }>;
+  } = {},
+) {
+  let index = initialFiles;
+  const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    const json = (data: unknown) => ({ ok: true, json: async () => data }) as Response;
+    if (url.endsWith("/mockups/import")) {
+      const files = importResult ?? [];
+      index = [...index, ...files.filter((f) => f.ok).map((f) => f.relativePath)];
+      return json({ files });
+    }
+    if (url.endsWith("/mockups/inspect")) return json({ files: [] });
+    if (url.includes("/api/projects"))
+      return json([{ name: "pavilio", path: "/root/git/prv/pavilio", repos: [] }]);
+    if (url.includes("/api/files/index")) return json(index.map(indexEntry));
+    if (url.includes("/api/files/read/"))
+      return json({ content: "# stub", absolutePath: "/abs/stub" });
+    if (url.includes("/api/scripts")) return json([]);
+    return { ok: false, json: async () => ({}) } as Response;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={[`/project/pavilio/${section}`]}>
+      <Routes>
+        <Route
+          path="/project/:name/:section"
+          element={
+            <>
+              <ProjectView />
+              <LocationProbe />
+            </>
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+  return fetchMock;
+}
+
+describe("importing mockups", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("import button only on mockups", async () => {
+    renderWithImport(["pavilio/mockups/boot-legend.html"]);
+    expect(await screen.findByTestId("mockups-import-button")).toBeTruthy();
+    cleanup();
+
+    renderWithImport(["pavilio/notes/2026-10-01-a.md"], { section: "notes" });
+    await screen.findByTestId("section-files-count");
+    expect(screen.queryByTestId("mockups-import-button")).toBeNull();
+    expect(screen.queryByTestId("mockups-empty-import-button")).toBeNull();
+  });
+
+  it("empty state offers import", async () => {
+    renderWithImport([]);
+
+    // The how-to paragraph is kept as it was …
+    const empty = await screen.findByTestId("mockups-empty-state");
+    expect(collapse(empty.textContent)).toBe(EXPECTED_COPY);
+    // … and the import path is offered beside it.
+    expect(screen.getByTestId("mockups-empty-import-button")).toBeTruthy();
+    expect(screen.getByText("Or import a Figma export — SVG, PNG, JPEG, WebP or HTML.")).toBeTruthy();
+  });
+
+  it("import selects the first saved file", async () => {
+    renderWithImport(["pavilio/mockups/boot-legend.html"], {
+      importResult: [
+        { name: "2026-10-07-frame-12.png", relativePath: "pavilio/mockups/2026-10-07-frame-12.png", ok: true },
+        { name: "2026-10-07-frame-13.png", relativePath: "pavilio/mockups/2026-10-07-frame-13.png", ok: true },
+      ],
+    });
+
+    const input = (await screen.findByTestId("mockups-import-button-input")) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "Frame 12.png"), new File(["y"], "Frame 13.png")] },
+    });
+    expect(await screen.findByTestId("mockup-import-dialog")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search").textContent).toBe(
+        `?file=${encodeURIComponent("pavilio/mockups/2026-10-07-frame-12.png")}`,
+      ),
+    );
+    expect(screen.queryByTestId("mockup-import-dialog")).toBeNull();
+    // The list refreshes and shows the imported files.
+    expect(await screen.findByText(/2026-10-07-frame-13/)).toBeTruthy();
+  });
+
+  it("dropping files on the mockups list opens the dialog", async () => {
+    renderWithImport([]);
+    const target = await screen.findByTestId("mockups-drop-target");
+
+    fireEvent.drop(target, {
+      dataTransfer: { files: [new File(["x"], "Frame 12.png")], types: ["Files"] },
+    });
+
+    const dialog = await screen.findByTestId("mockup-import-dialog");
+    expect(dialog).toBeTruthy();
   });
 });

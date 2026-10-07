@@ -34,3 +34,39 @@ export const isMockupFile = (path: string) =>
  */
 export const metaReadUrl = (readUrl: string) =>
   `${readUrl}${readUrl.includes("?") ? "&" : "?"}meta=1`;
+
+/**
+ * Import limits — mirrors the server's `MOCKUP_MAX_BYTES` so an oversized file
+ * is rejected in the dialog instead of after its upload.
+ */
+export const MOCKUP_MAX_BYTES = 20 * 1024 * 1024;
+
+/** The file picker's `accept`: every extension the import route takes. */
+export const MOCKUP_IMPORT_ACCEPT = [".html", ...MOCKUP_IMAGE_EXTS].join(",");
+
+/** The extension (with dot, lower-case) of a file name, or "" when it has none. */
+export const fileExt = (name: string) => {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot).toLowerCase() : "";
+};
+
+/** The extension the server writes: `.jpeg` is saved as `.jpg`. */
+export const importedExt = (name: string) => {
+  const ext = fileExt(name);
+  return ext === ".jpeg" ? ".jpg" : ext;
+};
+
+/**
+ * The slug the server would derive from `input` — lower-case, `[a-z0-9-]`
+ * only, dash runs collapsed, trimmed, max 60 chars. The client only uses it to
+ * PRE-FILL the dialog; whatever the user types is sent as-is and normalised
+ * server-side.
+ */
+export const normaliseMockupSlug = (input: string) =>
+  input
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60)
+    .replace(/-+$/, "");
