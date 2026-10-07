@@ -23,6 +23,11 @@ export interface AlertOptions {
   id?: string;
   /** Called on × and swipe only — not on timer expiry or `alerts.dismiss`. */
   onDismiss?: () => void;
+  /**
+   * Makes the card a button: click / Enter / Space call this and remove the
+   * card. Never on × or swipe, and activation does not call `onDismiss`.
+   */
+  onClick?: () => void;
 }
 
 export interface AlertEntry {
@@ -32,6 +37,7 @@ export interface AlertEntry {
   detail?: string;
   persistent: boolean;
   onDismiss?: () => void;
+  onClick?: () => void;
   /** Grows on every push and refresh. */
   seq: number;
 }
@@ -62,6 +68,7 @@ function push(kind: AlertKind, title: string, opts: AlertOptions = {}): string {
     detail: opts.detail,
     persistent: opts.persistent ?? false,
     onDismiss: opts.onDismiss,
+    onClick: opts.onClick,
     seq: nextSeq++,
   };
   const index = entries.findIndex((e) => e.id === id);
@@ -98,6 +105,11 @@ export const alerts: { [K in AlertKind]: (title: string, opts?: AlertOptions) =>
 /** The × / swipe path: removes the entry and calls its `onDismiss`. */
 export function userDismissAlert(id: string): void {
   remove(id)?.onDismiss?.();
+}
+
+/** The click / Enter / Space path: removes the entry and calls its `onClick`, never `onDismiss`. */
+export function userActivateAlert(id: string): void {
+  remove(id)?.onClick?.();
 }
 
 export function subscribeAlerts(l: () => void): () => void {

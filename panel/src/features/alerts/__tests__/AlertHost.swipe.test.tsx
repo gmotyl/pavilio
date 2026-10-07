@@ -308,4 +308,36 @@ describe("AlertHost across navigation", () => {
     advance(1); // 4000: the original expiry
     expect(cards()).toHaveLength(0);
   });
+
+  it("a swipe on an actionable card never runs the action", () => {
+    const onClick = vi.fn();
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.warning("standing", { persistent: true, onClick, onDismiss });
+    });
+    let card = cards()[0];
+
+    // A drag that settles back: the click the browser synthesizes after it is not a tap.
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
+    advance(400);
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 150 });
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: 150 });
+    fireEvent.click(card);
+    expect(cards()).toHaveLength(1);
+    expect(onClick).not.toHaveBeenCalled();
+
+    // A swipe past the threshold, with its synthesized click mid slide-out.
+    card = cards()[0];
+    fireEvent.pointerDown(card, { pointerId: 2, clientX: 100 });
+    advance(400);
+    fireEvent.pointerMove(card, { pointerId: 2, clientX: 100 + 0.4 * CARD_WIDTH });
+    fireEvent.pointerUp(card, { pointerId: 2, clientX: 100 + 0.4 * CARD_WIDTH });
+    fireEvent.click(card);
+
+    advance(PAST_SLIDE_OUT);
+    expect(cards()).toHaveLength(0);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
 });

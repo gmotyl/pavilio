@@ -5,6 +5,8 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X, type LucideIcon } from "lucide-react";
@@ -13,6 +15,7 @@ import {
   alerts,
   getAlertsSnapshot,
   subscribeAlerts,
+  userActivateAlert,
   userDismissAlert,
   type AlertEntry,
   type AlertKind,
@@ -149,6 +152,13 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
   const drag = useRef<Drag | null>(null);
   /** Set between a swipe past the threshold and the store removal. */
   const leaving = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Set when the last drag travelled like a swipe, so the click the browser
+   * synthesizes on its pointerup is not taken as a tap. Cleared by the next
+   * pointerdown.
+   */
+  const dragged = useRef(false);
+  const actionable = entry.onClick !== undefined;
 
   // Hovering, dragging and sliding out each hold the countdown, so a card
   // cannot expire from under the pointer or mid-swipe.
@@ -181,6 +191,7 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
     if (e.pointerType === "mouse" && e.button !== 0) return;
     // × keeps its click; a press on it never turns into a drag.
     if ((e.target as Element).closest("button")) return;
+    dragged.current = false;
     const el = e.currentTarget;
     drag.current = { pointerId: e.pointerId, x: e.clientX, t: Date.now(), width: el.getBoundingClientRect().width };
     try {
@@ -206,6 +217,7 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
     const dx = e.clientX - d.x;
     const dt = Math.max(1, Date.now() - d.t);
     const dist = Math.abs(dx);
+    if (dist >= FLICK_MIN_PX) dragged.current = true;
     const past =
       dist > SWIPE_DISTANCE * d.width || (dist >= FLICK_MIN_PX && dist / dt > SWIPE_VELOCITY);
     if (cancelled || !past) {
@@ -226,13 +238,41 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
     reportPaused();
   };
 
+  // × is its own button: a click on it (or anything inside it) never activates.
+  const onClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!actionable) return;
+    if ((e.target as Element).closest("[data-testid='alert-dismiss']")) return;
+    if (dragged.current || leaving.current !== null) {
+      dragged.current = false;
+      return;
+    }
+    userActivateAlert(id);
+  };
+
+  // Only when the card itself has focus: Enter on a focused × stays the ×.
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!actionable || e.target !== e.currentTarget) return;
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    if (leaving.current !== null) return;
+    userActivateAlert(id);
+  };
+
+  const liveRole = entry.kind === "error" ? "alert" : "status";
+
   return (
     <div
       data-testid="alert"
       data-alert-id={id}
       data-kind={entry.kind}
       data-paused={paused ? "1" : "0"}
-      role={entry.kind === "error" ? "alert" : "status"}
+      // An actionable card is a button; aria-live keeps it announced the way
+      // its live role would have been.
+      role={actionable ? "button" : liveRole}
+      aria-live={actionable ? (liveRole === "alert" ? "assertive" : "polite") : undefined}
+      tabIndex={actionable ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onKeyDown}
       onPointerEnter={() => {
         hovered.current = true;
         reportPaused();
@@ -249,6 +289,7 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
       style={{
         pointerEvents: "auto",
         touchAction: "pan-y",
+        cursor: actionable ? "pointer" : undefined,
         background: "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
         borderLeft: `3px solid ${color}`,

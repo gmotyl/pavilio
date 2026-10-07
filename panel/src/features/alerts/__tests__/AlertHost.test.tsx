@@ -297,4 +297,83 @@ describe("AlertHost", () => {
     }
     expect(screen.getByTestId("alert-region")).toHaveStyle({ position: "fixed", pointerEvents: "none" });
   });
+
+  it("clicking an actionable card runs its action once and removes it", () => {
+    const onClick = vi.fn();
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("answer", { onClick, onDismiss });
+    });
+    const card = cards()[0];
+    expect(card).toHaveAttribute("role", "button");
+    expect(card).toHaveAttribute("tabindex", "0");
+
+    fireEvent.click(within(card).getByTestId("alert-title"));
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(cards()).toHaveLength(0);
+  });
+
+  it("Enter and Space activate an actionable card", () => {
+    const onClick = vi.fn();
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("enter", { id: "e", onClick, onDismiss });
+    });
+    let card = cards()[0];
+    card.focus();
+    expect(card).toHaveFocus();
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(cards()).toHaveLength(0);
+
+    act(() => {
+      alerts.info("space", { id: "s", onClick, onDismiss });
+    });
+    card = cards()[0];
+    card.focus();
+    fireEvent.keyDown(card, { key: " " });
+    expect(onClick).toHaveBeenCalledTimes(2);
+    expect(cards()).toHaveLength(0);
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("× on an actionable card dismisses without running the action", () => {
+    const onClick = vi.fn();
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("answer", { onClick, onDismiss });
+    });
+    const dismiss = within(cards()[0]).getByTestId("alert-dismiss");
+    fireEvent.click(dismiss);
+    expect(cards()).toHaveLength(0);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+
+    // Enter on a focused × is the ×, not the card.
+    act(() => {
+      alerts.info("again", { onClick, onDismiss });
+    });
+    fireEvent.keyDown(within(cards()[0]).getByTestId("alert-dismiss"), { key: "Enter" });
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("a card without an action ignores clicks", () => {
+    const onDismiss = vi.fn();
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("plain", { onDismiss });
+    });
+    const card = cards()[0];
+    expect(card).toHaveAttribute("role", "status");
+    expect(card).not.toHaveAttribute("tabindex");
+
+    fireEvent.click(card);
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(cards()).toHaveLength(1);
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
 });
