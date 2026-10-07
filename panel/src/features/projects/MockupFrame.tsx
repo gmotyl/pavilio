@@ -48,14 +48,29 @@ const rawSrc = (filePath: string) =>
   `/api/files/raw/${filePath.split("/").map(encodeURIComponent).join("/")}`;
 
 /**
+ * The project whose Mockups tab a file belongs to: `<p>` for
+ * `<p>/mockups/…` and `archived/<p>/mockups/…`, otherwise null — a file
+ * outside a project's mockups folder has no Mockups route to link to.
+ */
+const mockupProject = (filePath: string): string | null => {
+  const parts = filePath.split("/");
+  const rest = parts[0] === "archived" ? parts.slice(1) : parts;
+  return rest.length >= 3 && rest[0] && rest[1] === "mockups" ? rest[0] : null;
+};
+
+/**
  * The markdown link Copy link puts on the clipboard: the workspace-relative
  * path as its text (what an agent reads) and the host-relative Mockups route
  * as its target (what a human clicks). Host-relative so it works on localhost,
- * over Tailscale and on a phone. The project is the index-relative path's first
- * segment — every viewer that mounts the frame addresses files that way.
+ * over Tailscale and on a phone. `[`/`]` are escaped in the text and `(`/`)`
+ * encoded in the target so a file name cannot end the link early. An archived
+ * project's file links to the same tab, which opens it by its `?file=`.
  */
-const mockupLink = (relativePath: string, filePath: string) =>
-  `[${relativePath}](/project/${filePath.split("/")[0]}/mockups?file=${encodeURIComponent(filePath)})`;
+const mockupLink = (relativePath: string, filePath: string, project: string) => {
+  const text = relativePath.replace(/[\\[\]]/g, (c) => `\\${c}`);
+  const file = encodeURIComponent(filePath).replace(/\(/g, "%28").replace(/\)/g, "%29");
+  return `[${text}](/project/${encodeURIComponent(project)}/mockups?file=${file})`;
+};
 
 const BUTTON_CLASS =
   "text-sm px-2 py-1 rounded-md transition-colors cursor-pointer";
@@ -76,6 +91,7 @@ export function MockupFrame({
   const [selected, setSelected] = useState<Width>(WIDTHS[0]);
   const [zoom, setZoom] = useState<Zoom>(ZOOMS[0]);
   const isImage = isMockupImage(filePath);
+  const project = mockupProject(filePath);
   const workspaceRoot = useWorkspaceRoot();
   const relativePath = workspaceRoot
     ? relativeToWorkspace(absolutePath, workspaceRoot)
@@ -149,8 +165,13 @@ export function MockupFrame({
           relativePath={relativePath}
           // Both copies wait on the same workspace root: until it is known the
           // link has no text, and the absolute path never stands in for it.
+          // Outside a project's mockups folder there is no link at all.
           copyLinkText={
-            relativePath === null ? null : mockupLink(relativePath, filePath)
+            project === null
+              ? undefined
+              : relativePath === null
+                ? null
+                : mockupLink(relativePath, filePath, project)
           }
           // No `content`: copy content stays disabled on every mockup, which a
           // raster image needs — its bytes are not text.

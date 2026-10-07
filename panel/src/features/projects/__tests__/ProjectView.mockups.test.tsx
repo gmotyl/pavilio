@@ -73,6 +73,17 @@ describe("the mockups detail pane", () => {
     expect(await screen.findByTestId("mockup-viewer-frame")).toBeTruthy();
   });
 
+  it("opens an archived project's mockup from a copied link", async () => {
+    // Copy link targets `/project/<p>/mockups?file=archived/<p>/mockups/…`;
+    // the file is not in the section list, but the pane still frames it.
+    renderMockups(["archived/pavilio/mockups/old.html"], {
+      file: "archived/pavilio/mockups/old.html",
+    });
+
+    const frame = await screen.findByTestId("mockup-viewer-frame");
+    expect(frame).toHaveAttribute("src", "/api/files/raw/archived/pavilio/mockups/old.html");
+  });
+
   it("renders FileViewer for a markdown file in the mockups section", async () => {
     // The branch is on the extension, not the section: a note that happens to
     // live under mockups/ is still a document, not something to put in a frame.

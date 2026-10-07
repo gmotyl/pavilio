@@ -123,6 +123,49 @@ describe("MockupFrame with an image mockup", () => {
   });
 });
 
+describe("MockupFrame copy link", () => {
+  const ROOT = "/root/git/prv/projects/projects";
+
+  const copiedLink = async () => {
+    const button = screen.getByTestId("mockup-viewer-copy-link");
+    await waitFor(() => expect(button).not.toBeDisabled());
+    fireEvent.click(button);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    return writeText.mock.calls[0][0] as string;
+  };
+
+  it("links an archived project's mockup to that project", async () => {
+    const path = "archived/pavilio/mockups/old.png";
+    render(<MockupFrame filePath={path} absolutePath={`${ROOT}/${path}`} />);
+
+    expect(await copiedLink()).toBe(
+      `[projects/${path}](/project/pavilio/mockups?file=${encodeURIComponent(path)})`,
+    );
+  });
+
+  it("has no copy link outside a project's mockups folder", async () => {
+    for (const path of ["pavilio/notes/x.png", "x.png", "archived/x.png", "a/b/mockups/x.png"]) {
+      const { unmount } = render(
+        <MockupFrame filePath={path} absolutePath={`${ROOT}/${path}`} />,
+      );
+      // Positive control: the toolbar rendered
+      expect(screen.getByTestId("mockup-viewer-copy-absolute")).toBeTruthy();
+      expect(screen.queryByTestId("mockup-viewer-copy-link")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("escapes brackets in the text and parentheses in the target", async () => {
+    const path = "pavilio/mockups/a [b] (c).png";
+    render(<MockupFrame filePath={path} absolutePath={`${ROOT}/${path}`} />);
+
+    expect(await copiedLink()).toBe(
+      "[projects/pavilio/mockups/a \\[b\\] (c).png]" +
+        "(/project/pavilio/mockups?file=pavilio%2Fmockups%2Fa%20%5Bb%5D%20%28c%29.png)",
+    );
+  });
+});
+
 describe("mockup image detection", () => {
   it("matches the image extensions case-insensitively", () => {
     for (const p of ["a.svg", "a.png", "a.jpg", "a.jpeg", "a.webp", "A.PNG", "b.JpEg"])
