@@ -328,11 +328,11 @@ export default function PlansTab({ projectName }: Props) {
   // work left, the done banner once every box is checked (a status is not by
   // itself runnable). The path it is handed is workspace-relative, the form
   // the objective template names; the run opens at the workspace root, so a
-  // linked repo's `../` path resolves there too. Until the root has loaded the
-  // absolute path stands in, which still names the file.
+  // linked repo's `../` path resolves there too. Until the root has loaded
+  // there is no path, and the banner keeps Run disabled: the absolute path
+  // would name the panel owner's tree, so it never stands in.
   const runStatus =
     selectedPath && fileContent !== null ? taskListStatus(selectedPath, fileContent) : null;
-  const runPath = selectedRelative ?? selectedPath ?? "";
   const navigate = useNavigate();
   const [runError, setRunError] = useState<string | null>(null);
   useEffect(() => setRunError(null), [selectedPath]);
@@ -640,7 +640,7 @@ export default function PlansTab({ projectName }: Props) {
             <RunBanner
               status={runStatus}
               project={projectName}
-              path={runPath}
+              path={selectedRelative}
               onRun={onRun}
             />
           )}

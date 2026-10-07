@@ -16,6 +16,7 @@ vi.mock("../startTaskRun", () => ({
 
 import PlansTab from "../PlansTab";
 import { startTaskRun } from "../startTaskRun";
+import { __resetWorkspaceRootForTests } from "../useWorkspaceRoot";
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
@@ -81,14 +82,29 @@ const TREE = {
 // Every file carries unchecked boxes, so only the PATH decides the banner.
 const CONTENT = "# Tasks\n\n- [x] Step one done\n- [ ] Step two pending\n";
 
+// The parent of the projects directory, as `/api/system` reports it. The run
+// line names the plan relative to it.
+const WORKSPACE_ROOT = "/p";
+const ACTIVE_TASKS_RELATIVE = "projects/alokai/plans/openspec/changes/live-change/tasks.md";
+
 let fetchMock: ReturnType<typeof vi.fn>;
+/** When set, `/api/system` never answers: the workspace root is still loading. */
+let systemPending: boolean;
 
 beforeEach(() => {
   globals.__PAVILIO_PREFS__ = { version: 1 };
   writePreference(preferences.terminalLaunchers, LAUNCHERS);
   vi.mocked(startTaskRun).mockClear();
+  __resetWorkspaceRootForTests();
+  systemPending = false;
   fetchMock = vi.fn(async (input: string) => {
     const url = String(input);
+    if (url.startsWith("/api/system")) {
+      if (systemPending) return new Promise<Response>(() => {});
+      return new Response(JSON.stringify({ wslDistro: null, workspaceRoot: WORKSPACE_ROOT }), {
+        status: 200,
+      });
+    }
     if (url.includes("plans-tree")) return new Response(JSON.stringify(TREE), { status: 200 });
     if (url.includes("plans/read")) {
       return new Response(JSON.stringify({ content: CONTENT }), { status: 200 });
@@ -145,6 +161,33 @@ describe("PlansTab run banner", () => {
     expect(opts.project).toBe("alokai");
     expect(opts.runLine.startsWith("claude '/goal ")).toBe(true);
     expect(await screen.findByText("terminal view")).toBeTruthy();
+  });
+
+  it("the run line names the plan by its workspace-relative path", async () => {
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    const run = screen.getByRole("button", { name: "Run" });
+    await waitFor(() => expect(run).not.toBeDisabled());
+    fireEvent.click(run);
+    await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
+    const { runLine } = vi.mocked(startTaskRun).mock.calls[0][0];
+    // The default objective's `{path}`, resolved against the stubbed root.
+    expect(runLine).toContain(`Implement all tasks in ${ACTIVE_TASKS_RELATIVE};`);
+    expect(runLine).not.toContain(ACTIVE_TASKS);
+  });
+
+  it("Run waits for the workspace root rather than send an absolute path", async () => {
+    systemPending = true;
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    const run = screen.getByRole("button", { name: "Run" });
+    expect(run).toBeDisabled();
+    fireEvent.click(run);
+    // Neither shown nor sent: the owner's tree never stands in for the path.
+    const objective = screen.getByRole("textbox", { name: "Objective" }) as HTMLTextAreaElement;
+    expect(objective.value).toContain("Implement all tasks in");
+    expect(objective.value).not.toContain(ACTIVE_TASKS);
+    expect(vi.mocked(startTaskRun)).not.toHaveBeenCalled();
   });
 
   it("a flagged launcher's line reaches the new session", async () => {
