@@ -15,9 +15,10 @@ const idOf = (sessionId: string) => `terminal-cell-speech-controls-${sessionId}`
  * move it: `armed` has no setter, and nothing the control is handed could reach
  * one if it had.
  *
- * Arming is the BAR's switch. The stub bar below carries that switch's
- * `data-armed` under the same test id the real `SpeechControlBar` publishes, so
- * "who is armed" is read here exactly where a user reads it — inside the bar.
+ * Arming is the BAR's speech mode control. The stub bar below carries that
+ * control's `data-speech-mode` under the same test id the real
+ * `SpeechControlBar` publishes, so "who is armed" is read here exactly where a
+ * user reads it — inside the bar.
  */
 function TwoCells({
   initialArmed = null,
@@ -48,7 +49,7 @@ function TwoCells({
             <div data-testid={`speech-bar-${id}`}>
               <span
                 data-testid={`speech-bar-autoplay-${id}`}
-                data-armed={armed === id ? "1" : "0"}
+                data-speech-mode={armed === id ? "autoplay" : "off"}
               />
             </div>
           ) : null}
@@ -59,7 +60,7 @@ function TwoCells({
 }
 
 const armOf = (id: string) =>
-  screen.getByTestId(`speech-bar-autoplay-${id}`).getAttribute("data-armed");
+  screen.getByTestId(`speech-bar-autoplay-${id}`).getAttribute("data-speech-mode");
 
 describe("CellSpeechControlsToggle", () => {
   it("the control shows and hides the speech control bar", () => {
@@ -84,7 +85,7 @@ describe("CellSpeechControlsToggle", () => {
   it("activating the control does not change the armed cell", () => {
     // Both bars out, so both arm switches are readable throughout.
     render(<TwoCells initialArmed="a" initialOpen={["a", "b"]} />);
-    expect([armOf("a"), armOf("b")]).toEqual(["1", "0"]);
+    expect([armOf("a"), armOf("b")]).toEqual(["autoplay", "off"]);
 
     // Hide and show the armed cell's bar, then the unarmed cell's — four
     // activations of the control, none of which can arm or disarm anything.
@@ -93,7 +94,7 @@ describe("CellSpeechControlsToggle", () => {
     fireEvent.click(screen.getByTestId(idOf("b")));
     fireEvent.click(screen.getByTestId(idOf("b")));
 
-    expect([armOf("a"), armOf("b")]).toEqual(["1", "0"]);
+    expect([armOf("a"), armOf("b")]).toEqual(["autoplay", "off"]);
   });
 
   it("the control renders the same whether or not the cell is armed", () => {
@@ -108,8 +109,8 @@ describe("CellSpeechControlsToggle", () => {
 
     expect(normalize("a")).toBe(normalize("b"));
     // The channel the stylesheet used to key the green off is gone with it.
-    expect(screen.getByTestId(idOf("a"))).not.toHaveAttribute("data-armed");
-    expect(screen.getByTestId(idOf("b"))).not.toHaveAttribute("data-armed");
+    expect(screen.getByTestId(idOf("a"))).not.toHaveAttribute("data-speech-mode");
+    expect(screen.getByTestId(idOf("b"))).not.toHaveAttribute("data-speech-mode");
   });
 
   it("the accessible name mentions only the speech controls", () => {

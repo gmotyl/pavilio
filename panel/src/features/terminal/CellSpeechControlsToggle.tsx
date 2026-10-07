@@ -27,7 +27,7 @@ export interface CellSpeechControlsToggleProps {
  * whose colour answers one question and whose click answers another is two
  * controls wearing one button: a user reading the green had no way to learn
  * that pressing it would not turn the green off. Arming lives in one place now,
- * the bar's own arm switch, and is read there.
+ * the bar's own speech mode control, and is read there.
  *
  * Which is why the speech modes are absent from the props rather than merely
  * left unread: a component still handed them is one the next change can

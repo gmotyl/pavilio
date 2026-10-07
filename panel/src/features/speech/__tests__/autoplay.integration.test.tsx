@@ -9,8 +9,9 @@
  * that forgets to pass it leaves every cell `empty`, every callback a no-op,
  * and a grid-level suite entirely green. So these tests mount
  * `ProjectTerminalsSurface` and `TerminalsPage` — the two hosts — and read the
- * cell header's own `data-speech` attribute and, for arming, the `data-armed`
- * of the switch inside the bar — the only control that reports it since Task 9.
+ * cell header's own `data-speech` attribute and, for arming, the
+ * `data-speech-mode` of the mode control inside the bar — the only control that
+ * reports it since Task 9.
  *
  * Since Task 8 the SPEECH BAR is in that chain too: arming lives in the bar, and
  * the bar is rendered by `TerminalView`, two prop hops below the surface
@@ -509,7 +510,7 @@ const speakIcon = (sessionId: string): string | null =>
  * point of the task, and several of these tests are what pins it.
  */
 const armed = (sessionId: string): string | null =>
-  screen.getByTestId(`speech-bar-autoplay-${sessionId}`).getAttribute("data-armed");
+  screen.getByTestId(`speech-bar-autoplay-${sessionId}`).getAttribute("data-speech-mode");
 
 /** Whether this cell's bar is on screen — what the header control toggles. */
 const barVisible = (sessionId: string): boolean =>
@@ -572,7 +573,7 @@ const controls = (kind: ControlKind, sessionId: string): HTMLElement[] =>
  * bars have to be open for this to mean anything — `openBarInViews` is how.
  */
 const armedInViews = (sessionId: string): (string | null)[] =>
-  controls("bar-autoplay", sessionId).map((el) => el.getAttribute("data-armed"));
+  controls("bar-autoplay", sessionId).map((el) => el.getAttribute("data-speech-mode"));
 
 async function clickIn(view: number, kind: ControlKind, sessionId: string): Promise<void> {
   await act(async () => {
@@ -990,9 +991,9 @@ describe("autoplay — the surfaces and the session language", () => {
     expect(speakState("cell-a")).toBe("ready");
 
     // The utterance brought the bar out, so the arm switch is on screen.
-    expect(armed("cell-a")).toBe("0");
+    expect(armed("cell-a")).toBe("off");
     await arm("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
   });
 
   it("the standalone terminals page wires its cells to the channel", async () => {
@@ -1012,7 +1013,7 @@ describe("autoplay — the surfaces and the session language", () => {
     expect(speakState("cell-a")).toBe("ready");
 
     await arm("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
   });
 
   it("the session language accumulates across utterances", async () => {
@@ -1204,7 +1205,7 @@ describe("the row is reserved from mount", () => {
     // Launchers, live switch: arming ahead of the first answer is the reason
     // the row is reachable before it at all.
     await arm("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
   });
 
   it("hiding the bar survives a later utterance", async () => {
@@ -1273,7 +1274,7 @@ describe("the header control and the bar", () => {
     await renderProjectSurface();
     // `arm` presses the switch in the row, which is out from mount.
     await arm("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
 
     // Hide the armed cell's row and bring it back: hiding is not disarming, and
     // showing is not arming. The control cannot reach the armed cell at all —
@@ -1282,14 +1283,14 @@ describe("the header control and the bar", () => {
     expect(barVisible("cell-a")).toBe(false);
     await click(testIdFor("speech-controls", "cell-a"));
     expect(barVisible("cell-a")).toBe(true);
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
 
     // Nor from another cell's control: hiding and restoring b's row leaves a
     // armed and b not.
     await click(testIdFor("speech-controls", "cell-b"));
     await click(testIdFor("speech-controls", "cell-b"));
     expect(barVisible("cell-b")).toBe(true);
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "off"]);
   });
 
   it("the control renders the same whether or not the cell is armed", async () => {
@@ -1316,43 +1317,44 @@ describe("the header control and the bar", () => {
     expect(markup("cell-b")).toBe(markup("cell-a"));
     expect(markup("cell-b")).toBe(markup("cell-c"));
     expect(screen.getByTestId(testIdFor("speech-controls", "cell-b"))).not.toHaveAttribute(
-      "data-armed",
+      "data-speech-mode",
     );
 
     // Arming is still true — it simply is not the header's story any more. The
     // bar is where it is read, and b's bar still says so when it is reopened.
     await openBar("cell-b");
-    expect(armed("cell-b")).toBe("1");
+    expect(armed("cell-b")).toBe("autoplay");
   });
 
-  it("the bar's arm switch still reports armed state", async () => {
+  it("the bar's mode control still reports the speech mode", async () => {
     await renderProjectSurface();
     await arm("cell-a");
 
-    // The switch reports through both channels it always has: the attribute the
-    // stylesheet keys the green off, and `aria-checked`, which is what a screen
-    // reader gets now that the header control says nothing about arming.
-    const armSwitch = screen.getByTestId(testIdFor("bar-autoplay", "cell-a"));
-    expect(armSwitch).toHaveAttribute("data-armed", "1");
-    expect(armSwitch).toHaveAttribute("role", "switch");
-    expect(armSwitch).toHaveAttribute("aria-checked", "true");
-    expect(armSwitch).toHaveAccessibleName(/armed/i);
+    // The control reports through two channels: `data-speech-mode`, which the
+    // stylesheet keys the green off, and the accessible name, which is what a
+    // screen reader gets now that the header control says nothing about
+    // arming. Three modes are not a switch, so there is no `aria-checked`.
+    const modeControl = screen.getByTestId(testIdFor("bar-autoplay", "cell-a"));
+    expect(modeControl).toHaveAttribute("data-speech-mode", "autoplay");
+    expect(modeControl).not.toHaveAttribute("role", "switch");
+    expect(modeControl).not.toHaveAttribute("aria-checked");
+    expect(modeControl).toHaveAccessibleName(/autoplay/i);
 
     // Hidden and shown again from the header: the bar comes back reporting the
     // same thing, which is what makes the next click on it the one that
-    // disarms rather than a click on a control drawn wrong.
+    // turns it off rather than a click on a control drawn wrong.
     await click(testIdFor("speech-controls", "cell-a"));
     await openBar("cell-a");
     expect(screen.getByTestId(testIdFor("bar-autoplay", "cell-a"))).toHaveAttribute(
-      "data-armed",
-      "1",
+      "data-speech-mode",
+      "autoplay",
     );
 
-    // And an unarmed cell's switch says so just as plainly.
+    // And an untouched cell's control says so just as plainly.
     await openBar("cell-b");
     const other = screen.getByTestId(testIdFor("bar-autoplay", "cell-b"));
-    expect(other).toHaveAttribute("data-armed", "0");
-    expect(other).toHaveAttribute("aria-checked", "false");
+    expect(other).toHaveAttribute("data-speech-mode", "off");
+    expect(other).toHaveAccessibleName(/speech off/i);
   });
 
   it("autoplay on one cell leaves another cell in autoplay", async () => {
@@ -1363,21 +1365,21 @@ describe("the header control and the bar", () => {
     await openBar("cell-b");
 
     await arm("cell-a");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "off"]);
 
     // Not exclusive: putting b in autoplay leaves a where it was.
     await arm("cell-b");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "1"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "autoplay"]);
 
     // One more click on b's own switch steps it round to off; a is untouched.
     await click(testIdFor("bar-autoplay", "cell-b"));
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "off"]);
   });
 
   it("arming survives a reload", async () => {
     const first = await renderProjectSurface();
     await arm("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
 
     // The row is shown from mount, so leaving it alone would make the
     // post-reload reading below true under a persisting implementation too.
@@ -1400,10 +1402,10 @@ describe("the header control and the bar", () => {
     expect(barVisible("cell-a")).toBe(true);
     // What survived is the armed cell — and the row is where that is read,
     // since the header control reports nothing about it.
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
 
     await openBar("cell-b");
-    expect(armed("cell-b")).toBe("0");
+    expect(armed("cell-b")).toBe("off");
   });
 
   it("the header speak control is unchanged", async () => {
@@ -1445,7 +1447,7 @@ describe("the header control and the bar", () => {
     // Speaking a cell is not arming it. Read from the bars, which is where
     // arming is legible — so cell a's is brought back out to be asked.
     await openBar("cell-a");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "1"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["off", "autoplay"]);
   });
 });
 
@@ -1470,7 +1472,7 @@ describe("one speech host for the panel, not one per surface", () => {
     // from its own header control, the choice being per cell AND per view —
     // and the restored arming is legible only once they are.
     await openBarInViews("cell-a");
-    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
+    expect(armedInViews("cell-a")).toEqual(["autoplay", "autoplay"]);
 
     // The user works in both views, as they do whenever the drawer is open.
     await clickAround(0, "cell-a");
@@ -1502,7 +1504,7 @@ describe("one speech host for the panel, not one per surface", () => {
     // question at all: the bars are where arming is reported.
     await openBarInViews("cell-a");
     await openBarInViews("cell-b");
-    expect(armedInViews("cell-a")).toEqual(["0", "0"]);
+    expect(armedInViews("cell-a")).toEqual(["off", "off"]);
 
     // From the bar, which is where arming lives — and from ONE view's bar, so
     // what the other view reports is the shared value and not its own click.
@@ -1511,15 +1513,15 @@ describe("one speech host for the panel, not one per surface", () => {
 
     // The drawer is not a second browser: both views' bars show the same
     // armed cell.
-    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
+    expect(armedInViews("cell-a")).toEqual(["autoplay", "autoplay"]);
 
     // Autoplay from the *other* view joins the first cell rather than
     // replacing it — and both views report both.
     await clickIn(1, "bar-autoplay", "cell-b");
     await clickIn(1, "bar-autoplay", "cell-b");
 
-    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
-    expect(armedInViews("cell-b")).toEqual(["1", "1"]);
+    expect(armedInViews("cell-a")).toEqual(["autoplay", "autoplay"]);
+    expect(armedInViews("cell-b")).toEqual(["autoplay", "autoplay"]);
   });
 
   it("a freshly hydrated tab does not start talking on its own", async () => {
@@ -1549,7 +1551,7 @@ describe("one speech host for the panel, not one per surface", () => {
     // The restored arming is read from the bar, the only control that reports
     // it — brought out here if the hydrated utterance has not already.
     await openBar("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
     // No gesture has reached the `<audio>` element, so this must be absorbed:
     // a page that starts talking by itself is what the lock gate prevents.
     expect(played).toEqual([]);
