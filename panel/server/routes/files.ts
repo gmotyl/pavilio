@@ -149,11 +149,11 @@ router.get("/raw/*path", (req, res) => {
 
   // Imported mockups are untrusted: opening the raw URL directly must not run
   // script with panel credentials. HTML keeps allow-scripts to match the
-  // iframe's own sandbox; SVG gets no script at all.
+  // iframe's own sandbox; SVG and XML (both can carry script) get none.
   const lower = absolutePath.toLowerCase();
-  if (lower.endsWith(".html")) {
+  if (lower.endsWith(".html") || lower.endsWith(".htm") || lower.endsWith(".xhtml")) {
     res.setHeader("Content-Security-Policy", "sandbox allow-scripts");
-  } else if (lower.endsWith(".svg")) {
+  } else if (lower.endsWith(".svg") || lower.endsWith(".xml")) {
     res.setHeader("Content-Security-Policy", "sandbox");
   }
 

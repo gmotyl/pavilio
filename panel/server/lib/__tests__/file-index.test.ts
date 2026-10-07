@@ -94,6 +94,14 @@ describe("file-index image mockups", () => {
     expect(paths).toContain("archived/q/mockups/sub/f.png");
   });
 
+  it("indexes upper-case image extensions under a mockups directory", () => {
+    const files = ["A.PNG", "B.SVG", "C.JPEG", "D.WebP"].map((f) => `p/mockups/${f}`);
+    files.forEach(seed);
+    rebuildIndex();
+    const paths = getFileIndex().map((e) => e.relativePath);
+    for (const f of files) expect(paths).toContain(f);
+  });
+
   it("does not index image files outside mockups", () => {
     seed("p/notes/shot.png");
     seed("p/notes/diagram.svg");

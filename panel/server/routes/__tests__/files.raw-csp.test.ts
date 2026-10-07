@@ -35,6 +35,13 @@ describe("GET /api/files/raw CSP", () => {
     );
     writeFileSync(join(mockups, "a.html"), "<!doctype html><script>1</script>");
     writeFileSync(join(mockups, "a.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(join(mockups, "B.SVG"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    writeFileSync(join(mockups, "a.htm"), "<!doctype html><script>1</script>");
+    writeFileSync(
+      join(mockups, "a.xhtml"),
+      '<html xmlns="http://www.w3.org/1999/xhtml"><script>1</script></html>',
+    );
+    writeFileSync(join(mockups, "a.xml"), '<?xml version="1.0"?><root/>');
   });
 
   afterEach(() => {
@@ -51,6 +58,26 @@ describe("GET /api/files/raw CSP", () => {
     const res = await request(makeApp()).get("/api/files/raw/p/mockups/a.html");
     expect(res.status).toBe(200);
     expect(res.headers["content-security-policy"]).toBe("sandbox allow-scripts");
+  });
+
+  it("upper-case svg is sandboxed too", async () => {
+    const res = await request(makeApp()).get("/api/files/raw/p/mockups/B.SVG");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-security-policy"]).toBe("sandbox");
+  });
+
+  it("htm and xhtml are sandboxed like html", async () => {
+    for (const name of ["a.htm", "a.xhtml"]) {
+      const res = await request(makeApp()).get(`/api/files/raw/p/mockups/${name}`);
+      expect(res.status).toBe(200);
+      expect(res.headers["content-security-policy"]).toBe("sandbox allow-scripts");
+    }
+  });
+
+  it("xml is sandboxed without scripts", async () => {
+    const res = await request(makeApp()).get("/api/files/raw/p/mockups/a.xml");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-security-policy"]).toBe("sandbox");
   });
 
   it("raw png gets no csp", async () => {
