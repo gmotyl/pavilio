@@ -9,6 +9,7 @@ vi.mock("../../shell/vscode", () => ({
 
 import MarkdownViewer from "../MarkdownViewer";
 import MockupFrame from "../../projects/MockupFrame";
+import { __resetWorkspaceRootForTests } from "../../projects/useWorkspaceRoot";
 import {
   BreadcrumbActionsContext,
   BreadcrumbActionsProvider,
@@ -16,6 +17,7 @@ import {
 
 // The projects directory is nested one level under the workspace root, so the
 // workspace-relative path keeps that directory's own name ("projects/").
+const WORKSPACE_ROOT = "/root/git/prv/projects";
 const MOCKUP_PATH = "pavilio/mockups/boot.html";
 const MOCKUP_ABSOLUTE =
   "/root/git/prv/projects/projects/pavilio/mockups/boot.html";
@@ -31,15 +33,24 @@ function BreadcrumbSlot() {
   return <div data-testid="breadcrumb-slot">{actions}</div>;
 }
 
+/** `/api/system` answers with the workspace root copy-path is relative to;
+ * every other request is the file read. */
 function stubRead(content: string, absolutePath: string) {
   vi.stubGlobal(
     "fetch",
     vi.fn(
-      async () =>
-        new Response(JSON.stringify({ content, absolutePath }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+      async (input: string) =>
+        new Response(
+          JSON.stringify(
+            String(input).startsWith("/api/system")
+              ? { wslDistro: null, workspaceRoot: WORKSPACE_ROOT }
+              : { content, absolutePath },
+          ),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
     ),
   );
 }
@@ -74,6 +85,7 @@ function renderViewer(path: string) {
 }
 
 beforeEach(() => {
+  __resetWorkspaceRootForTests();
   vi.stubGlobal(
     "WebSocket",
     class {
@@ -155,12 +167,17 @@ describe("MarkdownViewer html handling", () => {
 
     // The standalone viewer…
     renderViewer(MOCKUP_PATH);
-    fireEvent.click(await screen.findByTestId("markdown-viewer-copy-path"));
+    const viewerPath = await screen.findByTestId("markdown-viewer-copy-path");
+    await waitFor(() => expect(viewerPath).not.toBeDisabled());
+    fireEvent.click(viewerPath);
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
 
     // …and the mockups tab, which mounts `MockupFrame` directly.
     render(
       <MockupFrame filePath={MOCKUP_PATH} absolutePath={MOCKUP_ABSOLUTE} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("mockup-viewer-copy-path")).not.toBeDisabled(),
     );
     fireEvent.click(screen.getByTestId("mockup-viewer-copy-path"));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));

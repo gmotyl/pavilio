@@ -3,13 +3,16 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useContext } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MarkdownViewer from "../MarkdownViewer";
+import { __resetWorkspaceRootForTests } from "../../projects/useWorkspaceRoot";
 import {
   BreadcrumbActionsContext,
   BreadcrumbActionsProvider,
 } from "../../shell/Breadcrumbs/BreadcrumbActionsProvider";
 
 const PATH = "pavilio/notes/foo.md";
-const ABSOLUTE = "/root/git/prv/projects/projects/pavilio/notes/foo.md";
+const WORKSPACE_ROOT = "/root/git/prv/projects";
+const ABSOLUTE = `${WORKSPACE_ROOT}/projects/pavilio/notes/foo.md`;
+const RELATIVE = "projects/pavilio/notes/foo.md";
 const SOURCE = "# Foo\n\nthe file's source text\n";
 
 /**
@@ -27,11 +30,19 @@ function stubRead(content: string) {
   vi.stubGlobal(
     "fetch",
     vi.fn(
-      async () =>
-        new Response(JSON.stringify({ content, absolutePath: ABSOLUTE }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+      async (input: string) =>
+        new Response(
+          JSON.stringify(
+            // `/api/system` carries the root copy-path is relative to.
+            String(input).startsWith("/api/system")
+              ? { wslDistro: null, workspaceRoot: WORKSPACE_ROOT }
+              : { content, absolutePath: ABSOLUTE },
+          ),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
     ),
   );
 }
@@ -68,6 +79,7 @@ function renderViewer() {
 }
 
 beforeEach(() => {
+  __resetWorkspaceRootForTests();
   vi.stubGlobal(
     "WebSocket",
     class {
@@ -154,10 +166,11 @@ describe("MarkdownViewer copy actions", () => {
 
     // Now the other one: the first button's confirmation must clear, not sit
     // there alongside it.
+    await waitFor(() => expect(path()).not.toBeDisabled());
     fireEvent.click(path());
     await waitFor(() => expect(path()).toHaveTextContent("Copied"));
     expect(content()).toHaveTextContent("Copy");
     expect(screen.getAllByText("Copied")).toHaveLength(1);
-    expect(writeText).toHaveBeenLastCalledWith(ABSOLUTE);
+    expect(writeText).toHaveBeenLastCalledWith(RELATIVE);
   });
 });

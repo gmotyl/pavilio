@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import ViewerActions from "../ViewerActions";
 
 const PATH = "/home/greg/git/prv/projects/notes/foo.md";
+const RELATIVE = "notes/foo.md";
 const CONTENT = "# Foo\n\nsome source text\n";
 
 function setSecureContext(value: boolean) {
@@ -22,10 +23,10 @@ describe("ViewerActions copy path", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
 
-    render(<ViewerActions absolutePath={PATH} />);
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} />);
     fireEvent.click(screen.getByTestId("file-viewer-copy-path"));
 
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(PATH));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(RELATIVE));
     expect(await screen.findByText("Copied")).toBeInTheDocument();
   });
 
@@ -38,7 +39,7 @@ describe("ViewerActions copy path", () => {
       configurable: true,
     });
 
-    render(<ViewerActions absolutePath={PATH} />);
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} />);
     fireEvent.click(screen.getByTestId("file-viewer-copy-path"));
 
     await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
@@ -54,7 +55,7 @@ describe("ViewerActions copy contents", () => {
       const writeText = vi.fn().mockResolvedValue(undefined);
       Object.assign(navigator, { clipboard: { writeText } });
 
-      render(<ViewerActions absolutePath={PATH} content={CONTENT} />);
+      render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={CONTENT} />);
       fireEvent.click(screen.getByTestId("file-viewer-copy-content"));
 
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(CONTENT));
@@ -82,7 +83,7 @@ describe("ViewerActions copy contents", () => {
       configurable: true,
     });
 
-    render(<ViewerActions absolutePath={PATH} content={CONTENT} />);
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={CONTENT} />);
     fireEvent.click(screen.getByTestId("file-viewer-copy-content"));
 
     await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
@@ -100,7 +101,7 @@ describe("ViewerActions copy contents", () => {
       configurable: true,
     });
 
-    render(<ViewerActions absolutePath={PATH} content={CONTENT} />);
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={CONTENT} />);
     fireEvent.click(screen.getByTestId("file-viewer-copy-content"));
 
     await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
@@ -114,7 +115,7 @@ describe("ViewerActions copy contents", () => {
   });
 
   it("disables copy when content is null", () => {
-    render(<ViewerActions absolutePath={PATH} content={null} />);
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={null} />);
 
     const button = screen.getByTestId("file-viewer-copy-content");
     expect(button).toBeDisabled();
@@ -122,7 +123,7 @@ describe("ViewerActions copy contents", () => {
   });
 
   it("disables copy when content is an empty string", () => {
-    render(<ViewerActions absolutePath={PATH} content="" />);
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content="" />);
 
     const button = screen.getByTestId("file-viewer-copy-content");
     expect(button).toBeDisabled();
@@ -130,7 +131,7 @@ describe("ViewerActions copy contents", () => {
   });
 
   it("disables copy when content is not provided", () => {
-    render(<ViewerActions absolutePath={PATH} />);
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} />);
 
     const button = screen.getByTestId("file-viewer-copy-content");
     expect(button).toBeDisabled();
@@ -147,7 +148,7 @@ describe("ViewerActions copy contents", () => {
       configurable: true,
     });
 
-    render(<ViewerActions absolutePath={PATH} content="" />);
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content="" />);
     fireEvent.click(screen.getByTestId("file-viewer-copy-content"));
 
     expect(writeText).not.toHaveBeenCalled();
@@ -160,7 +161,7 @@ describe("ViewerActions copy contents", () => {
     Object.assign(navigator, { clipboard: { writeText } });
 
     const { unmount } = render(
-      <ViewerActions absolutePath={PATH} content={CONTENT} />,
+      <ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={CONTENT} />,
     );
     fireEvent.click(screen.getByTestId("file-viewer-copy-content"));
 
@@ -174,7 +175,7 @@ describe("ViewerActions copy contents", () => {
     );
     unmount();
 
-    render(<ViewerActions absolutePath={PATH} content={CONTENT} />);
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={CONTENT} />);
     fireEvent.click(screen.getByTestId("file-viewer-copy-path"));
 
     await waitFor(() =>
@@ -187,8 +188,8 @@ describe("ViewerActions copy contents", () => {
     );
   });
 
-  it("renders the buttons in the order VS Code, Path, Copy", () => {
-    render(<ViewerActions absolutePath={PATH} content={CONTENT} />);
+  it("renders the buttons in the order VS Code, Path, Absolute, Copy", () => {
+    render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={CONTENT} />);
 
     const ids = screen
       .getAllByRole("button")
@@ -196,6 +197,7 @@ describe("ViewerActions copy contents", () => {
     expect(ids).toEqual([
       "file-viewer-vscode",
       "file-viewer-copy-path",
+      "file-viewer-copy-absolute",
       "file-viewer-copy-content",
     ]);
   });
@@ -210,7 +212,7 @@ describe("ViewerActions copy feedback timers", () => {
         clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
       });
 
-      render(<ViewerActions absolutePath={PATH} content={CONTENT} />);
+      render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={CONTENT} />);
       const path = () => screen.getByTestId("file-viewer-copy-path");
 
       fireEvent.click(path());
@@ -248,7 +250,7 @@ describe("ViewerActions copy feedback timers", () => {
       });
 
       const { unmount } = render(
-        <ViewerActions absolutePath={PATH} content={CONTENT} />,
+        <ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={CONTENT} />,
       );
       fireEvent.click(screen.getByTestId("file-viewer-copy-path"));
       await waitFor(() =>
@@ -273,7 +275,7 @@ describe("ViewerActions copy feedback timers", () => {
         clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
       });
 
-      render(<ViewerActions absolutePath={PATH} content={CONTENT} />);
+      render(<ViewerActions absolutePath={PATH} relativePath={RELATIVE} content={CONTENT} />);
       const copy = () => screen.getByTestId("file-viewer-copy-content");
 
       fireEvent.click(screen.getByTestId("file-viewer-copy-path"));

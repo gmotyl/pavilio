@@ -3,6 +3,8 @@ import { useState, useEffect } from "react";
 import { useActiveFile } from "../explorer/useActiveFile";
 import MockupFrame from "../projects/MockupFrame";
 import ViewerActions from "../projects/ViewerActions";
+import { relativeToWorkspace } from "../projects/relativeToWorkspace";
+import { useWorkspaceRoot } from "../projects/useWorkspaceRoot";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useFloatingAction } from "../shell/Layout";
@@ -38,6 +40,7 @@ export default function MarkdownViewer() {
 
   const [content, setContent] = useState("");
   const [absolutePath, setAbsolutePath] = useState("");
+  const workspaceRoot = useWorkspaceRoot();
   const [loading, setLoading] = useState(true);
   const [wide, toggleWide] = useWideMode("viewer");
   const { lastMessage } = useWebSocket();
@@ -77,8 +80,8 @@ export default function MarkdownViewer() {
   const isHtml = filePath.endsWith(".html") && !isCrossRoot;
 
   // The toolbar above an open file is `ViewerActions`, the same component the
-  // project file viewer and the plans tab mount — VS Code, copy-path and
-  // copy-content, with one shared revert timer so only one confirms at a time.
+  // project file viewer and the plans tab mount — VS Code, copy-path (relative
+  // to the workspace root), copy-absolute and copy-content, with one shared revert timer so only one confirms at a time.
   // The prefix keeps this screen's published `markdown-viewer-*` test ids.
   // While a file switch is in flight `content` still holds the previous file's
   // text, so it is withheld until this one has loaded.
@@ -89,11 +92,14 @@ export default function MarkdownViewer() {
     absolutePath && !isHtml ? (
       <ViewerActions
         absolutePath={absolutePath}
+        relativePath={
+          workspaceRoot ? relativeToWorkspace(absolutePath, workspaceRoot) : null
+        }
         content={loading ? null : content}
         testIdPrefix="markdown-viewer"
       />
     ) : null,
-    [absolutePath, content, loading, isHtml],
+    [absolutePath, workspaceRoot, content, loading, isHtml],
   );
 
   useFloatingAction(<WideToggle wide={wide} onToggle={toggleWide} />, [

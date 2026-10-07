@@ -1,6 +1,8 @@
 import ImageDropZone from "../markdown/ImageDropZone";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import ViewerActions from "./ViewerActions";
+import { relativeToWorkspace } from "./relativeToWorkspace";
+import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { usePeekTriggerProps } from "./peekTrigger";
 
 interface Props {
@@ -20,6 +22,7 @@ export function FileViewer({
   loading,
 }: Props) {
   const peekTrigger = usePeekTriggerProps();
+  const workspaceRoot = useWorkspaceRoot();
   return (
     <div>
       <div
@@ -39,6 +42,9 @@ export function FileViewer({
           // open file's text, so withhold it until this file has loaded.
           <ViewerActions
             absolutePath={absolutePath}
+            relativePath={
+              workspaceRoot ? relativeToWorkspace(absolutePath, workspaceRoot) : null
+            }
             content={loading ? null : content}
           />
         )}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import ViewerActions from "./ViewerActions";
-import { workspaceRelativePath } from "./workspaceRelativePath";
+import { relativeToWorkspace } from "./relativeToWorkspace";
+import { useWorkspaceRoot } from "./useWorkspaceRoot";
 
 /**
  * The widths the viewer can pin the frame to. `full` fills the pane; the
@@ -45,6 +46,7 @@ export function MockupFrame({
   // The selected entry itself, not its id: the width then needs no lookup and
   // so no unreachable "not found" fallback.
   const [selected, setSelected] = useState<Width>(WIDTHS[0]);
+  const workspaceRoot = useWorkspaceRoot();
 
   return (
     // `h-[70vh]` is the phone's height and the fallback for any surface whose
@@ -91,7 +93,9 @@ export function MockupFrame({
           absolutePath={absolutePath}
           // The path that means something inside an agent conversation, not the
           // machine-specific absolute one. VS Code still gets the absolute path.
-          copyPathText={workspaceRelativePath(absolutePath, filePath)}
+          relativePath={
+            workspaceRoot ? relativeToWorkspace(absolutePath, workspaceRoot) : null
+          }
           testIdPrefix={testIdPrefix}
         />
       </div>

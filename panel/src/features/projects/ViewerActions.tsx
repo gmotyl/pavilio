@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, Copy, ClipboardCopy, Check } from "lucide-react";
+import { ExternalLink, Copy, ClipboardCopy, Check, FileSymlink } from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
 import { openInVSCode } from "../shell/vscode";
 
@@ -7,26 +7,28 @@ const BUTTON_CLASS =
   "flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors";
 
 /** Which button, if any, is currently showing its "Copied" confirmation. */
-type Feedback = "path" | "content" | null;
+type Feedback = "path" | "absolute" | "content" | null;
 
 /** Viewer toolbar actions: the buttons above an open file that operate on it. */
 export function ViewerActions({
   absolutePath,
   content,
-  copyPathText,
+  relativePath,
   testIdPrefix = "file-viewer",
 }: {
+  /** The open file on disk. VS Code and copy-absolute take it. */
   absolutePath: string;
   /** Open file's source. Null/undefined/empty means nothing to copy — the button is disabled. */
   content?: string | null;
   /**
-   * Text the copy-path button puts on the clipboard. Only `undefined` falls
-   * back to `absolutePath` — an explicit `""` is copied as an empty string.
-   * That asymmetry with `content` (where empty means nothing-to-copy) is
-   * deliberate: a path is always copyable, so a blank one is a caller bug
-   * worth seeing rather than silently rewriting into the absolute path.
+   * What copy-path puts on the clipboard: the file's path relative to the
+   * workspace root (`relativeToWorkspace`), e.g. `projects/metro/notes/a.md`, or
+   * a `../` path for a linked repo outside it. Required, so every call site has
+   * to derive it; `null` means it is not known yet (the workspace root is still
+   * loading) and disables the button. The absolute path never stands in for it
+   * — that has its own button.
    */
-  copyPathText?: string;
+  relativePath: string | null;
   /**
    * Stem of the buttons' `data-testid`s. It exists so the standalone `/view/*`
    * viewer can compose this toolbar without renaming the `markdown-viewer-*`
@@ -89,10 +91,15 @@ export function ViewerActions({
       </button>
       <button
         data-testid={`${testIdPrefix}-copy-path`}
-        onClick={() => copy("path", copyPathText ?? absolutePath)}
+        onClick={() => {
+          if (relativePath !== null) void copy("path", relativePath);
+        }}
+        disabled={relativePath === null}
+        title="Copy path relative to the workspace"
         className={BUTTON_CLASS}
         style={{
           color: copied === "path" ? "var(--green)" : "var(--text-secondary)",
+          opacity: relativePath === null ? 0.4 : 1,
         }}
       >
         {copied === "path" ? (
@@ -101,6 +108,23 @@ export function ViewerActions({
           <Copy className="w-3.5 h-3.5" />
         )}
         {copied === "path" ? "Copied" : "Path"}
+      </button>
+      <button
+        data-testid={`${testIdPrefix}-copy-absolute`}
+        onClick={() => copy("absolute", absolutePath)}
+        title="Copy absolute path"
+        className={BUTTON_CLASS}
+        style={{
+          color:
+            copied === "absolute" ? "var(--green)" : "var(--text-secondary)",
+        }}
+      >
+        {copied === "absolute" ? (
+          <Check className="w-3.5 h-3.5" />
+        ) : (
+          <FileSymlink className="w-3.5 h-3.5" />
+        )}
+        {copied === "absolute" ? "Copied" : "Absolute"}
       </button>
       <button
         data-testid={`${testIdPrefix}-copy-content`}
