@@ -107,6 +107,38 @@ If `design.md` has a `## Mockups` section (written by [[pavilio-grill]]'s mockup
 
 - **`Visual verification: no`, or no `## Mockups` section** → write no screenshot task. With `no`, the Check items are still carried as acceptance criteria and render tests.
 
+### Storybook story per mockup
+
+Check whether the code repo has Storybook: a `.storybook/` directory, or a `storybook` / `@storybook/*` dependency in the `package.json` of the package that owns the component. Look at it; don't assume.
+
+**If it has Storybook and `design.md` has a `## Mockups` section**, every listed surface gets a story and a story-based visual check. This does not depend on `Visual verification: yes|no`. A story can be reached without a login or a click path, so it is cheap. The opt-in in-app task above stays as it is.
+
+- **Story in the building task.** The task that builds the surface also creates or extends its story file, following the repo's existing story conventions (location, CSF version, naming). It writes one story per mockup state, with the args and data the mockup shows. List the story file under `Files:` and give the story names in the task.
+- **Story visual check task.** Append one task after the last UI task (before the in-app Visual verification task, if there is one):
+
+  ```markdown
+  ### Task N: Storybook visual check against mockups
+  References:
+  - [<workspace path>](<panel route>) — story `<story id>` — viewport <w>px
+    - Check: <items>
+    - Agreed deviations: <items | none>
+  Acceptance criteria:
+  - WHEN the story is opened in Storybook at <viewport> with agent-browser THEN its screenshot is
+    compared to <reference>; every Check item matches or is an agreed deviation
+  - WHEN a mismatch is found THEN fix the component (not the story's args) and repeat the comparison
+  - WHEN Storybook does not build or the story does not render THEN this task is blocked; never
+    check it off without a comparison
+  Steps:
+  - [ ] Step 1: Start Storybook (the repo's own script, on a spare port) and open each story's
+        `iframe.html?id=<story id>&viewMode=story` with agent-browser at the mockup's viewport
+  - [ ] Step 2: Screenshot each story; record match/mismatch per Check item against its mockup
+  - [ ] Step 3: Fix mismatches and repeat until every item matches or is an agreed deviation
+  - [ ] Step 4: Save screenshots to `openspec/changes/<id>/verification/storybook/` and list them
+        with story ids and viewports in the session progress note; stop Storybook
+  ```
+
+- **No Storybook** → no story and no story task. Never add Storybook to a repo just for this.
+
 ## When inline code IS warranted
 
 Include code only where the code itself is the decision being locked in:
