@@ -218,6 +218,13 @@ export function useSpeechHost(): SpeechHost {
    * than leaving a stuck slot behind for the next one.
    */
   const [synthesisWindow] = useState<SynthesisWindow>(createSynthesisWindow);
+  // A host that unmounts stops its window: queued warms and preloads must not
+  // go on firing syntheses for a panel nobody is looking at. Reopened on mount
+  // for React's development double-mount, which reuses the same instance.
+  useEffect(() => {
+    synthesisWindow.reopen();
+    return () => synthesisWindow.dispose();
+  }, [synthesisWindow]);
   /**
    * Preload units already handed to the window, as `utteranceId#index`, so a
    * re-render does not queue the same unit twice. A unit that declined at its
@@ -225,6 +232,17 @@ export function useSpeechHost(): SpeechHost {
    * arming the cell again reaches it.
    */
   const preloadedRef = useRef<Set<string>>(new Set());
+  /**
+   * Utterances whose preload a failed unit stopped, per session. A ref rather
+   * than a local of `preloadRemainder`, because that function runs again on
+   * every arrival anywhere in the grid and on every mode change: a stop held
+   * only for one call would walk a down synthesizer through the rest of the
+   * answer the next time any cell spoke. Cleared for a cell when its speech
+   * mode is cycled — a click on the control is the one retry the user asked
+   * for — and bounded per cell like the autoplay record, for the same reason:
+   * an older answer than that is out of the queue's reach.
+   */
+  const preloadFailedRef = useRef<Map<string, Set<string>>>(new Map());
   /**
    * The answers autoplay cells are owed, across the grid, in arrival order —
    * see `autoplayQueue.ts`. Per host for the same reason as the window: there
@@ -470,16 +488,17 @@ export function useSpeechHost(): SpeechHost {
    * nothing more. A unit that declines is forgotten, so arming the cell again
    * picks it back up.
    *
-   * A failed unit stops the rest of that utterance's preload too: a
-   * synthesizer that is down must not be walked through a twelve-unit answer
-   * nobody has asked for yet. The run, if one starts, reports the failure.
+   * A failed unit stops the rest of that utterance's preload too, and it
+   * stays stopped across later arrivals (`preloadFailedRef`): a synthesizer
+   * that is down must not be walked through a twelve-unit answer nobody has
+   * asked for yet. The run, if one starts, reports the failure. Cycling the
+   * cell's mode is what tries again.
    */
   const preloadRemainder = useCallback(
     (utterance: Utterance, units: readonly SpeechUnit[]): void => {
       const { id, sessionId } = utterance;
-      let failed = false;
       const unwanted = (): boolean =>
-        failed ||
+        preloadFailedRef.current.get(sessionId)?.has(id) === true ||
         speechModeOfRef.current(sessionId) === "off" ||
         heardForRef.current(sessionId).has(id);
       // Heard answers are never preloaded: a replay is a click away and pays
@@ -500,7 +519,12 @@ export function useSpeechHost(): SpeechHost {
           // Read at the turn, for the same reason the warm reads it there.
           return synthesizeSpeech(text, { voice: getStoredVoice() }).catch(() => {
             // Best-effort, like every warm: the click synthesizes it for real.
-            failed = true;
+            // The unit is forgotten so a retry reaches it, and the answer is
+            // marked so nothing after it is requested until that retry.
+            preloadedRef.current.delete(key);
+            const failed = preloadFailedRef.current.get(sessionId) ?? new Set<string>();
+            rememberAutoplayed(failed, id);
+            preloadFailedRef.current.set(sessionId, failed);
           });
         });
       }
@@ -1134,6 +1158,8 @@ export function useSpeechHost(): SpeechHost {
       // Cycling is a click too, and it is the gesture the autoplay that follows
       // will need — so it is spent on the element here rather than lost.
       unlock();
+      // And it is the retry for a preload a failed unit stopped.
+      preloadFailedRef.current.delete(sessionId);
       cycleChannelSpeechMode(sessionId);
     },
     [cycleChannelSpeechMode, unlock],

@@ -155,7 +155,12 @@ vi.mock("../../realtime/useWebSocket", async () => {
 
 import { prepare } from "../prepare";
 import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
-import { nextSlot, SPECULATIVE_SLOTS, SYNTHESIS_WINDOW_SIZE } from "../synthesisWindow";
+import {
+  createSynthesisWindow,
+  nextSlot,
+  SPECULATIVE_SLOTS,
+  SYNTHESIS_WINDOW_SIZE,
+} from "../synthesisWindow";
 
 /** The `src` of every started playback, in order. Warming must never add one. */
 const played: string[] = [];
@@ -457,6 +462,49 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     await cycle(() => result.current, "cell-a");
     expect(requestedTexts()).toEqual(units.slice(0, 4));
   });
+  it("a failed preload stays stopped across unrelated arrivals", async () => {
+    const markdown = response(5);
+    const units = holdAll(markdown);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    expect(requestedTexts()).toEqual([units[0], units[1]]);
+
+    // Unit 1 fails: units 2+ decline at their turn.
+    await act(async () => {
+      synth.fail(units[1]);
+      await drain();
+    });
+    await release(units[0]);
+    expect(requestedTexts()).toEqual([units[0], units[1]]);
+
+    // An arrival in another cell re-runs the warm effect; the failed answer's
+    // remainder must not be requested again because of it.
+    await emitUtterance("cell-b", "b-1", response(2, "Bravo"));
+    for (const unit of units.slice(1)) expect(timesRequested(unit)).toBeLessThanOrEqual(1);
+    for (const unit of units.slice(2)) expect(timesRequested(unit)).toBe(0);
+
+    // Cycling the cell's mode is the retry.
+    await cycle(() => result.current, "cell-a"); // autoplay
+    expect(timesRequested(units[1])).toBe(2);
+  });
+
+  it("the window stops at unmount", async () => {
+    const markdown = response(5);
+    const units = holdAll(markdown);
+    const { result, unmount } = renderHook(() => useSpeechHost());
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    expect(requestedTexts()).toEqual([units[0], units[1]]);
+
+    unmount();
+    // The in-flight pair lands; the queued units 2..4 never start.
+    await release(units[0]);
+    await release(units[1]);
+    expect(requestedTexts()).toEqual([units[0], units[1]]);
+  });
 });
 
 describe("nextSlot — the window's priority rule", () => {
@@ -476,5 +524,52 @@ describe("nextSlot — the window's priority rule", () => {
     const speculating = { run: 0, warm: 1, preload: SPECULATIVE_SLOTS - 1 };
     expect(nextSlot(speculating, { run: 0, warm: 1, preload: 1 })).toBeNull();
     expect(nextSlot(speculating, { run: 1, warm: 1, preload: 1 })).toBe("run");
+  });
+});
+
+describe("createSynthesisWindow — dispose", () => {
+  /** A job that holds its slot until the returned `settle` is called. */
+  function heldJob(
+    started: string[],
+    name: string,
+  ): { job: () => Promise<void>; settle: () => void } {
+    let settle = (): void => {};
+    const pending = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    return {
+      job: () => {
+        started.push(name);
+        return pending;
+      },
+      settle: () => settle(),
+    };
+  }
+
+  it("a disposed window starts nothing that was queued, nor anything scheduled later", async () => {
+    const window = createSynthesisWindow();
+    const started: string[] = [];
+    const jobs = ["a", "b", "c", "d"].map((name) => heldJob(started, name));
+    for (const { job } of jobs) window.schedule("run", job);
+    expect(started).toEqual(["a", "b", "c"]);
+
+    window.dispose();
+    window.schedule("run", heldJob(started, "e").job);
+    jobs[0].settle();
+    await drain();
+    expect(started).toEqual(["a", "b", "c"]);
+  });
+
+  it("a window reopened before any slot frees loses nothing (the development double-mount)", async () => {
+    const window = createSynthesisWindow();
+    const started: string[] = [];
+    const jobs = ["a", "b", "c", "d"].map((name) => heldJob(started, name));
+    for (const { job } of jobs) window.schedule("run", job);
+
+    window.dispose();
+    window.reopen();
+    jobs[0].settle();
+    await drain();
+    expect(started).toEqual(["a", "b", "c", "d"]);
   });
 });

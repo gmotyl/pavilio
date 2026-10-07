@@ -76,13 +76,39 @@ export type SynthesisJob = () => Promise<unknown> | null;
 export interface SynthesisWindow {
   /** Starts the job now if its tier has a slot, otherwise queues it (FIFO per tier). */
   schedule(tier: SynthesisTier, job: SynthesisJob): void;
+  /**
+   * Closes the window: nothing scheduled afterwards is accepted, and every job
+   * still queued is dropped unstarted the next time a slot frees. What is
+   * already in flight is not cancelled — a synthesis cannot be — but nothing
+   * new starts once the host that owns the window has unmounted.
+   */
+  dispose(): void;
+  /**
+   * Undoes {@link dispose}. Only for React's development double-mount, which
+   * runs the host's unmount cleanup and then mounts the SAME instance again:
+   * without this, a StrictMode panel would be left with a dead window.
+   */
+  reopen(): void;
 }
 
 export function createSynthesisWindow(): SynthesisWindow {
   const active: Record<SynthesisTier, number> = { run: 0, warm: 0, preload: 0 };
-  const waiting: Record<SynthesisTier, SynthesisJob[]> = { run: [], warm: [], preload: [] };
+  const waiting: Record<SynthesisTier, SynthesisJob[]> = {
+    run: [],
+    warm: [],
+    preload: [],
+  };
+  let disposed = false;
 
   const pump = (): void => {
+    if (disposed) {
+      // Dropped here rather than in `dispose`, so a dispose that is undone
+      // before any slot frees (the development double-mount) loses nothing.
+      waiting.run.length = 0;
+      waiting.warm.length = 0;
+      waiting.preload.length = 0;
+      return;
+    }
     for (;;) {
       const tier = nextSlot(active, {
         run: waiting.run.length,
@@ -112,7 +138,15 @@ export function createSynthesisWindow(): SynthesisWindow {
 
   return {
     schedule(tier, job) {
+      if (disposed) return;
       waiting[tier].push(job);
+      pump();
+    },
+    dispose() {
+      disposed = true;
+    },
+    reopen() {
+      disposed = false;
       pump();
     },
   };
