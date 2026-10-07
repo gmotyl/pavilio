@@ -57,6 +57,21 @@ Interview relentlessly until you reach shared understanding. Walk each branch of
 - **Cross-reference with code.** If a stated behavior contradicts the code, surface the contradiction.
 - **Propose 2-3 approaches** (design mode, or grill mode when a real fork appears) with trade-offs; lead with your recommendation.
 
+### Mockup mode
+
+A mockup named in a grill becomes binding: it is turned into a **mockup check** that [[pavilio-writing-plans]] carries into `tasks.md` as acceptance criteria. Use the glossary's terms exactly — **mockup check**, **agreed deviation**, **visual verification** — never "known diff", "exception" or "screenshot test".
+
+- **Trigger (a) — a mockup appears.** When a path or panel link to a file under `*/mockups/` appears in the conversation — or the user names another image/HTML file as the design — enter mockup mode for that file.
+- **Trigger (b) — a rendered surface with no mockup.** When the change touches a rendered surface (a panel, page, component — anything a user sees) and no mockup has appeared, ask once, lettered:
+  - a) I have a mockup — import it in the Mockups tab and paste its **Copy link**
+  - b) make one — `pavilio-mockup`
+  - c) no mockup for this change
+
+  On **b**, invoke [[pavilio-mockup]] (`Skill` tool, `skill: pavilio-mockup`) and treat the file it writes exactly like a supplied mockup. On **c**, drop mockup mode for the rest of the grill.
+- **Per mockup:** read the file (images visually, HTML as source), then propose its **mockup check** — concrete, checkable items: elements present, their order, copy, states, composition per viewport. Get the user to confirm or edit it before moving on.
+- **Agreed deviations are recorded when decided.** The moment a grill decision contradicts a mockup (a different label, a dropped element, another order), add it to that mockup's **agreed deviations** — "mockup shows X → we build Y, because …" — right then, not at the end.
+- **Once per change,** when at least one mockup is attached, ask whether the change gets **visual verification** (a screenshot comparison task in the plan) — lettered a) yes · b) no, recommendation depending on how reachable the surface is, **default no**. Record the answer.
+
 ## 3. Update domain docs inline
 
 Capture decisions as they crystallise — don't batch.
@@ -74,7 +89,22 @@ Once you understand what's being built, present it in sections scaled to complex
 Backend already resolved in §0 (per [[pavilio-openspec-storage]]). Write into the resolved `openspec/changes/<change-id>/` tree and commit:
 
 - `proposal.md` — the why/what of the change.
-- `design.md` — the technical design, **with mermaid diagrams** where they clarify architecture, data flow, or state.
+- `design.md` — the technical design, **with mermaid diagrams** where they clarify architecture, data flow, or state. When the change has mockups (§2 Mockup mode), `design.md` gets a `## Mockups` section in exactly this shape — one `###` per mockup, its heading the mockup's Copy-link link, and one `Visual verification` line for the whole change:
+
+  ```markdown
+  ## Mockups
+
+  ### [projects/<p>/mockups/<file>](/project/<p>/mockups?file=<p>%2Fmockups%2F<file>)
+  - Surface: <component / screen>, viewport(s): <390px, 1280px>
+  - Check:
+    - <item>
+  - Agreed deviations:
+    - <mockup shows X → we build Y, because …> | none
+
+  Visual verification: yes | no
+  ```
+
+  A change with no mockup has no `## Mockups` section (not an empty one).
 - `specs/<capability>/spec.md` — the requirement **deltas** (below). One file per capability the change touches.
 
 A coordinated multi-repository change reuses **one shared `<change-id>`** across each repository's independently-resolved backend (see [[pavilio-openspec-storage]]). The panel's Plans tab groups these change dirs.
