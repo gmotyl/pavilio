@@ -535,7 +535,7 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
 
-    expect(result.current.warmableUtterances).toEqual([
+    expect(result.current.warmableUtterances.map((entry) => entry.utterance)).toEqual([
       utterance("cell-a", "a1"),
       utterance("cell-b", "b1"),
     ]);
@@ -573,7 +573,7 @@ describe("useUtteranceChannel", () => {
 
     // a1 is under the cursor; a2 — `previous[cursor - 2]` — is one press away.
     // a3 is two presses away and has no business being warmed ahead of it.
-    const warmed = result.current.warmableUtterances.map((entry) => entry.id);
+    const warmed = result.current.warmableUtterances.map((entry) => entry.utterance.id);
     expect(warmed).toEqual(["a1", "a2"]);
     expect(warmed).not.toContain("a3");
   });

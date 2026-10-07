@@ -20,10 +20,11 @@
  * reads `warmableUtterances`, fills the synthesis cache, and reports which
  * cells are still waiting on it — {@link SpeechHost.preparingSessionIds}, the
  * red the control shows before anyone has clicked anything. It is also where
- * the panel-wide bound on that work lives — {@link WARM_CONCURRENCY} — for the
- * third time for the same reason: the channel cannot see the synthesizer and
- * the player cannot see the other cells, so only this module can count what the
- * whole grid has in flight.
+ * the panel-wide bound on that work lives — the synthesis window
+ * (`synthesisWindow.ts`), shared with the player's cascade — for the third time
+ * for the same reason: the channel cannot see the synthesizer and the player
+ * cannot see the other cells, so only this module can count what the whole grid
+ * has in flight.
  *
  * ## Why a run object rather than `await play(); markHeard()`
  *
@@ -54,6 +55,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { alerts } from "../alerts/store";
 import { prepare } from "./prepare";
 import { synthesizeSpeech } from "./synth";
+import { createSynthesisWindow, type SynthesisWindow } from "./synthesisWindow";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
 import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
@@ -148,35 +150,6 @@ export interface SpeechHost extends GridSpeech, MediaSessionTransportTarget {
   preparingSessionIds: ReadonlySet<string>;
 }
 
-/**
- * How many warms the WHOLE PANEL may have in flight at once.
- *
- * The per-cell bound is the queue's reach — what is being spoken and what the
- * transport would reach next, so two — and that was the only bound there was.
- * The warm loop walks every warmable utterance in every cell and fires a
- * synthesis for each with no await, so ten busy terminals opened ten edge-tts
- * WebSocket handshakes at once, each with its own DRM token, all competing with
- * the unit the listener is actually waiting for. `SPEECH_STREAM_STALL_TIMEOUT_MS`
- * is 15 s, so the losers stall rather than merely queue.
- *
- * Two, and the rest wait their turn:
- *
- * - It matches the per-cell bound, so a single cell's pair still goes out
- *   together. The common case — one terminal answering — is unchanged, and the
- *   existing per-cell pin keeps meaning what it meant.
- * - Speculation stops growing with the number of terminals. The gate is what
- *   makes the panel's warm cost a constant rather than a function of the grid.
- * - It leaves the listener the larger share. A live run's own cascade is
- *   bounded separately at `SYNTHESIS_CONCURRENCY` = 3 inside the player,
- *   and that one is audio somebody is waiting on; this one is a guess about a
- *   click nobody has made. The guess does not get to outnumber it.
- *
- * Not one: that would serialize a single cell's own pair behind itself and slow
- * the case the warm exists for. Not four or more: two cells' speculation would
- * then match or beat the live cascade, which is the ratio being fixed.
- */
-const WARM_CONCURRENCY = 2;
-
 /** Shared so a panel with nothing warming does not allocate a Set per render. */
 const NOTHING_PREPARING: ReadonlySet<string> = new Set<string>();
 
@@ -232,50 +205,25 @@ export function useSpeechHost(): SpeechHost {
    */
   const warmingRef = useRef<Map<string, string>>(new Map());
   /**
-   * The panel-wide warm gate: how many warms are in flight, and the ones still
-   * waiting for a slot. See {@link WARM_CONCURRENCY}.
+   * The panel-wide synthesis window, shared with the player's cascade: at most
+   * three syntheses in flight across the grid, a freed slot going to the
+   * playing run first, then to unit-0 warms, then to armed preloads. See
+   * `synthesisWindow.ts`.
    *
-   * A ref rather than a module-level counter, and that IS panel-wide: this hook
-   * is hosted exactly once per panel (`SpeechHostProvider`), which is the same
+   * Per host rather than module-level, and that IS panel-wide: this hook is
+   * hosted exactly once per panel (`SpeechHostProvider`), which is the same
    * reason the player's single `<audio>` element lives here. Holding it on the
-   * instance also means a host that unmounts takes its gate with it, rather
+   * instance also means a host that unmounts takes its window with it, rather
    * than leaving a stuck slot behind for the next one.
    */
-  const warmGateRef = useRef<{ active: number; waiting: Array<() => void> }>({
-    active: 0,
-    waiting: [],
-  });
-
+  const [synthesisWindow] = useState<SynthesisWindow>(createSynthesisWindow);
   /**
-   * Runs a warm now if the panel has a slot, and otherwise queues it in arrival
-   * order. The slot is released on EVERY ending — a warm that failed is not a
-   * warm that is still running, and a gate closed by a swallowed rejection
-   * would stop the panel warming anything ever again.
+   * Preload units already handed to the window, as `utteranceId#index`, so a
+   * re-render does not queue the same unit twice. A unit that declined at its
+   * turn (the cell was disarmed, or the answer heard) is taken back out, so
+   * arming the cell again reaches it.
    */
-  const runWarm = useCallback((warm: () => Promise<void>): void => {
-    const gate = warmGateRef.current;
-
-    const start = (): void => {
-      gate.active += 1;
-      void warm().then(
-        () => {
-          release();
-        },
-        () => {
-          release();
-        },
-      );
-    };
-
-    const release = (): void => {
-      gate.active -= 1;
-      const next = gate.waiting.shift();
-      if (next) next();
-    };
-
-    if (gate.active < WARM_CONCURRENCY) start();
-    else gate.waiting.push(start);
-  }, []);
+  const preloadedRef = useRef<Set<string>>(new Set());
   const [preparingSessionIds, setPreparingSessionIds] =
     useState<ReadonlySet<string>>(NOTHING_PREPARING);
 
@@ -318,7 +266,7 @@ export function useSpeechHost(): SpeechHost {
     alerts.error("Speech stopped — the voice could not be synthesized.");
   }, []);
 
-  const player = useSpeechPlayer({ onError });
+  const player = useSpeechPlayer({ onError, synthesisWindow });
   /**
    * Destructured on purpose, and depended on **as methods** everywhere below —
    * never as `player`.
@@ -422,6 +370,20 @@ export function useSpeechHost(): SpeechHost {
     warmableUtterances,
   } = channel;
 
+  /**
+   * What a waiting preload asks at its turn — is the cell still armed, is the
+   * answer still unheard — read through mirrors, because the answer has to be
+   * the one at the moment the slot frees, not the one when the unit queued.
+   * Mirrors rather than effect dependencies: `heardFor` moves on every
+   * `markHeard`, and the warming effect must not re-run for that.
+   */
+  const speechModeOfRef = useRef(speechModeOf);
+  const heardForRef = useRef(heardFor);
+  useEffect(() => {
+    speechModeOfRef.current = speechModeOf;
+    heardForRef.current = heardFor;
+  }, [heardFor, speechModeOf]);
+
   const preparedFor = useCallback(
     (utterance: Utterance, language: "pl" | "en"): PreparedSpeech => {
       const cached = preparedRef.current.get(utterance.id);
@@ -434,47 +396,32 @@ export function useSpeechHost(): SpeechHost {
     [],
   );
 
-  useEffect(() => {
-    // A lit control has to be ready to speak. Without this the first click pays
-    // for the dynamic `import("edge-tts-universal/browser")`, a DRM token and a
-    // fresh WebSocket handshake — seconds of nothing, which reads as a dead
-    // button. So unit 0 is synthesized the moment an utterance arrives.
-    //
-    // EVERY session is warmed, not only the autoplay ones (Greg: "arm all, I will
-    // use TTS most of the time"). The cost is one small synthesis per arriving
-    // response, bounded by the number of terminals, and unit 0 is deliberately
-    // the response's heading or first sentence.
-    //
-    // Warming is silent but deliberately VISIBLE. Silent: it fills the
-    // synthesis cache and never touches the player, so a warmed cell that is
-    // not in autoplay makes no sound however it is coloured. Visible: the cell is
-    // reported preparing until the audio is actually in hand, because a green
-    // control that might still be synthesizing is exactly the ambiguity the
-    // red state exists to remove.
-    for (const utterance of warmableUtterances) {
-      if (warmedRef.current.has(utterance.id)) continue;
+  /** Unit 0 of an arriving utterance, at the window's `warm` tier, once. */
+  const warmFirstUnit = useCallback(
+    (utterance: Utterance, units: readonly SpeechUnit[]): void => {
+      if (warmedRef.current.has(utterance.id)) return;
       // Marked before the synthesis, not after: a second render must not start
       // a second warm of the same utterance while the first is in flight.
       warmedRef.current.add(utterance.id);
 
-      const first = preparedFor(utterance, languageFor(utterance.sessionId)).units[0];
-      if (!first) continue;
+      const first = units[0];
+      if (!first) return;
 
       warmingRef.current.set(utterance.sessionId, utterance.id);
       setPreparing(utterance.sessionId, true);
 
-      // Through the panel-wide gate, which runs this now or queues it behind at
-      // most {@link WARM_CONCURRENCY} others. The red above is set OUTSIDE the
-      // gate on purpose: a cell waiting for a slot is a cell waiting for its
-      // audio, and which side of the gate it is waiting on is not the user's
-      // question.
+      // Through the panel-wide window, which runs this now or queues it behind
+      // the playing run and the warms ahead of it. The red above is set OUTSIDE
+      // the window on purpose: a cell waiting for a slot is a cell waiting for
+      // its audio, and which side of the window it is waiting on is not the
+      // user's question.
       //
       // `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the
       // whole point here — it is what says when the cell stops being red, and
-      // now also what says when the next warm may start — and a
-      // fire-and-forget warm cannot be reported on. The failure is swallowed
-      // exactly as `prefetchSpeech` swallows it.
-      runWarm(() =>
+      // also what frees the slot — and a fire-and-forget warm cannot be
+      // reported on. The failure is swallowed exactly as `prefetchSpeech`
+      // swallows it.
+      synthesisWindow.schedule("warm", () =>
         // The voice is the one the click will use, from the same source
         // `useSpeechPlayer` reads, and it is read HERE rather than at the point
         // the warm was queued: a warm that waited out a voice change should
@@ -495,13 +442,93 @@ export function useSpeechHost(): SpeechHost {
             setPreparing(utterance.sessionId, false);
           }),
       );
+    },
+    [setPreparing, synthesisWindow],
+  );
+
+  /**
+   * Units 1..n of an armed cell's unheard utterance, at the window's `preload`
+   * tier, in the order they are handed in. Unit 0 is the warm's.
+   *
+   * Each unit asks again at its turn whether it is still wanted: a cell
+   * disarmed while its units waited stops there (what is already in flight
+   * finishes and stays cached), and an answer heard in the meantime needs
+   * nothing more. A unit that declines is forgotten, so arming the cell again
+   * picks it back up.
+   *
+   * A failed unit stops the rest of that utterance's preload too: a
+   * synthesizer that is down must not be walked through a twelve-unit answer
+   * nobody has asked for yet. The run, if one starts, reports the failure.
+   */
+  const preloadRemainder = useCallback(
+    (utterance: Utterance, units: readonly SpeechUnit[]): void => {
+      const { id, sessionId } = utterance;
+      let failed = false;
+      const unwanted = (): boolean =>
+        failed ||
+        speechModeOfRef.current(sessionId) === "off" ||
+        heardForRef.current(sessionId).has(id);
+      // Heard answers are never preloaded: a replay is a click away and pays
+      // for itself, and an armed history must not cost the panel a backlog.
+      if (unwanted()) return;
+
+      for (let index = 1; index < units.length; index += 1) {
+        const key = `${id}#${index}`;
+        if (preloadedRef.current.has(key)) continue;
+        preloadedRef.current.add(key);
+
+        const { text } = units[index];
+        synthesisWindow.schedule("preload", () => {
+          if (unwanted()) {
+            preloadedRef.current.delete(key);
+            return null;
+          }
+          // Read at the turn, for the same reason the warm reads it there.
+          return synthesizeSpeech(text, { voice: getStoredVoice() }).catch(() => {
+            // Best-effort, like every warm: the click synthesizes it for real.
+            failed = true;
+          });
+        });
+      }
+    },
+    [synthesisWindow],
+  );
+
+  useEffect(() => {
+    // A lit control has to be ready to speak. Without this the first click pays
+    // for the dynamic `import("edge-tts-universal/browser")`, a DRM token and a
+    // fresh WebSocket handshake — seconds of nothing, which reads as a dead
+    // button. So unit 0 is synthesized the moment an utterance arrives.
+    //
+    // EVERY session is warmed, not only the autoplay ones (Greg: "arm all, I will
+    // use TTS most of the time"). The cost is one small synthesis per arriving
+    // response, bounded by the number of terminals, and unit 0 is deliberately
+    // the response's heading or first sentence.
+    //
+    // Warming is silent but deliberately VISIBLE. Silent: it fills the
+    // synthesis cache and never touches the player, so a warmed cell that is
+    // not in autoplay makes no sound however it is coloured. Visible: the cell is
+    // reported preparing until the audio is actually in hand, because a green
+    // control that might still be synthesizing is exactly the ambiguity the
+    // red state exists to remove.
+    //
+    // An ARMED (or autoplay) cell goes further: every unit of its unheard
+    // answer is preloaded, so the click that follows plays to the end without
+    // a red underrun. Preloads are the window's lowest tier — behind the
+    // playing run and behind every unit-0 warm — and silent and invisible: the
+    // scrubber's segments already show them landing, and the control's red is
+    // about unit 0 alone.
+    for (const { utterance, mode } of warmableUtterances) {
+      const { units } = preparedFor(utterance, languageFor(utterance.sessionId));
+      warmFirstUnit(utterance, units);
+      if (mode !== "off") preloadRemainder(utterance, units);
     }
     // Warming reads nothing from the player any more: the supersession that
     // used to ride along inside this loop is its own effect below, because it
     // is about the QUEUE rather than about the cache, and a loop over every
     // speakable utterance in the panel was never the honest place to ask "is
     // this one cell's held run stale".
-  }, [languageFor, preparedFor, runWarm, setPreparing, warmableUtterances]);
+  }, [languageFor, preparedFor, preloadRemainder, warmFirstUnit, warmableUtterances]);
 
   useEffect(() => {
     // "A paused cell does not hold the next answer hostage" — the living spec,

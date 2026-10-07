@@ -844,11 +844,11 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
    * WebSocket handshakes at once — each with its own DRM token, all competing
    * with the unit the listener is actually waiting for.
    *
-   * {@link WARM_CONCURRENCY} is that bound, and the rest queue. Two, matching
-   * the per-cell bound, so one cell's pair still goes out together — the common
-   * case is unchanged — while speculation across the panel never grows with the
-   * number of terminals. The live run keeps the larger share: its own cascade
-   * is bounded separately at `SYNTHESIS_CONCURRENCY = 3`.
+   * The synthesis window's `SPECULATIVE_SLOTS` is that bound, and the rest
+   * queue. Two, matching the per-cell bound, so one cell's pair still goes out
+   * together — the common case is unchanged — while speculation across the
+   * panel never grows with the number of terminals. The live run keeps the
+   * larger share: it ranks first in the same three-slot window.
    *
    * A queued warm is still an honest red: the cell IS waiting for its audio,
    * and which side of the gate it is waiting on is not the user's question.

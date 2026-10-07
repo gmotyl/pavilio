@@ -207,6 +207,12 @@ function queueHolds(queue: UtteranceQueue, id: string): boolean {
   );
 }
 
+/** A warmable utterance, tagged with its cell's speech mode at the time. */
+export interface WarmableUtterance {
+  utterance: Utterance;
+  mode: SpeechMode;
+}
+
 /**
  * What the host **warms**, per cell: the utterance the transport is on, and the
  * one a `next` press would actually land on. That second entry is read off the
@@ -341,8 +347,13 @@ export interface Channel {
    * the set does, so an effect keyed on it runs once per arrival rather than
    * once per render, and both arrival paths — a live frame and `/latest`
    * hydration — land in it.
+   *
+   * Each entry carries its cell's speech mode, because the mode decides how
+   * much of it is warmed: unit 0 for a cell that is off, every unit for an
+   * armed or autoplay one. So the list also moves when a cell's mode does —
+   * arming a cell is what reaches back for the answer it already holds.
    */
-  warmableUtterances: Utterance[];
+  warmableUtterances: WarmableUtterance[];
   /** The cell's speech mode; `off` for a session with no entry. */
   speechModeOf(sessionId: string): SpeechMode;
   /** `off → armed → autoplay → off`, persisted per browser. Not exclusive. */
@@ -741,26 +752,33 @@ export function useUtteranceChannel({
   );
 
   /** The last list handed out, so an unchanged set keeps its identity. */
-  const warmableRef = useRef<Utterance[]>([]);
+  const warmableRef = useRef<WarmableUtterance[]>([]);
   const warmableUtterances = useMemo(() => {
-    const next = [...sessions.values()].flatMap((record) => warmableOf(record.queue));
+    const next = [...sessions.entries()].flatMap(([sessionId, record]) => {
+      const mode = speechModes[sessionId] ?? "off";
+      return warmableOf(record.queue).map((utterance) => ({ utterance, mode }));
+    });
 
     // `sessions` is a fresh Map on every change, including a `markHeard` that
     // touches no utterance at all, so the array it derives is fresh too. Utterance
-    // objects are stored once and never rewritten, so element identity is the
-    // honest test of whether the SET changed — and returning the previous array
-    // when it did not is what stops the host warming effect churning.
+    // objects are stored once and never rewritten, so element identity — plus
+    // the mode it was tagged with — is the honest test of whether the SET
+    // changed, and returning the previous array when it did not is what stops
+    // the host warming effect churning.
     const previous = warmableRef.current;
     if (
       previous.length === next.length &&
-      previous.every((utterance, index) => utterance === next[index])
+      previous.every(
+        (entry, index) =>
+          entry.utterance === next[index].utterance && entry.mode === next[index].mode,
+      )
     ) {
       return previous;
     }
 
     warmableRef.current = next;
     return next;
-  }, [sessions]);
+  }, [sessions, speechModes]);
 
   const markHeard = useCallback((sessionId: string) => {
     setSessions((current) => {

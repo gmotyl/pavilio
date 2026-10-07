@@ -952,7 +952,14 @@ describe("autoplay — refusal and synthesis failure", () => {
     await waitFor(() => expect(lastAlert()?.kind).toBe("error"));
     expect(played).toEqual([]);
     expect(speakState("cell-a")).toBe("ready");
-    expect(synth.requests).toHaveLength(2);
+    // Only the answer's own two units are ever asked for. An autoplay cell
+    // preloads its unit 1 as well as the run loading it, and a failure is
+    // never cached, so that unit may be asked for twice — but nothing past
+    // the answer is.
+    expect(new Set(synth.requests)).toEqual(
+      new Set(prepare(markdown).units.map((unit) => unit.text)),
+    );
+    expect(synth.requests.length).toBeLessThanOrEqual(3);
   });
 
   it("a run that spoke before it failed is not heard either", async () => {
