@@ -67,7 +67,7 @@ A mockup named in a grill becomes binding: it is turned into a **mockup check** 
   - b) make one — `pavilio-mockup`
   - c) no mockup for this change
 
-  On **b**, invoke [[pavilio-mockup]] (`Skill` tool, `skill: pavilio-mockup`) and treat the file it writes exactly like a supplied mockup. On **c**, drop mockup mode for the rest of the grill.
+  On **b**, invoke [[pavilio-mockup]] (`Skill` tool, `skill: pavilio-mockup`) and treat the file it writes exactly like a supplied mockup. When it writes an options comparison (several variants in one file) rather than a single design, have the user pick one option first, and write the mockup check for that option only. On **c**, do not ask this question again for the rest of the grill — trigger (a) still fires if a mockup is pasted later.
 - **Per mockup:** read the file (images visually, HTML as source), then propose its **mockup check** — concrete, checkable items: elements present, their order, copy, states, composition per viewport. Get the user to confirm or edit it before moving on.
 - **Agreed deviations are recorded when decided.** The moment a grill decision contradicts a mockup (a different label, a dropped element, another order), add it to that mockup's **agreed deviations** — "mockup shows X → we build Y, because …" — right then, not at the end.
 - **Once per change,** when at least one mockup is attached, ask whether the change gets **visual verification** (a screenshot comparison task in the plan) — lettered a) yes · b) no, recommendation depending on how reachable the surface is, **default no**. Record the answer.
