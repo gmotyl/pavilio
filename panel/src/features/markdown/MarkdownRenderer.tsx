@@ -58,6 +58,19 @@ function resolveRelativeHref(href: string, basePath: string): string | null {
   return resolved.join("/");
 }
 
+/**
+ * The raw-file URL for a resolved route path. A cross-root `_root/<id>/rest`
+ * path is a viewer-route prefix, not a file under projectsDir: the raw route
+ * selects that root with `?root=<id>`, as the read route does.
+ */
+function rawFileUrl(resolved: string): string {
+  const parts = resolved.split("/");
+  if (parts[0] === "_root" && parts[1]) {
+    return `/api/files/raw/${parts.slice(2).join("/")}?root=${encodeURIComponent(parts[1])}`;
+  }
+  return `/api/files/raw/${resolved}`;
+}
+
 /** Extract plain text from React children (handles nested spans from rehype-highlight leftovers) */
 function extractText(children: any): string {
   if (typeof children === "string") return children;
@@ -201,7 +214,7 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
       // A download saves whatever the href answers, and `/view/*` is answered
       // with the SPA shell — so it gets the raw file, as images do.
       if (props.download !== undefined && props.download !== false) {
-        return <a href={`/api/files/raw/${resolved}`} {...props}>{children}</a>;
+        return <a href={rawFileUrl(resolved)} {...props}>{children}</a>;
       }
 
       return inAppLink(`/view/${resolved}`, children, props);
@@ -219,7 +232,7 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
         }
         const resolved = resolveRelativeHref(src, basePath);
         if (!resolved) return <img src={src} alt={alt} {...props} />;
-        return <img src={`/api/files/raw/${resolved}`} alt={alt} {...props} />;
+        return <img src={rawFileUrl(resolved)} alt={alt} {...props} />;
       },
     };
   }, [basePath, navigate]);

@@ -135,17 +135,29 @@ router.get("/raw/*path", (req, res) => {
   const relativePath = Array.isArray(parts) ? parts.join("/") : parts;
   const { projectsDir } = getConfig();
 
-  let absolutePath = resolve(projectsDir, relativePath);
-  if (!absolutePath.startsWith(projectsDir)) {
-    return res.status(403).json({ error: "Path traversal blocked" });
-  }
+  let absolutePath: string;
+  // ?root=<id> — explicit cross-root file, same containment as the read route
+  // and no projectsDir/repo-root fallback.
+  const rootParam = typeof req.query.root === "string" ? req.query.root : "";
+  if (rootParam && isValidRoot(rootParam)) {
+    const base = resolveRoot(rootParam);
+    absolutePath = resolve(base, relativePath);
+    if (!isPathUnder(absolutePath, base)) {
+      return res.status(403).json({ error: "Path traversal blocked" });
+    }
+  } else {
+    absolutePath = resolve(projectsDir, relativePath);
+    if (!absolutePath.startsWith(projectsDir)) {
+      return res.status(403).json({ error: "Path traversal blocked" });
+    }
 
-  // Fallback: if not found in projectsDir, try repo root
-  if (!existsSync(absolutePath)) {
-    const repoRoot = resolve(projectsDir, "..");
-    const fallback = resolve(repoRoot, relativePath);
-    if (fallback.startsWith(repoRoot) && existsSync(fallback)) {
-      absolutePath = fallback;
+    // Fallback: if not found in projectsDir, try repo root
+    if (!existsSync(absolutePath)) {
+      const repoRoot = resolve(projectsDir, "..");
+      const fallback = resolve(repoRoot, relativePath);
+      if (fallback.startsWith(repoRoot) && existsSync(fallback)) {
+        absolutePath = fallback;
+      }
     }
   }
 

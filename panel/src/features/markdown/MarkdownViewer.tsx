@@ -94,9 +94,10 @@ export default function MarkdownViewer() {
     (filePath.startsWith("_skills/") && !filePath.includes("."));
   const isJson = filePath.endsWith(".json");
   // A mockup frame is only honest for a path the raw route can actually serve.
-  // `/raw/*path` resolves against the projects dir (with a repo-root fallback)
-  // and takes no `root` query, so a cross-root `_root/<rootId>/…` path would
-  // load an empty frame with no error. Those fall through to the source text.
+  // `MockupFrame` builds a `/raw/*path` URL with no `root` selector, which
+  // resolves against the projects dir (with a repo-root fallback), so a
+  // cross-root `_root/<rootId>/…` path would load an empty frame with no
+  // error. Those fall through to the source text.
   const isCrossRoot = filePath.split("/")[0] === "_root";
   // Image mockups (SVG, PNG, JPEG, WebP) take the same frame, which renders
   // them through `<img>`; QuickFinder and the file tree link them here.

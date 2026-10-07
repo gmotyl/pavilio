@@ -127,4 +127,22 @@ describe("MarkdownRenderer links that ask for another target", () => {
       "/view/pavilio/mockups/z.svg",
     );
   });
+
+  it("points a cross-root download link at the raw route with its root selector", () => {
+    // `_root/<id>/` is a viewer-route prefix; the raw route selects the root
+    // with `?root=` the way the read route does.
+    renderMd(`<a href="./assets/x.svg" download>dl</a>`, "_root/skills/memo/SKILL.md");
+
+    expect(screen.getByRole("link", { name: "dl" })).toHaveAttribute(
+      "href",
+      "/api/files/raw/memo/assets/x.svg?root=skills",
+    );
+  });
+
+  it("resolves a cross-root relative image through the raw route's root selector", () => {
+    const { container } = renderMd("![shot](./img/s.png)", "_root/skills/memo/SKILL.md");
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(
+      "/api/files/raw/memo/img/s.png?root=skills",
+    );
+  });
 });
