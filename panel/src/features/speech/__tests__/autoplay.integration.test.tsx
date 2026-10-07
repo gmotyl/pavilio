@@ -1886,14 +1886,21 @@ describe("autoplay — the queue across cells", () => {
     // and the user here has already clicked before it lands.
     setStoredSpeechMode("cell-a", "autoplay");
     setStoredSpeechMode("cell-b", "autoplay");
+    // Only `/api/speech/latest` is held. The first mount in a fresh module
+    // graph also fetches the panel's cached lookups (project colours, OS users,
+    // preferences…); a stub that held EVERY request kept the last resolver,
+    // which was one of those, so on its own this test never landed the
+    // hydration at all.
     let serve: (utterances: unknown[]) => void = () => {};
-    global.fetch = vi.fn(
-      () =>
-        new Promise<Response>((resolve) => {
-          serve = (utterances) =>
-            resolve({ ok: true, json: async () => ({ utterances }) } as Response);
-        }),
-    ) as unknown as typeof fetch;
+    global.fetch = vi.fn((input: unknown) => {
+      if (input !== "/api/speech/latest") {
+        return Promise.resolve({ ok: true, json: async () => ({ utterances: [] }) } as Response);
+      }
+      return new Promise<Response>((resolve) => {
+        serve = (utterances) =>
+          resolve({ ok: true, json: async () => ({ utterances }) } as Response);
+      });
+    }) as unknown as typeof fetch;
 
     await renderProjectSurface();
     // A gesture: round C's cycle, leaving its mode where it was.
@@ -2229,5 +2236,58 @@ describe("the speaking alert, end to end", () => {
     expect(speakingAlert()?.title).toBe("Speaking — beta · claude-b");
     expect(pathname()).toBe("/project/vector/iterm");
     expect(document.activeElement).toBe(focused);
+  });
+});
+
+/**
+ * The answer alert, mounted. `answerAlert.test.ts` covers the decision and the
+ * raise in isolation, which says nothing about whether the provider hands
+ * `onAnswer` to the host or the host hands it on to the channel: dropping either
+ * hop left every suite green and the panel without a single answer card. This is
+ * that wiring's own assertion — the real provider, the real host, the real
+ * channel, and only the session store's list stubbed.
+ */
+describe("the answer alert, end to end", () => {
+  const answerAlerts = () => getAlertsSnapshot().filter((entry) => entry.id.startsWith("answer-"));
+
+  beforeEach(() => {
+    sessionList.current = SESSIONS as unknown as Array<Record<string, unknown>>;
+  });
+
+  it("a live answer in a cell nobody is looking at raises its card", async () => {
+    await renderProjectSurface();
+
+    await emitUtterance("cell-b", "b1", "Done with the migration.");
+
+    const card = getAlertsSnapshot().find((entry) => entry.id === "answer-cell-b");
+    expect(card?.title).toBe("vector · claude-b");
+    expect(answerAlerts()).toHaveLength(1);
+  });
+
+  it("an answer hydrated on mount raises nothing", async () => {
+    global.fetch = vi.fn(async (input: unknown) => ({
+      ok: true,
+      json: async () => ({
+        utterances:
+          input === "/api/speech/latest"
+            ? [{ id: "b1", sessionId: "cell-b", text: "From before.", at: 1 }]
+            : [],
+      }),
+    })) as unknown as typeof fetch;
+
+    await renderProjectSurface();
+
+    // It did land — in its cell — so the silence below is not a missed fetch.
+    expect(speakState("cell-b")).toBe("ready");
+    expect(answerAlerts()).toEqual([]);
+  });
+
+  it("an answer recovered by a catch-up raises nothing", async () => {
+    await renderProjectSurface();
+
+    await caughtUp("cell-b", "b1", "Recovered for B.");
+
+    expect(speakState("cell-b")).toBe("ready");
+    expect(answerAlerts()).toEqual([]);
   });
 });
