@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import AlertHost from "../AlertHost";
 import { __resetAlertsForTests, alerts } from "../store";
 
@@ -306,8 +307,11 @@ describe("AlertHost", () => {
       alerts.info("answer", { onClick, onDismiss });
     });
     const card = cards()[0];
-    expect(card).toHaveAttribute("role", "button");
-    expect(card).toHaveAttribute("tabindex", "0");
+    // The card stays a live region; its action is a real, focusable button.
+    expect(card).toHaveAttribute("role", "status");
+    const action = within(card).getByRole("button", { name: "answer" });
+    expect(action).toHaveAttribute("type", "button");
+    expect(action.tabIndex).toBe(0);
 
     fireEvent.click(within(card).getByTestId("alert-title"));
     expect(onClick).toHaveBeenCalledTimes(1);
@@ -315,32 +319,52 @@ describe("AlertHost", () => {
     expect(cards()).toHaveLength(0);
   });
 
-  it("Enter and Space activate an actionable card", () => {
+  it("Enter and Space activate an actionable card, once each", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
     const onClick = vi.fn();
     const onDismiss = vi.fn();
     render(<AlertHost />);
     act(() => {
       alerts.info("enter", { id: "e", onClick, onDismiss });
     });
-    let card = cards()[0];
-    card.focus();
-    expect(card).toHaveFocus();
-    fireEvent.keyDown(card, { key: "Enter" });
+    let action = within(cards()[0]).getByTestId("alert-action");
+    action.focus();
+    expect(action).toHaveFocus();
+    await user.keyboard("{Enter}");
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(cards()).toHaveLength(0);
 
     act(() => {
       alerts.info("space", { id: "s", onClick, onDismiss });
     });
-    card = cards()[0];
-    card.focus();
-    fireEvent.keyDown(card, { key: " " });
+    action = within(cards()[0]).getByTestId("alert-action");
+    action.focus();
+    await user.keyboard(" ");
     expect(onClick).toHaveBeenCalledTimes(2);
     expect(cards()).toHaveLength(0);
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
-  it("× on an actionable card dismisses without running the action", () => {
+  it("the dismiss control is not nested inside the action button", () => {
+    render(<AlertHost />);
+    act(() => {
+      alerts.error("failed", { detail: "why", onClick: vi.fn() });
+    });
+    const card = cards()[0];
+    // An error card keeps role alert even when actionable.
+    expect(card).toHaveAttribute("role", "alert");
+    expect(card).not.toHaveAttribute("tabindex");
+    const action = within(card).getByRole("button", { name: /^failed/ });
+    const dismiss = within(card).getByRole("button", { name: "Dismiss" });
+    expect(action.contains(dismiss)).toBe(false);
+    expect(dismiss.contains(action)).toBe(false);
+    expect(dismiss.parentElement).toBe(action.parentElement);
+    expect(card.closest("[role='button']")).toBeNull();
+    expect(within(card).getAllByRole("button")).toHaveLength(2);
+  });
+
+  it("× on an actionable card dismisses without running the action", async () => {
     const onClick = vi.fn();
     const onDismiss = vi.fn();
     render(<AlertHost />);
@@ -353,11 +377,16 @@ describe("AlertHost", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
     expect(onClick).not.toHaveBeenCalled();
 
-    // Enter on a focused × is the ×, not the card.
+    // Enter on a focused × is the ×, not the action.
+    vi.useRealTimers();
+    const user = userEvent.setup();
     act(() => {
       alerts.info("again", { onClick, onDismiss });
     });
-    fireEvent.keyDown(within(cards()[0]).getByTestId("alert-dismiss"), { key: "Enter" });
+    within(cards()[0]).getByTestId("alert-dismiss").focus();
+    await user.keyboard("{Enter}");
+    expect(cards()).toHaveLength(0);
+    expect(onDismiss).toHaveBeenCalledTimes(2);
     expect(onClick).not.toHaveBeenCalled();
   });
 
@@ -370,6 +399,8 @@ describe("AlertHost", () => {
     const card = cards()[0];
     expect(card).toHaveAttribute("role", "status");
     expect(card).not.toHaveAttribute("tabindex");
+    expect(within(card).queryByTestId("alert-action")).toBeNull();
+    expect(within(card).getAllByRole("button")).toHaveLength(1);
 
     fireEvent.click(card);
     fireEvent.keyDown(card, { key: "Enter" });

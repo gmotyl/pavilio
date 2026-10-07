@@ -2441,6 +2441,26 @@ input[type="checkbox"] {
   animation: alert-drop-in 160ms ease-out;
 }
 
+/* The action button of an actionable card reads as the card's text, not as
+   a control: no chrome of its own, so the card looks the same either way. */
+.alert-action {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: inherit;
+}
+
+.alert-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
 .alert-countdown {
   transform-origin: left center;
   animation-name: alert-countdown;
