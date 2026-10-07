@@ -8,7 +8,7 @@ import {
   voteLanguage,
   type LanguageState,
 } from "./pronunciation";
-import type { CellSpeechState, Utterance } from "./types";
+import type { CellSpeechState, SpeechMode, Utterance } from "./types";
 import {
   emptyUtteranceQueue,
   utteranceQueueReducer,
@@ -16,12 +16,12 @@ import {
   type UtteranceQueue,
   type UtteranceQueueEvent,
 } from "./utteranceQueue";
-import { getStoredArmedSession, setStoredArmedSession } from "./voices";
+import { getStoredSpeechModes, nextSpeechMode, setStoredSpeechMode } from "./voices";
 
 /**
  * The panel's single subscriber to the utterance stream: it hydrates from the
  * server's latest-per-session store, listens for `speech-utterance` frames, and
- * remembers which cell has something unheard and which one is armed.
+ * remembers which cell has something unheard and each cell's speech mode.
  *
  * It does NOT own playback, and it does not own synthesis either. The coupling
  * is kept one-way — nothing here imports the player or the synthesizer — so
@@ -207,6 +207,12 @@ function queueHolds(queue: UtteranceQueue, id: string): boolean {
   );
 }
 
+/** A warmable utterance, tagged with its cell's speech mode at the time. */
+export interface WarmableUtterance {
+  utterance: Utterance;
+  mode: SpeechMode;
+}
+
 /**
  * What the host **warms**, per cell: the utterance the transport is on, and the
  * one a `next` press would actually land on. That second entry is read off the
@@ -294,6 +300,14 @@ export interface UtteranceChannelOptions {
    * so the pulse, the pip and the unread count are all unaffected. See ADR 0017.
    */
   recordAutoplayed: (sessionId: string, utteranceId: string) => void;
+  /**
+   * Told about every speakable answer the channel takes up, once, outside any
+   * state updater. `recovered` is false only for a live `speech-utterance`
+   * frame; anything read off `/latest` — the mount hydration and a reconnect's
+   * catch-up alike — is recovered. The same line ADR 0017 draws for autoplay:
+   * a recovered answer is shown, never announced. The answer alert hangs off it.
+   */
+  onAnswer?: (utterance: Utterance, recovered: boolean) => void;
 }
 
 /**
@@ -341,11 +355,22 @@ export interface Channel {
    * the set does, so an effect keyed on it runs once per arrival rather than
    * once per render, and both arrival paths — a live frame and `/latest`
    * hydration — land in it.
+   *
+   * Each entry carries its cell's speech mode, because the mode decides how
+   * much of it is warmed: unit 0 for a cell that is off, every unit for an
+   * armed or autoplay one. So the list also moves when a cell's mode does —
+   * arming a cell is what reaches back for the answer it already holds.
    */
-  warmableUtterances: Utterance[];
-  armedSessionId: string | null;
-  /** Exclusive: arming a session disarms whichever was armed. `null` disarms. */
-  setArmed(sessionId: string | null): void;
+  warmableUtterances: WarmableUtterance[];
+  /** The cell's speech mode; `off` for a session with no entry. */
+  speechModeOf(sessionId: string): SpeechMode;
+  /** `off → armed → autoplay → off`, persisted per browser. Not exclusive. */
+  cycleSpeechMode(sessionId: string): void;
+  /**
+   * Every cell in `autoplay`, in the order the record holds them. A new array
+   * only when the set changes, so an effect keyed on it runs per change.
+   */
+  autoplaySessionIds: readonly string[];
   markHeard(sessionId: string): void;
 }
 
@@ -435,6 +460,7 @@ export function useUtteranceChannel({
   waitingForSynthesis,
   preparingSessionIds,
   recordAutoplayed,
+  onAnswer,
 }: UtteranceChannelOptions): Channel {
   const { lastMessage } = useWebSocket();
   const [sessions, setSessions] = useState<Map<string, SessionSpeech>>(() => new Map());
@@ -482,8 +508,14 @@ export function useUtteranceChannel({
   useEffect(() => {
     recordAutoplayedRef.current = recordAutoplayed;
   }, [recordAutoplayed]);
-  // Read once at mount, so a remount restores the armed cell (DECISION 12).
-  const [armedSessionId, setArmedSessionId] = useState<string | null>(getStoredArmedSession);
+  /** `onAnswer`, mirrored so neither arrival effect re-runs when it changes identity. */
+  const onAnswerRef = useRef(onAnswer);
+  useEffect(() => {
+    onAnswerRef.current = onAnswer;
+  }, [onAnswer]);
+  // Read once at mount, so a remount restores every cell's mode (DECISION 12).
+  const [speechModes, setSpeechModes] =
+    useState<Readonly<Record<string, SpeechMode>>>(getStoredSpeechModes);
 
   /**
    * How many times the realtime channel has come back. It is what re-runs the
@@ -608,10 +640,14 @@ export function useUtteranceChannel({
       return next;
     });
 
+    for (const { utterance, speakable } of taken) {
+      if (speakable) onAnswerRef.current?.(utterance, true);
+    }
+
     // Only a CATCH-UP is absorbed, never the mount fetch. A tab that has just
     // loaded has had no gesture either, and the host already absorbs a hydrated
     // arrival there for that reason; recording one from here would only clobber
-    // the armed cell's own bookkeeping with an id that may never reach the
+    // an autoplay cell's own bookkeeping with an id that may never reach the
     // cursor.
     if (!catchUp) return;
     for (const { utterance, speakable } of taken) {
@@ -624,6 +660,17 @@ export function useUtteranceChannel({
 
     const utterance = toUtterance(lastMessage);
     if (!utterance) return;
+
+    // Decided against the rendered state, outside the updater, which has to
+    // stay pure: the same two gates the updater applies — not a re-delivery,
+    // and something to say.
+    const held = sessionsRef.current.get(utterance.sessionId);
+    if (
+      !(held && queueHolds(held.queue, utterance.id)) &&
+      hasSomethingToSay(utterance.text, advanceLanguage(held?.language, utterance.text).lang)
+    ) {
+      onAnswerRef.current?.(utterance, false);
+    }
 
     setSessions((current) => {
       const existing = current.get(utterance.sessionId);
@@ -734,26 +781,33 @@ export function useUtteranceChannel({
   );
 
   /** The last list handed out, so an unchanged set keeps its identity. */
-  const warmableRef = useRef<Utterance[]>([]);
+  const warmableRef = useRef<WarmableUtterance[]>([]);
   const warmableUtterances = useMemo(() => {
-    const next = [...sessions.values()].flatMap((record) => warmableOf(record.queue));
+    const next = [...sessions.entries()].flatMap(([sessionId, record]) => {
+      const mode = speechModes[sessionId] ?? "off";
+      return warmableOf(record.queue).map((utterance) => ({ utterance, mode }));
+    });
 
     // `sessions` is a fresh Map on every change, including a `markHeard` that
     // touches no utterance at all, so the array it derives is fresh too. Utterance
-    // objects are stored once and never rewritten, so element identity is the
-    // honest test of whether the SET changed — and returning the previous array
-    // when it did not is what stops the host warming effect churning.
+    // objects are stored once and never rewritten, so element identity — plus
+    // the mode it was tagged with — is the honest test of whether the SET
+    // changed, and returning the previous array when it did not is what stops
+    // the host warming effect churning.
     const previous = warmableRef.current;
     if (
       previous.length === next.length &&
-      previous.every((utterance, index) => utterance === next[index])
+      previous.every(
+        (entry, index) =>
+          entry.utterance === next[index].utterance && entry.mode === next[index].mode,
+      )
     ) {
       return previous;
     }
 
     warmableRef.current = next;
     return next;
-  }, [sessions]);
+  }, [sessions, speechModes]);
 
   const markHeard = useCallback((sessionId: string) => {
     setSessions((current) => {
@@ -809,11 +863,33 @@ export function useUtteranceChannel({
     });
   }, []);
 
-  // Exclusivity is structural: one slot, so arming a cell IS disarming the
-  // other. There is no set of armed cells that could ever hold two.
-  const setArmed = useCallback((sessionId: string | null) => {
-    setArmedSessionId(setStoredArmedSession(sessionId));
+  const speechModeOf = useCallback(
+    (sessionId: string): SpeechMode => speechModes[sessionId] ?? "off",
+    [speechModes],
+  );
+
+  // Stepped from a mirror rather than the state, so two cycles inside one batch
+  // each step from the other's result; and from the page's own record rather
+  // than the store, so cycling still works for this page when storage refuses.
+  const speechModesRef = useRef(speechModes);
+  const cycleSpeechMode = useCallback((sessionId: string) => {
+    const current = speechModesRef.current;
+    const mode = nextSpeechMode(current[sessionId] ?? "off");
+    const next: Record<string, SpeechMode> = { ...current };
+    if (mode === "off") delete next[sessionId];
+    else next[sessionId] = mode;
+    setStoredSpeechMode(sessionId, mode);
+    speechModesRef.current = next;
+    setSpeechModes(next);
   }, []);
+
+  const autoplayKey = Object.keys(speechModes)
+    .filter((sessionId) => speechModes[sessionId] === "autoplay")
+    .join("\n");
+  const autoplaySessionIds = useMemo(
+    () => (autoplayKey === "" ? [] : autoplayKey.split("\n")),
+    [autoplayKey],
+  );
 
   return {
     stateFor,
@@ -824,8 +900,9 @@ export function useUtteranceChannel({
     finishUtterance,
     languageFor,
     warmableUtterances,
-    armedSessionId,
-    setArmed,
+    speechModeOf,
+    cycleSpeechMode,
+    autoplaySessionIds,
     markHeard,
   };
 }

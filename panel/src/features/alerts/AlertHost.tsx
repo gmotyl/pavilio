@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X, type LucideIcon } from "lucide-react";
@@ -13,6 +14,7 @@ import {
   alerts,
   getAlertsSnapshot,
   subscribeAlerts,
+  userActivateAlert,
   userDismissAlert,
   type AlertEntry,
   type AlertKind,
@@ -149,6 +151,13 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
   const drag = useRef<Drag | null>(null);
   /** Set between a swipe past the threshold and the store removal. */
   const leaving = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Set when the last drag travelled like a swipe, so the click the browser
+   * synthesizes on its pointerup is not taken as a tap. Cleared by the next
+   * pointerdown.
+   */
+  const dragged = useRef(false);
+  const actionable = entry.onClick !== undefined;
 
   // Hovering, dragging and sliding out each hold the countdown, so a card
   // cannot expire from under the pointer or mid-swipe.
@@ -180,7 +189,8 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
     if (leaving.current !== null || drag.current !== null) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     // × keeps its click; a press on it never turns into a drag.
-    if ((e.target as Element).closest("button")) return;
+    if ((e.target as Element).closest("[data-testid='alert-dismiss']")) return;
+    dragged.current = false;
     const el = e.currentTarget;
     drag.current = { pointerId: e.pointerId, x: e.clientX, t: Date.now(), width: el.getBoundingClientRect().width };
     try {
@@ -206,6 +216,7 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
     const dx = e.clientX - d.x;
     const dt = Math.max(1, Date.now() - d.t);
     const dist = Math.abs(dx);
+    if (dist >= FLICK_MIN_PX) dragged.current = true;
     const past =
       dist > SWIPE_DISTANCE * d.width || (dist >= FLICK_MIN_PX && dist / dt > SWIPE_VELOCITY);
     if (cancelled || !past) {
@@ -226,13 +237,47 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
     reportPaused();
   };
 
+  // The one activation path. A pointer click anywhere on the card outside ×
+  // lands here, and so does the click the native action button fires for
+  // Enter/Space, so there is no keydown handler to activate a second time.
+  // × is a sibling button: a click on it (or anything inside it) never activates.
+  const onClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!actionable) return;
+    if ((e.target as Element).closest("[data-testid='alert-dismiss']")) return;
+    if (dragged.current || leaving.current !== null) {
+      dragged.current = false;
+      return;
+    }
+    userActivateAlert(id);
+  };
+
+  const liveRole = entry.kind === "error" ? "alert" : "status";
+
+  // Spans, not divs: the action wraps them in a native button, whose content model
+  // is phrasing only.
+  const content = (
+    <>
+      <span data-testid="alert-title" className="block break-words">
+        {entry.title}
+      </span>
+      {entry.detail && (
+        <span className="mt-0.5 block break-words text-xs" style={{ color: "var(--text-muted)" }}>
+          {entry.detail}
+        </span>
+      )}
+    </>
+  );
+
   return (
     <div
       data-testid="alert"
       data-alert-id={id}
       data-kind={entry.kind}
       data-paused={paused ? "1" : "0"}
-      role={entry.kind === "error" ? "alert" : "status"}
+      // The card stays a live region even when actionable; the action is a
+      // button inside it, a sibling of ×, so neither control hides the other.
+      role={liveRole}
+      onClick={onClick}
       onPointerEnter={() => {
         hovered.current = true;
         reportPaused();
@@ -249,6 +294,7 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
       style={{
         pointerEvents: "auto",
         touchAction: "pan-y",
+        cursor: actionable ? "pointer" : undefined,
         background: "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
         borderLeft: `3px solid ${color}`,
@@ -256,16 +302,13 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
       }}
     >
       <Icon size={16} style={{ color, flexShrink: 0, marginTop: 2 }} />
-      <div className="min-w-0 flex-1">
-        <div data-testid="alert-title" className="break-words">
-          {entry.title}
-        </div>
-        {entry.detail && (
-          <div className="mt-0.5 break-words text-xs" style={{ color: "var(--text-muted)" }}>
-            {entry.detail}
-          </div>
-        )}
-      </div>
+      {actionable ? (
+        <button type="button" data-testid="alert-action" className="alert-action min-w-0 flex-1">
+          {content}
+        </button>
+      ) : (
+        <div className="min-w-0 flex-1">{content}</div>
+      )}
       <button
         type="button"
         data-testid="alert-dismiss"

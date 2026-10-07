@@ -7,7 +7,7 @@
  * on screen at once (ProjectView's and the terminal drawer's), so this hook has
  * exactly one call site — `SpeechHostProvider` — and surfaces read its value
  * from context. The channel is hoisted with it so every cell in the panel reads
- * the same armed session and the same state.
+ * the same speech modes and the same state.
  *
  * The coupling stays one-way. `useUtteranceChannel` still imports nothing from
  * the player; this module passes the player's `speakingSessionId` *into* the
@@ -20,10 +20,11 @@
  * reads `warmableUtterances`, fills the synthesis cache, and reports which
  * cells are still waiting on it — {@link SpeechHost.preparingSessionIds}, the
  * red the control shows before anyone has clicked anything. It is also where
- * the panel-wide bound on that work lives — {@link WARM_CONCURRENCY} — for the
- * third time for the same reason: the channel cannot see the synthesizer and
- * the player cannot see the other cells, so only this module can count what the
- * whole grid has in flight.
+ * the panel-wide bound on that work lives — the synthesis window
+ * (`synthesisWindow.ts`), shared with the player's cascade — for the third time
+ * for the same reason: the channel cannot see the synthesizer and the player
+ * cannot see the other cells, so only this module can count what the whole grid
+ * has in flight.
  *
  * ## Why a run object rather than `await play(); markHeard()`
  *
@@ -52,8 +53,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { alerts } from "../alerts/store";
+import { createAutoplayQueue, type AutoplayQueue } from "./autoplayQueue";
 import { prepare } from "./prepare";
 import { synthesizeSpeech } from "./synth";
+import { createSynthesisWindow, type SynthesisWindow } from "./synthesisWindow";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
 import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
@@ -74,7 +77,7 @@ import { MAX_PENDING, MAX_PREVIOUS, utteranceUnderCursor } from "./utteranceQueu
 import { getStoredVoice } from "./voices";
 
 /**
- * How many utterances the armed cell's autoplay record keeps.
+ * How many utterances an autoplay cell's record keeps.
  *
  * The record is only ever asked about the utterance UNDER THE CURSOR, and the
  * cursor can only ever land on an utterance the queue holds — its history, the
@@ -83,7 +86,7 @@ import { getStoredVoice } from "./voices";
  * newest eleven recorded has fallen out of the queue's reach and can never be
  * asked about again. The same argument bounds the channel's `heard` set, and
  * for the same reason: unbounded, this would grow for as long as one cell
- * stays armed.
+ * stays in autoplay.
  *
  * Derived from the queue's own constants rather than written as `11`, so a
  * deeper history cannot silently make the record too short.
@@ -148,35 +151,6 @@ export interface SpeechHost extends GridSpeech, MediaSessionTransportTarget {
   preparingSessionIds: ReadonlySet<string>;
 }
 
-/**
- * How many warms the WHOLE PANEL may have in flight at once.
- *
- * The per-cell bound is the queue's reach — what is being spoken and what the
- * transport would reach next, so two — and that was the only bound there was.
- * The warm loop walks every warmable utterance in every cell and fires a
- * synthesis for each with no await, so ten busy terminals opened ten edge-tts
- * WebSocket handshakes at once, each with its own DRM token, all competing with
- * the unit the listener is actually waiting for. `SPEECH_STREAM_STALL_TIMEOUT_MS`
- * is 15 s, so the losers stall rather than merely queue.
- *
- * Two, and the rest wait their turn:
- *
- * - It matches the per-cell bound, so a single cell's pair still goes out
- *   together. The common case — one terminal answering — is unchanged, and the
- *   existing per-cell pin keeps meaning what it meant.
- * - Speculation stops growing with the number of terminals. The gate is what
- *   makes the panel's warm cost a constant rather than a function of the grid.
- * - It leaves the listener the larger share. A live run's own cascade is
- *   bounded separately at `SYNTHESIS_CONCURRENCY` = 3 inside the player,
- *   and that one is audio somebody is waiting on; this one is a guess about a
- *   click nobody has made. The guess does not get to outnumber it.
- *
- * Not one: that would serialize a single cell's own pair behind itself and slow
- * the case the warm exists for. Not four or more: two cells' speculation would
- * then match or beat the live cascade, which is the ratio being fixed.
- */
-const WARM_CONCURRENCY = 2;
-
 /** Shared so a panel with nothing warming does not allocate a Set per render. */
 const NOTHING_PREPARING: ReadonlySet<string> = new Set<string>();
 
@@ -196,7 +170,67 @@ interface Run {
   outcome: RunOutcome;
 }
 
-export function useSpeechHost(): SpeechHost {
+export interface SpeechHostOptions {
+  /**
+   * Every speakable answer the channel takes up; `recovered` for one read off
+   * `/latest` rather than a live frame. See `UtteranceChannelOptions.onAnswer`.
+   */
+  onAnswer?: (utterance: Utterance, recovered: boolean) => void;
+  /**
+   * False for a session the panel knows has closed. The channel never forgets a
+   * session, so this is the only way the idle transport learns a cell is gone.
+   * Absent: every session counts as open.
+   */
+  isSessionOpen?: (sessionId: string) => boolean;
+  /**
+   * Told when the voice starts, is held, continues or falls silent — whichever
+   * cell it is in and whoever started it. See {@link SpeechRunEvent}.
+   */
+  onRunChange?: (event: SpeechRunEvent) => void;
+}
+
+/**
+ * What the voice is doing, for whatever has to follow it around the panel (the
+ * speaking alert, `speakingAlert.ts`).
+ *
+ * - `start` — a run started in `sessionId`, manual or autoplay. A barge-in is a
+ *   `start` with no `end` before it: the run it replaced is not the voice any
+ *   more, but the voice did not stop.
+ * - `pause` / `resume` — the run was held, and continues.
+ * - `end` — the voice fell silent, however the run ended: played out, stopped,
+ *   refused, failed. Reported only once the autoplay queue has had its turn, so
+ *   a queued answer that starts straight after is a `start` without an `end`
+ *   in between — what follows the voice can update in place rather than leave
+ *   and come back.
+ */
+export type SpeechRunEvent =
+  | { type: "start"; sessionId: string }
+  | { type: "pause" }
+  | { type: "resume" }
+  | { type: "end" };
+
+/** Every session counts as open when the panel says nothing about it. */
+const ALWAYS_OPEN = (): boolean => true;
+
+export function useSpeechHost({
+  onAnswer,
+  isSessionOpen = ALWAYS_OPEN,
+  onRunChange,
+}: SpeechHostOptions = {}): SpeechHost {
+  /**
+   * `onRunChange`, mirrored: it is called from inside `speakUtterance`, whose
+   * identity the whole grid depends on, so it must not be a dependency.
+   */
+  const onRunChangeRef = useRef(onRunChange);
+  useEffect(() => {
+    onRunChangeRef.current = onRunChange;
+  }, [onRunChange]);
+  /**
+   * The run that held the element ended, and whether the voice has fallen
+   * silent is still to be settled: the autoplay queue gets its turn first. See
+   * the `end` effect below the autoplay effect.
+   */
+  const endPendingRef = useRef(false);
   const runRef = useRef<Run | null>(null);
   /**
    * The utterance the player was last handed. Not `runRef`, which is nulled the
@@ -208,8 +242,9 @@ export function useSpeechHost(): SpeechHost {
   // prepares the same way, so a replay must not pay for it twice.
   const preparedRef = useRef<Map<string, PreparedSpeech>>(new Map());
   /**
-   * The armed cell's utterances that autoplay is done with, so none is played
-   * twice.
+   * Each autoplay cell's utterances that autoplay is done with, so none is
+   * played twice. One record per cell in autoplay — keyed by session, created
+   * when the cell enters autoplay and dropped when it leaves.
    *
    * A SET rather than the one slot it used to be, because the records are no
    * longer all about the utterance under the cursor. A catch-up records the
@@ -221,14 +256,7 @@ export function useSpeechHost(): SpeechHost {
    * it had stepped onto. One record per utterance is the honest shape for a
    * question asked per utterance. Bounded by {@link MAX_AUTOPLAYED}.
    */
-  const autoplayedRef = useRef<Set<string>>(new Set());
-  /**
-   * The armed cell, mirrored, so {@link recordAutoplayed} can be declared above
-   * the channel — which is where the armed cell comes from, and which needs the
-   * callback handed to it for its catch-up. Written in an EFFECT, so it can
-   * never be ahead of the commit the rest of the panel is looking at.
-   */
-  const armedSessionIdRef = useRef<string | null>(null);
+  const autoplayedRef = useRef<Map<string, Set<string>>>(new Map());
   /** Utterance ids whose first unit has been warmed, so none is warmed twice. */
   const warmedRef = useRef<Set<string>>(new Set());
   /**
@@ -238,52 +266,72 @@ export function useSpeechHost(): SpeechHost {
    */
   const warmingRef = useRef<Map<string, string>>(new Map());
   /**
-   * The panel-wide warm gate: how many warms are in flight, and the ones still
-   * waiting for a slot. See {@link WARM_CONCURRENCY}.
+   * The panel-wide synthesis window, shared with the player's cascade: at most
+   * three syntheses in flight across the grid, a freed slot going to the
+   * playing run first, then to unit-0 warms, then to armed preloads. See
+   * `synthesisWindow.ts`.
    *
-   * A ref rather than a module-level counter, and that IS panel-wide: this hook
-   * is hosted exactly once per panel (`SpeechHostProvider`), which is the same
+   * Per host rather than module-level, and that IS panel-wide: this hook is
+   * hosted exactly once per panel (`SpeechHostProvider`), which is the same
    * reason the player's single `<audio>` element lives here. Holding it on the
-   * instance also means a host that unmounts takes its gate with it, rather
+   * instance also means a host that unmounts takes its window with it, rather
    * than leaving a stuck slot behind for the next one.
    */
-  const warmGateRef = useRef<{ active: number; waiting: Array<() => void> }>({
-    active: 0,
-    waiting: [],
-  });
-
+  const [synthesisWindow] = useState<SynthesisWindow>(createSynthesisWindow);
+  // A host that unmounts stops its window: queued warms and preloads must not
+  // go on firing syntheses for a panel nobody is looking at. Reopened on mount
+  // for React's development double-mount, which reuses the same instance.
+  useEffect(() => {
+    synthesisWindow.reopen();
+    return () => synthesisWindow.dispose();
+  }, [synthesisWindow]);
   /**
-   * Runs a warm now if the panel has a slot, and otherwise queues it in arrival
-   * order. The slot is released on EVERY ending — a warm that failed is not a
-   * warm that is still running, and a gate closed by a swallowed rejection
-   * would stop the panel warming anything ever again.
+   * Preload units already handed to the window, as `utteranceId#index`, so a
+   * re-render does not queue the same unit twice. A unit that declined at its
+   * turn (the cell was disarmed, or the answer heard) is taken back out, so
+   * arming the cell again reaches it.
    */
-  const runWarm = useCallback((warm: () => Promise<void>): void => {
-    const gate = warmGateRef.current;
-
-    const start = (): void => {
-      gate.active += 1;
-      void warm().then(
-        () => {
-          release();
-        },
-        () => {
-          release();
-        },
-      );
-    };
-
-    const release = (): void => {
-      gate.active -= 1;
-      const next = gate.waiting.shift();
-      if (next) next();
-    };
-
-    if (gate.active < WARM_CONCURRENCY) start();
-    else gate.waiting.push(start);
-  }, []);
+  const preloadedRef = useRef<Set<string>>(new Set());
+  /**
+   * Utterances whose preload a failed unit stopped, per session. A ref rather
+   * than a local of `preloadRemainder`, because that function runs again on
+   * every arrival anywhere in the grid and on every mode change: a stop held
+   * only for one call would walk a down synthesizer through the rest of the
+   * answer the next time any cell spoke. Cleared for a cell when its speech
+   * mode is cycled — a click on the control is the one retry the user asked
+   * for — and bounded per cell like the autoplay record, for the same reason:
+   * an older answer than that is out of the queue's reach.
+   */
+  const preloadFailedRef = useRef<Map<string, Set<string>>>(new Map());
+  /**
+   * The answers autoplay cells are owed, across the grid, in arrival order —
+   * see `autoplayQueue.ts`. Per host for the same reason as the window: there
+   * is one host per panel, and one element for it to speak through.
+   */
+  const [autoplayQueue] = useState<AutoplayQueue>(createAutoplayQueue);
+  /**
+   * Bumped every time a run ends, however it ended: the autoplay queue's turn
+   * signal. A ref would not do — the queue must be asked AFTER the ending's
+   * own state (the cell marked heard, its backlog advanced) has rendered, and
+   * a state update lands in the same batch as `finishUtterance`.
+   */
+  const [runEnds, setRunEnds] = useState(0);
   const [preparingSessionIds, setPreparingSessionIds] =
     useState<ReadonlySet<string>>(NOTHING_PREPARING);
+  /**
+   * The cell the player was last handed a run for, however that run ended —
+   * the transport's idle target once no autoplay cell is owed an answer
+   * (`idleTransportTarget.ts`). State, not a ref: the transport reads it off
+   * this host's value, which has to move when it does.
+   */
+  const [lastSpokenSessionId, setLastSpokenSessionId] = useState<string | null>(null);
+  /**
+   * The cell whose transport was last stepped by hand (next / previous), until
+   * the next run starts — the idle transport's first pick, so a step that
+   * moves a cell's cursor onto a heard answer does not hand the following
+   * press to another cell. See `idleTransportTarget.ts`.
+   */
+  const [steppedSessionId, setSteppedSessionId] = useState<string | null>(null);
 
   const setPreparing = useCallback((sessionId: string, preparing: boolean): void => {
     setPreparingSessionIds((current) => {
@@ -324,7 +372,7 @@ export function useSpeechHost(): SpeechHost {
     alerts.error("Speech stopped — the voice could not be synthesized.");
   }, []);
 
-  const player = useSpeechPlayer({ onError });
+  const player = useSpeechPlayer({ onError, synthesisWindow });
   /**
    * Destructured on purpose, and depended on **as methods** everywhere below —
    * never as `player`.
@@ -362,17 +410,17 @@ export function useSpeechHost(): SpeechHost {
     waitingForSynthesis,
   } = player;
   /**
-   * The cursor moved under the armed cell, and whatever that move is owed has
+   * The cursor moved under an autoplay cell, and whatever that move is owed has
    * been settled HERE — so the utterance it landed on is recorded as already
    * autoplayed, and the autoplay effect does not act on it a second time.
    *
    * Three callers, for what read as three different reasons and are really one.
    * In `onNext` the move IS played there, so without this record the effect
-   * would see "the armed cell's utterance changed" and start the same answer
+   * would see "the autoplay cell's utterance changed" and start the same answer
    * twice. In `onPrevious` the move is deliberately NOT played — and the record
    * is what makes that stick, because the effect watches the utterance under
    * the cursor and a backward step changes it exactly as an arrival would. Drop
-   * the call there and the armed cell speaks the answer the user stepped back
+   * the call there and the autoplay cell speaks the answer the user stepped back
    * to read, through the autoplay path rather than the transport's; the press
    * is silent everywhere except the one state Greg actually listens in. And the
    * channel's catch-up calls it for an answer recovered after a reconnect,
@@ -388,16 +436,16 @@ export function useSpeechHost(): SpeechHost {
    * or the pips passes through here — those are `markHeard` / `finishUtterance`
    * — and a silent step leaves every one of them alone. It is narrower than its
    * name: *autoplay has no further business with this utterance*. Only the
-   * armed cell has such a record to corrupt.
+   * autoplay cell has such a record to corrupt.
    *
-   * Declared above the channel, which is where the armed cell comes from, so it
-   * reads the mirror rather than the value — and is stable for the whole life
-   * of the host, which is what keeps the channel's catch-up effect off it.
+   * Declared above the channel, which is where the autoplay cells come from, so
+   * it reads the per-cell records rather than the modes — and is stable for the
+   * whole life of the host, which is what keeps the channel's catch-up effect
+   * off it.
    */
   const recordAutoplayed = useCallback((sessionId: string, utteranceId: string): void => {
-    if (sessionId === armedSessionIdRef.current) {
-      rememberAutoplayed(autoplayedRef.current, utteranceId);
-    }
+    const record = autoplayedRef.current.get(sessionId);
+    if (record) rememberAutoplayed(record, utteranceId);
   }, []);
 
   // The channel never observes playback or synthesis, so everything it needs to
@@ -412,26 +460,36 @@ export function useSpeechHost(): SpeechHost {
     preparingSessionIds,
     // A catch-up after a reconnect is SHOWN, never spoken: see ADR 0017.
     recordAutoplayed,
+    onAnswer,
   });
   const {
-    armedSessionId,
+    autoplaySessionIds,
+    cycleSpeechMode: cycleChannelSpeechMode,
     dispatchQueue,
     finishUtterance,
     heardFor,
     languageFor,
     markHeard,
     queueFor,
-    setArmed,
+    speechModeOf,
     stateFor,
     utteranceFor,
     warmableUtterances,
   } = channel;
 
-  // Written in an EFFECT, never during render, so the mirror can never be newer
-  // than the commit the rest of the panel is looking at.
+  /**
+   * What a waiting preload asks at its turn — is the cell still armed, is the
+   * answer still unheard — read through mirrors, because the answer has to be
+   * the one at the moment the slot frees, not the one when the unit queued.
+   * Mirrors rather than effect dependencies: `heardFor` moves on every
+   * `markHeard`, and the warming effect must not re-run for that.
+   */
+  const speechModeOfRef = useRef(speechModeOf);
+  const heardForRef = useRef(heardFor);
   useEffect(() => {
-    armedSessionIdRef.current = armedSessionId;
-  }, [armedSessionId]);
+    speechModeOfRef.current = speechModeOf;
+    heardForRef.current = heardFor;
+  }, [heardFor, speechModeOf]);
 
   const preparedFor = useCallback(
     (utterance: Utterance, language: "pl" | "en"): PreparedSpeech => {
@@ -445,47 +503,32 @@ export function useSpeechHost(): SpeechHost {
     [],
   );
 
-  useEffect(() => {
-    // A lit control has to be ready to speak. Without this the first click pays
-    // for the dynamic `import("edge-tts-universal/browser")`, a DRM token and a
-    // fresh WebSocket handshake — seconds of nothing, which reads as a dead
-    // button. So unit 0 is synthesized the moment an utterance arrives.
-    //
-    // EVERY session is warmed, not only the armed one (Greg: "arm all, I will
-    // use TTS most of the time"). The cost is one small synthesis per arriving
-    // response, bounded by the number of terminals, and unit 0 is deliberately
-    // the response's heading or first sentence.
-    //
-    // Warming is silent but deliberately VISIBLE. Silent: it fills the
-    // synthesis cache and never touches the player, so a warmed cell that is
-    // not armed makes no sound however it is coloured. Visible: the cell is
-    // reported preparing until the audio is actually in hand, because a green
-    // control that might still be synthesizing is exactly the ambiguity the
-    // red state exists to remove.
-    for (const utterance of warmableUtterances) {
-      if (warmedRef.current.has(utterance.id)) continue;
+  /** Unit 0 of an arriving utterance, at the window's `warm` tier, once. */
+  const warmFirstUnit = useCallback(
+    (utterance: Utterance, units: readonly SpeechUnit[]): void => {
+      if (warmedRef.current.has(utterance.id)) return;
       // Marked before the synthesis, not after: a second render must not start
       // a second warm of the same utterance while the first is in flight.
       warmedRef.current.add(utterance.id);
 
-      const first = preparedFor(utterance, languageFor(utterance.sessionId)).units[0];
-      if (!first) continue;
+      const first = units[0];
+      if (!first) return;
 
       warmingRef.current.set(utterance.sessionId, utterance.id);
       setPreparing(utterance.sessionId, true);
 
-      // Through the panel-wide gate, which runs this now or queues it behind at
-      // most {@link WARM_CONCURRENCY} others. The red above is set OUTSIDE the
-      // gate on purpose: a cell waiting for a slot is a cell waiting for its
-      // audio, and which side of the gate it is waiting on is not the user's
-      // question.
+      // Through the panel-wide window, which runs this now or queues it behind
+      // the playing run and the warms ahead of it. The red above is set OUTSIDE
+      // the window on purpose: a cell waiting for a slot is a cell waiting for
+      // its audio, and which side of the window it is waiting on is not the
+      // user's question.
       //
       // `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the
       // whole point here — it is what says when the cell stops being red, and
-      // now also what says when the next warm may start — and a
-      // fire-and-forget warm cannot be reported on. The failure is swallowed
-      // exactly as `prefetchSpeech` swallows it.
-      runWarm(() =>
+      // also what frees the slot — and a fire-and-forget warm cannot be
+      // reported on. The failure is swallowed exactly as `prefetchSpeech`
+      // swallows it.
+      synthesisWindow.schedule("warm", () =>
         // The voice is the one the click will use, from the same source
         // `useSpeechPlayer` reads, and it is read HERE rather than at the point
         // the warm was queued: a warm that waited out a voice change should
@@ -506,13 +549,99 @@ export function useSpeechHost(): SpeechHost {
             setPreparing(utterance.sessionId, false);
           }),
       );
+    },
+    [setPreparing, synthesisWindow],
+  );
+
+  /**
+   * Units 1..n of an armed cell's unheard utterance, at the window's `preload`
+   * tier, in the order they are handed in. Unit 0 is the warm's.
+   *
+   * Each unit asks again at its turn whether it is still wanted: a cell
+   * disarmed while its units waited stops there (what is already in flight
+   * finishes and stays cached), and an answer heard in the meantime needs
+   * nothing more. A unit that declines is forgotten, so arming the cell again
+   * picks it back up.
+   *
+   * A failed unit stops the rest of that utterance's preload too, and it
+   * stays stopped across later arrivals (`preloadFailedRef`): a synthesizer
+   * that is down must not be walked through a twelve-unit answer nobody has
+   * asked for yet. The run, if one starts, reports the failure. Cycling the
+   * cell's mode is what tries again.
+   */
+  const preloadRemainder = useCallback(
+    (utterance: Utterance, units: readonly SpeechUnit[]): void => {
+      const { id, sessionId } = utterance;
+      const unwanted = (): boolean =>
+        preloadFailedRef.current.get(sessionId)?.has(id) === true ||
+        speechModeOfRef.current(sessionId) === "off" ||
+        heardForRef.current(sessionId).has(id);
+      // Heard answers are never preloaded: a replay is a click away and pays
+      // for itself, and an armed history must not cost the panel a backlog.
+      if (unwanted()) return;
+
+      for (let index = 1; index < units.length; index += 1) {
+        const key = `${id}#${index}`;
+        if (preloadedRef.current.has(key)) continue;
+        preloadedRef.current.add(key);
+
+        const { text } = units[index];
+        synthesisWindow.schedule("preload", () => {
+          if (unwanted()) {
+            preloadedRef.current.delete(key);
+            return null;
+          }
+          // Read at the turn, for the same reason the warm reads it there.
+          return synthesizeSpeech(text, { voice: getStoredVoice() }).catch(() => {
+            // Best-effort, like every warm: the click synthesizes it for real.
+            // The unit is forgotten so a retry reaches it, and the answer is
+            // marked so nothing after it is requested until that retry.
+            preloadedRef.current.delete(key);
+            const failed = preloadFailedRef.current.get(sessionId) ?? new Set<string>();
+            rememberAutoplayed(failed, id);
+            preloadFailedRef.current.set(sessionId, failed);
+          });
+        });
+      }
+    },
+    [synthesisWindow],
+  );
+
+  useEffect(() => {
+    // A lit control has to be ready to speak. Without this the first click pays
+    // for the dynamic `import("edge-tts-universal/browser")`, a DRM token and a
+    // fresh WebSocket handshake — seconds of nothing, which reads as a dead
+    // button. So unit 0 is synthesized the moment an utterance arrives.
+    //
+    // EVERY session is warmed, not only the autoplay ones (Greg: "arm all, I will
+    // use TTS most of the time"). The cost is one small synthesis per arriving
+    // response, bounded by the number of terminals, and unit 0 is deliberately
+    // the response's heading or first sentence.
+    //
+    // Warming is silent but deliberately VISIBLE. Silent: it fills the
+    // synthesis cache and never touches the player, so a warmed cell that is
+    // not in autoplay makes no sound however it is coloured. Visible: the cell is
+    // reported preparing until the audio is actually in hand, because a green
+    // control that might still be synthesizing is exactly the ambiguity the
+    // red state exists to remove.
+    //
+    // An ARMED (or autoplay) cell goes further: every unit of its unheard
+    // answer is preloaded, so the click that follows plays to the end without
+    // a red underrun. Preloads are the window's lowest tier — behind the
+    // playing run and behind every unit-0 warm — and silent and invisible: the
+    // scrubber's segments already show them landing, and the control's red is
+    // about unit 0 alone.
+    for (const { utterance, mode } of warmableUtterances) {
+      const { units } = preparedFor(utterance, languageFor(utterance.sessionId));
+      warmFirstUnit(utterance, units);
+      if (mode !== "off") preloadRemainder(utterance, units);
     }
     // Warming reads nothing from the player any more: the supersession that
     // used to ride along inside this loop is its own effect below, because it
     // is about the QUEUE rather than about the cache, and a loop over every
     // speakable utterance in the panel was never the honest place to ask "is
     // this one cell's held run stale".
-  }, [languageFor, preparedFor, runWarm, setPreparing, warmableUtterances]);
+  }, [languageFor, preparedFor, preloadRemainder, warmFirstUnit, warmableUtterances]);
 
   useEffect(() => {
     // "A paused cell does not hold the next answer hostage" — the living spec,
@@ -606,6 +735,9 @@ export function useSpeechHost(): SpeechHost {
         // this — but a cell that somehow does has nothing to say, and leaving it
         // pulsing would be a notification that can never be met.
         markHeard(sessionId);
+        // Counts as a run that ended: reached from a dequeue, the autoplay
+        // queue would otherwise wait for an ending that never comes.
+        setRunEnds((count) => count + 1);
         return;
       }
 
@@ -617,9 +749,24 @@ export function useSpeechHost(): SpeechHost {
       const run: Run = { sessionId, utteranceId: utterance.id, outcome: "pending" };
       runRef.current = run;
       playingUtteranceRef.current = utterance.id;
+      setLastSpokenSessionId(sessionId);
+      // A run is the transport's focus from here on; the step has been spent.
+      setSteppedSessionId(null);
+      // The voice goes on, in this cell: whatever ended before it is not an end.
+      endPendingRef.current = false;
+      onRunChangeRef.current?.({ type: "start", sessionId });
 
       function finish(ended: Run): void {
-        if (runRef.current === ended) runRef.current = null;
+        if (runRef.current === ended) {
+          runRef.current = null;
+          // Only the run holding the element ends the voice; a superseded one
+          // finishes after its replacement has already started.
+          endPendingRef.current = true;
+        }
+        // Whatever the ending, the autoplay queue gets to ask whether it is
+        // its turn. A run another one superseded asks too, and is told no:
+        // the run that replaced it holds the element.
+        setRunEnds((count) => count + 1);
 
         // `heard` means the final unit played to its end, and nothing else.
         // Superseded, stopped, refused, failed — every ending that is not the
@@ -631,8 +778,8 @@ export function useSpeechHost(): SpeechHost {
         // Marks it heard AND moves the queue on — the queue's own "finished",
         // which advances into what is waiting, returns the cursor out of a
         // replay, and does nothing at all when neither applies. The autoplay
-        // effect below is what turns that advance into sound, so an unarmed
-        // cell ends up simply HOLDING the next answer.
+        // effect below is what turns that advance into sound, so a cell not in
+        // autoplay ends up simply HOLDING the next answer.
         finishUtterance(ended.sessionId);
       }
 
@@ -756,6 +903,9 @@ export function useSpeechHost(): SpeechHost {
       // are transport presses too, and a row that kept this to itself left
       // them unable to give the body back at all.
       noteTransport(sessionId);
+      // The transport is on this cell now, whatever the press turns out to
+      // move: the idle play that follows stays here (`idleTransportTarget`).
+      setSteppedSessionId(sessionId);
 
       if (steppingOffTheWave) {
         // A backward press is the user saying *I want the text*, and this
@@ -818,7 +968,7 @@ export function useSpeechHost(): SpeechHost {
       // `recordAutoplayed` stays for a related reason, and see its own comment:
       // the autoplay effect watches the utterance under the cursor, so a
       // backward step looks to it exactly like an arrival. Without the record
-      // the armed cell would speak the answer the user stepped back to read —
+      // an autoplay cell would speak the answer the user stepped back to read —
       // the press silenced everywhere except the state it is listened to in.
       // It records nothing about `heard`, so the unplayed count is untouched.
       unlock();
@@ -851,6 +1001,8 @@ export function useSpeechHost(): SpeechHost {
       // gate above for the same reason: `noteTransport` moves what `derive`
       // reports, so anything asked of the store belongs before it.
       noteTransport(sessionId);
+      // As on the backward press: the idle play that follows stays here.
+      setSteppedSessionId(sessionId);
 
       if (steppingOntoTheWave) {
         unlock();
@@ -893,7 +1045,7 @@ export function useSpeechHost(): SpeechHost {
       // `recordAutoplayed` STAYS for the same reason it does on the backward
       // press, and it is what makes this silent on the ARMED cell too: the
       // autoplay effect watches the utterance under the cursor, so a step looks
-      // exactly like an arrival to it. Without the record an armed cell would
+      // exactly like an arrival to it. Without the record an autoplay cell would
       // speak the answer the user merely stepped onto — the press silenced
       // everywhere except the state it is listened to in. It records nothing
       // about `heard`, so the unplayed count is untouched.
@@ -1095,55 +1247,193 @@ export function useSpeechHost(): SpeechHost {
     [seekPlaybackWithinUnit, speakingSessionId],
   );
 
-  const onArm = useCallback(
-    (sessionId: string | null): void => {
-      // Arming is a click too, and it is the gesture the autoplay that follows
+  const cycleSpeechMode = useCallback(
+    (sessionId: string): void => {
+      // Cycling is a click too, and it is the gesture the autoplay that follows
       // will need — so it is spent on the element here rather than lost.
       unlock();
-      setArmed(sessionId);
+      // And it is the retry for a preload a failed unit stopped.
+      preloadFailedRef.current.delete(sessionId);
+      cycleChannelSpeechMode(sessionId);
     },
-    [setArmed, unlock],
+    [cycleChannelSpeechMode, unlock],
   );
 
-  const armedUtterance = armedSessionId ? utteranceFor(armedSessionId) : null;
+  /**
+   * What each autoplay cell is owed by autoplay: the utterance under its cursor
+   * and, while the cursor is on `current`, the answers waiting behind it — in
+   * the order the cell would play them. The backlog is in here so that an
+   * answer arriving for the SPEAKING cell takes its turn in the autoplay queue
+   * at the moment it arrived, not at the moment its own run ended: otherwise an
+   * answer from another cell that landed later would be spoken first.
+   */
+  const autoplayOwed = useCallback(
+    (sessionId: string): Utterance[] => {
+      const queue = queueFor(sessionId);
+      const under = utteranceUnderCursor(queue);
+      if (!under) return [];
+      return queue.cursor === 0 ? [under, ...queue.pending] : [under];
+    },
+    [queueFor],
+  );
+
+  /**
+   * Each autoplay cell with what it is owed, as one string so the effect below
+   * runs when any of them moves and not on every render.
+   */
+  const autoplayKey = autoplaySessionIds
+    .map(
+      (sessionId) =>
+        `${sessionId}\u0000${autoplayOwed(sessionId)
+          .map((utterance) => utterance.id)
+          .join("\u0000")}`,
+    )
+    .join("\u0001");
 
   useEffect(() => {
-    // Arming a cell does not speak what is already sitting in it: autoplay is
-    // for utterances that ARRIVE while the cell is armed. A fresh set, because
-    // the records belong to the cell that was armed and say nothing about this
-    // one.
-    const remembered = new Set<string>();
-    const under = armedSessionId ? utteranceFor(armedSessionId) : null;
-    if (under) remembered.add(under.id);
-    autoplayedRef.current = remembered;
-    // `utteranceFor` deliberately not a dependency: this must run when the
-    // armed cell changes, and only then.
+    // Entering autoplay does not speak what is already sitting in the cell:
+    // autoplay is for utterances that ARRIVE while the cell is in it. A fresh
+    // record per cell that just entered, because records belong to a cell and
+    // say nothing about another; a cell still in autoplay keeps its own.
+    const before = autoplayedRef.current;
+    const after = new Map<string, Set<string>>();
+    for (const sessionId of autoplaySessionIds) {
+      const kept = before.get(sessionId);
+      if (kept) {
+        after.set(sessionId, kept);
+        continue;
+      }
+      const remembered = new Set<string>();
+      for (const owed of autoplayOwed(sessionId)) remembered.add(owed.id);
+      after.set(sessionId, remembered);
+    }
+    // A cell that left autoplay gives up its turns: its answers stay unheard,
+    // waiting for a click like any other cell's.
+    for (const sessionId of before.keys()) {
+      if (!after.has(sessionId)) autoplayQueue.dropSession(sessionId);
+    }
+    autoplayedRef.current = after;
+    // `autoplayOwed` deliberately not a dependency: this must run when the set
+    // of autoplay cells changes, and only then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [armedSessionId]);
+  }, [autoplaySessionIds]);
 
   useEffect(() => {
-    if (!armedSessionId || !armedUtterance) return;
-    if (autoplayedRef.current.has(armedUtterance.id)) return;
+    // 1. Enqueue. Every utterance an autoplay cell is owed that autoplay has
+    //    not dealt with yet is recorded, and — with a gesture in hand — queued
+    //    for its turn, oldest first across the cells. With no gesture yet it is
+    //    ABSORBED instead: the browser would refuse anyway, and a tab that has
+    //    just hydrated `/api/speech/latest` must not start talking on its own.
+    //    A catch-up's recovered answers never get this far: the channel has
+    //    already recorded them (ADR 0017), so they are shown, never queued.
+    const arrived: Utterance[] = [];
+    const owedIds = new Set<string>();
+    for (const sessionId of autoplaySessionIds) {
+      const record = autoplayedRef.current.get(sessionId);
+      if (!record) continue;
+      for (const owed of autoplayOwed(sessionId)) {
+        owedIds.add(owed.id);
+        if (record.has(owed.id)) continue;
+        rememberAutoplayed(record, owed.id);
+        if (unlocked) arrived.push(owed);
+      }
+    }
+    // Stable, so answers that share a stamp keep the order they were found in.
+    arrived.sort((left, right) => left.at - right.at);
+    // An idle cell's newer answer replaces the older one under its cursor, so
+    // the older one's queued turn is no longer owed: the newer answer takes
+    // that turn over rather than queuing behind cells that answered between
+    // the two. The speaking cell's backlog is still owed, so its next answer
+    // keeps its own arrival place.
+    for (const { sessionId, id } of arrived) {
+      autoplayQueue.enqueue({ sessionId, utteranceId: id }, (queued) =>
+        owedIds.has(queued.utteranceId),
+      );
+    }
 
+    // 2. Dequeue — only between runs. A run that is still going, PAUSED
+    //    included (a pause does not end it), keeps the element; the queue
+    //    waits until it ends or a click replaces it. That is also what makes a
+    //    manual play a barge-in rather than a queue jump: it holds the element
+    //    until its own end, and only then does the queue resume.
+    if (runRef.current) return;
     if (!unlocked) {
-      // No gesture has reached the element yet, so the browser would refuse
-      // this anyway — and a tab that has just hydrated `/api/speech/latest`
-      // must not start talking on its own. Absorb it: it is old news by the
-      // time the user does click something.
-      rememberAutoplayed(autoplayedRef.current, armedUtterance.id);
+      // No gesture: the head is absorbed exactly as an arrival is — recorded
+      // already, and no audio. Unreachable while `unlocked` only ever goes
+      // false → true, but the gate is the browser's, not this queue's.
+      while (autoplayQueue.next(() => true));
       return;
     }
 
-    rememberAutoplayed(autoplayedRef.current, armedUtterance.id);
-    speak(armedSessionId);
-  }, [armedSessionId, armedUtterance, speak, unlocked]);
+    // The oldest entry still worth speaking: its cell still in autoplay, the
+    // answer still under the cell's cursor (a newer arrival or a transport
+    // press moved it on), and not heard by hand in the meantime. Anything else
+    // is stale and dropped on the way.
+    const turn = autoplayQueue.next(
+      ({ sessionId, utteranceId }) =>
+        speechModeOf(sessionId) === "autoplay" &&
+        utteranceFor(sessionId)?.id === utteranceId &&
+        !heardFor(sessionId).has(utteranceId),
+    );
+    if (!turn) return;
+    const utterance = utteranceFor(turn.sessionId);
+    if (utterance) speakUtterance(turn.sessionId, utterance);
+    // Keyed on `autoplayKey`, which already folds in what every autoplay cell
+    // is owed, and on `runEnds`, which is the queue's turn signal. The reads
+    // above are this render's, which is the render either of them moved in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoplayKey, runEnds, speakUtterance, unlocked]);
+
+  // The voice fell silent — asked AFTER the autoplay effect above, which is
+  // declared first and so runs first in the same commit: a queued answer it
+  // started has already reported its `start` and cleared the flag, and the
+  // alert following the voice moves on rather than leaving and coming back.
+  useEffect(() => {
+    if (!endPendingRef.current || runRef.current) return;
+    endPendingRef.current = false;
+    onRunChangeRef.current?.({ type: "end" });
+  }, [runEnds]);
+
+  // Held and continued, read off the player rather than off `onPause` /
+  // `onResume`, so every route to a pause is seen. A run that ENDS while held
+  // (a stop, a supersession) also clears `pausedSessionId`; that is no resume,
+  // which is what the run's outcome and identity say.
+  const heldSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const before = heldSessionRef.current;
+    heldSessionRef.current = pausedSessionId;
+    if (pausedSessionId) {
+      if (before !== pausedSessionId) onRunChangeRef.current?.({ type: "pause" });
+      return;
+    }
+    const run = runRef.current;
+    if (before && run?.sessionId === before && run.outcome === "pending") {
+      onRunChangeRef.current?.({ type: "resume" });
+    }
+  }, [pausedSessionId]);
+
+  /**
+   * When the answer a play on this cell would start arrived — the utterance
+   * under its cursor, the one `onSpeak` plays — or `null` once that is heard.
+   * Only that one, and not an older unheard answer further down the history:
+   * the idle transport ranks cells by what pressing play would actually say.
+   */
+  const oldestUnheardArrival = useCallback(
+    (sessionId: string): number | null => {
+      const under = utteranceUnderCursor(queueFor(sessionId));
+      if (!under || heardFor(sessionId).has(under.id)) return null;
+      return under.at;
+    },
+    [heardFor, queueFor],
+  );
 
   return useMemo(
     () => ({
       stateFor,
       queueFor,
       heardFor,
-      armedSessionId,
+      speechModeOf,
+      autoplaySessionIds,
       onSpeak,
       onPause,
       onResume,
@@ -1151,7 +1441,7 @@ export function useSpeechHost(): SpeechHost {
       onPrevious,
       onNext,
       onNewestAnswer,
-      onArm,
+      cycleSpeechMode,
       unitsFor,
       subscribeProgress,
       progressFor,
@@ -1167,11 +1457,23 @@ export function useSpeechHost(): SpeechHost {
       speakingSessionId,
       pausedSessionId,
       onSeekBackward,
+      // The idle transport's readings. `lastSpokenSessionId` moves only when
+      // a run starts in a different cell, `steppedSessionId` on a step press
+      // and the next run start; `oldestUnheardArrival` with the queue and the
+      // heard set, which move this object already. `isSessionOpen` is the
+      // panel's, handed through.
+      oldestUnheardArrival,
+      lastSpokenSessionId,
+      steppedSessionId,
+      isSessionOpen,
     }),
     [
-      armedSessionId,
+      autoplaySessionIds,
+      cycleSpeechMode,
       heardFor,
-      onArm,
+      isSessionOpen,
+      lastSpokenSessionId,
+      oldestUnheardArrival,
       onJumpToUnit,
       onNewestAnswer,
       onNext,
@@ -1187,7 +1489,9 @@ export function useSpeechHost(): SpeechHost {
       progressFor,
       queueFor,
       speakingSessionId,
+      speechModeOf,
       stateFor,
+      steppedSessionId,
       subscribeProgress,
       unitDurationsFor,
       unitsFor,

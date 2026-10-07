@@ -45,7 +45,7 @@ import { TerminalDrawerProvider, useTerminalDrawer } from "../useTerminalDrawer"
 import { useTerminalSessions } from "../useTerminalSessions";
 import { useTerminalOrdering } from "../useTerminalOrdering";
 import { useTerminalMaximized } from "../useTerminalMaximized";
-import { setStoredArmedSession } from "../../speech/voices";
+import { setStoredSpeechMode } from "../../speech/voices";
 
 const SESSIONS = [
   { id: "s1", name: "vector-1", project: "vector", cwd: "/", pid: 1, createdAt: "" },
@@ -92,6 +92,7 @@ describe("the terminal tier boundary", () => {
     expect(preferences.terminalOrder.portable).toBe(false);
     expect(preferences.terminalGrid.portable).toBe(false);
     expect(preferences.speechArmedCell.portable).toBe(false);
+    expect(preferences.speechModes.portable).toBe(false);
 
     expect(preferences.terminalDrawerOpen.portable).toBe(true);
     expect(preferences.terminalDrawerSide.portable).toBe(true);
@@ -134,13 +135,13 @@ describe("the terminal tier boundary", () => {
     expect(localStorage.getItem(storageKey(preferences.terminalGrid, "vector"))).toContain("s2");
   });
 
-  it("the armed speech cell stays in localStorage", async () => {
-    expect(setStoredArmedSession("s1")).toBe("s1");
+  it("the speech modes stay in localStorage", async () => {
+    expect(setStoredSpeechMode("s1", "autoplay")).toEqual({ s1: "autoplay" });
     await afterDebounce();
 
     expect(preferencePatches(mockFetch)).toEqual([]);
     expect(Object.keys(doc())).toEqual(["version"]);
-    expect(localStorage.getItem(storageKey(preferences.speechArmedCell))).toBe('"s1"');
+    expect(localStorage.getItem(storageKey(preferences.speechModes))).toBe('{"s1":"autoplay"}');
   });
 
   it("changing the drawer's side issues exactly one PATCH and touches no browser storage", async () => {

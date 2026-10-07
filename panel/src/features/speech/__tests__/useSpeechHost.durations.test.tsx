@@ -405,7 +405,10 @@ describe("the scrubber's durations belong to an utterance, not to a cell", () =>
 
     await emitUtterance("cell-a", "u-1", MEASURED);
     // Armed, so the answer that lands next speaks by itself.
-    await settle(() => host.onArm("cell-a"));
+    await settle(() => {
+      host.cycleSpeechMode("cell-a"); // armed
+      host.cycleSpeechMode("cell-a"); // autoplay
+    });
     await settle(() => host.onSpeak("cell-a"));
     await loadDuration(2);
     await endCurrentUnit();

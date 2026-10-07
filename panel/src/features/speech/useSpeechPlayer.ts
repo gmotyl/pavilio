@@ -19,6 +19,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { synthesizeSpeech, toSpeechBlob } from "./synth";
+import {
+  createSynthesisWindow,
+  SYNTHESIS_WINDOW_SIZE,
+  type SynthesisWindow,
+} from "./synthesisWindow";
 import type { SpeechUnit } from "./types";
 import { getStoredVoice } from "./voices";
 
@@ -39,7 +44,7 @@ import { getStoredVoice } from "./voices";
  * merely queue. Three is already many multiples ahead of playback: a unit is
  * 20-30 s of audio and a synthesis a few seconds.
  */
-export const SYNTHESIS_CONCURRENCY = 3;
+export const SYNTHESIS_CONCURRENCY = SYNTHESIS_WINDOW_SIZE;
 
 /**
  * Consecutive unit failures that stop the run. Consecutive is the point: a
@@ -138,6 +143,14 @@ export interface SpeechPlayerOptions {
    * silent — the player logs instead.
    */
   onError?: (error: SpeechPlaybackError) => void;
+  /**
+   * The window the cascade shares with the rest of the panel's speculative
+   * synthesis, at the top tier. Optional: a player on its own gets a private
+   * window, which is exactly the {@link SYNTHESIS_CONCURRENCY} bound it always
+   * had. The host passes its panel-wide one, so armed cells' preloads queue
+   * behind the run instead of beside it. Read once, at mount.
+   */
+  synthesisWindow?: SynthesisWindow;
 }
 
 export interface SpeechPlayer {
@@ -335,12 +348,12 @@ async function loadUnit(
 }
 
 /**
- * Warms the synthesis cache for `[from, end)` behind a rolling window of
- * {@link SYNTHESIS_CONCURRENCY} requests, each slot refilled the moment the
- * request holding it settles, until the slice is exhausted.
+ * Warms the synthesis cache for `[from, end)` through the synthesis window at
+ * its top tier, `run`: at most {@link SYNTHESIS_CONCURRENCY} in flight, each
+ * freed slot handed to this run's next unit before any warm or preload gets it.
  *
  * `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the whole
- * point — it is what refills the slot — and a fire-and-forget warm cannot bound
+ * point — it is what frees the slot — and a fire-and-forget warm cannot bound
  * anything, since nothing can observe it finishing. The failure is swallowed
  * exactly as `prefetchSpeech` swallows it, and the cache dedupes an in-flight
  * request, so the ladder materializing a unit this is already warming costs no
@@ -355,25 +368,22 @@ function cascadeWarm(
   from: number,
   end: number,
   voice: string,
+  synthesisWindow: SynthesisWindow,
 ): void {
-  let next = from;
-
-  const fill = (): void => {
-    // A torn-down or barged-in run must stop opening sockets the moment it
-    // loses the element: nothing will ever play what it warms from here on.
-    if (!run.active || next >= end) return;
-
-    const { text } = units[next];
-    next += 1;
-    void synthesizeSpeech(text, { voice })
-      .catch(() => {
-        // Best-effort: the unit is synthesized for real when the ladder
-        // reaches it, and that is where a failure gets reported.
-      })
-      .then(fill);
-  };
-
-  for (let slot = 0; slot < SYNTHESIS_CONCURRENCY; slot += 1) fill();
+  for (let index = from; index < end; index += 1) {
+    const { text } = units[index];
+    synthesisWindow.schedule("run", () =>
+      // A torn-down or barged-in run must stop opening sockets the moment it
+      // loses the element: nothing will ever play what it warms from here on.
+      // Declining hands the slot straight on.
+      run.active
+        ? synthesizeSpeech(text, { voice }).catch(() => {
+            // Best-effort: the unit is synthesized for real when the ladder
+            // reaches it, and that is where a failure gets reported.
+          })
+        : null,
+    );
+  }
 }
 
 /**
@@ -491,6 +501,11 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
   const elementRef = useRef<HTMLAudioElement | null>(null);
   const runRef = useRef<PlaybackRun | null>(null);
   const onErrorRef = useRef<SpeechPlayerOptions["onError"]>(undefined);
+  // Fixed at mount, and lazily, so a player handed the host's window never
+  // builds a private one.
+  const [synthesisWindow] = useState<SynthesisWindow>(
+    () => options.synthesisWindow ?? createSynthesisWindow(),
+  );
 
   useEffect(() => {
     onErrorRef.current = options.onError;
@@ -712,7 +727,7 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       const startCascade = (loaded: LoadedUnit): void => {
         if (cascaded || "error" in loaded || isStale()) return;
         cascaded = true;
-        cascadeWarm(run, units, loaded.index + 1, units.length, voice);
+        cascadeWarm(run, units, loaded.index + 1, units.length, voice, synthesisWindow);
       };
       /**
        * Materializes one unit's object URL — that is what makes the swap local
@@ -837,7 +852,7 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
 
       stop();
     },
-    [ensureElement, publishUnit, report, stop],
+    [ensureElement, publishUnit, report, stop, synthesisWindow],
   );
 
   const jumpToUnit = useCallback(

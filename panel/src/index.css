@@ -41,7 +41,7 @@
      paints — `.speech-bar-seg`, `.answer-pane-seg`, and the wave's crests.
 
      Only the segments moved to it. The rest of the speech surface's greens —
-     the speak control, the activity LED, the armed switch — are the same hue
+     the speak control, the activity LED, the speech mode control — are the same hue
      for their own reasons and are not this token's to change. */
   --speech-seg: #9ece6a;
 
@@ -650,9 +650,10 @@ input[type="checkbox"] {
 /* The header disclosure used to take the same green plus a fill under
    `[data-armed="1"]`, and its hover was gated on `[data-armed="0"]` so the
    green survived a pointer. Both are gone with the attribute: the control no
-   longer reports arming, so nothing in the panel writes `data-armed` outside
-   the bar's own switch and neither rule could ever match again. The bar's
-   switch keeps the green — see `.speech-bar-btn[data-armed="1"]` below.
+   longer reports arming, and nothing in the panel writes `data-armed` any more
+   (the bar's mode control reports `data-speech-mode`), so neither rule could
+   ever match again. The bar keeps the green — see
+   `.speech-bar-btn[data-speech-mode="autoplay"]` below.
 
    Hover feedback like the sibling header buttons, but only where no fill is
    already standing — a speaking cell keeps its green. The disclosure never has
@@ -785,9 +786,27 @@ input[type="checkbox"] {
   cursor: default;
 }
 
-/* Armed reads the same as the header toggle: the same green, the same fill.
-   The eye, while the answer pane is open, wears the same pressed state. */
-.speech-bar-btn[data-armed="1"],
+/* The speech mode control, one look per `data-speech-mode`. `off` dims only
+   the glyph, at the disabled floor's 0.6 (3.13:1, see above) so it reads as
+   "nothing happening here" without reading as unclickable — the button keeps
+   its hover fill and pointer, and a hover lifts the glyph back. `armed` takes
+   the green ink alone: the cell is preloading, not speaking. `autoplay` reads
+   the same as the header toggle used to: the same green, the same fill. The
+   eye, while the answer pane is open, wears that pressed state too. */
+.speech-bar-btn[data-speech-mode="off"] svg {
+  opacity: 0.6;
+  transition: opacity 200ms ease;
+}
+
+.speech-bar-btn[data-speech-mode="off"]:hover svg {
+  opacity: 1;
+}
+
+.speech-bar-btn[data-speech-mode="armed"] {
+  color: #9ece6a;
+}
+
+.speech-bar-btn[data-speech-mode="autoplay"],
 .speech-bar-btn[data-open="1"] {
   color: #9ece6a;
   background: rgba(158, 206, 106, 0.16);
@@ -2420,6 +2439,26 @@ input[type="checkbox"] {
 
 .alert-card {
   animation: alert-drop-in 160ms ease-out;
+}
+
+/* The action button of an actionable card reads as the card's text, not as
+   a control: no chrome of its own, so the card looks the same either way. */
+.alert-action {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: inherit;
+}
+
+.alert-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
 }
 
 .alert-countdown {

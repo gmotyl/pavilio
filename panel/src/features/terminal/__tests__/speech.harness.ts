@@ -25,7 +25,7 @@ export const INERT_SPEECH: GridSpeech = {
   stateFor: () => "empty",
   queueFor: () => emptyUtteranceQueue,
   heardFor: () => NOTHING_HEARD,
-  armedSessionId: null,
+  speechModeOf: () => "off",
   onSpeak: () => {},
   onPause: () => {},
   onResume: () => {},
@@ -33,7 +33,7 @@ export const INERT_SPEECH: GridSpeech = {
   onPrevious: () => {},
   onNext: () => {},
   onNewestAnswer: () => {},
-  onArm: () => {},
+  cycleSpeechMode: () => {},
   unitsFor: () => NO_UNITS,
   subscribeProgress: () => () => {},
   progressFor: () => null,
@@ -48,7 +48,7 @@ export const INERT_SPEECH: GridSpeech = {
  * above the subject.
  *
  * `SpeechHost` is `GridSpeech` plus what the document-wide media-session
- * transport reads, and the provider mounts that transport, so the four extra
+ * transport reads, and the provider mounts that transport, so the extra
  * members are not optional. Every suite that mounts the provider used to spell
  * this object out itself; one definition means a new member of `SpeechHost`
  * breaks in one place instead of quietly leaving each copy a `GridSpeech`
@@ -61,6 +61,9 @@ export const INERT_SPEECH_HOST: SpeechHost = {
   ...INERT_SPEECH,
   speakingSessionId: null,
   pausedSessionId: null,
+  autoplaySessionIds: [],
+  oldestUnheardArrival: () => null,
+  lastSpokenSessionId: null,
   onSeekBackward: () => {},
   preparingSessionIds: new Set<string>(),
 };

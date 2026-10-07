@@ -186,13 +186,25 @@ function stubTarget(
   run: {
     speakingSessionId?: string | null;
     pausedSessionId?: string | null;
-    armedSessionId?: string | null;
+    autoplaySessionId?: string | null;
+    /**
+     * Arrival order of each cell's oldest unheard answer. Defaults to the
+     * autoplay cell holding one, which is what made it the idle target before
+     * there could be several.
+     */
+    unheard?: Record<string, number>;
+    lastSpokenSessionId?: string | null;
   } = {},
 ): StubTarget {
   return {
     speakingSessionId: run.speakingSessionId ?? null,
     pausedSessionId: run.pausedSessionId ?? null,
-    armedSessionId: run.armedSessionId ?? null,
+    autoplaySessionIds: run.autoplaySessionId ? [run.autoplaySessionId] : [],
+    oldestUnheardArrival: (sessionId: string) => {
+      const unheard = run.unheard ?? (run.autoplaySessionId ? { [run.autoplaySessionId]: 0 } : {});
+      return unheard[sessionId] ?? null;
+    },
+    lastSpokenSessionId: run.lastSpokenSessionId ?? null,
     onSpeak: vi.fn<(sessionId: string) => void>(),
     onPause: vi.fn<(sessionId: string) => void>(),
     onResume: vi.fn<(sessionId: string) => void>(),
@@ -270,7 +282,7 @@ describe("useMediaSessionTransport", () => {
   });
 
   it("play with nothing active starts the armed cell", () => {
-    const target = stubTarget({ armedSessionId: "cell-b" });
+    const target = stubTarget({ autoplaySessionId: "cell-b" });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("play");
@@ -283,7 +295,7 @@ describe("useMediaSessionTransport", () => {
     const target = stubTarget({
       speakingSessionId: "cell-a",
       pausedSessionId: "cell-a",
-      armedSessionId: "cell-b",
+      autoplaySessionId: "cell-b",
     });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
@@ -304,7 +316,7 @@ describe("useMediaSessionTransport", () => {
    * answer on one cell while the notice on it stayed lit.
    */
   it("play and pause report an arrival on the cell they acted on", () => {
-    const armed = stubTarget({ armedSessionId: "cell-b" });
+    const armed = stubTarget({ autoplaySessionId: "cell-b" });
     const { unmount } = renderHook(() => useMediaSessionTransport(armed, arrival));
     fire("play");
     expect(arrival).toHaveBeenCalledTimes(1);
@@ -315,7 +327,7 @@ describe("useMediaSessionTransport", () => {
     const held = stubTarget({
       speakingSessionId: "cell-a",
       pausedSessionId: "cell-a",
-      armedSessionId: "cell-b",
+      autoplaySessionId: "cell-b",
     });
     const second = renderHook(() => useMediaSessionTransport(held, arrival));
     fire("play");
@@ -339,7 +351,7 @@ describe("useMediaSessionTransport", () => {
    * one-line change nothing else would catch.
    */
   it("nexttrack, previoustrack and seekbackward report no arrival", () => {
-    const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    const target = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("nexttrack");
@@ -361,7 +373,7 @@ describe("useMediaSessionTransport", () => {
 
   it("next and previous walk the playing cell's queue", () => {
     // The armed cell is a different one on purpose: the run wins.
-    const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    const target = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("nexttrack");
@@ -374,7 +386,7 @@ describe("useMediaSessionTransport", () => {
   });
 
   it("next and previous fall back to the armed cell with nothing playing", () => {
-    const target = stubTarget({ armedSessionId: "cell-b" });
+    const target = stubTarget({ autoplaySessionId: "cell-b" });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("nexttrack");
@@ -425,7 +437,7 @@ describe("useMediaSessionTransport", () => {
     const target = stubTarget({
       speakingSessionId: "cell-a",
       pausedSessionId: "cell-a",
-      armedSessionId: "cell-b",
+      autoplaySessionId: "cell-b",
     });
 
     const { unmount } = renderHook(() => useMediaSessionTransport(target, arrival));
@@ -494,17 +506,22 @@ async function settle(action: () => void): Promise<void> {
   });
 }
 
-async function emitUtterance(sessionId: string, id: string, text: string): Promise<void> {
+async function emitUtterance(
+  sessionId: string,
+  id: string,
+  text: string,
+  at = Date.now(),
+): Promise<void> {
   await act(async () => {
-    ws.emit({ type: "speech-utterance", id, sessionId, text, at: Date.now() });
+    ws.emit({ type: "speech-utterance", id, sessionId, text, at });
     await drain();
   });
 }
 
 /** A response of `count` units, each comfortably inside the packing window. */
-function response(count: number): string {
+function response(count: number, word = "Paragraph"): string {
   return Array.from({ length: count }, (_, i) => {
-    const head = `Paragraph ${String(i).padStart(2, "0")} `;
+    const head = `${word} ${String(i).padStart(2, "0")} `;
     return head + "x".repeat(238 - head.length) + ".";
   }).join("\n\n");
 }
@@ -581,7 +598,10 @@ describe("the transport acts on the playback, never on the focused cell", () => 
     // plausible to go wrong.
     await emitUtterance("cell-a", "u-a", response(3));
     await emitUtterance("cell-b", "u-b", response(3));
-    await settle(() => result.current.onArm("cell-b"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-b"); // armed
+      result.current.cycleSpeechMode("cell-b"); // autoplay
+    });
 
     await settle(() => result.current.onSpeak("cell-a"));
 
@@ -615,5 +635,57 @@ describe("the transport acts on the playback, never on the focused cell", () => 
     expect(result.current.stateFor("cell-a")).toBe("speaking");
     expect(result.current.stateFor("cell-b")).toBe("ready");
     expect(session.playbackState).toBe("playing");
+  });
+
+  it("media play with nothing active starts the oldest unheard autoplay answer", async () => {
+    const { result } = renderHook(() => {
+      const host = useSpeechHost();
+      useMediaSessionTransport(host, arrival);
+      return host;
+    });
+    const firstUnit = (word: string): string =>
+      `blob:${word} 00 ${"x".repeat(238 - word.length - 4)}.`;
+
+    // A's answer is the older one, but B enters autoplay first — so "the first
+    // autoplay cell" would be B. Entering autoplay speaks neither.
+    await emitUtterance("cell-a", "u-a", response(2, "Alpha"), 1_000);
+    await emitUtterance("cell-b", "u-b", response(2, "Bravo"), 2_000);
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-b");
+      result.current.cycleSpeechMode("cell-b");
+      result.current.cycleSpeechMode("cell-a");
+      result.current.cycleSpeechMode("cell-a");
+    });
+    expect(result.current.autoplaySessionIds).toEqual(["cell-b", "cell-a"]);
+    expect(played).toEqual([]);
+
+    await settle(() => fire("play"));
+    expect(played).toEqual([firstUnit("Alpha")]);
+    expect(arrival).toHaveBeenCalledWith("cell-a");
+
+    // Stopped short, A is still unheard and still the oldest: play goes back to it.
+    await settle(() => result.current.onStop("cell-a"));
+    await settle(() => fire("play"));
+    expect(played).toEqual([firstUnit("Alpha"), firstUnit("Alpha")]);
+  });
+
+  it("media play with nothing unheard in autoplay replays the last speaker", async () => {
+    const { result } = renderHook(() => {
+      const host = useSpeechHost();
+      useMediaSessionTransport(host, arrival);
+      return host;
+    });
+    const firstUnit = `blob:Charlie 00 ${"x".repeat(238 - 11)}.`;
+
+    // Nothing has ever spoken and nothing is in autoplay: play does nothing.
+    await emitUtterance("cell-c", "u-c", response(2, "Charlie"));
+    await settle(() => fire("play"));
+    expect(played).toEqual([]);
+
+    // C (not in autoplay) speaks and is stopped; play is "that again".
+    await settle(() => result.current.onSpeak("cell-c"));
+    await settle(() => result.current.onStop("cell-c"));
+    await settle(() => fire("play"));
+    expect(played).toEqual([firstUnit, firstUnit]);
   });
 });

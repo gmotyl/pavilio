@@ -1,4 +1,4 @@
-import { Eye, Pause, Play, Radio, SkipBack, SkipForward } from "lucide-react";
+import { Crosshair, Eye, Pause, Play, Radio, SkipBack, SkipForward, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import { LauncherPills } from "./LauncherPills";
@@ -17,7 +17,7 @@ import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { stepsOffTheWave, stepsOntoTheWave } from "../speech/waveStep";
-import type { CellSpeechState, GridSpeech, SpeechUnit } from "../speech/types";
+import type { CellSpeechState, GridSpeech, SpeechMode, SpeechUnit } from "../speech/types";
 import { getStoredVoice } from "../speech/voices";
 
 export interface SpeechControlBarProps {
@@ -124,6 +124,19 @@ const PLAY_PAUSE_LABEL: Record<CellSpeechState, string> = {
   stalled: "Pause — waiting for the voice",
   paused: "Resume speaking",
   heard: "Replay the last response",
+};
+
+/**
+ * The row's first control, per speech mode: the glyph, and a label that names
+ * the mode the cell is in AND what the next click does — the cycle is only
+ * learnable from the control itself. Three states are not a switch, so the
+ * control is a plain button reporting `data-speech-mode` rather than
+ * `aria-checked`; the stylesheet dims the `off` glyph and greens the other two.
+ */
+const SPEECH_MODE_CONTROL: Record<SpeechMode, { Icon: typeof Radio; label: string }> = {
+  off: { Icon: Radio, label: "Speech off — arm this cell" },
+  armed: { Icon: Crosshair, label: "Armed — preloading; click for autoplay" },
+  autoplay: { Icon: Volume2, label: "Autoplay — click to turn off" },
 };
 
 /** What a click on the play/pause control does, independently of the colour. */
@@ -372,7 +385,10 @@ export function SpeechControlBar({
     return () => noteSpeaking(sessionId, false);
   }, [sessionId, voiceIsReading]);
 
-  const armed = speech.armedSessionId === sessionId;
+  // The row's first control shows the cell's speech mode and steps it round
+  // `off → armed → autoplay → off`. See {@link SPEECH_MODE_CONTROL}.
+  const mode = speech.speechModeOf(sessionId);
+  const modeControl = SPEECH_MODE_CONTROL[mode];
   const intent = transportIntent(state);
   const weights = segmentWeights(units, durations);
   const total = weights.reduce((sum, weight) => sum + weight, 0);
@@ -530,16 +546,14 @@ export function SpeechControlBar({
       <div className="speech-bar-row">
         <button
           type="button"
-          role="switch"
-          aria-checked={armed}
-          title={armed ? "Autoplay armed — speak responses here" : "Autoplay off — arm this cell"}
-          aria-label={armed ? "Autoplay armed — speak responses here" : "Autoplay off — arm this cell"}
+          title={modeControl.label}
+          aria-label={modeControl.label}
           data-testid={`speech-bar-autoplay-${sessionId}`}
-          data-armed={armed ? "1" : "0"}
+          data-speech-mode={mode}
           className="speech-bar-btn"
-          onClick={() => speech.onArm(armed ? null : sessionId)}
+          onClick={() => speech.cycleSpeechMode(sessionId)}
         >
-          <Radio size={17} />
+          <modeControl.Icon size={17} />
         </button>
 
         {/*

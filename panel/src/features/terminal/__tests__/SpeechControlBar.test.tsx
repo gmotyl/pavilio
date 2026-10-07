@@ -186,7 +186,7 @@ interface SpeechOverrides {
   units?: SpeechUnit[];
   progress?: { unitIndex: number; unitTime: number; unitDuration: number | null } | null;
   durations?: ReadonlyMap<number, number>;
-  armedSessionId?: string | null;
+  autoplaySessionId?: string | null;
 }
 
 /** Shared, because a `useSyncExternalStore` snapshot must be referentially
@@ -213,7 +213,7 @@ function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
     subscribeProgress: () => () => {},
     progressFor: () => progress,
     unitDurationsFor: () => durations,
-    armedSessionId: over.armedSessionId ?? null,
+    speechModeOf: (id: string) => (id === over.autoplaySessionId ? "autoplay" : "off"),
     onSpeak: vi.fn(),
     onPause: vi.fn(),
     onResume: vi.fn(),
@@ -221,7 +221,7 @@ function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
     onPrevious: vi.fn(),
     onNext: vi.fn(),
     onNewestAnswer: vi.fn(),
-    onArm: vi.fn(),
+    cycleSpeechMode: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
   };

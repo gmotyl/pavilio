@@ -241,7 +241,10 @@ describe("useSpeechHost — a catch-up disturbs nothing the listener is on", () 
     const first = unitsOf(FIRST);
     const { result } = renderHook(() => useSpeechHost());
 
-    await settle(() => result.current.onArm("cell-a"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
     await emitUtterance("cell-a", "u-1", FIRST);
     expect(played).toEqual([`blob:${first[0]}`]);
     expect(result.current.stateFor("cell-a")).toBe("speaking");
@@ -265,7 +268,10 @@ describe("useSpeechHost — a catch-up disturbs nothing the listener is on", () 
     await emitUtterance("cell-a", "u-1", FIRST);
     await emitUtterance("cell-a", "u-2", SECOND);
     await emitUtterance("cell-a", "u-3", THIRD);
-    await settle(() => result.current.onArm("cell-a"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
     played.length = 0;
 
     // The skim: back onto u-2, silently, which is what `onPrevious`'s own
@@ -287,7 +293,10 @@ describe("useSpeechHost — a catch-up disturbs nothing the listener is on", () 
     const first = unitsOf(FIRST);
     const { result } = renderHook(() => useSpeechHost());
 
-    await settle(() => result.current.onArm("cell-a"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
     await emitUtterance("cell-a", "u-1", FIRST);
     await caughtUp("cell-a", "u-2", SECOND);
 

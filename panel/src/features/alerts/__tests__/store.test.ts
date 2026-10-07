@@ -4,6 +4,7 @@ import {
   alerts,
   getAlertsSnapshot,
   subscribeAlerts,
+  userActivateAlert,
   userDismissAlert,
 } from "../store";
 
@@ -83,5 +84,16 @@ describe("alert store", () => {
     const [persistent, transient] = getAlertsSnapshot();
     expect(persistent.persistent).toBe(true);
     expect(transient.persistent).toBe(false);
+  });
+
+  it("userActivateAlert removes the entry and calls onClick, not onDismiss", () => {
+    const onClick = vi.fn();
+    const onDismiss = vi.fn();
+    const id = alerts.info("a", { onClick, onDismiss });
+    userActivateAlert(id);
+    userActivateAlert(id);
+    expect(getAlertsSnapshot()).toHaveLength(0);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 });

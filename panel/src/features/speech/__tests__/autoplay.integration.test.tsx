@@ -9,8 +9,9 @@
  * that forgets to pass it leaves every cell `empty`, every callback a no-op,
  * and a grid-level suite entirely green. So these tests mount
  * `ProjectTerminalsSurface` and `TerminalsPage` — the two hosts — and read the
- * cell header's own `data-speech` attribute and, for arming, the `data-armed`
- * of the switch inside the bar — the only control that reports it since Task 9.
+ * cell header's own `data-speech` attribute and, for arming, the
+ * `data-speech-mode` of the mode control inside the bar — the only control that
+ * reports it since Task 9.
  *
  * Since Task 8 the SPEECH BAR is in that chain too: arming lives in the bar, and
  * the bar is rendered by `TerminalView`, two prop hops below the surface
@@ -22,7 +23,7 @@
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 
 /**
  * Deferred synthesis, copied in spirit from `useSpeechPlayer.test.ts`: the real
@@ -301,6 +302,24 @@ vi.mock("../../realtime/useWebSocket", async () => {
   };
 });
 
+/**
+ * The realtime channel's listeners, captured so a test can stage a RETURN — the
+ * socket coming back — and with it the channel's catch-up (ADR 0017). Nothing
+ * else here publishes on it, and the real one would open a socket.
+ */
+const realtime = vi.hoisted(() => ({
+  listeners: new Set<(frame: Record<string, unknown>) => void>(),
+}));
+vi.mock("../../realtime/channel", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../realtime/channel")>()),
+  subscribeRealtime: (listener: (frame: Record<string, unknown>) => void) => {
+    realtime.listeners.add(listener);
+    return () => {
+      realtime.listeners.delete(listener);
+    };
+  },
+}));
+
 // xterm cannot render in jsdom, and the pool's sockets are not this suite's
 // subject — the cell header and the bar are.
 //
@@ -389,6 +408,16 @@ vi.mock("../../terminal/useAllTerminalSessions", async (importOriginal) => ({
     applyPreset: () => {},
   }),
 }));
+/**
+ * What the tab-wide session store lists — what the speech alerts read to name a
+ * cell and to arrive at it. Empty unless a test fills it, so the alerts stay
+ * out of every test that is not about them.
+ */
+const sessionList = vi.hoisted(() => ({ current: [] as Array<Record<string, unknown>> }));
+vi.mock("../../terminal/sessionStore", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../terminal/sessionStore")>()),
+  getSessions: () => sessionList.current,
+}));
 vi.mock("../../terminal/useTerminalMaximized", () => ({
   useTerminalMaximized: () => [false, () => {}, () => {}],
 }));
@@ -403,9 +432,15 @@ import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import ProjectTerminalsSurface from "../../terminal/ProjectTerminalsSurface";
 import TerminalsPage from "../../../pages/TerminalsPage";
 import { SpeechHostProvider } from "../SpeechHostProvider";
-import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
+import {
+  __resetAlertsForTests,
+  getAlertsSnapshot,
+  subscribeAlerts,
+  userActivateAlert,
+} from "../../alerts/store";
+import { SPEAKING_ALERT_ID } from "../speakingAlert";
 import { prepare } from "../prepare";
-import { setStoredArmedSession, setStoredVoice } from "../voices";
+import { setStoredSpeechMode, setStoredVoice } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { clearPreference } from "../../../preferences/store";
 
@@ -509,7 +544,7 @@ const speakIcon = (sessionId: string): string | null =>
  * point of the task, and several of these tests are what pins it.
  */
 const armed = (sessionId: string): string | null =>
-  screen.getByTestId(`speech-bar-autoplay-${sessionId}`).getAttribute("data-armed");
+  screen.getByTestId(`speech-bar-autoplay-${sessionId}`).getAttribute("data-speech-mode");
 
 /** Whether this cell's bar is on screen — what the header control toggles. */
 const barVisible = (sessionId: string): boolean =>
@@ -572,7 +607,7 @@ const controls = (kind: ControlKind, sessionId: string): HTMLElement[] =>
  * bars have to be open for this to mean anything — `openBarInViews` is how.
  */
 const armedInViews = (sessionId: string): (string | null)[] =>
-  controls("bar-autoplay", sessionId).map((el) => el.getAttribute("data-armed"));
+  controls("bar-autoplay", sessionId).map((el) => el.getAttribute("data-speech-mode"));
 
 async function clickIn(view: number, kind: ControlKind, sessionId: string): Promise<void> {
   await act(async () => {
@@ -584,11 +619,13 @@ async function clickIn(view: number, kind: ControlKind, sessionId: string): Prom
 /**
  * Spends a user gesture inside one view. An `<audio>` element is unlocked by a
  * click that reaches *it*, so a second host would need its own — this is how a
- * user who touches both views gets there. The toggle is clicked twice so the
- * armed cell ends exactly where it started, which keeps the script identical
- * whether the panel has one host or (the bug) one per surface.
+ * user who touches both views gets there. The switch is clicked three times —
+ * once round the whole `off → armed → autoplay` cycle — so the cell's speech
+ * mode ends exactly where it started, which keeps the script identical whether
+ * the panel has one host or (the bug) one per surface.
  */
 async function clickAround(view: number, sessionId: string): Promise<void> {
+  await clickIn(view, "bar-autoplay", sessionId);
   await clickIn(view, "bar-autoplay", sessionId);
   await clickIn(view, "bar-autoplay", sessionId);
 }
@@ -605,12 +642,15 @@ const latestFetches = (): number =>
  * is a programmatic play riding on a real user gesture, which is exactly what
  * the browser requires.
  *
- * The row is out from mount, so this is the single click it always was — the
- * switch inside the row. {@link openBar} stays in front of it for the cells a
+ * The row is out from mount, so these are clicks on the switch inside the
+ * row. {@link openBar} stays in front of it for the cells a
  * test has deliberately hidden the row on.
  */
 async function arm(sessionId: string): Promise<void> {
   await openBar(sessionId);
+  // Two steps round the speech mode: off → armed → autoplay. Only `autoplay`
+  // speaks on its own, and it is what the switch reports.
+  await click(testIdFor("bar-autoplay", sessionId));
   await click(testIdFor("bar-autoplay", sessionId));
 }
 
@@ -688,6 +728,7 @@ beforeEach(() => {
   // The alert store is a module singleton, so an alert raised by one test would
   // otherwise still be standing in the next one.
   __resetAlertsForTests();
+  sessionList.current = [];
   prepareCalls.length = 0;
   elements.length = 0;
   played.length = 0;
@@ -946,7 +987,14 @@ describe("autoplay — refusal and synthesis failure", () => {
     await waitFor(() => expect(lastAlert()?.kind).toBe("error"));
     expect(played).toEqual([]);
     expect(speakState("cell-a")).toBe("ready");
-    expect(synth.requests).toHaveLength(2);
+    // Only the answer's own two units are ever asked for. An autoplay cell
+    // preloads its unit 1 as well as the run loading it, and a failure is
+    // never cached, so that unit may be asked for twice — but nothing past
+    // the answer is.
+    expect(new Set(synth.requests)).toEqual(
+      new Set(prepare(markdown).units.map((unit) => unit.text)),
+    );
+    expect(synth.requests.length).toBeLessThanOrEqual(3);
   });
 
   it("a run that spoke before it failed is not heard either", async () => {
@@ -985,9 +1033,9 @@ describe("autoplay — the surfaces and the session language", () => {
     expect(speakState("cell-a")).toBe("ready");
 
     // The utterance brought the bar out, so the arm switch is on screen.
-    expect(armed("cell-a")).toBe("0");
+    expect(armed("cell-a")).toBe("off");
     await arm("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
   });
 
   it("the standalone terminals page wires its cells to the channel", async () => {
@@ -1007,7 +1055,7 @@ describe("autoplay — the surfaces and the session language", () => {
     expect(speakState("cell-a")).toBe("ready");
 
     await arm("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
   });
 
   it("the session language accumulates across utterances", async () => {
@@ -1198,8 +1246,8 @@ describe("the row is reserved from mount", () => {
     expect(screen.getByTestId("speech-bar-launchers-cell-a")).toBeInTheDocument();
     // Launchers, live switch: arming ahead of the first answer is the reason
     // the row is reachable before it at all.
-    await click(testIdFor("bar-autoplay", "cell-a"));
-    expect(armed("cell-a")).toBe("1");
+    await arm("cell-a");
+    expect(armed("cell-a")).toBe("autoplay");
   });
 
   it("hiding the bar survives a later utterance", async () => {
@@ -1268,7 +1316,7 @@ describe("the header control and the bar", () => {
     await renderProjectSurface();
     // `arm` presses the switch in the row, which is out from mount.
     await arm("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
 
     // Hide the armed cell's row and bring it back: hiding is not disarming, and
     // showing is not arming. The control cannot reach the armed cell at all —
@@ -1277,14 +1325,14 @@ describe("the header control and the bar", () => {
     expect(barVisible("cell-a")).toBe(false);
     await click(testIdFor("speech-controls", "cell-a"));
     expect(barVisible("cell-a")).toBe(true);
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
 
     // Nor from another cell's control: hiding and restoring b's row leaves a
     // armed and b not.
     await click(testIdFor("speech-controls", "cell-b"));
     await click(testIdFor("speech-controls", "cell-b"));
     expect(barVisible("cell-b")).toBe(true);
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "off"]);
   });
 
   it("the control renders the same whether or not the cell is armed", async () => {
@@ -1311,46 +1359,47 @@ describe("the header control and the bar", () => {
     expect(markup("cell-b")).toBe(markup("cell-a"));
     expect(markup("cell-b")).toBe(markup("cell-c"));
     expect(screen.getByTestId(testIdFor("speech-controls", "cell-b"))).not.toHaveAttribute(
-      "data-armed",
+      "data-speech-mode",
     );
 
     // Arming is still true — it simply is not the header's story any more. The
     // bar is where it is read, and b's bar still says so when it is reopened.
     await openBar("cell-b");
-    expect(armed("cell-b")).toBe("1");
+    expect(armed("cell-b")).toBe("autoplay");
   });
 
-  it("the bar's arm switch still reports armed state", async () => {
+  it("the bar's mode control still reports the speech mode", async () => {
     await renderProjectSurface();
     await arm("cell-a");
 
-    // The switch reports through both channels it always has: the attribute the
-    // stylesheet keys the green off, and `aria-checked`, which is what a screen
-    // reader gets now that the header control says nothing about arming.
-    const armSwitch = screen.getByTestId(testIdFor("bar-autoplay", "cell-a"));
-    expect(armSwitch).toHaveAttribute("data-armed", "1");
-    expect(armSwitch).toHaveAttribute("role", "switch");
-    expect(armSwitch).toHaveAttribute("aria-checked", "true");
-    expect(armSwitch).toHaveAccessibleName(/armed/i);
+    // The control reports through two channels: `data-speech-mode`, which the
+    // stylesheet keys the green off, and the accessible name, which is what a
+    // screen reader gets now that the header control says nothing about
+    // arming. Three modes are not a switch, so there is no `aria-checked`.
+    const modeControl = screen.getByTestId(testIdFor("bar-autoplay", "cell-a"));
+    expect(modeControl).toHaveAttribute("data-speech-mode", "autoplay");
+    expect(modeControl).not.toHaveAttribute("role", "switch");
+    expect(modeControl).not.toHaveAttribute("aria-checked");
+    expect(modeControl).toHaveAccessibleName(/autoplay/i);
 
     // Hidden and shown again from the header: the bar comes back reporting the
     // same thing, which is what makes the next click on it the one that
-    // disarms rather than a click on a control drawn wrong.
+    // turns it off rather than a click on a control drawn wrong.
     await click(testIdFor("speech-controls", "cell-a"));
     await openBar("cell-a");
     expect(screen.getByTestId(testIdFor("bar-autoplay", "cell-a"))).toHaveAttribute(
-      "data-armed",
-      "1",
+      "data-speech-mode",
+      "autoplay",
     );
 
-    // And an unarmed cell's switch says so just as plainly.
+    // And an untouched cell's control says so just as plainly.
     await openBar("cell-b");
     const other = screen.getByTestId(testIdFor("bar-autoplay", "cell-b"));
-    expect(other).toHaveAttribute("data-armed", "0");
-    expect(other).toHaveAttribute("aria-checked", "false");
+    expect(other).toHaveAttribute("data-speech-mode", "off");
+    expect(other).toHaveAccessibleName(/speech off/i);
   });
 
-  it("arming from the bar disarms the previously armed cell", async () => {
+  it("autoplay on one cell leaves another cell in autoplay", async () => {
     await renderProjectSurface();
     // Both bars out, so both arm switches are readable throughout — arming is
     // read where it lives, and cell b's bar has to be open to be read.
@@ -1358,22 +1407,21 @@ describe("the header control and the bar", () => {
     await openBar("cell-b");
 
     await arm("cell-a");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "off"]);
 
-    // One armed cell per browser: arming b is what disarms a, and nothing had
-    // to click a to make that happen.
+    // Not exclusive: putting b in autoplay leaves a where it was.
     await arm("cell-b");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "1"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "autoplay"]);
 
-    // Clicking the armed cell's own bar switch disarms it, leaving none armed.
-    await arm("cell-b");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "0"]);
+    // One more click on b's own switch steps it round to off; a is untouched.
+    await click(testIdFor("bar-autoplay", "cell-b"));
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "off"]);
   });
 
   it("arming survives a reload", async () => {
     const first = await renderProjectSurface();
     await arm("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
 
     // The row is shown from mount, so leaving it alone would make the
     // post-reload reading below true under a persisting implementation too.
@@ -1396,10 +1444,10 @@ describe("the header control and the bar", () => {
     expect(barVisible("cell-a")).toBe(true);
     // What survived is the armed cell — and the row is where that is read,
     // since the header control reports nothing about it.
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
 
     await openBar("cell-b");
-    expect(armed("cell-b")).toBe("0");
+    expect(armed("cell-b")).toBe("off");
   });
 
   it("the header speak control is unchanged", async () => {
@@ -1441,7 +1489,7 @@ describe("the header control and the bar", () => {
     // Speaking a cell is not arming it. Read from the bars, which is where
     // arming is legible — so cell a's is brought back out to be asked.
     await openBar("cell-a");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "1"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["off", "autoplay"]);
   });
 });
 
@@ -1456,7 +1504,7 @@ describe("one speech host for the panel, not one per surface", () => {
   it("two mounted surfaces are one voice, not two", async () => {
     // A returning browser: the armed cell is restored from storage by whatever
     // mounts, so both views come up armed on the same cell (DECISION 12).
-    setStoredArmedSession("cell-a");
+    setStoredSpeechMode("cell-a", "autoplay");
 
     await renderBothViews();
     // Fixture guard: this really is the two-surface arrangement, not one.
@@ -1466,7 +1514,7 @@ describe("one speech host for the panel, not one per surface", () => {
     // from its own header control, the choice being per cell AND per view —
     // and the restored arming is legible only once they are.
     await openBarInViews("cell-a");
-    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
+    expect(armedInViews("cell-a")).toEqual(["autoplay", "autoplay"]);
 
     // The user works in both views, as they do whenever the drawer is open.
     await clickAround(0, "cell-a");
@@ -1488,7 +1536,7 @@ describe("one speech host for the panel, not one per surface", () => {
     expect(latestFetches()).toBe(1);
   });
 
-  it("arming stays exclusive across both views", async () => {
+  it("speech modes are shared across both views", async () => {
     await renderBothViews();
 
     // No cell has spoken, so every bar is closed: both cells are opened in both
@@ -1498,29 +1546,31 @@ describe("one speech host for the panel, not one per surface", () => {
     // question at all: the bars are where arming is reported.
     await openBarInViews("cell-a");
     await openBarInViews("cell-b");
-    expect(armedInViews("cell-a")).toEqual(["0", "0"]);
+    expect(armedInViews("cell-a")).toEqual(["off", "off"]);
 
     // From the bar, which is where arming lives — and from ONE view's bar, so
     // what the other view reports is the shared value and not its own click.
     await clickIn(0, "bar-autoplay", "cell-a");
+    await clickIn(0, "bar-autoplay", "cell-a");
 
     // The drawer is not a second browser: both views' bars show the same
     // armed cell.
-    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
+    expect(armedInViews("cell-a")).toEqual(["autoplay", "autoplay"]);
 
-    // Arming from the *other* view disarms the first cell everywhere — one
-    // armed cell per browser, whichever view it was armed from.
+    // Autoplay from the *other* view joins the first cell rather than
+    // replacing it — and both views report both.
+    await clickIn(1, "bar-autoplay", "cell-b");
     await clickIn(1, "bar-autoplay", "cell-b");
 
-    expect(armedInViews("cell-a")).toEqual(["0", "0"]);
-    expect(armedInViews("cell-b")).toEqual(["1", "1"]);
+    expect(armedInViews("cell-a")).toEqual(["autoplay", "autoplay"]);
+    expect(armedInViews("cell-b")).toEqual(["autoplay", "autoplay"]);
   });
 
   it("a freshly hydrated tab does not start talking on its own", async () => {
     // The browser remembers an armed cell and the server still holds that
     // cell's last response, so the tab comes up armed with something unheard
     // in it — and nothing has been clicked yet.
-    setStoredArmedSession("cell-a");
+    setStoredSpeechMode("cell-a", "autoplay");
     global.fetch = vi.fn(
       async () =>
         ({
@@ -1543,7 +1593,7 @@ describe("one speech host for the panel, not one per surface", () => {
     // The restored arming is read from the bar, the only control that reports
     // it — brought out here if the hydrated utterance has not already.
     await openBar("cell-a");
-    expect(armed("cell-a")).toBe("1");
+    expect(armed("cell-a")).toBe("autoplay");
     // No gesture has reached the `<audio>` element, so this must be absorbed:
     // a page that starts talking by itself is what the lock gate prevents.
     expect(played).toEqual([]);
@@ -1775,5 +1825,469 @@ describe("the control's colour and icon, end to end", () => {
     await waitFor(() => expect(speakState("cell-b")).toBe("speaking"));
     expect(speakState("cell-a")).toBe("ready");
     expect(speakIcon("cell-a")).toBe("speaker");
+  });
+});
+
+/**
+ * A return: the socket comes back, the channel re-asks `/latest`, and the
+ * panel server hands back an answer it retained while the tab was away.
+ */
+async function caughtUp(sessionId: string, id: string, text: string): Promise<void> {
+  global.fetch = vi.fn(
+    async () =>
+      ({
+        ok: true,
+        json: async () => ({ utterances: [{ id, sessionId, text, at: Date.now() }] }),
+      }) as Response,
+  ) as unknown as typeof fetch;
+  await act(async () => {
+    for (const listener of [...realtime.listeners]) listener({ type: "realtime-reconnect" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await drain();
+  });
+}
+
+/** Whether the panel's one element is audibly mid-unit — nothing ended it. */
+const lastPlayed = (): string | undefined => played.at(-1);
+
+describe("autoplay — the queue across cells", () => {
+  it("a competing autoplay answer waits for the speaking one", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "A first. A second.");
+    expect(played).toEqual(["blob:A first."]);
+
+    // B answers while A is mid-answer: A is NOT cut off.
+    await emitUtterance("cell-b", "b1", "B answer.");
+    expect(played).toEqual(["blob:A first."]);
+    expect(speakState("cell-a")).toBe("speaking");
+    expect(speakState("cell-b")).toBe("ready");
+
+    await endCurrentUnit();
+    expect(played).toEqual(["blob:A first.", "blob:A second."]);
+    expect(speakState("cell-a")).toBe("speaking");
+
+    // A's last unit ends: A is heard, and B starts on its own.
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:B answer."));
+    expect(speakState("cell-a")).toBe("heard");
+    expect(speakState("cell-b")).toBe("speaking");
+  });
+
+  it("answers for two autoplay cells in the same pass are both spoken, in order", async () => {
+    // The one route that lands two answers in ONE pass of the host: the mount
+    // hydration, committing every retained answer at once. It is not a
+    // catch-up, so it is not absorbed by the record — only by the lock gate,
+    // and the user here has already clicked before it lands.
+    setStoredSpeechMode("cell-a", "autoplay");
+    setStoredSpeechMode("cell-b", "autoplay");
+    // Only `/api/speech/latest` is held. The first mount in a fresh module
+    // graph also fetches the panel's cached lookups (project colours, OS users,
+    // preferences…); a stub that held EVERY request kept the last resolver,
+    // which was one of those, so on its own this test never landed the
+    // hydration at all.
+    let serve: (utterances: unknown[]) => void = () => {};
+    global.fetch = vi.fn((input: unknown) => {
+      if (input !== "/api/speech/latest") {
+        return Promise.resolve({ ok: true, json: async () => ({ utterances: [] }) } as Response);
+      }
+      return new Promise<Response>((resolve) => {
+        serve = (utterances) =>
+          resolve({ ok: true, json: async () => ({ utterances }) } as Response);
+      });
+    }) as unknown as typeof fetch;
+
+    await renderProjectSurface();
+    // A gesture: round C's cycle, leaving its mode where it was.
+    await click(testIdFor("bar-autoplay", "cell-c"));
+    await click(testIdFor("bar-autoplay", "cell-c"));
+    await click(testIdFor("bar-autoplay", "cell-c"));
+
+    await act(async () => {
+      serve([
+        { id: "a1", sessionId: "cell-a", text: "From A.", at: 1 },
+        { id: "b1", sessionId: "cell-b", text: "From B.", at: 2 },
+      ]);
+      await drain();
+    });
+    // Both were owed in that one pass; the older speaks first…
+    expect(played).toEqual(["blob:From A."]);
+
+    // …and the other is not dropped: it speaks when A ends.
+    await endCurrentUnit();
+    await waitFor(() => expect(played).toEqual(["blob:From A.", "blob:From B."]));
+    expect(speakState("cell-a")).toBe("heard");
+    expect(speakState("cell-b")).toBe("speaking");
+  });
+
+  it("answers queued behind the speaking cell play in arrival order", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+    await arm("cell-c");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    await emitUtterance("cell-b", "b1", "From B.");
+    await emitUtterance("cell-c", "c1", "From C.");
+    expect(played).toEqual(["blob:From A."]);
+
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From C."));
+    expect(played).toEqual(["blob:From A.", "blob:From B.", "blob:From C."]);
+  });
+
+  it("the speaking cell's next answer keeps its arrival place in the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "A one.");
+    // A answers again while it is speaking — held behind its own run — and only
+    // then does B answer. A's second answer arrived first, so it speaks first.
+    await emitUtterance("cell-a", "a2", "A two.");
+    await emitUtterance("cell-b", "b1", "From B.");
+    expect(played).toEqual(["blob:A one."]);
+
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:A two."));
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    expect(played).toEqual(["blob:A one.", "blob:A two.", "blob:From B."]);
+  });
+
+  it("a newer answer keeps its cell's place in the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+    await arm("cell-c");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    // B is idle, so its second answer replaces the first under B's cursor —
+    // and takes over the first one's turn, ahead of C, rather than queuing
+    // behind C while the first goes stale.
+    await emitUtterance("cell-b", "b1", "B one.");
+    await emitUtterance("cell-c", "c1", "From C.");
+    await emitUtterance("cell-b", "b2", "B two.");
+    expect(played).toEqual(["blob:From A."]);
+
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:B two."));
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From C."));
+    expect(played).toEqual(["blob:From A.", "blob:B two.", "blob:From C."]);
+  });
+
+  it("a manual play barges in and the queue resumes after it", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "A first. A second.");
+    await emitUtterance("cell-b", "b1", "From B.");
+    // C is not in autoplay: its answer waits for a click, and gets one.
+    await emitUtterance("cell-c", "c1", "From C.");
+    expect(played).toEqual(["blob:A first."]);
+
+    await click("terminal-cell-speak-cell-c");
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From C."));
+    // A was cut short, so it is unheard — and the queue did NOT jump in.
+    expect(speakState("cell-a")).toBe("ready");
+    expect(speakState("cell-c")).toBe("speaking");
+    expect(speakState("cell-b")).toBe("ready");
+
+    // C ends: the queue resumes with B.
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    expect(speakState("cell-c")).toBe("heard");
+
+    // B ends, and A — interrupted, not re-queued — stays silent and unheard.
+    const before = played.length;
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-b")).toBe("heard"));
+    expect(played).toHaveLength(before);
+    expect(speakState("cell-a")).toBe("ready");
+  });
+
+  it("a queued answer heard by hand before its turn is skipped", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    await emitUtterance("cell-b", "b1", "From B.");
+
+    // The user plays B themselves, all the way through.
+    await click("terminal-cell-speak-cell-b");
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-b")).toBe("heard"));
+
+    // Its queued turn is spent: nothing replays it.
+    expect(played).toEqual(["blob:From A.", "blob:From B."]);
+  });
+
+  it("pause holds the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "A first. A second.");
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("paused");
+
+    await emitUtterance("cell-b", "b1", "From B.");
+    // The paused run has not ended, so B waits — however long the pause.
+    expect(played).toEqual(["blob:A first."]);
+    expect(speakState("cell-a")).toBe("paused");
+    expect(speakState("cell-b")).toBe("ready");
+
+    // Resumed and played out: then B.
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("speaking");
+    await endCurrentUnit();
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    expect(speakState("cell-a")).toBe("heard");
+  });
+
+  it("leaving autoplay drops a queued answer", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    await emitUtterance("cell-b", "b1", "From B.");
+
+    // autoplay → off.
+    await click(testIdFor("bar-autoplay", "cell-b"));
+    expect(armed("cell-b")).toBe("off");
+
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
+    expect(played).toEqual(["blob:From A."]);
+    expect(speakState("cell-b")).toBe("ready");
+  });
+
+  it("an answer for an off or armed cell never enters the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    // B only armed: off → armed.
+    await click(testIdFor("bar-autoplay", "cell-b"));
+    expect(armed("cell-b")).toBe("armed");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    await emitUtterance("cell-b", "b1", "From B.");
+    await emitUtterance("cell-c", "c1", "From C.");
+
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
+    expect(played).toEqual(["blob:From A."]);
+    expect(speakState("cell-b")).toBe("ready");
+    expect(speakState("cell-c")).toBe("ready");
+  });
+
+  it("catch-up answers never enter the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    expect(speakState("cell-a")).toBe("speaking");
+
+    // B's answer is RECOVERED after a reconnect, not delivered live: shown,
+    // never spoken (ADR 0017) — not now, and not after A.
+    await caughtUp("cell-b", "b1", "Recovered for B.");
+    expect(speakState("cell-b")).toBe("ready");
+
+    await endCurrentUnit();
+    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
+    expect(played).toEqual(["blob:From A."]);
+    expect(speakState("cell-b")).toBe("ready");
+  });
+});
+
+describe("the speaking alert, end to end", () => {
+  /** The route, rendered where a test can read it. */
+  function LocationProbe() {
+    const { pathname } = useLocation();
+    return <div data-testid="location">{pathname}</div>;
+  }
+  const pathname = (): string | null => screen.getByTestId("location").textContent;
+
+  /** The project surface at its own route, with the store listing `sessions`. */
+  async function renderWithSessions(sessions: Array<Record<string, unknown>>): Promise<void> {
+    sessionList.current = sessions;
+    render(
+      <MemoryRouter initialEntries={["/project/vector/iterm"]}>
+        <SpeechHostProvider>
+          <ProjectTerminalsSurface projectName="vector" active />
+          <LocationProbe />
+        </SpeechHostProvider>
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      await drain();
+    });
+  }
+
+  const speakingAlert = () => getAlertsSnapshot().find((entry) => entry.id === SPEAKING_ALERT_ID);
+
+  it("the speaking alert follows the queue to the next cell", async () => {
+    await renderWithSessions(SESSIONS as unknown as Array<Record<string, unknown>>);
+    await arm("cell-a");
+    await arm("cell-b");
+    // Every moment the voice is going, the card is up: the hand-over from one
+    // cell to the next updates it in place rather than taking it down.
+    const gaps: number[] = [];
+    let wasUp = false;
+    const unsubscribe = subscribeAlerts(() => {
+      const up = speakingAlert() !== undefined;
+      if (wasUp && !up) gaps.push(played.length);
+      wasUp = up;
+    });
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    expect(speakingAlert()?.title).toBe("Speaking — vector · claude-a");
+    await emitUtterance("cell-b", "b1", "From B.");
+    expect(speakingAlert()?.title).toBe("Speaking — vector · claude-a");
+
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    expect(speakingAlert()?.title).toBe("Speaking — vector · claude-b");
+    expect(gaps).toEqual([]);
+
+    // B ends and nothing is queued: the voice is silent, and the card goes.
+    await endCurrentUnit();
+    await waitFor(() => expect(speakingAlert()).toBeUndefined());
+    unsubscribe();
+  });
+
+  it("the speaking alert leaves when the voice stops or pauses", async () => {
+    await renderWithSessions(SESSIONS as unknown as Array<Record<string, unknown>>);
+    await emitUtterance("cell-a", "a1", "A first. A second.");
+
+    await click("terminal-cell-speak-cell-a");
+    expect(speakingAlert()?.title).toBe("Speaking — vector · claude-a");
+
+    // The control pauses a speaking cell, and resumes a paused one.
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("paused");
+    expect(speakingAlert()).toBeUndefined();
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("speaking");
+    expect(speakingAlert()).toBeDefined();
+
+    // The transport chord pauses too, and the card goes with it.
+    await pressTransport("Space");
+    expect(speakState("cell-a")).toBe("paused");
+    expect(speakingAlert()).toBeUndefined();
+
+    // Resumed, and played out: the voice runs out and the card goes for good.
+    await pressTransport("Space");
+    expect(speakingAlert()).toBeDefined();
+    await endRun();
+    expect(speakState("cell-a")).toBe("heard");
+    expect(speakingAlert()).toBeUndefined();
+  });
+
+  it("clicking the speaking alert arrives without stopping playback", async () => {
+    await renderWithSessions([
+      ...(SESSIONS as unknown as Array<Record<string, unknown>>).filter(
+        (session) => session.id !== "cell-b",
+      ),
+      { ...SESSIONS[1], project: "beta" },
+    ]);
+    await emitUtterance("cell-b", "b1", "B first. B second.");
+    await click("terminal-cell-speak-cell-b");
+    expect(speakingAlert()?.title).toBe("Speaking — beta · claude-b");
+
+    await act(async () => {
+      userActivateAlert(SPEAKING_ALERT_ID);
+      await drain();
+    });
+
+    expect(pathname()).toBe("/project/beta/iterm");
+    // The voice did not notice: the run goes on to its next unit.
+    expect(played).toEqual(["blob:B first."]);
+    await endCurrentUnit();
+    expect(played).toEqual(["blob:B first.", "blob:B second."]);
+  });
+
+  it("speech never navigates by itself", async () => {
+    await renderWithSessions([
+      ...(SESSIONS as unknown as Array<Record<string, unknown>>).filter(
+        (session) => session.id !== "cell-b",
+      ),
+      { ...SESSIONS[1], project: "beta" },
+    ]);
+    await arm("cell-b");
+    const focused = document.activeElement;
+
+    await emitUtterance("cell-b", "b1", "From B.");
+
+    expect(played).toEqual(["blob:From B."]);
+    expect(speakingAlert()?.title).toBe("Speaking — beta · claude-b");
+    expect(pathname()).toBe("/project/vector/iterm");
+    expect(document.activeElement).toBe(focused);
+  });
+});
+
+/**
+ * The answer alert, mounted. `answerAlert.test.ts` covers the decision and the
+ * raise in isolation, which says nothing about whether the provider hands
+ * `onAnswer` to the host or the host hands it on to the channel: dropping either
+ * hop left every suite green and the panel without a single answer card. This is
+ * that wiring's own assertion — the real provider, the real host, the real
+ * channel, and only the session store's list stubbed.
+ */
+describe("the answer alert, end to end", () => {
+  const answerAlerts = () => getAlertsSnapshot().filter((entry) => entry.id.startsWith("answer-"));
+
+  beforeEach(() => {
+    sessionList.current = SESSIONS as unknown as Array<Record<string, unknown>>;
+  });
+
+  it("a live answer in a cell nobody is looking at raises its card", async () => {
+    await renderProjectSurface();
+
+    await emitUtterance("cell-b", "b1", "Done with the migration.");
+
+    const card = getAlertsSnapshot().find((entry) => entry.id === "answer-cell-b");
+    expect(card?.title).toBe("vector · claude-b");
+    expect(answerAlerts()).toHaveLength(1);
+  });
+
+  it("an answer hydrated on mount raises nothing", async () => {
+    global.fetch = vi.fn(async (input: unknown) => ({
+      ok: true,
+      json: async () => ({
+        utterances:
+          input === "/api/speech/latest"
+            ? [{ id: "b1", sessionId: "cell-b", text: "From before.", at: 1 }]
+            : [],
+      }),
+    })) as unknown as typeof fetch;
+
+    await renderProjectSurface();
+
+    // It did land — in its cell — so the silence below is not a missed fetch.
+    expect(speakState("cell-b")).toBe("ready");
+    expect(answerAlerts()).toEqual([]);
+  });
+
+  it("an answer recovered by a catch-up raises nothing", async () => {
+    await renderProjectSurface();
+
+    await caughtUp("cell-b", "b1", "Recovered for B.");
+
+    expect(speakState("cell-b")).toBe("ready");
+    expect(answerAlerts()).toEqual([]);
   });
 });

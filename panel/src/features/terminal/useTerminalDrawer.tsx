@@ -186,6 +186,15 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Whether the drawer is on screen, or false with no provider above — for a
+ * reader that must also work where no drawer is mounted (the speech host in a
+ * surface's own test, say). `useTerminalDrawer` throws there instead.
+ */
+export function useTerminalDrawerVisible(): boolean {
+  return useContext(Ctx)?.visible ?? false;
+}
+
 export function useTerminalDrawer(): DrawerCtx {
   const ctx = useContext(Ctx);
   if (!ctx) {
