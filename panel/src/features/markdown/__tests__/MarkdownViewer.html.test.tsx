@@ -132,6 +132,53 @@ describe("MarkdownViewer html handling", () => {
     expect(screen.queryByTestId("markdown-viewer-frame")).toBeNull();
   });
 
+  it("caps the source read of a cross-root html or svg file", async () => {
+    // A linked-root mockup is shown as source text, but a huge one must not be
+    // read in full any more than an in-root one is.
+    for (const path of ["_root/skills/tdd/mock.html", "_root/skills/tdd/icon.svg"]) {
+      stubRead(MOCKUP_SOURCE, `/root/git/prv/projects/skills/tdd/${path}`);
+      const { container, unmount } = renderViewer(path);
+      await waitFor(() => expect(container.querySelector("pre")).not.toBeNull());
+      const reads = vi
+        .mocked(fetch)
+        .mock.calls.map(([input]) => String(input))
+        .filter((url) => url.startsWith("/api/files/read/"));
+      expect(reads.length).toBeGreaterThan(0);
+      for (const url of reads) {
+        expect(url).toContain("root=skills");
+        expect(url).toContain("maxBytes=");
+      }
+      unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("says a too-large cross-root file is not shown instead of an empty pane", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (input: string) =>
+          new Response(
+            JSON.stringify(
+              String(input).startsWith("/api/system")
+                ? { wslDistro: null, workspaceRoot: WORKSPACE_ROOT }
+                : {
+                    content: "",
+                    tooLarge: true,
+                    absolutePath: "/root/git/prv/projects/skills/tdd/big.html",
+                  },
+            ),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    renderViewer("_root/skills/tdd/big.html");
+
+    expect(await screen.findByTestId("markdown-viewer-too-large")).toHaveTextContent(
+      /too large/i,
+    );
+  });
+
   it("view route renders image mockups as img", async () => {
     // QuickFinder and the file tree list image mockups and link them to
     // `/view/<path>`; their bytes must never be shown (or read) as text.

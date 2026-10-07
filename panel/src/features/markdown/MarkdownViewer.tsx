@@ -2,7 +2,7 @@ import { useLocation } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { useActiveFile } from "../explorer/useActiveFile";
 import MockupFrame from "../projects/MockupFrame";
-import { isMockupFile, isRasterImage, viewerReadUrl } from "../projects/mockupFiles";
+import { isMockupFile, MOCKUP_MAX_SOURCE_BYTES, viewerReadUrl } from "../projects/mockupFiles";
 import ViewerActions from "../projects/ViewerActions";
 import { relativeToWorkspace } from "../projects/relativeToWorkspace";
 import { useWorkspaceRoot } from "../projects/useWorkspaceRoot";
@@ -41,6 +41,7 @@ export default function MarkdownViewer() {
 
   const [content, setContent] = useState("");
   const [absolutePath, setAbsolutePath] = useState("");
+  const [tooLarge, setTooLarge] = useState(false);
   const workspaceRoot = useWorkspaceRoot();
   const [loading, setLoading] = useState(true);
   const [wide, toggleWide] = useWideMode("viewer");
@@ -55,16 +56,16 @@ export default function MarkdownViewer() {
     const path = filePath;
     // A raster image only needs its absolute path — the frame loads it from
     // the raw route — so its bytes are never read as text. An HTML/SVG file is
-    // text and is read for Copy content, up to a size cap — except cross-root,
-    // where it is shown as source text and so is read in full.
-    const url = buildReadUrl(path);
-    const crossRootText = path.split("/")[0] === "_root" && !isRasterImage(path);
-    const res = await fetch(crossRootText ? url : viewerReadUrl(path, url));
+    // text and is read for Copy content, up to a size cap. Cross-root, where it
+    // is shown as source text, the same cap applies: above it the server
+    // answers `tooLarge` and the pane says so instead of reading the file.
+    const res = await fetch(viewerReadUrl(path, buildReadUrl(path)));
     if (currentPath.current !== path) return;
     if (res.ok) {
       const data = await res.json();
       if (currentPath.current !== path) return;
       setContent(data.content);
+      setTooLarge(data.tooLarge === true);
       setAbsolutePath(data.absolutePath);
     }
     setLoading(false);
@@ -75,6 +76,7 @@ export default function MarkdownViewer() {
     // frame's Copy content nor the breadcrumb toolbar can copy it meanwhile.
     setLoading(true);
     setContent("");
+    setTooLarge(false);
     fetchContent();
   }, [filePath]);
 
@@ -167,6 +169,15 @@ export default function MarkdownViewer() {
           >
             {JSON.stringify(JSON.parse(content), null, 2)}
           </pre>
+        ) : tooLarge ? (
+          <p
+            data-testid="markdown-viewer-too-large"
+            className="text-sm"
+            style={{ color: "var(--text-muted)" }}
+          >
+            This file is too large to show here (over{" "}
+            {MOCKUP_MAX_SOURCE_BYTES / (1024 * 1024)} MB). Open it in VS Code instead.
+          </p>
         ) : (
           <pre
             className="text-sm font-mono whitespace-pre-wrap"
