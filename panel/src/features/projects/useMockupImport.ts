@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { alerts } from "../alerts/store";
 import {
   MOCKUP_MAX_BYTES,
   MOCKUP_MAX_FILES,
+  MOCKUP_MAX_TOTAL_BYTES,
   importedExt,
   isHtmlMockup,
   isMockupFile,
@@ -37,6 +38,7 @@ interface ImportResult {
 const UNSUPPORTED = "Unsupported file type — SVG, PNG, JPEG, WebP or HTML only";
 const TOO_LARGE = "Larger than 20 MB";
 const TOO_MANY = `At most ${MOCKUP_MAX_FILES} files per import`;
+const OVER_TOTAL = "Over the 100 MB per-import total — import it separately";
 
 function rejection(file: File): string | null {
   if (!isMockupFile(file.name)) return UNSUPPORTED;
@@ -73,12 +75,20 @@ export function useMockupImport({
   onImported: (relativePaths: string[]) => void;
 }) {
   const base = useMemo(() => {
-    // Only files that would be sent count toward the limit, so an
-    // unsupported file early in the batch does not push a good one out.
+    // Only files that would be sent count toward the limits, so an
+    // unsupported file early in the batch does not push a good one out. The
+    // byte budget is the server's per-request total: a file that would cross
+    // it is not sent, and a later one that still fits is.
     let accepted = 0;
+    let bytes = 0;
     return files.map((file) => {
       let rejected = rejection(file);
-      if (!rejected && ++accepted > MOCKUP_MAX_FILES) rejected = TOO_MANY;
+      if (!rejected && accepted >= MOCKUP_MAX_FILES) rejected = TOO_MANY;
+      else if (!rejected && bytes + file.size > MOCKUP_MAX_TOTAL_BYTES) rejected = OVER_TOTAL;
+      if (!rejected) {
+        accepted++;
+        bytes += file.size;
+      }
       return {
         file,
         ext: importedExt(file.name),
@@ -93,6 +103,29 @@ export function useMockupImport({
   const [externalCounts, setExternalCounts] = useState<number[]>([]);
   const [thumbs, setThumbs] = useState<(string | null)[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // Synchronous twin of `submitting`: two clicks in one frame send one import.
+  const submittingRef = useRef(false);
+  const inspectAbort = useRef<AbortController | null>(null);
+  const [serverDate, setServerDate] = useState<string | null>(null);
+
+  // The server prefixes imports with ITS local date; show that one, not the
+  // browser's (they differ when the panel is opened from another time zone).
+  // The browser's date is the placeholder until — or if never — it answers.
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/projects/${encodeURIComponent(project)}/mockups/today`, {
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const date = ((await res.json()) as { date?: unknown }).date;
+        if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) setServerDate(date);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [project]);
+  const [browserPrefix] = useState(() => todayPrefix());
+  const prefix = serverDate ? `${serverDate}-` : browserPrefix;
 
   // Thumbnails: made in an effect (not during render) so the cleanup that
   // revokes them pairs with exactly the URLs it created.
@@ -113,17 +146,21 @@ export function useMockupImport({
       .map((r, i) => ({ r, i }))
       .filter(({ r }) => !r.rejected && !isRasterImage(r.file.name));
     if (inspected.length === 0) return;
-    let cancelled = false;
+    // Aborted on close (and when the import starts), so a dismissed dialog
+    // does not keep uploading, and the import is not a second parallel upload.
+    const controller = new AbortController();
+    inspectAbort.current = controller;
     const body = new FormData();
     for (const { r } of inspected) body.append("files", r.file);
     fetch(`/api/projects/${encodeURIComponent(project)}/mockups/inspect`, {
       method: "POST",
       body,
+      signal: controller.signal,
     })
       .then(async (res) => {
-        if (!res.ok || cancelled) return;
+        if (!res.ok || controller.signal.aborted) return;
         const data = (await res.json()) as { files?: { externalCount: number }[] };
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         const counts = base.map(() => 0);
         inspected.forEach(({ i }, k) => {
           counts[i] = data.files?.[k]?.externalCount ?? 0;
@@ -133,7 +170,8 @@ export function useMockupImport({
       // The warning is advisory; a failed inspect just shows none.
       .catch(() => {});
     return () => {
-      cancelled = true;
+      controller.abort();
+      if (inspectAbort.current === controller) inspectAbort.current = null;
     };
   }, [base, project]);
 
@@ -153,7 +191,10 @@ export function useMockupImport({
     const accepted = base
       .map((r, i) => ({ r, slug: slugs[i] ?? "" }))
       .filter(({ r }) => !r.rejected);
-    if (accepted.length === 0) return;
+    if (accepted.length === 0 || submittingRef.current) return;
+    submittingRef.current = true;
+    // The warnings are advisory; once importing, the inspect upload is waste.
+    inspectAbort.current?.abort();
     const body = new FormData();
     for (const { r, slug } of accepted) {
       body.append("files", r.file);
@@ -184,11 +225,12 @@ export function useMockupImport({
     } catch (err) {
       alerts.error("Mockup import failed", { detail: (err as Error).message });
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }, [base, slugs, project, onImported]);
 
-  return { rows, acceptedCount, setSlug, submit, submitting };
+  return { rows, acceptedCount, setSlug, submit, submitting, prefix };
 }
 
 /** Whether a drag carries files from the OS (not a panel row being moved). */

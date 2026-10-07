@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import MockupImportDialog from "../MockupImportDialog";
-import { MOCKUP_MAX_FILES } from "../mockupFiles";
+import { MOCKUP_MAX_FILES, MOCKUP_MAX_TOTAL_BYTES } from "../mockupFiles";
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 
 const MB = 1024 * 1024;
@@ -251,6 +251,88 @@ describe("MockupImportDialog", () => {
     expect(sent).not.toContain(`f${MOCKUP_MAX_FILES + 1}.png`);
   });
 
+  it("rejects files past the 100 MB import total and does not send them", async () => {
+    expect(MOCKUP_MAX_TOTAL_BYTES).toBe(100 * MB);
+    const calls = stubFetch();
+    // 5 × 19 MB = 95 MB fit; the sixth crosses 100 MB; a 4 MB one still fits
+    const files = [
+      ...Array.from({ length: 6 }, (_, i) => makeFile(`big${i}.png`, { size: 19 * MB })),
+      makeFile("small.png", { size: 4 * MB }),
+    ];
+    renderDialog(files);
+
+    const all = rows();
+    for (const row of all.slice(0, 5)) {
+      expect(within(row).queryByTestId("mockup-import-rejected")).toBeNull();
+    }
+    expect(within(all[5]).getByTestId("mockup-import-rejected").textContent).toBe(
+      "Rejected — Over the 100 MB per-import total — import it separately",
+    );
+    expect(within(all[6]).queryByTestId("mockup-import-rejected")).toBeNull();
+    expect(screen.getByTestId("mockup-import-confirm").textContent).toBe("Import 6");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
+    });
+    const sent = calls.importBodies[0].getAll("files").map((f) => (f as File).name);
+    expect(sent).not.toContain("big5.png");
+    expect(sent).toContain("small.png");
+  });
+
+  it("shows the server's date as the prefix", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith("/mockups/today"))
+          return { ok: true, json: async () => ({ date: "2026-10-08" }) } as Response;
+        return { ok: true, json: async () => ({ files: [] }) } as Response;
+      }),
+    );
+    renderDialog([makeFile("a.png")]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("mockup-import-prefix").textContent).toBe("2026-10-08-"),
+    );
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      "/api/projects/pavilio/mockups/today",
+      expect.anything(),
+    );
+  });
+
+  it("sends one import however fast confirm is clicked", async () => {
+    const calls = stubFetch();
+    renderDialog([makeFile("a.png")]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
+      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
+    });
+    expect(calls.importBodies).toHaveLength(1);
+  });
+
+  it("aborts a pending inspect when the import starts", async () => {
+    const signals: Record<string, AbortSignal | undefined> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/mockups/inspect")) {
+          signals.inspect = init?.signal ?? undefined;
+          return new Promise<Response>(() => {});
+        }
+        return Promise.resolve({ ok: true, json: async () => ({ files: [] }) } as Response);
+      }),
+    );
+    renderDialog([makeFile("page.html")]);
+    expect(signals.inspect).toBeDefined();
+    expect(signals.inspect!.aborted).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
+    });
+    expect(signals.inspect!.aborted).toBe(true);
+  });
+
   it("focuses the first name field on open", () => {
     stubFetch();
     renderDialog([makeFile("brief.pdf"), makeFile("a.png"), makeFile("b.png")]);
@@ -398,5 +480,30 @@ describe("MockupImportDialog lifecycle", () => {
     );
     unmount();
     expect(revoke).toHaveBeenCalledWith("blob:one");
+  });
+
+  it("aborts a pending inspect when the dialog closes", () => {
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).endsWith("/mockups/inspect")) {
+          signal = init?.signal ?? undefined;
+          return new Promise<Response>(() => {});
+        }
+        return Promise.resolve({ ok: false, json: async () => ({}) } as Response);
+      }),
+    );
+    const { unmount } = render(
+      <MockupImportDialog
+        project="pavilio"
+        files={[makeFile("icon.svg")]}
+        onClose={vi.fn()}
+        onImported={vi.fn()}
+      />,
+    );
+    expect(signal?.aborted).toBe(false);
+    unmount();
+    expect(signal?.aborted).toBe(true);
   });
 });

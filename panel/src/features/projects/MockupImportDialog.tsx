@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { AlertTriangle, FileCode, FileX } from "lucide-react";
-import { useMockupImport, todayPrefix, type MockupImportRow } from "./useMockupImport";
+import { useMockupImport, type MockupImportRow } from "./useMockupImport";
 
 interface Props {
   project: string;
@@ -118,13 +118,13 @@ function Row({
  * batch so a new drop starts fresh.
  */
 export default function MockupImportDialog({ project, files, onClose, onImported }: Props) {
-  const { rows, acceptedCount, setSlug, submit, submitting } = useMockupImport({
+  // `prefix` is the server's date (what the file will be saved with) once it
+  // answers, the browser's until then.
+  const { rows, acceptedCount, setSlug, submit, submitting, prefix } = useMockupImport({
     project,
     files,
     onImported,
   });
-  // Fixed for the dialog's lifetime; the server applies its own local date.
-  const prefix = useMemo(() => todayPrefix(), []);
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const submittingRef = useRef(submitting);
