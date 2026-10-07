@@ -198,6 +198,12 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
       const resolved = resolveRelativeHref(href, basePath);
       if (!resolved) return <a href={href} {...props}>{children}</a>;
 
+      // A download saves whatever the href answers, and `/view/*` is answered
+      // with the SPA shell — so it gets the raw file, as images do.
+      if (props.download !== undefined && props.download !== false) {
+        return <a href={`/api/files/raw/${resolved}`} {...props}>{children}</a>;
+      }
+
       return inAppLink(`/view/${resolved}`, children, props);
     };
 

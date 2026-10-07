@@ -105,4 +105,26 @@ describe("MarkdownRenderer links that ask for another target", () => {
     expect(fireEvent.click(screen.getByRole("link", { name: "self" }))).toBe(false);
     expect(navigate).toHaveBeenCalledWith("/view/pavilio/mockups/y.svg");
   });
+
+  it("points a relative download link at the raw file, not the viewer route", () => {
+    // `/view/*` is answered with the SPA shell, so downloading it would save
+    // index.html instead of the linked file.
+    renderMd(
+      [
+        `<a href="../mockups/x.svg" download>dl</a>`,
+        `<a href="../mockups/z.svg" target="_blank">blank</a>`,
+      ].join("\n\n"),
+      "pavilio/plans/design.md",
+    );
+
+    expect(screen.getByRole("link", { name: "dl" })).toHaveAttribute(
+      "href",
+      "/api/files/raw/pavilio/mockups/x.svg",
+    );
+    // A new tab opens the viewer, which is what an in-app file link means.
+    expect(screen.getByRole("link", { name: "blank" })).toHaveAttribute(
+      "href",
+      "/view/pavilio/mockups/z.svg",
+    );
+  });
 });
