@@ -176,9 +176,21 @@ export interface SpeechHostOptions {
    * `/latest` rather than a live frame. See `UtteranceChannelOptions.onAnswer`.
    */
   onAnswer?: (utterance: Utterance, recovered: boolean) => void;
+  /**
+   * False for a session the panel knows has closed. The channel never forgets a
+   * session, so this is the only way the idle transport learns a cell is gone.
+   * Absent: every session counts as open.
+   */
+  isSessionOpen?: (sessionId: string) => boolean;
 }
 
-export function useSpeechHost({ onAnswer }: SpeechHostOptions = {}): SpeechHost {
+/** Every session counts as open when the panel says nothing about it. */
+const ALWAYS_OPEN = (): boolean => true;
+
+export function useSpeechHost({
+  onAnswer,
+  isSessionOpen = ALWAYS_OPEN,
+}: SpeechHostOptions = {}): SpeechHost {
   const runRef = useRef<Run | null>(null);
   /**
    * The utterance the player was last handed. Not `runRef`, which is nulled the
@@ -273,6 +285,13 @@ export function useSpeechHost({ onAnswer }: SpeechHostOptions = {}): SpeechHost 
    * this host's value, which has to move when it does.
    */
   const [lastSpokenSessionId, setLastSpokenSessionId] = useState<string | null>(null);
+  /**
+   * The cell whose transport was last stepped by hand (next / previous), until
+   * the next run starts — the idle transport's first pick, so a step that
+   * moves a cell's cursor onto a heard answer does not hand the following
+   * press to another cell. See `idleTransportTarget.ts`.
+   */
+  const [steppedSessionId, setSteppedSessionId] = useState<string | null>(null);
 
   const setPreparing = useCallback((sessionId: string, preparing: boolean): void => {
     setPreparingSessionIds((current) => {
@@ -691,6 +710,8 @@ export function useSpeechHost({ onAnswer }: SpeechHostOptions = {}): SpeechHost 
       runRef.current = run;
       playingUtteranceRef.current = utterance.id;
       setLastSpokenSessionId(sessionId);
+      // A run is the transport's focus from here on; the step has been spent.
+      setSteppedSessionId(null);
 
       function finish(ended: Run): void {
         if (runRef.current === ended) runRef.current = null;
@@ -834,6 +855,9 @@ export function useSpeechHost({ onAnswer }: SpeechHostOptions = {}): SpeechHost 
       // are transport presses too, and a row that kept this to itself left
       // them unable to give the body back at all.
       noteTransport(sessionId);
+      // The transport is on this cell now, whatever the press turns out to
+      // move: the idle play that follows stays here (`idleTransportTarget`).
+      setSteppedSessionId(sessionId);
 
       if (steppingOffTheWave) {
         // A backward press is the user saying *I want the text*, and this
@@ -929,6 +953,8 @@ export function useSpeechHost({ onAnswer }: SpeechHostOptions = {}): SpeechHost 
       // gate above for the same reason: `noteTransport` moves what `derive`
       // reports, so anything asked of the store belongs before it.
       noteTransport(sessionId);
+      // As on the backward press: the idle play that follows stays here.
+      setSteppedSessionId(sessionId);
 
       if (steppingOntoTheWave) {
         unlock();
@@ -1355,16 +1381,21 @@ export function useSpeechHost({ onAnswer }: SpeechHostOptions = {}): SpeechHost 
       speakingSessionId,
       pausedSessionId,
       onSeekBackward,
-      // The idle transport's two readings. `lastSpokenSessionId` moves only
-      // when a run starts in a different cell; `oldestUnheardArrival` with
-      // the queue and the heard set, which move this object already.
+      // The idle transport's readings. `lastSpokenSessionId` moves only when
+      // a run starts in a different cell, `steppedSessionId` on a step press
+      // and the next run start; `oldestUnheardArrival` with the queue and the
+      // heard set, which move this object already. `isSessionOpen` is the
+      // panel's, handed through.
       oldestUnheardArrival,
       lastSpokenSessionId,
+      steppedSessionId,
+      isSessionOpen,
     }),
     [
       autoplaySessionIds,
       cycleSpeechMode,
       heardFor,
+      isSessionOpen,
       lastSpokenSessionId,
       oldestUnheardArrival,
       onJumpToUnit,
@@ -1384,6 +1415,7 @@ export function useSpeechHost({ onAnswer }: SpeechHostOptions = {}): SpeechHost 
       speakingSessionId,
       speechModeOf,
       stateFor,
+      steppedSessionId,
       subscribeProgress,
       unitDurationsFor,
       unitsFor,

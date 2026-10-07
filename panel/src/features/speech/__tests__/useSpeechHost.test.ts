@@ -139,6 +139,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
 });
 
 import { prepare } from "../prepare";
+import { idleTransportTarget } from "../idleTransportTarget";
 import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
 import { utteranceUnderCursor } from "../utteranceQueue";
 import { DEFAULT_SPEECH_VOICE } from "../voices";
@@ -1248,5 +1249,94 @@ describe("useSpeechHost — the snap to the newest answer", () => {
     // has to be free: the same queue object, and no sound.
     expect(result.current.queueFor("cell-a")).toBe(before);
     expect(played).toEqual([]);
+  });
+});
+
+describe("useSpeechHost — the idle transport", () => {
+  /** Puts a cell in autoplay: two clicks forward from off, the second the gesture. */
+  async function autoplay(host: () => SpeechHost, sessionId: string): Promise<void> {
+    await settle(() => {
+      host().cycleSpeechMode(sessionId); // armed
+      host().cycleSpeechMode(sessionId); // autoplay
+    });
+  }
+
+  it("idle previous keeps the transport on the same cell", async () => {
+    const answerA1 = response(1, "AlphaOne");
+    const { result } = renderHook(() => useSpeechHost());
+    const host = (): SpeechHost => result.current;
+    await autoplay(host, "cell-a");
+    await autoplay(host, "cell-b");
+
+    // A has a heard answer in its history and owes an unheard one: the second
+    // answer autoplayed and the user stopped it.
+    await emitUtterance("cell-a", "a-1", answerA1);
+    await endRun();
+    await emitUtterance("cell-a", "a-2", response(1, "AlphaTwo"));
+    await settle(() => host().onStop("cell-a"));
+    // B owes one too, and spoke last.
+    await emitUtterance("cell-b", "b-1", response(1, "Bravo"));
+    await settle(() => host().onStop("cell-b"));
+    expect(host().lastSpokenSessionId).toBe("cell-b");
+    expect(idleTransportTarget(host())).toBe("cell-a");
+
+    // Stepping back lands A's cursor on the heard answer, so A is no longer
+    // owed anything under it — and still the transport stays on A.
+    await settle(() => host().onPrevious("cell-a"));
+    expect(utteranceUnderCursor(host().queueFor("cell-a"))?.id).toBe("a-1");
+    expect(host().oldestUnheardArrival("cell-a")).toBeNull();
+    expect(idleTransportTarget(host())).toBe("cell-a");
+
+    // And play speaks what the step landed on; the run spends the step.
+    played.length = 0;
+    await settle(() => host().onSpeak(idleTransportTarget(host()) ?? ""));
+    expect(played).toEqual([`blob:${unitsOf(answerA1)[0]}`]);
+    expect(host().steppedSessionId).toBeNull();
+  });
+
+  it("an autoplay cell whose answer is heard is not an idle candidate", async () => {
+    const { result } = renderHook(() => useSpeechHost());
+    const host = (): SpeechHost => result.current;
+    await autoplay(host, "cell-a");
+
+    // A's answer autoplays to its end: heard, and older than anything else.
+    await emitUtterance("cell-a", "a-1", response(1, "Alpha"));
+    await endRun();
+    expect(host().stateFor("cell-a")).toBe("heard");
+    expect(host().oldestUnheardArrival("cell-a")).toBeNull();
+
+    // B is not in autoplay, and it is the one that spoke last.
+    await emitUtterance("cell-b", "b-1", response(1, "Bravo"));
+    await settle(() => host().onSpeak("cell-b"));
+    await endRun();
+
+    expect(host().autoplaySessionIds).toEqual(["cell-a"]);
+    expect(idleTransportTarget(host())).toBe("cell-b");
+  });
+
+  it("a closed cell is never the idle target", async () => {
+    const closed = new Set<string>();
+    const { result } = renderHook(() =>
+      useSpeechHost({ isSessionOpen: (sessionId) => !closed.has(sessionId) }),
+    );
+    const host = (): SpeechHost => result.current;
+
+    // A spoke last and B (autoplay) owes an answer: B is the target.
+    await autoplay(host, "cell-b");
+    await emitUtterance("cell-b", "b-1", response(1, "Bravo"));
+    await settle(() => host().onStop("cell-b"));
+    await emitUtterance("cell-a", "a-1", response(1, "Alpha"));
+    await settle(() => host().onSpeak("cell-a"));
+    await endRun();
+    expect(host().lastSpokenSessionId).toBe("cell-a");
+    expect(idleTransportTarget(host())).toBe("cell-b");
+
+    // B closes: the last speaker takes over.
+    closed.add("cell-b");
+    expect(idleTransportTarget(host())).toBe("cell-a");
+
+    // A closes too: nothing is left to play, rather than a cell nobody sees.
+    closed.add("cell-a");
+    expect(idleTransportTarget(host())).toBeNull();
   });
 });

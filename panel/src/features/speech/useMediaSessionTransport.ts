@@ -61,6 +61,10 @@ export interface MediaSessionTransportTarget {
   oldestUnheardArrival: (sessionId: string) => number | null;
   /** The cell that spoke last, the idle target when no autoplay cell is owed anything. */
   lastSpokenSessionId: string | null;
+  /** The cell the transport last stepped through, until a run starts — the idle target's first pick. */
+  steppedSessionId?: string | null;
+  /** False for a session the panel knows has closed, so the idle target skips it. */
+  isSessionOpen?: (sessionId: string) => boolean;
   onSpeak: (sessionId: string) => void;
   onPause: (sessionId: string) => void;
   onResume: (sessionId: string) => void;

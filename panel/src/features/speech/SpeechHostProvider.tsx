@@ -82,7 +82,16 @@ export function SpeechHostProvider({ children }: Props) {
     });
   }, []);
 
-  const speech = useSpeechHost({ onAnswer });
+  // The channel never forgets a session, so the idle transport learns a cell
+  // has closed from the session list: a session it no longer lists, while it
+  // lists any, is gone. An empty list is read as not loaded yet and rules
+  // nothing out — a panel that has not fetched its sessions must not go mute.
+  const isSessionOpen = useCallback((sessionId: string): boolean => {
+    const sessions = getSessions();
+    return sessions.length === 0 || sessions.some((session) => session.id === sessionId);
+  }, []);
+
+  const speech = useSpeechHost({ onAnswer, isSessionOpen });
 
   // Here for the same reason the host is: `navigator.mediaSession` is one state
   // machine per DOCUMENT, so a transport mounted per surface would have the two

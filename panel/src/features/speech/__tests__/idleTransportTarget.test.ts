@@ -64,3 +64,37 @@ describe("idleTransportTarget", () => {
     ).toBeNull();
   });
 });
+
+describe("idleTransportTarget — the stepped cell and closed cells", () => {
+  it("the cell the transport stepped outranks every other rule", () => {
+    expect(
+      idleTransportTarget({
+        autoplaySessionIds: ["cell-a", "cell-b"],
+        oldestUnheardArrival: unheard({ "cell-b": 1 }),
+        lastSpokenSessionId: "cell-c",
+        steppedSessionId: "cell-a",
+      }),
+    ).toBe("cell-a");
+  });
+
+  it("a closed cell is skipped in every rule", () => {
+    const isSessionOpen = (sessionId: string): boolean => sessionId !== "cell-a";
+    expect(
+      idleTransportTarget({
+        autoplaySessionIds: ["cell-a", "cell-b"],
+        oldestUnheardArrival: unheard({ "cell-a": 1, "cell-b": 2 }),
+        lastSpokenSessionId: "cell-c",
+        steppedSessionId: "cell-a",
+        isSessionOpen,
+      }),
+    ).toBe("cell-b");
+    expect(
+      idleTransportTarget({
+        autoplaySessionIds: [],
+        oldestUnheardArrival: unheard({}),
+        lastSpokenSessionId: "cell-a",
+        isSessionOpen,
+      }),
+    ).toBeNull();
+  });
+});

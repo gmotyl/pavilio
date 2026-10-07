@@ -490,6 +490,22 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     expect(timesRequested(units[1])).toBe(2);
   });
 
+  it("the window survives React's development double-mount", async () => {
+    const markdown = response(5);
+    const units = holdAll(markdown);
+    // StrictMode mounts, unmounts and remounts the host on the same state, so
+    // the window it disposes on the way out is the one it keeps using.
+    const { result } = renderHook(() => useSpeechHost(), { reactStrictMode: true });
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    expect(requestedTexts()).toEqual([units[0], units[1]]);
+
+    // A freed slot still goes to the next unit: the window was reopened.
+    await release(units[0]);
+    expect(requestedTexts()).toContain(units[2]);
+  });
+
   it("the window stops at unmount", async () => {
     const markdown = response(5);
     const units = holdAll(markdown);
