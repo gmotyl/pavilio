@@ -258,6 +258,13 @@ export function useSpeechHost(): SpeechHost {
   const [runEnds, setRunEnds] = useState(0);
   const [preparingSessionIds, setPreparingSessionIds] =
     useState<ReadonlySet<string>>(NOTHING_PREPARING);
+  /**
+   * The cell the player was last handed a run for, however that run ended —
+   * the transport's idle target once no autoplay cell is owed an answer
+   * (`idleTransportTarget.ts`). State, not a ref: the transport reads it off
+   * this host's value, which has to move when it does.
+   */
+  const [lastSpokenSessionId, setLastSpokenSessionId] = useState<string | null>(null);
 
   const setPreparing = useCallback((sessionId: string, preparing: boolean): void => {
     setPreparingSessionIds((current) => {
@@ -671,6 +678,7 @@ export function useSpeechHost(): SpeechHost {
       const run: Run = { sessionId, utteranceId: utterance.id, outcome: "pending" };
       runRef.current = run;
       playingUtteranceRef.current = utterance.id;
+      setLastSpokenSessionId(sessionId);
 
       function finish(ended: Run): void {
         if (runRef.current === ended) runRef.current = null;
@@ -1281,6 +1289,21 @@ export function useSpeechHost(): SpeechHost {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoplayKey, runEnds, speakUtterance, unlocked]);
 
+  /**
+   * When the answer a play on this cell would start arrived — the utterance
+   * under its cursor, the one `onSpeak` plays — or `null` once that is heard.
+   * Only that one, and not an older unheard answer further down the history:
+   * the idle transport ranks cells by what pressing play would actually say.
+   */
+  const oldestUnheardArrival = useCallback(
+    (sessionId: string): number | null => {
+      const under = utteranceUnderCursor(queueFor(sessionId));
+      if (!under || heardFor(sessionId).has(under.id)) return null;
+      return under.at;
+    },
+    [heardFor, queueFor],
+  );
+
   return useMemo(
     () => ({
       stateFor,
@@ -1311,11 +1334,18 @@ export function useSpeechHost(): SpeechHost {
       speakingSessionId,
       pausedSessionId,
       onSeekBackward,
+      // The idle transport's two readings. `lastSpokenSessionId` moves only
+      // when a run starts in a different cell; `oldestUnheardArrival` with
+      // the queue and the heard set, which move this object already.
+      oldestUnheardArrival,
+      lastSpokenSessionId,
     }),
     [
       autoplaySessionIds,
       cycleSpeechMode,
       heardFor,
+      lastSpokenSessionId,
+      oldestUnheardArrival,
       onJumpToUnit,
       onNewestAnswer,
       onNext,

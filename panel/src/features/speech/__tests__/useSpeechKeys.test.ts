@@ -42,12 +42,24 @@ function stubTarget(
     speakingSessionId?: string | null;
     pausedSessionId?: string | null;
     autoplaySessionId?: string | null;
+    /**
+     * Arrival order of each cell's oldest unheard answer. Defaults to the
+     * autoplay cell holding one, which is what made it the idle target before
+     * there could be several.
+     */
+    unheard?: Record<string, number>;
+    lastSpokenSessionId?: string | null;
   } = {},
 ): StubTarget {
   return {
     speakingSessionId: run.speakingSessionId ?? null,
     pausedSessionId: run.pausedSessionId ?? null,
     autoplaySessionIds: run.autoplaySessionId ? [run.autoplaySessionId] : [],
+    oldestUnheardArrival: (sessionId: string) => {
+      const unheard = run.unheard ?? (run.autoplaySessionId ? { [run.autoplaySessionId]: 0 } : {});
+      return unheard[sessionId] ?? null;
+    },
+    lastSpokenSessionId: run.lastSpokenSessionId ?? null,
     onSpeak: vi.fn<(sessionId: string) => void>(),
     onPause: vi.fn<(sessionId: string) => void>(),
     onResume: vi.fn<(sessionId: string) => void>(),
@@ -259,6 +271,41 @@ describe("useSpeechKeys", () => {
    * rather than left implicit: they resolve a target exactly as the toggle
    * does, so adding them would be a one-line change nothing else would notice.
    */
+  it("the keyboard fallback uses the same idle target", () => {
+    const toggle = (): void => {
+      press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true });
+    };
+
+    // Two autoplay cells holding unheard answers: the one owed longest plays,
+    // not the one listed first.
+    const both = {
+      ...stubTarget({ lastSpokenSessionId: "cell-c" }),
+      autoplaySessionIds: ["cell-b", "cell-a"],
+      oldestUnheardArrival: (sessionId: string) =>
+        ({ "cell-a": 100, "cell-b": 200 })[sessionId] ?? null,
+    };
+    mounted(both, toggle);
+    expect(both.onSpeak).toHaveBeenCalledWith("cell-a");
+    expect(arrival).toHaveBeenCalledWith("cell-a");
+    // The arrows resolve the same idle cell.
+    mounted(both, () => press({ code: "ArrowRight", ctrlKey: true, shiftKey: true }));
+    expect(both.onNext).toHaveBeenCalledWith("cell-a");
+
+    // Nothing unheard in autoplay: the cell that spoke last.
+    const caughtUp = stubTarget({
+      autoplaySessionId: "cell-a",
+      unheard: {},
+      lastSpokenSessionId: "cell-c",
+    });
+    mounted(caughtUp, toggle);
+    expect(caughtUp.onSpeak).toHaveBeenCalledWith("cell-c");
+
+    // Nothing ever spoken and nothing unheard: nothing at all.
+    const nothing = stubTarget({ autoplaySessionId: "cell-a", unheard: {} });
+    mounted(nothing, toggle);
+    expect(silent(nothing)).toBe(true);
+  });
+
   it("ctrl+shift+arrows report no arrival", () => {
     const target = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     mounted(target, () => {

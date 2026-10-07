@@ -5,7 +5,7 @@
  * interception at all and it is the only one that works on a phone. But a plain
  * PC keyboard has no play/pause to bind, and that is the machine most of this
  * panel is driven from, so there is a second surface — and it drives **the same
- * target**: the run that is playing, else the first autoplay cell. Nothing here
+ * target**: the run that is playing, else the idle target. Nothing here
  * reads focus to decide *what* to act on; focus only decides whether to act at all.
  *
  * ## Why this is not four more cases in `useITermShortcuts`
@@ -44,6 +44,7 @@
  * the day the terminal is mounted somewhere new.
  */
 import { useEffect, useRef } from "react";
+import { idleTransportTarget } from "./idleTransportTarget";
 import type { MediaSessionTransportTarget, TransportArrival } from "./useMediaSessionTransport";
 
 /** What one of the three combos means. */
@@ -149,25 +150,21 @@ export function useSpeechKeys(
 
   useEffect(() => {
     /**
-     * The cell every action lands on — the run first, the first autoplay cell
-     * only when there is no run to act on. The same rule the media keys follow, because
-     * two surfaces onto one `<audio>` element that disagreed about their target
-     * would be a bug with two correct-looking halves.
+     * The cell every action lands on — the run first, the idle target
+     * (`idleTransportTarget`) only when there is no run to act on. The same
+     * rule the media keys follow, because two surfaces onto one `<audio>`
+     * element that disagreed about their target would be a bug with two
+     * correct-looking halves.
      */
     const transportTarget = (): string | null => {
       const current = targetRef.current;
-      return (
-        current.speakingSessionId ??
-        current.pausedSessionId ??
-        current.autoplaySessionIds[0] ??
-        null
-      );
+      return current.speakingSessionId ?? current.pausedSessionId ?? idleTransportTarget(current);
     };
 
     /**
      * One key, two meanings — unlike the OS, which picks `play` or `pause` for
      * us from `playbackState`. A held run resumes; a live run is held; with
-     * nothing running the first autoplay cell starts. Resume rather than `onSpeak`: the
+     * nothing running the idle target starts. Resume rather than `onSpeak`: the
      * one thing the user pressing play on a paused answer cannot have meant is
      * to hear the unit from its start again.
      *
@@ -191,7 +188,7 @@ export function useSpeechKeys(
         current.onPause(current.speakingSessionId);
         return;
       }
-      const idle = current.autoplaySessionIds[0];
+      const idle = idleTransportTarget(current);
       if (idle) {
         arrivalRef.current(idle);
         current.onSpeak(idle);

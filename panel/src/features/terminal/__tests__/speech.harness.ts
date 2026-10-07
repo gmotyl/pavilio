@@ -48,7 +48,7 @@ export const INERT_SPEECH: GridSpeech = {
  * above the subject.
  *
  * `SpeechHost` is `GridSpeech` plus what the document-wide media-session
- * transport reads, and the provider mounts that transport, so the five extra
+ * transport reads, and the provider mounts that transport, so the extra
  * members are not optional. Every suite that mounts the provider used to spell
  * this object out itself; one definition means a new member of `SpeechHost`
  * breaks in one place instead of quietly leaving each copy a `GridSpeech`
@@ -62,6 +62,8 @@ export const INERT_SPEECH_HOST: SpeechHost = {
   speakingSessionId: null,
   pausedSessionId: null,
   autoplaySessionIds: [],
+  oldestUnheardArrival: () => null,
+  lastSpokenSessionId: null,
   onSeekBackward: () => {},
   preparingSessionIds: new Set<string>(),
 };

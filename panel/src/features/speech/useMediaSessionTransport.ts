@@ -15,7 +15,9 @@
  * surface drives the same target:
  *
  * - the run that is currently playing (or the one being held);
- * - or, when nothing is active, the first **autoplay** cell's utterance.
+ * - or, when nothing is active, the **idle target** (`idleTransportTarget.ts`):
+ *   the autoplay cell owed the oldest unheard answer, else the cell that spoke
+ *   last.
  *
  * Hearing a *different* cell stays a click on that cell's speak control — the
  * barge-in path that has always existed. Focus is not an input to this hook,
@@ -31,6 +33,7 @@
  * and its effects.
  */
 import { useEffect, useRef } from "react";
+import { idleTransportTarget } from "./idleTransportTarget";
 
 /** What the OS transport needs to know about the panel's one playback. */
 export interface MediaSessionTransportTarget {
@@ -47,10 +50,17 @@ export interface MediaSessionTransportTarget {
    */
   pausedSessionId: string | null;
   /**
-   * Every cell in autoplay in this browser. With no run to act on, the first of
-   * them is the transport's idle target.
+   * Every cell in autoplay in this browser. With no run to act on, the one of
+   * them owed the oldest unheard answer is the transport's idle target.
    */
   autoplaySessionIds: readonly string[];
+  /**
+   * Arrival order of the unheard answer a cell would play, `null` when it has
+   * none. What ranks the autoplay cells for {@link idleTransportTarget}.
+   */
+  oldestUnheardArrival: (sessionId: string) => number | null;
+  /** The cell that spoke last, the idle target when no autoplay cell is owed anything. */
+  lastSpokenSessionId: string | null;
   onSpeak: (sessionId: string) => void;
   onPause: (sessionId: string) => void;
   onResume: (sessionId: string) => void;
@@ -151,17 +161,12 @@ export function useMediaSessionTransport(
     if (!session) return;
 
     /**
-     * The cell every action lands on: the run first, the first autoplay cell
-     * only when there is no run to act on.
+     * The cell every action lands on: the run first, the idle target only when
+     * there is no run to act on.
      */
     const transportTarget = (): string | null => {
       const current = targetRef.current;
-      return (
-        current.speakingSessionId ??
-        current.pausedSessionId ??
-        current.autoplaySessionIds[0] ??
-        null
-      );
+      return current.speakingSessionId ?? current.pausedSessionId ?? idleTransportTarget(current);
     };
 
     const bind = (action: MediaSessionAction, handler: (() => void) | null): void => {
@@ -191,9 +196,9 @@ export function useMediaSessionTransport(
         return;
       }
       // Nothing is playing, so the OS is willing to send `play` at all. The
-      // first autoplay cell is the panel's standing answer to "what did you want
-      // to hear?", and it is the same answer autoplay gives.
-      const idle = current.autoplaySessionIds[0];
+      // idle target is the panel's standing answer to "what did you want to
+      // hear?": the answer autoplay has owed longest, else the last voice.
+      const idle = idleTransportTarget(current);
       if (idle) {
         arrivalRef.current(idle);
         current.onSpeak(idle);

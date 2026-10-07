@@ -388,12 +388,24 @@ function transportTarget(
     speakingSessionId?: string | null;
     pausedSessionId?: string | null;
     autoplaySessionId?: string | null;
+    /**
+     * Arrival order of each cell's oldest unheard answer. Defaults to the
+     * autoplay cell holding one, which is what made it the idle target before
+     * there could be several.
+     */
+    unheard?: Record<string, number>;
+    lastSpokenSessionId?: string | null;
   } = {},
 ): MediaSessionTransportTarget {
   return {
     speakingSessionId: run.speakingSessionId ?? null,
     pausedSessionId: run.pausedSessionId ?? null,
     autoplaySessionIds: run.autoplaySessionId ? [run.autoplaySessionId] : [],
+    oldestUnheardArrival: (sessionId: string) => {
+      const unheard = run.unheard ?? (run.autoplaySessionId ? { [run.autoplaySessionId]: 0 } : {});
+      return unheard[sessionId] ?? null;
+    },
+    lastSpokenSessionId: run.lastSpokenSessionId ?? null,
     onSpeak: vi.fn(),
     onPause: vi.fn(),
     onResume: vi.fn(),
