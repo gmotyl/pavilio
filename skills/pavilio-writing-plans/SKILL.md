@@ -77,6 +77,36 @@ Anchor Modify refs to **symbols, not line numbers** — line numbers rot the mom
 
 Note: tests live in a `__tests__` subfolder next to the file under test (shared harness may stay in `src/test/`).
 
+## Mockups
+
+If `design.md` has a `## Mockups` section (written by [[pavilio-grill]]'s mockup mode), its **mockup check** is binding on the contract:
+
+- **Every task that builds a listed surface** gets one WHEN/THEN acceptance criterion per Check item, one render-test name per Check item (each test asserts that item), and the mockup's link — the `###` heading link, as written — under its `Files:`/references.
+- **An agreed deviation wins.** When a Check item has an agreed deviation, the acceptance criterion states the deviated result (what we build), never the mockup's.
+- **`Visual verification: yes`** → append one task after the last UI task, in exactly this shape:
+
+  ```markdown
+  ### Task N: Visual verification against mockups
+  References:
+  - [<workspace path>](<panel route>) — viewport <w>px
+    - Check: <items>
+    - Agreed deviations: <items | none>
+  Acceptance criteria:
+  - WHEN rendered at <viewport> THEN a screenshot is compared to <reference>; every Check item
+    matches or is an agreed deviation
+  - WHEN a mismatch is found THEN fix it and repeat the comparison; DOM assertions alone do not
+    satisfy visual verification
+  - WHEN the surface cannot be reached THEN ask the user for a screenshot; never check this task off
+    without a comparison
+  Steps:
+  - [ ] Step 1: Capture screenshots per reference and viewport; record match/mismatch per Check item
+  - [ ] Step 2: Fix mismatches and repeat until every item matches or is an agreed deviation
+  - [ ] Step 3: Save screenshots to `openspec/changes/<id>/verification/` and list them with
+        viewport sizes in the session progress note
+  ```
+
+- **`Visual verification: no`, or no `## Mockups` section** → write no screenshot task. With `no`, the Check items are still carried as acceptance criteria and render tests.
+
 ## When inline code IS warranted
 
 Include code only where the code itself is the decision being locked in:
