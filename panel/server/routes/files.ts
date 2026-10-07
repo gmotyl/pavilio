@@ -141,6 +141,16 @@ router.get("/raw/*path", (req, res) => {
     return res.status(404).json({ error: "File not found" });
   }
 
+  // Imported mockups are untrusted: opening the raw URL directly must not run
+  // script with panel credentials. HTML keeps allow-scripts to match the
+  // iframe's own sandbox; SVG gets no script at all.
+  const lower = absolutePath.toLowerCase();
+  if (lower.endsWith(".html")) {
+    res.setHeader("Content-Security-Policy", "sandbox allow-scripts");
+  } else if (lower.endsWith(".svg")) {
+    res.setHeader("Content-Security-Policy", "sandbox");
+  }
+
   res.sendFile(absolutePath);
 });
 
