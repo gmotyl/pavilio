@@ -247,7 +247,10 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
     // step changes what it sees and it starts that answer on its own. A
     // `onPrevious` that merely dropped its own speak call would pass every
     // other test here and still talk over the skim.
-    await settle(() => result.current.onArm("cell-a"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
     played.length = 0;
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -328,7 +331,10 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
     // under the cursor, so a forward step looks like an arrival to it. An
     // `onNext` that merely dropped its own speak call would pass the test above
     // and still talk over the skim in the state Greg actually listens in.
-    await settle(() => result.current.onArm("cell-a"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
     played.length = 0;
 
     await settle(() => result.current.onNext("cell-a"));

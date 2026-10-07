@@ -112,11 +112,11 @@ import { prepare } from "../prepare";
 import { useSpeechHost } from "../useSpeechHost";
 
 /**
- * The armed cell names a LIVE SESSION, so it is `portable: false` and lives in
- * `localStorage` — which is exactly what lets a reloaded tab come up armed
- * with no gesture behind it.
+ * Speech modes name LIVE SESSIONS, so they are `portable: false` and live in
+ * `localStorage` — which is exactly what lets a reloaded tab come up in
+ * autoplay with no gesture behind it.
  */
-const ARMED_KEY = storageKey(preferences.speechArmedCell);
+const MODES_KEY = storageKey(preferences.speechModes);
 
 /** The `src` of every started playback, in order. An absorbed arrival adds none. */
 const played: string[] = [];
@@ -191,10 +191,10 @@ describe("useSpeechHost — what a silent step back still unlocks", () => {
   it("stepping back unlocks audio, so a later arrival on the armed cell still speaks", async () => {
     // The tab comes up ARMED with no gesture behind it — the state only a
     // reload can produce, and the one this whole chain lives in.
-    localStorage.setItem(ARMED_KEY, '"cell-a"');
+    localStorage.setItem(MODES_KEY, '{"cell-a":"autoplay"}');
 
     const { result } = renderHook(() => useSpeechHost());
-    expect(result.current.armedSessionId).toBe("cell-a");
+    expect(result.current.speechModeOf("cell-a")).toBe("autoplay");
 
     // Two answers land on the armed-but-locked cell. Both are ABSORBED, not
     // queued: the effect records each as autoplayed and moves on, so nothing

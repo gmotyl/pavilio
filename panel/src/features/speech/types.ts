@@ -17,6 +17,16 @@ import type { SpeechProgress } from "./useSpeechPlayer";
 import type { UtteranceQueue } from "./utteranceQueue";
 
 /**
+ * A cell's speech mode, per browser:
+ *
+ * - `off`      — nothing happens on its own; the default for every cell.
+ * - `armed`    — speaks only when asked (later tasks preload it).
+ * - `autoplay` — armed, and speaks what arrives on its own. Not exclusive:
+ *                any number of cells may be in autoplay at once.
+ */
+export type SpeechMode = "off" | "armed" | "autoplay";
+
+/**
  * What a cell's speech control shows. Seven states, feeding **two independent
  * channels** on the control: colour says where the audio is, icon says what a
  * click does. Keeping them independent is the requirement, which is why
@@ -100,8 +110,12 @@ export interface GridSpeech {
    * worse than no count. Empty for a cell that has played nothing.
    */
   heardFor: (sessionId: string) => ReadonlySet<string>;
-  /** The single armed session in this browser, or `null`. */
-  armedSessionId: string | null;
+  /**
+   * The cell's speech mode in this browser — `off` for a session that has none,
+   * including one this browser has never seen. Several cells may share a mode;
+   * nothing about `autoplay` is exclusive.
+   */
+  speechModeOf: (sessionId: string) => SpeechMode;
   /** Speak the cell's utterance from the start — or replay a heard one. */
   onSpeak: (sessionId: string) => void;
   /**
@@ -158,7 +172,11 @@ export interface GridSpeech {
    * hearing.
    */
   onNewestAnswer: (sessionId: string) => void;
-  onArm: (sessionId: string | null) => void;
+  /**
+   * Move the cell one step round `off → armed → autoplay → off`, persisted per
+   * browser. A click, so it is also the gesture autoplay will need.
+   */
+  cycleSpeechMode: (sessionId: string) => void;
   /**
    * The speech units of the utterance the cell's transport is on — the
    * scrubber's segments, one each. Non-empty from the moment an utterance

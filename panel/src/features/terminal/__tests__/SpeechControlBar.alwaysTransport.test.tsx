@@ -141,7 +141,7 @@ function makeSpeech(over: HostOverrides = {}): GridSpeech {
     subscribeProgress: () => () => {},
     progressFor: () => null,
     unitDurationsFor: () => NO_DURATIONS,
-    armedSessionId: null,
+    speechModeOf: () => "off",
     onSpeak: vi.fn(),
     onPause: vi.fn(),
     onResume: vi.fn(),
@@ -149,7 +149,7 @@ function makeSpeech(over: HostOverrides = {}): GridSpeech {
     onPrevious: vi.fn(),
     onNext: vi.fn(),
     onNewestAnswer: vi.fn(),
-    onArm: vi.fn(),
+    cycleSpeechMode: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
   };

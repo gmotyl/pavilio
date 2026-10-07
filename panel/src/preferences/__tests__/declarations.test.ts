@@ -69,6 +69,7 @@ const MACHINE_LOCAL = [
   "speech.answerComposer.height",
   "speech.answerPane.height",
   "speech.armedCell",
+  "speech.modes",
   "terminal.focus",
   "terminal.grid",
   "terminal.order",
@@ -154,6 +155,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   // the pane clamps to the area it is in and an unresized one covers it.
   ["speech.answerPane.height", 4000, "project"],
   ["speech.armedCell", null, "global"],
+  ["speech.modes", null, "global"],
   ["speech.voice", "en-US-AndrewMultilingualNeural", "global"],
   ["terminal.drawer.open", false, "global"],
   ["terminal.drawer.side", "left", "global"],
@@ -202,6 +204,7 @@ describe("the declaration table", () => {
       "terminal.order",
       "terminal.grid",
       "speech.armedCell",
+      "speech.modes",
       "nav.lastPath",
       "nav.lastFile",
       "nav.lastReposQuery",

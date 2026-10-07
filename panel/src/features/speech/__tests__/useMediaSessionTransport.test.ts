@@ -186,13 +186,13 @@ function stubTarget(
   run: {
     speakingSessionId?: string | null;
     pausedSessionId?: string | null;
-    armedSessionId?: string | null;
+    autoplaySessionId?: string | null;
   } = {},
 ): StubTarget {
   return {
     speakingSessionId: run.speakingSessionId ?? null,
     pausedSessionId: run.pausedSessionId ?? null,
-    armedSessionId: run.armedSessionId ?? null,
+    autoplaySessionIds: run.autoplaySessionId ? [run.autoplaySessionId] : [],
     onSpeak: vi.fn<(sessionId: string) => void>(),
     onPause: vi.fn<(sessionId: string) => void>(),
     onResume: vi.fn<(sessionId: string) => void>(),
@@ -270,7 +270,7 @@ describe("useMediaSessionTransport", () => {
   });
 
   it("play with nothing active starts the armed cell", () => {
-    const target = stubTarget({ armedSessionId: "cell-b" });
+    const target = stubTarget({ autoplaySessionId: "cell-b" });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("play");
@@ -283,7 +283,7 @@ describe("useMediaSessionTransport", () => {
     const target = stubTarget({
       speakingSessionId: "cell-a",
       pausedSessionId: "cell-a",
-      armedSessionId: "cell-b",
+      autoplaySessionId: "cell-b",
     });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
@@ -304,7 +304,7 @@ describe("useMediaSessionTransport", () => {
    * answer on one cell while the notice on it stayed lit.
    */
   it("play and pause report an arrival on the cell they acted on", () => {
-    const armed = stubTarget({ armedSessionId: "cell-b" });
+    const armed = stubTarget({ autoplaySessionId: "cell-b" });
     const { unmount } = renderHook(() => useMediaSessionTransport(armed, arrival));
     fire("play");
     expect(arrival).toHaveBeenCalledTimes(1);
@@ -315,7 +315,7 @@ describe("useMediaSessionTransport", () => {
     const held = stubTarget({
       speakingSessionId: "cell-a",
       pausedSessionId: "cell-a",
-      armedSessionId: "cell-b",
+      autoplaySessionId: "cell-b",
     });
     const second = renderHook(() => useMediaSessionTransport(held, arrival));
     fire("play");
@@ -339,7 +339,7 @@ describe("useMediaSessionTransport", () => {
    * one-line change nothing else would catch.
    */
   it("nexttrack, previoustrack and seekbackward report no arrival", () => {
-    const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    const target = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("nexttrack");
@@ -361,7 +361,7 @@ describe("useMediaSessionTransport", () => {
 
   it("next and previous walk the playing cell's queue", () => {
     // The armed cell is a different one on purpose: the run wins.
-    const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    const target = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("nexttrack");
@@ -374,7 +374,7 @@ describe("useMediaSessionTransport", () => {
   });
 
   it("next and previous fall back to the armed cell with nothing playing", () => {
-    const target = stubTarget({ armedSessionId: "cell-b" });
+    const target = stubTarget({ autoplaySessionId: "cell-b" });
     renderHook(() => useMediaSessionTransport(target, arrival));
 
     fire("nexttrack");
@@ -425,7 +425,7 @@ describe("useMediaSessionTransport", () => {
     const target = stubTarget({
       speakingSessionId: "cell-a",
       pausedSessionId: "cell-a",
-      armedSessionId: "cell-b",
+      autoplaySessionId: "cell-b",
     });
 
     const { unmount } = renderHook(() => useMediaSessionTransport(target, arrival));
@@ -581,7 +581,10 @@ describe("the transport acts on the playback, never on the focused cell", () => 
     // plausible to go wrong.
     await emitUtterance("cell-a", "u-a", response(3));
     await emitUtterance("cell-b", "u-b", response(3));
-    await settle(() => result.current.onArm("cell-b"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-b"); // armed
+      result.current.cycleSpeechMode("cell-b"); // autoplay
+    });
 
     await settle(() => result.current.onSpeak("cell-a"));
 

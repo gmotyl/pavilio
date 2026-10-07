@@ -114,7 +114,7 @@ function makeSpeech(state: CellSpeechState): GridSpeech {
     subscribeProgress: () => () => {},
     progressFor: () => null,
     unitDurationsFor: () => NO_DURATIONS,
-    armedSessionId: null,
+    speechModeOf: () => "off",
     onSpeak: vi.fn(),
     onPause: vi.fn(),
     onResume: vi.fn(),
@@ -122,7 +122,7 @@ function makeSpeech(state: CellSpeechState): GridSpeech {
     onPrevious: vi.fn(),
     onNext: vi.fn(),
     onNewestAnswer: vi.fn(),
-    onArm: vi.fn(),
+    cycleSpeechMode: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
   } satisfies GridSpeech;
@@ -387,13 +387,13 @@ function transportTarget(
   run: {
     speakingSessionId?: string | null;
     pausedSessionId?: string | null;
-    armedSessionId?: string | null;
+    autoplaySessionId?: string | null;
   } = {},
 ): MediaSessionTransportTarget {
   return {
     speakingSessionId: run.speakingSessionId ?? null,
     pausedSessionId: run.pausedSessionId ?? null,
-    armedSessionId: run.armedSessionId ?? null,
+    autoplaySessionIds: run.autoplaySessionId ? [run.autoplaySessionId] : [],
     onSpeak: vi.fn(),
     onPause: vi.fn(),
     onResume: vi.fn(),
@@ -422,7 +422,7 @@ describe("attention clears from the keyboard transport", () => {
 
   it("dismisses the armed cell that Ctrl+Shift+Space starts", () => {
     setActivity("cell-b", "attention");
-    renderHook(() => useSpeechKeys(transportTarget({ armedSessionId: "cell-b" }), dismissAttentionOnArrival));
+    renderHook(() => useSpeechKeys(transportTarget({ autoplaySessionId: "cell-b" }), dismissAttentionOnArrival));
 
     pressToggleChord();
 
@@ -461,13 +461,13 @@ describe("attention clears from the keyboard transport", () => {
     setActivity("cell-busy", "busy");
     setActivity("cell-idle", "idle");
     const { unmount } = renderHook(() =>
-      useSpeechKeys(transportTarget({ armedSessionId: "cell-busy" }), dismissAttentionOnArrival),
+      useSpeechKeys(transportTarget({ autoplaySessionId: "cell-busy" }), dismissAttentionOnArrival),
     );
     pressToggleChord();
     unmount();
 
     renderHook(() =>
-      useSpeechKeys(transportTarget({ armedSessionId: "cell-idle" }), dismissAttentionOnArrival),
+      useSpeechKeys(transportTarget({ autoplaySessionId: "cell-idle" }), dismissAttentionOnArrival),
     );
     pressToggleChord();
 
@@ -499,7 +499,7 @@ describe("attention clears from the OS media session", () => {
     setActivity("cell-b", "attention");
     renderHook(() =>
       useMediaSessionTransport(
-        transportTarget({ armedSessionId: "cell-b" }),
+        transportTarget({ autoplaySessionId: "cell-b" }),
         dismissAttentionOnArrival,
       ),
     );
@@ -550,7 +550,7 @@ describe("attention clears from the OS media session", () => {
     setActivity("cell-idle", "idle");
     const { unmount } = renderHook(() =>
       useMediaSessionTransport(
-        transportTarget({ armedSessionId: "cell-busy" }),
+        transportTarget({ autoplaySessionId: "cell-busy" }),
         dismissAttentionOnArrival,
       ),
     );
@@ -559,7 +559,7 @@ describe("attention clears from the OS media session", () => {
 
     renderHook(() =>
       useMediaSessionTransport(
-        transportTarget({ armedSessionId: "cell-idle" }),
+        transportTarget({ autoplaySessionId: "cell-idle" }),
         dismissAttentionOnArrival,
       ),
     );

@@ -29,8 +29,8 @@ export interface CellSpeechControlsToggleProps {
  * that pressing it would not turn the green off. Arming lives in one place now,
  * the bar's own arm switch, and is read there.
  *
- * Which is why `armedSessionId` is gone from the props rather than merely left
- * unread: a component still handed the armed session is one the next change can
+ * Which is why the speech modes are absent from the props rather than merely
+ * left unread: a component still handed them is one the next change can
  * quietly start rendering from again.
  *
  * It stays a plain button with `aria-expanded` rather than the `role="switch"`

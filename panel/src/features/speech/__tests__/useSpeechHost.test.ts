@@ -272,7 +272,7 @@ describe("useSpeechHost warming", () => {
 
     await emitUtterance("cell-a", "u-1", response(3));
 
-    expect(result.current.armedSessionId).toBeNull();
+    expect(result.current.autoplaySessionIds).toEqual([]);
     expect(requestedTexts()).toEqual([units[0]]);
     // The voice the click will use. Warming with any other one is a synthesis
     // nobody ever plays, because the cache keys on voice + text.
@@ -284,7 +284,10 @@ describe("useSpeechHost warming", () => {
 
     // Arming cell-a spends a gesture on the element, so nothing after this is
     // kept silent merely by the browser's autoplay lock.
-    await settle(() => result.current.onArm("cell-a"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
     await emitUtterance("cell-b", "u-1", response(3));
 
     expect(requestedTexts()).toEqual([unitsOf(response(3))[0]]);
@@ -385,7 +388,10 @@ describe("useSpeechHost warming", () => {
     const units = unitsOf(response(3));
     const { result } = renderHook(() => useSpeechHost());
 
-    await settle(() => result.current.onArm("cell-a"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
     await emitUtterance("cell-a", "u-1", response(3));
 
     expect(played).toEqual([`blob:${units[0]}`]);
@@ -546,7 +552,10 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
     const newer = unitsOf(response(3, "Newer"));
     const { result } = renderHook(() => useSpeechHost());
 
-    await settle(() => result.current.onArm("cell-a"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
     expect(result.current.stateFor("cell-a")).toBe("paused");
@@ -555,7 +564,7 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
 
     // Arming is a standing preference, not a property of the run that was
     // abandoned. The armed cell still autoplays the answer that arrived.
-    expect(result.current.armedSessionId).toBe("cell-a");
+    expect(result.current.speechModeOf("cell-a")).toBe("autoplay");
     expect(played[played.length - 1]).toBe(`blob:${newer[0]}`);
   });
 
@@ -657,7 +666,10 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     const newer = unitsOf(response(2, "Newer"));
     const { result } = renderHook(() => useSpeechHost());
 
-    await settle(() => result.current.onArm("cell-a"));
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
     await emitUtterance("cell-a", "u-1", response(2));
     expect(played).toEqual([`blob:${stale[0]}`]);
 
@@ -690,7 +702,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     await endCurrentUnit();
     await endCurrentUnit();
 
-    expect(result.current.armedSessionId).toBeNull();
+    expect(result.current.autoplaySessionIds).toEqual([]);
     expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
     const queue = result.current.queueFor("cell-a");
     expect(queue.current?.id).toBe("u-2");

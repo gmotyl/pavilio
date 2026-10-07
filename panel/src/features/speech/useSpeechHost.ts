@@ -7,7 +7,7 @@
  * on screen at once (ProjectView's and the terminal drawer's), so this hook has
  * exactly one call site — `SpeechHostProvider` — and surfaces read its value
  * from context. The channel is hoisted with it so every cell in the panel reads
- * the same armed session and the same state.
+ * the same speech modes and the same state.
  *
  * The coupling stays one-way. `useUtteranceChannel` still imports nothing from
  * the player; this module passes the player's `speakingSessionId` *into* the
@@ -74,7 +74,7 @@ import { MAX_PENDING, MAX_PREVIOUS, utteranceUnderCursor } from "./utteranceQueu
 import { getStoredVoice } from "./voices";
 
 /**
- * How many utterances the armed cell's autoplay record keeps.
+ * How many utterances an autoplay cell's record keeps.
  *
  * The record is only ever asked about the utterance UNDER THE CURSOR, and the
  * cursor can only ever land on an utterance the queue holds — its history, the
@@ -83,7 +83,7 @@ import { getStoredVoice } from "./voices";
  * newest eleven recorded has fallen out of the queue's reach and can never be
  * asked about again. The same argument bounds the channel's `heard` set, and
  * for the same reason: unbounded, this would grow for as long as one cell
- * stays armed.
+ * stays in autoplay.
  *
  * Derived from the queue's own constants rather than written as `11`, so a
  * deeper history cannot silently make the record too short.
@@ -208,8 +208,9 @@ export function useSpeechHost(): SpeechHost {
   // prepares the same way, so a replay must not pay for it twice.
   const preparedRef = useRef<Map<string, PreparedSpeech>>(new Map());
   /**
-   * The armed cell's utterances that autoplay is done with, so none is played
-   * twice.
+   * Each autoplay cell's utterances that autoplay is done with, so none is
+   * played twice. One record per cell in autoplay — keyed by session, created
+   * when the cell enters autoplay and dropped when it leaves.
    *
    * A SET rather than the one slot it used to be, because the records are no
    * longer all about the utterance under the cursor. A catch-up records the
@@ -221,14 +222,7 @@ export function useSpeechHost(): SpeechHost {
    * it had stepped onto. One record per utterance is the honest shape for a
    * question asked per utterance. Bounded by {@link MAX_AUTOPLAYED}.
    */
-  const autoplayedRef = useRef<Set<string>>(new Set());
-  /**
-   * The armed cell, mirrored, so {@link recordAutoplayed} can be declared above
-   * the channel — which is where the armed cell comes from, and which needs the
-   * callback handed to it for its catch-up. Written in an EFFECT, so it can
-   * never be ahead of the commit the rest of the panel is looking at.
-   */
-  const armedSessionIdRef = useRef<string | null>(null);
+  const autoplayedRef = useRef<Map<string, Set<string>>>(new Map());
   /** Utterance ids whose first unit has been warmed, so none is warmed twice. */
   const warmedRef = useRef<Set<string>>(new Set());
   /**
@@ -362,17 +356,17 @@ export function useSpeechHost(): SpeechHost {
     waitingForSynthesis,
   } = player;
   /**
-   * The cursor moved under the armed cell, and whatever that move is owed has
+   * The cursor moved under an autoplay cell, and whatever that move is owed has
    * been settled HERE — so the utterance it landed on is recorded as already
    * autoplayed, and the autoplay effect does not act on it a second time.
    *
    * Three callers, for what read as three different reasons and are really one.
    * In `onNext` the move IS played there, so without this record the effect
-   * would see "the armed cell's utterance changed" and start the same answer
+   * would see "the autoplay cell's utterance changed" and start the same answer
    * twice. In `onPrevious` the move is deliberately NOT played — and the record
    * is what makes that stick, because the effect watches the utterance under
    * the cursor and a backward step changes it exactly as an arrival would. Drop
-   * the call there and the armed cell speaks the answer the user stepped back
+   * the call there and the autoplay cell speaks the answer the user stepped back
    * to read, through the autoplay path rather than the transport's; the press
    * is silent everywhere except the one state Greg actually listens in. And the
    * channel's catch-up calls it for an answer recovered after a reconnect,
@@ -388,16 +382,16 @@ export function useSpeechHost(): SpeechHost {
    * or the pips passes through here — those are `markHeard` / `finishUtterance`
    * — and a silent step leaves every one of them alone. It is narrower than its
    * name: *autoplay has no further business with this utterance*. Only the
-   * armed cell has such a record to corrupt.
+   * autoplay cell has such a record to corrupt.
    *
-   * Declared above the channel, which is where the armed cell comes from, so it
-   * reads the mirror rather than the value — and is stable for the whole life
-   * of the host, which is what keeps the channel's catch-up effect off it.
+   * Declared above the channel, which is where the autoplay cells come from, so
+   * it reads the per-cell records rather than the modes — and is stable for the
+   * whole life of the host, which is what keeps the channel's catch-up effect
+   * off it.
    */
   const recordAutoplayed = useCallback((sessionId: string, utteranceId: string): void => {
-    if (sessionId === armedSessionIdRef.current) {
-      rememberAutoplayed(autoplayedRef.current, utteranceId);
-    }
+    const record = autoplayedRef.current.get(sessionId);
+    if (record) rememberAutoplayed(record, utteranceId);
   }, []);
 
   // The channel never observes playback or synthesis, so everything it needs to
@@ -414,24 +408,19 @@ export function useSpeechHost(): SpeechHost {
     recordAutoplayed,
   });
   const {
-    armedSessionId,
+    autoplaySessionIds,
+    cycleSpeechMode: cycleChannelSpeechMode,
     dispatchQueue,
     finishUtterance,
     heardFor,
     languageFor,
     markHeard,
     queueFor,
-    setArmed,
+    speechModeOf,
     stateFor,
     utteranceFor,
     warmableUtterances,
   } = channel;
-
-  // Written in an EFFECT, never during render, so the mirror can never be newer
-  // than the commit the rest of the panel is looking at.
-  useEffect(() => {
-    armedSessionIdRef.current = armedSessionId;
-  }, [armedSessionId]);
 
   const preparedFor = useCallback(
     (utterance: Utterance, language: "pl" | "en"): PreparedSpeech => {
@@ -451,14 +440,14 @@ export function useSpeechHost(): SpeechHost {
     // fresh WebSocket handshake — seconds of nothing, which reads as a dead
     // button. So unit 0 is synthesized the moment an utterance arrives.
     //
-    // EVERY session is warmed, not only the armed one (Greg: "arm all, I will
+    // EVERY session is warmed, not only the autoplay ones (Greg: "arm all, I will
     // use TTS most of the time"). The cost is one small synthesis per arriving
     // response, bounded by the number of terminals, and unit 0 is deliberately
     // the response's heading or first sentence.
     //
     // Warming is silent but deliberately VISIBLE. Silent: it fills the
     // synthesis cache and never touches the player, so a warmed cell that is
-    // not armed makes no sound however it is coloured. Visible: the cell is
+    // not in autoplay makes no sound however it is coloured. Visible: the cell is
     // reported preparing until the audio is actually in hand, because a green
     // control that might still be synthesizing is exactly the ambiguity the
     // red state exists to remove.
@@ -631,8 +620,8 @@ export function useSpeechHost(): SpeechHost {
         // Marks it heard AND moves the queue on — the queue's own "finished",
         // which advances into what is waiting, returns the cursor out of a
         // replay, and does nothing at all when neither applies. The autoplay
-        // effect below is what turns that advance into sound, so an unarmed
-        // cell ends up simply HOLDING the next answer.
+        // effect below is what turns that advance into sound, so a cell not in
+        // autoplay ends up simply HOLDING the next answer.
         finishUtterance(ended.sessionId);
       }
 
@@ -818,7 +807,7 @@ export function useSpeechHost(): SpeechHost {
       // `recordAutoplayed` stays for a related reason, and see its own comment:
       // the autoplay effect watches the utterance under the cursor, so a
       // backward step looks to it exactly like an arrival. Without the record
-      // the armed cell would speak the answer the user stepped back to read —
+      // an autoplay cell would speak the answer the user stepped back to read —
       // the press silenced everywhere except the state it is listened to in.
       // It records nothing about `heard`, so the unplayed count is untouched.
       unlock();
@@ -893,7 +882,7 @@ export function useSpeechHost(): SpeechHost {
       // `recordAutoplayed` STAYS for the same reason it does on the backward
       // press, and it is what makes this silent on the ARMED cell too: the
       // autoplay effect watches the utterance under the cursor, so a step looks
-      // exactly like an arrival to it. Without the record an armed cell would
+      // exactly like an arrival to it. Without the record an autoplay cell would
       // speak the answer the user merely stepped onto — the press silenced
       // everywhere except the state it is listened to in. It records nothing
       // about `heard`, so the unplayed count is untouched.
@@ -1095,55 +1084,76 @@ export function useSpeechHost(): SpeechHost {
     [seekPlaybackWithinUnit, speakingSessionId],
   );
 
-  const onArm = useCallback(
-    (sessionId: string | null): void => {
-      // Arming is a click too, and it is the gesture the autoplay that follows
+  const cycleSpeechMode = useCallback(
+    (sessionId: string): void => {
+      // Cycling is a click too, and it is the gesture the autoplay that follows
       // will need — so it is spent on the element here rather than lost.
       unlock();
-      setArmed(sessionId);
+      cycleChannelSpeechMode(sessionId);
     },
-    [setArmed, unlock],
+    [cycleChannelSpeechMode, unlock],
   );
 
-  const armedUtterance = armedSessionId ? utteranceFor(armedSessionId) : null;
+  /**
+   * Each autoplay cell with the utterance under its cursor, as one string so
+   * the effect below runs when any of them moves and not on every render.
+   */
+  const autoplayUnder = autoplaySessionIds
+    .map((sessionId) => `${sessionId}\u0000${utteranceFor(sessionId)?.id ?? ""}`)
+    .join("\u0001");
 
   useEffect(() => {
-    // Arming a cell does not speak what is already sitting in it: autoplay is
-    // for utterances that ARRIVE while the cell is armed. A fresh set, because
-    // the records belong to the cell that was armed and say nothing about this
-    // one.
-    const remembered = new Set<string>();
-    const under = armedSessionId ? utteranceFor(armedSessionId) : null;
-    if (under) remembered.add(under.id);
-    autoplayedRef.current = remembered;
-    // `utteranceFor` deliberately not a dependency: this must run when the
-    // armed cell changes, and only then.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [armedSessionId]);
-
-  useEffect(() => {
-    if (!armedSessionId || !armedUtterance) return;
-    if (autoplayedRef.current.has(armedUtterance.id)) return;
-
-    if (!unlocked) {
-      // No gesture has reached the element yet, so the browser would refuse
-      // this anyway — and a tab that has just hydrated `/api/speech/latest`
-      // must not start talking on its own. Absorb it: it is old news by the
-      // time the user does click something.
-      rememberAutoplayed(autoplayedRef.current, armedUtterance.id);
-      return;
+    // Entering autoplay does not speak what is already sitting in the cell:
+    // autoplay is for utterances that ARRIVE while the cell is in it. A fresh
+    // record per cell that just entered, because records belong to a cell and
+    // say nothing about another; a cell still in autoplay keeps its own.
+    const before = autoplayedRef.current;
+    const after = new Map<string, Set<string>>();
+    for (const sessionId of autoplaySessionIds) {
+      const kept = before.get(sessionId);
+      if (kept) {
+        after.set(sessionId, kept);
+        continue;
+      }
+      const remembered = new Set<string>();
+      const under = utteranceFor(sessionId);
+      if (under) remembered.add(under.id);
+      after.set(sessionId, remembered);
     }
+    autoplayedRef.current = after;
+    // `utteranceFor` deliberately not a dependency: this must run when the set
+    // of autoplay cells changes, and only then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoplaySessionIds]);
 
-    rememberAutoplayed(autoplayedRef.current, armedUtterance.id);
-    speak(armedSessionId);
-  }, [armedSessionId, armedUtterance, speak, unlocked]);
+  useEffect(() => {
+    // Every autoplay cell whose cursor sits on an utterance autoplay has not
+    // dealt with yet. Each is recorded; with no gesture yet they are absorbed —
+    // the browser would refuse anyway, and a tab that has just hydrated
+    // `/api/speech/latest` must not start talking on its own. Otherwise the
+    // last one is spoken: one `<audio>` element, so two starts in one pass
+    // would only cut each other off. (A queue across cells is a later task.)
+    let toSpeak: string | null = null;
+    for (const sessionId of autoplaySessionIds) {
+      const record = autoplayedRef.current.get(sessionId);
+      const under = utteranceFor(sessionId);
+      if (!record || !under || record.has(under.id)) continue;
+      rememberAutoplayed(record, under.id);
+      if (unlocked) toSpeak = sessionId;
+    }
+    if (toSpeak) speak(toSpeak);
+    // Keyed on `autoplayUnder`, which already folds in `utteranceFor`'s answer
+    // for every autoplay cell.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoplayUnder, speak, unlocked]);
 
   return useMemo(
     () => ({
       stateFor,
       queueFor,
       heardFor,
-      armedSessionId,
+      speechModeOf,
+      autoplaySessionIds,
       onSpeak,
       onPause,
       onResume,
@@ -1151,7 +1161,7 @@ export function useSpeechHost(): SpeechHost {
       onPrevious,
       onNext,
       onNewestAnswer,
-      onArm,
+      cycleSpeechMode,
       unitsFor,
       subscribeProgress,
       progressFor,
@@ -1169,9 +1179,9 @@ export function useSpeechHost(): SpeechHost {
       onSeekBackward,
     }),
     [
-      armedSessionId,
+      autoplaySessionIds,
+      cycleSpeechMode,
       heardFor,
-      onArm,
       onJumpToUnit,
       onNewestAnswer,
       onNext,
@@ -1187,6 +1197,7 @@ export function useSpeechHost(): SpeechHost {
       progressFor,
       queueFor,
       speakingSessionId,
+      speechModeOf,
       stateFor,
       subscribeProgress,
       unitDurationsFor,

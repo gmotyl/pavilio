@@ -1,7 +1,7 @@
 /**
  * The speech feature's per-browser preferences: the picked voice — vendored from
- * motyl's `lib/tts/voices.ts` with the Polish-only voices dropped — and the
- * armed cell.
+ * motyl's `lib/tts/voices.ts` with the Polish-only voices dropped — and each
+ * cell's speech mode.
  *
  * The picked voice ALWAYS wins: nothing here consults
  * {@link import("./pronunciation").voteLanguage} or the per-session language
@@ -18,6 +18,7 @@
 // feature would be the direction that closes a cycle.
 import { DEFAULT_SPEECH_VOICE, preferences } from "../../preferences/declarations";
 import { clearPreference, readPreference, writePreference } from "../../preferences/store";
+import type { SpeechMode } from "./types";
 
 export { DEFAULT_SPEECH_VOICE };
 
@@ -108,33 +109,64 @@ export function setStoredVoice(id: string): SpeechVoiceId {
   return id;
 }
 
-/**
- * The armed cell — the one session allowed to speak on its own. Exclusive: at
- * most one id is ever stored, so two windows each keep their own armed cell.
- *
- * `portable: false`, and this is the declaration where that matters most: the
- * value is a LIVE SESSION ID. Carried to another machine in the workspace file
- * it would arm a cell that does not exist there, and it would put a fact about
- * one browser window into a file every window reads. It stays in
- * `localStorage`, which is where it already was.
- */
-export function getStoredArmedSession(): string | null {
-  const stored = readPreference(preferences.speechArmedCell);
-  // A blank id is not an armed cell. Kept from the raw implementation: the
-  // codec round-trips `""` faithfully, so the normalization has to stay.
-  return stored && stored.trim() !== "" ? stored : null;
+/** One click on a cell's speech control: `off → armed → autoplay → off`. */
+export function nextSpeechMode(mode: SpeechMode): SpeechMode {
+  if (mode === "off") return "armed";
+  if (mode === "armed") return "autoplay";
+  return "off";
+}
+
+/** Only the two stored modes; `off` is the absence of an entry, never a value. */
+function isStoredMode(value: unknown): value is Exclude<SpeechMode, "off"> {
+  return value === "armed" || value === "autoplay";
 }
 
 /**
- * Stores the armed session and returns the one now in effect; `null` — or a
- * blank id — disarms. The return value is what the caller should hold, so
- * arming still takes effect for this page when storage is unavailable.
+ * Every cell's speech mode in this browser — `sessionId → mode`, with no entry
+ * for a cell that is `off`. Not exclusive: any number of cells may be in
+ * `autoplay`.
+ *
+ * `portable: false`, for the reason the armed id it replaces was: every key is
+ * a LIVE SESSION ID, which would name cells that do not exist on another
+ * machine and put a fact about one browser into a file every window reads.
+ *
+ * Migration: while the record has never been written (`null`), a legacy armed
+ * id reads as that one cell in `autoplay` — which is what "armed" used to mean.
+ * The first {@link setStoredSpeechMode} writes the record and clears the
+ * legacy value, so it is never consulted again.
  */
-export function setStoredArmedSession(sessionId: string | null): string | null {
-  const armed = sessionId && sessionId.trim() !== "" ? sessionId : null;
-  // Disarming CLEARS rather than storing `null`, mirroring the `removeItem`
-  // this replaces: "no armed cell" is the absence of a value, not a value.
-  if (armed) writePreference(preferences.speechArmedCell, armed);
-  else clearPreference(preferences.speechArmedCell);
-  return armed;
+export function getStoredSpeechModes(): Readonly<Record<string, SpeechMode>> {
+  const stored = readPreference(preferences.speechModes);
+  if (stored === null || typeof stored !== "object" || Array.isArray(stored)) {
+    // A blank id is not an armed cell: the legacy codec round-trips `""`.
+    const legacy = stored === null ? readPreference(preferences.speechArmedCell) : null;
+    return legacy && legacy.trim() !== "" ? { [legacy]: "autoplay" } : {};
+  }
+  // A hand-edited or stale record keeps only the entries that mean something.
+  const modes: Record<string, SpeechMode> = {};
+  for (const [sessionId, mode] of Object.entries(stored)) {
+    if (sessionId.trim() !== "" && isStoredMode(mode)) modes[sessionId] = mode;
+  }
+  return modes;
+}
+
+/**
+ * Sets one cell's mode and returns the whole record now in effect; `off`
+ * DELETES the entry. The return value is what the caller should hold, so a
+ * change still takes effect for this page when storage is unavailable.
+ */
+export function setStoredSpeechMode(
+  sessionId: string,
+  mode: SpeechMode,
+): Readonly<Record<string, SpeechMode>> {
+  const current = getStoredSpeechModes();
+  if (sessionId.trim() === "") return current;
+  const next: Record<string, SpeechMode> = { ...current };
+  if (mode === "off") delete next[sessionId];
+  else next[sessionId] = mode;
+  writePreference(preferences.speechModes, next);
+  // The record now exists, so the legacy id has been carried over — and
+  // clearing it keeps a stale id from resurfacing if the record is ever lost.
+  clearPreference(preferences.speechArmedCell);
+  return next;
 }

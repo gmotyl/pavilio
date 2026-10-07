@@ -140,6 +140,7 @@ const FIXTURES: Record<string, Fixture> = {
   "speech.answerComposer.height": { value: 148, scopeArg: "pavilio" },
   "speech.answerPane.height": { value: 412, scopeArg: "pavilio" },
   "speech.armedCell": { value: "sess-0b2e55d1" },
+  "speech.modes": { value: { "sess-0b2e55d1": "autoplay" } },
 
   // ── Notifications ────────────────────────────────────────────────────────
   // Non-portable and naming no session: the browser permission it pairs with
@@ -242,9 +243,9 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(45);
+    expect(ALL_PREFERENCES.length).toBe(46);
     expect(portable.length).toBe(34);
-    expect(machineLocal.length).toBe(11);
+    expect(machineLocal.length).toBe(12);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the
     // shipped table agrees with it, not merely that it type-checked.
@@ -419,6 +420,7 @@ describe("the machine-local guard", () => {
       "terminal.order",
       "terminal.grid",
       "speech.armedCell",
+      "speech.modes",
       "nav.lastPath",
       "nav.lastFile",
       "nav.lastReposQuery",

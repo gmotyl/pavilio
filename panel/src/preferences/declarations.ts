@@ -34,6 +34,7 @@ import type { DrawerSide } from "../features/terminal/useTerminalDrawer";
 import type { TileLayout } from "../features/terminal/tileLayout";
 import type { Period } from "../features/time/periodRange";
 import type { ReportDetail, ReportFormat } from "../features/time/reportFormatters";
+import type { SpeechMode } from "../features/speech/types";
 
 /** The file list's one sort, shared across every tab and project. */
 export interface FileListSort {
@@ -678,12 +679,33 @@ export const preferences = {
     codec: num,
     portable: false,
   }),
-  /** The one cell allowed to speak on its own — a session id. */
+  /**
+   * LEGACY: the one cell that used to be allowed to speak on its own — a
+   * session id. Superseded by {@link preferences.speechModes}, and read only to
+   * migrate: while no speech-mode record has ever been written, a stored id
+   * here reads as that cell in `autoplay`. The first write of the record
+   * clears it, and nothing consults it after that.
+   */
   speechArmedCell: definePreference<string | null>({
     key: "speech.armedCell", // was: panel-speech-armed
     scope: "global",
     default: null,
     codec: json<string | null>(),
+    portable: false,
+  }),
+  /**
+   * Each cell's speech mode — `sessionId → "armed" | "autoplay"`; a cell that
+   * is `off` has no entry. `null` means the record has never been written,
+   * which is what lets the legacy armed id above migrate on read.
+   *
+   * Machine-local for the reason the armed id was: every key is a LIVE
+   * SESSION ID, meaningless in a workspace file carried to another machine.
+   */
+  speechModes: definePreference<Record<string, SpeechMode> | null>({
+    key: "speech.modes", // was: speech.armedCell (migrated on read)
+    scope: "global",
+    default: null,
+    codec: json<Record<string, SpeechMode> | null>(),
     portable: false,
   }),
 

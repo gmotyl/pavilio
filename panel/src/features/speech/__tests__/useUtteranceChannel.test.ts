@@ -51,18 +51,18 @@ let waiting = false;
 let preparing: ReadonlySet<string> = new Set<string>();
 
 const { useUtteranceChannel } = await import("../useUtteranceChannel");
-const { setStoredArmedSession } = await import("../voices");
+const { setStoredSpeechMode } = await import("../voices");
 const { unplayedSinceLastPlayed } = await import("../unreadAnswers");
 const { REALTIME_RECONNECT_FRAME } = await import("../../realtime/channel");
 const { preferences } = await import("../../../preferences/declarations");
 const { storageKey } = await import("../../../preferences/types");
 
 /**
- * The armed cell names a LIVE SESSION, so it is `portable: false` and stays in
- * `localStorage` — never in the workspace file, which is committed and carried
- * to a machine where that session does not exist.
+ * Speech modes are keyed by LIVE SESSION, so they are `portable: false` and
+ * stay in `localStorage` — never in the workspace file, which is committed and
+ * carried to a machine where that session does not exist.
  */
-const ARMED_KEY = storageKey(preferences.speechArmedCell);
+const MODES_KEY = storageKey(preferences.speechModes);
 
 const utterance = (sessionId: string, id: string, at = 1_000): Utterance => ({
   id,
@@ -351,40 +351,36 @@ describe("useUtteranceChannel", () => {
     expect(result.current.utteranceFor("cell-never")).toBeNull();
   });
 
-  it("arming one session clears the previously armed one", async () => {
+  it("persists each step of a cell's speech mode", async () => {
     const { result } = await renderChannel();
 
-    expect(result.current.armedSessionId).toBeNull();
+    expect(result.current.speechModeOf("cell-a")).toBe("off");
 
     await act(async () => {
-      result.current.setArmed("cell-a");
+      result.current.cycleSpeechMode("cell-a");
     });
-    expect(result.current.armedSessionId).toBe("cell-a");
-    expect(localStorage.getItem(ARMED_KEY)).toBe('"cell-a"');
+    expect(result.current.speechModeOf("cell-a")).toBe("armed");
+    expect(localStorage.getItem(MODES_KEY)).toBe('{"cell-a":"armed"}');
 
-    // DECISION 12: one armed cell, so arming another IS disarming the first.
+    // Not exclusive: a second cell joins rather than displacing the first.
     await act(async () => {
-      result.current.setArmed("cell-b");
+      result.current.cycleSpeechMode("cell-b");
+      result.current.cycleSpeechMode("cell-b");
     });
-    expect(result.current.armedSessionId).toBe("cell-b");
-    expect(localStorage.getItem(ARMED_KEY)).toBe('"cell-b"');
-
-    await act(async () => {
-      result.current.setArmed(null);
-    });
-    expect(result.current.armedSessionId).toBeNull();
-    expect(localStorage.getItem(ARMED_KEY)).toBeNull();
+    expect(result.current.speechModeOf("cell-a")).toBe("armed");
+    expect(result.current.speechModeOf("cell-b")).toBe("autoplay");
+    expect(result.current.autoplaySessionIds).toEqual(["cell-b"]);
   });
 
-  it("restores the armed session from storage", async () => {
-    setStoredArmedSession("cell-b");
+  it("restores speech modes from storage", async () => {
+    setStoredSpeechMode("cell-b", "autoplay");
 
     const { result, unmount } = await renderChannel();
-    expect(result.current.armedSessionId).toBe("cell-b");
+    expect(result.current.speechModeOf("cell-b")).toBe("autoplay");
 
     unmount();
     const { result: remounted } = await renderChannel();
-    expect(remounted.current.armedSessionId).toBe("cell-b");
+    expect(remounted.current.speechModeOf("cell-b")).toBe("autoplay");
   });
 
   it("reports speaking for the session the caller says is speaking", async () => {
@@ -425,7 +421,7 @@ describe("useUtteranceChannel", () => {
     expect(result.current.stateFor("cell-a")).toBe("ready");
   });
 
-  it("keeps arming usable when localStorage throws", async () => {
+  it("keeps speech modes usable when localStorage throws", async () => {
     vi.spyOn(localStorage, "getItem").mockImplementation(() => {
       throw new Error("site data blocked");
     });
@@ -438,16 +434,18 @@ describe("useUtteranceChannel", () => {
 
     const { result } = await renderChannel();
 
-    expect(result.current.armedSessionId).toBeNull();
+    expect(result.current.speechModeOf("cell-a")).toBe("off");
     await act(async () => {
-      expect(() => result.current.setArmed("cell-a")).not.toThrow();
+      expect(() => result.current.cycleSpeechMode("cell-a")).not.toThrow();
     });
-    // Nothing was persisted, but arming still holds for this page.
-    expect(result.current.armedSessionId).toBe("cell-a");
+    // Nothing was persisted, but the mode still holds — and still steps — for
+    // this page.
+    expect(result.current.speechModeOf("cell-a")).toBe("armed");
     await act(async () => {
-      expect(() => result.current.setArmed(null)).not.toThrow();
+      expect(() => result.current.cycleSpeechMode("cell-a")).not.toThrow();
     });
-    expect(result.current.armedSessionId).toBeNull();
+    expect(result.current.speechModeOf("cell-a")).toBe("autoplay");
+    expect(localStorage.getItem).toHaveBeenCalled();
   });
 
   it("ignores frames that are not utterances and re-delivery of a heard one", async () => {
@@ -1215,10 +1213,11 @@ describe("useUtteranceChannel", () => {
     expect(recordAutoplayed).not.toHaveBeenCalled();
   });
 
-  it("marks a caught-up utterance as autoplayed so an armed cell stays silent", async () => {
+  it("marks a caught-up utterance as autoplayed so an autoplay cell stays silent", async () => {
     const { result } = await renderChannel();
     await act(async () => {
-      result.current.setArmed("cell-a");
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
     });
 
     serveLatest([utterance("cell-a", "a1")]);
@@ -1272,7 +1271,8 @@ describe("useUtteranceChannel", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      result.current.setArmed("cell-a");
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
     });
 
     // A catch-up that stays in flight until the live frame has been queued.
@@ -1333,7 +1333,8 @@ describe("useUtteranceChannel", () => {
      */
     const { result } = await renderChannel();
     await act(async () => {
-      result.current.setArmed("cell-a");
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
     });
 
     // A catch-up held in flight, so the frame can be staged before it lands.

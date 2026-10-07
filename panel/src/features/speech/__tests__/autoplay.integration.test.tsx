@@ -405,7 +405,7 @@ import TerminalsPage from "../../../pages/TerminalsPage";
 import { SpeechHostProvider } from "../SpeechHostProvider";
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { prepare } from "../prepare";
-import { setStoredArmedSession, setStoredVoice } from "../voices";
+import { setStoredSpeechMode, setStoredVoice } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { clearPreference } from "../../../preferences/store";
 
@@ -584,11 +584,13 @@ async function clickIn(view: number, kind: ControlKind, sessionId: string): Prom
 /**
  * Spends a user gesture inside one view. An `<audio>` element is unlocked by a
  * click that reaches *it*, so a second host would need its own — this is how a
- * user who touches both views gets there. The toggle is clicked twice so the
- * armed cell ends exactly where it started, which keeps the script identical
- * whether the panel has one host or (the bug) one per surface.
+ * user who touches both views gets there. The switch is clicked three times —
+ * once round the whole `off → armed → autoplay` cycle — so the cell's speech
+ * mode ends exactly where it started, which keeps the script identical whether
+ * the panel has one host or (the bug) one per surface.
  */
 async function clickAround(view: number, sessionId: string): Promise<void> {
+  await clickIn(view, "bar-autoplay", sessionId);
   await clickIn(view, "bar-autoplay", sessionId);
   await clickIn(view, "bar-autoplay", sessionId);
 }
@@ -605,12 +607,15 @@ const latestFetches = (): number =>
  * is a programmatic play riding on a real user gesture, which is exactly what
  * the browser requires.
  *
- * The row is out from mount, so this is the single click it always was — the
- * switch inside the row. {@link openBar} stays in front of it for the cells a
+ * The row is out from mount, so these are clicks on the switch inside the
+ * row. {@link openBar} stays in front of it for the cells a
  * test has deliberately hidden the row on.
  */
 async function arm(sessionId: string): Promise<void> {
   await openBar(sessionId);
+  // Two steps round the speech mode: off → armed → autoplay. Only `autoplay`
+  // speaks on its own, and it is what the switch reports.
+  await click(testIdFor("bar-autoplay", sessionId));
   await click(testIdFor("bar-autoplay", sessionId));
 }
 
@@ -1198,7 +1203,7 @@ describe("the row is reserved from mount", () => {
     expect(screen.getByTestId("speech-bar-launchers-cell-a")).toBeInTheDocument();
     // Launchers, live switch: arming ahead of the first answer is the reason
     // the row is reachable before it at all.
-    await click(testIdFor("bar-autoplay", "cell-a"));
+    await arm("cell-a");
     expect(armed("cell-a")).toBe("1");
   });
 
@@ -1350,7 +1355,7 @@ describe("the header control and the bar", () => {
     expect(other).toHaveAttribute("aria-checked", "false");
   });
 
-  it("arming from the bar disarms the previously armed cell", async () => {
+  it("autoplay on one cell leaves another cell in autoplay", async () => {
     await renderProjectSurface();
     // Both bars out, so both arm switches are readable throughout — arming is
     // read where it lives, and cell b's bar has to be open to be read.
@@ -1360,14 +1365,13 @@ describe("the header control and the bar", () => {
     await arm("cell-a");
     expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
 
-    // One armed cell per browser: arming b is what disarms a, and nothing had
-    // to click a to make that happen.
+    // Not exclusive: putting b in autoplay leaves a where it was.
     await arm("cell-b");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "1"]);
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "1"]);
 
-    // Clicking the armed cell's own bar switch disarms it, leaving none armed.
-    await arm("cell-b");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["0", "0"]);
+    // One more click on b's own switch steps it round to off; a is untouched.
+    await click(testIdFor("bar-autoplay", "cell-b"));
+    expect([armed("cell-a"), armed("cell-b")]).toEqual(["1", "0"]);
   });
 
   it("arming survives a reload", async () => {
@@ -1456,7 +1460,7 @@ describe("one speech host for the panel, not one per surface", () => {
   it("two mounted surfaces are one voice, not two", async () => {
     // A returning browser: the armed cell is restored from storage by whatever
     // mounts, so both views come up armed on the same cell (DECISION 12).
-    setStoredArmedSession("cell-a");
+    setStoredSpeechMode("cell-a", "autoplay");
 
     await renderBothViews();
     // Fixture guard: this really is the two-surface arrangement, not one.
@@ -1488,7 +1492,7 @@ describe("one speech host for the panel, not one per surface", () => {
     expect(latestFetches()).toBe(1);
   });
 
-  it("arming stays exclusive across both views", async () => {
+  it("speech modes are shared across both views", async () => {
     await renderBothViews();
 
     // No cell has spoken, so every bar is closed: both cells are opened in both
@@ -1503,16 +1507,18 @@ describe("one speech host for the panel, not one per surface", () => {
     // From the bar, which is where arming lives — and from ONE view's bar, so
     // what the other view reports is the shared value and not its own click.
     await clickIn(0, "bar-autoplay", "cell-a");
+    await clickIn(0, "bar-autoplay", "cell-a");
 
     // The drawer is not a second browser: both views' bars show the same
     // armed cell.
     expect(armedInViews("cell-a")).toEqual(["1", "1"]);
 
-    // Arming from the *other* view disarms the first cell everywhere — one
-    // armed cell per browser, whichever view it was armed from.
+    // Autoplay from the *other* view joins the first cell rather than
+    // replacing it — and both views report both.
+    await clickIn(1, "bar-autoplay", "cell-b");
     await clickIn(1, "bar-autoplay", "cell-b");
 
-    expect(armedInViews("cell-a")).toEqual(["0", "0"]);
+    expect(armedInViews("cell-a")).toEqual(["1", "1"]);
     expect(armedInViews("cell-b")).toEqual(["1", "1"]);
   });
 
@@ -1520,7 +1526,7 @@ describe("one speech host for the panel, not one per surface", () => {
     // The browser remembers an armed cell and the server still holds that
     // cell's last response, so the tab comes up armed with something unheard
     // in it — and nothing has been clicked yet.
-    setStoredArmedSession("cell-a");
+    setStoredSpeechMode("cell-a", "autoplay");
     global.fetch = vi.fn(
       async () =>
         ({

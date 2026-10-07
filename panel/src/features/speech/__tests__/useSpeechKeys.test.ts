@@ -41,13 +41,13 @@ function stubTarget(
   run: {
     speakingSessionId?: string | null;
     pausedSessionId?: string | null;
-    armedSessionId?: string | null;
+    autoplaySessionId?: string | null;
   } = {},
 ): StubTarget {
   return {
     speakingSessionId: run.speakingSessionId ?? null,
     pausedSessionId: run.pausedSessionId ?? null,
-    armedSessionId: run.armedSessionId ?? null,
+    autoplaySessionIds: run.autoplaySessionId ? [run.autoplaySessionId] : [],
     onSpeak: vi.fn<(sessionId: string) => void>(),
     onPause: vi.fn<(sessionId: string) => void>(),
     onResume: vi.fn<(sessionId: string) => void>(),
@@ -196,7 +196,7 @@ describe("useSpeechKeys", () => {
       speechTransportKeyFor({ type: "keydown", code: "Space", ctrlKey: true, shiftKey: true }),
     ).toBe("toggle");
 
-    const speaking = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    const speaking = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     mounted(speaking, () => press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true }));
     // The run, never the armed cell, while something is playing.
     expect(speaking.onPause).toHaveBeenCalledWith("cell-a");
@@ -208,7 +208,7 @@ describe("useSpeechKeys", () => {
     expect(held.onResume).toHaveBeenCalledWith("cell-a");
     expect(held.onSpeak).not.toHaveBeenCalled();
 
-    const idle = stubTarget({ armedSessionId: "cell-b" });
+    const idle = stubTarget({ autoplaySessionId: "cell-b" });
     mounted(idle, () => press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true }));
     expect(idle.onSpeak).toHaveBeenCalledWith("cell-b");
 
@@ -228,7 +228,7 @@ describe("useSpeechKeys", () => {
    * on it stayed lit.
    */
   it("ctrl+shift+space reports an arrival on the cell it acted on", () => {
-    const speaking = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    const speaking = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     mounted(speaking, () => press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true }));
     // Pause is an arrival too: one key, and which of the two it means is
     // decided by where the run is rather than by what the user expressed.
@@ -241,7 +241,7 @@ describe("useSpeechKeys", () => {
     expect(arrival).toHaveBeenCalledWith("cell-a");
 
     arrival.mockClear();
-    const idle = stubTarget({ armedSessionId: "cell-b" });
+    const idle = stubTarget({ autoplaySessionId: "cell-b" });
     mounted(idle, () => press({ code: "Space", key: " ", ctrlKey: true, shiftKey: true }));
     expect(arrival).toHaveBeenCalledWith("cell-b");
 
@@ -260,7 +260,7 @@ describe("useSpeechKeys", () => {
    * does, so adding them would be a one-line change nothing else would notice.
    */
   it("ctrl+shift+arrows report no arrival", () => {
-    const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    const target = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     mounted(target, () => {
       press({ code: "ArrowLeft", ctrlKey: true, shiftKey: true });
       press({ code: "ArrowRight", ctrlKey: true, shiftKey: true });
@@ -279,7 +279,7 @@ describe("useSpeechKeys", () => {
       speechTransportKeyFor({ type: "keydown", code: "ArrowRight", ctrlKey: true, shiftKey: true }),
     ).toBe("next");
 
-    const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    const target = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     mounted(target, () => {
       press({ code: "ArrowLeft", ctrlKey: true, shiftKey: true });
       expect(target.onPrevious).toHaveBeenCalledWith("cell-a");
@@ -290,13 +290,13 @@ describe("useSpeechKeys", () => {
 
     // With no run, the armed cell is the panel's standing answer to "which
     // queue?" — the same fallback the media keys take.
-    const idle = stubTarget({ armedSessionId: "cell-b" });
+    const idle = stubTarget({ autoplaySessionId: "cell-b" });
     mounted(idle, () => press({ code: "ArrowRight", ctrlKey: true, shiftKey: true }));
     expect(idle.onNext).toHaveBeenCalledWith("cell-b");
   });
 
   it("ctrl+shift+digits still reach the existing shortcut family", () => {
-    const target = stubTarget({ speakingSessionId: "cell-a", armedSessionId: "cell-b" });
+    const target = stubTarget({ speakingSessionId: "cell-a", autoplaySessionId: "cell-b" });
     renderHook(() => useSpeechKeys(target, arrival));
 
     for (const digit of [1, 2, 3, 4, 5, 6]) {

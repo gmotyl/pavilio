@@ -66,7 +66,7 @@ interface SpeechOverrides {
   state?: CellSpeechState;
   queue?: UtteranceQueue;
   units?: SpeechUnit[];
-  armedSessionId?: string | null;
+  autoplaySessionId?: string | null;
 }
 
 /** A cell that has played nothing has heard nothing — shared, like every other
@@ -84,7 +84,7 @@ function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
     subscribeProgress: () => () => {},
     progressFor: () => null,
     unitDurationsFor: () => NO_DURATIONS,
-    armedSessionId: over.armedSessionId ?? null,
+    speechModeOf: (id: string) => (id === over.autoplaySessionId ? "autoplay" : "off"),
     onSpeak: vi.fn(),
     onPause: vi.fn(),
     onResume: vi.fn(),
@@ -92,7 +92,7 @@ function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
     onPrevious: vi.fn(),
     onNext: vi.fn(),
     onNewestAnswer: vi.fn(),
-    onArm: vi.fn(),
+    cycleSpeechMode: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
   };
@@ -311,8 +311,8 @@ describe("LauncherPills", () => {
     // The switch is the reason the row is reachable before the first answer.
     await user.click(screen.getByTestId("speech-bar-autoplay-cell-a"));
 
-    expect(speech.onArm).toHaveBeenCalledTimes(1);
-    expect(speech.onArm).toHaveBeenCalledWith("cell-a");
+    expect(speech.cycleSpeechMode).toHaveBeenCalledTimes(1);
+    expect(speech.cycleSpeechMode).toHaveBeenCalledWith("cell-a");
   });
 
   /**

@@ -15,7 +15,7 @@
  * surface drives the same target:
  *
  * - the run that is currently playing (or the one being held);
- * - or, when nothing is active, the **armed** cell's utterance.
+ * - or, when nothing is active, the first **autoplay** cell's utterance.
  *
  * Hearing a *different* cell stays a click on that cell's speak control — the
  * barge-in path that has always existed. Focus is not an input to this hook,
@@ -46,8 +46,11 @@ export interface MediaSessionTransportTarget {
    * purpose: a held run has to resume rather than restart.
    */
   pausedSessionId: string | null;
-  /** The one armed cell in this browser, or `null`. */
-  armedSessionId: string | null;
+  /**
+   * Every cell in autoplay in this browser. With no run to act on, the first of
+   * them is the transport's idle target.
+   */
+  autoplaySessionIds: readonly string[];
   onSpeak: (sessionId: string) => void;
   onPause: (sessionId: string) => void;
   onResume: (sessionId: string) => void;
@@ -148,12 +151,17 @@ export function useMediaSessionTransport(
     if (!session) return;
 
     /**
-     * The cell every action lands on: the run first, the armed cell only when
-     * there is no run to act on.
+     * The cell every action lands on: the run first, the first autoplay cell
+     * only when there is no run to act on.
      */
     const transportTarget = (): string | null => {
       const current = targetRef.current;
-      return current.speakingSessionId ?? current.pausedSessionId ?? current.armedSessionId;
+      return (
+        current.speakingSessionId ??
+        current.pausedSessionId ??
+        current.autoplaySessionIds[0] ??
+        null
+      );
     };
 
     const bind = (action: MediaSessionAction, handler: (() => void) | null): void => {
@@ -183,11 +191,12 @@ export function useMediaSessionTransport(
         return;
       }
       // Nothing is playing, so the OS is willing to send `play` at all. The
-      // armed cell is the panel's standing answer to "what did you want to
-      // hear?", and it is the same answer autoplay gives.
-      if (current.armedSessionId) {
-        arrivalRef.current(current.armedSessionId);
-        current.onSpeak(current.armedSessionId);
+      // first autoplay cell is the panel's standing answer to "what did you want
+      // to hear?", and it is the same answer autoplay gives.
+      const idle = current.autoplaySessionIds[0];
+      if (idle) {
+        arrivalRef.current(idle);
+        current.onSpeak(idle);
       }
     });
 

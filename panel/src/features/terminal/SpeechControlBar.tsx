@@ -372,7 +372,10 @@ export function SpeechControlBar({
     return () => noteSpeaking(sessionId, false);
   }, [sessionId, voiceIsReading]);
 
-  const armed = speech.armedSessionId === sessionId;
+  // The switch still reports only `autoplay`: a click steps the cell's mode
+  // round all three, but an `armed` cell reads as off here until the control
+  // learns to show the mode it is in.
+  const autoplay = speech.speechModeOf(sessionId) === "autoplay";
   const intent = transportIntent(state);
   const weights = segmentWeights(units, durations);
   const total = weights.reduce((sum, weight) => sum + weight, 0);
@@ -531,13 +534,13 @@ export function SpeechControlBar({
         <button
           type="button"
           role="switch"
-          aria-checked={armed}
-          title={armed ? "Autoplay armed — speak responses here" : "Autoplay off — arm this cell"}
-          aria-label={armed ? "Autoplay armed — speak responses here" : "Autoplay off — arm this cell"}
+          aria-checked={autoplay}
+          title={autoplay ? "Autoplay armed — speak responses here" : "Autoplay off — arm this cell"}
+          aria-label={autoplay ? "Autoplay armed — speak responses here" : "Autoplay off — arm this cell"}
           data-testid={`speech-bar-autoplay-${sessionId}`}
-          data-armed={armed ? "1" : "0"}
+          data-armed={autoplay ? "1" : "0"}
           className="speech-bar-btn"
-          onClick={() => speech.onArm(armed ? null : sessionId)}
+          onClick={() => speech.cycleSpeechMode(sessionId)}
         >
           <Radio size={17} />
         </button>

@@ -91,7 +91,7 @@ const READERS = new Set([
   "subscribeProgress",
   "progressFor",
   "unitDurationsFor",
-  "armedSessionId",
+  "speechModeOf",
 ]);
 
 const utterance = (id: string, text: string): Utterance => ({
@@ -136,7 +136,7 @@ function makeSpeech(
     subscribeProgress: () => () => {},
     progressFor: () => null,
     unitDurationsFor: () => NO_DURATIONS,
-    armedSessionId: null,
+    speechModeOf: () => "off",
     onSpeak: vi.fn(),
     onPause: vi.fn(),
     onResume: vi.fn(),
@@ -150,7 +150,7 @@ function makeSpeech(
       fakeOnNext(sessionId, isAnswerHeld(sessionId), queue.cursor, queue.pending.length);
     }),
     onNewestAnswer: vi.fn(),
-    onArm: vi.fn(),
+    cycleSpeechMode: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
   } satisfies GridSpeech;

@@ -99,7 +99,7 @@ function makeSpeech(cell: Cell): GridSpeech {
     subscribeProgress: () => () => {},
     progressFor: () => null,
     unitDurationsFor: () => NO_DURATIONS,
-    armedSessionId: null,
+    speechModeOf: () => "off",
     onSpeak: vi.fn(),
     onPause: vi.fn(),
     onResume: vi.fn(),
@@ -112,7 +112,7 @@ function makeSpeech(cell: Cell): GridSpeech {
       fakeOnNext(sessionId, isAnswerHeld(sessionId), cell.queue.cursor, cell.queue.pending.length),
     ),
     onNewestAnswer: vi.fn(),
-    onArm: vi.fn(),
+    cycleSpeechMode: vi.fn(),
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
   } satisfies GridSpeech;

@@ -10,7 +10,7 @@ const idOf = (sessionId: string) => `terminal-cell-speech-controls-${sessionId}`
  *
  * The header control used to tell two stories: it showed which cell was armed
  * and it toggled the bar. It now tells one — show or hide the speech controls —
- * so `armedSessionId` is not among its props, and `onArm` never was. The armed
+ * so no speech mode is among its props, and no way to change one ever was. The armed
  * cell lives in this harness purely so the suite can prove the control cannot
  * move it: `armed` has no setter, and nothing the control is handed could reach
  * one if it had.

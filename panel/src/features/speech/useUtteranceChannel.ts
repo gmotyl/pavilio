@@ -8,7 +8,7 @@ import {
   voteLanguage,
   type LanguageState,
 } from "./pronunciation";
-import type { CellSpeechState, Utterance } from "./types";
+import type { CellSpeechState, SpeechMode, Utterance } from "./types";
 import {
   emptyUtteranceQueue,
   utteranceQueueReducer,
@@ -16,12 +16,12 @@ import {
   type UtteranceQueue,
   type UtteranceQueueEvent,
 } from "./utteranceQueue";
-import { getStoredArmedSession, setStoredArmedSession } from "./voices";
+import { getStoredSpeechModes, nextSpeechMode, setStoredSpeechMode } from "./voices";
 
 /**
  * The panel's single subscriber to the utterance stream: it hydrates from the
  * server's latest-per-session store, listens for `speech-utterance` frames, and
- * remembers which cell has something unheard and which one is armed.
+ * remembers which cell has something unheard and each cell's speech mode.
  *
  * It does NOT own playback, and it does not own synthesis either. The coupling
  * is kept one-way — nothing here imports the player or the synthesizer — so
@@ -343,9 +343,15 @@ export interface Channel {
    * hydration — land in it.
    */
   warmableUtterances: Utterance[];
-  armedSessionId: string | null;
-  /** Exclusive: arming a session disarms whichever was armed. `null` disarms. */
-  setArmed(sessionId: string | null): void;
+  /** The cell's speech mode; `off` for a session with no entry. */
+  speechModeOf(sessionId: string): SpeechMode;
+  /** `off → armed → autoplay → off`, persisted per browser. Not exclusive. */
+  cycleSpeechMode(sessionId: string): void;
+  /**
+   * Every cell in `autoplay`, in the order the record holds them. A new array
+   * only when the set changes, so an effect keyed on it runs per change.
+   */
+  autoplaySessionIds: readonly string[];
   markHeard(sessionId: string): void;
 }
 
@@ -482,8 +488,9 @@ export function useUtteranceChannel({
   useEffect(() => {
     recordAutoplayedRef.current = recordAutoplayed;
   }, [recordAutoplayed]);
-  // Read once at mount, so a remount restores the armed cell (DECISION 12).
-  const [armedSessionId, setArmedSessionId] = useState<string | null>(getStoredArmedSession);
+  // Read once at mount, so a remount restores every cell's mode (DECISION 12).
+  const [speechModes, setSpeechModes] =
+    useState<Readonly<Record<string, SpeechMode>>>(getStoredSpeechModes);
 
   /**
    * How many times the realtime channel has come back. It is what re-runs the
@@ -611,7 +618,7 @@ export function useUtteranceChannel({
     // Only a CATCH-UP is absorbed, never the mount fetch. A tab that has just
     // loaded has had no gesture either, and the host already absorbs a hydrated
     // arrival there for that reason; recording one from here would only clobber
-    // the armed cell's own bookkeeping with an id that may never reach the
+    // an autoplay cell's own bookkeeping with an id that may never reach the
     // cursor.
     if (!catchUp) return;
     for (const { utterance, speakable } of taken) {
@@ -809,11 +816,33 @@ export function useUtteranceChannel({
     });
   }, []);
 
-  // Exclusivity is structural: one slot, so arming a cell IS disarming the
-  // other. There is no set of armed cells that could ever hold two.
-  const setArmed = useCallback((sessionId: string | null) => {
-    setArmedSessionId(setStoredArmedSession(sessionId));
+  const speechModeOf = useCallback(
+    (sessionId: string): SpeechMode => speechModes[sessionId] ?? "off",
+    [speechModes],
+  );
+
+  // Stepped from a mirror rather than the state, so two cycles inside one batch
+  // each step from the other's result; and from the page's own record rather
+  // than the store, so cycling still works for this page when storage refuses.
+  const speechModesRef = useRef(speechModes);
+  const cycleSpeechMode = useCallback((sessionId: string) => {
+    const current = speechModesRef.current;
+    const mode = nextSpeechMode(current[sessionId] ?? "off");
+    const next: Record<string, SpeechMode> = { ...current };
+    if (mode === "off") delete next[sessionId];
+    else next[sessionId] = mode;
+    setStoredSpeechMode(sessionId, mode);
+    speechModesRef.current = next;
+    setSpeechModes(next);
   }, []);
+
+  const autoplayKey = Object.keys(speechModes)
+    .filter((sessionId) => speechModes[sessionId] === "autoplay")
+    .join("\n");
+  const autoplaySessionIds = useMemo(
+    () => (autoplayKey === "" ? [] : autoplayKey.split("\n")),
+    [autoplayKey],
+  );
 
   return {
     stateFor,
@@ -824,8 +853,9 @@ export function useUtteranceChannel({
     finishUtterance,
     languageFor,
     warmableUtterances,
-    armedSessionId,
-    setArmed,
+    speechModeOf,
+    cycleSpeechMode,
+    autoplaySessionIds,
     markHeard,
   };
 }

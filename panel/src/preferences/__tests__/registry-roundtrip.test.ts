@@ -105,13 +105,14 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   //    bridge keyed off the declared default rather than off the codec ─────
   "terminal.focus": [null, "", "sess-1", "true", "240", "null"],
   "speech.armedCell": [null, "", "sess-1", "true", "240", "null"],
+  "speech.modes": [null, {}, { "sess-1": "armed", "sess-2": "autoplay" }],
   "nav.lastPath": [null, "", "/notes/today.md", "true", "240", "null"],
   "nav.lastFile": [null, "", "/notes/today.md", "true", "240", "null"],
   "nav.lastReposQuery": [null, "", "pavilio", "true", "240", "null"],
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 45;
+const DECLARATION_COUNT = 46;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
