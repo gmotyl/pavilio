@@ -75,3 +75,36 @@ describe("file-index indexed extensions", () => {
     expect(paths).toContain("alpha/_index.json");
   });
 });
+
+describe("file-index image mockups", () => {
+  beforeEach(() => {
+    projectsDir = mkdtempSync(join(tmpdir(), "fidx-"));
+  });
+  afterEach(() => rmSync(projectsDir, { recursive: true, force: true }));
+
+  it("indexes image files under a mockups directory", () => {
+    const files = ["a.svg", "b.png", "c.jpg", "d.jpeg", "e.webp"].map(
+      (f) => `p/mockups/${f}`,
+    );
+    files.forEach(seed);
+    seed("archived/q/mockups/sub/f.png");
+    rebuildIndex();
+    const paths = getFileIndex().map((e) => e.relativePath);
+    for (const f of files) expect(paths).toContain(f);
+    expect(paths).toContain("archived/q/mockups/sub/f.png");
+  });
+
+  it("does not index image files outside mockups", () => {
+    seed("p/notes/shot.png");
+    seed("p/notes/diagram.svg");
+    seed("p/mockups-old.png");
+    // Positive control: proves the walk ran over p/notes
+    seed("p/notes/a.md");
+    rebuildIndex();
+    const paths = getFileIndex().map((e) => e.relativePath);
+    expect(paths).toContain("p/notes/a.md");
+    expect(paths).not.toContain("p/notes/shot.png");
+    expect(paths).not.toContain("p/notes/diagram.svg");
+    expect(paths).not.toContain("p/mockups-old.png");
+  });
+});
