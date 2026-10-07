@@ -22,6 +22,7 @@ import { mobileAuthMiddleware } from "./middleware/mobile-auth.js";
 import authMobileRouter from "./routes/auth-mobile.js";
 import mobileAccessRouter from "./routes/mobile-access.js";
 import projectsRouter from "./routes/projects.js";
+import mockupsRouter from "./routes/mockups.js";
 import { rebuildIndex } from "./lib/file-index.js";
 import filesRouter from "./routes/files.js";
 import gitRouter from "./routes/git.js";
@@ -191,6 +192,7 @@ export async function startPanel(
   app.use("/api/auth", authMobileRouter);
   app.use("/api/mobile-access", mobileAccessRouter);
 
+  app.use("/api/projects", mockupsRouter);
   app.use("/api/projects", projectsRouter);
   app.use("/api/files", filesRouter);
   app.use("/api/skills", skillsRouter);
