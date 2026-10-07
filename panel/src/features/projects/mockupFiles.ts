@@ -41,6 +41,12 @@ export const metaReadUrl = (readUrl: string) =>
  */
 export const MOCKUP_MAX_BYTES = 20 * 1024 * 1024;
 
+/**
+ * Mirrors the server's `MAX_FILES` for one import request: files beyond it
+ * are listed as rejected in the dialog instead of failing the whole upload.
+ */
+export const MOCKUP_MAX_FILES = 50;
+
 /** The file picker's `accept`: every extension the import route takes. */
 export const MOCKUP_IMPORT_ACCEPT = [".html", ...MOCKUP_IMAGE_EXTS].join(",");
 

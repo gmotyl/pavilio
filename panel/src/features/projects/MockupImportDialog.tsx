@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { AlertTriangle, FileCode, FileX } from "lucide-react";
 import { useMockupImport, todayPrefix, type MockupImportRow } from "./useMockupImport";
 
@@ -11,6 +11,10 @@ interface Props {
 }
 
 const MUTED = { color: "var(--text-muted)" };
+
+/** What Tab can land on inside the dialog; disabled controls are skipped. */
+const FOCUSABLE =
+  'input:not([disabled]), button:not([disabled]), [href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function Thumb({ row }: { row: MockupImportRow }) {
   const box = "w-12 h-12 shrink-0 rounded flex items-center justify-center overflow-hidden";
@@ -121,36 +125,80 @@ export default function MockupImportDialog({ project, files, onClose, onImported
   });
   // Fixed for the dialog's lifetime; the server applies its own local date.
   const prefix = useMemo(() => todayPrefix(), []);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const submittingRef = useRef(submitting);
   useEffect(() => {
     onCloseRef.current = onClose;
+    submittingRef.current = submitting;
   });
 
+  // Every way out (Escape, backdrop, Cancel) is held while the upload runs,
+  // so a closed dialog never leaves a request landing behind it.
+  const requestClose = useCallback(() => {
+    if (!submittingRef.current) onCloseRef.current();
+  }, []);
+
+  // Focus the first name field (or the dialog itself when every file is
+  // rejected) on open, and hand focus back to whatever opened it on close.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const firstSlug = dialog?.querySelector<HTMLInputElement>(
+      '[data-testid="mockup-import-slug"]',
+    );
+    (firstSlug ?? dialog)?.focus();
+    return () => {
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
+
+  // Window capture phase, so the modal owns Escape and Tab before any other
+  // key handler (the project search, a terminal's pane) sees them.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
       if (e.key === "Escape") {
         e.preventDefault();
-        onCloseRef.current();
+        e.stopPropagation();
+        requestClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      const inside = active !== dialog && dialog.contains(active);
+      if (!first || !last) {
+        e.preventDefault();
+        dialog.focus();
+      } else if (e.shiftKey ? !inside || active === first : !inside || active === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [requestClose]);
 
   return (
     <div
       data-testid="mockup-import-backdrop"
-      onClick={onClose}
+      onClick={requestClose}
       className="fixed inset-0 z-[100] flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.5)" }}
     >
       <div
+        ref={dialogRef}
         data-testid="mockup-import-dialog"
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby="mockup-import-title"
         onClick={(e) => e.stopPropagation()}
-        className="w-[90vw] max-w-[560px] max-h-[85vh] flex flex-col rounded-lg p-4"
+        className="w-[90vw] max-w-[560px] max-h-[85vh] flex flex-col rounded-lg p-4 outline-none"
         style={{
           background: "var(--bg-elevated)",
           border: "1px solid var(--border-subtle)",
@@ -172,8 +220,9 @@ export default function MockupImportDialog({ project, files, onClose, onImported
           <button
             type="button"
             data-testid="mockup-import-cancel"
-            onClick={onClose}
-            className="px-3 py-1.5 rounded-md text-[12.5px]"
+            onClick={requestClose}
+            disabled={submitting}
+            className="px-3 py-1.5 rounded-md text-[12.5px] disabled:opacity-50"
             style={{
               background: "var(--bg-base)",
               color: "var(--text-secondary)",
@@ -187,6 +236,7 @@ export default function MockupImportDialog({ project, files, onClose, onImported
             data-testid="mockup-import-confirm"
             onClick={() => void submit()}
             disabled={acceptedCount === 0 || submitting}
+            aria-busy={submitting}
             className="px-3 py-1.5 rounded-md text-[12.5px] font-semibold disabled:opacity-50"
             style={{
               background: "var(--accent)",

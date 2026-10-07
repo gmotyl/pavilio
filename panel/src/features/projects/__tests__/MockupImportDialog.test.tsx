@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import MockupImportDialog from "../MockupImportDialog";
+import { MOCKUP_MAX_FILES } from "../mockupFiles";
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 
 const MB = 1024 * 1024;
@@ -205,6 +206,158 @@ describe("MockupImportDialog", () => {
       fireEvent.click(screen.getByTestId("mockup-import-confirm"));
     });
     expect(calls.importBodies[0].getAll("slugs")).toEqual(["Account Details / Mobile!!"]);
+  });
+
+  it("maps inspect results to the html row when an image precedes it", async () => {
+    const calls = stubFetch({ externalCounts: { "landing.html": 2 } });
+    renderDialog([makeFile("a.png"), makeFile("landing.html", { type: "text/html" })]);
+
+    const [png, html] = rows();
+    expect(
+      (await within(html).findByTestId("mockup-import-warning")).textContent,
+    ).toBe("Loads 2 external resources — they will not load offline");
+    expect(within(png).queryByTestId("mockup-import-warning")).toBeNull();
+    expect(calls.inspect[0].getAll("files").map((f) => (f as File).name)).toEqual([
+      "landing.html",
+    ]);
+  });
+
+  it("rejects files beyond the per-import limit and does not send them", async () => {
+    expect(MOCKUP_MAX_FILES).toBe(50);
+    const calls = stubFetch();
+    // An unsupported file does not use up one of the 50 slots.
+    const files = [
+      makeFile("brief.pdf"),
+      ...Array.from({ length: MOCKUP_MAX_FILES + 2 }, (_, i) => makeFile(`f${i}.png`)),
+    ];
+    renderDialog(files);
+
+    const all = rows();
+    expect(all).toHaveLength(MOCKUP_MAX_FILES + 3);
+    expect(within(all[MOCKUP_MAX_FILES]).queryByTestId("mockup-import-rejected")).toBeNull();
+    for (const row of all.slice(MOCKUP_MAX_FILES + 1)) {
+      expect(within(row).getByTestId("mockup-import-rejected").textContent).toBe(
+        "Rejected — At most 50 files per import",
+      );
+    }
+    expect(screen.getByTestId("mockup-import-confirm").textContent).toBe("Import 50");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
+    });
+    const sent = calls.importBodies[0].getAll("files").map((f) => (f as File).name);
+    expect(sent).toHaveLength(MOCKUP_MAX_FILES);
+    expect(sent).not.toContain(`f${MOCKUP_MAX_FILES}.png`);
+    expect(sent).not.toContain(`f${MOCKUP_MAX_FILES + 1}.png`);
+  });
+
+  it("focuses the first name field on open", () => {
+    stubFetch();
+    renderDialog([makeFile("brief.pdf"), makeFile("a.png"), makeFile("b.png")]);
+    expect(document.activeElement).toBe(screen.getAllByTestId("mockup-import-slug")[0]);
+  });
+
+  it("focuses the dialog when no file can be named", () => {
+    stubFetch();
+    renderDialog([makeFile("brief.pdf")]);
+    expect(document.activeElement).toBe(screen.getByTestId("mockup-import-dialog"));
+  });
+
+  it("keeps Tab inside the dialog", () => {
+    stubFetch();
+    renderDialog([makeFile("a.png")]);
+    const slug = screen.getByTestId("mockup-import-slug");
+    const confirm = screen.getByTestId("mockup-import-confirm");
+
+    confirm.focus();
+    fireEvent.keyDown(confirm, { key: "Tab" });
+    expect(document.activeElement).toBe(slug);
+
+    fireEvent.keyDown(slug, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(confirm);
+  });
+
+  it("restores focus to the opener on close", () => {
+    stubFetch();
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { unmount } = render(
+      <MockupImportDialog
+        project="pavilio"
+        files={[makeFile("a.png")]}
+        onClose={vi.fn()}
+        onImported={vi.fn()}
+      />,
+    );
+    expect(document.activeElement).not.toBe(opener);
+    unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it("escape closes the dialog without reaching other key handlers", () => {
+    stubFetch();
+    const outerReact = vi.fn();
+    const windowBubble = vi.fn();
+    window.addEventListener("keydown", windowBubble);
+    const onClose = vi.fn();
+    render(
+      <div onKeyDown={outerReact}>
+        <MockupImportDialog
+          project="pavilio"
+          files={[makeFile("a.png")]}
+          onClose={onClose}
+          onImported={vi.fn()}
+        />
+      </div>,
+    );
+
+    fireEvent.keyDown(screen.getByTestId("mockup-import-slug"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(outerReact).not.toHaveBeenCalled();
+    expect(windowBubble).not.toHaveBeenCalled();
+    window.removeEventListener("keydown", windowBubble);
+  });
+
+  it("cannot be closed while an import is in flight", async () => {
+    let finish!: () => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        if (!String(input).endsWith("/mockups/import"))
+          return Promise.resolve({ ok: true, json: async () => ({ files: [] }) } as Response);
+        return new Promise<Response>((resolve) => {
+          finish = () =>
+            resolve({
+              ok: true,
+              json: async () => ({
+                files: [{ name: "a.png", relativePath: "pavilio/mockups/a.png", ok: true }],
+              }),
+            } as Response);
+        });
+      }),
+    );
+    const { onClose, onImported } = renderDialog([makeFile("a.png")]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mockup-import-confirm"));
+    });
+    const confirm = screen.getByTestId("mockup-import-confirm") as HTMLButtonElement;
+    expect(confirm.textContent).toBe("Importing…");
+    expect(confirm.getAttribute("aria-busy")).toBe("true");
+    expect(confirm.disabled).toBe(true);
+    expect((screen.getByTestId("mockup-import-cancel") as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.keyDown(screen.getByTestId("mockup-import-slug"), { key: "Escape" });
+    fireEvent.click(screen.getByTestId("mockup-import-backdrop"));
+    fireEvent.click(screen.getByTestId("mockup-import-cancel"));
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finish();
+    });
+    expect(onImported).toHaveBeenCalledWith(["pavilio/mockups/a.png"]);
   });
 
   it("cancel closes without uploading", () => {

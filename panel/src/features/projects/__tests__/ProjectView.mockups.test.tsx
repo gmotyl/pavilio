@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 import ProjectView from "../ProjectView";
+import { PAVILIO_FILE_MIME_TYPE } from "../../explorer/useFileDrag";
 import { mockFetchResponses } from "../../../test-utils";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
@@ -457,5 +458,32 @@ describe("importing mockups", () => {
 
     const dialog = await screen.findByTestId("mockup-import-dialog");
     expect(dialog).toBeTruthy();
+  });
+  it("ignores a panel row drag that carries no files", async () => {
+    renderWithImport([]);
+    const target = await screen.findByTestId("mockups-drop-target");
+
+    // fireEvent returns false only when a handler called preventDefault.
+    const notCancelled = fireEvent.dragOver(target, {
+      dataTransfer: { files: [], types: [PAVILIO_FILE_MIME_TYPE, "text/plain"] },
+    });
+    expect(notCancelled).toBe(true);
+    expect(target.style.outline).toBe("");
+
+    fireEvent.drop(target, {
+      dataTransfer: { files: [], types: [PAVILIO_FILE_MIME_TYPE, "text/plain"] },
+    });
+    expect(screen.queryByTestId("mockup-import-dialog")).toBeNull();
+  });
+
+  it("highlights the drop target for an OS file drag", async () => {
+    renderWithImport([]);
+    const target = await screen.findByTestId("mockups-drop-target");
+
+    const notCancelled = fireEvent.dragOver(target, {
+      dataTransfer: { files: [], types: ["Files"] },
+    });
+    expect(notCancelled).toBe(false);
+    expect(target.style.outline).toContain("dashed");
   });
 });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react
 import { alerts } from "../alerts/store";
 import {
   MOCKUP_MAX_BYTES,
+  MOCKUP_MAX_FILES,
   importedExt,
   isHtmlMockup,
   isMockupFile,
@@ -35,6 +36,7 @@ interface ImportResult {
 
 const UNSUPPORTED = "Unsupported file type — SVG, PNG, JPEG, WebP or HTML only";
 const TOO_LARGE = "Larger than 20 MB";
+const TOO_MANY = `At most ${MOCKUP_MAX_FILES} files per import`;
 
 function rejection(file: File): string | null {
   if (!isMockupFile(file.name)) return UNSUPPORTED;
@@ -70,16 +72,21 @@ export function useMockupImport({
   /** Relative paths of the files that landed, in the order they were sent. */
   onImported: (relativePaths: string[]) => void;
 }) {
-  const base = useMemo(
-    () =>
-      files.map((file) => ({
+  const base = useMemo(() => {
+    // Only files that would be sent count toward the limit, so an
+    // unsupported file early in the batch does not push a good one out.
+    let accepted = 0;
+    return files.map((file) => {
+      let rejected = rejection(file);
+      if (!rejected && ++accepted > MOCKUP_MAX_FILES) rejected = TOO_MANY;
+      return {
         file,
         ext: importedExt(file.name),
-        rejected: rejection(file),
+        rejected,
         isHtml: isHtmlMockup(file.name),
-      })),
-    [files],
-  );
+      };
+    });
+  }, [files]);
   const [slugs, setSlugs] = useState<string[]>(() =>
     files.map((f) => normaliseMockupSlug(basename(f.name))),
   );
