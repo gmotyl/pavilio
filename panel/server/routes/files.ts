@@ -58,6 +58,12 @@ router.get("/read/*path", (req, res) => {
   const parts = req.params.path;
   const relativePath = Array.isArray(parts) ? parts.join("/") : parts;
   const { projectsDir } = getConfig();
+  // ?meta=1 — resolve the file and return its absolute path without reading
+  // it: viewers of image mockups need the path, and an image's bytes decoded
+  // as utf-8 are garbage on the wire.
+  const metaOnly = req.query.meta === "1";
+  const readContent = (path: string) =>
+    metaOnly ? "" : readFileSync(path, "utf-8");
 
   // ?root=<id> — explicit cross-root read (checked first, before legacy prefixes)
   const rootParam = typeof req.query.root === "string" ? req.query.root : "";
@@ -70,7 +76,7 @@ router.get("/read/*path", (req, res) => {
     if (!existsSync(candidate)) {
       return res.status(404).json({ error: "File not found" });
     }
-    const content = readFileSync(candidate, "utf-8");
+    const content = readContent(candidate);
     return res.json({ path: relativePath, absolutePath: candidate, content });
   }
 
@@ -113,7 +119,7 @@ router.get("/read/*path", (req, res) => {
     return res.status(404).json({ error: "File not found" });
   }
 
-  const content = readFileSync(absolutePath, "utf-8");
+  const content = readContent(absolutePath);
   res.json({ path: relativePath, absolutePath, content });
 });
 

@@ -2,6 +2,11 @@ import { useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useActiveFile } from "../explorer/useActiveFile";
 import MockupFrame from "../projects/MockupFrame";
+import {
+  isMockupFile,
+  isMockupImage,
+  metaReadUrl,
+} from "../projects/mockupFiles";
 import ViewerActions from "../projects/ViewerActions";
 import { relativeToWorkspace } from "../projects/relativeToWorkspace";
 import { useWorkspaceRoot } from "../projects/useWorkspaceRoot";
@@ -46,7 +51,10 @@ export default function MarkdownViewer() {
   const { lastMessage } = useWebSocket();
 
   const fetchContent = async () => {
-    const res = await fetch(buildReadUrl(filePath));
+    // An image only needs its absolute path — the frame loads it from the raw
+    // route — so its bytes are never read as text.
+    const url = buildReadUrl(filePath);
+    const res = await fetch(isMockupImage(filePath) ? metaReadUrl(url) : url);
     if (res.ok) {
       const data = await res.json();
       setContent(data.content);
@@ -77,7 +85,9 @@ export default function MarkdownViewer() {
   // and takes no `root` query, so a cross-root `_root/<rootId>/…` path would
   // load an empty frame with no error. Those fall through to the source text.
   const isCrossRoot = filePath.split("/")[0] === "_root";
-  const isHtml = filePath.endsWith(".html") && !isCrossRoot;
+  // Image mockups (SVG, PNG, JPEG, WebP) take the same frame, which renders
+  // them through `<img>`; QuickFinder and the file tree link them here.
+  const isMockup = isMockupFile(filePath) && !isCrossRoot;
 
   // The toolbar above an open file is `ViewerActions`, the same component the
   // project file viewer and the plans tab mount — VS Code, copy-path (relative
@@ -89,7 +99,7 @@ export default function MarkdownViewer() {
   // frame (the width picker belongs next to it), so the breadcrumb slot stays
   // empty rather than mounting a second copy of the same buttons.
   useBreadcrumbActions(
-    absolutePath && !isHtml ? (
+    absolutePath && !isMockup ? (
       <ViewerActions
         absolutePath={absolutePath}
         relativePath={
@@ -99,7 +109,7 @@ export default function MarkdownViewer() {
         testIdPrefix="markdown-viewer"
       />
     ) : null,
-    [absolutePath, workspaceRoot, content, loading, isHtml],
+    [absolutePath, workspaceRoot, content, loading, isMockup],
   );
 
   useFloatingAction(<WideToggle wide={wide} onToggle={toggleWide} />, [
@@ -114,11 +124,12 @@ export default function MarkdownViewer() {
       </div>
     );
 
-  // An html file is a mockup: render it, do not show its source. Same frame
+  // An html or image file is a mockup: render it, do not show its source (an
+  // image's bytes are not even fetched as text). Same frame
   // component the mockups tab mounts, so both copy the same workspace-relative
   // path. It owns the full pane height and skips the image drop zone, which
   // only means something for markdown.
-  if (isHtml)
+  if (isMockup)
     return (
       <div className="p-6 h-full min-h-0">
         <MockupFrame

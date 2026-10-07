@@ -83,6 +83,38 @@ describe("the mockups detail pane", () => {
     expect(await screen.findByTestId("file-list-peek-trigger")).toBeTruthy();
     expect(screen.queryByTestId("mockup-viewer-frame")).toBeNull();
   });
+
+  it("html mockup unchanged", async () => {
+    renderMockups(["pavilio/mockups/boot-legend.html"], {
+      file: "pavilio/mockups/boot-legend.html",
+    });
+
+    // The frame and its viewport-width picker, and no image or zoom toggle.
+    expect(await screen.findByTestId("mockup-viewer-frame")).toBeTruthy();
+    expect(screen.getByTestId("mockup-viewer-width-full")).toBeTruthy();
+    expect(screen.getByTestId("mockup-viewer-width-tablet")).toBeTruthy();
+    expect(screen.getByTestId("mockup-viewer-width-phone")).toBeTruthy();
+    expect(screen.queryByTestId("mockup-viewer-image")).toBeNull();
+    expect(screen.queryByTestId("mockup-viewer-zoom-fit")).toBeNull();
+  });
+
+  it("renders an image mockup as an img without reading it as text", async () => {
+    renderMockups(["pavilio/mockups/2026-10-07-hero.PNG"], {
+      file: "pavilio/mockups/2026-10-07-hero.PNG",
+    });
+
+    const img = await screen.findByTestId("mockup-viewer-image");
+    expect(img.tagName).toBe("IMG");
+    expect(screen.queryByTestId("mockup-viewer-frame")).toBeNull();
+    // The read only resolves the absolute path; the bytes are never decoded
+    // as utf-8 text.
+    const reads = vi
+      .mocked(fetch)
+      .mock.calls.map(([input]) => String(input))
+      .filter((url) => url.startsWith("/api/files/read/"));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const url of reads) expect(url).toContain("meta=1");
+  });
 });
 
 describe("the mockups empty state", () => {
@@ -157,6 +189,18 @@ describe("the mockup fill chain", () => {
 
     const detail = await screen.findByTestId("file-list-sidebar-detail");
     expect(classesOf(outer())).toContain("relative");
+    expect(classesOf(outer())).toContain("md:h-full");
+    expect(classesOf(view())).toEqual(expect.arrayContaining(VIEW_FILL));
+    expect(classesOf(detail)).toEqual(expect.arrayContaining(DETAIL_FILL));
+  });
+
+  it("image mockup fills the pane height", async () => {
+    renderMockups(["pavilio/mockups/2026-10-07-hero.webp"], {
+      file: "pavilio/mockups/2026-10-07-hero.webp",
+    });
+
+    const detail = await screen.findByTestId("file-list-sidebar-detail");
+    await screen.findByTestId("mockup-viewer-image");
     expect(classesOf(outer())).toContain("md:h-full");
     expect(classesOf(view())).toEqual(expect.arrayContaining(VIEW_FILL));
     expect(classesOf(detail)).toEqual(expect.arrayContaining(DETAIL_FILL));

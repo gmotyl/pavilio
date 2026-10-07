@@ -132,6 +132,41 @@ describe("MarkdownViewer html handling", () => {
     expect(screen.queryByTestId("markdown-viewer-frame")).toBeNull();
   });
 
+  it("view route renders image mockups as img", async () => {
+    // QuickFinder and the file tree list image mockups and link them to
+    // `/view/<path>`; their bytes must never be shown (or read) as text.
+    stubRead("", "/root/git/prv/projects/projects/pavilio/mockups/hero.png");
+    const { container } = renderViewer("pavilio/mockups/hero.png");
+
+    const img = await screen.findByTestId("markdown-viewer-image");
+    expect(img.tagName).toBe("IMG");
+    expect(img).toHaveAttribute(
+      "src",
+      "/api/files/raw/pavilio/mockups/hero.png",
+    );
+    expect(container.querySelector("pre")).toBeNull();
+    expect(screen.queryByTestId("markdown-viewer-frame")).toBeNull();
+
+    const reads = vi
+      .mocked(fetch)
+      .mock.calls.map(([input]) => String(input))
+      .filter((url) => url.startsWith("/api/files/read/"));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const url of reads) expect(url).toContain("meta=1");
+
+    // The frame brings its own toolbar, with copy content off for a raster.
+    expect(screen.getByTestId("markdown-viewer-copy-content")).toBeDisabled();
+    expect(screen.getAllByTestId("markdown-viewer-copy-path")).toHaveLength(1);
+  });
+
+  it("view route renders an uppercase svg through img", async () => {
+    stubRead("", "/root/git/prv/projects/projects/pavilio/mockups/ICON.SVG");
+    renderViewer("pavilio/mockups/ICON.SVG");
+
+    const img = await screen.findByTestId("markdown-viewer-image");
+    expect(img.tagName).toBe("IMG");
+  });
+
   it("still renders markdown with the markdown renderer", async () => {
     stubRead("# Hello", "/root/git/prv/projects/projects/pavilio/notes/a.md");
     renderViewer("pavilio/notes/a.md");

@@ -11,6 +11,7 @@ import { useFileListControls } from "./fileListControls";
 import { useAutoSelectNewest } from "./useAutoSelectNewest";
 import FileListSidebar from "./FileListSidebar";
 import MockupFrame from "./MockupFrame";
+import { isMockupFile } from "./mockupFiles";
 import MockupsEmptyState from "./MockupsEmptyState";
 import ContextTab from "./ContextTab";
 import PlansTab from "./PlansTab";
@@ -39,12 +40,6 @@ import ProjectTerminalsSurface from "../terminal/ProjectTerminalsSurface";
 import { TimeTrackingLink } from "../time/TimeTrackingLink";
 import { useProjectTodayMinutes } from "../time/TimeTrackingProvider";
 
-/**
- * The extension, not the section, picks the viewer: a `.md` file living under
- * `mockups/` is still a document, and an `.html` file is a mockup wherever it
- * was filed.
- */
-const isHtml = (path: string) => path.endsWith(".html");
 
 /** Sidebar headings read like the sibling tabs ("Plans", "Context"). */
 const sectionTitle = (section: string) =>
@@ -203,7 +198,10 @@ export default function ProjectView() {
   // framed content that should fill what is left of the viewport; every other
   // file is a document the page scrolls.
   const fillsHeight = Boolean(
-    section && !SPECIAL_SECTIONS.has(section) && selectedFile && isHtml(selectedFile),
+    section &&
+      !SPECIAL_SECTIONS.has(section) &&
+      selectedFile &&
+      isMockupFile(selectedFile),
   );
 
   return (
@@ -368,7 +366,7 @@ export default function ProjectView() {
           aboveList={section === "qa" ? <ReviewRules project={name || ""} /> : null}
           detail={
             selectedFile ? (
-              isHtml(selectedFile) ? (
+              isMockupFile(selectedFile) ? (
                 <MockupFrame
                   filePath={selectedFile}
                   absolutePath={fileViewer.absolutePath}
