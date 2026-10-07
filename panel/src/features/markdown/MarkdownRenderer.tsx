@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Children, cloneElement, isValidElement, lazy, Suspense, useMemo, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, lazy, Suspense, useMemo, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -15,8 +15,24 @@ interface MarkdownRendererProps {
   basePath?: string;
 }
 
+/**
+ * A host-relative href (`/project/...`, but not protocol-relative `//host/...`)
+ * is a panel route, not a file path: it is navigated to as-is, query included.
+ */
+function isAppRoute(href: string): boolean {
+  return href.startsWith("/") && !href.startsWith("//");
+}
+
+/**
+ * A click the SPA should handle itself. Modifier and non-primary clicks keep
+ * the browser default (new tab / window / download) on the real `href`.
+ */
+function isPlainLeftClick(e: MouseEvent<HTMLAnchorElement>): boolean {
+  return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+}
+
 function resolveRelativeHref(href: string, basePath: string): string | null {
-  if (!href || href.startsWith("http") || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("vscode:")) return null;
+  if (!href || href.startsWith("//") || href.startsWith("http") || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("vscode:")) return null;
 
   const parts = basePath.split("/");
   parts.pop(); // remove filename → directory
@@ -149,32 +165,39 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
       },
     };
 
+    const inAppLink = (to: string, children: ReactNode, props: Record<string, unknown>) => (
+      <a
+        href={to}
+        onClick={(e) => {
+          if (!isPlainLeftClick(e)) return;
+          e.preventDefault();
+          navigate(to);
+        }}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+
+    // App routes do not depend on where the file lives, so they work without a
+    // basePath too (e.g. a design doc from an OpenSpec backend outside projectsDir).
+    const a: Components["a"] = ({ href, children, ...props }) => {
+      if (!href) return <a {...props}>{children}</a>;
+      if (isAppRoute(href)) return inAppLink(href, children, props);
+      if (!basePath) return <a href={href} {...props}>{children}</a>;
+
+      const resolved = resolveRelativeHref(href, basePath);
+      if (!resolved) return <a href={href} {...props}>{children}</a>;
+
+      return inAppLink(`/view/${resolved}`, children, props);
+    };
+
     // Relative links and images can only be resolved against a known base.
-    if (!basePath) return codeBlocks;
+    if (!basePath) return { ...codeBlocks, a };
 
     return {
       ...codeBlocks,
-      a: ({ href, children, ...props }) => {
-        if (!href) return <a {...props}>{children}</a>;
-
-        const resolved = resolveRelativeHref(href, basePath);
-        if (!resolved) return <a href={href} {...props}>{children}</a>;
-
-        const viewPath = `/view/${resolved}`;
-
-        return (
-          <a
-            href={viewPath}
-            onClick={(e) => {
-              e.preventDefault();
-              navigate(viewPath);
-            }}
-            {...props}
-          >
-            {children}
-          </a>
-        );
-      },
+      a,
       img: ({ src, alt, ...props }) => {
         if (!src || src.startsWith("http") || src.startsWith("data:")) {
           return <img src={src} alt={alt} {...props} />;
