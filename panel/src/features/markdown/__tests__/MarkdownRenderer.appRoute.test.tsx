@@ -85,3 +85,24 @@ describe("MarkdownRenderer host-relative links", () => {
     expect(container.querySelector("img")?.getAttribute("src")).toBe("/api/files/raw/pavilio/notes/img/s.png");
   });
 });
+
+describe("MarkdownRenderer links that ask for another target", () => {
+  it("leaves target=_blank and download links to the browser", () => {
+    renderMd(
+      [
+        `<a href="${MOCKUP_ROUTE}" target="_blank">blank</a>`,
+        `<a href="../mockups/x.svg" download>dl</a>`,
+        `<a href="../mockups/y.svg" target="_self">self</a>`,
+      ].join("\n\n"),
+      "pavilio/plans/design.md",
+    );
+
+    expect(fireEvent.click(screen.getByRole("link", { name: "blank" }))).toBe(true);
+    expect(fireEvent.click(screen.getByRole("link", { name: "dl" }))).toBe(true);
+    expect(navigate).not.toHaveBeenCalled();
+
+    // An explicit same-tab target is still an in-app navigation
+    expect(fireEvent.click(screen.getByRole("link", { name: "self" }))).toBe(false);
+    expect(navigate).toHaveBeenCalledWith("/view/pavilio/mockups/y.svg");
+  });
+});

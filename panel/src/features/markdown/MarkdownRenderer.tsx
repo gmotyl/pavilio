@@ -31,6 +31,15 @@ function isPlainLeftClick(e: MouseEvent<HTMLAnchorElement>): boolean {
   return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
 }
 
+/**
+ * A raw-HTML link that asks for another browsing context (`target="_blank"`,
+ * a named frame) or a download keeps the browser's own behaviour.
+ */
+function wantsBrowserNavigation(a: HTMLAnchorElement): boolean {
+  const target = a.getAttribute("target");
+  return a.hasAttribute("download") || (!!target && target.toLowerCase() !== "_self");
+}
+
 function resolveRelativeHref(href: string, basePath: string): string | null {
   if (!href || href.startsWith("//") || href.startsWith("http") || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("vscode:")) return null;
 
@@ -169,7 +178,7 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
       <a
         href={to}
         onClick={(e) => {
-          if (!isPlainLeftClick(e)) return;
+          if (!isPlainLeftClick(e) || wantsBrowserNavigation(e.currentTarget)) return;
           e.preventDefault();
           navigate(to);
         }}
