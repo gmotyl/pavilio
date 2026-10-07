@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import multer, { type StorageEngine } from "multer";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, realpath, writeFile } from "fs/promises";
 import { resolve } from "path";
 import { getConfig } from "../config.js";
 import { discoverProjects } from "../lib/discovery.js";
@@ -9,6 +9,7 @@ import { localISODate } from "../lib/dateLocal.js";
 import { validateProjectName } from "../lib/projectName.js";
 import {
   MOCKUP_MAX_BYTES,
+  MOCKUP_MAX_TOTAL_BYTES,
   countExternalResources,
   isPathUnder,
   mockupFileName,
@@ -20,31 +21,57 @@ const router = Router();
 const MAX_FILES = 50;
 const MAX_SUFFIX = 1000;
 
-type BufferedFile = Express.Multer.File & { tooLarge?: boolean };
+type BufferedFile = Express.Multer.File & { tooLarge?: boolean; overTotal?: boolean };
+
+/** Bytes buffered so far for one request, across all of its files. */
+const bufferedBytes = new WeakMap<Request, number>();
+/** Requests that hit the total cap: every later file fails too, even a small one. */
+const overTotalRequests = new WeakSet<Request>();
 
 /**
- * Memory storage that keeps going past the size cap: an oversized file is
+ * Memory storage that keeps going past the size caps: an oversized file is
  * drained and flagged instead of failing the whole request, so one 30 MB
- * export does not block the rest of the batch.
+ * export does not block the rest of the batch. Once the request has buffered
+ * `MOCKUP_MAX_TOTAL_BYTES`, every further file is drained and flagged too.
  */
 const cappedMemoryStorage: StorageEngine = {
-  _handleFile(_req, file, cb) {
+  _handleFile(req, file, cb) {
     const chunks: Buffer[] = [];
     let size = 0;
+    let kept = 0;
     let tooLarge = false;
+    let overTotal = false;
+    // Reserve bytes as they arrive (not at `end`) so a file that starts
+    // before the previous one finished still sees the running total.
+    const total = () => bufferedBytes.get(req) ?? 0;
+    const release = () => {
+      bufferedBytes.set(req, total() - kept);
+      kept = 0;
+      chunks.length = 0;
+    };
     file.stream.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MOCKUP_MAX_BYTES) {
+      if (tooLarge || overTotal) return;
+      if (overTotalRequests.has(req)) {
+        overTotal = true;
+        release();
+      } else if (size > MOCKUP_MAX_BYTES) {
         tooLarge = true;
-        chunks.length = 0;
-      } else if (!tooLarge) {
+        release();
+      } else if (total() + chunk.length > MOCKUP_MAX_TOTAL_BYTES) {
+        overTotal = true;
+        overTotalRequests.add(req);
+        release();
+      } else {
         chunks.push(chunk);
+        kept += chunk.length;
+        bufferedBytes.set(req, total() + chunk.length);
       }
     });
     file.stream.on("error", cb);
     file.stream.on("end", () => {
-      const buffer = tooLarge ? Buffer.alloc(0) : Buffer.concat(chunks);
-      cb(null, { buffer, size, tooLarge } as Partial<BufferedFile>);
+      const buffer = tooLarge || overTotal ? Buffer.alloc(0) : Buffer.concat(chunks);
+      cb(null, { buffer, size, tooLarge, overTotal } as Partial<BufferedFile>);
     });
   },
   _removeFile(_req, _file, cb) {
@@ -98,6 +125,9 @@ interface ImportResult {
   error?: string;
 }
 
+/** A failure whose message is safe to show the client (no server paths). */
+class ImportError extends Error {}
+
 /** Write with `wx`, moving to the next `-n` suffix on EEXIST — never an overwrite. */
 async function writeUnique(
   dir: string,
@@ -109,7 +139,7 @@ async function writeUnique(
   for (let n = 1; n <= MAX_SUFFIX; n++) {
     const name = mockupFileName(date, slug, file.originalname, ext, n);
     const target = resolve(dir, name);
-    if (!isPathUnder(target, dir) || target === dir) throw new Error("Invalid file name");
+    if (!isPathUnder(target, dir) || target === dir) throw new ImportError("Invalid file name");
     try {
       await writeFile(target, file.buffer, { flag: "wx" });
       return name;
@@ -117,7 +147,7 @@ async function writeUnique(
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
   }
-  throw new Error("Too many files with this name");
+  throw new ImportError("Too many files with this name");
 }
 
 router.post("/:project/mockups/import", requireProject, receiveFiles, async (req, res) => {
@@ -135,11 +165,28 @@ router.post("/:project/mockups/import", requireProject, receiveFiles, async (req
   const results: ImportResult[] = [];
   let wrote = false;
 
+  // Created lazily (only once a file passes), then resolved through symlinks:
+  // a `mockups` link pointing out of the project must not receive writes.
+  let realDir: Promise<string> | undefined;
+  const mockupsDir = () =>
+    (realDir ??= (async () => {
+      await mkdir(dir, { recursive: true });
+      const [realProject, real] = await Promise.all([realpath(projectDir), realpath(dir)]);
+      if (!isPathUnder(real, realProject) || real === realProject) {
+        throw new ImportError("The mockups folder is outside the project");
+      }
+      return real;
+    })());
+
   for (const [i, file] of files.entries()) {
     const fail = (error: string) =>
       results.push({ name: file.originalname, relativePath: "", ok: false, error });
     if (file.tooLarge) {
       fail("File is larger than 20 MB");
+      continue;
+    }
+    if (file.overTotal) {
+      fail("The import is larger than 100 MB in total — import the rest separately");
       continue;
     }
     const sniff = sniffMockup(file.originalname, file.buffer);
@@ -148,12 +195,17 @@ router.post("/:project/mockups/import", requireProject, receiveFiles, async (req
       continue;
     }
     try {
-      await mkdir(dir, { recursive: true });
-      const name = await writeUnique(dir, date, slugs[i], file, sniff.ext);
+      const target = await mockupsDir();
+      const name = await writeUnique(target, date, slugs[i], file, sniff.ext);
       wrote = true;
       results.push({ name, relativePath: `${project}/mockups/${name}`, ok: true });
     } catch (err) {
-      fail(err instanceof Error ? err.message : "Write failed");
+      // fs errors carry absolute paths — log them, send a generic reason
+      if (err instanceof ImportError) fail(err.message);
+      else {
+        console.error("[mockups] import write failed:", err);
+        fail("Could not write the file");
+      }
     }
   }
 

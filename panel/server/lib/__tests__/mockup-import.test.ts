@@ -28,6 +28,12 @@ describe("mockup-import naming", () => {
     );
   });
 
+  it("strips diacritics instead of turning them into dashes", () => {
+    expect(normaliseSlug("Zażółć gęślą")).toBe("zazolc-gesla");
+    expect(normaliseSlug("ŁÓDŹ Straße")).toBe("lodz-strasse");
+    expect(normaliseSlug("Søren Đorđe café")).toBe("soren-dorde-cafe");
+  });
+
   it("falls back to basename then mockup", () => {
     expect(mockupBaseName("", "Frame 12.png")).toBe("frame-12");
     expect(mockupBaseName("   ", "Frame 12.png")).toBe("frame-12");
@@ -64,6 +70,9 @@ describe("mockup-import sniffing", () => {
     expect(sniffMockup("a.pdf", Buffer.from("%PDF-1.7")).ok).toBe(false);
     expect(sniffMockup("a.png", Buffer.from("<!doctype html><p>x")).ok).toBe(false);
     expect(sniffMockup("a.svg", PNG).ok).toBe(false);
+    // RIFF container that is not WebP (a WAVE file renamed .webp)
+    const wave = Buffer.concat([Buffer.from("RIFF"), Buffer.from([0x24, 0, 0, 0]), Buffer.from("WAVEfmt ")]);
+    expect(sniffMockup("a.webp", wave).ok).toBe(false);
     expect(sniffMockup("a.html", Buffer.from([0xff, 0xfe, 0x3c, 0x00])).ok).toBe(false);
   });
 });

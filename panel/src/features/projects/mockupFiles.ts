@@ -56,14 +56,28 @@ export const importedExt = (name: string) => {
   return ext === ".jpeg" ? ".jpg" : ext;
 };
 
+// Letters NFKD does not decompose into base + combining mark
+const LETTER_FOLDS: Record<string, string> = {
+  ł: "l",
+  Ł: "L",
+  ß: "ss",
+  ø: "o",
+  Ø: "O",
+  đ: "d",
+  Đ: "D",
+};
+
 /**
- * The slug the server would derive from `input` — lower-case, `[a-z0-9-]`
- * only, dash runs collapsed, trimmed, max 60 chars. The client only uses it to
- * PRE-FILL the dialog; whatever the user types is sent as-is and normalised
- * server-side.
+ * The slug the server would derive from `input` — lower-case, diacritics
+ * folded to ASCII, `[a-z0-9-]` only, dash runs collapsed, trimmed, max 60
+ * chars. The client only uses it to PRE-FILL the dialog; whatever the user
+ * types is sent as-is and normalised server-side.
  */
 export const normaliseMockupSlug = (input: string) =>
   input
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .replace(/[łŁßøØđĐ]/g, (c) => LETTER_FOLDS[c] ?? c)
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/-{2,}/g, "-")

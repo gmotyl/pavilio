@@ -1,7 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import request from "supertest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "fs";
+import {
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  existsSync,
+  symlinkSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -155,6 +164,61 @@ describe("POST /api/projects/:project/mockups/import", () => {
     expect(listMockups("ghost")).toEqual([]);
     expect(listMockups()).toEqual([]);
     expect(rebuildIndex).not.toHaveBeenCalled();
+  });
+
+  it("refuses a mockups dir that is a symlink out of the project", async () => {
+    const outside = join(tmpRoot, "outside");
+    mkdirSync(outside);
+    symlinkSync(outside, mockupsDir());
+    const res = await request(makeApp())
+      .post("/api/projects/p/mockups/import")
+      .attach("files", PNG, "a.png")
+      .field("slugs", "a");
+    expect(res.status).toBe(200);
+    expect(res.body.files[0]).toMatchObject({ ok: false, name: "a.png" });
+    expect(res.body.files[0].error).not.toContain(tmpRoot);
+    expect(readdirSync(outside)).toEqual([]);
+    expect(rebuildIndex).not.toHaveBeenCalled();
+  });
+
+  it("does not leak the server path when the mockups dir cannot be created", async () => {
+    // A regular file where the folder should be makes mkdir/write fail
+    writeFileSync(mockupsDir(), "not a dir");
+    const res = await request(makeApp())
+      .post("/api/projects/p/mockups/import")
+      .attach("files", PNG, "a.png")
+      .field("slugs", "a");
+    expect(res.status).toBe(200);
+    expect(res.body.files[0]).toMatchObject({ ok: false, name: "a.png" });
+    expect(res.body.files[0].error).toBeTruthy();
+    expect(res.body.files[0].error).not.toContain(tmpRoot);
+    expect(res.body.files[0].error).not.toMatch(/\//);
+  });
+
+  it("dates the file by the local calendar day, not UTC", async () => {
+    const prevTz = process.env.TZ;
+    process.env.TZ = "Europe/Warsaw";
+    try {
+      // 00:30 in Warsaw on Oct 7 is 22:30 UTC on Oct 6
+      vi.setSystemTime(new Date(2026, 9, 7, 0, 30, 0));
+      expect(new Date().toISOString().slice(0, 10)).toBe("2026-10-06");
+      const res = await request(makeApp())
+        .post("/api/projects/p/mockups/import")
+        .attach("files", PNG, "a.png")
+        .field("slugs", "a");
+      expect(res.body.files[0]).toMatchObject({ ok: true, name: "2026-10-07-a.png" });
+    } finally {
+      if (prevTz === undefined) delete process.env.TZ;
+      else process.env.TZ = prevTz;
+    }
+  });
+
+  it("normalises a slug with diacritics", async () => {
+    const res = await request(makeApp())
+      .post("/api/projects/p/mockups/import")
+      .attach("files", PNG, "x.png")
+      .field("slugs", "Zażółć gęślą");
+    expect(res.body.files[0]).toMatchObject({ ok: true, name: "2026-10-07-zazolc-gesla.png" });
   });
 
   it("rebuilds the index once per batch", async () => {

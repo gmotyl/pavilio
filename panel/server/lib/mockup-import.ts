@@ -4,6 +4,8 @@
 import { extname, isAbsolute, relative } from "path";
 
 export const MOCKUP_MAX_BYTES = 20 * 1024 * 1024;
+/** Cap on the bytes buffered across all files of one import request. */
+export const MOCKUP_MAX_TOTAL_BYTES = 100 * 1024 * 1024;
 
 const SUPPORTED_EXTS = [".html", ".svg", ".png", ".jpg", ".jpeg", ".webp"] as const;
 const TEXT_SNIFF_BYTES = 4096;
@@ -78,9 +80,26 @@ export function sniffMockup(originalName: string, buf: Buffer): SniffResult {
   }
 }
 
-/** Lower-case, `[a-z0-9-]` only, dash runs collapsed, trimmed, max 60 chars. */
+// Letters NFKD does not decompose into base + combining mark
+const LETTER_FOLDS: Record<string, string> = {
+  ł: "l",
+  Ł: "L",
+  ß: "ss",
+  ø: "o",
+  Ø: "O",
+  đ: "d",
+  Đ: "D",
+};
+
+/**
+ * Lower-case, diacritics folded to ASCII (`ż` → `z`, `ł` → `l`), `[a-z0-9-]`
+ * only, dash runs collapsed, trimmed, max 60 chars.
+ */
 export function normaliseSlug(input: string): string {
   return input
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .replace(/[łŁßøØđĐ]/g, (c) => LETTER_FOLDS[c] ?? c)
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/-{2,}/g, "-")
