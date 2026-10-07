@@ -61,4 +61,17 @@ describe("autoplayQueue", () => {
 
     expect(queue.entries().map((entry) => entry.utteranceId)).toEqual(["b1", "d1"]);
   });
+
+  it("a newer answer takes over its cell's superseded entry in place", () => {
+    const queue = createAutoplayQueue();
+    queue.enqueue({ sessionId: "a", utteranceId: "a1" });
+    queue.enqueue({ sessionId: "b", utteranceId: "b1" });
+    queue.enqueue({ sessionId: "c", utteranceId: "c1" });
+    // b2 replaced b1 under B's cursor, so B no longer owes b1; A still owes a1.
+    const owed = new Set(["a1", "c1", "b2"]);
+    queue.enqueue({ sessionId: "b", utteranceId: "b2" }, (entry) => owed.has(entry.utteranceId));
+    queue.enqueue({ sessionId: "a", utteranceId: "a2" }, (entry) => owed.has(entry.utteranceId));
+
+    expect(queue.entries().map((entry) => entry.utteranceId)).toEqual(["a1", "b2", "c1", "a2"]);
+  });
 });

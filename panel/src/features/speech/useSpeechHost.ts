@@ -667,6 +667,9 @@ export function useSpeechHost(): SpeechHost {
         // this — but a cell that somehow does has nothing to say, and leaving it
         // pulsing would be a notification that can never be met.
         markHeard(sessionId);
+        // Counts as a run that ended: reached from a dequeue, the autoplay
+        // queue would otherwise wait for an ending that never comes.
+        setRunEnds((count) => count + 1);
         return;
       }
 
@@ -1241,10 +1244,12 @@ export function useSpeechHost(): SpeechHost {
     //    A catch-up's recovered answers never get this far: the channel has
     //    already recorded them (ADR 0017), so they are shown, never queued.
     const arrived: Utterance[] = [];
+    const owedIds = new Set<string>();
     for (const sessionId of autoplaySessionIds) {
       const record = autoplayedRef.current.get(sessionId);
       if (!record) continue;
       for (const owed of autoplayOwed(sessionId)) {
+        owedIds.add(owed.id);
         if (record.has(owed.id)) continue;
         rememberAutoplayed(record, owed.id);
         if (unlocked) arrived.push(owed);
@@ -1252,8 +1257,15 @@ export function useSpeechHost(): SpeechHost {
     }
     // Stable, so answers that share a stamp keep the order they were found in.
     arrived.sort((left, right) => left.at - right.at);
+    // An idle cell's newer answer replaces the older one under its cursor, so
+    // the older one's queued turn is no longer owed: the newer answer takes
+    // that turn over rather than queuing behind cells that answered between
+    // the two. The speaking cell's backlog is still owed, so its next answer
+    // keeps its own arrival place.
     for (const { sessionId, id } of arrived) {
-      autoplayQueue.enqueue({ sessionId, utteranceId: id });
+      autoplayQueue.enqueue({ sessionId, utteranceId: id }, (queued) =>
+        owedIds.has(queued.utteranceId),
+      );
     }
 
     // 2. Dequeue — only between runs. A run that is still going, PAUSED

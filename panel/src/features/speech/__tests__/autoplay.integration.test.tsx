@@ -1938,6 +1938,28 @@ describe("autoplay — the queue across cells", () => {
     expect(played).toEqual(["blob:A one.", "blob:A two.", "blob:From B."]);
   });
 
+  it("a newer answer keeps its cell's place in the queue", async () => {
+    await renderProjectSurface();
+    await arm("cell-a");
+    await arm("cell-b");
+    await arm("cell-c");
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    // B is idle, so its second answer replaces the first under B's cursor —
+    // and takes over the first one's turn, ahead of C, rather than queuing
+    // behind C while the first goes stale.
+    await emitUtterance("cell-b", "b1", "B one.");
+    await emitUtterance("cell-c", "c1", "From C.");
+    await emitUtterance("cell-b", "b2", "B two.");
+    expect(played).toEqual(["blob:From A."]);
+
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:B two."));
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From C."));
+    expect(played).toEqual(["blob:From A.", "blob:B two.", "blob:From C."]);
+  });
+
   it("a manual play barges in and the queue resumes after it", async () => {
     await renderProjectSurface();
     await arm("cell-a");

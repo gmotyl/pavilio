@@ -25,8 +25,14 @@ export interface QueuedAnswer {
 }
 
 export interface AutoplayQueue {
-  /** Appends an answer. A second entry for an utterance already queued is ignored. */
-  enqueue(entry: QueuedAnswer): void;
+  /**
+   * Appends an answer. A second entry for an utterance already queued is
+   * ignored. With `isOwed`, an entry of the SAME cell that the cell no longer
+   * owes — a newer answer replaced it under an idle cell's cursor — is taken
+   * over in place instead: the newest answer keeps the cell's turn rather than
+   * queuing behind cells that answered after the first one.
+   */
+  enqueue(entry: QueuedAnswer, isOwed?: (queued: QueuedAnswer) => boolean): void;
   /**
    * Removes and returns the oldest entry that `isUnheard` still accepts,
    * dropping every stale entry ahead of it on the way; `null` when none is left.
@@ -48,11 +54,25 @@ export function createAutoplayQueue(): AutoplayQueue {
   let queue: QueuedAnswer[] = [];
 
   return {
-    enqueue(entry) {
+    enqueue(entry, isOwed) {
       // Keyed on the utterance alone: an id names one answer from one cell, and
       // seeing it twice (a re-render, a re-broadcast) is the same arrival.
       if (queue.some((queued) => queued.utteranceId === entry.utteranceId)) return;
-      queue.push({ sessionId: entry.sessionId, utteranceId: entry.utteranceId });
+      const fresh = { sessionId: entry.sessionId, utteranceId: entry.utteranceId };
+      const superseded = isOwed
+        ? queue.findIndex((queued) => queued.sessionId === entry.sessionId && !isOwed(queued))
+        : -1;
+      if (superseded < 0) {
+        queue.push(fresh);
+        return;
+      }
+      // The first superseded entry's slot is the cell's turn; any later ones of
+      // the same cell are just as stale and would only be dropped at their turn.
+      queue = queue.filter(
+        (queued, index) =>
+          index <= superseded || queued.sessionId !== entry.sessionId || isOwed?.(queued),
+      );
+      queue[superseded] = fresh;
     },
 
     next(isUnheard) {
