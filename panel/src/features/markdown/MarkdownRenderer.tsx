@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Children, cloneElement, isValidElement, lazy, Suspense, useMemo, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, lazy, Suspense, useMemo, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -15,8 +15,33 @@ interface MarkdownRendererProps {
   basePath?: string;
 }
 
+/**
+ * A host-relative href (`/project/...`, but not protocol-relative `//host/...`)
+ * is a panel route, not a file path: it is navigated to as-is, query included.
+ */
+function isAppRoute(href: string): boolean {
+  return href.startsWith("/") && !href.startsWith("//");
+}
+
+/**
+ * A click the SPA should handle itself. Modifier and non-primary clicks keep
+ * the browser default (new tab / window / download) on the real `href`.
+ */
+function isPlainLeftClick(e: MouseEvent<HTMLAnchorElement>): boolean {
+  return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+}
+
+/**
+ * A raw-HTML link that asks for another browsing context (`target="_blank"`,
+ * a named frame) or a download keeps the browser's own behaviour.
+ */
+function wantsBrowserNavigation(a: HTMLAnchorElement): boolean {
+  const target = a.getAttribute("target");
+  return a.hasAttribute("download") || (!!target && target.toLowerCase() !== "_self");
+}
+
 function resolveRelativeHref(href: string, basePath: string): string | null {
-  if (!href || href.startsWith("http") || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("vscode:")) return null;
+  if (!href || href.startsWith("//") || href.startsWith("http") || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("vscode:")) return null;
 
   const parts = basePath.split("/");
   parts.pop(); // remove filename → directory
@@ -31,6 +56,30 @@ function resolveRelativeHref(href: string, basePath: string): string | null {
   }
 
   return resolved.join("/");
+}
+
+/**
+ * The raw-file URL for a resolved route path. A cross-root `_root/<id>/rest`
+ * path is a viewer-route prefix, not a file under projectsDir: the raw route
+ * selects that root with `?root=<id>`, as the read route does.
+ */
+function rawFileUrl(resolved: string): string {
+  // The href may carry its own query and fragment: `root` joins that query,
+  // and the fragment stays last.
+  const hashAt = resolved.indexOf("#");
+  const fragment = hashAt >= 0 ? resolved.slice(hashAt) : "";
+  const beforeHash = hashAt >= 0 ? resolved.slice(0, hashAt) : resolved;
+  const queryAt = beforeHash.indexOf("?");
+  const path = queryAt >= 0 ? beforeHash.slice(0, queryAt) : beforeHash;
+  const query = queryAt >= 0 ? beforeHash.slice(queryAt + 1) : "";
+
+  const parts = path.split("/");
+  if (parts[0] === "_root" && parts[1]) {
+    const params = new URLSearchParams(query);
+    params.set("root", parts[1]);
+    return `/api/files/raw/${parts.slice(2).join("/")}?${params.toString()}${fragment}`;
+  }
+  return `/api/files/raw/${resolved}`;
 }
 
 /** Extract plain text from React children (handles nested spans from rehype-highlight leftovers) */
@@ -149,39 +198,52 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
       },
     };
 
+    const inAppLink = (to: string, children: ReactNode, props: Record<string, unknown>) => (
+      <a
+        href={to}
+        onClick={(e) => {
+          if (!isPlainLeftClick(e) || wantsBrowserNavigation(e.currentTarget)) return;
+          e.preventDefault();
+          navigate(to);
+        }}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+
+    // App routes do not depend on where the file lives, so they work without a
+    // basePath too (e.g. a design doc from an OpenSpec backend outside projectsDir).
+    const a: Components["a"] = ({ href, children, ...props }) => {
+      if (!href) return <a {...props}>{children}</a>;
+      if (isAppRoute(href)) return inAppLink(href, children, props);
+      if (!basePath) return <a href={href} {...props}>{children}</a>;
+
+      const resolved = resolveRelativeHref(href, basePath);
+      if (!resolved) return <a href={href} {...props}>{children}</a>;
+
+      // A download saves whatever the href answers, and `/view/*` is answered
+      // with the SPA shell — so it gets the raw file, as images do.
+      if (props.download !== undefined && props.download !== false) {
+        return <a href={rawFileUrl(resolved)} {...props}>{children}</a>;
+      }
+
+      return inAppLink(`/view/${resolved}`, children, props);
+    };
+
     // Relative links and images can only be resolved against a known base.
-    if (!basePath) return codeBlocks;
+    if (!basePath) return { ...codeBlocks, a };
 
     return {
       ...codeBlocks,
-      a: ({ href, children, ...props }) => {
-        if (!href) return <a {...props}>{children}</a>;
-
-        const resolved = resolveRelativeHref(href, basePath);
-        if (!resolved) return <a href={href} {...props}>{children}</a>;
-
-        const viewPath = `/view/${resolved}`;
-
-        return (
-          <a
-            href={viewPath}
-            onClick={(e) => {
-              e.preventDefault();
-              navigate(viewPath);
-            }}
-            {...props}
-          >
-            {children}
-          </a>
-        );
-      },
+      a,
       img: ({ src, alt, ...props }) => {
         if (!src || src.startsWith("http") || src.startsWith("data:")) {
           return <img src={src} alt={alt} {...props} />;
         }
         const resolved = resolveRelativeHref(src, basePath);
         if (!resolved) return <img src={src} alt={alt} {...props} />;
-        return <img src={`/api/files/raw/${resolved}`} alt={alt} {...props} />;
+        return <img src={rawFileUrl(resolved)} alt={alt} {...props} />;
       },
     };
   }, [basePath, navigate]);

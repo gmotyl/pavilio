@@ -11,6 +11,17 @@ export interface FileEntry {
   root?: RootId;
 }
 
+const REFRESH_EVENT = "pavilio:file-index-refresh";
+
+/**
+ * Asks every mounted `useFileIndex` to re-fetch now — for a write the panel
+ * made itself (e.g. a mockup import), so the list does not wait for the
+ * watcher's `file-change` broadcast.
+ */
+export function refreshFileIndex() {
+  window.dispatchEvent(new Event(REFRESH_EVENT));
+}
+
 export function useFileIndex(root: RootId = "projects") {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const { lastMessage } = useWebSocket();
@@ -43,6 +54,12 @@ export function useFileIndex(root: RootId = "projects") {
   useEffect(() => {
     if (lastMessage?.type === "file-change") fetchFiles();
   }, [lastMessage, fetchFiles]);
+
+  useEffect(() => {
+    const onRefresh = () => void fetchFiles();
+    window.addEventListener(REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(REFRESH_EVENT, onRefresh);
+  }, [fetchFiles]);
 
   return files;
 }

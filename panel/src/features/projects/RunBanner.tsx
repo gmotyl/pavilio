@@ -60,9 +60,12 @@ export interface RunBannerProps {
    * `projects/pavilio/plans/openspec/changes/<id>/tasks.md`), because the run
    * opens a new terminal at the workspace root and the agent reads it from
    * there; an absolute path would name the panel owner's tree, which a
-   * project's own Linux account may not be able to read.
+   * project's own Linux account may not be able to read. `null` while it is
+   * not known yet (the workspace root is still loading): the objective shows
+   * the bare `{path}` placeholder and Run stays disabled, so the absolute path
+   * never stands in for it.
    */
-  path: string;
+  path: string | null;
   /**
    * Called with the chosen launcher — always one whose run loop resolves
    * ready — and the objective to send. A returned promise disables Run until
@@ -164,7 +167,7 @@ function ActiveRunBanner({ status, project, path, onRun }: RunBannerProps) {
   const [launchers] = usePreference(preferences.terminalLaunchers);
   const [expanded, setExpanded] = usePreference(preferences.plansBannerExpanded);
   const template = useObjectiveTemplate(project);
-  const vars = { change: status.changeId, path, project };
+  const vars = { change: status.changeId, path: path ?? "{path}", project };
   const resolved = resolveObjective(template, vars);
   // Mounted only while expanded; collapsed, the stored objective is sent.
   const field = useRef<ObjectiveFieldHandle>(null);
@@ -197,7 +200,8 @@ function ActiveRunBanner({ status, project, path, onRun }: RunBannerProps) {
   const usesObjective = ready ? takesPrompt(ready.runLoop) : true;
   // A blank edit is not blank to send: saving it clears the override, and the
   // workspace default is what runs. So only the stored objective gates Run.
-  const canRun = Boolean(ready) && (!usesObjective || resolved.trim() !== "") && !busy;
+  const canRun =
+    Boolean(ready) && path !== null && (!usesObjective || resolved.trim() !== "") && !busy;
 
   const run = () => {
     if (!canRun || !launcher) return;

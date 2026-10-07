@@ -6,7 +6,15 @@ import {
   clearLastSectionFile,
   writeLastSectionFile,
 } from "../shell/lastPath";
+import { viewerReadUrl } from "./mockupFiles";
 import { SPECIAL_SECTIONS } from "./sections";
+
+/**
+ * The read for an open file. A raster mockup only needs its absolute path (the
+ * frame loads it from the raw route), so its bytes are never decoded as text.
+ * An HTML/SVG mockup is text and is read for Copy content, up to a size cap.
+ */
+const readUrl = (path: string) => viewerReadUrl(path, `/api/files/read/${path}`);
 
 interface Options {
   project: string | undefined;
@@ -49,7 +57,7 @@ export function useFileViewer({ project, section }: Options) {
   useEffect(() => {
     if (!selectedFile) return;
     setLoading(true);
-    fetch(`/api/files/read/${selectedFile}`)
+    fetch(readUrl(selectedFile))
       .then(async (res) => {
         if (res.ok) {
           const data = await res.json();
@@ -78,7 +86,7 @@ export function useFileViewer({ project, section }: Options) {
     if (!selectedFile || lastMessage?.type !== "file-change") return;
     const changedPath = lastMessage.path as string;
     if (changedPath?.includes(selectedFile)) {
-      fetch(`/api/files/read/${selectedFile}`).then(async (res) => {
+      fetch(readUrl(selectedFile)).then(async (res) => {
         if (res.ok) setContent((await res.json()).content);
       });
     }

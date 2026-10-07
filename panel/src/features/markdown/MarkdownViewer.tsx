@@ -1,8 +1,11 @@
 import { useLocation } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useActiveFile } from "../explorer/useActiveFile";
 import MockupFrame from "../projects/MockupFrame";
+import { isMockupFile, MOCKUP_MAX_SOURCE_BYTES, viewerReadUrl } from "../projects/mockupFiles";
 import ViewerActions from "../projects/ViewerActions";
+import { relativeToWorkspace } from "../projects/relativeToWorkspace";
+import { useWorkspaceRoot } from "../projects/useWorkspaceRoot";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useFloatingAction } from "../shell/Layout";
@@ -38,21 +41,42 @@ export default function MarkdownViewer() {
 
   const [content, setContent] = useState("");
   const [absolutePath, setAbsolutePath] = useState("");
+  const [tooLarge, setTooLarge] = useState(false);
+  const workspaceRoot = useWorkspaceRoot();
   const [loading, setLoading] = useState(true);
   const [wide, toggleWide] = useWideMode("viewer");
   const { lastMessage } = useWebSocket();
 
+  // The path the latest read is for: a slower read of the previous file must
+  // not land on top of this one.
+  const currentPath = useRef(filePath);
+  currentPath.current = filePath;
+
   const fetchContent = async () => {
-    const res = await fetch(buildReadUrl(filePath));
+    const path = filePath;
+    // A raster image only needs its absolute path — the frame loads it from
+    // the raw route — so its bytes are never read as text. An HTML/SVG file is
+    // text and is read for Copy content, up to a size cap. Cross-root, where it
+    // is shown as source text, the same cap applies: above it the server
+    // answers `tooLarge` and the pane says so instead of reading the file.
+    const res = await fetch(viewerReadUrl(path, buildReadUrl(path)));
+    if (currentPath.current !== path) return;
     if (res.ok) {
       const data = await res.json();
+      if (currentPath.current !== path) return;
       setContent(data.content);
+      setTooLarge(data.tooLarge === true);
       setAbsolutePath(data.absolutePath);
     }
     setLoading(false);
   };
 
   useEffect(() => {
+    // A switch drops the previous file's text first, so neither the mockup
+    // frame's Copy content nor the breadcrumb toolbar can copy it meanwhile.
+    setLoading(true);
+    setContent("");
+    setTooLarge(false);
     fetchContent();
   }, [filePath]);
 
@@ -70,15 +94,18 @@ export default function MarkdownViewer() {
     (filePath.startsWith("_skills/") && !filePath.includes("."));
   const isJson = filePath.endsWith(".json");
   // A mockup frame is only honest for a path the raw route can actually serve.
-  // `/raw/*path` resolves against the projects dir (with a repo-root fallback)
-  // and takes no `root` query, so a cross-root `_root/<rootId>/…` path would
-  // load an empty frame with no error. Those fall through to the source text.
+  // `MockupFrame` builds a `/raw/*path` URL with no `root` selector, which
+  // resolves against the projects dir (with a repo-root fallback), so a
+  // cross-root `_root/<rootId>/…` path would load an empty frame with no
+  // error. Those fall through to the source text.
   const isCrossRoot = filePath.split("/")[0] === "_root";
-  const isHtml = filePath.endsWith(".html") && !isCrossRoot;
+  // Image mockups (SVG, PNG, JPEG, WebP) take the same frame, which renders
+  // them through `<img>`; QuickFinder and the file tree link them here.
+  const isMockup = isMockupFile(filePath) && !isCrossRoot;
 
   // The toolbar above an open file is `ViewerActions`, the same component the
-  // project file viewer and the plans tab mount — VS Code, copy-path and
-  // copy-content, with one shared revert timer so only one confirms at a time.
+  // project file viewer and the plans tab mount — VS Code, copy-path (relative
+  // to the workspace root), copy-absolute and copy-content, with one shared revert timer so only one confirms at a time.
   // The prefix keeps this screen's published `markdown-viewer-*` test ids.
   // While a file switch is in flight `content` still holds the previous file's
   // text, so it is withheld until this one has loaded.
@@ -86,14 +113,17 @@ export default function MarkdownViewer() {
   // frame (the width picker belongs next to it), so the breadcrumb slot stays
   // empty rather than mounting a second copy of the same buttons.
   useBreadcrumbActions(
-    absolutePath && !isHtml ? (
+    absolutePath && !isMockup ? (
       <ViewerActions
         absolutePath={absolutePath}
+        relativePath={
+          workspaceRoot ? relativeToWorkspace(absolutePath, workspaceRoot) : null
+        }
         content={loading ? null : content}
         testIdPrefix="markdown-viewer"
       />
     ) : null,
-    [absolutePath, content, loading, isHtml],
+    [absolutePath, workspaceRoot, content, loading, isMockup],
   );
 
   useFloatingAction(<WideToggle wide={wide} onToggle={toggleWide} />, [
@@ -108,16 +138,18 @@ export default function MarkdownViewer() {
       </div>
     );
 
-  // An html file is a mockup: render it, do not show its source. Same frame
+  // An html or image file is a mockup: render it, do not show its source (an
+  // image's bytes are not even fetched as text). Same frame
   // component the mockups tab mounts, so both copy the same workspace-relative
   // path. It owns the full pane height and skips the image drop zone, which
   // only means something for markdown.
-  if (isHtml)
+  if (isMockup)
     return (
       <div className="p-6 h-full min-h-0">
         <MockupFrame
           filePath={filePath}
           absolutePath={absolutePath}
+          content={content}
           testIdPrefix="markdown-viewer"
         />
       </div>
@@ -138,6 +170,15 @@ export default function MarkdownViewer() {
           >
             {JSON.stringify(JSON.parse(content), null, 2)}
           </pre>
+        ) : tooLarge ? (
+          <p
+            data-testid="markdown-viewer-too-large"
+            className="text-sm"
+            style={{ color: "var(--text-muted)" }}
+          >
+            This file is too large to show here (over{" "}
+            {MOCKUP_MAX_SOURCE_BYTES / (1024 * 1024)} MB). Open it in VS Code instead.
+          </p>
         ) : (
           <pre
             className="text-sm font-mono whitespace-pre-wrap"

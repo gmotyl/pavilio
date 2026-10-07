@@ -6,6 +6,7 @@ vi.mock("../../shell/vscode", () => ({
 }));
 
 import MockupFrame from "../MockupFrame";
+import { __resetWorkspaceRootForTests } from "../useWorkspaceRoot";
 
 // The projects directory is nested one level under the workspace root, so the
 // workspace-relative path keeps that directory's own name ("projects/").
@@ -17,6 +18,18 @@ const FILE_PATH = "pavilio/mockups/boot.html";
 let writeText: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  __resetWorkspaceRootForTests();
+  // `/api/system` carries the workspace root copy-path is relative to.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ wslDistro: null, workspaceRoot: "/root/git/prv/projects" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ),
+  );
   Object.defineProperty(window, "isSecureContext", {
     value: true,
     configurable: true,
@@ -27,6 +40,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const frame = () =>
@@ -85,6 +99,9 @@ describe("MockupFrame", () => {
 
   it("copies the workspace-relative path from the toolbar", async () => {
     render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("mockup-viewer-copy-path")).not.toBeDisabled(),
+    );
     fireEvent.click(screen.getByTestId("mockup-viewer-copy-path"));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));

@@ -1,3 +1,5 @@
+import MockupImportButton from "./MockupImportButton";
+
 /** Code spans in the copy: the two commands and the destination folder. */
 const CODE_CLASS = "font-mono px-1 py-0.5 rounded";
 const CODE_STYLE = {
@@ -18,24 +20,39 @@ function Code({ children }: { children: string }) {
  * other sections, an empty mockups tab is the FIRST thing most people see
  * here — the folder only appears once a mockup lands in it — so the pane
  * teaches the two commands that fill it instead of reporting that a list is
- * empty.
+ * empty. It also offers importing files (e.g. a Figma export) directly.
  */
-export function MockupsEmptyState({ projectName }: { projectName: string }) {
+export function MockupsEmptyState({
+  projectName,
+  onImportFiles,
+}: {
+  projectName: string;
+  /** Hands picked files to the import dialog; omitted → no import offer. */
+  onImportFiles?: (files: File[]) => void;
+}) {
   return (
-    <p
-      data-testid="mockups-empty-state"
-      className="text-sm max-w-prose leading-relaxed"
-      style={{ color: "var(--text-muted)" }}
-    >
-      No mockups yet. Run{" "}
-      {/* The placeholder is what the user types, so it stays literal. */}
-      <Code>{"/pavilio-ui-design <what you're designing>"}</Code> in a terminal
-      — it works out the design direction, then writes a self-contained HTML
-      mockup to <Code>{`projects/${projectName}/mockups/`}</Code>. It usually
-      drafts two or three options with a recommendation, so you have something
-      to pick from. <Code>{"/pavilio-mockup"}</Code> skips straight to the HTML
-      when you already know what you want.
-    </p>
+    <div className="space-y-3">
+      <p
+        data-testid="mockups-empty-state"
+        className="text-sm max-w-prose leading-relaxed"
+        style={{ color: "var(--text-muted)" }}
+      >
+        No mockups yet. Run{" "}
+        {/* The placeholder is what the user types, so it stays literal. */}
+        <Code>{"/pavilio-ui-design <what you're designing>"}</Code> in a terminal
+        — it works out the design direction, then writes a self-contained HTML
+        mockup to <Code>{`projects/${projectName}/mockups/`}</Code>. It usually
+        drafts two or three options with a recommendation, so you have something
+        to pick from. <Code>{"/pavilio-mockup"}</Code> skips straight to the HTML
+        when you already know what you want.
+      </p>
+      {onImportFiles && (
+        <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-muted)" }}>
+          <MockupImportButton onFiles={onImportFiles} testId="mockups-empty-import-button" />
+          <span>Or import a Figma export — SVG, PNG, JPEG, WebP or HTML.</span>
+        </div>
+      )}
+    </div>
   );
 }
 

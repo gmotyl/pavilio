@@ -64,6 +64,8 @@ interface Props {
   sources: FileListSource[];
   detail: ReactNode;
   onRefresh?: () => void;
+  /** Buttons in the list header, before Refresh, e.g. the mockups Import. */
+  headerActions?: ReactNode;
   /** Rendered above the source list, e.g. the QA review-rules block. */
   aboveList?: ReactNode;
   /** Filter/sort bar rendered above the source list (expanded view only). */
@@ -126,6 +128,7 @@ export default function FileListSidebar({
   sources,
   detail,
   onRefresh,
+  headerActions,
   aboveList,
   controls,
   fillHeight = false,
@@ -220,6 +223,7 @@ export default function FileListSidebar({
           </span>
         </h2>
         <div className="flex items-center">
+          {headerActions}
           {onRefresh && (
             <button
               data-testid={`${testId}-refresh`}

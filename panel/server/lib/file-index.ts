@@ -12,7 +12,18 @@ export interface FileEntry {
 
 let index: FileEntry[] = [];
 
-function walk(dir: string, projectsDir: string): FileEntry[] {
+const TEXT_EXTS = [".md", ".txt", ".json", ".html"];
+// Images are indexed only inside a mockups/ directory so notes/memo lists
+// do not fill up with screenshots
+const MOCKUP_IMAGE_EXTS = [".svg", ".png", ".jpg", ".jpeg", ".webp"];
+
+function isIndexable(name: string, inMockups: boolean): boolean {
+  const lower = name.toLowerCase();
+  if (TEXT_EXTS.some((ext) => name.endsWith(ext))) return true;
+  return inMockups && MOCKUP_IMAGE_EXTS.some((ext) => lower.endsWith(ext));
+}
+
+function walk(dir: string, projectsDir: string, inMockups = false): FileEntry[] {
   const entries: FileEntry[] = [];
   const items = readdirSync(dir, { withFileTypes: true });
 
@@ -21,13 +32,10 @@ function walk(dir: string, projectsDir: string): FileEntry[] {
     if (item.name.startsWith(".") || item.name === "node_modules") continue;
 
     if (item.isDirectory()) {
-      entries.push(...walk(fullPath, projectsDir));
-    } else if (
-      item.name.endsWith(".md") ||
-      item.name.endsWith(".txt") ||
-      item.name.endsWith(".json") ||
-      item.name.endsWith(".html")
-    ) {
+      entries.push(
+        ...walk(fullPath, projectsDir, inMockups || item.name === "mockups"),
+      );
+    } else if (isIndexable(item.name, inMockups)) {
       // POSIX separators everywhere: relativePath is split on "/" here and
       // used verbatim in API responses and URLs by the frontend
       const rel = relative(projectsDir, fullPath).split(sep).join("/");

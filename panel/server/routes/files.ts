@@ -58,6 +58,20 @@ router.get("/read/*path", (req, res) => {
   const parts = req.params.path;
   const relativePath = Array.isArray(parts) ? parts.join("/") : parts;
   const { projectsDir } = getConfig();
+  // ?meta=1 — resolve the file and return its absolute path without reading
+  // it: viewers of image mockups need the path, and an image's bytes decoded
+  // as utf-8 are garbage on the wire.
+  const metaOnly = req.query.meta === "1";
+  // ?maxBytes=N — skip the (synchronous) read of a file larger than N and
+  // flag it `tooLarge`: mockup viewers only want the source for Copy content,
+  // and a huge SVG/HTML already in the workspace must not stall the server.
+  const maxBytesParam = typeof req.query.maxBytes === "string" ? req.query.maxBytes : "";
+  const maxBytes = /^\d+$/.test(maxBytesParam) ? Number(maxBytesParam) : null;
+  const read = (path: string): { content: string; tooLarge?: true } => {
+    if (metaOnly) return { content: "" };
+    if (maxBytes !== null && statSync(path).size > maxBytes) return { content: "", tooLarge: true };
+    return { content: readFileSync(path, "utf-8") };
+  };
 
   // ?root=<id> — explicit cross-root read (checked first, before legacy prefixes)
   const rootParam = typeof req.query.root === "string" ? req.query.root : "";
@@ -70,8 +84,7 @@ router.get("/read/*path", (req, res) => {
     if (!existsSync(candidate)) {
       return res.status(404).json({ error: "File not found" });
     }
-    const content = readFileSync(candidate, "utf-8");
-    return res.json({ path: relativePath, absolutePath: candidate, content });
+    return res.json({ path: relativePath, absolutePath: candidate, ...read(candidate) });
   }
 
   // Support _skills/ prefix for skill SKILL.md files
@@ -113,8 +126,7 @@ router.get("/read/*path", (req, res) => {
     return res.status(404).json({ error: "File not found" });
   }
 
-  const content = readFileSync(absolutePath, "utf-8");
-  res.json({ path: relativePath, absolutePath, content });
+  res.json({ path: relativePath, absolutePath, ...read(absolutePath) });
 });
 
 // Serve raw files (images, etc.) with correct MIME type
@@ -123,22 +135,44 @@ router.get("/raw/*path", (req, res) => {
   const relativePath = Array.isArray(parts) ? parts.join("/") : parts;
   const { projectsDir } = getConfig();
 
-  let absolutePath = resolve(projectsDir, relativePath);
-  if (!absolutePath.startsWith(projectsDir)) {
-    return res.status(403).json({ error: "Path traversal blocked" });
-  }
+  let absolutePath: string;
+  // ?root=<id> — explicit cross-root file, same containment as the read route
+  // and no projectsDir/repo-root fallback.
+  const rootParam = typeof req.query.root === "string" ? req.query.root : "";
+  if (rootParam && isValidRoot(rootParam)) {
+    const base = resolveRoot(rootParam);
+    absolutePath = resolve(base, relativePath);
+    if (!isPathUnder(absolutePath, base)) {
+      return res.status(403).json({ error: "Path traversal blocked" });
+    }
+  } else {
+    absolutePath = resolve(projectsDir, relativePath);
+    if (!absolutePath.startsWith(projectsDir)) {
+      return res.status(403).json({ error: "Path traversal blocked" });
+    }
 
-  // Fallback: if not found in projectsDir, try repo root
-  if (!existsSync(absolutePath)) {
-    const repoRoot = resolve(projectsDir, "..");
-    const fallback = resolve(repoRoot, relativePath);
-    if (fallback.startsWith(repoRoot) && existsSync(fallback)) {
-      absolutePath = fallback;
+    // Fallback: if not found in projectsDir, try repo root
+    if (!existsSync(absolutePath)) {
+      const repoRoot = resolve(projectsDir, "..");
+      const fallback = resolve(repoRoot, relativePath);
+      if (fallback.startsWith(repoRoot) && existsSync(fallback)) {
+        absolutePath = fallback;
+      }
     }
   }
 
   if (!existsSync(absolutePath)) {
     return res.status(404).json({ error: "File not found" });
+  }
+
+  // Imported mockups are untrusted: opening the raw URL directly must not run
+  // script with panel credentials. HTML keeps allow-scripts to match the
+  // iframe's own sandbox; SVG and XML (both can carry script) get none.
+  const lower = absolutePath.toLowerCase();
+  if (lower.endsWith(".html") || lower.endsWith(".htm") || lower.endsWith(".xhtml")) {
+    res.setHeader("Content-Security-Policy", "sandbox allow-scripts");
+  } else if (lower.endsWith(".svg") || lower.endsWith(".xml")) {
+    res.setHeader("Content-Security-Policy", "sandbox");
   }
 
   res.sendFile(absolutePath);

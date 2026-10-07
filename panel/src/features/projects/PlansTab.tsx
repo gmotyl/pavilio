@@ -28,7 +28,8 @@ import { RunBanner } from "./RunBanner";
 import { startTaskRun } from "./startTaskRun";
 import { taskRunLine } from "./runPrompt";
 import { taskListStatus } from "./taskList";
-import { workspaceRelativePath } from "./workspaceRelativePath";
+import { relativeToWorkspace } from "./relativeToWorkspace";
+import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { dispatchTerminalFocus } from "../terminal/useTerminalSessions";
 
 interface Props {
@@ -184,9 +185,12 @@ function ChangeGroupRows({
 /** Open-file header: the filename doubles as the hover-peek trigger (see PeekTriggerContext). */
 function PlanDetailHeader({
   path,
+  relativePath,
   content,
 }: {
   path: string;
+  /** `path` relative to the workspace root, or null while the root is loading. */
+  relativePath: string | null;
   /** The open plan's source, or null while it is still loading. */
   content: string | null;
 }) {
@@ -204,7 +208,7 @@ function PlanDetailHeader({
       >
         {path.split("/").pop()}
       </span>
-      <ViewerActions absolutePath={path} content={content} />
+      <ViewerActions absolutePath={path} relativePath={relativePath} content={content} />
     </div>
   );
 }
@@ -314,15 +318,21 @@ export default function PlansTab({ projectName }: Props) {
     ? (filesByPath.get(selectedPath)?.relativeToProjectsDir ?? undefined)
     : undefined;
 
+  // The open plan relative to the workspace root — what copy-path copies. A
+  // plan in a linked repo outside the workspace comes out as a `../` path.
+  const workspaceRoot = useWorkspaceRoot();
+  const selectedRelative =
+    selectedPath && workspaceRoot ? relativeToWorkspace(selectedPath, workspaceRoot) : null;
+
   // A change's tasks.md with a checkbox gets the banner — the run banner with
   // work left, the done banner once every box is checked (a status is not by
   // itself runnable). The path it is handed is workspace-relative, the form
-  // the objective template names.
+  // the objective template names; the run opens at the workspace root, so a
+  // linked repo's `../` path resolves there too. Until the root has loaded
+  // there is no path, and the banner keeps Run disabled: the absolute path
+  // would name the panel owner's tree, so it never stands in.
   const runStatus =
     selectedPath && fileContent !== null ? taskListStatus(selectedPath, fileContent) : null;
-  const runPath = selectedPath
-    ? workspaceRelativePath(selectedPath, selectedBasePath ?? "")
-    : "";
   const navigate = useNavigate();
   const [runError, setRunError] = useState<string | null>(null);
   useEffect(() => setRunError(null), [selectedPath]);
@@ -610,7 +620,11 @@ export default function PlansTab({ projectName }: Props) {
             </p>
           )}
           {selectedPath && (
-            <PlanDetailHeader path={selectedPath} content={fileContent} />
+            <PlanDetailHeader
+              path={selectedPath}
+              relativePath={selectedRelative}
+              content={fileContent}
+            />
           )}
           {selectedPath && fileError && (
             <p className="text-sm" style={{ color: "var(--red)" }}>
@@ -626,7 +640,7 @@ export default function PlansTab({ projectName }: Props) {
             <RunBanner
               status={runStatus}
               project={projectName}
-              path={runPath}
+              path={selectedRelative}
               onRun={onRun}
             />
           )}

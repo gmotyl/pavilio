@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { useContext } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +9,7 @@ vi.mock("../../shell/vscode", () => ({
 
 import MarkdownViewer from "../MarkdownViewer";
 import MockupFrame from "../../projects/MockupFrame";
+import { __resetWorkspaceRootForTests } from "../../projects/useWorkspaceRoot";
 import {
   BreadcrumbActionsContext,
   BreadcrumbActionsProvider,
@@ -16,6 +17,7 @@ import {
 
 // The projects directory is nested one level under the workspace root, so the
 // workspace-relative path keeps that directory's own name ("projects/").
+const WORKSPACE_ROOT = "/root/git/prv/projects";
 const MOCKUP_PATH = "pavilio/mockups/boot.html";
 const MOCKUP_ABSOLUTE =
   "/root/git/prv/projects/projects/pavilio/mockups/boot.html";
@@ -31,15 +33,24 @@ function BreadcrumbSlot() {
   return <div data-testid="breadcrumb-slot">{actions}</div>;
 }
 
+/** `/api/system` answers with the workspace root copy-path is relative to;
+ * every other request is the file read. */
 function stubRead(content: string, absolutePath: string) {
   vi.stubGlobal(
     "fetch",
     vi.fn(
-      async () =>
-        new Response(JSON.stringify({ content, absolutePath }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+      async (input: string) =>
+        new Response(
+          JSON.stringify(
+            String(input).startsWith("/api/system")
+              ? { wslDistro: null, workspaceRoot: WORKSPACE_ROOT }
+              : { content, absolutePath },
+          ),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
     ),
   );
 }
@@ -74,6 +85,7 @@ function renderViewer(path: string) {
 }
 
 beforeEach(() => {
+  __resetWorkspaceRootForTests();
   vi.stubGlobal(
     "WebSocket",
     class {
@@ -120,6 +132,115 @@ describe("MarkdownViewer html handling", () => {
     expect(screen.queryByTestId("markdown-viewer-frame")).toBeNull();
   });
 
+  it("caps the source read of a cross-root html or svg file", async () => {
+    // A linked-root mockup is shown as source text, but a huge one must not be
+    // read in full any more than an in-root one is.
+    for (const path of ["_root/skills/tdd/mock.html", "_root/skills/tdd/icon.svg"]) {
+      stubRead(MOCKUP_SOURCE, `/root/git/prv/projects/skills/tdd/${path}`);
+      const { container, unmount } = renderViewer(path);
+      await waitFor(() => expect(container.querySelector("pre")).not.toBeNull());
+      const reads = vi
+        .mocked(fetch)
+        .mock.calls.map(([input]) => String(input))
+        .filter((url) => url.startsWith("/api/files/read/"));
+      expect(reads.length).toBeGreaterThan(0);
+      for (const url of reads) {
+        expect(url).toContain("root=skills");
+        expect(url).toContain("maxBytes=");
+      }
+      unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("says a too-large cross-root file is not shown instead of an empty pane", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (input: string) =>
+          new Response(
+            JSON.stringify(
+              String(input).startsWith("/api/system")
+                ? { wslDistro: null, workspaceRoot: WORKSPACE_ROOT }
+                : {
+                    content: "",
+                    tooLarge: true,
+                    absolutePath: "/root/git/prv/projects/skills/tdd/big.html",
+                  },
+            ),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    renderViewer("_root/skills/tdd/big.html");
+
+    expect(await screen.findByTestId("markdown-viewer-too-large")).toHaveTextContent(
+      /too large/i,
+    );
+  });
+
+  it("view route renders image mockups as img", async () => {
+    // QuickFinder and the file tree list image mockups and link them to
+    // `/view/<path>`; their bytes must never be shown (or read) as text.
+    stubRead("", "/root/git/prv/projects/projects/pavilio/mockups/hero.png");
+    const { container } = renderViewer("pavilio/mockups/hero.png");
+
+    const img = await screen.findByTestId("markdown-viewer-image");
+    expect(img.tagName).toBe("IMG");
+    expect(img).toHaveAttribute(
+      "src",
+      "/api/files/raw/pavilio/mockups/hero.png",
+    );
+    expect(container.querySelector("pre")).toBeNull();
+    expect(screen.queryByTestId("markdown-viewer-frame")).toBeNull();
+
+    const reads = vi
+      .mocked(fetch)
+      .mock.calls.map(([input]) => String(input))
+      .filter((url) => url.startsWith("/api/files/read/"));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const url of reads) expect(url).toContain("meta=1");
+
+    // The frame brings its own toolbar, with copy content off for a raster.
+    expect(screen.getByTestId("markdown-viewer-copy-content")).toBeDisabled();
+    expect(screen.getAllByTestId("markdown-viewer-copy-path")).toHaveLength(1);
+  });
+
+  it("view route copies an html or svg mockup's source", async () => {
+    for (const [path, source] of [
+      [MOCKUP_PATH, MOCKUP_SOURCE],
+      ["pavilio/mockups/icon.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>'],
+    ]) {
+      stubRead(source, `/root/git/prv/projects/projects/${path}`);
+      const writeText = spyClipboard();
+      const { unmount } = renderViewer(path);
+
+      const button = await screen.findByTestId("markdown-viewer-copy-content");
+      await waitFor(() => expect(button).not.toBeDisabled());
+      fireEvent.click(button);
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      expect(writeText).toHaveBeenLastCalledWith(source);
+      // The svg is read as text: no meta-only read
+      const reads = vi
+        .mocked(fetch)
+        .mock.calls.map(([input]) => String(input))
+        .filter((url) => url.startsWith("/api/files/read/"));
+      for (const url of reads) expect(url).not.toContain("meta=1");
+      // …but capped, so a huge existing file is not read in full for Copy content
+      for (const url of reads) expect(url).toContain("maxBytes=");
+      unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("view route renders an uppercase svg through img", async () => {
+    stubRead("", "/root/git/prv/projects/projects/pavilio/mockups/ICON.SVG");
+    renderViewer("pavilio/mockups/ICON.SVG");
+
+    const img = await screen.findByTestId("markdown-viewer-image");
+    expect(img.tagName).toBe("IMG");
+  });
+
   it("still renders markdown with the markdown renderer", async () => {
     stubRead("# Hello", "/root/git/prv/projects/projects/pavilio/notes/a.md");
     renderViewer("pavilio/notes/a.md");
@@ -155,12 +276,17 @@ describe("MarkdownViewer html handling", () => {
 
     // The standalone viewer…
     renderViewer(MOCKUP_PATH);
-    fireEvent.click(await screen.findByTestId("markdown-viewer-copy-path"));
+    const viewerPath = await screen.findByTestId("markdown-viewer-copy-path");
+    await waitFor(() => expect(viewerPath).not.toBeDisabled());
+    fireEvent.click(viewerPath);
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
 
     // …and the mockups tab, which mounts `MockupFrame` directly.
     render(
       <MockupFrame filePath={MOCKUP_PATH} absolutePath={MOCKUP_ABSOLUTE} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("mockup-viewer-copy-path")).not.toBeDisabled(),
     );
     fireEvent.click(screen.getByTestId("mockup-viewer-copy-path"));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
@@ -173,5 +299,58 @@ describe("MarkdownViewer html handling", () => {
     // One toolbar, not two: the breadcrumb slot must not also mount a copy
     // button for the same file.
     expect(screen.getAllByTestId("markdown-viewer-copy-path")).toHaveLength(1);
+  });
+  it("does not hand the previous mockup's source to the next one while it loads", async () => {
+    const SECOND = "pavilio/mockups/other.html";
+    let releaseSecond: (() => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const url = String(input);
+        const json = (body: unknown) =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        if (url.startsWith("/api/system")) {
+          return json({ wslDistro: null, workspaceRoot: WORKSPACE_ROOT });
+        }
+        if (url.includes("other.html")) {
+          // Held open: the switch is in flight for the rest of the test
+          await new Promise<void>((r) => (releaseSecond = r));
+          return json({ content: "<p>second</p>", absolutePath: "/x/other.html" });
+        }
+        return json({ content: MOCKUP_SOURCE, absolutePath: MOCKUP_ABSOLUTE });
+      }),
+    );
+    const writeText = spyClipboard();
+    function GoNext() {
+      const navigate = useNavigate();
+      return <button data-testid="go-next" onClick={() => navigate(`/view/${SECOND}`)} />;
+    }
+    render(
+      <BreadcrumbActionsProvider>
+        <BreadcrumbSlot />
+        <MemoryRouter initialEntries={[`/view/${MOCKUP_PATH}`]}>
+          <GoNext />
+          <Routes>
+            <Route path="/view/*" element={<MarkdownViewer />} />
+          </Routes>
+        </MemoryRouter>
+      </BreadcrumbActionsProvider>,
+    );
+    const first = await screen.findByTestId("markdown-viewer-copy-content");
+    await waitFor(() => expect(first).not.toBeDisabled());
+
+    fireEvent.click(screen.getByTestId("go-next"));
+    await waitFor(() => expect(releaseSecond).toBeDefined());
+
+    const during = screen.queryByTestId("markdown-viewer-copy-content");
+    if (during) {
+      expect(during).toBeDisabled();
+      fireEvent.click(during);
+    }
+    expect(writeText).not.toHaveBeenCalledWith(MOCKUP_SOURCE);
+    releaseSecond?.();
   });
 });
