@@ -182,7 +182,32 @@ export interface SpeechHostOptions {
    * Absent: every session counts as open.
    */
   isSessionOpen?: (sessionId: string) => boolean;
+  /**
+   * Told when the voice starts, is held, continues or falls silent — whichever
+   * cell it is in and whoever started it. See {@link SpeechRunEvent}.
+   */
+  onRunChange?: (event: SpeechRunEvent) => void;
 }
+
+/**
+ * What the voice is doing, for whatever has to follow it around the panel (the
+ * speaking alert, `speakingAlert.ts`).
+ *
+ * - `start` — a run started in `sessionId`, manual or autoplay. A barge-in is a
+ *   `start` with no `end` before it: the run it replaced is not the voice any
+ *   more, but the voice did not stop.
+ * - `pause` / `resume` — the run was held, and continues.
+ * - `end` — the voice fell silent, however the run ended: played out, stopped,
+ *   refused, failed. Reported only once the autoplay queue has had its turn, so
+ *   a queued answer that starts straight after is a `start` without an `end`
+ *   in between — what follows the voice can update in place rather than leave
+ *   and come back.
+ */
+export type SpeechRunEvent =
+  | { type: "start"; sessionId: string }
+  | { type: "pause" }
+  | { type: "resume" }
+  | { type: "end" };
 
 /** Every session counts as open when the panel says nothing about it. */
 const ALWAYS_OPEN = (): boolean => true;
@@ -190,7 +215,22 @@ const ALWAYS_OPEN = (): boolean => true;
 export function useSpeechHost({
   onAnswer,
   isSessionOpen = ALWAYS_OPEN,
+  onRunChange,
 }: SpeechHostOptions = {}): SpeechHost {
+  /**
+   * `onRunChange`, mirrored: it is called from inside `speakUtterance`, whose
+   * identity the whole grid depends on, so it must not be a dependency.
+   */
+  const onRunChangeRef = useRef(onRunChange);
+  useEffect(() => {
+    onRunChangeRef.current = onRunChange;
+  }, [onRunChange]);
+  /**
+   * The run that held the element ended, and whether the voice has fallen
+   * silent is still to be settled: the autoplay queue gets its turn first. See
+   * the `end` effect below the autoplay effect.
+   */
+  const endPendingRef = useRef(false);
   const runRef = useRef<Run | null>(null);
   /**
    * The utterance the player was last handed. Not `runRef`, which is nulled the
@@ -712,9 +752,17 @@ export function useSpeechHost({
       setLastSpokenSessionId(sessionId);
       // A run is the transport's focus from here on; the step has been spent.
       setSteppedSessionId(null);
+      // The voice goes on, in this cell: whatever ended before it is not an end.
+      endPendingRef.current = false;
+      onRunChangeRef.current?.({ type: "start", sessionId });
 
       function finish(ended: Run): void {
-        if (runRef.current === ended) runRef.current = null;
+        if (runRef.current === ended) {
+          runRef.current = null;
+          // Only the run holding the element ends the voice; a superseded one
+          // finishes after its replacement has already started.
+          endPendingRef.current = true;
+        }
         // Whatever the ending, the autoplay queue gets to ask whether it is
         // its turn. A run another one superseded asks too, and is told no:
         // the run that replaced it holds the element.
@@ -1335,6 +1383,34 @@ export function useSpeechHost({
     // above are this render's, which is the render either of them moved in.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoplayKey, runEnds, speakUtterance, unlocked]);
+
+  // The voice fell silent — asked AFTER the autoplay effect above, which is
+  // declared first and so runs first in the same commit: a queued answer it
+  // started has already reported its `start` and cleared the flag, and the
+  // alert following the voice moves on rather than leaving and coming back.
+  useEffect(() => {
+    if (!endPendingRef.current || runRef.current) return;
+    endPendingRef.current = false;
+    onRunChangeRef.current?.({ type: "end" });
+  }, [runEnds]);
+
+  // Held and continued, read off the player rather than off `onPause` /
+  // `onResume`, so every route to a pause is seen. A run that ENDS while held
+  // (a stop, a supersession) also clears `pausedSessionId`; that is no resume,
+  // which is what the run's outcome and identity say.
+  const heldSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const before = heldSessionRef.current;
+    heldSessionRef.current = pausedSessionId;
+    if (pausedSessionId) {
+      if (before !== pausedSessionId) onRunChangeRef.current?.({ type: "pause" });
+      return;
+    }
+    const run = runRef.current;
+    if (before && run?.sessionId === before && run.outcome === "pending") {
+      onRunChangeRef.current?.({ type: "resume" });
+    }
+  }, [pausedSessionId]);
 
   /**
    * When the answer a play on this cell would start arrived — the utterance

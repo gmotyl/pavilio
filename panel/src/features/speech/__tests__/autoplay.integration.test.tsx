@@ -23,7 +23,7 @@
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 
 /**
  * Deferred synthesis, copied in spirit from `useSpeechPlayer.test.ts`: the real
@@ -408,6 +408,16 @@ vi.mock("../../terminal/useAllTerminalSessions", async (importOriginal) => ({
     applyPreset: () => {},
   }),
 }));
+/**
+ * What the tab-wide session store lists — what the speech alerts read to name a
+ * cell and to arrive at it. Empty unless a test fills it, so the alerts stay
+ * out of every test that is not about them.
+ */
+const sessionList = vi.hoisted(() => ({ current: [] as Array<Record<string, unknown>> }));
+vi.mock("../../terminal/sessionStore", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../terminal/sessionStore")>()),
+  getSessions: () => sessionList.current,
+}));
 vi.mock("../../terminal/useTerminalMaximized", () => ({
   useTerminalMaximized: () => [false, () => {}, () => {}],
 }));
@@ -422,7 +432,13 @@ import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import ProjectTerminalsSurface from "../../terminal/ProjectTerminalsSurface";
 import TerminalsPage from "../../../pages/TerminalsPage";
 import { SpeechHostProvider } from "../SpeechHostProvider";
-import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
+import {
+  __resetAlertsForTests,
+  getAlertsSnapshot,
+  subscribeAlerts,
+  userActivateAlert,
+} from "../../alerts/store";
+import { SPEAKING_ALERT_ID } from "../speakingAlert";
 import { prepare } from "../prepare";
 import { setStoredSpeechMode, setStoredVoice } from "../voices";
 import { preferences } from "../../../preferences/declarations";
@@ -712,6 +728,7 @@ beforeEach(() => {
   // The alert store is a module singleton, so an alert raised by one test would
   // otherwise still be standing in the next one.
   __resetAlertsForTests();
+  sessionList.current = [];
   prepareCalls.length = 0;
   elements.length = 0;
   played.length = 0;
@@ -2086,5 +2103,131 @@ describe("autoplay — the queue across cells", () => {
     await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
     expect(played).toEqual(["blob:From A."]);
     expect(speakState("cell-b")).toBe("ready");
+  });
+});
+
+describe("the speaking alert, end to end", () => {
+  /** The route, rendered where a test can read it. */
+  function LocationProbe() {
+    const { pathname } = useLocation();
+    return <div data-testid="location">{pathname}</div>;
+  }
+  const pathname = (): string | null => screen.getByTestId("location").textContent;
+
+  /** The project surface at its own route, with the store listing `sessions`. */
+  async function renderWithSessions(sessions: Array<Record<string, unknown>>): Promise<void> {
+    sessionList.current = sessions;
+    render(
+      <MemoryRouter initialEntries={["/project/vector/iterm"]}>
+        <SpeechHostProvider>
+          <ProjectTerminalsSurface projectName="vector" active />
+          <LocationProbe />
+        </SpeechHostProvider>
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      await drain();
+    });
+  }
+
+  const speakingAlert = () => getAlertsSnapshot().find((entry) => entry.id === SPEAKING_ALERT_ID);
+
+  it("the speaking alert follows the queue to the next cell", async () => {
+    await renderWithSessions(SESSIONS as unknown as Array<Record<string, unknown>>);
+    await arm("cell-a");
+    await arm("cell-b");
+    // Every moment the voice is going, the card is up: the hand-over from one
+    // cell to the next updates it in place rather than taking it down.
+    const gaps: number[] = [];
+    let wasUp = false;
+    const unsubscribe = subscribeAlerts(() => {
+      const up = speakingAlert() !== undefined;
+      if (wasUp && !up) gaps.push(played.length);
+      wasUp = up;
+    });
+
+    await emitUtterance("cell-a", "a1", "From A.");
+    expect(speakingAlert()?.title).toBe("Speaking — vector · claude-a");
+    await emitUtterance("cell-b", "b1", "From B.");
+    expect(speakingAlert()?.title).toBe("Speaking — vector · claude-a");
+
+    await endCurrentUnit();
+    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
+    expect(speakingAlert()?.title).toBe("Speaking — vector · claude-b");
+    expect(gaps).toEqual([]);
+
+    // B ends and nothing is queued: the voice is silent, and the card goes.
+    await endCurrentUnit();
+    await waitFor(() => expect(speakingAlert()).toBeUndefined());
+    unsubscribe();
+  });
+
+  it("the speaking alert leaves when the voice stops or pauses", async () => {
+    await renderWithSessions(SESSIONS as unknown as Array<Record<string, unknown>>);
+    await emitUtterance("cell-a", "a1", "A first. A second.");
+
+    await click("terminal-cell-speak-cell-a");
+    expect(speakingAlert()?.title).toBe("Speaking — vector · claude-a");
+
+    // The control pauses a speaking cell, and resumes a paused one.
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("paused");
+    expect(speakingAlert()).toBeUndefined();
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("speaking");
+    expect(speakingAlert()).toBeDefined();
+
+    // The transport chord pauses too, and the card goes with it.
+    await pressTransport("Space");
+    expect(speakState("cell-a")).toBe("paused");
+    expect(speakingAlert()).toBeUndefined();
+
+    // Resumed, and played out: the voice runs out and the card goes for good.
+    await pressTransport("Space");
+    expect(speakingAlert()).toBeDefined();
+    await endRun();
+    expect(speakState("cell-a")).toBe("heard");
+    expect(speakingAlert()).toBeUndefined();
+  });
+
+  it("clicking the speaking alert arrives without stopping playback", async () => {
+    await renderWithSessions([
+      ...(SESSIONS as unknown as Array<Record<string, unknown>>).filter(
+        (session) => session.id !== "cell-b",
+      ),
+      { ...SESSIONS[1], project: "beta" },
+    ]);
+    await emitUtterance("cell-b", "b1", "B first. B second.");
+    await click("terminal-cell-speak-cell-b");
+    expect(speakingAlert()?.title).toBe("Speaking — beta · claude-b");
+
+    await act(async () => {
+      userActivateAlert(SPEAKING_ALERT_ID);
+      await drain();
+    });
+
+    expect(pathname()).toBe("/project/beta/iterm");
+    // The voice did not notice: the run goes on to its next unit.
+    expect(played).toEqual(["blob:B first."]);
+    await endCurrentUnit();
+    expect(played).toEqual(["blob:B first.", "blob:B second."]);
+  });
+
+  it("speech never navigates by itself", async () => {
+    await renderWithSessions([
+      ...(SESSIONS as unknown as Array<Record<string, unknown>>).filter(
+        (session) => session.id !== "cell-b",
+      ),
+      { ...SESSIONS[1], project: "beta" },
+    ]);
+    await arm("cell-b");
+    const focused = document.activeElement;
+
+    await emitUtterance("cell-b", "b1", "From B.");
+
+    expect(played).toEqual(["blob:From B."]);
+    expect(speakingAlert()?.title).toBe("Speaking — beta · claude-b");
+    expect(pathname()).toBe("/project/vector/iterm");
+    expect(document.activeElement).toBe(focused);
   });
 });

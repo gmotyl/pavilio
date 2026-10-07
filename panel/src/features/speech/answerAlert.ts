@@ -96,18 +96,30 @@ export function alertOnAnswer(
     project: session.project,
     terminalLabel: terminalLabel(session),
     markdown: text,
-    // The dismiss wait it returns times itself out, and a click is a one-off;
-    // nothing here outlives it to cancel it.
-    arrive: () => {
-      arriveFromNotification(
-        { type: NOTIFICATION_CLICK_MESSAGE_TYPE, sessionId, project: session.project },
-        {
-          projectOf: (id) => deps.sessionOf(id)?.project,
-          navigate: deps.navigate,
-        },
-      );
-    },
+    arrive: () => arriveAtCell(sessionId, session.project, deps),
   });
+}
+
+/**
+ * A click on a speech alert: the notification's own tap, `arriveFromNotification`
+ * — route to the cell's project, focus the cell, clear its attention LED. Shared
+ * by the answer alert and the speaking alert (`speakingAlert.ts`), so both land
+ * on a cell exactly the way a tapped system notification does.
+ */
+export function arriveAtCell(
+  sessionId: string,
+  project: string,
+  deps: Pick<AnswerAlertDeps, "sessionOf" | "navigate">,
+): void {
+  // The dismiss wait it returns times itself out, and a click is a one-off;
+  // nothing here outlives it to cancel it.
+  arriveFromNotification(
+    { type: NOTIFICATION_CLICK_MESSAGE_TYPE, sessionId, project },
+    {
+      projectOf: (id) => deps.sessionOf(id)?.project,
+      navigate: deps.navigate,
+    },
+  );
 }
 
 /**

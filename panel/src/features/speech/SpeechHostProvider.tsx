@@ -17,13 +17,22 @@
  * a surface that forgets it leaves every cell `empty`, and its suite says so.
  * Letting the grid reach into this context itself would delete that signal.
  */
-import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
 import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
 import { getSessions } from "../terminal/sessionStore";
 import { useTerminalDrawerVisible } from "../terminal/useTerminalDrawer";
 import { readTerminalFocus } from "../terminal/useTerminalSessions";
-import { alertOnAnswer, focusedVisibleSessionIdFor } from "./answerAlert";
+import { alertOnAnswer, focusedVisibleSessionIdFor, type AnswerAlertDeps } from "./answerAlert";
+import { createSpeakingAlert } from "./speakingAlert";
 import { useMediaSessionTransport } from "./useMediaSessionTransport";
 import { useSpeechHost } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
@@ -60,7 +69,8 @@ function RouterBridge({ view }: { view: { current: RouterView } }): null {
 /** Mount once, above every terminals surface. See `App.tsx`. */
 export function SpeechHostProvider({ children }: Props) {
   // The answer alert (see `answerAlert.ts`): raised for a live arrival, read at
-  // the moment it lands — what is on screen then, the session list then.
+  // the moment it lands — what is on screen then, the session list then. The
+  // speaking alert below shares its plumbing.
   const inRouter = useInRouterContext();
   const routerView = useRef<RouterView>({ navigate: null, pathname: "" });
   const drawerVisible = useTerminalDrawerVisible();
@@ -68,19 +78,32 @@ export function SpeechHostProvider({ children }: Props) {
   useEffect(() => {
     drawerVisibleRef.current = drawerVisible;
   }, [drawerVisible]);
-  const onAnswer = useCallback((utterance: Utterance, recovered: boolean) => {
-    alertOnAnswer(utterance, recovered, {
-      sessionOf: (sessionId) => getSessions().find((session) => session.id === sessionId),
-      focusedVisibleSessionId: () =>
-        focusedVisibleSessionIdFor(
-          routerView.current.pathname,
-          drawerVisibleRef.current,
-          readTerminalFocus,
-        ),
-      documentVisible: () => document.visibilityState === "visible",
-      navigate: (path) => routerView.current.navigate?.(path),
-    });
-  }, []);
+  // What both speech alerts read to name a cell and to arrive at it: the
+  // session list at the moment of asking, and the router's navigate.
+  const [cellPlumbing] = useState<Pick<AnswerAlertDeps, "sessionOf" | "navigate">>(() => ({
+    sessionOf: (sessionId) => getSessions().find((session) => session.id === sessionId),
+    navigate: (path) => routerView.current.navigate?.(path),
+  }));
+  const onAnswer = useCallback(
+    (utterance: Utterance, recovered: boolean) => {
+      alertOnAnswer(utterance, recovered, {
+        ...cellPlumbing,
+        focusedVisibleSessionId: () =>
+          focusedVisibleSessionIdFor(
+            routerView.current.pathname,
+            drawerVisibleRef.current,
+            readTerminalFocus,
+          ),
+        documentVisible: () => document.visibilityState === "visible",
+      });
+    },
+    [cellPlumbing],
+  );
+
+  // The speaking alert (see `speakingAlert.ts`), fed the host's run events. One
+  // per provider, like the host; taken down when the provider goes.
+  const [speakingAlert] = useState(() => createSpeakingAlert(cellPlumbing));
+  useEffect(() => () => speakingAlert.dispose(), [speakingAlert]);
 
   // The channel never forgets a session, so the idle transport learns a cell
   // has closed from the session list: a session it no longer lists, while it
@@ -91,7 +114,11 @@ export function SpeechHostProvider({ children }: Props) {
     return sessions.length === 0 || sessions.some((session) => session.id === sessionId);
   }, []);
 
-  const speech = useSpeechHost({ onAnswer, isSessionOpen });
+  const speech = useSpeechHost({
+    onAnswer,
+    isSessionOpen,
+    onRunChange: speakingAlert.onRunChange,
+  });
 
   // Here for the same reason the host is: `navigator.mediaSession` is one state
   // machine per DOCUMENT, so a transport mounted per surface would have the two

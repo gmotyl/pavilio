@@ -140,7 +140,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
 
 import { prepare } from "../prepare";
 import { idleTransportTarget } from "../idleTransportTarget";
-import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
+import { useSpeechHost, type SpeechHost, type SpeechRunEvent } from "../useSpeechHost";
 import { utteranceUnderCursor } from "../utteranceQueue";
 import { DEFAULT_SPEECH_VOICE } from "../voices";
 
@@ -1338,5 +1338,67 @@ describe("useSpeechHost — the idle transport", () => {
     // A closes too: nothing is left to play, rather than a cell nobody sees.
     closed.add("cell-a");
     expect(idleTransportTarget(host())).toBeNull();
+  });
+});
+
+describe("useSpeechHost — the voice's run events", () => {
+  it("reports the voice starting, holding, continuing and falling silent", async () => {
+    const events: SpeechRunEvent[] = [];
+    const { result } = renderHook(() =>
+      useSpeechHost({ onRunChange: (event) => events.push(event) }),
+    );
+    const host = (): SpeechHost => result.current;
+
+    await emitUtterance("cell-a", "a-1", response(2, "Alpha"));
+    await settle(() => host().onSpeak("cell-a"));
+    await settle(() => host().onPause("cell-a"));
+    await settle(() => host().onResume("cell-a"));
+    // A stop is an end; so is a stop taken while held, with no resume first.
+    await settle(() => host().onStop("cell-a"));
+    expect(events).toEqual([
+      { type: "start", sessionId: "cell-a" },
+      { type: "pause" },
+      { type: "resume" },
+      { type: "end" },
+    ]);
+
+    events.length = 0;
+    await settle(() => host().onSpeak("cell-a"));
+    await settle(() => host().onPause("cell-a"));
+    await settle(() => host().onStop("cell-a"));
+    expect(events).toEqual([
+      { type: "start", sessionId: "cell-a" },
+      { type: "pause" },
+      { type: "end" },
+    ]);
+  });
+
+  it("a barge-in and the queue's next answer move the voice without an end between", async () => {
+    const events: SpeechRunEvent[] = [];
+    const { result } = renderHook(() =>
+      useSpeechHost({ onRunChange: (event) => events.push(event) }),
+    );
+    const host = (): SpeechHost => result.current;
+    await settle(() => {
+      host().cycleSpeechMode("cell-b"); // armed
+      host().cycleSpeechMode("cell-b"); // autoplay
+    });
+
+    await emitUtterance("cell-a", "a-1", response(1, "Alpha"));
+    await emitUtterance("cell-c", "c-1", response(1, "Charlie"));
+    await settle(() => host().onSpeak("cell-a"));
+    // C barges in over A.
+    await settle(() => host().onSpeak("cell-c"));
+    // B answers while C speaks: queued, and spoken the moment C ends.
+    await emitUtterance("cell-b", "b-1", response(1, "Bravo"));
+    await endCurrentUnit();
+    await endRun();
+
+    expect(events).toEqual([
+      { type: "start", sessionId: "cell-a" },
+      { type: "start", sessionId: "cell-c" },
+      { type: "start", sessionId: "cell-b" },
+      { type: "end" },
+    ]);
   });
 });
