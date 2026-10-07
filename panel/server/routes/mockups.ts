@@ -20,6 +20,8 @@ const router = Router();
 
 const MAX_FILES = 50;
 const MAX_SUFFIX = 1000;
+/** A slug is cut to 60 chars server-side; 1 KB leaves room for any typed input. */
+const MAX_FIELD_BYTES = 1024;
 
 type BufferedFile = Express.Multer.File & { tooLarge?: boolean; overTotal?: boolean };
 
@@ -82,7 +84,17 @@ const cappedMemoryStorage: StorageEngine = {
 const upload = multer({
   storage: cappedMemoryStorage,
   defParamCharset: "utf8",
-  limits: { files: MAX_FILES },
+  // Text fields are bounded too: the only one is `slugs`, one per file, so
+  // repeated or huge fields cannot grow `req.body` past a few dozen KB.
+  limits: {
+    files: MAX_FILES,
+    fields: MAX_FILES,
+    fieldSize: MAX_FIELD_BYTES,
+    fieldNameSize: 100,
+    // A file and its slug per entry; busboy counts the closing boundary as
+    // a part too, so the full 50 + 50 needs one more.
+    parts: MAX_FILES * 2 + 1,
+  },
 });
 
 /** 400 for a malformed name, 404 for one that is not a known project — before any upload is read. */
@@ -211,6 +223,14 @@ router.post("/:project/mockups/import", requireProject, receiveFiles, async (req
 
   if (wrote) rebuildIndex();
   res.json({ files: results });
+});
+
+/**
+ * The date every import is prefixed with today — the server's local day, which
+ * the dialog shows instead of the browser's (they differ across time zones).
+ */
+router.get("/:project/mockups/today", requireProject, (_req, res) => {
+  res.json({ date: localISODate() });
 });
 
 router.post("/:project/mockups/inspect", requireProject, receiveFiles, (req, res) => {

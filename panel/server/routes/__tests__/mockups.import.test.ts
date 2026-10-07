@@ -221,6 +221,33 @@ describe("POST /api/projects/:project/mockups/import", () => {
     expect(res.body.files[0]).toMatchObject({ ok: true, name: "2026-10-07-zazolc-gesla.png" });
   });
 
+  it("refuses more text fields than files can use", async () => {
+    let req = request(makeApp()).post("/api/projects/p/mockups/import").attach("files", PNG, "a.png");
+    for (let i = 0; i < 51; i++) req = req.field("slugs", `s${i}`);
+    const res = await req;
+    expect(res.status).toBe(400);
+    expect(listMockups()).toEqual([]);
+  });
+
+  it("refuses an oversized text field", async () => {
+    const res = await request(makeApp())
+      .post("/api/projects/p/mockups/import")
+      .attach("files", PNG, "a.png")
+      .field("slugs", "x".repeat(2048));
+    expect(res.status).toBe(400);
+    expect(listMockups()).toEqual([]);
+  });
+
+  it("still takes one slug per file at the file limit", async () => {
+    let req = request(makeApp()).post("/api/projects/p/mockups/import");
+    for (let i = 0; i < 50; i++) req = req.attach("files", PNG, `f${i}.png`).field("slugs", `s${i}`);
+    const res = await req;
+    expect(res.body.error).toBeUndefined();
+    expect(res.status).toBe(200);
+    expect(res.body.files).toHaveLength(50);
+    expect(res.body.files.every((f: { ok: boolean }) => f.ok)).toBe(true);
+  });
+
   it("rebuilds the index once per batch", async () => {
     const res = await request(makeApp())
       .post("/api/projects/p/mockups/import")
@@ -267,5 +294,39 @@ describe("POST /api/projects/:project/mockups/inspect", () => {
       ],
     });
     expect(listMockups()).toEqual([]);
+  });
+});
+
+describe("GET /api/projects/:project/mockups/today", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-mockup-today-test-"));
+    projectsDir = join(tmpRoot, "projects");
+    mkdirSync(join(projectsDir, "p"), { recursive: true });
+    writeFileSync(join(projectsDir, "p", "PROJECT.md"), "# p");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("answers with the server's local date, the one imports are prefixed with", async () => {
+    const prevTz = process.env.TZ;
+    process.env.TZ = "Europe/Warsaw";
+    try {
+      vi.setSystemTime(new Date(2026, 9, 7, 0, 30, 0));
+      const res = await request(makeApp()).get("/api/projects/p/mockups/today");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ date: "2026-10-07" });
+    } finally {
+      if (prevTz === undefined) delete process.env.TZ;
+      else process.env.TZ = prevTz;
+    }
+  });
+
+  it("404s an unknown project", async () => {
+    const res = await request(makeApp()).get("/api/projects/nope/mockups/today");
+    expect(res.status).toBe(404);
   });
 });
