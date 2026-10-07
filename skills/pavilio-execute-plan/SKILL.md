@@ -42,6 +42,11 @@ For each task, in order:
 1. **Mark it in-progress** (main thread).
 2. **Dispatch an implementer sub-agent** (general-purpose). Give it: the task's steps verbatim, the plan context it needs, the repo/project conventions, and TDD discipline (write the failing test → see it fail → minimal implementation → see it pass → commit within the task). Require a structured result: files changed, the diff range / commit SHA(s), the test/verification output pasted, and anything it could not complete.
 3. **Dispatch a reviewer sub-agent** on that task's diff. Give it the plan task's **WHEN/THEN acceptance criteria**, the standards sources (`qa/REVIEW_RULES.md`, `CONTEXT.md`, ADRs), and the implementer's diff range. It verifies the diff **against the acceptance criteria and standards — not against non-`Contract:` code sketched in the plan** (code inside a task's `Contract:` block is part of the acceptance criteria and must be verified); divergence from other plan detail is fine when the criteria are met. It reports: does each AC hold? Separate **blocking** issues from nits.
+
+   **Mockup fidelity** — when the change's `design.md` has a `## Mockups` section, also give the reviewer that section and these rules; each failure is **blocking**:
+   - **Visual verification task:** the screenshots must exist in `openspec/changes/<id>/verification/` and the result must carry a match/mismatch verdict per Check item. No screenshots, or no per-Check-item verdict → blocking. DOM assertions alone do not satisfy it.
+   - **Task with mockup check items:** every Check item in the task's acceptance criteria must have an assertion in the diff's tests. One check item without a test assertion → blocking.
+   - **Agreed deviations stand:** a diff that moves a surface from an agreed deviation back toward the mockup is blocking — the deviation is the expected result, not a defect to "fix".
 4. **Read the review (main thread) and decide:**
    - **Clean** → mark the todo complete, update the progress note, keep the task's commit, move on.
    - **Blocking issues** → dispatch a fresh implementer sub-agent with the reviewer's findings to fix, then re-review. **Bound the loop to ~2–3 rounds**; if it doesn't converge, stop and escalate to the user.
