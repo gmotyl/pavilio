@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ViewerActions from "./ViewerActions";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
+import { useWebSocket } from "../realtime/useWebSocket";
 import { isMockupImage, isRasterImage } from "./mockupFiles";
 
 /**
@@ -98,6 +99,15 @@ export function MockupFrame({
   const [zoom, setZoom] = useState<Zoom>(ZOOMS[0]);
   const isImage = isMockupImage(filePath);
   const project = mockupProject(filePath);
+  // An `<img>` keeps showing its cached bitmap when the file changes on disk;
+  // a new query string on the raw src makes the browser fetch it again.
+  const [imageVersion, setImageVersion] = useState(0);
+  const { lastMessage } = useWebSocket();
+  useEffect(() => {
+    if (!isImage || lastMessage?.type !== "file-change") return;
+    const changedPath = lastMessage.path as string | undefined;
+    if (changedPath?.includes(filePath)) setImageVersion((v) => v + 1);
+  }, [lastMessage, filePath, isImage]);
   const workspaceRoot = useWorkspaceRoot();
   const relativePath = workspaceRoot
     ? relativeToWorkspace(absolutePath, workspaceRoot)
@@ -190,7 +200,9 @@ export function MockupFrame({
         <div className="flex-1 min-h-0 overflow-auto">
           <img
             data-testid={`${testIdPrefix}-image`}
-            src={rawSrc(filePath)}
+            src={
+              imageVersion ? `${rawSrc(filePath)}?v=${imageVersion}` : rawSrc(filePath)
+            }
             alt={filePath.split("/").pop()}
             className="block mx-auto"
             style={{ maxWidth: zoom.maxWidth, height: "auto" }}
