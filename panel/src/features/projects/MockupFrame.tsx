@@ -34,6 +34,16 @@ export interface MockupFrameProps {
 const rawSrc = (filePath: string) =>
   `/api/files/raw/${filePath.split("/").map(encodeURIComponent).join("/")}`;
 
+/**
+ * The markdown link Copy link puts on the clipboard: the workspace-relative
+ * path as its text (what an agent reads) and the host-relative Mockups route
+ * as its target (what a human clicks). Host-relative so it works on localhost,
+ * over Tailscale and on a phone. The project is the index-relative path's first
+ * segment — every viewer that mounts the frame addresses files that way.
+ */
+const mockupLink = (relativePath: string, filePath: string) =>
+  `[${relativePath}](/project/${filePath.split("/")[0]}/mockups?file=${encodeURIComponent(filePath)})`;
+
 const BUTTON_CLASS =
   "text-sm px-2 py-1 rounded-md transition-colors cursor-pointer";
 
@@ -47,6 +57,9 @@ export function MockupFrame({
   // so no unreachable "not found" fallback.
   const [selected, setSelected] = useState<Width>(WIDTHS[0]);
   const workspaceRoot = useWorkspaceRoot();
+  const relativePath = workspaceRoot
+    ? relativeToWorkspace(absolutePath, workspaceRoot)
+    : null;
 
   return (
     // `h-[70vh]` is the phone's height and the fallback for any surface whose
@@ -93,8 +106,11 @@ export function MockupFrame({
           absolutePath={absolutePath}
           // The path that means something inside an agent conversation, not the
           // machine-specific absolute one. VS Code still gets the absolute path.
-          relativePath={
-            workspaceRoot ? relativeToWorkspace(absolutePath, workspaceRoot) : null
+          relativePath={relativePath}
+          // Both copies wait on the same workspace root: until it is known the
+          // link has no text, and the absolute path never stands in for it.
+          copyLinkText={
+            relativePath === null ? null : mockupLink(relativePath, filePath)
           }
           testIdPrefix={testIdPrefix}
         />

@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, Copy, ClipboardCopy, Check, FileSymlink } from "lucide-react";
+import {
+  ExternalLink,
+  Copy,
+  ClipboardCopy,
+  Check,
+  FileSymlink,
+  Link,
+} from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
 import { openInVSCode } from "../shell/vscode";
 
@@ -7,13 +14,14 @@ const BUTTON_CLASS =
   "flex items-center gap-1.5 text-sm px-2 py-1 rounded-md transition-colors";
 
 /** Which button, if any, is currently showing its "Copied" confirmation. */
-type Feedback = "path" | "absolute" | "content" | null;
+type Feedback = "path" | "link" | "absolute" | "content" | null;
 
 /** Viewer toolbar actions: the buttons above an open file that operate on it. */
 export function ViewerActions({
   absolutePath,
   content,
   relativePath,
+  copyLinkText,
   testIdPrefix = "file-viewer",
 }: {
   /** The open file on disk. VS Code and copy-absolute take it. */
@@ -29,6 +37,13 @@ export function ViewerActions({
    * — that has its own button.
    */
   relativePath: string | null;
+  /**
+   * What Copy link puts on the clipboard: a markdown link to the file's panel
+   * route, built by the caller. Only the mockup viewer passes it; left out
+   * (`undefined`), no Copy link button renders. `null` means the link cannot
+   * be built yet (the workspace root is still loading) and disables the button.
+   */
+  copyLinkText?: string | null;
   /**
    * Stem of the buttons' `data-testid`s. It exists so the standalone `/view/*`
    * viewer can compose this toolbar without renaming the `markdown-viewer-*`
@@ -109,6 +124,28 @@ export function ViewerActions({
         )}
         {copied === "path" ? "Copied" : "Path"}
       </button>
+      {copyLinkText !== undefined && (
+        <button
+          data-testid={`${testIdPrefix}-copy-link`}
+          onClick={() => {
+            if (copyLinkText !== null) void copy("link", copyLinkText);
+          }}
+          disabled={copyLinkText === null}
+          title="Copy a markdown link to this mockup in the panel"
+          className={BUTTON_CLASS}
+          style={{
+            color: copied === "link" ? "var(--green)" : "var(--text-secondary)",
+            opacity: copyLinkText === null ? 0.4 : 1,
+          }}
+        >
+          {copied === "link" ? (
+            <Check className="w-3.5 h-3.5" />
+          ) : (
+            <Link className="w-3.5 h-3.5" />
+          )}
+          {copied === "link" ? "Copied" : "Link"}
+        </button>
+      )}
       <button
         data-testid={`${testIdPrefix}-copy-absolute`}
         onClick={() => copy("absolute", absolutePath)}
