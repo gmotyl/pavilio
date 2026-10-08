@@ -100,6 +100,19 @@ describe("project voice", () => {
     expect(getProjectVoice("p")).toBeNull();
   });
 
+  it("a project named __proto__ stores its voice as an ordinary entry", () => {
+    setProjectVoice("p", ANDREW);
+    setProjectVoice("__proto__", EMMA);
+
+    expect(getProjectVoice("__proto__")).toBe(EMMA);
+    expect(getProjectVoice("p")).toBe(ANDREW);
+    expect(Object.hasOwn(globals.__PAVILIO_PREFS__![BY_PROJECT_KEY] as object, "__proto__")).toBe(true);
+
+    setProjectVoice("__proto__", null);
+    expect(getProjectVoice("__proto__")).toBeNull();
+    expect(globals.__PAVILIO_PREFS__![BY_PROJECT_KEY]).toEqual({ p: ANDREW });
+  });
+
   it("an unknown session gets the default voice", async () => {
     setProjectVoice("p", EMMA);
     await seedSessions([session("sess-p", "p")]);

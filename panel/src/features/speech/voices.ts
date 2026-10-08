@@ -127,12 +127,16 @@ export function getProjectVoice(project: string): SpeechVoiceId | null {
 /** Sets the project's voice; `null` DELETES the entry, so it follows the default. */
 export function setProjectVoice(project: string, id: SpeechVoiceId | null): void {
   if (project.trim() === "") return;
+  if (id !== null && !isSpeechVoice(id)) return;
   const stored = readPreference(preferences.speechVoiceByProject);
-  const next: Record<string, string> =
-    stored !== null && typeof stored === "object" && !Array.isArray(stored) ? { ...stored } : {};
-  if (id === null) delete next[project];
-  else if (isSpeechVoice(id)) next[project] = id;
-  else return;
+  const others = Object.entries(
+    stored !== null && typeof stored === "object" && !Array.isArray(stored) ? stored : {},
+  ).filter(([key]) => key !== project);
+  // Built by `fromEntries`, which defines its keys: an assignment would hand a
+  // project named `__proto__` to the prototype setter and drop the write.
+  const next: Record<string, string> = Object.fromEntries(
+    id === null ? others : [...others, [project, id]],
+  );
   writePreference(preferences.speechVoiceByProject, next);
 }
 
