@@ -102,7 +102,7 @@ describe("ProjectView — Overview", () => {
     expect(screen.queryByText("Second paragraph, only in the full render.")).toBeNull();
   });
 
-  it("PROJECT.md is collapsed again after switching project", async () => {
+  it("PROJECT.md and project settings start fresh after switching project", async () => {
     mockFetchResponses({
       "/api/projects/colors": { colors: {} },
       "/api/projects": [
@@ -132,6 +132,11 @@ describe("ProjectView — Overview", () => {
     await screen.findByTestId("project-md-peek");
     fireEvent.click(toggle());
     expect(await screen.findByText("Second paragraph, only in the full render.")).toBeInTheDocument();
+    // A half-typed, rejected custom colour — local to the picker, not stored.
+    const settings = screen.getByTestId("project-settings-card");
+    fireEvent.change(within(settings).getByLabelText("Custom hex"), { target: { value: "nope" } });
+    fireEvent.click(screen.getByTestId("project-color-apply-pavilio"));
+    expect(within(settings).getByRole("alert")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("to other"));
 
@@ -139,6 +144,9 @@ describe("ProjectView — Overview", () => {
     expect(screen.getByTestId("project-md-peek")).toHaveTextContent("Other project peek line.");
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Other full-only paragraph.")).toBeNull();
+    const otherSettings = screen.getByTestId("project-settings-card");
+    expect(within(otherSettings).getByLabelText("Custom hex")).toHaveValue("");
+    expect(within(otherSettings).queryByRole("alert")).toBeNull();
   });
 
   it("a PROJECT.md load error shows without expanding", async () => {

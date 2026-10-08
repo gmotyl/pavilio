@@ -475,15 +475,16 @@ export default function ProjectView() {
             </div>
           )}
           {/* Keyed by project: `/project/:name` reuses this ProjectView when only
-              the name changes, so without the key the expanded state would carry
-              over to the next project instead of starting collapsed. */}
+              the name changes, so without the key the expanded state — and the
+              settings card's half-typed custom colour — would carry over to the
+              next project instead of starting fresh. */}
           <CollapsibleProjectMd
             key={name}
             content={content}
             error={error}
             basePath={`${name}/PROJECT.md`}
           />
-          {name && <ProjectSettingsCard project={name} />}
+          {name && <ProjectSettingsCard key={`settings:${name}`} project={name} />}
         </>
       )}
     </div>
