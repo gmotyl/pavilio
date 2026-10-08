@@ -327,7 +327,7 @@ async function loadUnit(
   try {
     // The voice is always explicit: `synth.ts` keeps a private
     // `DEFAULT_VOICE = "en-GB-RyanNeural"` from motyl, so an omitted voice
-    // silently overrides the panel's Andrew default.
+    // silently overrides the panel's default voice.
     const buffer = await synthesizeSpeech(units[index].text, { voice });
     // `toSpeechBlob` copies the cached buffer. Wrapping it by hand would hand
     // the same ArrayBuffer out twice and detach it on the second playback.

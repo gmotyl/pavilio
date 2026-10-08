@@ -18,6 +18,9 @@
 // feature would be the direction that closes a cycle.
 import { DEFAULT_SPEECH_VOICE, preferences } from "../../preferences/declarations";
 import { clearPreference, readPreference, writePreference } from "../../preferences/store";
+// Points DOWN too: sessionProject reaches only the session store and the
+// preference types, neither of which imports a speech module.
+import { projectOfSession } from "../terminal/sessionProject";
 import type { SpeechMode } from "./types";
 
 export { DEFAULT_SPEECH_VOICE };
@@ -107,6 +110,43 @@ export function setStoredVoice(id: string): SpeechVoiceId {
   if (!isSpeechVoice(id)) return getStoredVoice();
   writePreference(preferences.speechVoice, id);
   return id;
+}
+
+/**
+ * The project's own voice, or `null` when it follows the default. A stale or
+ * hand-edited id reads as `null` — the record's codec is plain `json`, so this
+ * is the boundary that drops it, as `resolveVoice` is for the default.
+ */
+export function getProjectVoice(project: string): SpeechVoiceId | null {
+  const stored = readPreference(preferences.speechVoiceByProject);
+  if (stored === null || typeof stored !== "object" || Array.isArray(stored)) return null;
+  const id: unknown = Object.hasOwn(stored, project) ? stored[project] : null;
+  return typeof id === "string" && isSpeechVoice(id) ? id : null;
+}
+
+/** Sets the project's voice; `null` DELETES the entry, so it follows the default. */
+export function setProjectVoice(project: string, id: SpeechVoiceId | null): void {
+  if (project.trim() === "") return;
+  const stored = readPreference(preferences.speechVoiceByProject);
+  const next: Record<string, string> =
+    stored !== null && typeof stored === "object" && !Array.isArray(stored) ? { ...stored } : {};
+  if (id === null) delete next[project];
+  else if (isSpeechVoice(id)) next[project] = id;
+  else return;
+  writePreference(preferences.speechVoiceByProject, next);
+}
+
+/** The voice a project speaks with: its own, else the default voice. */
+export function voiceForProject(project: string | undefined): SpeechVoiceId {
+  return (project ? getProjectVoice(project) : null) ?? getStoredVoice();
+}
+
+/**
+ * The voice a cell speaks with, through the project its session belongs to;
+ * a session the tab cannot place gets the default voice.
+ */
+export function voiceForSession(sessionId: string): SpeechVoiceId {
+  return voiceForProject(projectOfSession(sessionId) ?? undefined);
 }
 
 /** One click on a cell's speech control: `off → armed → autoplay → off`. */

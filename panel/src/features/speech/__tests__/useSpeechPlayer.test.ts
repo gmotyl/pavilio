@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *
  * The fake also records the resolved voice of every request. `synth.ts` keeps a
  * private `DEFAULT_VOICE = "en-GB-RyanNeural"` inherited from motyl, so a
- * caller that omits the voice silently gets Ryan instead of the panel's Andrew
+ * caller that omits the voice silently gets Ryan instead of the panel's own
  * default; these recordings are what pin that the player always passes one.
  */
 const synth = vi.hoisted(() => {
