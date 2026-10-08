@@ -25,6 +25,8 @@ import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { segmentStateFor } from "../segmentState";
 import { AnswerPane } from "../AnswerPane";
 import { __resetAnswerWaitingForTests, beginWaiting, noteTransport } from "../answerWaiting";
+import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../../speech/voices";
+import { refreshSessions } from "../sessionStore";
 
 // mermaid pulls in a browser-only rendering stack; what matters here is that
 // the fence reaches the diagram component, not what mermaid draws.
@@ -54,11 +56,25 @@ vi.mock("../../markdown/MarkdownRenderer", async (importOriginal) => {
 const warm = vi.hoisted(() => new Set<string>());
 const warming = vi.hoisted(() => new Set<string>());
 const cacheListeners = vi.hoisted(() => new Set<() => void>());
+/**
+ * Units in hand in ONE voice: text → the voice they were synthesized in. The
+ * real cache keys on voice + text, so these read `ready` only to a peek that
+ * names the same voice, and `cold` to any other.
+ */
+const voiced = vi.hoisted(() => new Map<string, string>());
 
 vi.mock("../../speech/synth", () => ({
   isSpeechSynthesized: (text: string) => warm.has(text) || warming.has(text),
-  speechCacheState: (text: string) =>
-    warm.has(text) ? "ready" : warming.has(text) ? "warming" : "cold",
+  speechCacheState: (text: string, options: { voice?: string } = {}) =>
+    voiced.has(text)
+      ? voiced.get(text) === options.voice
+        ? "ready"
+        : "cold"
+      : warm.has(text)
+        ? "ready"
+        : warming.has(text)
+          ? "warming"
+          : "cold",
   subscribeSpeechCache: (listener: () => void) => {
     cacheListeners.add(listener);
     return () => {
@@ -419,6 +435,7 @@ const box = (index: number): { top: number; height: number } => ({
 beforeEach(() => {
   warm.clear();
   warming.clear();
+  voiced.clear();
   cacheListeners.clear();
   bodyRenders.count = 0;
   scrollTo.mockClear();
@@ -470,6 +487,41 @@ describe("AnswerPane", () => {
     expect(segment(0)).toHaveAttribute("data-segment", "played");
     expect(segment(1)).toHaveAttribute("data-segment", "playing");
     expect(segment(2)).toHaveAttribute("data-segment", "ready");
+  });
+
+  it("the pane reads cache state in the session's project voice", async () => {
+    const EMMA = "en-US-EmmaMultilingualNeural";
+    setProjectVoice("p", EMMA);
+    // The session list, loaded through the store's own fetch — which is where
+    // `voiceForSession` places the cell in its project.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { id: "cell-p", name: "cell-p", project: "p", cwd: "/srv/git/p", pid: 1, createdAt: "" },
+        ],
+      })),
+    );
+    try {
+      await refreshSessions();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.stubGlobal("ResizeObserver", StubResizeObserver);
+    }
+    const h = harness(MARKDOWN, null);
+    voiced.set(h.units[0].text, EMMA); // the host warmed it in the project's voice
+    voiced.set(h.units[1].text, DEFAULT_SPEECH_VOICE); // a default-voice entry: not this cell's
+
+    render(
+      <MemoryRouter>
+        <AnswerPane sessionId="cell-p" speech={makeSpeech(h)} onClose={() => {}} send={NO_SEND} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("answer-pane-seg-cell-p-0")).toHaveAttribute("data-segment", "ready");
+    expect(screen.getByTestId("answer-pane-seg-cell-p-1")).toHaveAttribute("data-segment", "cold");
   });
 
   it("marks the spoken block and parks the playhead beside its segment", () => {
