@@ -80,6 +80,7 @@ export default function CollapsibleProjectMd({ content, error, basePath }: Props
       style={{ border: "1px solid var(--border-default)", background: "var(--bg-surface)" }}
     >
       <button
+        data-testid="project-md-toggle"
         type="button"
         aria-expanded={open}
         aria-controls={open ? bodyId : undefined}
