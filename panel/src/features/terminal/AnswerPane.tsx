@@ -24,7 +24,7 @@ import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { unplayedSinceLastPlayed } from "../speech/unreadAnswers";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
-import { getStoredVoice } from "../speech/voices";
+import { voiceForSession } from "../speech/voices";
 import { type UnitToBlocks, alignToSegments, layoutRail, matchableBlocks } from "./layoutRail";
 import { matchUnitsToBlocks } from "./matchUnitsToBlocks";
 import { segmentStateFor } from "./segmentState";
@@ -368,7 +368,8 @@ export function AnswerPane({
   // subscribing IS the point.
   useSyncExternalStore(subscribeCacheVersion, readCacheVersion);
 
-  const voice = getStoredVoice();
+  // The session's voice, as the bar reads it — see `voiceForSession`.
+  const voice = voiceForSession(sessionId);
   const text = answer?.text ?? "";
   const answerId = answer?.id ?? null;
 

@@ -25,7 +25,7 @@ import {
   type SynthesisWindow,
 } from "./synthesisWindow";
 import type { SpeechUnit } from "./types";
-import { getStoredVoice } from "./voices";
+import { voiceForSession } from "./voices";
 
 /**
  * How many syntheses the run keeps in flight while it warms its remainder.
@@ -684,7 +684,10 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
         }
       }
       publishUnit(start, startAt);
-      const voice = getStoredVoice();
+      // The session's voice — its project's own, else the default — resolved
+      // once, when the run starts. The cache keys on voice + text, so this has
+      // to be the voice the host warmed and preloaded with.
+      const voice = voiceForSession(sessionId);
       const run: PlaybackRun = {
         sessionId,
         active: true,

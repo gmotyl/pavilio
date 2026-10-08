@@ -178,7 +178,8 @@ vi.mock("../synth", () => ({
 import type { SpeechPlaybackError, SpeechPlayer } from "../useSpeechPlayer";
 import { SYNTHESIS_CONCURRENCY, useSpeechPlayer } from "../useSpeechPlayer";
 import type { SpeechUnit } from "../types";
-import { DEFAULT_SPEECH_VOICE, setStoredVoice } from "../voices";
+import { refreshSessions } from "../../terminal/sessionStore";
+import { DEFAULT_SPEECH_VOICE, setProjectVoice, setStoredVoice } from "../voices";
 
 function units(...texts: string[]): SpeechUnit[] {
   return texts.map((text) => ({ text, chars: text.length, source: text }));
@@ -399,6 +400,39 @@ describe("useSpeechPlayer", () => {
       DEFAULT_SPEECH_VOICE,
       DEFAULT_SPEECH_VOICE,
     ]);
+  });
+
+  it("a run synthesizes in the session's project voice", async () => {
+    const EMMA = "en-US-EmmaMultilingualNeural";
+    setProjectVoice("p", EMMA);
+    // The session list, loaded through the store's own fetch — which is where
+    // `voiceForSession` places the cell in its project.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { id: "cell-p", name: "cell-p", project: "p", cwd: "/srv/git/p", pid: 1, createdAt: "" },
+        ],
+      })),
+    );
+    try {
+      await refreshSessions();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+
+    await startPlay(result.current, "cell-p", manyUnits(4));
+
+    expect(played).toEqual(["blob:unit-0"]);
+    // Unit 0 and every unit the cascade warmed after it, all in the project's
+    // voice: any other one is a cache entry the host's warm never made.
+    expect(requested()).toEqual(["unit-0", "unit-1", "unit-2", "unit-3"]);
+    expect(new Set(synth.requests.map((request) => request.voice))).toEqual(new Set([EMMA]));
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("has the next unit's object URL ready before the current unit ends", async () => {

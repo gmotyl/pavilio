@@ -142,7 +142,9 @@ import { prepare } from "../prepare";
 import { idleTransportTarget } from "../idleTransportTarget";
 import { useSpeechHost, type SpeechHost, type SpeechRunEvent } from "../useSpeechHost";
 import { utteranceUnderCursor } from "../utteranceQueue";
-import { DEFAULT_SPEECH_VOICE } from "../voices";
+import { refreshSessions } from "../../terminal/sessionStore";
+import type { SessionMeta } from "../../terminal/useTerminalSessions";
+import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
 
 /** The `src` of every started playback, in order. Warming must never add one. */
 const played: string[] = [];
@@ -397,6 +399,71 @@ describe("useSpeechHost warming", () => {
 
     expect(played).toEqual([`blob:${units[0]}`]);
     expect(timesRequested(units[0])).toBe(1);
+  });
+});
+
+/**
+ * The cache keys on voice + text, so a cell whose project has its own voice
+ * must be warmed and preloaded in THAT voice — any other one is a synthesis the
+ * click never finds. The session list is seeded through the store's own fetch,
+ * which is where `voiceForSession` places a cell in its project.
+ */
+describe("useSpeechHost — the session's project voice", () => {
+  const EMMA = "en-US-EmmaMultilingualNeural";
+
+  async function seedSession(id: string, project: string): Promise<void> {
+    const session: SessionMeta = {
+      id,
+      name: id,
+      project,
+      cwd: `/srv/git/${project}`,
+      pid: 4242,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const channelFetch = global.fetch;
+    global.fetch = vi.fn(
+      async () => ({ ok: true, status: 200, json: async () => [session] }) as Response,
+    ) as unknown as typeof fetch;
+    try {
+      await refreshSessions();
+    } finally {
+      global.fetch = channelFetch;
+    }
+  }
+
+  it("an arriving answer warms unit 0 in its project's voice", async () => {
+    setProjectVoice("p", EMMA);
+    await seedSession("cell-p", "p");
+    const units = unitsOf(response(3));
+    renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-p", "u-1", response(3));
+    await emitUtterance("cell-q", "u-2", response(2, "Other"));
+
+    expect(synth.requests).toEqual([
+      { text: units[0], voice: EMMA },
+      // A cell the tab cannot place in a project keeps the default voice.
+      { text: unitsOf(response(2, "Other"))[0], voice: DEFAULT_SPEECH_VOICE },
+    ]);
+  });
+
+  it("an armed cell preloads every later unit in its project's voice", async () => {
+    setProjectVoice("p", EMMA);
+    await seedSession("cell-p", "p");
+    const units = unitsOf(response(4));
+    const { result } = renderHook(() => useSpeechHost());
+
+    await settle(() => result.current.cycleSpeechMode("cell-p")); // armed
+    await emitUtterance("cell-p", "u-1", response(4));
+
+    expect([...requestedTexts()].sort()).toEqual([...units].sort());
+    expect(new Set(synth.requests.map((request) => request.voice))).toEqual(new Set([EMMA]));
+
+    // And the click that follows finds every unit in hand, in that voice.
+    await settle(() => result.current.onSpeak("cell-p"));
+    await endRun();
+    expect(played).toEqual(units.map((unit) => `blob:${unit}`));
+    for (const unit of units) expect(timesRequested(unit)).toBe(1);
   });
 });
 
