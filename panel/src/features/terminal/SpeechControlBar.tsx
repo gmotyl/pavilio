@@ -19,6 +19,8 @@ import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueu
 import { stepsOffTheWave, stepsOntoTheWave } from "../speech/waveStep";
 import type { CellSpeechState, GridSpeech, SpeechMode, SpeechUnit } from "../speech/types";
 import { voiceForSession } from "../speech/voices";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 
 export interface SpeechControlBarProps {
   sessionId: string;
@@ -465,7 +467,10 @@ export function SpeechControlBar({
   const seekRef = useRef<(clientX: number, index: number, element: HTMLElement) => void>(() => {});
 
   // The voice the cell's units were synthesized in — its project's — or a
-  // cached unit reads as cold: the cache keys on voice + text.
+  // cached unit reads as cold: the cache keys on voice + text. Both voice
+  // preferences are subscribed to only so a change re-reads it here.
+  usePreference(preferences.speechVoice);
+  usePreference(preferences.speechVoiceByProject);
   const voice = voiceForSession(sessionId);
 
   const segmentStateAt = (index: number): SegmentState => {

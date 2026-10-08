@@ -369,6 +369,9 @@ export function AnswerPane({
   useSyncExternalStore(subscribeCacheVersion, readCacheVersion);
 
   // The session's voice, as the bar reads it — see `voiceForSession`.
+  // Subscribed to only so a voice change re-reads it here.
+  usePreference(preferences.speechVoice);
+  usePreference(preferences.speechVoiceByProject);
   const voice = voiceForSession(sessionId);
   const text = answer?.text ?? "";
   const answerId = answer?.id ?? null;

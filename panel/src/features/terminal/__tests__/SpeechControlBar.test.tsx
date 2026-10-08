@@ -590,6 +590,36 @@ describe("SpeechControlBar", () => {
       expect(segmentAt("cell-p", 1)).toBe("cold");
     });
 
+    it("the bar redraws its cache state when the project's voice changes", async () => {
+      const EMMA = "en-US-EmmaMultilingualNeural";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => [
+            { id: "cell-p", name: "cell-p", project: "p", cwd: "/srv/git/p", pid: 1, createdAt: "" },
+          ],
+        })),
+      );
+      try {
+        await refreshSessions();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      const all = units(200);
+      voiced.set(all[0].text, EMMA); // warmed in Emma, which the project does not use yet
+
+      render(<SpeechControlBar sessionId="cell-p" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor(all)} />);
+      expect(segmentAt("cell-p", 0)).toBe("cold");
+
+      // The override lands while the bar is mounted — from the Overview, or
+      // another tab. Nothing else re-renders the bar, so it must subscribe.
+      act(() => setProjectVoice("p", EMMA));
+
+      expect(segmentAt("cell-p", 0)).toBe("ready");
+    });
+
     it("a warming segment settles to ready with no progress tick", () => {
       const all = units(200, 240);
       warming.add(all[0].text);

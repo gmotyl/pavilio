@@ -524,6 +524,40 @@ describe("AnswerPane", () => {
     expect(screen.getByTestId("answer-pane-seg-cell-p-1")).toHaveAttribute("data-segment", "cold");
   });
 
+  it("the pane redraws its cache state when the project's voice changes", async () => {
+    const EMMA = "en-US-EmmaMultilingualNeural";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { id: "cell-p", name: "cell-p", project: "p", cwd: "/srv/git/p", pid: 1, createdAt: "" },
+        ],
+      })),
+    );
+    try {
+      await refreshSessions();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.stubGlobal("ResizeObserver", StubResizeObserver);
+    }
+    const h = harness(MARKDOWN, null);
+    voiced.set(h.units[0].text, EMMA); // warmed in Emma, which the project does not use yet
+
+    render(
+      <MemoryRouter>
+        <AnswerPane sessionId="cell-p" speech={makeSpeech(h)} onClose={() => {}} send={NO_SEND} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("answer-pane-seg-cell-p-0")).toHaveAttribute("data-segment", "cold");
+
+    // The override lands while the pane is open; nothing else re-renders it.
+    act(() => setProjectVoice("p", EMMA));
+
+    expect(screen.getByTestId("answer-pane-seg-cell-p-0")).toHaveAttribute("data-segment", "ready");
+  });
+
   it("marks the spoken block and parks the playhead beside its segment", () => {
     const h = harness(MARKDOWN, { unitIndex: 1, unitTime: 0, unitDuration: null });
     render(paneElement(makeSpeech(h)));
