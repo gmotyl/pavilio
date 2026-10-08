@@ -19,10 +19,10 @@ const PROJECT_MD = [
 ].join("\n");
 
 /**
- * Overview plus one other tab of the same project. The tab link sits outside
- * `Routes`, so switching tabs keeps ProjectView itself mounted — the case where
- * a component-level "expanded" flag would survive if it lived above the
- * Overview branch.
+ * Overview plus one other tab of the same project. The links sit outside
+ * `Routes`; a tab switch unmounts the Overview branch (it renders only when no
+ * section is open), so the round trip checks that reopening Overview starts
+ * from a fresh, collapsed PROJECT.md.
  */
 function renderOverview() {
   return render(
@@ -100,6 +100,45 @@ describe("ProjectView — Overview", () => {
     expect(await screen.findByTestId("project-md-peek")).toBeInTheDocument();
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Second paragraph, only in the full render.")).toBeNull();
+  });
+
+  it("PROJECT.md is collapsed again after switching project", async () => {
+    mockFetchResponses({
+      "/api/projects/colors": { colors: {} },
+      "/api/projects": [
+        { name: "pavilio", path: "/root/git/prv/pavilio", repos: [] },
+        { name: "other", path: "/root/git/prv/other", repos: [] },
+      ],
+      "/api/files/read/pavilio/PROJECT.md": {
+        content: PROJECT_MD,
+        absolutePath: "/root/git/prv/projects/projects/pavilio/PROJECT.md",
+      },
+      "/api/files/read/other/PROJECT.md": {
+        content: "# Other\n\nOther project peek line.\n\nOther full-only paragraph.",
+        absolutePath: "/root/git/prv/projects/projects/other/PROJECT.md",
+      },
+      "/api/scripts": { scripts: [] },
+      "/api/files/index": [],
+    });
+    // Same `/project/:name` route for both, so ProjectView stays mounted.
+    render(
+      <MemoryRouter initialEntries={["/project/pavilio"]}>
+        <Link to="/project/other">to other</Link>
+        <Routes>
+          <Route path="/project/:name" element={<ProjectView />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByTestId("project-md-peek");
+    fireEvent.click(toggle());
+    expect(await screen.findByText("Second paragraph, only in the full render.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("to other"));
+
+    expect(await screen.findByText("Other project peek line.")).toBeInTheDocument();
+    expect(screen.getByTestId("project-md-peek")).toHaveTextContent("Other project peek line.");
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Other full-only paragraph.")).toBeNull();
   });
 
   it("a PROJECT.md load error shows without expanding", async () => {
