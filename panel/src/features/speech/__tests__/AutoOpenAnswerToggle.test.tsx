@@ -119,7 +119,7 @@ describe("AutoOpenAnswerToggle", () => {
     const heading = screen.getByRole("heading", { level: 2, name: "Speech" });
     const section = heading.closest("section");
     expect(section).not.toBeNull();
-    const voice = within(section!).getByRole("combobox", { name: "Speech voice" });
+    const voice = within(section!).getByRole("combobox", { name: "Default voice" });
     const box = within(section!).getByRole("checkbox", { name: LABEL });
     // Under the voice: the picker comes first in document order.
     expect(voice.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

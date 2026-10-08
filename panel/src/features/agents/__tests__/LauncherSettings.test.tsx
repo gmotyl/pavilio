@@ -118,7 +118,7 @@ describe("LauncherSettings", () => {
     const section = screen.getByRole("heading", { level: 2, name: "Speech" }).closest("section");
     expect(section).not.toBeNull();
     const scope = within(section!);
-    expect(scope.getByRole("combobox", { name: "Speech voice" })).toBeInTheDocument();
+    expect(scope.getByRole("combobox", { name: "Default voice" })).toBeInTheDocument();
     expect(
       scope.getByRole("checkbox", { name: "Open the answer pane on a new answer" }),
     ).toBeInTheDocument();

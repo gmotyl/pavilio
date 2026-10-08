@@ -67,7 +67,7 @@ vi.mock("../useSpeechHost", async () => {
   };
 });
 
-const VOICE_LABEL = "Speech voice";
+const VOICE_LABEL = "Default voice";
 
 /** The settings page lists agent config files over `fetch`; it needs none here. */
 function stubEmptyAgentSettingsApi(): void {
@@ -153,6 +153,25 @@ describe("VoiceSelect", () => {
     // Nothing was persisted, so a reload falls back to the default — that is
     // the documented consequence, not a crash.
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+  });
+
+  it("the settings picker is labelled Default voice", () => {
+    render(<VoiceSelect />);
+
+    // A project can override the voice, so the Settings pick is the fallback.
+    expect(screen.getByLabelText("Default voice")).toBe(voiceSelect());
+    expect(screen.queryByText("Speech voice")).not.toBeInTheDocument();
+  });
+
+  it("the help text points to project overrides, not this browser", () => {
+    render(<VoiceSelect />);
+
+    expect(
+      screen.getByText(
+        "Every voice reads both Polish and English. Saved in the workspace; a project can override it in its Overview → Project settings.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/this browser/)).not.toBeInTheDocument();
   });
 
   it("labels the page, sidebar entry and breadcrumb Settings", async () => {

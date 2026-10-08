@@ -8,8 +8,9 @@ import {
 } from "./voices";
 
 /**
- * The voice picker. One global preference — not a property of a cell or a
- * surface — so it lives on the Settings page.
+ * The default voice picker. One workspace-wide preference — not a property of
+ * a cell or a surface — so it lives on the Settings page; a project can
+ * override it from its Overview → Project settings.
  *
  * `voices.ts` is the single source: the list, the storage key and the default
  * all come from there, and the picked voice always wins because nothing here
@@ -27,7 +28,7 @@ export function VoiceSelect() {
         className="block text-xs mb-1"
         style={{ color: "var(--text-muted)" }}
       >
-        Speech voice
+        Default voice
       </label>
       <select
         id="speech-voice"
@@ -48,8 +49,8 @@ export function VoiceSelect() {
         ))}
       </select>
       <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-        Every voice reads both Polish and English. The pick is stored in this
-        browser and is never switched automatically.
+        Every voice reads both Polish and English. Saved in the workspace; a
+        project can override it in its Overview → Project settings.
       </p>
     </div>
   );
