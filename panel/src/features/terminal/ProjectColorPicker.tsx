@@ -68,6 +68,13 @@ interface Props {
    * focus back while the popover (and its hex field) is still mounted.
    */
   onDismiss?: () => void;
+  /**
+   * `"popover"` (default) is the trigger-plus-popover the terminal grid hosts.
+   * `"inline"` lays the palette out in place, always visible, for a settings
+   * row: no trigger, no outside-click close, and `open` / `onOpenChange` /
+   * `onDismiss` go unused.
+   */
+  variant?: "popover" | "inline";
 }
 
 /**
@@ -101,7 +108,9 @@ export function ProjectColorPicker({
   open: openProp,
   onOpenChange,
   onDismiss,
+  variant = "popover",
 }: Props) {
+  const inline = variant === "inline";
   const { colors, colorFor, setColor } = useProjectColors();
   const [openState, setOpenState] = useState(false);
   const controlled = openProp !== undefined;
@@ -121,14 +130,14 @@ export function ProjectColorPicker({
   // document-level `mousedown` against a root ref that covers trigger *and*
   // popover, so clicking the trigger toggles rather than close-then-reopen.
   useEffect(() => {
-    if (!open) return;
+    if (inline || !open) return;
     const onDocMouseDown = (e: MouseEvent) => {
       if (!rootRef.current) return;
       if (!rootRef.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
-  }, [open, setOpen]);
+  }, [inline, open, setOpen]);
 
   /** Close as "finished with": tell the host first, then close. */
   const dismiss = () => {
@@ -154,7 +163,8 @@ export function ProjectColorPicker({
 
   const apply = (hex: string) => {
     setError(null);
-    dismiss();
+    // Inline there is nothing to close and no host waiting to refocus.
+    if (!inline) dismiss();
     // `setColor` rolls the optimistic value back and *rethrows* on failure, so
     // an uncaught call would surface as an unhandled rejection. The rollback is
     // silent on its own — a colour that quietly springs back looks like a bug —
@@ -173,6 +183,132 @@ export function ProjectColorPicker({
     setCustom("");
     apply(hex);
   };
+
+  const body = (
+    <>
+      {/* Inline, the settings row the picker sits in already names it. */}
+      {!inline && (
+        <div
+          className="px-0.5 pb-1.5 text-[10px] uppercase tracking-[0.16em] truncate"
+          style={{ color: "var(--text-tertiary)" }}
+        >
+          Colour for <span className="font-mono normal-case">{project}</span>
+        </div>
+      )}
+
+      <div className={`grid gap-1 ${inline ? "grid-cols-6" : "grid-cols-3"}`}>
+        {PROJECT_COLOR_PRESETS.map((preset) => {
+          const taken = owners.get(preset.hex.toLowerCase());
+          const label = taken
+            ? `${preset.name} — used by ${taken.join(", ")}`
+            : preset.name;
+          const selected = current.toLowerCase() === preset.hex.toLowerCase();
+          return (
+            <button
+              key={preset.hex}
+              type="button"
+              data-testid={`project-color-preset-${project}-${preset.name.toLowerCase()}`}
+              title={label}
+              aria-label={label}
+              aria-pressed={selected}
+              onMouseDown={keepFocus}
+              onClick={() => apply(preset.hex)}
+              className="flex flex-col gap-1 rounded p-1 text-left transition-colors"
+              style={{
+                border: selected
+                  ? "1px solid var(--text-secondary)"
+                  : "1px solid transparent",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "rgba(255,255,255,0.06)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "transparent")
+              }
+            >
+              <span
+                className="block h-3 w-full rounded-sm"
+                style={{ background: preset.hex }}
+              />
+              {/* Taken presets wear the other project's name instead of the
+                  colour's — the name is what makes the clash readable. */}
+              <span
+                className="block truncate text-[9px] leading-none"
+                style={{
+                  color: taken ? "var(--text-tertiary)" : "var(--text-muted)",
+                }}
+              >
+                {taken ? taken[0] : preset.name}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-2 flex items-center gap-1">
+        <input
+          aria-label="Custom hex"
+          value={custom}
+          placeholder="#rrggbb"
+          spellCheck={false}
+          onChange={(e) => {
+            setCustom(e.target.value);
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") applyCustom();
+          }}
+          className="min-w-0 flex-1 rounded px-1.5 py-1 font-mono text-[11px]"
+          style={{
+            background: "var(--bg-base, rgba(0,0,0,0.25))",
+            border: `1px solid ${error ? "var(--red, #f7768e)" : "var(--border-subtle)"}`,
+            color: "var(--text-primary)",
+          }}
+        />
+        <button
+          type="button"
+          data-testid={`project-color-apply-${project}`}
+          onMouseDown={keepFocus}
+          onClick={applyCustom}
+          className="rounded px-2 py-1 text-[11px] transition-colors"
+          style={{
+            border: "1px solid var(--border-subtle)",
+            color: "var(--text-secondary)",
+          }}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.background = "rgba(255,255,255,0.06)")
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.background = "transparent")
+          }
+        >
+          Apply
+        </button>
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="mt-1 text-[10px] leading-tight"
+          style={{ color: "var(--red, #f7768e)" }}
+        >
+          {error}
+        </div>
+      )}
+    </>
+  );
+
+  if (inline) {
+    return (
+      <div
+        role="group"
+        aria-label={`Colour for ${project}`}
+        data-testid="project-color-picker"
+      >
+        {body}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -239,112 +375,7 @@ export function ProjectColorPicker({
             border: "1px solid var(--border-subtle)",
           }}
         >
-          <div
-            className="px-0.5 pb-1.5 text-[10px] uppercase tracking-[0.16em] truncate"
-            style={{ color: "var(--text-tertiary)" }}
-          >
-            Colour for <span className="font-mono normal-case">{project}</span>
-          </div>
-
-          <div className="grid grid-cols-3 gap-1">
-            {PROJECT_COLOR_PRESETS.map((preset) => {
-              const taken = owners.get(preset.hex.toLowerCase());
-              const label = taken
-                ? `${preset.name} — used by ${taken.join(", ")}`
-                : preset.name;
-              const selected = current.toLowerCase() === preset.hex.toLowerCase();
-              return (
-                <button
-                  key={preset.hex}
-                  type="button"
-                  data-testid={`project-color-preset-${project}-${preset.name.toLowerCase()}`}
-                  title={label}
-                  aria-label={label}
-                  aria-pressed={selected}
-                  onMouseDown={keepFocus}
-                  onClick={() => apply(preset.hex)}
-                  className="flex flex-col gap-1 rounded p-1 text-left transition-colors"
-                  style={{
-                    border: selected
-                      ? "1px solid var(--text-secondary)"
-                      : "1px solid transparent",
-                  }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = "rgba(255,255,255,0.06)")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = "transparent")
-                  }
-                >
-                  <span
-                    className="block h-3 w-full rounded-sm"
-                    style={{ background: preset.hex }}
-                  />
-                  {/* Taken presets wear the other project's name instead of the
-                      colour's — the name is what makes the clash readable. */}
-                  <span
-                    className="block truncate text-[9px] leading-none"
-                    style={{
-                      color: taken ? "var(--text-tertiary)" : "var(--text-muted)",
-                    }}
-                  >
-                    {taken ? taken[0] : preset.name}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-2 flex items-center gap-1">
-            <input
-              aria-label="Custom hex"
-              value={custom}
-              placeholder="#rrggbb"
-              spellCheck={false}
-              onChange={(e) => {
-                setCustom(e.target.value);
-                setError(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") applyCustom();
-              }}
-              className="min-w-0 flex-1 rounded px-1.5 py-1 font-mono text-[11px]"
-              style={{
-                background: "var(--bg-base, rgba(0,0,0,0.25))",
-                border: `1px solid ${error ? "var(--red, #f7768e)" : "var(--border-subtle)"}`,
-                color: "var(--text-primary)",
-              }}
-            />
-            <button
-              type="button"
-              data-testid={`project-color-apply-${project}`}
-              onMouseDown={keepFocus}
-              onClick={applyCustom}
-              className="rounded px-2 py-1 text-[11px] transition-colors"
-              style={{
-                border: "1px solid var(--border-subtle)",
-                color: "var(--text-secondary)",
-              }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "rgba(255,255,255,0.06)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
-              }
-            >
-              Apply
-            </button>
-          </div>
-
-          {error && (
-            <div
-              role="alert"
-              className="mt-1 text-[10px] leading-tight"
-              style={{ color: "var(--red, #f7768e)" }}
-            >
-              {error}
-            </div>
-          )}
+          {body}
         </div>
       )}
     </div>

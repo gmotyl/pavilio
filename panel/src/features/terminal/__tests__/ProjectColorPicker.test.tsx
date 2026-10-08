@@ -320,4 +320,56 @@ describe("ProjectColorPicker", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(onDismiss).not.toHaveBeenCalled();
   });
+
+  describe("inline variant", () => {
+    it("the inline picker shows the palette without a trigger", () => {
+      const addListener = vi.spyOn(document, "addEventListener");
+      render(<ProjectColorPicker project="alpha" variant="inline" />);
+
+      expect(
+        screen.queryByRole("button", { name: /set colour for/i }),
+      ).not.toBeInTheDocument();
+      for (const preset of PROJECT_COLOR_PRESETS) {
+        expect(
+          screen.getByTestId(`project-color-preset-alpha-${preset.name.toLowerCase()}`),
+        ).toBeInTheDocument();
+      }
+      expect(screen.getByLabelText(/custom hex/i)).toBeInTheDocument();
+      // Nothing to close, so no outside-click listener either.
+      expect(
+        addListener.mock.calls.filter(([type]) => type === "mousedown"),
+      ).toHaveLength(0);
+      addListener.mockRestore();
+    });
+
+    it("picking inline sets the project colour", async () => {
+      render(
+        <>
+          <ProjectColorPicker project="alpha" variant="inline" />
+          <ColorReader id="s1" project="alpha" />
+        </>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^purple/i }));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("reader-s1")).toHaveTextContent("#c678dd"),
+      );
+      const writes = colorWrites();
+      expect(writes).toHaveLength(1);
+      expect(String(writes[0][0])).toBe("/api/projects/alpha/color");
+      expect(JSON.parse(String(writes[0][1]?.body))).toEqual({ hex: "#c678dd" });
+      // Still there — an inline picker has nothing to close.
+      expect(screen.getByLabelText(/custom hex/i)).toBeInTheDocument();
+    });
+
+    it("the inline picker marks colours used by other projects", async () => {
+      render(<ProjectColorPicker project="alpha" variant="inline" />);
+
+      const taken = await screen.findByRole("button", { name: /coral.*beta/i });
+
+      expect(taken).toBeEnabled();
+      expect(taken).toHaveTextContent("beta");
+    });
+  });
 });
