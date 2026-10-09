@@ -151,7 +151,7 @@ export const DEFAULT_TASK_PROMPT =
  * voices.ts imports it from here, and a future `usePreference` call in
  * voices.ts then adds no cycle.
  */
-export const DEFAULT_SPEECH_VOICE = "en-US-AndrewMultilingualNeural";
+export const DEFAULT_SPEECH_VOICE = "fr-FR-VivienneMultilingualNeural";
 
 /**
  * The answer pane's height when nothing has been dragged: taller than any
@@ -580,6 +580,20 @@ export const preferences = {
     scope: "global",
     default: DEFAULT_SPEECH_VOICE,
     codec: str,
+    portable: true,
+  }),
+  /**
+   * Each project's own voice — `project → voice id`; a project that follows
+   * the default voice has no entry. Portable, unlike `speech.modes`: the keys
+   * are project names, which mean the same thing on every machine. The codec
+   * is plain `json` for the reason `speech.voice`'s is `str` — `voices.ts`
+   * drops a stale id on the way out.
+   */
+  speechVoiceByProject: definePreference<Record<string, string>>({
+    key: "speech.voiceByProject", // was: nothing — per-project voices are new
+    scope: "global",
+    default: {},
+    codec: json<Record<string, string>>(),
     portable: true,
   }),
   /**

@@ -32,9 +32,9 @@ describe("SPEECH_VOICES", () => {
 });
 
 describe("getStoredVoice", () => {
-  it("defaults to Andrew when nothing is stored", () => {
-    expect(DEFAULT_SPEECH_VOICE).toBe("en-US-AndrewMultilingualNeural");
-    expect(getStoredVoice()).toBe("en-US-AndrewMultilingualNeural");
+  it("defaults to Vivienne when nothing is stored", () => {
+    expect(DEFAULT_SPEECH_VOICE).toBe("fr-FR-VivienneMultilingualNeural");
+    expect(getStoredVoice()).toBe("fr-FR-VivienneMultilingualNeural");
 
     expect(setStoredVoice("en-US-EmmaMultilingualNeural")).toBe("en-US-EmmaMultilingualNeural");
     expect(getStoredVoice()).toBe("en-US-EmmaMultilingualNeural");
@@ -42,7 +42,7 @@ describe("getStoredVoice", () => {
     expect(localStorage.length).toBe(0);
   });
 
-  it("falls back to Andrew for a dropped voice, an unknown id, and no document", () => {
+  it("falls back to the default for a dropped voice, an unknown id, and no document", () => {
     // `resolveVoice` is still the boundary: the declaration's codec is `str`,
     // so a dropped Polish voice and a plain nonsense id both arrive intact and
     // are mapped onto a real voice here.

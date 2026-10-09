@@ -59,7 +59,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 
   // ── str: the values that would round-trip WRONG through a JSON re-parse ──
   "git.branchDiff.base": ["", "main", "true", "240", "null", "{}", "[]", "release/1.0"],
-  "speech.voice": ["en-US-AndrewMultilingualNeural", "", "true", "240", "null"],
+  "speech.voice": ["fr-FR-VivienneMultilingualNeural", "", "true", "240", "null"],
   "plans.taskPrompt": ["Implement all tasks in {path}.", "", "true", "240", "null", "{}"],
   // `optionalStr`: text that may be absent. No "" sample — a blank stored
   // value reads back as `null` by design, since a blank override is none.
@@ -106,13 +106,14 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "terminal.focus": [null, "", "sess-1", "true", "240", "null"],
   "speech.armedCell": [null, "", "sess-1", "true", "240", "null"],
   "speech.modes": [null, {}, { "sess-1": "armed", "sess-2": "autoplay" }],
+  "speech.voiceByProject": [{}, { pavilio: "en-US-EmmaMultilingualNeural" }, { "240": "true" }],
   "nav.lastPath": [null, "", "/notes/today.md", "true", "240", "null"],
   "nav.lastFile": [null, "", "/notes/today.md", "true", "240", "null"],
   "nav.lastReposQuery": [null, "", "pavilio", "true", "240", "null"],
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 46;
+const DECLARATION_COUNT = 47;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

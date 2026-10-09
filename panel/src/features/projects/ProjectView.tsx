@@ -29,7 +29,8 @@ import { useRepoSearch } from "./useRepoSearch";
 import { useFileViewer } from "./useFileViewer";
 import { useCommitsOpenMap } from "./useCommitsOpenMap";
 import { useRepoOpenFile } from "./useRepoOpenFile";
-import MarkdownRenderer from "../markdown/MarkdownRenderer";
+import CollapsibleProjectMd from "./CollapsibleProjectMd";
+import ProjectSettingsCard from "./ProjectSettingsCard";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useLastPath } from "../shell/useLastPath";
 import { useFloatingAction, useScrollContainer } from "../shell/Layout";
@@ -473,22 +474,17 @@ export default function ProjectView() {
               ))}
             </div>
           )}
-          {error && (
-            <p className="text-sm" style={{ color: "var(--red)" }}>
-              Failed to load PROJECT.md: {error}
-            </p>
-          )}
-          {!error && content === null && (
-            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              Loading...
-            </p>
-          )}
-          {content !== null && (
-            <MarkdownRenderer
-              content={content}
-              basePath={`${name}/PROJECT.md`}
-            />
-          )}
+          {/* Keyed by project: `/project/:name` reuses this ProjectView when only
+              the name changes, so without the key the expanded state — and the
+              settings card's half-typed custom colour — would carry over to the
+              next project instead of starting fresh. */}
+          <CollapsibleProjectMd
+            key={name}
+            content={content}
+            error={error}
+            basePath={`${name}/PROJECT.md`}
+          />
+          {name && <ProjectSettingsCard key={`settings:${name}`} project={name} />}
         </>
       )}
     </div>

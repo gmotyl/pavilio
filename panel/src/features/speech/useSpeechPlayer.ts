@@ -25,7 +25,7 @@ import {
   type SynthesisWindow,
 } from "./synthesisWindow";
 import type { SpeechUnit } from "./types";
-import { getStoredVoice } from "./voices";
+import { voiceForSession } from "./voices";
 
 /**
  * How many syntheses the run keeps in flight while it warms its remainder.
@@ -327,7 +327,7 @@ async function loadUnit(
   try {
     // The voice is always explicit: `synth.ts` keeps a private
     // `DEFAULT_VOICE = "en-GB-RyanNeural"` from motyl, so an omitted voice
-    // silently overrides the panel's Andrew default.
+    // silently overrides the panel's default voice.
     const buffer = await synthesizeSpeech(units[index].text, { voice });
     // `toSpeechBlob` copies the cached buffer. Wrapping it by hand would hand
     // the same ArrayBuffer out twice and detach it on the second playback.
@@ -684,7 +684,10 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
         }
       }
       publishUnit(start, startAt);
-      const voice = getStoredVoice();
+      // The session's voice — its project's own, else the default — resolved
+      // once, when the run starts. The cache keys on voice + text, so this has
+      // to be the voice the host warmed and preloaded with.
+      const voice = voiceForSession(sessionId);
       const run: PlaybackRun = {
         sessionId,
         active: true,

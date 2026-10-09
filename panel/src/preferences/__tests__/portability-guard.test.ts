@@ -123,6 +123,7 @@ const FIXTURES: Record<string, Fixture> = {
 
   // ── Speech ───────────────────────────────────────────────────────────────
   "speech.voice": { value: "en-GB-RyanNeural" },
+  "speech.voiceByProject": { value: { pavilio: "en-US-EmmaMultilingualNeural" } },
   "speech.answerPane.autoOpen": { value: true },
   "speech.answerComposer.on": { value: false },
   "composer.shortcuts": {
@@ -243,8 +244,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(46);
-    expect(portable.length).toBe(34);
+    expect(ALL_PREFERENCES.length).toBe(47);
+    expect(portable.length).toBe(35);
     expect(machineLocal.length).toBe(12);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the

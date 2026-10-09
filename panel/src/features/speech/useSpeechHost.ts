@@ -74,7 +74,7 @@ import {
 } from "../terminal/answerWaiting";
 import { stepsOffTheWave, stepsOntoTheWave } from "./waveStep";
 import { MAX_PENDING, MAX_PREVIOUS, utteranceUnderCursor } from "./utteranceQueue";
-import { getStoredVoice } from "./voices";
+import { voiceForSession } from "./voices";
 
 /**
  * How many utterances an autoplay cell's record keeps.
@@ -529,13 +529,13 @@ export function useSpeechHost({
       // reported on. The failure is swallowed exactly as `prefetchSpeech`
       // swallows it.
       synthesisWindow.schedule("warm", () =>
-        // The voice is the one the click will use, from the same source
-        // `useSpeechPlayer` reads, and it is read HERE rather than at the point
-        // the warm was queued: a warm that waited out a voice change should
-        // synthesize the voice the click is now going to want. The cache keys
-        // on voice + text, so warming with any other one is a synthesis nobody
-        // ever plays.
-        synthesizeSpeech(first.text, { voice: getStoredVoice() })
+        // The voice is the one the click will use — the session's, through its
+        // project, from the same `voiceForSession` `useSpeechPlayer` reads — and
+        // it is read HERE rather than at the point the warm was queued: a warm
+        // that waited out a voice change should synthesize the voice the click
+        // is now going to want. The cache keys on voice + text, so warming with
+        // any other one is a synthesis nobody ever plays.
+        synthesizeSpeech(first.text, { voice: voiceForSession(utterance.sessionId) })
           .catch(() => {
             // A warm that failed must never strand a cell red: the cell is
             // reported ready anyway, and the click pays for the synthesis
@@ -591,8 +591,9 @@ export function useSpeechHost({
             preloadedRef.current.delete(key);
             return null;
           }
-          // Read at the turn, for the same reason the warm reads it there.
-          return synthesizeSpeech(text, { voice: getStoredVoice() }).catch(() => {
+          // The session's voice, read at the turn, for the same reasons the
+          // warm reads it there.
+          return synthesizeSpeech(text, { voice: voiceForSession(sessionId) }).catch(() => {
             // Best-effort, like every warm: the click synthesizes it for real.
             // The unit is forgotten so a retry reaches it, and the answer is
             // marked so nothing after it is requested until that retry.
