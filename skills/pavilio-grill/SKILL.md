@@ -50,6 +50,7 @@ Interview relentlessly until you reach shared understanding. Walk each branch of
 
 - **One question per message.** Ask, then STOP and wait for the answer. Never stack questions.
 - **Always give your recommended answer** with brief reasoning.
+- **The final message of a turn that stops for the user is self-contained.** The answer pane shows only that last message, not earlier commentary in the turn. Restate the full question, the options and your recommendation in it — never end on a bare "waiting for your approval" line.
 - **If the codebase can answer it, go read the code** instead of asking.
 - **Sharpen fuzzy language.** Vague/overloaded term → propose a precise canonical term. ("You said 'account' — Customer or User? Those differ.")
 - **Challenge against the glossary.** A term that conflicts with `CONTEXT.md` → call it out immediately.

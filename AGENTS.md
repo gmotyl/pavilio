@@ -10,13 +10,18 @@ This file defines your project registry and workflow for AI agents (Claude Code,
 
 The panel speaks finished responses aloud. The voice cannot read a table, a diagram or a URL, so
 those are stripped before synthesis and announced as `, tabela,` / `, link,` — the listener hears
-that something was there, but not what it said. Two habits close that gap:
+that something was there, but not what it said. Three habits close that gap:
 
 - **After a table, add one sentence saying what it shows.** The table itself is never spoken, so
   without that sentence the listener gets a placeholder and no content.
 - **After a link, name the destination in parentheses** — `[the ordering hook](https://…)
   (link do githuba)`. The address is dropped before synthesis, so the parenthetical is the only
   thing that survives to say where it pointed.
+
+- **End every turn that stops for me with the full question.** Only the turn's *last* message
+  reaches the panel, so anything said earlier in the turn is lost. Put the question, the options and
+  your recommendation in that final message — never close on a bare "waiting for your approval"
+  line.
 
 Both are written for the ear, not the eye. They cost one line each, and they are the difference
 between an answer that survives being heard and one that does not.
