@@ -139,6 +139,15 @@ Check whether the code repo has Storybook: a `.storybook/` directory, or a `stor
 
 - **No Storybook** → no story and no story task. Never add Storybook to a repo just for this.
 
+## ADR changes
+
+ADRs live in `projects/<project>/adr/` (format: [[pavilio-grill]] `ADR-FORMAT.md`). `design.md` records the ADR changes the grill decided.
+
+- **Grill decided an ADR change** → `tasks.md` gets a task for it, with WHEN/THEN criteria (file path, title, Status, what the body must say).
+- **Planning finds an ADR change the grill did not cover** → a task writes it with Status `proposed`. The closing message lists it as an "unplanned ADR change".
+- **New ADR supersedes ADR-NNNN** → the new ADR says "Supersedes ADR-NNNN". A **separate** task changes only the old ADR's Status to `superseded by ADR-MMMM`; its body stays untouched.
+- **A plan with ADR tasks ends with a list of the ADRs the change touches** (created, superseded, status-changed) — the reviewer's input in [[pavilio-execute-plan]].
+
 ## When inline code IS warranted
 
 Include code only where the code itself is the decision being locked in:
