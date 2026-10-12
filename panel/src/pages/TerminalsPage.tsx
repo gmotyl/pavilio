@@ -1,10 +1,11 @@
-import { useCallback, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAllTerminalSessions } from "../features/terminal/useAllTerminalSessions";
 import { useTerminalMaximized } from "../features/terminal/useTerminalMaximized";
 import TerminalsSurface from "../features/terminal/TerminalsSurface";
 import { destroyTerminal } from "../features/terminal/terminalInstances";
 import type { TerminalHandle } from "../features/terminal/TerminalView";
+import { publishStandaloneTerminalFocus } from "../features/terminal/standaloneTerminalFocus";
 import { usePanelSpeech } from "../features/speech/SpeechHostProvider";
 
 export default function TerminalsPage() {
@@ -18,6 +19,11 @@ export default function TerminalsPage() {
   } = useAllTerminalSessions();
   const [maximized, toggleMaximized] = useTerminalMaximized("__all__");
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  // Told to the speech alerts, whose "looked at" rule reads this page's focus.
+  useEffect(() => {
+    publishStandaloneTerminalFocus(focusedId);
+    return () => publishStandaloneTerminalFocus(null);
+  }, [focusedId]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
   const navigate = useNavigate();

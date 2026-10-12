@@ -28,11 +28,14 @@ const sessions = new Map([
 
 function setup() {
   const navigate = vi.fn();
+  /** The cells the user is looking at; the test moves it like focus/route would. */
+  const inView = new Set<string>();
   const alert = createSpeakingAlert({
     sessionOf: (sessionId) => sessions.get(sessionId),
     navigate,
+    lookedAt: (sessionId) => inView.has(sessionId),
   });
-  return { alert, navigate };
+  return { alert, navigate, inView };
 }
 
 const speaking = () => getAlertsSnapshot().filter((entry) => entry.id === SPEAKING_ALERT_ID);
@@ -146,5 +149,52 @@ describe("speaking alert", () => {
     }
     expect(navigate).not.toHaveBeenCalled();
     expect(arrival.arrive).not.toHaveBeenCalled();
+  });
+
+  it("speaking alert is not raised for the cell in view", () => {
+    const { alert, inView } = setup();
+    inView.add("cell-a");
+
+    alert.onRunChange({ type: "start", sessionId: "cell-a" });
+
+    expect(speaking()).toEqual([]);
+  });
+
+  it("speaking alert is raised for a cell not in view", () => {
+    const { alert, inView } = setup();
+    inView.add("cell-a");
+
+    alert.onRunChange({ type: "start", sessionId: "cell-b" });
+
+    expect(speaking()).toEqual([
+      expect.objectContaining({ title: "Speaking — beta · agent two", persistent: true }),
+    ]);
+  });
+
+  it("arriving at the speaking cell withdraws the speaking alert", () => {
+    const { alert, inView } = setup();
+    alert.onRunChange({ type: "start", sessionId: "cell-b" });
+    expect(speaking()).toHaveLength(1);
+
+    inView.add("cell-b");
+    alert.recheck();
+
+    expect(speaking()).toEqual([]);
+
+    // Playback goes on: a later resume with the cell in view stays quiet, and
+    // looking away while it still speaks brings the card back.
+    alert.onRunChange({ type: "resume" });
+    expect(speaking()).toEqual([]);
+    inView.delete("cell-b");
+    alert.recheck();
+    expect(speaking()).toHaveLength(1);
+  });
+
+  it("recheck does not revive a card the user closed", () => {
+    const { alert } = setup();
+    alert.onRunChange({ type: "start", sessionId: "cell-b" });
+    userDismissAlert(SPEAKING_ALERT_ID);
+    alert.recheck();
+    expect(speaking()).toEqual([]);
   });
 });

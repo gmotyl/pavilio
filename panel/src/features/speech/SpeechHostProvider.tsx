@@ -30,8 +30,17 @@ import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
 import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
 import { getSessions } from "../terminal/sessionStore";
 import { useTerminalDrawerVisible } from "../terminal/useTerminalDrawer";
-import { readTerminalFocus } from "../terminal/useTerminalSessions";
-import { alertOnAnswer, focusedVisibleSessionIdFor, type AnswerAlertDeps } from "./answerAlert";
+import {
+  readStandaloneTerminalFocus,
+  subscribeStandaloneTerminalFocus,
+} from "../terminal/standaloneTerminalFocus";
+import { readTerminalFocus, TERMINAL_FOCUS_EVENT } from "../terminal/useTerminalSessions";
+import {
+  alertOnAnswer,
+  focusedVisibleSessionIdFor,
+  isLookedAt,
+  type AnswerAlertDeps,
+} from "./answerAlert";
 import { createSpeakingAlert } from "./speakingAlert";
 import { useMediaSessionTransport } from "./useMediaSessionTransport";
 import { useSpeechHost } from "./useSpeechHost";
@@ -56,13 +65,20 @@ interface RouterView {
  * mounted without a router — a surface's own suite — and the router hooks throw
  * there; this is only rendered when a router is above.
  */
-function RouterBridge({ view }: { view: { current: RouterView } }): null {
+function RouterBridge({
+  view,
+  onRouteChange,
+}: {
+  view: { current: RouterView };
+  onRouteChange: () => void;
+}): null {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   // In an effect, so a render React throws away never runs the mirror ahead.
   useEffect(() => {
     view.current = { navigate, pathname };
-  }, [navigate, pathname, view]);
+    onRouteChange();
+  }, [navigate, pathname, view, onRouteChange]);
   return null;
 }
 
@@ -84,26 +100,56 @@ export function SpeechHostProvider({ children }: Props) {
     sessionOf: (sessionId) => getSessions().find((session) => session.id === sessionId),
     navigate: (path) => routerView.current.navigate?.(path),
   }));
+  /** The focused cell on screen right now: the project's, the drawer's, or the standalone page's. */
+  const readFocusedVisible = useCallback(
+    () =>
+      focusedVisibleSessionIdFor(
+        routerView.current.pathname,
+        drawerVisibleRef.current,
+        readTerminalFocus,
+        readStandaloneTerminalFocus,
+      ),
+    [],
+  );
   const onAnswer = useCallback(
     (utterance: Utterance, recovered: boolean) => {
       alertOnAnswer(utterance, recovered, {
         ...cellPlumbing,
-        focusedVisibleSessionId: () =>
-          focusedVisibleSessionIdFor(
-            routerView.current.pathname,
-            drawerVisibleRef.current,
-            readTerminalFocus,
-          ),
+        focusedVisibleSessionId: readFocusedVisible,
         documentVisible: () => document.visibilityState === "visible",
       });
     },
-    [cellPlumbing],
+    [cellPlumbing, readFocusedVisible],
   );
 
   // The speaking alert (see `speakingAlert.ts`), fed the host's run events. One
   // per provider, like the host; taken down when the provider goes.
-  const [speakingAlert] = useState(() => createSpeakingAlert(cellPlumbing));
+  const [speakingAlert] = useState(() =>
+    createSpeakingAlert({
+      ...cellPlumbing,
+      lookedAt: (sessionId) =>
+        isLookedAt(sessionId, readFocusedVisible(), document.visibilityState === "visible"),
+    }),
+  );
   useEffect(() => () => speakingAlert.dispose(), [speakingAlert]);
+  // The looked-at rule is re-evaluated whenever what is on screen can change:
+  // the route (RouterBridge), the drawer, a focus change anywhere, the
+  // standalone page's focus, and the tab going hidden/visible.
+  const recheckSpeakingAlert = speakingAlert.recheck;
+  useEffect(() => {
+    // After drawerVisibleRef's own effect has run (effects run in order).
+    recheckSpeakingAlert();
+  }, [drawerVisible, recheckSpeakingAlert]);
+  useEffect(() => {
+    const unsubscribe = subscribeStandaloneTerminalFocus(recheckSpeakingAlert);
+    window.addEventListener(TERMINAL_FOCUS_EVENT, recheckSpeakingAlert);
+    document.addEventListener("visibilitychange", recheckSpeakingAlert);
+    return () => {
+      unsubscribe();
+      window.removeEventListener(TERMINAL_FOCUS_EVENT, recheckSpeakingAlert);
+      document.removeEventListener("visibilitychange", recheckSpeakingAlert);
+    };
+  }, [recheckSpeakingAlert]);
 
   // The channel never forgets a session, so the idle transport learns a cell
   // has closed from the session list: a session it no longer lists, while it
@@ -143,7 +189,7 @@ export function SpeechHostProvider({ children }: Props) {
 
   return (
     <SpeechHostContext.Provider value={speech}>
-      {inRouter && <RouterBridge view={routerView} />}
+      {inRouter && <RouterBridge view={routerView} onRouteChange={recheckSpeakingAlert} />}
       {children}
     </SpeechHostContext.Provider>
   );

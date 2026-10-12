@@ -30,6 +30,19 @@ import {
 import { answerPreview, terminalLabel } from "../notifications/notificationText";
 import { matchProjectFromPath } from "../projects/matchProjectFromPath";
 
+/**
+ * The one "looked at" predicate both speech alerts share: the cell is the one on
+ * screen (`focusedVisibleSessionId`) and the tab is visible. A hidden tab looks
+ * at nothing.
+ */
+export function isLookedAt(
+  sessionId: string,
+  focusedVisibleSessionId: string | null,
+  documentVisible: boolean,
+): boolean {
+  return documentVisible && focusedVisibleSessionId === sessionId;
+}
+
 export function shouldRaiseAnswerAlert(input: {
   sessionId: string;
   recovered: boolean;
@@ -38,7 +51,7 @@ export function shouldRaiseAnswerAlert(input: {
 }): boolean {
   const { sessionId, recovered, focusedVisibleSessionId, documentVisible } = input;
   if (recovered) return false;
-  return !(documentVisible && focusedVisibleSessionId === sessionId);
+  return !isLookedAt(sessionId, focusedVisibleSessionId, documentVisible);
 }
 
 export function raiseAnswerAlert(input: {
@@ -127,14 +140,16 @@ export function arriveAtCell(
  * terminals tab, or the terminal drawer over another of its tabs — else null.
  * In the grid every cell is visible; in Max and on a phone the focused one is
  * the one shown (`visibleSessionId`), so "focused" is the cell being looked at
- * either way. The standalone `/terminals` page keeps its focus to itself, so
- * there nothing counts as looked at and every answer alerts.
+ * either way. The standalone `/terminals` page has its own focus, which it
+ * publishes (`readStandaloneFocus`); that cell counts as looked at there.
  */
 export function focusedVisibleSessionIdFor(
   pathname: string,
   drawerVisible: boolean,
   readFocus: (project: string) => string | null,
+  readStandaloneFocus: () => string | null = () => null,
 ): string | null {
+  if (pathname === "/terminals") return readStandaloneFocus();
   const match = matchProjectFromPath(pathname);
   if (!match) return null;
   if (match.section !== "iterm" && !drawerVisible) return null;
