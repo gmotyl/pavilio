@@ -42,7 +42,7 @@ Collect every file that documents how code should be written for this project:
 - `projects/<name>/qa/REVIEW_RULES.md` — **project-specific review rules** (conventions, preferred libraries, patterns, anti-patterns). Primary source.
 - `projects/<name>/PROJECT.md`, `projects/<name>/CONTEXT.md`.
 - Repo-level `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `STYLE.md` / `STANDARDS.md` / `STYLEGUIDE.md`.
-- `projects/<project>/adr/` (architectural decisions are standards).
+- `projects/<project>/adr/`, plus the reviewed repo's own ADR directory if it keeps one (architectural decisions are standards).
 - `.editorconfig`, `eslint.config.*`, `biome.json`, `prettier.config.*`, `tsconfig.json` — machine-enforced; **note them but don't re-check what tooling already enforces**.
 
 ### 4. Identify the spec source (optional)
