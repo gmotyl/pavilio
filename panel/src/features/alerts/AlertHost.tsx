@@ -20,6 +20,7 @@ import {
 } from "./store";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { SPEAKING_TITLE_PREFIX } from "../speech/speakingAlert";
 import { ProjectMark } from "../projects/ProjectMark";
 import { useProjectColors } from "../terminal/useProjectColors";
 
@@ -48,6 +49,21 @@ const palette: Record<AlertKind, { color: string; icon: LucideIcon }> = {
   info: { color: "var(--blue)", icon: Info },
   success: { color: "var(--green)", icon: CheckCircle2 },
 };
+
+/**
+ * Where the project name sits in a project alert's title: `<project> · …`
+ * (answer cards) or `Speaking — <project> · …`. Anchored on those shapes, not
+ * the first substring match, so a project called "claude" or "speaking" is
+ * not coloured inside another word. Null when the title has neither shape.
+ */
+function projectSpan(title: string, project: string): [number, number] | null {
+  for (const prefix of ["", SPEAKING_TITLE_PREFIX]) {
+    if (!title.startsWith(prefix + project)) continue;
+    const end = prefix.length + project.length;
+    if (end === title.length || title.startsWith(" · ", end)) return [prefix.length, end];
+  }
+  return null;
+}
 
 /**
  * Transient entries newest first, then persistent entries newest first, so a
@@ -263,16 +279,17 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
 
   // Spans, not divs: the action wraps them in a native button, whose content model
   // is phrasing only.
+  const span = project ? projectSpan(entry.title, project) : null;
   const content = (
     <>
       <span data-testid="alert-title" className="block break-words">
-        {project && entry.title.includes(project) ? (
+        {span ? (
           <>
-            {entry.title.slice(0, entry.title.indexOf(project))}
+            {entry.title.slice(0, span[0])}
             <b data-testid="alert-project-name" style={{ color: projectColor }}>
-              {project}
+              {entry.title.slice(span[0], span[1])}
             </b>
-            {entry.title.slice(entry.title.indexOf(project) + project.length)}
+            {entry.title.slice(span[1])}
           </>
         ) : (
           entry.title

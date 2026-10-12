@@ -36,8 +36,11 @@ import type { SpeechRunEvent } from "./useSpeechHost";
 
 export const SPEAKING_ALERT_ID = "speech-speaking";
 
+/** What precedes the project name in the speaking card's title. */
+export const SPEAKING_TITLE_PREFIX = "Speaking — ";
+
 export function speakingAlertTitle(project: string, label: string): string {
-  return `Speaking — ${project} · ${label}`;
+  return `${SPEAKING_TITLE_PREFIX}${project} · ${label}`;
 }
 
 /** What the speaking alert needs from the panel: the same plumbing as the answer alert's. */
