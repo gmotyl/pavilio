@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import AgentSettings from "../AgentSettings";
@@ -68,5 +68,19 @@ describe("AgentSettings alerts card", () => {
     await user.tab();
     expect(readPreference(preferences.alertsDurationSeconds)).toBe(2);
     expect(field.value).toBe("2");
+  });
+
+  it("focusing then blurring an untouched field keeps a value synced meanwhile", async () => {
+    const user = userEvent.setup();
+    writePreference(preferences.alertsDurationSeconds, 15);
+    const field = await renderSettings();
+
+    await user.click(field);
+    act(() => {
+      writePreference(preferences.alertsDurationSeconds, 40);
+    });
+    await user.tab();
+    expect(readPreference(preferences.alertsDurationSeconds)).toBe(40);
+    expect(field.value).toBe("40");
   });
 });

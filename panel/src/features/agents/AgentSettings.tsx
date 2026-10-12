@@ -103,7 +103,8 @@ function AlertsSettings() {
           onFocus={() => setFocused(true)}
           onBlur={() => {
             setFocused(false);
-            commit();
+            // An untouched draft must not overwrite a value synced meanwhile.
+            if (draft !== String(base)) commit();
           }}
           className="text-sm px-2 py-1 rounded"
           style={{
