@@ -73,6 +73,8 @@ Every plan MUST start with:
 - [ ] **Step 3: Commit** — `git add <paths> && git commit -m "feat: ..."`
 ````
 
+**Non-testable tasks** (config, docs, mechanical refactor — no behavior to test): replace the Tests block and the red step with `**Verification: non-testable** — Run: \`<cmd>\` — Expected: <outcome>`. Testable tasks keep the red step.
+
 Anchor Modify refs to **symbols, not line numbers** — line numbers rot the moment anything else lands.
 
 Note: tests live in a `__tests__` subfolder next to the file under test (shared harness may stay in `src/test/`).
