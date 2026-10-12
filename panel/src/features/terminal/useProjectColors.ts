@@ -8,7 +8,8 @@ import {
 } from "../projects/projectMark";
 
 const KEY_PREFIX = `${preferences.projectColor.key}@`;
-const EMPTY: Record<string, string> = Object.freeze({});
+/** Null-prototype so a project named `constructor` or `__proto__` is just a key. */
+const EMPTY: Record<string, string> = Object.freeze(Object.create(null));
 
 /**
  * A thin reader/writer over the `project.color` preference. A project with no
@@ -27,7 +28,7 @@ const watched = new Map<string, () => void>();
 
 function storedColors(): Record<string, string> {
   const doc = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__;
-  const out: Record<string, string> = {};
+  const out: Record<string, string> = Object.create(null);
   if (!doc) return out;
   for (const key of Object.keys(doc)) {
     if (!key.startsWith(KEY_PREFIX)) continue;

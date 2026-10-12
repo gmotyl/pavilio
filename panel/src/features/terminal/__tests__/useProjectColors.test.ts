@@ -29,6 +29,19 @@ describe("useProjectColors", () => {
     expect(result.current.colors).toEqual({ alpha: "#f0c674" });
   });
 
+  it("a project named like an Object.prototype member still gets its derived colour", () => {
+    const { result } = renderHook(() => useProjectColors());
+    for (const name of ["constructor", "toString", "__proto__"]) {
+      expect(result.current.colorFor(name)).toBe(derivedProjectColor(name));
+    }
+  });
+
+  it("a stored colour for a project named __proto__ is read back", () => {
+    installProjectColors({ ["__proto__"]: "#112233" });
+    const { result } = renderHook(() => useProjectColors());
+    expect(result.current.colorFor("__proto__")).toBe("#112233");
+  });
+
   it("setColor stores the preference and every consumer repaints", async () => {
     const a = renderHook(() => useProjectColors());
     const b = renderHook(() => useProjectColors());
