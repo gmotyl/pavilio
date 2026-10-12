@@ -1,10 +1,16 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ProjectMark } from "../ProjectMark";
-import { derivedProjectColor } from "../projectMark";
+import { preferences } from "../../../preferences/declarations";
+import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
+import { PROJECT_MARK_COMPONENTS, ProjectMark } from "../ProjectMark";
+import { PROJECT_MARK_ICONS, derivedProjectColor } from "../projectMark";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  __resetPreferenceStoreForTests();
+});
 
 /** The browser normalises hex to rgb() inside serialised styles. */
 function rgb(hex: string): string {
@@ -22,6 +28,34 @@ describe("ProjectMark", () => {
     expect(tile.style.border).toContain(rgb("#e06c75"));
     const icon = screen.getByTestId("project-mark-icon-rocket");
     expect(tile.contains(icon)).toBe(true);
+    expect(icon.getAttribute("class")).toContain("lucide-rocket");
+  });
+
+  it("the registry names and the component map keys are the same set", () => {
+    expect([...Object.keys(PROJECT_MARK_COMPONENTS)].sort()).toEqual([...PROJECT_MARK_ICONS].sort());
+  });
+
+  it("every registered name renders its own icon", () => {
+    for (const name of PROJECT_MARK_ICONS) {
+      render(<ProjectMark project="alpha" mark={`lucide:${name}`} />);
+      expect(screen.getByTestId(`project-mark-icon-${name}`).tagName.toLowerCase()).toBe("svg");
+      cleanup();
+    }
+  });
+
+  it("reads the stored mark when no mark prop is given", () => {
+    writePreference(preferences.projectMark, "lucide:rocket", "alpha");
+    render(<ProjectMark project="alpha" />);
+    expect(screen.getByTestId("project-mark-icon-rocket").getAttribute("class")).toContain(
+      "lucide-rocket",
+    );
+  });
+
+  it("an unknown lucide name falls back to the folder", () => {
+    render(<ProjectMark project="alpha" mark="lucide:nope" />);
+    expect(screen.getByTestId("project-mark-icon-folder").getAttribute("class")).toContain(
+      "lucide-folder",
+    );
   });
 
   it("emoji mark renders as text inside the tinted tile", () => {
@@ -37,7 +71,9 @@ describe("ProjectMark", () => {
     const tile = screen.getByTestId("project-mark");
     const hex = derivedProjectColor("alpha");
     expect(tile.style.background).toContain(rgb(hex));
-    expect(screen.getByTestId("project-mark-icon-folder")).toBeTruthy();
+    expect(screen.getByTestId("project-mark-icon-folder").getAttribute("class")).toContain(
+      "lucide-folder",
+    );
     expect(tile.getAttribute("data-color")).toBe(hex);
   });
 });
