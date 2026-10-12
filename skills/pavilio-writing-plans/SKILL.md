@@ -73,6 +73,8 @@ Every plan MUST start with:
 - [ ] **Step 3: Commit** — `git add <paths> && git commit -m "feat: ..."`
 ````
 
+**Non-testable tasks** (config, docs, mechanical refactor — no behavior to test): replace the Tests block and the red step with `**Verification: non-testable** — Run: \`<cmd>\` — Expected: <outcome>`. Testable tasks keep the red step.
+
 Anchor Modify refs to **symbols, not line numbers** — line numbers rot the moment anything else lands.
 
 Note: tests live in a `__tests__` subfolder next to the file under test (shared harness may stay in `src/test/`).
@@ -138,6 +140,15 @@ Check whether the code repo has Storybook: a `.storybook/` directory, or a `stor
   ```
 
 - **No Storybook** → no story and no story task. Never add Storybook to a repo just for this.
+
+## ADR changes
+
+ADRs live in `projects/<project>/adr/` (format: [[pavilio-grill]] `ADR-FORMAT.md`). `design.md` records the ADR changes the grill decided.
+
+- **Grill decided an ADR change** → `tasks.md` gets a task for it, with WHEN/THEN criteria (file path, title, Status, what the body must say).
+- **Planning finds an ADR change the grill did not cover** → a task writes it with Status `proposed`. The closing message lists it as an "unplanned ADR change".
+- **New ADR supersedes ADR-NNNN** → the new ADR says "Supersedes ADR-NNNN". A **separate** task changes only the old ADR's Status to `superseded by ADR-MMMM`; its body stays untouched.
+- **A plan with ADR tasks ends with a list of the ADRs the change touches** (created, superseded, status-changed) — the reviewer's input in [[pavilio-execute-plan]].
 
 ## When inline code IS warranted
 

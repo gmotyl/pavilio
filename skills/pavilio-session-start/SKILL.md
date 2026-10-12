@@ -24,15 +24,11 @@ Start work on a project by loading context, checking in-progress plans, and ente
 
 If the resolved folder is missing, say so and re-resolve via `.projects.local.md` — never guess a sibling path like `<root>/<name>/`.
 
-**Then follow the full start logic:**
+**Then follow the lazy start logic.** With no task known yet, read only the two files below and nothing else — no git history, no `CONTEXT.md`, no `adr/`, no repo code, no `tasks.md`:
 
-1. Load most recent progress file from `<root>/projects/[project]/progress/`
-2. Read the project's default-discovery files:
-   - `PROJECT.md` — the resume card: overview, repos + working rules, gotchas (always; it is capped at 60 lines for exactly this read)
-   - `STATUS.md` (if present) — **do not read at start.** It holds meeting-driven state (focus, open questions, team) and is for [[pavilio-question]] / [[pavilio-manager]]; the progress file already carries what this session needs. Read it only when the session turns out to be meeting prep or a status question.
-   - `CONTEXT.md` (if present) — project-specific glossary (always; usually short)
-   - `adr/` (if present) — **list filenames/titles only**, do not read bodies. You'll know which ADRs exist for later targeted reads.
-3. Derive **active work** from the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). There is no active-plan pointer file to read.
+1. Load the most recent progress file from `<root>/projects/[project]/progress/`
+2. Read `PROJECT.md` — the resume card: overview, repos + working rules, gotchas (always; capped at 60 lines for exactly this read). `STATUS.md` is **not** read at start; it holds meeting-driven state for [[pavilio-question]] / [[pavilio-manager]]. Read it only when the session turns out to be meeting prep or a status question.
+3. Derive **active work** by listing the **names** of the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). Do not open their files at this point. There is no active-plan pointer file to read.
 4. **Branch on the active changes found:**
 
    **None** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.
@@ -40,16 +36,21 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
    **One active change** → Skip summary. Show:
    ```
    In-progress change: <change-id>
-   Next task: <next unchecked task in its tasks.md>
 
    Continue this change, or do you have a different task?
    ```
-   Wait for reply. If confirmed → enter the workflow at **step 3: Execute** for that change's `tasks.md`. If new task → treat as fast-entry with task description.
+   Wait for reply. If confirmed → the task is known: load its scope (below), read that change's `tasks.md` for the next unchecked task, and enter the workflow at **step 3: Execute**. If new task → treat as fast-entry with task description.
 
-   **Multiple active changes** → Skip summary. Show numbered list, wait for selection.
+   **Multiple active changes** → Skip summary. Show a numbered list of change names, wait for selection.
+
+**Once the task is known** (reply to the question above, a selected change, or fast-entry), load context for that scope only, guided by `PROJECT.md`:
+- `CONTEXT.md` (if present) — the project glossary
+- `adr/` (if present) — **list filenames/titles only**, read a body only when the task touches it
+- the relevant change dir (`proposal.md`, `design.md`, `tasks.md`) and only the specs under `openspec/specs/` for the capabilities in scope
+- repo code only when the task needs it, via targeted reads
 
 **Fast-entry variant** (`/pavilio-session-start [project] <task description>`):
-1. Load PROJECT.md silently (no display)
+1. Load PROJECT.md silently (no display); the task is known, so apply the same lazy rule — load `CONTEXT.md`, ADR titles, and the relevant change and specs for that scope
 2. Skip progress summary
 3. Classify the argument: a build task → enter the workflow at **step 1: Design** with it in hand. A question or a non-build ask ("what did we decide about X", "prep me for the call with Y") → answer it directly in the non-build lane; fast-entry is a shortcut past the summary, not a commitment to grill.
 

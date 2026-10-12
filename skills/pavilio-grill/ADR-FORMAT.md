@@ -1,8 +1,8 @@
 # ADR Format
 
-ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
+ADRs live in `projects/<project>/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
 
-Create the `docs/adr/` directory lazily — only when the first ADR is needed.
+Create the `projects/<project>/adr/` directory lazily — only when the first ADR is needed.
 
 ## Template
 
@@ -19,12 +19,13 @@ That's it. An ADR can be a single paragraph. The value is in recording *that* a 
 Only include these when they add genuine value. Most ADRs won't need them.
 
 - **Status** frontmatter (`proposed | accepted | deprecated | superseded by ADR-NNNN`) — useful when decisions are revisited
+- **Supersede** — the new ADR says "Supersedes ADR-NNNN". The old ADR changes only its Status to `superseded by ADR-MMMM`; its body is never edited. Do the status change as its own step/task.
 - **Considered Options** — only when the rejected alternatives are worth remembering
 - **Consequences** — only when non-obvious downstream effects need to be called out
 
 ## Numbering
 
-Scan `docs/adr/` for the highest existing number and increment by one.
+Scan `projects/<project>/adr/` for the highest existing number and increment by one.
 
 ## When to offer an ADR
 
