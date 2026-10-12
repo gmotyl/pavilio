@@ -40,7 +40,6 @@ function renderOverview() {
 /** Pattern order matters: `mockFetchResponses` matches by substring, first hit wins. */
 function stubOverview({ projectMd = true }: { projectMd?: boolean } = {}) {
   mockFetchResponses({
-    "/api/projects/colors": { colors: {} },
     "/api/projects/pavilio/context": { project: "pavilio", sources: [], contexts: [], adrs: [] },
     "/api/projects": [{ name: "pavilio", path: "/root/git/prv/pavilio", repos: [] }],
     ...(projectMd
@@ -104,7 +103,6 @@ describe("ProjectView — Overview", () => {
 
   it("PROJECT.md and project settings start fresh after switching project", async () => {
     mockFetchResponses({
-      "/api/projects/colors": { colors: {} },
       "/api/projects": [
         { name: "pavilio", path: "/root/git/prv/pavilio", repos: [] },
         { name: "other", path: "/root/git/prv/other", repos: [] },

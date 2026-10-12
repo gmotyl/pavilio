@@ -102,6 +102,10 @@ const SAMPLES: Record<string, readonly unknown[]> = {
     ],
   ],
 
+  // ── project identity (validating text codecs) ───────────────────────────
+  "project.color": ["", "#112233", "#abc"],
+  "project.mark": ["", "lucide:rocket", "emoji:🚀", "emoji:🇵🇱"],
+
   // ── json whose payload can be a BARE STRING — the shape that breaks a
   //    bridge keyed off the declared default rather than off the codec ─────
   "terminal.focus": [null, "", "sess-1", "true", "240", "null"],
@@ -114,7 +118,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 48;
+const DECLARATION_COUNT = 50;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

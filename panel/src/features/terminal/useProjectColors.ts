@@ -1,148 +1,101 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-/**
- * Shown for a project the map does not (yet) cover — during the first load,
- * and for a name the server has never discovered. A fixed neutral token, so a
- * project never flashes another project's colour on the way to its own.
- */
-export const PROJECT_COLOR_PLACEHOLDER = "var(--border-subtle)";
+import { preferences } from "../../preferences/declarations";
+import { readPreference, subscribePreference, writePreference } from "../../preferences/store";
+import {
+  PROJECT_COLOR_HEX_RE,
+  derivedProjectColor,
+} from "../projects/projectMark";
 
-const COLORS_URL = "/api/projects/colors";
-
+const KEY_PREFIX = `${preferences.projectColor.key}@`;
 const EMPTY: Record<string, string> = Object.freeze({});
 
 /**
- * Module-level store, not per-component state.
+ * A thin reader/writer over the `project.color` preference. A project with no
+ * stored colour reads as the colour derived from its name; nothing is written
+ * for it.
  *
- * Every chip, cell header, mobile dot and drawer row asks for a colour, so a
- * `useEffect` fetch inside the hook would put one request per terminal on the
- * wire. The store fetches once on the first subscription and fans the result
- * out through `useSyncExternalStore`, the same idiom as `features/alerts/store.ts` and
- * `terminalInstances`.
+ * `colors` (every stored colour, for the picker's "already used by" marks) is a
+ * cached snapshot rebuilt only when a colour changes, because
+ * `useSyncExternalStore` compares snapshots by identity.
  */
-let colors: Record<string, string> = EMPTY;
-let loading: Promise<void> | null = null;
+let snapshot: Record<string, string> = EMPTY;
+let snapshotStale = true;
 const listeners = new Set<() => void>();
+/** Projects whose preference this module already listens to (cross-tab changes). */
+const watched = new Map<string, () => void>();
 
-/**
- * `getSnapshot` hands back this object by identity, so it must only ever be
- * *replaced*, never mutated — React compares snapshots with `Object.is` and
- * warns ("The result of getSnapshot should be cached") if a fresh object comes
- * back from an unchanged store.
- */
-function publish(next: Record<string, string>): void {
-  colors = next;
-  for (const l of listeners) l();
+function storedColors(): Record<string, string> {
+  const doc = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__;
+  const out: Record<string, string> = {};
+  if (!doc) return out;
+  for (const key of Object.keys(doc)) {
+    if (!key.startsWith(KEY_PREFIX)) continue;
+    const name = key.slice(KEY_PREFIX.length);
+    const hex = readPreference(preferences.projectColor, name);
+    if (hex !== "") out[name] = hex;
+  }
+  return out;
+}
+
+function changed(): void {
+  snapshotStale = true;
+  for (const l of [...listeners]) l();
+}
+
+function watch(project: string): void {
+  if (watched.has(project) || project.trim() === "") return;
+  watched.set(project, subscribePreference(preferences.projectColor, project, changed));
 }
 
 function getSnapshot(): Record<string, string> {
-  return colors;
-}
-
-async function load(): Promise<void> {
-  try {
-    const res = await fetch(COLORS_URL);
-    if (!res.ok) return;
-    const body = (await res.json()) as { colors?: Record<string, string> };
-    publish(body.colors ?? EMPTY);
-  } catch {
-    // Offline or a dead server: the placeholder is a fine resting state, and
-    // the next reload retries. No polling, no retry loop.
+  if (snapshotStale) {
+    snapshot = storedColors();
+    snapshotStale = false;
+    for (const name of Object.keys(snapshot)) watch(name);
   }
-}
-
-/**
- * Fetch exactly once per page load. The guard is the promise itself rather
- * than a "did it finish" flag, so the second of `<StrictMode>`'s double-invoked
- * effects joins the in-flight request instead of starting another one.
- */
-function ensureLoaded(): void {
-  if (loading) return;
-  loading = load();
+  return snapshot;
 }
 
 function subscribe(onStoreChange: () => void): () => void {
   listeners.add(onStoreChange);
-  ensureLoaded();
   return () => {
     listeners.delete(onStoreChange);
   };
 }
 
-/**
- * Write one project's colour: applied optimistically so the UI moves at once,
- * rolled back if the server refuses. The response is `{ ok: true }` and carries
- * no map, so a success needs no refetch — the value just sent is the truth.
- *
- * Rejects on failure (after rolling back) so the caller can report it; callers
- * that do not care must still `.catch()`.
- *
- * The rollback restores *this project's key only*, onto whatever the map holds
- * at the moment it fails. Snapshotting the whole map and republishing it would
- * undo any other project's write that landed while this one was in flight —
- * two pickers moving at once, and the loser's colour silently reappears.
- */
+/** Rejects a colour that is not #rgb / #rrggbb; nothing is saved then. */
 async function setProjectColor(project: string, hex: string): Promise<void> {
-  // The map only ever holds hex strings, so `undefined` unambiguously means
-  // "this project had no entry" — and rolling that back has to *remove* the
-  // key. An own key set to `undefined` would defeat `colorFor`'s `??`
-  // placeholder fallback and survive into any JSON the map is written to.
-  const previous: string | undefined = Object.prototype.hasOwnProperty.call(
-    colors,
-    project,
-  )
-    ? colors[project]
-    : undefined;
-
-  const rollback = (): void => {
-    const next = { ...colors };
-    if (previous === undefined) delete next[project];
-    else next[project] = previous;
-    publish(next);
-  };
-
-  publish({ ...colors, [project]: hex });
-  let res: Response;
-  try {
-    res = await fetch(`/api/projects/${encodeURIComponent(project)}/color`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hex }),
-    });
-  } catch (err) {
-    rollback();
-    throw err;
-  }
-  if (!res.ok) {
-    rollback();
-    throw new Error(`Failed to set colour for ${project} (${res.status})`);
-  }
+  if (!PROJECT_COLOR_HEX_RE.test(hex)) throw new Error(`Invalid colour: ${hex}`);
+  watch(project);
+  writePreference(preferences.projectColor, hex, project);
+  changed();
 }
 
-/** Drop all shared state. Tests only — the store is a page-lifetime singleton. */
+/** Drop all shared state. Tests only. */
 export function __resetProjectColorsForTests(): void {
-  colors = EMPTY;
-  loading = null;
+  for (const off of watched.values()) off();
+  watched.clear();
+  snapshot = EMPTY;
+  snapshotStale = true;
   listeners.clear();
 }
 
 /**
- * The workspace's project → colour map, shared across every consumer.
- *
- * `colorFor` is the read path; it never throws and never leaves a project
- * colourless. `setColor` is the write path.
+ * The workspace's project colours. `colorFor` never throws and never leaves a
+ * project colourless; `setColor` is the write path.
  */
 export function useProjectColors(): {
   colorFor: (project: string) => string;
   setColor: (project: string, hex: string) => Promise<void>;
   colors: Record<string, string>;
 } {
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const colors = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const colorFor = useCallback(
-    (project: string) => snapshot[project] ?? PROJECT_COLOR_PLACEHOLDER,
-    [snapshot],
+    (project: string) => colors[project] ?? derivedProjectColor(project),
+    [colors],
   );
 
-  return { colorFor, setColor: setProjectColor, colors: snapshot };
+  return { colorFor, setColor: setProjectColor, colors };
 }

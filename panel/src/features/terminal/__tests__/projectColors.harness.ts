@@ -1,12 +1,12 @@
 import { vi } from "vitest";
 
+import { __resetPreferenceStoreForTests } from "../../../preferences/store";
 import { __resetProjectColorsForTests } from "../useProjectColors";
 
 /**
- * Colour is a *project* property now, so every surface test that asserts one
- * needs the shared `useProjectColors` store primed. The store fetches once per
- * page load, so priming means stubbing `fetch` and resetting the singleton —
- * not passing a prop.
+ * Colour is a *project* preference now, so every surface test that asserts one
+ * seeds the injected workspace document (`window.__PAVILIO_PREFS__`) rather
+ * than answering a fetch.
  */
 export const TEST_PROJECT_COLORS: Record<string, string> = {
   alpha: "#f0c674",
@@ -28,18 +28,18 @@ export function rgb(hex: string): string {
 }
 
 /**
- * Reset the shared store and answer its one GET with `colors`. Call from
- * `beforeEach`; `src/test-setup.ts` restores the stub afterwards.
+ * Reset the stores and seed the workspace document with `colors`. Call from
+ * `beforeEach`; the PATCH a write sends is answered with an empty 200.
  */
 export function installProjectColors(
   colors: Record<string, string> = TEST_PROJECT_COLORS,
 ): void {
+  __resetPreferenceStoreForTests();
+  const doc: Record<string, unknown> = { version: 1 };
+  for (const [name, hex] of Object.entries(colors)) doc[`project.color@${name}`] = hex;
+  (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__ = doc;
   __resetProjectColorsForTests();
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const url = String(input);
-    if (url === "/api/projects/colors") {
-      return { ok: true, status: 200, json: async () => ({ colors }) } as Response;
-    }
-    return { ok: true, status: 200, json: async () => ({}) } as Response;
-  });
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () => ({ ok: true, status: 200, json: async () => ({}) }) as Response,
+  );
 }

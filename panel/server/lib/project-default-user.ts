@@ -90,8 +90,7 @@ export function setDefaultUser(project: string, username: string): void {
 /**
  * Every known project's default user, narrowed to `projectNames` — a stale
  * entry for a deleted project is never returned, though it stays on disk.
- * Unlike `resolveProjectColors`, nothing is auto-assigned: an unset project
- * is simply absent from the result.
+ * Nothing is auto-assigned: an unset project is simply absent from the result.
  */
 export function getAllDefaultUsers(projectNames: string[]): Record<string, string> {
   const users = readStore();

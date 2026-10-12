@@ -309,8 +309,8 @@ export function destroySession(id: string): boolean {
 
 /**
  * A session's name is the only mutable part of its model. Colour used to live
- * here too; it identifies a *project* now and lives in the committed store
- * behind `project-colors.ts`.
+ * here too; it identifies a *project* now and lives in the `project.color`
+ * preference (see `useProjectColors`).
  *
  * Renaming does not touch `assignedNames`: the old default-assigned name
  * (e.g. `alokai-3`) stays recorded even though no live session is called

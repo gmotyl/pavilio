@@ -11,6 +11,7 @@ import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
 import { loadConfig, getConfig, isPortExplicit } from "./config.js";
 import { loadPreferences } from "./lib/preferences-store.js";
+import { importLegacyColors } from "./lib/import-legacy-colors.js";
 import {
   authMiddleware,
   loginHandler,
@@ -110,6 +111,12 @@ export async function startPanel(
   // blocks on — never touches the disk. Deliberately before `listen()`, so no
   // request can observe an unloaded document.
   loadPreferences(getConfig().preferencesPath);
+  // One-way fill of project colours from the old `.panel/project-colors.json`.
+  try {
+    importLegacyColors();
+  } catch (err) {
+    console.error("[preferences] legacy colour import failed:", err);
+  }
   rebuildIndex();
   const { port: configuredPort, tlsCert, tlsKey } = getConfig();
   // A configured port is a wish and may be stepped past; a port named in

@@ -3,17 +3,22 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 
 import { ProjectColorPicker, PROJECT_COLOR_PRESETS } from "../ProjectColorPicker";
 import { useProjectColors } from "../useProjectColors";
-import { PROJECT_COLOR_PRESETS as SERVER_PRESETS } from "../../../../server/lib/project-colors";
 import { TEST_PROJECT_COLORS, installProjectColors } from "./projectColors.harness";
 
 const GOLD = TEST_PROJECT_COLORS.alpha; // #f0c674, held by "alpha"
 const CORAL = TEST_PROJECT_COLORS.beta; // #e06c75, held by "beta"
 
-/** Every write the picker put on the wire. */
-function colorWrites() {
-  return vi
-    .mocked(globalThis.fetch)
-    .mock.calls.filter(([u]) => String(u).endsWith("/color"));
+/** Every colour the picker sent to the preference store, as `[key, hex]`. */
+function colorWrites(): [string, string][] {
+  const out: [string, string][] = [];
+  for (const [url, init] of vi.mocked(globalThis.fetch).mock.calls) {
+    if (String(url) !== "/api/preferences" || init?.method !== "PATCH") continue;
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(body)) {
+      if (key.startsWith("project.color@")) out.push([key, String(value)]);
+    }
+  }
+  return out;
 }
 
 /**
@@ -56,10 +61,6 @@ const openPicker = () => {
 describe("ProjectColorPicker", () => {
   beforeEach(() => installProjectColors());
 
-  it("keeps the client preset list in step with the server's", () => {
-    expect(PROJECT_COLOR_PRESETS).toEqual(SERVER_PRESETS);
-  });
-
   it("opens the picker naming the project", () => {
     renderPicker({ project: "alpha" });
 
@@ -87,21 +88,12 @@ describe("ProjectColorPicker", () => {
     expect(screen.getByTestId("reader-s2")).toHaveTextContent("#c678dd");
 
     // …and persisted.
-    const writes = colorWrites();
-    expect(writes).toHaveLength(1);
-    expect(String(writes[0][0])).toBe("/api/projects/alpha/color");
-    expect(writes[0][1]).toMatchObject({ method: "PUT" });
-    expect(JSON.parse(String(writes[0][1]?.body))).toEqual({ hex: "#c678dd" });
+    await waitFor(() => expect(colorWrites()).toHaveLength(1));
+    expect(colorWrites()[0]).toEqual(["project.color@alpha", "#c678dd"]);
   });
 
   it("marks a colour already used by another project", async () => {
     renderPicker({ project: "alpha" });
-
-    await waitFor(() =>
-      expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
-        "/api/projects/colors",
-      ),
-    );
 
     const panel = openPicker();
     const taken = within(panel).getByRole("button", { name: /coral.*beta/i });
@@ -112,7 +104,7 @@ describe("ProjectColorPicker", () => {
     // Advisory only — it still applies.
     fireEvent.click(taken);
     await waitFor(() => expect(colorWrites()).toHaveLength(1));
-    expect(JSON.parse(String(colorWrites()[0][1]?.body))).toEqual({ hex: CORAL });
+    expect(colorWrites()[0][1]).toBe(CORAL);
   });
 
   it("refuses an invalid custom hex", async () => {
@@ -140,7 +132,7 @@ describe("ProjectColorPicker", () => {
     fireEvent.click(within(panel).getByRole("button", { name: /apply/i }));
 
     await waitFor(() => expect(colorWrites()).toHaveLength(1));
-    expect(JSON.parse(String(colorWrites()[0][1]?.body))).toEqual({ hex: "#abc" });
+    expect(colorWrites()[0][1]).toBe("#abc");
   });
 
   it("does not focus or drag the cell when activated", async () => {
@@ -355,10 +347,8 @@ describe("ProjectColorPicker", () => {
       await waitFor(() =>
         expect(screen.getByTestId("reader-s1")).toHaveTextContent("#c678dd"),
       );
-      const writes = colorWrites();
-      expect(writes).toHaveLength(1);
-      expect(String(writes[0][0])).toBe("/api/projects/alpha/color");
-      expect(JSON.parse(String(writes[0][1]?.body))).toEqual({ hex: "#c678dd" });
+      await waitFor(() => expect(colorWrites()).toHaveLength(1));
+      expect(colorWrites()[0]).toEqual(["project.color@alpha", "#c678dd"]);
       // Still there — an inline picker has nothing to close.
       expect(screen.getByLabelText(/custom hex/i)).toBeInTheDocument();
     });

@@ -25,6 +25,7 @@
  * would close a cycle the moment those features start reading the registry.
  */
 import { bool, json, listOf, num, oneOf, optionalStr, str } from "./codecs";
+import { PROJECT_COLOR_HEX_RE, parseProjectMark } from "../features/projects/projectMark";
 import { definePreference, type PreferenceCodec, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
@@ -301,6 +302,37 @@ export const preferences = {
     scope: "project",
     default: true,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The project's colour as a hex string; "" = none stored, and readers fall
+   * back to the colour derived from the name (nothing is written for it).
+   * Scope argument: the project name.
+   */
+  projectColor: definePreference({
+    key: "project.color", // was: <projectsDir>/.panel/project-colors.json (imported at boot)
+    scope: "project",
+    default: "",
+    codec: {
+      parse: (raw) => (PROJECT_COLOR_HEX_RE.test(raw) ? raw : ""),
+      serialize: (value) => value,
+      storesText: true,
+    } satisfies PreferenceCodec<string>,
+    portable: true,
+  }),
+  /**
+   * The project's mark: "" | "lucide:<registered icon>" | "emoji:<one emoji>".
+   * Anything else reads as "". Scope argument: the project name.
+   */
+  projectMark: definePreference({
+    key: "project.mark", // was: nothing — new with project identity
+    scope: "project",
+    default: "",
+    codec: {
+      parse: (raw) => parseProjectMark(raw),
+      serialize: (value) => value,
+      storesText: true,
+    } satisfies PreferenceCodec<string>,
     portable: true,
   }),
   projectExpanded: definePreference({
