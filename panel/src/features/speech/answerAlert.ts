@@ -150,7 +150,7 @@ export function focusedVisibleSessionIdFor(
   readFocus: (project: string) => string | null,
   readStandaloneFocus: () => string | null = () => null,
 ): string | null {
-  if (pathname === "/terminals") return readStandaloneFocus();
+  if (pathname.replace(/\/+$/, "") === "/terminals") return readStandaloneFocus();
   const match = matchProjectFromPath(pathname);
   if (!match) return null;
   if (match.section !== "iterm" && !drawerVisible) return null;

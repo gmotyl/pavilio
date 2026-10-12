@@ -175,6 +175,9 @@ describe("focusedVisibleSessionIdFor", () => {
   it("standalone terminals page counts as looking for the answer alert", () => {
     expect(focusedVisibleSessionIdFor("/terminals", false, focus, () => "cell-b")).toBe("cell-b");
     expect(focusedVisibleSessionIdFor("/terminals", false, focus, () => null)).toBeNull();
+    // The route also matches with a trailing slash.
+    expect(focusedVisibleSessionIdFor("/terminals/", false, focus, () => "cell-b")).toBe("cell-b");
+    expect(focusedVisibleSessionIdFor("/project/alpha/iterm/", false, focus)).toBe("cell-a");
     // Without the standalone reader (older callers) nothing is looked at there.
     expect(focusedVisibleSessionIdFor("/terminals", false, focus)).toBeNull();
   });
