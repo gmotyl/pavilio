@@ -50,7 +50,9 @@ Interview relentlessly until you reach shared understanding. Walk each branch of
 
 - **One question per message.** Ask, then STOP and wait for the answer. Never stack questions.
 - **Always give your recommended answer** with brief reasoning.
-- **The final message of a turn that stops for the user is self-contained.** The answer pane shows only that last message, not earlier commentary in the turn. Restate the full question, the options and your recommendation in it — never end on a bare "waiting for your approval" line.
+- **Discrete-answer questions are lettered, uppercase.** Options are **A)–C)** with your recommendation as **A)**, and **D) Other, tell me how** always last. With only two options drop C: A), B), D). A bare letter reply ("B", "b") *is* that option — do not ask for confirmation. Free-text questions (a name, a description) carry no letters and stay one per message.
+- **Language follows the user.** When the user writes Polish, ask the grill questions in Polish; artifacts, code and commit messages stay English.
+- **The final message of a turn that stops for the user is self-contained.** The answer pane shows only that last message, not earlier commentary in the turn. Restate the full question, the lettered options and your recommendation in it — never end on a bare "waiting for your approval" line.
 - **If the codebase can answer it, go read the code** instead of asking.
 - **Sharpen fuzzy language.** Vague/overloaded term → propose a precise canonical term. ("You said 'account' — Customer or User? Those differ.")
 - **Challenge against the glossary.** A term that conflicts with `CONTEXT.md` → call it out immediately.
@@ -63,15 +65,16 @@ Interview relentlessly until you reach shared understanding. Walk each branch of
 A mockup named in a grill becomes binding: it is turned into a **mockup check** that [[pavilio-writing-plans]] carries into `tasks.md` as acceptance criteria. Use the glossary's terms exactly — **mockup check**, **agreed deviation**, **visual verification** — never "known diff", "exception" or "screenshot test".
 
 - **Trigger (a) — a mockup appears.** When a path or panel link to a file under `*/mockups/` appears in the conversation — or the user names another image/HTML file as the design — enter mockup mode for that file.
-- **Trigger (b) — a rendered surface with no mockup.** When the change touches a rendered surface (a panel, page, component — anything a user sees) and no mockup has appeared, ask once, lettered:
-  - a) I have a mockup — import it in the Mockups tab and paste its **Copy link**
-  - b) make one — `pavilio-mockup`
-  - c) no mockup for this change
+- **Trigger (b) — a rendered surface with no mockup.** When the change touches a rendered surface (a panel, page, component — anything a user sees) and no mockup has appeared, ask once, lettered (A–C, plus D):
+  - A) I have a mockup — import it in the Mockups tab and paste its **Copy link**
+  - B) make one — `pavilio-mockup`
+  - C) no mockup for this change
+  - D) Other, tell me how
 
-  On **b**, invoke [[pavilio-mockup]] (`Skill` tool, `skill: pavilio-mockup`) and treat the file it writes exactly like a supplied mockup. When it writes an options comparison (several variants in one file) rather than a single design, have the user pick one option first, and write the mockup check for that option only. On **c**, do not ask this question again for the rest of the grill — trigger (a) still fires if a mockup is pasted later.
+  On **B**, invoke [[pavilio-mockup]] (`Skill` tool, `skill: pavilio-mockup`) and treat the file it writes exactly like a supplied mockup. When it writes an options comparison (several variants in one file) rather than a single design, have the user pick one option first, and write the mockup check for that option only. On **C**, do not ask this question again for the rest of the grill — trigger (a) still fires if a mockup is pasted later.
 - **Per mockup:** read the file (images visually, HTML as source), then propose its **mockup check** — concrete, checkable items: elements present, their order, copy, states, composition per viewport. Get the user to confirm or edit it before moving on.
 - **Agreed deviations are recorded when decided.** The moment a grill decision contradicts a mockup (a different label, a dropped element, another order), add it to that mockup's **agreed deviations** — "mockup shows X → we build Y, because …" — right then, not at the end.
-- **Once per change,** when at least one mockup is attached, ask whether the change gets **visual verification** (a screenshot comparison task in the plan) — lettered a) yes · b) no, recommendation depending on how reachable the surface is, **default no**. Record the answer.
+- **Once per change,** when at least one mockup is attached, ask whether the change gets **visual verification** (a screenshot comparison task in the plan) — lettered, recommendation first as A) depending on how reachable the surface is, **default no** (so A) no · B) yes · D) Other, tell me how, unless the surface is easy to reach). Record the answer.
 
 ## 3. Update domain docs inline
 
@@ -156,7 +159,7 @@ Not a suggestion and not a handoff to the user — grill performs this step itse
 
 ## Key principles
 
-- One question at a time — with a recommended answer.
+- One question at a time — with a recommended answer. Discrete choices are lettered A–C (recommended = A) plus D) Other; a bare letter is that option; Polish questions when the user writes Polish.
 - Read code before asking what code can tell you.
 - Multiple choice / 2-3 approaches at real forks; don't manufacture them.
 - Domain docs are project-scoped and written inline, not at the end.
