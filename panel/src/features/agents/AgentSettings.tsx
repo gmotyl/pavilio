@@ -8,6 +8,8 @@ import { NotificationsToggle } from "../notifications/NotificationsToggle";
 import { LauncherSettings } from "./LauncherSettings";
 import { DefaultObjectiveSettings } from "./DefaultObjectiveSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 
 interface SettingsFile {
   name: string;
@@ -51,6 +53,74 @@ const DESTRUCTIVE_ACTION_IDS = new Set(["setup:restore"]);
 
 function isDestructive(action: WorkspaceAction): boolean {
   return DESTRUCTIVE_ACTION_IDS.has(action.id);
+}
+
+/**
+ * The global alert display time. Edited as text and committed on blur: the
+ * stored preference clamps to 2–60 on write, and the field then shows what was
+ * actually stored. A non-number (empty field) restores the stored value.
+ */
+function AlertsSettings() {
+  const [seconds, setSeconds] = usePreference(preferences.alertsDurationSeconds);
+  const [draft, setDraft] = useState(String(seconds));
+  const [base, setBase] = useState(seconds);
+  const [focused, setFocused] = useState(false);
+
+  // Follow the stored value (another tab, a clamp) unless the user is mid-edit.
+  if (seconds !== base && !focused) {
+    setBase(seconds);
+    setDraft(String(seconds));
+  }
+
+  const commit = () => {
+    const n = Math.round(Number(draft));
+    if (draft.trim() === "" || !Number.isFinite(n)) {
+      setDraft(String(seconds));
+      return;
+    }
+    const clamped = Math.min(60, Math.max(2, n));
+    setSeconds(clamped);
+    setBase(clamped);
+    setDraft(String(clamped));
+  };
+
+  return (
+    <div
+      className="rounded p-4"
+      style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", maxWidth: 640 }}
+    >
+      <div className="flex items-center gap-3 flex-wrap text-sm" style={{ color: "var(--text-primary)" }}>
+        <label htmlFor="alerts-duration">Show alerts for</label>
+        <input
+          id="alerts-duration"
+          data-testid="alerts-duration"
+          type="number"
+          min={2}
+          max={60}
+          step={1}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false);
+            commit();
+          }}
+          className="text-sm px-2 py-1 rounded"
+          style={{
+            width: 72,
+            background: "var(--bg-base, var(--bg-surface))",
+            color: "var(--text-primary)",
+            border: "1px solid var(--border-subtle)",
+          }}
+        />
+        <span style={{ color: "var(--text-secondary, var(--text-muted))" }}>seconds</span>
+      </div>
+      <p data-testid="alerts-duration-help" className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+        Applies to every alert that dismisses itself. &quot;Speaking&quot; stays until the voice stops, and is
+        hidden while you are looking at the speaking cell.
+      </p>
+    </div>
+  );
 }
 
 /** The script the server will run, shown so the user sees it before saying yes. */
@@ -502,6 +572,12 @@ export default function AgentSettings() {
         <div className="mt-4">
           <ShortcutSettings />
         </div>
+      </section>
+
+      {/* Alerts */}
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Alerts</h2>
+        <AlertsSettings />
       </section>
 
       {/* Workspace actions — whatever this workspace's package.json defines */}
