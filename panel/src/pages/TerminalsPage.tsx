@@ -20,10 +20,12 @@ export default function TerminalsPage() {
   const [maximized, toggleMaximized] = useTerminalMaximized("__all__");
   const [focusedId, setFocusedId] = useState<string | null>(null);
   // Told to the speech alerts, whose "looked at" rule reads this page's focus.
+  // The reset is mount-only: a per-change cleanup would publish null between
+  // two focused cells and make the speaking alert flicker.
   useEffect(() => {
     publishStandaloneTerminalFocus(focusedId);
-    return () => publishStandaloneTerminalFocus(null);
   }, [focusedId]);
+  useEffect(() => () => publishStandaloneTerminalFocus(null), []);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
   const navigate = useNavigate();
