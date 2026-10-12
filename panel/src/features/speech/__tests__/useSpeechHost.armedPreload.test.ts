@@ -80,6 +80,9 @@ const synth = vi.hoisted(() => {
       blobText.set(blob, bufferText.get(buffer) ?? "unknown");
       return blob;
     },
+    /** The real one's peek: is the audio cached (or in flight) for this text. */
+    isSpeechSynthesized: (text: string, options: { voice?: string } = {}): boolean =>
+      cache.has(`${options.voice ?? ""}::${text}`),
     textForBlob: (blob: Blob): string => blobText.get(blob) ?? "unknown",
     /** Holds this text's synthesis open, so "while it is warming" is observable. */
     hold: (text: string): void => {
@@ -119,6 +122,7 @@ vi.mock("../synth", () => ({
   synthesizeSpeech: synth.synthesizeSpeech,
   prefetchSpeech: synth.prefetchSpeech,
   toSpeechBlob: synth.toSpeechBlob,
+  isSpeechSynthesized: synth.isSpeechSynthesized,
   SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
 }));
 
@@ -338,6 +342,25 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     await emitUtterance("cell-b", "b-1", response(2, "Later"));
     expect(timesRequested(units[1])).toBe(2);
     expect(timesRequested(units[2])).toBeGreaterThanOrEqual(1);
+  });
+
+  it("evicted preloaded units are requested again at the next opportunity", async () => {
+    const answerX = response(6, "Xray");
+    const answerY = response(4, "Yankee");
+    const x = unitsOf(answerX);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await cycle(() => result.current, "cell-x");
+    await emitUtterance("cell-x", "x-1", answerX);
+    for (const unit of x) expect(timesRequested(unit)).toBe(1);
+
+    // Y's syntheses push X's entries out of the 200-entry LRU (modelled by clearing the cache).
+    synth.clearCache();
+    await emitUtterance("cell-y", "y-1", answerY);
+    await cycle(() => result.current, "cell-y");
+
+    // X's units 1.. must be back in the cache before Play.
+    for (const unit of x.slice(1)) expect(timesRequested(unit)).toBeGreaterThanOrEqual(2);
   });
 
   it("preloads never delay the playing run's next unit", async () => {
