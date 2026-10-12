@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { preferences } from "../../../preferences/declarations";
+import { readPreference, writePreference } from "../../../preferences/store";
 import ProjectSettingsCard from "../ProjectSettingsCard";
 import { ProjectColorPicker } from "../../terminal/ProjectColorPicker";
 import { installProjectColors, rgb } from "../../terminal/__tests__/projectColors.harness";
@@ -90,6 +92,51 @@ describe("ProjectSettingsCard appearance", () => {
     fireEvent.click(screen.getByRole("button", { name: "Use emoji" }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(within(row()).getByTestId("project-mark").textContent).toBe("🚀");
+  });
+
+  it("Escape while unfolded discards the draft and folds", () => {
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.click(screen.getByTestId("appearance-icon-rocket"));
+    fireEvent.keyDown(screen.getByTestId("appearance-body"), { key: "Escape" });
+    expect(screen.queryByTestId("appearance-body")).toBeNull();
+    expect(within(row()).getByTestId("project-mark-icon-folder")).toBeTruthy();
+    expect(readPreference(preferences.projectMark, "alpha")).toBe("");
+  });
+
+  it("an emoji mark highlights no icon and prefills the Emoji field", () => {
+    writePreference(preferences.projectMark, "emoji:🚀", "alpha");
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    const pressed = within(screen.getByTestId("appearance-icons"))
+      .getAllByRole("button")
+      .filter((b) => b.getAttribute("aria-pressed") === "true");
+    expect(pressed).toHaveLength(0);
+    fireEvent.click(screen.getByRole("tab", { name: "Emoji" }));
+    expect((screen.getByLabelText("Emoji") as HTMLInputElement).value).toBe("🚀");
+  });
+
+  it("Apply with an emoji mark persists emoji:🚀", () => {
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.click(screen.getByRole("tab", { name: "Emoji" }));
+    fireEvent.change(screen.getByLabelText("Emoji"), { target: { value: "🚀" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use emoji" }));
+    expect(readPreference(preferences.projectMark, "alpha")).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(readPreference(preferences.projectMark, "alpha")).toBe("emoji:🚀");
+  });
+
+  it("typing a hex only stages a draft; Apply then saves it", () => {
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.change(screen.getByLabelText("Custom hex"), { target: { value: "#123456" } });
+    fireEvent.keyDown(screen.getByLabelText("Custom hex"), { key: "Enter" });
+    expect(screen.getByTestId("appearance-chip").getAttribute("data-color")).toBe("#123456");
+    expect(readPreference(preferences.projectColor, "alpha")).toBe("#f0c674");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(readPreference(preferences.projectColor, "alpha")).toBe("#123456");
+    expect(screen.getByTestId("appearance-chip").getAttribute("data-color")).toBe("#123456");
   });
 
   it("a colour held by another project still names that project", () => {

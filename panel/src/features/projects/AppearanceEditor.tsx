@@ -40,14 +40,18 @@ export default function AppearanceEditor({ project }: { project: string }) {
   const unfold = () => {
     setDraftColor(storedColor);
     setDraftMark(storedMark);
-    setEmoji("");
+    setEmoji(storedMark.startsWith("emoji:") ? storedMark.slice(6) : "");
     setEmojiError(null);
     setOpen(true);
   };
 
   const previewColor = open ? color : storedColor;
   const previewMark = open ? mark : storedMark;
-  const selectedIcon = previewMark.startsWith("lucide:") ? previewMark.slice(7) : "folder";
+  const selectedIcon = previewMark.startsWith("lucide:")
+    ? previewMark.slice(7)
+    : previewMark.startsWith("emoji:")
+      ? ""
+      : "folder";
 
   const useEmoji = () => {
     const glyph = emoji.trim();
@@ -107,7 +111,13 @@ export default function AppearanceEditor({ project }: { project: string }) {
       </div>
 
       {open && (
-        <div data-testid="appearance-body" className="mt-3">
+        <div
+          data-testid="appearance-body"
+          className="mt-3"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpen(false);
+          }}
+        >
           <ProjectColorPicker
             project={project}
             variant="inline"
