@@ -31,6 +31,7 @@ import { useAutoSyncStatus } from "../auto-sync/useAutoSyncStatus";
 import { useArchivedProjects } from "../projects/useArchivedProjects";
 import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
+import { ProjectMark } from "../projects/ProjectMark";
 import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
 import { SessionIndicator } from "../terminal/SessionIndicator";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
@@ -354,6 +355,10 @@ export default function LeftSidebar() {
                   sessions is talking. */}
               <ProjectActivityLed sessionIds={projectSessionIds} />
             </span>
+          )}
+          {/* An unresolved (blank) name is not a preference scope: no tile for it. */}
+          {typeof project.name === "string" && project.name.trim() !== "" && (
+            <ProjectMark project={project.name} size={18} />
           )}
           <NavLink
             to={projectHref(project.name)}

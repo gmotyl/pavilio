@@ -2,38 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Palette } from "lucide-react";
 
 import { alerts } from "../alerts/store";
+import { PROJECT_COLOR_PRESETS } from "../projects/projectMark";
 import { useProjectColors } from "./useProjectColors";
 
 /**
- * The palette offered in the picker.
- *
- * **Source of truth is `server/lib/project-colors.ts`** — the server assigns
- * from that list, this one only offers it. It is duplicated rather than served
- * because it is a design constant that changes about never, and serving it
- * would mean a second endpoint, a second fetch and a loading state in front of
- * twelve literals; `useProjectColors` already owns the one request this feature
- * makes.
- *
- * **Drift risk:** the two lists can fall out of step, and nothing at runtime
- * would say so — a preset missing here is simply unofferable, and one only here
- * is a colour the server never auto-assigns. `ProjectColorPicker.test.tsx`
- * asserts the two arrays are equal, so a change to either side fails the suite;
- * if you edit one, edit both.
+ * The palette offered in the picker — the same list the derived default colour
+ * is picked from, owned by `features/projects/projectMark.ts`.
  */
-export const PROJECT_COLOR_PRESETS: readonly { name: string; hex: string }[] = [
-  { name: "Gold", hex: "#f0c674" },
-  { name: "Coral", hex: "#e06c75" },
-  { name: "Purple", hex: "#c678dd" },
-  { name: "Blue", hex: "#61afef" },
-  { name: "Teal", hex: "#56b6c2" },
-  { name: "Green", hex: "#98c379" },
-  { name: "Orange", hex: "#d19a66" },
-  { name: "Olive", hex: "#b5bd68" },
-  { name: "Emerald", hex: "#5fd7a7" },
-  { name: "Indigo", hex: "#7d8ff5" },
-  { name: "Pink", hex: "#ec7fa9" },
-  { name: "Slate", hex: "#8fa3bf" },
-];
+export { PROJECT_COLOR_PRESETS };
 
 /**
  * Format only — `#rgb` or `#rrggbb`. Deliberately *not* a contrast or
@@ -75,6 +51,12 @@ interface Props {
    * `onDismiss` go unused.
    */
   variant?: "popover" | "inline";
+  /**
+   * Inline only: a host that stages the colour (the Appearance editor) gets the
+   * picked hex back instead of it being saved, and `value` marks the selection.
+   */
+  onPick?: (hex: string) => void;
+  value?: string;
 }
 
 /**
@@ -109,6 +91,8 @@ export function ProjectColorPicker({
   onOpenChange,
   onDismiss,
   variant = "popover",
+  onPick,
+  value,
 }: Props) {
   const inline = variant === "inline";
   const { colors, colorFor, setColor } = useProjectColors();
@@ -145,7 +129,7 @@ export function ProjectColorPicker({
     setOpen(false);
   };
 
-  const current = colorFor(project);
+  const current = value ?? colorFor(project);
 
   /** hex (lowercased) → the other projects already flying it. */
   const owners = useMemo(() => {
@@ -163,6 +147,10 @@ export function ProjectColorPicker({
 
   const apply = (hex: string) => {
     setError(null);
+    if (inline && onPick) {
+      onPick(hex);
+      return;
+    }
     // Inline there is nothing to close and no host waiting to refocus.
     if (!inline) dismiss();
     // `setColor` rolls the optimistic value back and *rethrows* on failure, so
@@ -282,7 +270,7 @@ export function ProjectColorPicker({
             (e.currentTarget.style.background = "transparent")
           }
         >
-          Apply
+          {inline && onPick ? "Use" : "Apply"}
         </button>
       </div>
 

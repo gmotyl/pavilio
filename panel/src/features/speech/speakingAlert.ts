@@ -10,6 +10,11 @@
  * the host reports as a `start` with no `end` in between. Pausing, stopping or
  * the voice running out takes it down programmatically; a resume brings it back.
  *
+ * It is not raised for a cell the user is already looking at, and `recheck`
+ * (called on focus/route/visibility changes) re-evaluates that: arriving at the
+ * speaking cell withdraws the card, looking away while it still speaks brings
+ * it back. Playback is never touched.
+ *
  * Two user gestures hide it **for the rest of that run**, and the next run
  * raises it again:
  *
@@ -31,12 +36,18 @@ import type { SpeechRunEvent } from "./useSpeechHost";
 
 export const SPEAKING_ALERT_ID = "speech-speaking";
 
+/** What precedes the project name in the speaking card's title. */
+export const SPEAKING_TITLE_PREFIX = "Speaking — ";
+
 export function speakingAlertTitle(project: string, label: string): string {
-  return `Speaking — ${project} · ${label}`;
+  return `${SPEAKING_TITLE_PREFIX}${project} · ${label}`;
 }
 
 /** What the speaking alert needs from the panel: the same plumbing as the answer alert's. */
-export type SpeakingAlertDeps = Pick<AnswerAlertDeps, "sessionOf" | "navigate">;
+export type SpeakingAlertDeps = Pick<AnswerAlertDeps, "sessionOf" | "navigate"> & {
+  /** Whether the user is looking at the cell now (see `isLookedAt`); read on every evaluation. */
+  lookedAt: (sessionId: string) => boolean;
+};
 
 /**
  * The card's state machine, fed the host's run events (`onRunChange`). Returns
@@ -44,6 +55,8 @@ export type SpeakingAlertDeps = Pick<AnswerAlertDeps, "sessionOf" | "navigate">;
  */
 export function createSpeakingAlert(deps: SpeakingAlertDeps): {
   onRunChange: (event: SpeechRunEvent) => void;
+  /** Re-evaluate the looked-at rule; the provider calls it when focus, route or visibility changes. */
+  recheck: () => void;
   dispose: () => void;
 } {
   /** The cell the voice is in, or null while it is silent. */
@@ -52,10 +65,16 @@ export function createSpeakingAlert(deps: SpeakingAlertDeps): {
   let run = 0;
   /** The run whose card the user closed or clicked; hidden until the next run. */
   let hiddenRun = -1;
+  /** Paused: the card stays down until a resume, whatever the user looks at. */
+  let paused = false;
 
   function raise(): void {
     const sessionId = speaking;
     if (!sessionId || hiddenRun === run) return;
+    if (deps.lookedAt(sessionId)) {
+      alerts.dismiss(SPEAKING_ALERT_ID);
+      return;
+    }
     const session = deps.sessionOf(sessionId);
     // A session the panel does not list has nothing to name or arrive at.
     if (!session) {
@@ -65,6 +84,7 @@ export function createSpeakingAlert(deps: SpeakingAlertDeps): {
     const raisedFor = run;
     alerts.info(speakingAlertTitle(session.project, terminalLabel(session)), {
       id: SPEAKING_ALERT_ID,
+      project: session.project,
       persistent: true,
       // The × and the swipe — never the programmatic dismissals below.
       onDismiss: () => {
@@ -82,20 +102,27 @@ export function createSpeakingAlert(deps: SpeakingAlertDeps): {
       switch (event.type) {
         case "start":
           speaking = event.sessionId;
+          paused = false;
           run += 1;
           raise();
           return;
         case "resume":
+          paused = false;
           raise();
           return;
         case "pause":
+          paused = true;
           alerts.dismiss(SPEAKING_ALERT_ID);
           return;
         case "end":
           speaking = null;
+          paused = false;
           alerts.dismiss(SPEAKING_ALERT_ID);
           return;
       }
+    },
+    recheck() {
+      if (!paused) raise();
     },
     dispose() {
       speaking = null;

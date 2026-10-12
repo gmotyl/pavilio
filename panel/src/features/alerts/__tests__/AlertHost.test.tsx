@@ -3,6 +3,8 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AlertHost from "../AlertHost";
 import { __resetAlertsForTests, alerts } from "../store";
+import { preferences } from "../../../preferences/declarations";
+import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
 
 function cards(): HTMLElement[] {
   return screen.queryAllByTestId("alert");
@@ -24,11 +26,18 @@ function advance(ms: number): void {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("{}", { status: 200 })),
+  );
 });
 
 afterEach(() => {
   vi.useRealTimers();
   __resetAlertsForTests();
+  localStorage.clear();
+  __resetPreferenceStoreForTests();
+  vi.unstubAllGlobals();
 });
 
 describe("AlertHost", () => {
@@ -68,21 +77,17 @@ describe("AlertHost", () => {
     expect(titles()).toEqual(["passing", "standing"]);
   });
 
-  it("each kind expires after its own duration", () => {
+  it("every kind expires after the same duration", () => {
     render(<AlertHost />);
     act(() => {
       alerts.info("i");
       alerts.error("e");
+      alerts.warning("w");
     });
 
-    advance(3999);
-    expect(titles()).toEqual(["e", "i"]);
+    advance(14_999);
+    expect(titles()).toHaveLength(3);
     advance(1);
-    expect(titles()).toEqual(["e"]);
-
-    advance(2000); // 6000
-    expect(titles()).toEqual(["e"]);
-    advance(2000); // 8000
     expect(titles()).toEqual([]);
   });
 
@@ -94,11 +99,11 @@ describe("AlertHost", () => {
 
     advance(3000);
     fireEvent.pointerEnter(cards()[0]);
-    advance(5000);
+    advance(50_000);
     expect(titles()).toEqual(["i"]);
 
     fireEvent.pointerLeave(cards()[0]);
-    advance(999);
+    advance(11_999);
     expect(titles()).toEqual(["i"]);
     advance(1);
     expect(titles()).toEqual([]);
@@ -111,7 +116,7 @@ describe("AlertHost", () => {
       alerts.info("passing");
     });
 
-    advance(10_000);
+    advance(60_000);
     expect(titles()).toEqual(["standing"]);
     expect(within(cards()[0]).queryByTestId("alert-countdown")).toBeNull();
   });
@@ -143,7 +148,7 @@ describe("AlertHost", () => {
     act(() => {
       alerts.info("second", { id: "x" });
     });
-    advance(3999);
+    advance(14_999);
     expect(titles()).toEqual(["second"]);
     advance(1);
     expect(titles()).toEqual([]);
@@ -155,22 +160,22 @@ describe("AlertHost", () => {
       for (const n of [1, 2, 3]) alerts.info(`a${n}`, { id: `a${n}` });
     });
 
-    advance(3000);
+    advance(13_000);
     act(() => {
       alerts.info("a4", { id: "a4" });
     });
     // a1 is folded behind "+1 more" now; its clock must not reset or stop.
     expect(titles()).toEqual(["a4", "a3", "a2"]);
 
-    advance(999); // 3999
+    advance(1999); // 14999
     fireEvent.click(screen.getByRole("button", { name: "+1 more" }));
     expect(titles()).toEqual(["a4", "a3", "a2", "a1"]);
     // Its bar picks up where the clock is, not from full.
     const a1 = cards().find((c) => titleOf(c) === "a1")!;
-    expect(within(a1).getByTestId("alert-countdown").style.animationDelay).toBe("-3999ms");
-    advance(1); // 4000
+    expect(within(a1).getByTestId("alert-countdown").style.animationDelay).toBe("-14999ms");
+    advance(1); // 15000
     expect(titles()).toEqual(["a4"]);
-    advance(3000); // 7000
+    advance(13_000); // 28000
     expect(titles()).toEqual([]);
   });
 
@@ -180,13 +185,13 @@ describe("AlertHost", () => {
       for (const n of [1, 2, 3, 4, 5]) alerts.info(`a${n}`, { id: `a${n}` });
     });
 
-    advance(2000);
+    advance(12_000);
     fireEvent.click(screen.getByRole("button", { name: "+2 more" }));
     expect(titles()).toEqual(["a5", "a4", "a3", "a2", "a1"]);
 
-    advance(1999); // 3999
+    advance(2999); // 14999
     expect(titles()).toHaveLength(5);
-    advance(1); // 4000
+    advance(1); // 15000
     expect(titles()).toEqual([]);
   });
 
@@ -196,7 +201,7 @@ describe("AlertHost", () => {
       for (const n of [1, 2, 3, 4, 5]) alerts.info(`a${n}`, { id: `a${n}` });
     });
 
-    advance(4000);
+    advance(15_000);
     expect(titles()).toEqual([]);
     expect(screen.queryByRole("button", { name: /more/ })).toBeNull();
   });
@@ -208,7 +213,7 @@ describe("AlertHost", () => {
       alerts.info("i", { onDismiss });
     });
 
-    advance(4000);
+    advance(15_000);
     expect(titles()).toEqual([]);
     expect(onDismiss).not.toHaveBeenCalled();
   });
@@ -222,11 +227,11 @@ describe("AlertHost", () => {
 
     const a = cards().find((c) => titleOf(c) === "a")!;
     fireEvent.pointerEnter(a);
-    advance(4000);
+    advance(15_000);
     expect(titles()).toEqual(["a"]);
 
     fireEvent.pointerLeave(cards()[0]);
-    advance(3999);
+    advance(14_999);
     expect(titles()).toEqual(["a"]);
     advance(1);
     expect(titles()).toEqual([]);
@@ -249,31 +254,33 @@ describe("AlertHost", () => {
     });
     expect(titles()).toEqual(["a4", "a3", "a2"]);
 
-    advance(1000); // 4000: a2 and a3 expire, a1 is shown again
+    advance(12_000); // 15000: a2 and a3 expire, a1 is shown again
     expect(titles()).toEqual(["a4", "a1"]);
-    advance(1999); // 5999: a1 has run 3999 of its 4000
+    advance(1999); // 16999: a1 has run 14999 of its 15000
     expect(titles()).toEqual(["a4", "a1"]);
-    advance(1); // 6000
+    advance(1); // 17000
     expect(titles()).toEqual(["a4"]);
   });
 
   it("timers are cleared when an entry is removed early and when the host unmounts", () => {
     const { unmount } = render(<AlertHost />);
+    // The preference store keeps its own timers once mounted; count ours relative to them.
+    const base = vi.getTimerCount();
     act(() => {
       alerts.info("a", { id: "a" });
       alerts.info("b", { id: "b" });
       alerts.warning("standing", { persistent: true });
     });
     // One clock per transient entry; the persistent one has none.
-    expect(vi.getTimerCount()).toBe(2);
+    expect(vi.getTimerCount() - base).toBe(2);
 
     act(() => {
       alerts.dismiss("a");
     });
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount() - base).toBe(1);
 
     unmount();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(base);
   });
 
   it("error uses role alert, others role status", () => {
@@ -406,5 +413,74 @@ describe("AlertHost", () => {
     fireEvent.keyDown(card, { key: "Enter" });
     expect(cards()).toHaveLength(1);
     expect(onDismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe("AlertHost display time", () => {
+  it("info alert expires after the default 15 seconds", () => {
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("i");
+    });
+    advance(14_000);
+    expect(titles()).toEqual(["i"]);
+    advance(1000);
+    expect(titles()).toEqual([]);
+  });
+
+  it("error alert uses the same configured delay as info", () => {
+    writePreference(preferences.alertsDurationSeconds, 10);
+    render(<AlertHost />);
+    act(() => {
+      alerts.error("e");
+      alerts.info("i");
+    });
+    advance(9999);
+    expect(titles()).toEqual(["i", "e"]);
+    advance(1);
+    expect(titles()).toEqual([]);
+  });
+
+  it("persistent alerts ignore the configured delay", () => {
+    writePreference(preferences.alertsDurationSeconds, 2);
+    render(<AlertHost />);
+    act(() => {
+      alerts.warning("standing", { persistent: true });
+    });
+    advance(120_000);
+    expect(titles()).toEqual(["standing"]);
+  });
+
+  it("hover pause and folded expiry still work on the configured delay", () => {
+    writePreference(preferences.alertsDurationSeconds, 10);
+    render(<AlertHost />);
+    act(() => {
+      for (const n of [1, 2, 3, 4]) alerts.info(`a${n}`, { id: `a${n}` });
+    });
+    // a1 is folded behind "+1 more" and still expires on time.
+    expect(screen.getByRole("button", { name: "+1 more" })).toBeInTheDocument();
+    const a4 = cards().find((c) => titleOf(c) === "a4")!;
+    fireEvent.pointerEnter(a4);
+    advance(10_000);
+    expect(titles()).toEqual(["a4"]);
+    fireEvent.pointerLeave(cards()[0]);
+    advance(9999);
+    expect(titles()).toEqual(["a4"]);
+    advance(1);
+    expect(titles()).toEqual([]);
+  });
+
+  it("keeps a running alert's bar on the duration its clock captured", () => {
+    writePreference(preferences.alertsDurationSeconds, 10);
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("i");
+    });
+    act(() => {
+      writePreference(preferences.alertsDurationSeconds, 3);
+    });
+    expect(screen.getByTestId("alert-countdown").style.animationDuration).toBe("10000ms");
+    advance(9999);
+    expect(titles()).toEqual(["i"]);
   });
 });

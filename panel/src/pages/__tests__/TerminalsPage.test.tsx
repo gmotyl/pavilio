@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 const surfaceProps = vi.fn();
@@ -38,6 +38,10 @@ vi.mock("../../features/projects/useProjects", () => ({
 
 import TerminalsPage from "../TerminalsPage";
 // The page reads the panel's one speech host from context.
+import {
+  readStandaloneTerminalFocus,
+  subscribeStandaloneTerminalFocus,
+} from "../../features/terminal/standaloneTerminalFocus";
 import { SpeechHostProvider } from "../../features/speech/SpeechHostProvider";
 
 function renderPage() {
@@ -71,5 +75,25 @@ describe("TerminalsPage", () => {
 
     expect(placeTiles).toHaveBeenCalledWith(layout);
     expect(applyPreset).toHaveBeenCalledWith(preset);
+  });
+
+  it("moves the published focus A -> B without an intermediate null, and clears it on unmount", () => {
+    const seen: (string | null)[] = [];
+    const off = subscribeStandaloneTerminalFocus(() => seen.push(readStandaloneTerminalFocus()));
+    const { unmount } = render(
+      <MemoryRouter>
+        <SpeechHostProvider>
+          <TerminalsPage />
+        </SpeechHostProvider>
+      </MemoryRouter>,
+    );
+    const onFocus = () =>
+      surfaceProps.mock.calls[surfaceProps.mock.calls.length - 1][0].onFocus as (id: string) => void;
+    act(() => onFocus()("a"));
+    act(() => onFocus()("b"));
+    expect(seen).toEqual(["a", "b"]);
+    unmount();
+    expect(seen).toEqual(["a", "b", null]);
+    off();
   });
 });

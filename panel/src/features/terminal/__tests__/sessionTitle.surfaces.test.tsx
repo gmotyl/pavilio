@@ -138,13 +138,11 @@ function renamed(): SessionMeta {
   return auto({ name: "deploy" });
 }
 
-/** Both fetches every surface here can make, answered from one stub. */
+/** The fetches every surface here can make, answered from one stub. */
 function stubFetch(sessions: SessionMeta[]): void {
   __resetProjectColorsForTests();
   vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url === "/api/projects/colors")
-      return { ok: true, status: 200, json: async () => ({ colors: {} }) } as Response;
     if (url.startsWith("/api/terminal/sessions"))
       return { ok: true, status: 200, json: async () => sessions } as Response;
     return { ok: true, status: 200, json: async () => ({}) } as Response;

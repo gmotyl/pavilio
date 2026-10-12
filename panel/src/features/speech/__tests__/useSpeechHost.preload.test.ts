@@ -119,6 +119,8 @@ vi.mock("../synth", () => ({
   synthesizeSpeech: synth.synthesizeSpeech,
   prefetchSpeech: synth.prefetchSpeech,
   toSpeechBlob: synth.toSpeechBlob,
+  // Nothing is ever evicted in this harness.
+  isSpeechSynthesized: () => true,
   SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
 }));
 
@@ -462,7 +464,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     await cycle(() => result.current, "cell-a");
     expect(requestedTexts()).toEqual(units.slice(0, 4));
   });
-  it("a failed preload stays stopped across unrelated arrivals", async () => {
+  it("a failed preload stops the rest of the pass and is retried on the next arrival", async () => {
     const markdown = response(5);
     const units = holdAll(markdown);
     const { result } = renderHook(() => useSpeechHost());
@@ -479,14 +481,9 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     await release(units[0]);
     expect(requestedTexts()).toEqual([units[0], units[1]]);
 
-    // An arrival in another cell re-runs the warm effect; the failed answer's
-    // remainder must not be requested again because of it.
+    // An arrival elsewhere is the next opportunity: the failed unit is asked
+    // for again, once.
     await emitUtterance("cell-b", "b-1", response(2, "Bravo"));
-    for (const unit of units.slice(1)) expect(timesRequested(unit)).toBeLessThanOrEqual(1);
-    for (const unit of units.slice(2)) expect(timesRequested(unit)).toBe(0);
-
-    // Cycling the cell's mode is the retry.
-    await cycle(() => result.current, "cell-a"); // autoplay
     expect(timesRequested(units[1])).toBe(2);
   });
 

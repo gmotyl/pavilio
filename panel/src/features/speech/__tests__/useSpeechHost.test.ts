@@ -104,6 +104,8 @@ vi.mock("../synth", () => ({
   synthesizeSpeech: synth.synthesizeSpeech,
   prefetchSpeech: synth.prefetchSpeech,
   toSpeechBlob: synth.toSpeechBlob,
+  // Nothing is ever evicted in this harness.
+  isSpeechSynthesized: () => true,
   SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
 }));
 

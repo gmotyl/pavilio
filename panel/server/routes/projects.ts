@@ -13,7 +13,6 @@ import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, resolveOpenSpecRoot } from "../lib/openspec.js";
-import { resolveProjectColors, setProjectColor } from "../lib/project-colors.js";
 import { getAllDefaultUsers, setDefaultUser } from "../lib/project-default-user.js";
 import { listOsUsers } from "../lib/os-users.js";
 
@@ -506,30 +505,8 @@ export function isContextPathAllowed(
   return dirname(absolutePath) === join(containingRoot, "specs");
 }
 
-/** Same shapes the colour store accepts; kept here so a bad body is a 400, not a 500. */
-const COLOR_HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-
 // Literal path, registered ahead of every `/:name/...` pattern so it can never be
-// read as a project named "colors".
-router.get("/colors", (_req, res) => {
-  try {
-    const names = discoverProjects().map((p) => p.name);
-    // The store returns the whole persisted map, which can still hold entries for
-    // projects that have since been deleted. Narrow to the discovered set: this is
-    // the client's list of known projects, and a stale name would render a chip for
-    // something that no longer exists. The entry stays on disk, so a project that
-    // comes back keeps its colour.
-    const resolved = resolveProjectColors(names);
-    const colors: Record<string, string> = {};
-    for (const name of names) colors[name] = resolved[name];
-    res.json({ colors });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// Literal path, registered ahead of every `/:name/...` pattern so it can never be
-// read as a project named "default-terminal-users". Mirrors `/colors` above.
+// read as a project named "default-terminal-users".
 router.get("/default-terminal-users", (_req, res) => {
   const names = discoverProjects().map((p) => p.name);
   const users = getAllDefaultUsers(names);
@@ -537,7 +514,7 @@ router.get("/default-terminal-users", (_req, res) => {
 });
 
 router.put("/:name/default-terminal-user", (req, res) => {
-  // Existence comes from discovery — same source `GET /` and `GET /colors` use —
+  // Existence comes from discovery — same source `GET /` uses —
   // so a traversal-shaped name is rejected here instead of reaching the store.
   if (!discoverProjects().some((p) => p.name === req.params.name)) {
     return res.status(404).json({ error: "Project not found" });
@@ -548,22 +525,6 @@ router.put("/:name/default-terminal-user", (req, res) => {
   }
   try {
     setDefaultUser(req.params.name, username);
-  } catch (err) {
-    return res.status(500).json({ error: (err as Error).message });
-  }
-  res.json({ ok: true });
-});
-
-router.put("/:name/color", (req, res) => {
-  // Existence comes from discovery — the same source `GET /` and `GET /colors` use —
-  // so a traversal-shaped name is rejected here instead of reaching the store.
-  if (!discoverProjects().some((p) => p.name === req.params.name)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
-  const hex = typeof req.body?.hex === "string" ? req.body.hex : "";
-  if (!COLOR_HEX_RE.test(hex)) return res.status(400).json({ error: "Invalid colour" });
-  try {
-    setProjectColor(req.params.name, hex);
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
   }

@@ -25,7 +25,8 @@
  * would close a cycle the moment those features start reading the registry.
  */
 import { bool, json, listOf, num, oneOf, optionalStr, str } from "./codecs";
-import { definePreference, type PreferenceDef } from "./types";
+import { PROJECT_COLOR_HEX_RE, parseProjectMark } from "../features/projects/projectMark";
+import { definePreference, type PreferenceCodec, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
 import type { RepoSearchScope } from "../features/projects/useRepoSearch";
@@ -57,6 +58,14 @@ export interface TerminalLauncher {
   promptFlag?: string;
   /** Start-prompt text the CLI receives; `{prompt}` is the objective. "" = not offered. */
   runLoop?: string;
+}
+
+/** A number codec that pulls any stored value into [min, max]. */
+function clampedNum(min: number, max: number): PreferenceCodec<number> {
+  return {
+    parse: (raw) => Math.min(max, Math.max(min, num.parse(raw))),
+    serialize: num.serialize,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -227,6 +236,20 @@ export const ANSWER_PANE_FULL_HEIGHT = 4000;
  * ===========================================================================
  */
 export const preferences = {
+  // ── Alerts ───────────────────────────────────────────────────────────────
+  /**
+   * How long a transient alert stays up, in seconds — one value for every
+   * kind (it replaces the old per-kind 4/4/6/8 s table). Persistent alerts
+   * ignore it. The codec clamps on read, so a hand-edited workspace file with
+   * 0 or 500 still yields 2 s or 60 s rather than an instant or endless alert.
+   */
+  alertsDurationSeconds: definePreference({
+    key: "alerts.durationSeconds", // was: nothing — a hard-coded per-kind table
+    scope: "global",
+    default: 15,
+    codec: clampedNum(2, 60),
+    portable: true,
+  }),
   // ── Shell ────────────────────────────────────────────────────────────────
   leftSidebarExpanded: definePreference({
     key: "shell.leftSidebar.expanded", // was: panel:leftSidebar
@@ -279,6 +302,37 @@ export const preferences = {
     scope: "project",
     default: true,
     codec: bool,
+    portable: true,
+  }),
+  /**
+   * The project's colour as a hex string; "" = none stored, and readers fall
+   * back to the colour derived from the name (nothing is written for it).
+   * Scope argument: the project name.
+   */
+  projectColor: definePreference({
+    key: "project.color", // was: <projectsDir>/.panel/project-colors.json (imported at boot)
+    scope: "project",
+    default: "",
+    codec: {
+      parse: (raw) => (PROJECT_COLOR_HEX_RE.test(raw) ? raw : ""),
+      serialize: (value) => value,
+      storesText: true,
+    } satisfies PreferenceCodec<string>,
+    portable: true,
+  }),
+  /**
+   * The project's mark: "" | "lucide:<registered icon>" | "emoji:<one emoji>".
+   * Anything else reads as "". Scope argument: the project name.
+   */
+  projectMark: definePreference({
+    key: "project.mark", // was: nothing — new with project identity
+    scope: "project",
+    default: "",
+    codec: {
+      parse: (raw) => parseProjectMark(raw),
+      serialize: (value) => value,
+      storesText: true,
+    } satisfies PreferenceCodec<string>,
     portable: true,
   }),
   projectExpanded: definePreference({

@@ -16,6 +16,7 @@ vi.mock("../../notifications/notificationClickTarget", async (importOriginal) =>
 const {
   alertOnAnswer,
   focusedVisibleSessionIdFor,
+  isLookedAt,
   raiseAnswerAlert,
   shouldRaiseAnswerAlert,
 } = await import("../answerAlert");
@@ -60,6 +61,7 @@ describe("answer alert", () => {
         id: "answer-cell-b",
         kind: "info",
         title: "beta · agent two",
+        project: "beta",
         detail: "Done The build passed.",
       }),
     ]);
@@ -168,6 +170,23 @@ describe("focusedVisibleSessionIdFor", () => {
 
   it("is the project's focused cell while the drawer shows its terminals", () => {
     expect(focusedVisibleSessionIdFor("/project/alpha/notes", true, focus)).toBe("cell-a");
+  });
+
+  it("standalone terminals page counts as looking for the answer alert", () => {
+    expect(focusedVisibleSessionIdFor("/terminals", false, focus, () => "cell-b")).toBe("cell-b");
+    expect(focusedVisibleSessionIdFor("/terminals", false, focus, () => null)).toBeNull();
+    // The route also matches with a trailing slash.
+    expect(focusedVisibleSessionIdFor("/terminals/", false, focus, () => "cell-b")).toBe("cell-b");
+    expect(focusedVisibleSessionIdFor("/project/alpha/iterm/", false, focus)).toBe("cell-a");
+    // Without the standalone reader (older callers) nothing is looked at there.
+    expect(focusedVisibleSessionIdFor("/terminals", false, focus)).toBeNull();
+  });
+
+  it("a hidden tab looks at nothing", () => {
+    expect(isLookedAt("cell-a", "cell-a", true)).toBe(true);
+    expect(isLookedAt("cell-a", "cell-a", false)).toBe(false);
+    expect(isLookedAt("cell-b", "cell-a", true)).toBe(false);
+    expect(isLookedAt("cell-a", null, true)).toBe(false);
   });
 
   it("is nothing where no terminals are on screen", () => {

@@ -10,7 +10,6 @@ import {
 } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X, type LucideIcon } from "lucide-react";
 import {
-  ALERT_DURATION_MS,
   alerts,
   getAlertsSnapshot,
   subscribeAlerts,
@@ -19,6 +18,11 @@ import {
   type AlertEntry,
   type AlertKind,
 } from "./store";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
+import { SPEAKING_TITLE_PREFIX } from "../speech/speakingAlert";
+import { ProjectMark } from "../projects/ProjectMark";
+import { useProjectColors } from "../terminal/useProjectColors";
 
 /** Cards shown before the rest fold into the "+N more" pill. */
 const VISIBLE_CAP = 3;
@@ -47,6 +51,21 @@ const palette: Record<AlertKind, { color: string; icon: LucideIcon }> = {
 };
 
 /**
+ * Where the project name sits in a project alert's title: `<project> · …`
+ * (answer cards) or `Speaking — <project> · …`. Anchored on those shapes, not
+ * the first substring match, so a project called "claude" or "speaking" is
+ * not coloured inside another word. Null when the title has neither shape.
+ */
+function projectSpan(title: string, project: string): [number, number] | null {
+  for (const prefix of ["", SPEAKING_TITLE_PREFIX]) {
+    if (!title.startsWith(prefix + project)) continue;
+    const end = prefix.length + project.length;
+    if (end === title.length || title.startsWith(" · ", end)) return [prefix.length, end];
+  }
+  return null;
+}
+
+/**
  * Transient entries newest first, then persistent entries newest first, so a
  * passing alert always lands above a standing warning and leaves without
  * moving it. "Newest" is store order: a refresh keeps its slot.
@@ -64,7 +83,7 @@ export default function AlertHost() {
   const entries = useSyncExternalStore(subscribeAlerts, getAlertsSnapshot, getAlertsSnapshot);
   const [expanded, setExpanded] = useState(false);
   const [pausedIds, setPausedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const elapsedOf = useAlertClocks(entries, pausedIds);
+  const clockOf = useAlertClocks(entries, pausedIds);
 
   const setPaused = useCallback((id: string, paused: boolean) => {
     setPausedIds((prev) => {
@@ -104,7 +123,7 @@ export default function AlertHost() {
           entry={entry}
           paused={pausedIds.has(entry.id)}
           onPausedChange={setPaused}
-          elapsedOf={elapsedOf}
+          clockOf={clockOf}
         />
       ))}
       {hidden > 0 && (
@@ -132,7 +151,7 @@ interface AlertCardProps {
   paused: boolean;
   /** Hover and drag reports; the host owns the clock this pauses. */
   onPausedChange: (id: string, paused: boolean) => void;
-  elapsedOf: (id: string, seq: number) => number;
+  clockOf: (id: string, seq: number) => { elapsed: number; duration: number } | null;
 }
 
 interface Drag {
@@ -142,10 +161,16 @@ interface Drag {
   width: number;
 }
 
-function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps) {
+function AlertCard({ entry, paused, onPausedChange, clockOf }: AlertCardProps) {
   const { id, seq } = entry;
-  const { color, icon: Icon } = palette[entry.kind];
-  const duration = ALERT_DURATION_MS[entry.kind];
+  const { color: kindColor, icon: Icon } = palette[entry.kind];
+  const { colorFor } = useProjectColors();
+  const project = entry.project;
+  const projectColor = project ? colorFor(project) : undefined;
+  const color = projectColor ?? kindColor;
+  const [seconds] = usePreference(preferences.alertsDurationSeconds);
+  // The bar follows the clock's captured duration, not the live preference.
+  const duration = clockOf(id, seq)?.duration ?? seconds * 1000;
   const bar = useRef<HTMLDivElement>(null);
   const hovered = useRef(false);
   const drag = useRef<Drag | null>(null);
@@ -180,8 +205,8 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
 
   // A card shown late (expanded from the fold) starts its bar where the clock is.
   useLayoutEffect(() => {
-    if (bar.current) bar.current.style.animationDelay = `-${elapsedOf(id, seq)}ms`;
-  }, [id, seq, elapsedOf]);
+    if (bar.current) bar.current.style.animationDelay = `-${clockOf(id, seq)?.elapsed ?? 0}ms`;
+  }, [id, seq, clockOf]);
 
   // The drag writes the card's transform straight to the DOM: React owns no
   // `transform` in the style prop, so a re-render mid-drag leaves it alone.
@@ -255,10 +280,21 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
 
   // Spans, not divs: the action wraps them in a native button, whose content model
   // is phrasing only.
+  const span = project ? projectSpan(entry.title, project) : null;
   const content = (
     <>
       <span data-testid="alert-title" className="block break-words">
-        {entry.title}
+        {span ? (
+          <>
+            {entry.title.slice(0, span[0])}
+            <b data-testid="alert-project-name" style={{ color: projectColor }}>
+              {entry.title.slice(span[0], span[1])}
+            </b>
+            {entry.title.slice(span[1])}
+          </>
+        ) : (
+          entry.title
+        )}
       </span>
       {entry.detail && (
         <span className="mt-0.5 block break-words text-xs" style={{ color: "var(--text-muted)" }}>
@@ -295,13 +331,19 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
         pointerEvents: "auto",
         touchAction: "pan-y",
         cursor: actionable ? "pointer" : undefined,
-        background: "var(--bg-surface)",
+        background: projectColor
+          ? `color-mix(in srgb, ${projectColor} 10%, var(--bg-surface))`
+          : "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
-        borderLeft: `3px solid ${color}`,
+        borderLeft: `${projectColor ? 4 : 3}px solid ${color}`,
         color: "var(--text-primary)",
       }}
     >
-      <Icon size={16} style={{ color, flexShrink: 0, marginTop: 2 }} />
+      {project ? (
+        <ProjectMark project={project} />
+      ) : (
+        <Icon size={16} style={{ color, flexShrink: 0, marginTop: 2 }} />
+      )}
       {actionable ? (
         <button type="button" data-testid="alert-action" className="alert-action min-w-0 flex-1">
           {content}
@@ -363,13 +405,15 @@ function stop(clock: Clock): void {
  * full. Expiry goes through `alerts.dismiss`, which by contract does not call
  * `onDismiss`.
  *
- * Returns how long an entry's current clock has run, for drawing its bar.
+ * Returns how long an entry's current clock has run and the duration it
+ * captured, for drawing its bar.
  */
 function useAlertClocks(
   entries: readonly AlertEntry[],
   pausedIds: ReadonlySet<string>,
-): (id: string, seq: number) => number {
+): (id: string, seq: number) => { elapsed: number; duration: number } | null {
   const clocks = useRef(new Map<string, Clock>());
+  const [seconds] = usePreference(preferences.alertsDurationSeconds);
 
   useEffect(() => {
     const map = clocks.current;
@@ -384,7 +428,7 @@ function useAlertClocks(
         clock = undefined;
       }
       if (!clock) {
-        const duration = ALERT_DURATION_MS[entry.kind];
+        const duration = seconds * 1000;
         clock = { seq, duration, remaining: duration, startedAt: null, timer: null };
         map.set(id, clock);
       }
@@ -400,7 +444,7 @@ function useAlertClocks(
       stop(clock);
       map.delete(id);
     }
-  }, [entries, pausedIds]);
+  }, [entries, pausedIds, seconds]);
 
   // Unmount stops (and banks) every clock; a remount resumes them.
   useEffect(() => {
@@ -410,8 +454,11 @@ function useAlertClocks(
 
   return useCallback((id: string, seq: number) => {
     const clock = clocks.current.get(id);
-    if (!clock || clock.seq !== seq) return 0;
+    if (!clock || clock.seq !== seq) return null;
     const running = clock.startedAt === null ? 0 : Date.now() - clock.startedAt;
-    return Math.max(0, clock.duration - clock.remaining + running);
+    return {
+      elapsed: Math.max(0, clock.duration - clock.remaining + running),
+      duration: clock.duration,
+    };
   }, []);
 }

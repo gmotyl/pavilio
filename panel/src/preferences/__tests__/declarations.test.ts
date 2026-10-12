@@ -8,6 +8,7 @@ import { __resetPreferenceStoreForTests, readPreference, writePreference } from 
  * comparing it against itself would assert nothing at all.
  */
 const PORTABLE = [
+  "alerts.durationSeconds",
   "composer.shortcuts",
   "fileList.paneWidth",
   "fileList.sidebarCollapsed",
@@ -21,6 +22,8 @@ const PORTABLE = [
   "plans.runBanner.launcher",
   "plans.taskPrompt",
   "plans.taskPrompt.override",
+  "project.color",
+  "project.mark",
   "projects.favorites",
   "repos.searchScope",
   "repos.tree.paneWidth",
@@ -138,6 +141,9 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["plans.taskPrompt.override", null, "project"],
   ["projects.favorites", [], "global"],
   ["repos.searchScope", "changed", "global"],
+  ["alerts.durationSeconds", 15, "global"],
+  ["project.color", "", "project"],
+  ["project.mark", "", "project"],
   ["repos.tree.paneWidth", 280, "global"],
   ["search.includeArchived", true, "global"],
   ["shell.leftSidebar.expanded", true, "global"],
@@ -510,5 +516,36 @@ describe("the width the repo file trees share", () => {
       version: 1,
       "repos.tree.paneWidth": 344,
     });
+  });
+});
+
+describe("the alert display time", () => {
+  beforeEach(() => {
+    globals.__PAVILIO_PREFS__ = { version: 1 };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 200 })),
+    );
+  });
+
+  afterEach(() => {
+    delete globals.__PAVILIO_PREFS__;
+    localStorage.clear();
+    sessionStorage.clear();
+    __resetPreferenceStoreForTests();
+    vi.unstubAllGlobals();
+  });
+
+  it("defaults to 15 seconds", () => {
+    expect(readPreference(preferences.alertsDurationSeconds)).toBe(15);
+  });
+
+  it("out-of-range stored values clamp to 2 and 60", () => {
+    writePreference(preferences.alertsDurationSeconds, 0);
+    expect(readPreference(preferences.alertsDurationSeconds)).toBe(2);
+    writePreference(preferences.alertsDurationSeconds, 500);
+    expect(readPreference(preferences.alertsDurationSeconds)).toBe(60);
+    writePreference(preferences.alertsDurationSeconds, 30);
+    expect(readPreference(preferences.alertsDurationSeconds)).toBe(30);
   });
 });

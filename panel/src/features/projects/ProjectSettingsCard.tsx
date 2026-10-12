@@ -1,10 +1,10 @@
 import { Settings } from "lucide-react";
 import { ProjectVoiceSelect } from "../speech/ProjectVoiceSelect";
-import { ProjectColorPicker } from "../terminal/ProjectColorPicker";
+import AppearanceEditor from "./AppearanceEditor";
 
 /**
  * The project's own settings, on its Overview tab: the voice its terminals'
- * answers are read in, and the colour its terminals are accented with.
+ * answers are read in, and the mark and colour that identify it.
  *
  * Each row's control brings its own label and help where it has them — the
  * voice select renders "Speech voice", its help line and the "overrides
@@ -31,14 +31,7 @@ export default function ProjectSettingsCard({ project }: { project: string }) {
         <ProjectVoiceSelect project={project} />
       </div>
       <div className="px-3.5 py-3" style={{ borderTop: "1px solid var(--border-subtle)" }}>
-        <div className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>
-          Project color
-        </div>
-        <ProjectColorPicker project={project} variant="inline" />
-        <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-          Accent for this project's terminals. Same picker as in the terminals view; a colour
-          another project already uses shows that project's name.
-        </p>
+        <AppearanceEditor project={project} />
       </div>
     </section>
   );
