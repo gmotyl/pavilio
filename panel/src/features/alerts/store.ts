@@ -28,6 +28,8 @@ export interface AlertOptions {
    * card. Never on × or swipe, and activation does not call `onDismiss`.
    */
   onClick?: () => void;
+  /** Names a project: the card carries its colour and mark. Omit for a neutral card. */
+  project?: string;
 }
 
 export interface AlertEntry {
@@ -38,6 +40,7 @@ export interface AlertEntry {
   persistent: boolean;
   onDismiss?: () => void;
   onClick?: () => void;
+  project?: string;
   /** Grows on every push and refresh. */
   seq: number;
 }
@@ -62,6 +65,7 @@ function push(kind: AlertKind, title: string, opts: AlertOptions = {}): string {
     persistent: opts.persistent ?? false,
     onDismiss: opts.onDismiss,
     onClick: opts.onClick,
+    project: opts.project,
     seq: nextSeq++,
   };
   const index = entries.findIndex((e) => e.id === id);

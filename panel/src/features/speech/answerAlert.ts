@@ -65,6 +65,7 @@ export function raiseAnswerAlert(input: {
   const detail = answerPreview(markdown);
   alerts.info(`${project} · ${label}`, {
     id: `answer-${sessionId}`,
+    project,
     detail: detail || undefined,
     onClick: arrive,
   });

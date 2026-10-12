@@ -61,6 +61,7 @@ describe("answer alert", () => {
         id: "answer-cell-b",
         kind: "info",
         title: "beta · agent two",
+        project: "beta",
         detail: "Done The build passed.",
       }),
     ]);

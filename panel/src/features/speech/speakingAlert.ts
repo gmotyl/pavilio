@@ -81,6 +81,7 @@ export function createSpeakingAlert(deps: SpeakingAlertDeps): {
     const raisedFor = run;
     alerts.info(speakingAlertTitle(session.project, terminalLabel(session)), {
       id: SPEAKING_ALERT_ID,
+      project: session.project,
       persistent: true,
       // The × and the swipe — never the programmatic dismissals below.
       onDismiss: () => {

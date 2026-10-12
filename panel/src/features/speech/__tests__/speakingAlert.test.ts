@@ -56,6 +56,7 @@ describe("speaking alert", () => {
         id: "speech-speaking",
         kind: "info",
         title: "Speaking — alpha · Build agent",
+        project: "alpha",
         persistent: true,
       }),
     ]);

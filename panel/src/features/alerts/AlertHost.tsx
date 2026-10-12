@@ -20,6 +20,8 @@ import {
 } from "./store";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { ProjectMark } from "../projects/ProjectMark";
+import { useProjectColors } from "../terminal/useProjectColors";
 
 /** Cards shown before the rest fold into the "+N more" pill. */
 const VISIBLE_CAP = 3;
@@ -145,7 +147,11 @@ interface Drag {
 
 function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps) {
   const { id, seq } = entry;
-  const { color, icon: Icon } = palette[entry.kind];
+  const { color: kindColor, icon: Icon } = palette[entry.kind];
+  const { colorFor } = useProjectColors();
+  const project = entry.project;
+  const projectColor = project ? colorFor(project) : undefined;
+  const color = projectColor ?? kindColor;
   const [seconds] = usePreference(preferences.alertsDurationSeconds);
   const duration = seconds * 1000;
   const bar = useRef<HTMLDivElement>(null);
@@ -260,7 +266,17 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
   const content = (
     <>
       <span data-testid="alert-title" className="block break-words">
-        {entry.title}
+        {project && entry.title.includes(project) ? (
+          <>
+            {entry.title.slice(0, entry.title.indexOf(project))}
+            <b data-testid="alert-project-name" style={{ color: projectColor }}>
+              {project}
+            </b>
+            {entry.title.slice(entry.title.indexOf(project) + project.length)}
+          </>
+        ) : (
+          entry.title
+        )}
       </span>
       {entry.detail && (
         <span className="mt-0.5 block break-words text-xs" style={{ color: "var(--text-muted)" }}>
@@ -297,13 +313,19 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
         pointerEvents: "auto",
         touchAction: "pan-y",
         cursor: actionable ? "pointer" : undefined,
-        background: "var(--bg-surface)",
+        background: projectColor
+          ? `color-mix(in srgb, ${projectColor} 10%, var(--bg-surface))`
+          : "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
-        borderLeft: `3px solid ${color}`,
+        borderLeft: `${projectColor ? 4 : 3}px solid ${color}`,
         color: "var(--text-primary)",
       }}
     >
-      <Icon size={16} style={{ color, flexShrink: 0, marginTop: 2 }} />
+      {project ? (
+        <ProjectMark project={project} />
+      ) : (
+        <Icon size={16} style={{ color, flexShrink: 0, marginTop: 2 }} />
+      )}
       {actionable ? (
         <button type="button" data-testid="alert-action" className="alert-action min-w-0 flex-1">
           {content}
