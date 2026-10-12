@@ -51,6 +51,12 @@ interface Props {
    * `onDismiss` go unused.
    */
   variant?: "popover" | "inline";
+  /**
+   * Inline only: a host that stages the colour (the Appearance editor) gets the
+   * picked hex back instead of it being saved, and `value` marks the selection.
+   */
+  onPick?: (hex: string) => void;
+  value?: string;
 }
 
 /**
@@ -85,6 +91,8 @@ export function ProjectColorPicker({
   onOpenChange,
   onDismiss,
   variant = "popover",
+  onPick,
+  value,
 }: Props) {
   const inline = variant === "inline";
   const { colors, colorFor, setColor } = useProjectColors();
@@ -121,7 +129,7 @@ export function ProjectColorPicker({
     setOpen(false);
   };
 
-  const current = colorFor(project);
+  const current = value ?? colorFor(project);
 
   /** hex (lowercased) → the other projects already flying it. */
   const owners = useMemo(() => {
@@ -139,6 +147,10 @@ export function ProjectColorPicker({
 
   const apply = (hex: string) => {
     setError(null);
+    if (inline && onPick) {
+      onPick(hex);
+      return;
+    }
     // Inline there is nothing to close and no host waiting to refocus.
     if (!inline) dismiss();
     // `setColor` rolls the optimistic value back and *rethrows* on failure, so
@@ -258,7 +270,7 @@ export function ProjectColorPicker({
             (e.currentTarget.style.background = "transparent")
           }
         >
-          Apply
+          {inline && onPick ? "Use" : "Apply"}
         </button>
       </div>
 

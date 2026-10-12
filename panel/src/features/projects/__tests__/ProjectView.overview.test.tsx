@@ -132,6 +132,7 @@ describe("ProjectView — Overview", () => {
     expect(await screen.findByText("Second paragraph, only in the full render.")).toBeInTheDocument();
     // A half-typed, rejected custom colour — local to the picker, not stored.
     const settings = screen.getByTestId("project-settings-card");
+    fireEvent.click(within(settings).getByRole("button", { name: "Change appearance" }));
     fireEvent.change(within(settings).getByLabelText("Custom hex"), { target: { value: "nope" } });
     fireEvent.click(screen.getByTestId("project-color-apply-pavilio"));
     expect(within(settings).getByRole("alert")).toBeInTheDocument();
@@ -142,8 +143,9 @@ describe("ProjectView — Overview", () => {
     expect(screen.getByTestId("project-md-peek")).toHaveTextContent("Other project peek line.");
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Other full-only paragraph.")).toBeNull();
+    // The editor folds back on the other project: the draft does not carry over.
     const otherSettings = screen.getByTestId("project-settings-card");
-    expect(within(otherSettings).getByLabelText("Custom hex")).toHaveValue("");
+    expect(within(otherSettings).queryByLabelText("Custom hex")).toBeNull();
     expect(within(otherSettings).queryByRole("alert")).toBeNull();
   });
 
@@ -156,7 +158,7 @@ describe("ProjectView — Overview", () => {
     expect(within(screen.getByTestId("project-md")).getByText(/Failed to load/)).toBeInTheDocument();
   });
 
-  it("the settings card carries the voice select and the inline colour picker", async () => {
+  it("the settings card carries the voice select and the collapsed Appearance row", async () => {
     renderOverview();
     const card = await screen.findByTestId("project-settings-card");
 
@@ -165,8 +167,10 @@ describe("ProjectView — Overview", () => {
       "id",
       "project-voice-pavilio",
     );
-    // Inline: the palette is laid out in place, no trigger to open first.
-    expect(within(card).getByRole("group", { name: "Colour for pavilio" })).toBeInTheDocument();
+    // Collapsed Appearance row; the palette unfolds only on demand.
+    expect(within(card).getByTestId("appearance-row")).toBeInTheDocument();
+    expect(within(card).queryByRole("group", { name: "Colour for pavilio" })).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Change appearance" }));
     expect(
       within(card).getByTestId("project-color-preset-pavilio-gold"),
     ).toBeInTheDocument();
