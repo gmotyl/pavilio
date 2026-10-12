@@ -25,7 +25,7 @@
  * would close a cycle the moment those features start reading the registry.
  */
 import { bool, json, listOf, num, oneOf, optionalStr, str } from "./codecs";
-import { definePreference, type PreferenceDef } from "./types";
+import { definePreference, type PreferenceCodec, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
 import type { RepoSearchScope } from "../features/projects/useRepoSearch";
@@ -57,6 +57,14 @@ export interface TerminalLauncher {
   promptFlag?: string;
   /** Start-prompt text the CLI receives; `{prompt}` is the objective. "" = not offered. */
   runLoop?: string;
+}
+
+/** A number codec that pulls any stored value into [min, max]. */
+function clampedNum(min: number, max: number): PreferenceCodec<number> {
+  return {
+    parse: (raw) => Math.min(max, Math.max(min, num.parse(raw))),
+    serialize: num.serialize,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -227,6 +235,20 @@ export const ANSWER_PANE_FULL_HEIGHT = 4000;
  * ===========================================================================
  */
 export const preferences = {
+  // ── Alerts ───────────────────────────────────────────────────────────────
+  /**
+   * How long a transient alert stays up, in seconds — one value for every
+   * kind (it replaces the old per-kind 4/4/6/8 s table). Persistent alerts
+   * ignore it. The codec clamps on read, so a hand-edited workspace file with
+   * 0 or 500 still yields 2 s or 60 s rather than an instant or endless alert.
+   */
+  alertsDurationSeconds: definePreference({
+    key: "alerts.durationSeconds", // was: nothing — a hard-coded per-kind table
+    scope: "global",
+    default: 15,
+    codec: clampedNum(2, 60),
+    portable: true,
+  }),
   // ── Shell ────────────────────────────────────────────────────────────────
   leftSidebarExpanded: definePreference({
     key: "shell.leftSidebar.expanded", // was: panel:leftSidebar

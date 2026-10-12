@@ -303,9 +303,9 @@ describe("AlertHost across navigation", () => {
     advance(2500);
     go("/settings");
     expect(cards().map((c) => c.getAttribute("data-alert-id"))).toEqual(["p"]);
-    advance(1499); // 3999
+    advance(12_499); // 14999
     expect(cards()).toHaveLength(1);
-    advance(1); // 4000: the original expiry
+    advance(1); // 15000: the original expiry
     expect(cards()).toHaveLength(0);
   });
 

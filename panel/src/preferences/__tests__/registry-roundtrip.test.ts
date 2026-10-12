@@ -51,6 +51,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   // ── num ─────────────────────────────────────────────────────────────────
   "terminal.drawer.width": [480, 0, 1, 1024, 23.5, -1],
   "fileList.paneWidth": [288, 0, 200, 560, 344.5, -1],
+  "alerts.durationSeconds": [15, 2, 60, 30, 10.5],
   "repos.tree.paneWidth": [280, 0, 200, 480, 344.5, -1],
   "shell.leftSidebar.width": [240, 0, 180, 400, 344.5, -1],
   "shell.rightSidebar.width": [264, 0, 200, 440, 344.5, -1],
@@ -113,7 +114,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 47;
+const DECLARATION_COUNT = 48;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

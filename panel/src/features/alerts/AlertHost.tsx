@@ -10,7 +10,6 @@ import {
 } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X, type LucideIcon } from "lucide-react";
 import {
-  ALERT_DURATION_MS,
   alerts,
   getAlertsSnapshot,
   subscribeAlerts,
@@ -19,6 +18,8 @@ import {
   type AlertEntry,
   type AlertKind,
 } from "./store";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 
 /** Cards shown before the rest fold into the "+N more" pill. */
 const VISIBLE_CAP = 3;
@@ -145,7 +146,8 @@ interface Drag {
 function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps) {
   const { id, seq } = entry;
   const { color, icon: Icon } = palette[entry.kind];
-  const duration = ALERT_DURATION_MS[entry.kind];
+  const [seconds] = usePreference(preferences.alertsDurationSeconds);
+  const duration = seconds * 1000;
   const bar = useRef<HTMLDivElement>(null);
   const hovered = useRef(false);
   const drag = useRef<Drag | null>(null);
@@ -370,6 +372,7 @@ function useAlertClocks(
   pausedIds: ReadonlySet<string>,
 ): (id: string, seq: number) => number {
   const clocks = useRef(new Map<string, Clock>());
+  const [seconds] = usePreference(preferences.alertsDurationSeconds);
 
   useEffect(() => {
     const map = clocks.current;
@@ -384,7 +387,7 @@ function useAlertClocks(
         clock = undefined;
       }
       if (!clock) {
-        const duration = ALERT_DURATION_MS[entry.kind];
+        const duration = seconds * 1000;
         clock = { seq, duration, remaining: duration, startedAt: null, timer: null };
         map.set(id, clock);
       }
@@ -400,7 +403,7 @@ function useAlertClocks(
       stop(clock);
       map.delete(id);
     }
-  }, [entries, pausedIds]);
+  }, [entries, pausedIds, seconds]);
 
   // Unmount stops (and banks) every clock; a remount resumes them.
   useEffect(() => {

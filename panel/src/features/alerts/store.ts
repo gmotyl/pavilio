@@ -42,13 +42,6 @@ export interface AlertEntry {
   seq: number;
 }
 
-export const ALERT_DURATION_MS: Record<AlertKind, number> = {
-  info: 4000,
-  success: 4000,
-  warning: 6000,
-  error: 8000,
-};
-
 let entries: readonly AlertEntry[] = [];
 let nextSeq = 1;
 let nextId = 1;
