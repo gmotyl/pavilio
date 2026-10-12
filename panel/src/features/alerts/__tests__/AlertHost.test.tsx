@@ -469,4 +469,18 @@ describe("AlertHost display time", () => {
     advance(1);
     expect(titles()).toEqual([]);
   });
+
+  it("keeps a running alert's bar on the duration its clock captured", () => {
+    writePreference(preferences.alertsDurationSeconds, 10);
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("i");
+    });
+    act(() => {
+      writePreference(preferences.alertsDurationSeconds, 3);
+    });
+    expect(screen.getByTestId("alert-countdown").style.animationDuration).toBe("10000ms");
+    advance(9999);
+    expect(titles()).toEqual(["i"]);
+  });
 });

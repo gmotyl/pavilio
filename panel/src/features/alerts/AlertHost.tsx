@@ -83,7 +83,7 @@ export default function AlertHost() {
   const entries = useSyncExternalStore(subscribeAlerts, getAlertsSnapshot, getAlertsSnapshot);
   const [expanded, setExpanded] = useState(false);
   const [pausedIds, setPausedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const elapsedOf = useAlertClocks(entries, pausedIds);
+  const clockOf = useAlertClocks(entries, pausedIds);
 
   const setPaused = useCallback((id: string, paused: boolean) => {
     setPausedIds((prev) => {
@@ -123,7 +123,7 @@ export default function AlertHost() {
           entry={entry}
           paused={pausedIds.has(entry.id)}
           onPausedChange={setPaused}
-          elapsedOf={elapsedOf}
+          clockOf={clockOf}
         />
       ))}
       {hidden > 0 && (
@@ -151,7 +151,7 @@ interface AlertCardProps {
   paused: boolean;
   /** Hover and drag reports; the host owns the clock this pauses. */
   onPausedChange: (id: string, paused: boolean) => void;
-  elapsedOf: (id: string, seq: number) => number;
+  clockOf: (id: string, seq: number) => { elapsed: number; duration: number } | null;
 }
 
 interface Drag {
@@ -161,7 +161,7 @@ interface Drag {
   width: number;
 }
 
-function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps) {
+function AlertCard({ entry, paused, onPausedChange, clockOf }: AlertCardProps) {
   const { id, seq } = entry;
   const { color: kindColor, icon: Icon } = palette[entry.kind];
   const { colorFor } = useProjectColors();
@@ -169,7 +169,8 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
   const projectColor = project ? colorFor(project) : undefined;
   const color = projectColor ?? kindColor;
   const [seconds] = usePreference(preferences.alertsDurationSeconds);
-  const duration = seconds * 1000;
+  // The bar follows the clock's captured duration, not the live preference.
+  const duration = clockOf(id, seq)?.duration ?? seconds * 1000;
   const bar = useRef<HTMLDivElement>(null);
   const hovered = useRef(false);
   const drag = useRef<Drag | null>(null);
@@ -204,8 +205,8 @@ function AlertCard({ entry, paused, onPausedChange, elapsedOf }: AlertCardProps)
 
   // A card shown late (expanded from the fold) starts its bar where the clock is.
   useLayoutEffect(() => {
-    if (bar.current) bar.current.style.animationDelay = `-${elapsedOf(id, seq)}ms`;
-  }, [id, seq, elapsedOf]);
+    if (bar.current) bar.current.style.animationDelay = `-${clockOf(id, seq)?.elapsed ?? 0}ms`;
+  }, [id, seq, clockOf]);
 
   // The drag writes the card's transform straight to the DOM: React owns no
   // `transform` in the style prop, so a re-render mid-drag leaves it alone.
@@ -404,12 +405,13 @@ function stop(clock: Clock): void {
  * full. Expiry goes through `alerts.dismiss`, which by contract does not call
  * `onDismiss`.
  *
- * Returns how long an entry's current clock has run, for drawing its bar.
+ * Returns how long an entry's current clock has run and the duration it
+ * captured, for drawing its bar.
  */
 function useAlertClocks(
   entries: readonly AlertEntry[],
   pausedIds: ReadonlySet<string>,
-): (id: string, seq: number) => number {
+): (id: string, seq: number) => { elapsed: number; duration: number } | null {
   const clocks = useRef(new Map<string, Clock>());
   const [seconds] = usePreference(preferences.alertsDurationSeconds);
 
@@ -452,8 +454,11 @@ function useAlertClocks(
 
   return useCallback((id: string, seq: number) => {
     const clock = clocks.current.get(id);
-    if (!clock || clock.seq !== seq) return 0;
+    if (!clock || clock.seq !== seq) return null;
     const running = clock.startedAt === null ? 0 : Date.now() - clock.startedAt;
-    return Math.max(0, clock.duration - clock.remaining + running);
+    return {
+      elapsed: Math.max(0, clock.duration - clock.remaining + running),
+      duration: clock.duration,
+    };
   }, []);
 }
