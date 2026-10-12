@@ -93,7 +93,14 @@ export function useProjectColors(): {
   const colors = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const colorFor = useCallback(
-    (project: string) => colors[project] ?? derivedProjectColor(project),
+    (project: string) => {
+      // Asking about a project is what makes its key worth listening to: a
+      // colour set later (another tab) for one with none stored here would
+      // otherwise never rebuild the snapshot. Idempotent, and the preference
+      // store has no wildcard subscription to use instead.
+      watch(project);
+      return colors[project] ?? derivedProjectColor(project);
+    },
     [colors],
   );
 

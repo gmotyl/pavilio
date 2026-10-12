@@ -13,9 +13,13 @@ const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
  * One-way import of the old `<projectsDir>/.panel/project-colors.json` into
  * the preferences document, run once per server start after preferences load.
  *
- * Only fills gaps: a project that already has `project.color@<name>` keeps it,
- * so the import can run on every boot without undoing a later choice. The
- * legacy file is read, never written or deleted. Returns how many colours were
+ * Only fills MISSING colours: a project that already has `project.color@<name>`
+ * keeps it, so the import can run on every boot without undoing a later
+ * choice. The flip side is deliberate and known: a colour the user later
+ * clears is missing again, so the next start re-imports it from the legacy
+ * file. No "imported" marker is kept — preferences have no server-private
+ * key idiom, and a marker would itself be a portable, synced preference.
+ * The legacy file is read, never written or deleted. Returns how many colours were
  * imported.
  */
 export function importLegacyColors(): number {

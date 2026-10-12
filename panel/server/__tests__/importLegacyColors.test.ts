@@ -28,7 +28,7 @@ describe("import legacy colours", () => {
     expect(preferences.projectMark.key).toBe("project.mark");
   });
 
-  it("legacy colours are imported once and never overwrite preferences", () => {
+  it("fills only missing colours and never overwrites a stored one", () => {
     writeLegacy({ alpha: "#f0c674", beta: "#e06c75", bad: "red", constructor: "#abc" });
     loadPreferences(join(projectsDir, "prefs.json"));
     // beta already has a colour of its own.
@@ -41,10 +41,15 @@ describe("import legacy colours", () => {
     expect(getPreferences()["project.color@constructor"]).toBe("#abc");
     expect(getPreferences()["project.color@bad"]).toBeUndefined();
 
-    // A later start changes nothing, even after the user picked a new colour.
+    // A later start changes nothing while the user keeps a colour of their own.
     getPreferences()["project.color@alpha"] = "#222222";
     expect(importLegacyColors()).toBe(0);
     expect(getPreferences()["project.color@alpha"]).toBe("#222222");
+
+    // Known limit: a CLEARED colour is a missing one, so the next start fills it again.
+    delete getPreferences()["project.color@alpha"];
+    expect(importLegacyColors()).toBe(1);
+    expect(getPreferences()["project.color@alpha"]).toBe("#f0c674");
   });
 
   it("the legacy colours file is left in place", () => {

@@ -57,7 +57,13 @@ export function derivedProjectColor(name: string): string {
   return PROJECT_COLOR_PRESETS[hashName(name) % PROJECT_COLOR_PRESETS.length].hex;
 }
 
-const EMOJI_RE = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}{2})/u;
+/**
+ * What may open an emoji grapheme: a keycap, a flag, a glyph that is an emoji
+ * by default, or a text-default pictograph that is made one by VS16 (U+FE0F)
+ * or a skin-tone modifier. A bare ©, ™ or ▶ is text, so it does not pass.
+ */
+const EMOJI_RE =
+  /^(?:[0-9#*]\uFE0F?\u20E3|\p{Regional_Indicator}{2}|\p{Emoji_Presentation}|\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}))/u;
 
 /** Whether `text` is exactly one grapheme and that grapheme is an emoji. */
 export function isSingleEmoji(text: string): boolean {

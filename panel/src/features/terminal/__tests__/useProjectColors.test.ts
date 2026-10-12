@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { derivedProjectColor } from "../../projects/projectMark";
-import { readPreference } from "../../../preferences/store";
+import { readPreference, writePreference } from "../../../preferences/store";
 import { preferences } from "../../../preferences/declarations";
 import { useProjectColors } from "../useProjectColors";
 import { installProjectColors } from "./projectColors.harness";
@@ -52,5 +52,14 @@ describe("useProjectColors", () => {
     const first = result.current.colors;
     rerender();
     expect(result.current.colors).toBe(first);
+  });
+
+  it("picks up a colour stored later for a project that had none here", () => {
+    const { result } = renderHook(() => useProjectColors());
+    expect(result.current.colorFor("gamma")).toBe(derivedProjectColor("gamma"));
+    // Stands in for another tab's change landing through the preference store.
+    act(() => writePreference(preferences.projectColor, "#123456", "gamma"));
+    expect(result.current.colorFor("gamma")).toBe("#123456");
+    expect(result.current.colors.gamma).toBe("#123456");
   });
 });

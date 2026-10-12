@@ -73,3 +73,17 @@ describe("a flag or skin-tone emoji counts as one grapheme", () => {
     }
   });
 });
+
+describe("emoji presentation", () => {
+  it("rejects text-default symbols without a variation selector", () => {
+    for (const e of ["©", "™", "▶", "❤", "☺"]) {
+      expect(parseProjectMark(`emoji:${e}`)).toBe("");
+    }
+  });
+
+  it("accepts keycaps, the same symbols with VS16, and default-emoji glyphs", () => {
+    for (const e of ["1️⃣", "#️⃣", "©️", "™️", "▶️", "❤️", "🚀", "🇵🇱", "👍🏽", "👨‍👩‍👧‍👦"]) {
+      expect(parseProjectMark(`emoji:${e}`)).toBe(`emoji:${e}`);
+    }
+  });
+});
