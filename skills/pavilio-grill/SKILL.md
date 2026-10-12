@@ -79,7 +79,7 @@ Capture decisions as they crystallise — don't batch.
 
 - **CONTEXT.md** — when a term is resolved, write it right there using the format in
   [CONTEXT-FORMAT.md](CONTEXT-FORMAT.md). Create the file lazily on the first resolved term. Keep it domain-level; don't couple to implementation details. Multi-context repos use `CONTEXT-MAP.md`.
-- **ADRs** — offer sparingly, only when ALL THREE hold: hard to reverse, surprising without context, result of a real trade-off. Format + guidance in [ADR-FORMAT.md](ADR-FORMAT.md). Location override: `projects/<project>/adr/` (NOT `docs/adr/`); scan it for the highest number and increment.
+- **ADRs** — offer sparingly, only when ALL THREE hold: hard to reverse, surprising without context, result of a real trade-off. Format + guidance in [ADR-FORMAT.md](ADR-FORMAT.md). Location: `projects/<project>/adr/`; scan it for the highest number and increment.
 
 ## 4. Present the design
 
