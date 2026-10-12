@@ -632,6 +632,13 @@ export function useSpeechHost({
     // playing run and behind every unit-0 warm — and silent and invisible: the
     // scrubber's segments already show them landing, and the control's red is
     // about unit 0 alone.
+    //
+    // This run IS the "next opportunity" for a preload a failed unit stopped
+    // (an arrival, a mode change, a catch-up that surfaced something). The stop
+    // only holds within one pass, so a synthesizer that is down is walked once
+    // per opportunity rather than through the whole answer, and a transient
+    // failure no longer leaves an armed cell cold until its mode is cycled.
+    preloadFailedRef.current.clear();
     for (const { utterance, mode } of warmableUtterances) {
       const { units } = preparedFor(utterance, languageFor(utterance.sessionId));
       warmFirstUnit(utterance, units);
