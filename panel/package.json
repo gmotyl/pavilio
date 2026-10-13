@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "tsx server/dev.ts",
     "start": "tsx server/index.ts",
-    "build": "pnpm lint && vite build",
-    "lint": "tsc --noEmit --pretty false",
+    "build": "vite build",
+    "lint": "tsc --noEmit --pretty false -p tsconfig.json && tsc --noEmit --pretty false -p tsconfig.node.json",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
