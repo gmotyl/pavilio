@@ -226,7 +226,7 @@ describe("POST /api/agent-settings/run-action", () => {
     expect(res.body.output).toBe("claude commands synced");
 
     expect(execMock).toHaveBeenCalledTimes(1);
-    const [command, options] = execMock.mock.calls[0] as [string, { cwd?: string; timeout?: number; shell?: string }];
+    const [command, options] = execMock.mock.calls[0] as [string, { cwd?: string; timeout?: number; shell?: string; maxBuffer?: number }];
 
     // The toolchain is resolved by the workspace's own resolver, not assumed.
     expect(command).toContain(". scripts/pm");
@@ -267,7 +267,7 @@ describe("POST /api/agent-settings/run-action", () => {
         .send({ action: id });
 
       expect(res.status, `${id} → ${script}`).toBe(200);
-      const [command, options] = execMock.mock.calls[0] as [string, { timeout?: number }];
+      const [command, options] = execMock.mock.calls[0] as [string, { timeout?: number; maxBuffer?: number }];
       expect(command).toContain(`pm_in . ${script}`);
       // All three are slow enough to need the long-running budget, keyed by id.
       expect(options.timeout, `${id} timeout`).toBe(300_000);
