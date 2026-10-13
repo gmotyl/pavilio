@@ -98,23 +98,26 @@ afterEach(() => {
 
 // Plant a sentinel in the shared directory before any test runs; the last
 // test asserts it survived untouched, mtime included. Skipped when the
-// existing entry is a symlink, not a directory, or belongs to another uid —
-// lstat (never following links, matching the production route's guard) so we
-// cannot plant through a link into an unrelated directory we could not clean
-// our sentinel up from.
+// resulting entry is a symlink, not a directory, or belongs to another uid —
+// validated with lstat AFTER mkdir, like the production route, so a symlink
+// raced into place between check and create is still rejected and we cannot
+// plant through a link into an unrelated directory we could not clean our
+// sentinel up from.
 let sentinel: string | undefined;
 let sentinelMtimeMs: number | undefined;
 beforeAll(() => {
   try {
-    const st = lstatSync(SHARED_PASTE_DIR, { throwIfNoEntry: false });
-    if (st && (st.isSymbolicLink() || !st.isDirectory() || st.uid !== panel.uid))
-      return;
     // Match production's traversal-only mode, not the umask default, when
-    // this run is the one creating the shared directory.
+    // this run is the one creating the shared directory (recursive also
+    // swallows EEXIST for a pre-existing one).
     mkdirSync(SHARED_PASTE_DIR, { recursive: true, mode: 0o711 });
+    const st = lstatSync(SHARED_PASTE_DIR);
+    if (st.isSymbolicLink() || !st.isDirectory() || st.uid !== panel.uid)
+      return;
     const name = `test-sentinel-${randomBytes(6).toString("hex")}`;
     const p = join(SHARED_PASTE_DIR, name);
-    writeFileSync(p, "sentinel");
+    // wx: O_EXCL never follows a pre-existing symlink at the file path.
+    writeFileSync(p, "sentinel", { flag: "wx" });
     sentinel = p;
     sentinelMtimeMs = statSync(p).mtimeMs;
   } catch {
