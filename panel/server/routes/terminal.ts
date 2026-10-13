@@ -143,7 +143,12 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/bmp": "bmp",
 };
 
-const PASTE_DIR = join(tmpdir(), "pavilio-pastes");
+// Resolved per call so tests (and operators) can point pastes somewhere else
+// via PAVILIO_PASTE_DIR without restarting the panel. The default is the
+// machine-shared directory under the system tmpdir.
+export function pasteDir(): string {
+  return process.env.PAVILIO_PASTE_DIR || join(tmpdir(), "pavilio-pastes");
+}
 const PASTE_TTL_MS = 24 * 60 * 60 * 1000;
 // Traversal-only (--x--x on top of the panel's own rwx): a `runAsUser`
 // session can reach the random filename it was handed, but cannot list the
@@ -152,15 +157,15 @@ const PASTE_TTL_MS = 24 * 60 * 60 * 1000;
 const PASTE_DIR_MODE = 0o711;
 
 // Nothing else ever deletes these files, so each upload sweeps expired ones.
-async function sweepOldPastes() {
+export async function sweepOldPastes(dir: string): Promise<void> {
   let names: string[];
   try {
-    names = await fs.readdir(PASTE_DIR);
+    names = await fs.readdir(dir);
   } catch {
     return;
   }
   for (const name of names) {
-    const p = join(PASTE_DIR, name);
+    const p = join(dir, name);
     try {
       const stat = await fs.stat(p);
       if (Date.now() - stat.mtimeMs > PASTE_TTL_MS) await fs.unlink(p);
@@ -204,24 +209,25 @@ router.post("/paste-image", (req, res) => {
     // paste from other local accounts for its whole 24 hours — a terminal
     // user is handed its own names, which is enough to reconstruct a
     // `Math.random` stream and predict everyone else's.
+    const pasteRoot = pasteDir();
     const path = join(
-      PASTE_DIR,
+      pasteRoot,
       `paste-${Date.now()}-${randomBytes(12).toString("hex")}.${ext}`,
     );
     try {
-      await fs.mkdir(PASTE_DIR, { recursive: true, mode: PASTE_DIR_MODE });
+      await fs.mkdir(pasteRoot, { recursive: true, mode: PASTE_DIR_MODE });
       // /tmp is world-writable, so the path may have been pre-planted: mkdir
       // accepts an existing directory and follows a symlink. Anything but a
       // real directory owned by this process fails the paste rather than
       // being chmod'ed and written into while its owner keeps rwx.
-      const dir = await fs.lstat(PASTE_DIR);
+      const dir = await fs.lstat(pasteRoot);
       if (!dir.isDirectory() || dir.uid !== panel.uid)
         throw new Error("paste directory is not the panel's own");
       // `mkdir` only applies a mode when it creates; normalise a directory an
       // older panel left behind as 0700.
-      await fs.chmod(PASTE_DIR, PASTE_DIR_MODE);
+      await fs.chmod(pasteRoot, PASTE_DIR_MODE);
       // Fire-and-forget: don't delay this upload's response on the sweep.
-      sweepOldPastes().catch(() => {});
+      sweepOldPastes(pasteRoot).catch(() => {});
       // Screenshots often contain secrets — the file is readable by its owner
       // alone, and that owner is the account the session's pty runs as. `wx`
       // fails on a pre-planted name or symlink instead of reusing it, which
