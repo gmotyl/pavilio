@@ -26,8 +26,8 @@ UPSTREAM_DIR="${1:-"$SCRIPT_DIR/../../pavilio"}"
 # update started from the Windows shortcut — no login shell, so none of the
 # dotfiles that put a version manager on PATH have been read — finds node and the
 # package manager the same way every other entry point does. It also gives us
-# pm_in, which spells a package script the way whichever manager was found wants,
-# and pm_install, which does the same for dependency installation.
+# $PM_CMD — `pnpm`, or `corepack pnpm` on a host without pnpm — and pm_in /
+# pm_install, which drive it for package scripts and dependency installation.
 # shellcheck source=scripts/pm
 . "$SCRIPT_DIR/pm" || exit 1
 pm_resolve || exit 1
@@ -37,14 +37,9 @@ pm_resolve || exit 1
 # shellcheck source=scripts/remotes
 . "$SCRIPT_DIR/remotes" || exit 1
 
-# How to re-run the panel steps by hand, in the same spelling the run itself uses.
-if [ "$PM" = "pnpm" ]; then
-  PANEL_INSTALL_CMD="pnpm -C \"$REPO_ROOT/panel\" install"
-  PANEL_BUILD_CMD="pnpm -C \"$REPO_ROOT/panel\" build"
-else
-  PANEL_INSTALL_CMD="npm --prefix \"$REPO_ROOT/panel\" install"
-  PANEL_BUILD_CMD="npm --prefix \"$REPO_ROOT/panel\" run build"
-fi
+# How to re-run the panel steps by hand, with the same pnpm command the run uses.
+PANEL_INSTALL_CMD="$PM_CMD -C \"$REPO_ROOT/panel\" install"
+PANEL_BUILD_CMD="$PM_CMD -C \"$REPO_ROOT/panel\" build"
 
 # Clone mode: the workspace *is* a pavilio clone, so there is no separate tree to
 # mirror from. The update is then a rebase onto the `upstream` remote rather than
@@ -201,7 +196,7 @@ if [ "$CLONE_MODE" = 1 ]; then
   echo "Updated to $UPDATED_SHA $UPDATED_SUBJECT."
   # The panel process is never touched from here: it may be serving the very
   # terminal this update was started from, and stopping it would kill the run.
-  echo "The running panel still serves the old bundle — run: pnpm reboot"
+  echo "The running panel still serves the old bundle — run: $PM_CMD reboot"
   exit 0
 fi
 
@@ -420,7 +415,7 @@ echo ""
 echo "Done. panel/, skills/, scripts/ (and commands/ if present) synced from upstream;"
 echo "agent commands regenerated for configured agents, and the sync committed."
 echo ""
-echo "The panel bundle is built and ready to start: pnpm start"
+echo "The panel bundle is built and ready to start: $PM_CMD start"
 echo ""
 echo "Note: AGENTS.md and CLAUDE.md are manually maintained."
 echo "Check https://github.com/gmotyl/pavilio for changes and cherry-pick as needed."

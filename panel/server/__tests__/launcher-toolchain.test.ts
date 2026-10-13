@@ -95,6 +95,8 @@ let nodeBin: string;
 let orderLog: string;
 /** The PATH the stub scripts/panel was handed — proof the toolchain came first. */
 let panelPathLog: string;
+/** The PM_CMD the stub scripts/panel inherited — which pnpm it will drive. */
+let panelPmCmdLog: string;
 /** Written only if anything ever invokes netsh. Asserted absent everywhere. */
 let netshMarker: string;
 
@@ -124,9 +126,9 @@ const EXECUTED_MARKER = "was executed";
  * neither ever happened — without it, a launcher that started shelling out to
  * a bare `node`/`pnpm` again would pass every case here unnoticed.
  */
-function writePinnedToolchain() {
+function writePinnedToolchain(names: string[] = ["node", "pnpm"]) {
   mkdirSync(nodeBin, { recursive: true });
-  for (const name of ["node", "pnpm"]) {
+  for (const name of names) {
     writeFileSync(
       join(nodeBin, name),
       `#!/bin/sh\necho "stub ${name} ${EXECUTED_MARKER}" >&2\nexit 97\n`,
@@ -164,6 +166,7 @@ beforeEach(() => {
   nodeBin = join(sandbox, "pinned-node");
   orderLog = join(sandbox, "order.log");
   panelPathLog = join(sandbox, "panel-path.log");
+  panelPmCmdLog = join(sandbox, "panel-pm-cmd.log");
   netshMarker = join(sandbox, "NETSH-WAS-RUN");
   mkdirSync(join(repo, "scripts"), { recursive: true });
   mkdirSync(home, { recursive: true });
@@ -181,6 +184,7 @@ beforeEach(() => {
       "# Stub scripts/panel: record the call, start no panel.",
       `echo "panel $*" >> "${orderLog}"`,
       `echo "$PATH" > "${panelPathLog}"`,
+      `echo "\${PM_CMD:-}" > "${panelPmCmdLog}"`,
       "",
     ].join("\n"),
     { mode: 0o755 },
@@ -267,6 +271,44 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(output).not.toContain("node/pnpm not found");
     expect(existsSync(netshMarker)).toBe(false);
     // On PATH is all they were ever for: the launcher must not run them itself.
+    expectNoToolchainWasRun(status, output);
+  }, 30000);
+
+  it("launcher starts the panel with corepack pnpm when pnpm is absent", () => {
+    // A node that still bundles corepack, and no pnpm anywhere. npm is there
+    // too, and must play no part.
+    writePinnedToolchain(["node", "corepack", "npm"]);
+    writeLocalEnv(`PAVILIO_NODE_BIN="${nodeBin}"`);
+
+    const { status, output } = run();
+
+    expect(status).toBe(0);
+    expect(order()).toEqual(["panel start"]);
+    // scripts/panel inherits the resolved command and drives pnpm through it.
+    expect(readFileSync(panelPmCmdLog, "utf8").trim()).toBe("corepack pnpm");
+    expect(output).not.toContain("node/pnpm not found");
+    expect(existsSync(netshMarker)).toBe(false);
+    expectNoToolchainWasRun(status, output);
+    // Nothing in the launcher spells npm any more, not even in a comment.
+    expect(readFileSync(LAUNCHER, "utf8")).not.toMatch(/\bnpm\b/);
+  }, 30000);
+
+  it("launcher stops with a pnpm install hint when neither pnpm nor corepack exists", () => {
+    writePinnedToolchain(["node", "npm"]);
+    writeLocalEnv(`PAVILIO_NODE_BIN="${nodeBin}"`);
+
+    const { status, output } = run();
+
+    expect(status).toBe(1);
+    // One message, from scripts/pm, naming how to get pnpm.
+    expect(output.match(/node\/pnpm not found/g)).toHaveLength(1);
+    expect(output).toMatch(/install pnpm/i);
+    expect(output).toMatch(/Node(\.js)? ≥ ?25/);
+    // Nothing was started, polled or printed as ready, and npm never ran.
+    expect(order()).toEqual([]);
+    expect(existsSync(panelPathLog)).toBe(false);
+    expect(output).not.toContain("Pavilio panel ready");
+    expect(existsSync(netshMarker)).toBe(false);
     expectNoToolchainWasRun(status, output);
   }, 30000);
 
