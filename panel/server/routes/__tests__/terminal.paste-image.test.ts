@@ -1,16 +1,26 @@
-import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  vi,
+} from "vitest";
 import express from "express";
 import request from "supertest";
+import { randomBytes } from "crypto";
 import {
   chmodSync,
   chownSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   promises as fsp,
   readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -40,7 +50,7 @@ vi.mock("../../lib/terminal-manager", () => ({
   ),
 }));
 
-import terminalRouter from "../terminal";
+import terminalRouter, { pasteDir, sweepOldPastes } from "../terminal";
 
 function makeApp() {
   const app = express();
@@ -55,50 +65,113 @@ const PNG = Buffer.from(
   "base64",
 );
 
-const PASTE_DIR = join(tmpdir(), "pavilio-pastes");
+// The real, machine-shared paste directory. These tests must never read,
+// write, rename or remove it: every test redirects the route into its own
+// mkdtemp directory via PAVILIO_PASTE_DIR, so concurrent runs (two shells,
+// two worktrees) cannot trample each other. The sentinel planted below is
+// the one sanctioned exception, and it only proves the directory was left
+// alone.
+const SHARED_PASTE_DIR = join(tmpdir(), "pavilio-pastes");
 const panel = userInfo();
 
+let tmp: string;
+const envBefore = process.env.PAVILIO_PASTE_DIR;
+
 function pasteNames(): string[] {
-  return existsSync(PASTE_DIR) ? readdirSync(PASTE_DIR).sort() : [];
+  return existsSync(tmp) ? readdirSync(tmp).sort() : [];
 }
 
-// The paste directory is a fixed absolute path, so a test that replaces it
-// with a hostile one puts the real directory back afterwards.
-const PASTE_DIR_STASH = `${PASTE_DIR}.test-stash`;
-function pasteDirExists(): boolean {
-  try {
-    lstatSync(PASTE_DIR);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function stashPasteDir() {
-  if (pasteDirExists()) renameSync(PASTE_DIR, PASTE_DIR_STASH);
-}
-function restorePasteDir() {
-  rmSync(PASTE_DIR, { recursive: true, force: true });
-  if (existsSync(PASTE_DIR_STASH)) renameSync(PASTE_DIR_STASH, PASTE_DIR);
-}
-
-const created: string[] = [];
 beforeEach(() => {
   state.ids = ["sess-1"];
   // A different account than the panel process: the paste has to be handed
   // over before the session's pty can read it.
   state.owner = { uid: panel.uid + 1, gid: panel.gid + 1 };
+  tmp = mkdtempSync(join(tmpdir(), "pavilio-paste-test-"));
+  process.env.PAVILIO_PASTE_DIR = tmp;
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const p of created.splice(0)) rmSync(p, { force: true });
+  if (envBefore === undefined) delete process.env.PAVILIO_PASTE_DIR;
+  else process.env.PAVILIO_PASTE_DIR = envBefore;
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+// Plant a sentinel in the shared directory before any test runs; the last
+// test asserts it survived untouched, mtime included. Skipped when the
+// resulting entry is a symlink, not a directory, or belongs to another uid —
+// validated with lstat AFTER mkdir, like the production route, so a symlink
+// raced into place between check and create is still rejected and we cannot
+// plant through a link into an unrelated directory we could not clean our
+// sentinel up from.
+let sentinel: string | undefined;
+let sentinelMtimeMs: number | undefined;
+beforeAll(() => {
+  try {
+    // Match production's traversal-only mode, not the umask default, when
+    // this run is the one creating the shared directory (recursive also
+    // swallows EEXIST for a pre-existing one).
+    mkdirSync(SHARED_PASTE_DIR, { recursive: true, mode: 0o711 });
+    const st = lstatSync(SHARED_PASTE_DIR);
+    if (st.isSymbolicLink() || !st.isDirectory() || st.uid !== panel.uid)
+      return;
+    const name = `test-sentinel-${randomBytes(6).toString("hex")}`;
+    const p = join(SHARED_PASTE_DIR, name);
+    // wx: O_EXCL never follows a pre-existing symlink at the file path.
+    writeFileSync(p, "sentinel", { flag: "wx" });
+    sentinel = p;
+    sentinelMtimeMs = statSync(p).mtimeMs;
+  } catch {
+    sentinel = undefined;
+  }
+});
+afterAll(() => {
+  if (sentinel) rmSync(sentinel, { force: true });
+});
+
+describe("pasteDir", () => {
+  it("pasteDir defaults to tmpdir/pavilio-pastes", () => {
+    delete process.env.PAVILIO_PASTE_DIR;
+    expect(pasteDir()).toBe(SHARED_PASTE_DIR);
+  });
+
+  it("pasteDir honours PAVILIO_PASTE_DIR", () => {
+    // beforeEach pointed the env at this test's own temp directory.
+    expect(pasteDir()).toBe(tmp);
+  });
+});
+
+describe("sweepOldPastes", () => {
+  it("sweeps expired pastes", async () => {
+    const stale = join(tmp, "paste-0-stale.png");
+    writeFileSync(stale, PNG);
+    const old = (Date.now() - 25 * 60 * 60 * 1000) / 1000; // 25h ago
+    utimesSync(stale, old, old);
+
+    await sweepOldPastes(tmp);
+
+    expect(existsSync(stale)).toBe(false);
+  });
+
+  it("keeps fresh pastes when sweeping", async () => {
+    const stale = join(tmp, "paste-0-stale.png");
+    writeFileSync(stale, PNG);
+    const old = (Date.now() - 25 * 60 * 60 * 1000) / 1000; // 25h ago
+    utimesSync(stale, old, old);
+    const fresh = join(tmp, "paste-1-fresh.png");
+    writeFileSync(fresh, PNG);
+
+    await sweepOldPastes(tmp);
+
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+  });
 });
 
 describe("POST /api/terminal/paste-image", () => {
   it("saves a target-owned private image under a traversal-only directory", async () => {
     // A directory left behind by an older panel is private to the panel
     // account — the terminal user cannot even traverse into it.
-    mkdirSync(PASTE_DIR, { recursive: true });
-    chmodSync(PASTE_DIR, 0o700);
+    chmodSync(tmp, 0o700);
     const chown = vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
 
     const res = await request(makeApp())
@@ -108,8 +181,7 @@ describe("POST /api/terminal/paste-image", () => {
 
     expect(res.status).toBe(200);
     expect(typeof res.body.path).toBe("string");
-    created.push(res.body.path);
-    expect(res.body.path.startsWith("/")).toBe(true);
+    expect(res.body.path.startsWith(tmp)).toBe(true);
     expect(res.body.path.endsWith(".png")).toBe(true);
     expect(readFileSync(res.body.path).equals(PNG)).toBe(true);
     // Private to its owner, and that owner is the session's account.
@@ -121,7 +193,7 @@ describe("POST /api/terminal/paste-image", () => {
     );
     // Traversal-only: the terminal user reaches the random filename it was
     // handed, but cannot list anybody else's pastes.
-    expect(statSync(PASTE_DIR).mode & 0o777).toBe(0o711);
+    expect(statSync(tmp).mode & 0o777).toBe(0o711);
   });
 
   it("writes as the panel account when the session shares its identity", async () => {
@@ -134,7 +206,6 @@ describe("POST /api/terminal/paste-image", () => {
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
 
     expect(res.status).toBe(200);
-    created.push(res.body.path);
     expect(chown).not.toHaveBeenCalled();
     expect(statSync(res.body.path).mode & 0o777).toBe(0o600);
     expect(statSync(res.body.path).uid).toBe(panel.uid);
@@ -190,43 +261,6 @@ describe("POST /api/terminal/paste-image", () => {
     expect(pasteNames()).toEqual(before);
   });
 
-  // Skipped: the route fires `sweepOldPastes()` unawaited by design, so this
-  // races an intentionally detached unlink rather than catching a bug. It
-  // passes in isolation and fails only under full-suite load, where it blocked
-  // `git push` through the pre-push hook. Un-skip once we decide whether the
-  // upload endpoint should guarantee the unlink at all (await it, or expose a
-  // way to wait) — not on a retry. Until then the fix here is to await or poll
-  // the sweep instead of asserting straight after the response.
-  it.skip("sweeps expired pastes", async () => {
-    mkdirSync(PASTE_DIR, { recursive: true });
-    const stale = join(PASTE_DIR, "paste-0-stale.png");
-    writeFileSync(stale, PNG);
-    // Swept by this request, but registered anyway: a failing sweep must not
-    // leave the fixture behind in the real paste directory.
-    created.push(stale);
-    const old = (Date.now() - 25 * 60 * 60 * 1000) / 1000; // 25h ago
-    utimesSync(stale, old, old);
-    vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
-
-    const res = await request(makeApp())
-      .post("/api/terminal/paste-image")
-      .field("sessionId", "sess-1")
-      .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
-
-    expect(res.status).toBe(200);
-    created.push(res.body.path);
-    // The sweep is FIRE-AND-FORGET by design — `terminal.ts` starts it without
-    // awaiting so an upload's response is never delayed by it — so the unlink
-    // may not have landed when the response resolves. Asserting straight away
-    // passes on a quiet machine and fails under suite load, which is what this
-    // test did: green in isolation, red in a full run, for reasons that had
-    // nothing to do with the branch under test. Waiting for the effect is the
-    // honest assertion; the timeout is what still fails if no sweep happens.
-    await expect.poll(() => existsSync(stale), { timeout: 5000 }).toBe(false);
-    expect(existsSync(res.body.path)).toBe(true);
-  });
-
-
   it("names the paste with cryptographic entropy", async () => {
     vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
 
@@ -236,7 +270,6 @@ describe("POST /api/terminal/paste-image", () => {
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
 
     expect(res.status).toBe(200);
-    created.push(res.body.path);
     // Under a traversal-only directory the unguessable name is the only
     // thing keeping a paste from other local accounts for its whole life,
     // so it has to be fixed-length CSPRNG output — never `Math.random`,
@@ -256,10 +289,9 @@ describe("POST /api/terminal/paste-image", () => {
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
 
     expect(res.status).toBe(200);
-    created.push(res.body.path);
     // `mkdir` carries the mode itself: a first creation is never briefly
     // world-listable before the normalising chmod lands.
-    expect(mkdir).toHaveBeenCalledWith(PASTE_DIR, {
+    expect(mkdir).toHaveBeenCalledWith(tmp, {
       recursive: true,
       mode: 0o711,
     });
@@ -271,13 +303,38 @@ describe("POST /api/terminal/paste-image", () => {
   });
 
   it("refuses a paste directory that is a symlink", async () => {
-    const decoy = join(tmpdir(), "pavilio-pastes-decoy");
-    // Inside the `try`: a setup that throws half-way must still put the real
-    // paste directory back, or the next restore rm -rf's the live one.
-    try {
-      stashPasteDir();
-      mkdirSync(decoy, { recursive: true });
-      symlinkSync(decoy, PASTE_DIR);
+    // Both the decoy and the symlink live inside this test's own temp
+    // directory — nothing shared is ever replaced or stashed.
+    const decoy = join(tmp, "decoy");
+    const linked = join(tmp, "pastes");
+    mkdirSync(decoy, { recursive: true });
+    symlinkSync(decoy, linked);
+    process.env.PAVILIO_PASTE_DIR = linked;
+
+    const res = await request(makeApp())
+      .post("/api/terminal/paste-image")
+      .field("sessionId", "sess-1")
+      .attach("image", PNG, {
+        filename: "paste.png",
+        contentType: "image/png",
+      });
+
+    // /tmp is world-writable: a local user can pre-plant the path. Writing
+    // into it would hand every paste to whoever owns the target.
+    expect(res.status).toBe(500);
+    expect(readdirSync(decoy)).toEqual([]);
+  });
+
+  // Only root can hand a directory to another account.
+  it.skipIf(panel.uid !== 0)(
+    "refuses a paste directory owned by another account",
+    async () => {
+      const foreign = join(tmp, "pastes");
+      mkdirSync(foreign, { recursive: true });
+      chmodSync(foreign, 0o700);
+      chownSync(foreign, panel.uid + 1, panel.gid + 1);
+      process.env.PAVILIO_PASTE_DIR = foreign;
+
       const res = await request(makeApp())
         .post("/api/terminal/paste-image")
         .field("sessionId", "sess-1")
@@ -286,44 +343,14 @@ describe("POST /api/terminal/paste-image", () => {
           contentType: "image/png",
         });
 
-      // /tmp is world-writable: a local user can pre-plant the path. Writing
-      // into it would hand every paste to whoever owns the target.
+      // The owner keeps rwx through any chmod the panel applies — it could
+      // list every paste name and replace entries.
       expect(res.status).toBe(500);
-      expect(readdirSync(decoy)).toEqual([]);
-    } finally {
-      restorePasteDir();
-      rmSync(decoy, { recursive: true, force: true });
-    }
-  });
-
-  // Only root can hand a directory to another account.
-  it.skipIf(panel.uid !== 0)(
-    "refuses a paste directory owned by another account",
-    async () => {
-      try {
-        stashPasteDir();
-        mkdirSync(PASTE_DIR, { recursive: true });
-        chmodSync(PASTE_DIR, 0o700);
-        chownSync(PASTE_DIR, panel.uid + 1, panel.gid + 1);
-        const res = await request(makeApp())
-          .post("/api/terminal/paste-image")
-          .field("sessionId", "sess-1")
-          .attach("image", PNG, {
-            filename: "paste.png",
-            contentType: "image/png",
-          });
-
-        // The owner keeps rwx through any chmod the panel applies — it could
-        // list every paste name and replace entries.
-        expect(res.status).toBe(500);
-        expect(readdirSync(PASTE_DIR)).toEqual([]);
-        // Untouched: the ownership check has to run *before* the normalising
-        // chmod. A panel that re-modes first has already opened a directory
-        // it does not own to everyone the 0711 lets in.
-        expect(statSync(PASTE_DIR).mode & 0o777).toBe(0o700);
-      } finally {
-        restorePasteDir();
-      }
+      expect(readdirSync(foreign)).toEqual([]);
+      // Untouched: the ownership check has to run *before* the normalising
+      // chmod. A panel that re-modes first has already opened a directory
+      // it does not own to everyone the 0711 lets in.
+      expect(statSync(foreign).mode & 0o777).toBe(0o700);
     },
   );
 
@@ -337,7 +364,19 @@ describe("POST /api/terminal/paste-image", () => {
       .field("sessionId", "sess-1");
 
     expect(res.status).toBe(200);
-    created.push(res.body.path);
     expect(statSync(res.body.path).mode & 0o777).toBe(0o600);
+  });
+});
+
+// Deliberately last in the file: the sentinel planted in beforeAll must have
+// survived every test above with its mtime intact, proving nothing here ever
+// read, wrote, renamed or removed the shared paste directory's contents.
+describe("shared paste directory isolation", () => {
+  it("never touches the shared paste directory", (ctx) => {
+    // Planting skipped (directory owned by another uid): show the skip in
+    // the run summary instead of passing vacuously.
+    if (!sentinel) return ctx.skip();
+    expect(existsSync(sentinel)).toBe(true);
+    expect(statSync(sentinel).mtimeMs).toBe(sentinelMtimeMs);
   });
 });

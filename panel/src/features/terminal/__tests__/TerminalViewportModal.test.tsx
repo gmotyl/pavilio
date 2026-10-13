@@ -104,8 +104,6 @@ describe("TerminalViewportModal", () => {
   });
 
   it("the reader touches no storage", () => {
-    // Spy on the instance: in this jsdom build localStorage is a plain object
-    // whose prototype is not Storage.prototype, so a prototype spy never fires.
     const getItem = vi.spyOn(window.localStorage, "getItem");
     const setItem = vi.spyOn(window.localStorage, "setItem");
     const removeItem = vi.spyOn(window.localStorage, "removeItem");

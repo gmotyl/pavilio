@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, appendFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -221,6 +221,15 @@ describe("syncRepo", () => {
     // GIT_SSH_COMMAND that hangs forever simulates the stalled ssh from the incident
     const hang = join(root, "hang-ssh.sh");
     writeFileSync(hang, "#!/bin/sh\nsleep 300\n", { mode: 0o755 });
+    // Decoy: a foreign long-sleeping process whose command line also ends in
+    // /hang-ssh.sh, but from a DIFFERENT directory — the neighbor worktree
+    // running this suite concurrently. The orphan check below must match our
+    // own script by its full per-test path and ignore this one.
+    const decoyRoot = mkdtempSync(join(tmpdir(), "syncrepo-decoy-"));
+    const decoyScript = join(decoyRoot, "hang-ssh.sh");
+    writeFileSync(decoyScript, "#!/bin/sh\nsleep 300\n", { mode: 0o755 });
+    // detached → own process group, so the cleanup kill reaps sh and its sleep
+    const decoy = spawn(decoyScript, [], { detached: true, stdio: "ignore" });
     git(mac, "remote", "set-url", "origin", "ssh://fake-host/repo.git");
     const prev = process.env.GIT_SSH_COMMAND;
     process.env.GIT_SSH_COMMAND = hang;
@@ -229,12 +238,24 @@ describe("syncRepo", () => {
       const r = await syncRepo(mac, { ...opts("mac"), gitTimeoutMs: 1_000 });
       expect(r.state).toBe("offline");
       expect(Date.now() - start).toBeLessThan(10_000); // did not wait for sleep 300
-      // no orphaned hang-ssh survives the process-group kill
-      const ps = spawnSync("pgrep", ["-f", "hang-ssh.sh"], { encoding: "utf-8" });
+      // No orphaned hang-ssh survives the process-group kill. Match by the
+      // full per-test path: a bare basename would also catch the decoy (or a
+      // neighbor worktree's concurrent run) and fail spuriously.
+      const ps = spawnSync("pgrep", ["-f", hang], { encoding: "utf-8" });
       expect(ps.stdout.trim()).toBe("");
+      // The foreign process is none of this test's business: it must still
+      // be running untouched.
+      expect(decoy.exitCode).toBeNull();
     } finally {
       if (prev === undefined) delete process.env.GIT_SSH_COMMAND;
       else process.env.GIT_SSH_COMMAND = prev;
+      // Never leak the decoy: kill its whole process group (sh + sleep).
+      try {
+        process.kill(-decoy.pid!, "SIGKILL");
+      } catch {
+        // already gone
+      }
+      rmSync(decoyRoot, { recursive: true, force: true });
     }
   }, 30_000);
 
