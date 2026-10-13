@@ -144,9 +144,8 @@ describe("useTerminalOrdering", () => {
   });
 
   it("renders the default preset when browser storage is unavailable", () => {
-    // Spied on the INSTANCE, and asserted reached: the suite replaces
-    // `localStorage` with a plain object, so a `Storage.prototype` spy is inert
-    // and this test used to pass without the throw ever happening.
+    // Asserted reached: this test must never pass without the throw having
+    // actually happened.
     const getItem = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
       throw new Error("denied");
     });

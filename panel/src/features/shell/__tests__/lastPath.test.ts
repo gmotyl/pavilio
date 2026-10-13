@@ -17,13 +17,9 @@ import { preferences } from "../../../preferences/declarations";
  * try/catch and relocated that protection into `readPreference` /
  * `writePreference`. The four tests that used to sit here have moved with it,
  * to `preferences/__tests__/store.test.ts` ("the session tier under a browser
- * that refuses storage"), where the code they exercise actually lives.
- *
- * They were also vacuous where they stood. They spied on `Storage.prototype`,
- * but `test-setup.ts` installs a plain object literal as `sessionStorage`,
- * which does not inherit from it — so the spy was never reached, the value was
- * still stored, and both tests passed without exercising anything. The
- * relocated versions spy on the storage INSTANCE and assert the spy was called.
+ * that refuses storage"), where the code they exercise actually lives. The
+ * relocated versions assert their spy WAS called, so they cannot pass
+ * vacuously the way the originals once did.
  */
 
 /** A scope that is `string` to the compiler and `undefined` at runtime. */

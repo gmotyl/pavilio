@@ -52,11 +52,9 @@ function seed(def: PreferenceDef<boolean>, value: boolean) {
  *
  * Both declarations here are portable, so a write is `doc[key] = …` on the
  * injected `__PAVILIO_PREFS__` document — that object is the write path, and a
- * proxy around it sees every assignment the store makes through it. It is a
- * spy on the INSTANCE for the same reason the rest of this suite avoids
- * prototype spies: the object the store reaches for is the one installed on
- * `globalThis`, and nothing about these two preferences ever touches
- * `Storage.prototype` at all.
+ * proxy around it sees every assignment the store makes through it — these
+ * two preferences are portable, so their write path is the injected document,
+ * never browser storage.
  *
  * Rendered state is not enough on its own — a sidebar can look closed while
  * the store has been told about it. "Toggling on desktop still persists" is

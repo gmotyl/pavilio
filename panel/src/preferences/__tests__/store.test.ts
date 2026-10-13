@@ -176,9 +176,7 @@ describe("reading", () => {
   });
 
   it("a throwing localStorage falls back to the declared default", () => {
-    // Private-mode Safari throws on access rather than returning null. Spy on
-    // the instance, not `Storage.prototype` — test-setup.ts replaces the
-    // instance outright, so a prototype spy is never reached.
+    // Private-mode Safari throws on access rather than returning null.
     const getItem = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
       throw new DOMException("The operation is insecure.", "SecurityError");
     });
@@ -216,11 +214,8 @@ describe("the session tier under a browser that refuses storage", () => {
    * relocated here, into `readPreference`/`writePreference`. These are the
    * tests that actually exercise it.
    *
-   * The spy goes on the `sessionStorage` INSTANCE, never on
-   * `Storage.prototype`: `test-setup.ts` installs a plain object literal as
-   * `sessionStorage`, which does not inherit from `Storage.prototype`, so a
-   * prototype spy is never reached and the test passes vacuously. Each case
-   * asserts the spy WAS called, so that trap cannot come back unnoticed.
+   * Each case asserts the spy WAS called, so none of these tests can pass
+   * vacuously with the refusing storage never actually consulted.
    */
   it("a write that throws is swallowed and stores nothing", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});

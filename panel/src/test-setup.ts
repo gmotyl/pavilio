@@ -43,29 +43,78 @@ async function resetTabScopedSingletons(): Promise<void> {
   await reset("./features/terminal/launcherUse", "__resetLauncherUseForTests");
 }
 
-function createMemoryStorage(): Storage {
-  const store = new Map<string, string>();
+/**
+ * One backing map per storage object, keyed on the instance. Keeping the data
+ * OFF the instances is what lets `createMemoryStorage` return an object with
+ * no own properties at all: every method call travels through
+ * `Storage.prototype`, so a suite spying there — the form most codebases
+ * reach for first — is actually reached, and an instance spy still works as
+ * before. The lazy initialisation also keeps jsdom's own Storage instances
+ * functional should anything still hold one: they simply get a fresh map.
+ */
+const storageBacking = new WeakMap<object, Map<string, string>>();
 
-  return {
-    get length() {
-      return store.size;
+function backingOf(self: object): Map<string, string> {
+  let store = storageBacking.get(self);
+  if (!store) {
+    store = new Map();
+    storageBacking.set(self, store);
+  }
+  return store;
+}
+
+// Replace jsdom's Storage methods on the prototype with ones backed by the
+// WeakMap. `length` must be an accessor, so it goes through defineProperty.
+Object.defineProperties(Storage.prototype, {
+  length: {
+    get(this: object) {
+      return backingOf(this).size;
     },
-    clear() {
-      store.clear();
-    },
-    getItem(key: string) {
+    configurable: true,
+    enumerable: true,
+  },
+  getItem: {
+    value(this: object, key: string) {
+      const store = backingOf(this);
       return store.has(key) ? store.get(key)! : null;
     },
-    key(index: number) {
-      return Array.from(store.keys())[index] ?? null;
+    configurable: true,
+    writable: true,
+  },
+  setItem: {
+    value(this: object, key: string, value: string) {
+      backingOf(this).set(String(key), String(value));
     },
-    removeItem(key: string) {
-      store.delete(key);
+    configurable: true,
+    writable: true,
+  },
+  removeItem: {
+    value(this: object, key: string) {
+      backingOf(this).delete(key);
     },
-    setItem(key: string, value: string) {
-      store.set(key, value);
+    configurable: true,
+    writable: true,
+  },
+  clear: {
+    value(this: object) {
+      backingOf(this).clear();
     },
-  };
+    configurable: true,
+    writable: true,
+  },
+  key: {
+    value(this: object, index: number) {
+      return Array.from(backingOf(this).keys())[index] ?? null;
+    },
+    configurable: true,
+    writable: true,
+  },
+});
+
+function createMemoryStorage(): Storage {
+  // No own methods, no own data — a real-looking Storage instance whose every
+  // call resolves on Storage.prototype (see storageBacking above).
+  return Object.create(Storage.prototype) as Storage;
 }
 
 const storage = createMemoryStorage();
