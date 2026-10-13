@@ -11,6 +11,13 @@ import react from "@vitejs/plugin-react";
 // replacement, and an unknown key in it is rejected rather than ignored.
 //
 // `pnpm test` still runs both; `vitest --project node` runs one.
+//
+// The projects run in sequence (`sequence.groupOrder` below), not interleaved
+// in one worker pool: node-project tests drive real child processes, servers
+// and the filesystem, so running them alongside browser-project tests made
+// them contend over machine-global state. Serializing removes that
+// cross-project interference — all `browser` files finish before the first
+// `node` file starts.
 export default defineConfig({
   test: {
     projects: [
@@ -22,6 +29,9 @@ export default defineConfig({
         test: {
           name: "browser",
           environment: "jsdom",
+          sequence: {
+            groupOrder: 0,
+          },
           globals: true,
           setupFiles: ["./src/test-setup.ts"],
           include: ["src/**/__tests__/**/*.test.{ts,tsx}"],
@@ -37,6 +47,9 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
+          sequence: {
+            groupOrder: 1,
+          },
           globals: true,
           setupFiles: ["./test-setup.node.ts"],
           include: [
