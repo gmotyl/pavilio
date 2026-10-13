@@ -3,7 +3,10 @@
 #   . "$SCRIPT_DIR/pm" && pm_resolve || exit 1
 #
 # After a successful pm_resolve:
-#   $PM           — "pnpm" or "npm", the package manager to drive
+#   $PM           — always "pnpm", the workspace's one package manager
+#   $PM_CMD       — the command that runs it: "pnpm", or "corepack pnpm" when
+#                   only corepack is on PATH. Word-split on purpose; callers
+#                   spell `$PM_CMD -C <dir> …`, never `"$PM_CMD"`.
 #   $NODE_BIN_DIR — the directory holding the `node` that is now on PATH
 #
 # Why this exists: the Windows shortcut and the setup scripts run bash without a
@@ -173,14 +176,18 @@ pm_probe_newest_nvm_version() {
   pm_prepend_path "$best_dir"
 }
 
+# Both failures (no node, or a node with neither pnpm nor corepack beside it)
+# get the same advice: the fix for either is a toolchain that carries pnpm.
 pm_not_found() {
   echo "node/pnpm not found. Open a normal terminal in $PM_REPO_ROOT and run: pnpm bootstrap" >&2
+  echo "No pnpm? Install pnpm (https://pnpm.io/installation), or run \`corepack enable pnpm\` where corepack exists — Node ≥ 25 no longer bundles corepack." >&2
 }
 
 # Find a toolchain and record it in $PM / $NODE_BIN_DIR. Returns 1, having said
 # what to do about it, when there is nothing to find.
 pm_resolve() {
   PM=""
+  PM_CMD=""
   NODE_BIN_DIR=""
 
   # 1. the pin, then 2. whatever the caller's PATH already carries (a normal
@@ -197,58 +204,56 @@ pm_resolve() {
     return 1
   fi
 
-  # 8. pnpm is the workspace's package manager; npm is the fallback that every
-  #    node install brings with it.
+  # 8. pnpm is the workspace's only package manager. corepack runs it without a
+  #    global install where node still ships corepack (below Node 25).
   if command -v pnpm >/dev/null 2>&1; then
-    PM="pnpm"
-  elif command -v npm >/dev/null 2>&1; then
-    PM="npm"
+    PM_CMD="pnpm"
+  elif command -v corepack >/dev/null 2>&1; then
+    PM_CMD="corepack pnpm"
   else
     pm_not_found
     return 1
   fi
+  PM="pnpm"
 
   local node_path
   node_path="$(command -v node)"
   NODE_BIN_DIR="${node_path%/*}"
-  export PM NODE_BIN_DIR
+  export PM PM_CMD NODE_BIN_DIR
   return 0
 }
 
-# Run a package script in a subdirectory, spelled the way $PM wants it.
-# Both managers get an explicit `run`; npm additionally needs the `--` separator
-# before any arguments.
+# Run a package script in a subdirectory with the resolved pnpm command.
 #
-# `run` is not optional under pnpm either. The bare `pnpm -C <dir> <script>`
-# shorthand only reaches package.json for names pnpm does not claim itself:
-# `setup`, `update` and `restart` (among others) are pnpm's OWN subcommands, and
-# the shorthand silently runs those instead of the package script of the same
-# name. `update` brings two aliases with it — `up` and `upgrade` — which is why
-# the workspace's update script is called `sync`, never `upgrade`.
-# `pnpm run <script>` always means the package script.
+# `run` is not optional. The bare `pnpm -C <dir> <script>` shorthand only
+# reaches package.json for names pnpm does not claim itself: `setup`, `update`
+# and `restart` (among others) are pnpm's OWN subcommands, and the shorthand
+# silently runs those instead of the package script of the same name. `update`
+# brings two aliases with it — `up` and `upgrade` — which is why the workspace's
+# update script is called `sync`, never `upgrade`. `pnpm run <script>` always
+# means the package script.
 pm_in() {
   local dir="$1" script="$2"
   shift 2
-  if [ "${PM:-}" = "pnpm" ]; then
-    pnpm -C "$dir" run "$script" "$@"
-  else
-    npm --prefix "$dir" run "$script" -- "$@"
+  if [ -z "${PM_CMD:-}" ]; then
+    pm_not_found
+    return 1
   fi
+  # Unquoted on purpose: "corepack pnpm" is two words.
+  $PM_CMD -C "$dir" run "$script" "$@"
 }
 
-# Install a subdirectory's dependencies, spelled the way $PM wants it.
+# Install a subdirectory's dependencies with the resolved pnpm command.
 #
 # Deliberately not pm_in: `install` is the package manager's own command, not a
-# package script. pm_in now spells an explicit `run` for both managers, so
-# `pm_in <dir> install` would ask for a package script named `install` —
-# `pnpm -C <dir> run install` / `npm --prefix <dir> run install --` — and
-# panel/package.json has no such script, so it fails with "Missing script:
-# install".
+# package script. `pm_in <dir> install` would ask for a package script named
+# `install` — `pnpm -C <dir> run install` — and panel/package.json has no such
+# script, so it fails with "Missing script: install".
 pm_install() {
   local dir="$1"
-  if [ "${PM:-}" = "pnpm" ]; then
-    pnpm -C "$dir" install
-  else
-    npm --prefix "$dir" install
+  if [ -z "${PM_CMD:-}" ]; then
+    pm_not_found
+    return 1
   fi
+  $PM_CMD -C "$dir" install
 }

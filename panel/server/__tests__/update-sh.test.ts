@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -644,6 +645,34 @@ describe("scripts/update.sh clone mode", () => {
     expect(output).not.toMatch(/panel bundle built/);
     expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(false);
     expect(invocations(pnpmCalled)).not.toContain("build");
+  }, 120000);
+
+  it("update.sh rerun hints use the resolved pnpm command", () => {
+    initCloneRepo();
+    // A host whose node carries corepack but no pnpm: every PATH entry holding a
+    // pnpm or a corepack is dropped, node comes back on its own, and corepack is
+    // a recording stub whose `install` fails so both rerun hints are printed.
+    const nodeOnly = join(sandbox, "node-only");
+    mkdirSync(nodeOnly, { recursive: true });
+    symlinkSync(process.execPath, join(nodeOnly, "node"));
+    const kept = (process.env.PATH ?? "")
+      .split(":")
+      .filter((d) => d && !existsSync(join(d, "pnpm")) && !existsSync(join(d, "corepack")));
+    const corepackCalled = stubCommand(
+      "corepack",
+      ['for arg in "$@"; do', '  [ "$arg" = "install" ] && exit 1', "done", "exit 0"].join("\n"),
+    );
+    // npm may well sit in /usr/bin beside git; it must never be reached for.
+    const npmCalled = stubCommand("npm");
+
+    const { status, output } = runUpdate({ PATH: [stubBin, nodeOnly, ...kept].join(":") }, null);
+
+    expect(status).toBe(1);
+    expect(invocations(corepackCalled)).toContain(`pnpm -C ${join(dest, "panel")} install`);
+    expect(output).toContain(`corepack pnpm -C "${join(dest, "panel")}" install`);
+    expect(output).toContain(`corepack pnpm -C "${join(dest, "panel")}" build`);
+    expect(output).not.toMatch(/npm --prefix/);
+    expect(invocations(npmCalled)).toBe("");
   }, 120000);
 
   it("ends clone mode with the restart hint and never restarts the panel", () => {

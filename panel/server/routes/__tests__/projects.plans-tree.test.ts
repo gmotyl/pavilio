@@ -474,7 +474,8 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
 // --- Legacy flat source visibility vs contributed OpenSpec changes -------------
 
 describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () => {
-  const findProject = (body: { sources: { id: string }[] }) =>
+  // The legacy flat source carries its plan files; type them so callers can read them.
+  const findProject = (body: { sources: { id: string; files: { filename: string }[] }[] }) =>
     body.sources.find((s) => s.id === "project");
 
   it("hides the empty legacy flat source when an OpenSpec source contributed changes", async () => {

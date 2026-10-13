@@ -61,7 +61,7 @@ export function mountTimeRoutes(
   });
 
   app.patch("/api/time/entry/:id", (req: Request, res: Response) => {
-    const id = req.params.id;
+    const id = req.params.id as string;
     const { project, patch } = req.body ?? {};
     const projectErr = validateProjectName(project);
     if (projectErr) return res.status(400).json({ error: projectErr });
@@ -85,7 +85,7 @@ export function mountTimeRoutes(
   });
 
   app.delete("/api/time/entry/:id", (req: Request, res: Response) => {
-    const id = req.params.id;
+    const id = req.params.id as string;
     const project = String(req.query.project ?? "");
     const projectErr = validateProjectName(project);
     if (projectErr) return res.status(400).json({ error: projectErr });

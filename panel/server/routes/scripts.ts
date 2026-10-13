@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { execFile } from "child_process";
+import { execFile, type ExecException } from "child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import { join, resolve, sep } from "path";
 import { getConfig } from "../config.js";
@@ -166,7 +166,7 @@ function runScript(
       (err, stdout, stderr) => {
         const durationMs = Date.now() - start;
         const output = [stdout, stderr].filter(Boolean).join("").trim();
-        if (err && (err as NodeJS.ErrnoException).killed) {
+        if (err && (err as ExecException).killed) {
           resolve({
             ok: false,
             output: `Timed out after ${Math.round(timeoutMs / 1000)}s\n${output}`.trim(),

@@ -38,8 +38,8 @@ The panel is then on <http://localhost:3010>.
 > the bare `pnpm <name>` spelling reaches *this* workspace's script. That rules
 > out the names pnpm claims for itself: `pnpm setup` appends pnpm's `PNPM_HOME`
 > block to your shell profile; `pnpm update` — and its aliases `pnpm upgrade`
-> and `pnpm up` — rewrites your lockfile; `pnpm restart` is npm's lifecycle
-> spelling that runs `stop`, `restart` *and* `start`. None of them ever reads
+> and `pnpm up` — rewrites your lockfile; `pnpm restart` is a built-in
+> lifecycle command that runs `stop`, `restart` *and* `start` in turn. None of them ever reads
 > `package.json` the way you meant. So setup is `pnpm bootstrap`, the update is
 > `pnpm pull`, and the restart is `pnpm reboot`.
 
@@ -47,13 +47,16 @@ The panel is then on <http://localhost:3010>.
 a file you own and never adds a remote twice. In one pass it:
 
 1. **toolchain** — finds `node` (**Node 22 or newer** is required) and picks
-   `pnpm`, `corepack pnpm` or `npm`, whichever this machine actually has. It
+   `pnpm`, or `corepack pnpm` when pnpm is not on `PATH` — pnpm is the only
+   package manager pavilio uses. It
    records the interpreter's directory in `scripts/start-panel-windows.local.env`,
    which is the Windows launcher's only way back to it.
 2. **seed** — creates `projects/` and, if you do not have one yet,
    `.projects.local.md` from `AGENTS.md.example`. That file is your private
    project registry; once it exists, setup leaves it alone.
 3. **panel install** and **panel build** — the only two steps that are fatal.
+   Pavilio is one pnpm workspace with one root lockfile, so that single install
+   covers the root and the panel alike; there is no separate panel install.
 4. **remotes** — see [Keep your notes safe](#keep-your-notes-safe) below.
 5. **skills** — installs everything under `skills/` as slash commands, for each
    agent already configured on this machine: Claude Code (`~/.claude`), opencode
@@ -267,7 +270,7 @@ So `[vite] (client) hmr update …` in the console means the wrong entry is live
 ps aux | grep 'tsx server'      # want server/index.ts, not server/dev.ts
 ```
 
-The usual cause is the **workspace's own root `package.json`**: `pnpm pull` syncs `panel/`, `skills/`, `commands/` and `scripts/`, but never the root `package.json`, so a workspace set up before the entry-point split can still carry `"start": "cd panel && npm run dev &"`. Point it at the serving entry:
+The usual cause is the **workspace's own root `package.json`**: `pnpm pull` syncs `panel/`, `skills/`, `commands/` and `scripts/`, but never the root `package.json`, so a workspace set up before the entry-point split can still carry a `start` script that changes into `panel/` and launches its `dev` script in the background. Point it at the serving entry:
 
 ```json
 "build": "pnpm -C panel build",

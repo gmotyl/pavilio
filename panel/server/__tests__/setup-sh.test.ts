@@ -408,8 +408,9 @@ describe("scripts/bootstrap", () => {
     expect(existsSync(join(repo, ".projects.local.md"))).toBe(false);
   }, 60000);
 
-  it("chooses corepack pnpm, then npm, and says which", () => {
-    // No pnpm on PATH, but corepack — which ships with node — can provide one.
+  it("chooses corepack pnpm when pnpm is absent, and says so", () => {
+    // No pnpm on PATH, but corepack — which ships with node below 25 — can
+    // provide one. npm is on PATH too, and must stay untouched.
     rmSync(join(stubBin, "pnpm"));
     clearCalls();
 
@@ -418,20 +419,33 @@ describe("scripts/bootstrap", () => {
     expect(viaCorepack.stdout).toMatch(/^✓ toolchain\b.*package manager: corepack pnpm$/m);
     expect(countRecorded(`corepack pnpm -C ${join(repo, "panel")} install`)).toBe(1);
     expect(countRecorded(`corepack pnpm -C ${join(repo, "panel")} run build`)).toBe(1);
+    expect(countRecordedTool("npm")).toBe(0);
 
-    // Neither: the npm every node install brings with it.
+    // The choice is pm_resolve's, not a second chain of bootstrap's own: no
+    // npm branch and no `pnpm()` shim function standing in for corepack.
+    const source = readFileSync(BOOTSTRAP, "utf8");
+    expect(source).not.toMatch(/^\s*pnpm\(\)\s*\{/m);
+    expect(source).not.toMatch(/command -v npm\b/);
+  }, 60000);
+
+  it("stops before installing when neither pnpm nor corepack exists", () => {
+    // npm alone is no longer a package manager this workspace will drive.
+    rmSync(join(stubBin, "pnpm"));
     rmSync(join(stubBin, "corepack"));
-    const second = join(sandbox, "repo-npm");
-    makeRepo(second, CANONICAL_HTTPS);
     clearCalls();
 
-    const viaNpm = run(["--yes"], { repoDir: second });
-    expect(viaNpm.status, viaNpm.output).toBe(0);
-    expect(viaNpm.stdout).toMatch(/^✓ toolchain\b.*package manager: npm$/m);
-    expect(viaNpm.stdout).not.toMatch(/package manager: (corepack )?pnpm$/m);
-    // npm spells both commands differently, and `install` is not a package script.
-    expect(countRecorded(`npm --prefix ${join(second, "panel")} install`)).toBe(1);
-    expect(countRecorded(`npm --prefix ${join(second, "panel")} run build`)).toBe(1);
+    const { status, stdout, output } = run(["--yes"]);
+
+    expect(status).toBe(1);
+    expect(stdout).toMatch(/^✗ toolchain failed — run: pnpm bootstrap$/m);
+    expect(failureCommands(stdout)).toEqual(["pnpm bootstrap"]);
+    expect(output).toMatch(/install pnpm/i);
+    expect(output).toMatch(/Node(\.js)? ≥ ?25/);
+    // Nothing was installed, built, seeded or linked — and npm never ran.
+    expect(countRecordedTool("npm")).toBe(0);
+    expect(countRecorded(" -C ")).toBe(0);
+    expect(countRecorded("install:speech")).toBe(0);
+    expect(existsSync(join(repo, ".projects.local.md"))).toBe(false);
   }, 60000);
 
   it("skips agents whose config directory is absent", () => {
@@ -918,8 +932,8 @@ describe("scripts/bootstrap", () => {
   // -------------------------------------------------------------------------
 
   it("pins node and names the right start command when corepack is the only manager", () => {
-    // corepack, but no npm at all: pm_resolve cannot pick a manager here, and
-    // the pin must still be written rather than left empty.
+    // corepack, and no npm at all: the pin must still be written rather than
+    // left empty.
     rmSync(join(stubBin, "pnpm"));
     rmSync(join(stubBin, "npm"));
     clearCalls();
@@ -940,17 +954,6 @@ describe("scripts/bootstrap", () => {
     expect(lines[lines.length - 1]).toBe(
       "Done. Start the panel: corepack pnpm start  →  http://localhost:3010",
     );
-  }, 60000);
-
-  it("names the npm start command when npm is the resolved manager", () => {
-    rmSync(join(stubBin, "pnpm"));
-    rmSync(join(stubBin, "corepack"));
-    clearCalls();
-
-    const { status, stdout, output } = run(["--yes"]);
-    expect(status, output).toBe(0);
-    const lines = stdout.trimEnd().split("\n");
-    expect(lines[lines.length - 1]).toBe("Done. Start the panel: npm start  →  http://localhost:3010");
   }, 60000);
 
   it("escapes the pinned path, which scripts/pm eval's back", () => {

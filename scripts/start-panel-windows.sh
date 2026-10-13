@@ -4,7 +4,7 @@
 # What it does on every launch:
 #   0. resolves node/pnpm through scripts/pm. The shortcut runs this file with
 #      `bash -lc`, and a login shell reads none of the dotfiles that put nvm/fnm
-#      on PATH — so a bare `npm`/`pnpm` here dies with "command not found"
+#      on PATH — so a bare `pnpm` here dies with "command not found"
 #      before anything else has a chance to run. Nothing is started until this
 #      succeeds.
 #   1. starts the panel through scripts/panel, which owns the process (detached,
@@ -73,9 +73,9 @@ cd "${SCRIPT_DIR}/.."
 pm_resolve || exit 1
 
 # scripts/panel owns the process: detached, logged, and building panel/dist when
-# it is missing. Called directly rather than through `npm start` — `npm` is the
-# thing that may not exist here, and the root script is only a wrapper around
-# this same file.
+# it is missing. Called directly rather than through `pnpm start` — pnpm may
+# only be reachable as `corepack pnpm` here, and the root script is only a
+# wrapper around this same file.
 #
 # Its exit status is the whole answer about whether there is a panel to talk to.
 # Discarding it used to buy fifteen seconds of dots against a port nothing was
@@ -260,8 +260,9 @@ if [ -n "${PANEL_EXTRA_PORTS}" ] && [ -n "${LAN_IP:-}" ]; then
   done
 fi
 echo
-# scripts/panel, not `npm stop`: this host may carry pnpm only, or no package
-# manager on PATH at all — which is the reason this launcher exists.
+# scripts/panel, not `pnpm stop`: this host may reach pnpm only through
+# corepack, or carry no package manager on PATH at all — which is the reason
+# this launcher exists.
 echo "Stop with: ./scripts/panel stop"
 echo
 

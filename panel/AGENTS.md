@@ -52,6 +52,6 @@ Agent guidance for the `panel/` app. Read this before making panel-specific chan
 ## Validation Checklist
 
 - Update imports after any file move.
-- Run `npm run build` from `panel/` after structural refactors.
+- Run `pnpm lint` from `panel/` after structural refactors — it is the type check; `pnpm build` is `vite build` only and does not typecheck.
 - Prefer targeted tests for touched features.
 - If test infrastructure failures appear unrelated, report them clearly instead of masking them.

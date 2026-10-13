@@ -19,8 +19,8 @@ const { SerializeAddon } = serializePkg;
 const SCROLLBACK = 5000;
 
 interface ReplayBuffer {
-  term: Terminal;
-  serialize: SerializeAddon;
+  term: InstanceType<typeof Terminal>;
+  serialize: InstanceType<typeof SerializeAddon>;
 }
 
 const buffers = new Map<string, ReplayBuffer>();

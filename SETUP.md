@@ -6,7 +6,9 @@ Get pavilio running in 20 minutes.
 
 - Bash shell (macOS, Linux, WSL)
 - Git
-- Node.js 18+ (for npm scripts)
+- Node.js 22+ and pnpm. With only corepack (Node below 25 bundles it; Node ≥ 25 no
+  longer does), run `corepack enable pnpm` once — it installs the `pnpm` shim, so
+  every `pnpm …` command below works as written.
 - Your chosen AI provider credentials (Claude, Kilocode, Copilot, QWEN, Gemini, etc.)
 
 ## Step 1: Clone Repository
@@ -28,7 +30,7 @@ Decide which AI providers you want to support. You can add more later.
 ## Step 3: Run Master Setup
 
 ```bash
-npm run setup:all
+pnpm setup:all
 ```
 
 This interactive script will:
@@ -56,7 +58,7 @@ These show you the folder structure and how to configure different providers.
 ## Step 5: Create Your First Project
 
 ```bash
-npm run create-project
+pnpm create-project
 ```
 
 Follow the interactive prompts:
@@ -81,8 +83,8 @@ Use your chosen AI agent (Claude, Kilo, Copilot, etc.) to start building.
 
 ## Troubleshooting
 
-### "Command not found: npm"
-Install Node.js: https://nodejs.org/
+### "Command not found: pnpm"
+Install Node.js 22+ (https://nodejs.org/), then enable pnpm with `corepack enable pnpm`.
 
 ### "Permission denied: ./scripts/setup:all"
 Make scripts executable:

@@ -1,0 +1,4 @@
+packages:
+  - panel
+onlyBuiltDependencies:
+  - node-pty

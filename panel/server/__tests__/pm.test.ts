@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -207,31 +215,67 @@ describe("scripts/pm toolchain resolution", () => {
     );
   }, 30000);
 
-  it("prefers pnpm and falls back to npm with --prefix", () => {
+  it("prefers pnpm, then corepack pnpm", () => {
     const withPnpm = join(sandbox, "with-pnpm");
     stub(withPnpm, "node");
     stub(withPnpm, "pnpm");
+    stub(withPnpm, "corepack");
     stub(withPnpm, "npm");
     writeLocalEnv(`PAVILIO_NODE_BIN="${withPnpm}"`);
 
-    const body = ["pm_resolve || exit 1", 'echo "PM=$PM"', "pm_in panel build"].join("\n");
+    const body = [
+      "pm_resolve || exit 1",
+      'echo "PM=$PM"',
+      // Printed from a child shell, so only an exported PM_CMD shows up.
+      `${BASH} -c 'echo "PM_CMD=$PM_CMD"'`,
+      "pm_in panel build",
+    ].join("\n");
     const pnpmRun = runHarness(body);
 
     expect(pnpmRun.status).toBe(0);
     expect(field(pnpmRun.output, "PM")).toBe("pnpm");
+    expect(field(pnpmRun.output, "PM_CMD")).toBe("pnpm");
     expect(pnpmRun.output).toContain("pnpm -C panel run build");
+    expect(pnpmRun.output).not.toContain("corepack pnpm");
 
-    // Same script, a toolchain that only ships npm.
+    // Same script, a toolchain whose node ships corepack but no pnpm (and npm,
+    // which must stay untouched).
+    const corepackOnly = join(sandbox, "corepack-only");
+    stub(corepackOnly, "node");
+    stub(corepackOnly, "corepack");
+    stub(corepackOnly, "npm");
+    writeLocalEnv(`PAVILIO_NODE_BIN="${corepackOnly}"`);
+
+    const corepackRun = runHarness(body);
+
+    expect(corepackRun.status).toBe(0);
+    expect(field(corepackRun.output, "PM")).toBe("pnpm");
+    expect(field(corepackRun.output, "PM_CMD")).toBe("corepack pnpm");
+    expect(corepackRun.output).toContain("corepack pnpm -C panel run build");
+    expect(corepackRun.output).not.toMatch(/^npm /m);
+  }, 30000);
+
+  it("fails with a pnpm install hint when neither pnpm nor corepack exists, never npm", () => {
     const npmOnly = join(sandbox, "npm-only");
+    const npmCalled = join(sandbox, "npm-called");
     stub(npmOnly, "node");
-    stub(npmOnly, "npm");
+    stub(npmOnly, "npm", `echo "npm $*" > "${npmCalled}"`);
     writeLocalEnv(`PAVILIO_NODE_BIN="${npmOnly}"`);
 
-    const npmRun = runHarness(body);
+    const body = [
+      "pm_resolve || { echo RESOLVE=failed; pm_install panel; pm_in panel build; exit 1; }",
+      'echo "PM=$PM"',
+    ].join("\n");
+    const { status, output } = runHarness(body);
 
-    expect(npmRun.status).toBe(0);
-    expect(field(npmRun.output, "PM")).toBe("npm");
-    expect(npmRun.output).toContain("npm --prefix panel run build --");
+    expect(status).not.toBe(0);
+    expect(field(output, "RESOLVE")).toBe("failed");
+    expect(output).toMatch(/install pnpm/i);
+    expect(output).toMatch(/Node(\.js)? ≥ ?25/);
+    expect(output).toMatch(/corepack/i);
+    expect(existsSync(npmCalled)).toBe(false);
+    // The resolver has no npm spelling left to fall back to.
+    expect(readFileSync(PM_SCRIPT, "utf8")).not.toMatch(/\bnpm\b/);
   }, 30000);
 
   it("pm_in spells an explicit run so a pnpm built-in cannot shadow the script", () => {
@@ -256,35 +300,34 @@ describe("scripts/pm toolchain resolution", () => {
     expect(output).not.toMatch(/pnpm -C \. (bootstrap|sync)\b/);
   }, 30000);
 
-  it("pm_install installs dependencies with pnpm -C and npm --prefix, not a run script", () => {
+  it("pm_install installs dependencies with the resolved pnpm command", () => {
     const withPnpm = join(sandbox, "with-pnpm");
     stub(withPnpm, "node");
     stub(withPnpm, "pnpm");
-    stub(withPnpm, "npm");
+    stub(withPnpm, "corepack");
     writeLocalEnv(`PAVILIO_NODE_BIN="${withPnpm}"`);
 
-    const body = ["pm_resolve || exit 1", 'echo "PM=$PM"', "pm_install panel"].join("\n");
+    const body = ["pm_resolve || exit 1", 'echo "PM_CMD=$PM_CMD"', "pm_install panel"].join("\n");
     const pnpmRun = runHarness(body);
 
     expect(pnpmRun.status).toBe(0);
-    expect(field(pnpmRun.output, "PM")).toBe("pnpm");
+    expect(field(pnpmRun.output, "PM_CMD")).toBe("pnpm");
     expect(pnpmRun.output).toContain("pnpm -C panel install");
+    // Dependency installation, never `run install`: panel/package.json has no
+    // script by that name, so the pm_in spelling dies on "Missing script".
+    expect(pnpmRun.output).not.toContain("run install");
 
-    // The npm fallback this exists for: dependency installation, never
-    // `run install`. panel/package.json has no script by that name, so the
-    // pm_in spelling (`npm --prefix panel run install --`) dies on
-    // "Missing script: install" — and under `set -e` takes the update with it.
-    const npmOnly = join(sandbox, "npm-only");
-    stub(npmOnly, "node");
-    stub(npmOnly, "npm");
-    writeLocalEnv(`PAVILIO_NODE_BIN="${npmOnly}"`);
+    const corepackOnly = join(sandbox, "corepack-only");
+    stub(corepackOnly, "node");
+    stub(corepackOnly, "corepack");
+    writeLocalEnv(`PAVILIO_NODE_BIN="${corepackOnly}"`);
 
-    const npmRun = runHarness(body);
+    const corepackRun = runHarness(body);
 
-    expect(npmRun.status).toBe(0);
-    expect(field(npmRun.output, "PM")).toBe("npm");
-    expect(npmRun.output).toContain("npm --prefix panel install");
-    expect(npmRun.output).not.toContain("run install");
+    expect(corepackRun.status).toBe(0);
+    expect(field(corepackRun.output, "PM_CMD")).toBe("corepack pnpm");
+    expect(corepackRun.output).toContain("corepack pnpm -C panel install");
+    expect(corepackRun.output).not.toContain("run install");
   }, 30000);
 
   it("fails with a message naming pnpm bootstrap when no node is found", () => {

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "events";
 import * as terminalManager from "../lib/terminal-manager";
+import { createModeState } from "../lib/terminal-mode-state";
+import { createTitleState } from "../lib/terminal-title";
 import { attachTerminalSocket } from "../watcher";
 
 // Minimal fake WebSocket for handler tests.
@@ -31,6 +33,9 @@ describe("attachTerminalSocket — mobile-nudge", () => {
         resize: () => {},
         kill: () => {},
       } as never,
+      modeState: createModeState(),
+      titleState: createTitleState(),
+      identityHomeDir: "/",
     });
     const nudge = vi
       .spyOn(terminalManager, "nudgeSession")
@@ -64,6 +69,9 @@ function mockGetSession(): void {
       resize: () => {},
       kill: () => {},
     } as never,
+    modeState: createModeState(),
+    titleState: createTitleState(),
+    identityHomeDir: "/",
   });
 }
 
