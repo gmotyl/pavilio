@@ -104,7 +104,9 @@ beforeAll(() => {
   try {
     if (existsSync(SHARED_PASTE_DIR) && statSync(SHARED_PASTE_DIR).uid !== panel.uid)
       return;
-    mkdirSync(SHARED_PASTE_DIR, { recursive: true });
+    // Match production's traversal-only mode, not the umask default, when
+    // this run is the one creating the shared directory.
+    mkdirSync(SHARED_PASTE_DIR, { recursive: true, mode: 0o711 });
     const name = `test-sentinel-${randomBytes(6).toString("hex")}`;
     const p = join(SHARED_PASTE_DIR, name);
     writeFileSync(p, "sentinel");
@@ -362,8 +364,10 @@ describe("POST /api/terminal/paste-image", () => {
 // survived every test above with its mtime intact, proving nothing here ever
 // read, wrote, renamed or removed the shared paste directory's contents.
 describe("shared paste directory isolation", () => {
-  it("never touches the shared paste directory", () => {
-    if (!sentinel) return; // planting skipped: directory owned by another uid
+  it("never touches the shared paste directory", (ctx) => {
+    // Planting skipped (directory owned by another uid): show the skip in
+    // the run summary instead of passing vacuously.
+    if (!sentinel) return ctx.skip();
     expect(existsSync(sentinel)).toBe(true);
     expect(statSync(sentinel).mtimeMs).toBe(sentinelMtimeMs);
   });
