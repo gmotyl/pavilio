@@ -108,7 +108,7 @@ Each work session should be tracked in `progress/`:
 
 ```bash
 # Track tasks in Todoist
-npm run setup:todoist  # First time setup
+pnpm setup:todoist  # First time setup
 
 # Then use Todoist for daily task management
 # Reference tasks from progress notes
@@ -121,14 +121,14 @@ npm run setup:todoist  # First time setup
 git push
 
 # Check for open issues
-npm run setup:github  # First time setup
+pnpm setup:github  # First time setup
 ```
 
 ### NotebookLM Analysis
 
 ```bash
 # When you need architectural insights
-npm run export-project -- --project .
+pnpm export-project --project .
 
 # Go to https://notebooklm.google.com/
 # Create notebook, paste content
@@ -181,7 +181,7 @@ cd my-project
 # { "provider": "kilocode" } → { "provider": "claude" }
 
 # 2. Setup new provider (first time)
-npm run setup:claude-code
+pnpm setup:claude-code
 
 # 3. Continue working
 # Progress notes stay the same
@@ -193,7 +193,7 @@ npm run setup:claude-code
 
 ```bash
 # Export your project for analysis
-npm run export-project -- --project .
+pnpm export-project --project .
 
 # Upload to NotebookLM and ask:
 # "Summarize this week's progress"
