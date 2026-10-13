@@ -15,6 +15,7 @@ import {
   chmodSync,
   chownSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   promises as fsp,
@@ -97,12 +98,16 @@ afterEach(() => {
 
 // Plant a sentinel in the shared directory before any test runs; the last
 // test asserts it survived untouched, mtime included. Skipped when the
-// directory belongs to another uid — we could not clean our sentinel up.
+// existing entry is a symlink, not a directory, or belongs to another uid —
+// lstat (never following links, matching the production route's guard) so we
+// cannot plant through a link into an unrelated directory we could not clean
+// our sentinel up from.
 let sentinel: string | undefined;
 let sentinelMtimeMs: number | undefined;
 beforeAll(() => {
   try {
-    if (existsSync(SHARED_PASTE_DIR) && statSync(SHARED_PASTE_DIR).uid !== panel.uid)
+    const st = lstatSync(SHARED_PASTE_DIR, { throwIfNoEntry: false });
+    if (st && (st.isSymbolicLink() || !st.isDirectory() || st.uid !== panel.uid))
       return;
     // Match production's traversal-only mode, not the umask default, when
     // this run is the one creating the shared directory.
