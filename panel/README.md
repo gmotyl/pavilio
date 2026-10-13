@@ -14,11 +14,13 @@ Local web dashboard for the pavilio workspace. Built with Vite + React + Express
 
 ## Setup
 
+The panel is part of the root pnpm workspace — one `pnpm install` at the repo
+root installs it; there is no separate panel install. From the repo root:
+
 ```bash
-cd panel
-npm install
-npm run build
-npm start
+pnpm install
+pnpm build
+pnpm start
 # Open http://localhost:3010
 ```
 

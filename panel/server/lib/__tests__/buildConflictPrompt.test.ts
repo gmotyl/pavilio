@@ -45,6 +45,11 @@ describe("buildConflictPrompt", () => {
     expect(out).toContain("branch main");
   });
 
+  it("verifies with the type gate before build and test, since build skips tsc", () => {
+    const out = buildConflictPrompt({ ...base, conflictFiles: ["panel/x.ts"] });
+    expect(out).toContain("pnpm lint && pnpm build && pnpm test (all must exit 0)");
+  });
+
   it("warns to check HEAD holds a full tree before restoring wholesale", () => {
     const out = buildConflictPrompt({ ...base, conflictFiles: ["panel/x.ts"] });
     expect(out).toContain("ls-tree");

@@ -88,7 +88,7 @@ export function buildConflictPrompt(input: ConflictPromptInput): string {
     `1. git -C ${repoRoot} tag -f presync-backup HEAD && git -C ${repoRoot} fetch\n` +
     `2. git -C ${repoRoot} merge --no-commit --no-ff @{u}\n` +
     `3. Apply the per-class guidance above.\n` +
-    `4. Verify before committing: cd ${repoRoot}/panel && pnpm build && pnpm test (both must exit 0)\n` +
+    `4. Verify before committing: cd ${repoRoot}/panel && pnpm lint && pnpm build && pnpm test (all must exit 0)\n` +
     `5. Commit the merge and push.\n` +
     `6. Confirm it is green: POST http://localhost:3010/api/auto-sync/now and expect state "synced".\n`;
 
