@@ -6,7 +6,9 @@ Get pavilio running in 20 minutes.
 
 - Bash shell (macOS, Linux, WSL)
 - Git
-- Node.js 22+ and pnpm (or `corepack pnpm`)
+- Node.js 22+ and pnpm. With only corepack (Node below 25 bundles it; Node ≥ 25 no
+  longer does), run `corepack enable pnpm` once — it installs the `pnpm` shim, so
+  every `pnpm …` command below works as written.
 - Your chosen AI provider credentials (Claude, Kilocode, Copilot, QWEN, Gemini, etc.)
 
 ## Step 1: Clone Repository
