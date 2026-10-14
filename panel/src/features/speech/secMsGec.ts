@@ -5,7 +5,7 @@
  * Self-contained on purpose: no imports, no panel code, no platform APIs. It is
  * meant to move verbatim into a standalone library, and a copy of the same
  * logic is inlined into the `edge-tts-universal` pnpm patch (see
- * `patches/edge-tts-universal@1.4.0.patch`); the golden-vector test covers
+ * `panel/patches/edge-tts-universal@1.4.0.patch`); the golden-vector test covers
  * both.
  *
  * A faithful port of rany2/edge-tts 7.3.1 `edge_tts/drm.py`

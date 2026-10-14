@@ -6,7 +6,7 @@
  * (`generateSecMsGec`) when they build the WebSocket URL, while
  * `Communicate.stream()` does.
  *
- * The library is pnpm-patched (`patches/edge-tts-universal@1.4.0.patch`):
+ * The library is pnpm-patched (`panel/patches/edge-tts-universal@1.4.0.patch`):
  * Microsoft has required the Sec-MS-GEC **v2** token since ~2026-10-10 and
  * answers v1 with HTTP 403, and an unpatched refused handshake never settles
  * the stream. The patch sends v2 (see `./secMsGec.ts`) and rejects with a
