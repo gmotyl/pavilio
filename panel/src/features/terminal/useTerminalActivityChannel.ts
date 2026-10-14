@@ -11,6 +11,14 @@ interface ChannelRecord {
 const records = new Map<string, ChannelRecord>();
 const listeners = new Map<string, Set<(state: ActivityState) => void>>();
 
+type TransitionListener = (
+  sessionId: string,
+  prev: ActivityState,
+  next: ActivityState,
+) => void;
+/** Global listeners called only when a session's state actually changes. */
+const transitionListeners = new Set<TransitionListener>();
+
 let ws: WebSocket | null = null;
 let wsRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -43,6 +51,10 @@ function applyEvent(ev: IncomingEvent): void {
     busySinceAt: nextBusySinceAt,
   });
   notify(ev.sessionId, ev.state);
+  const prevState = prev?.state ?? "idle";
+  if (prevState !== ev.state) {
+    for (const fn of transitionListeners) fn(ev.sessionId, prevState, ev.state);
+  }
 }
 
 export function _applyEventForTests(ev: IncomingEvent): void {
@@ -111,6 +123,17 @@ export function subscribeActivity(
     if (!s) return;
     s.delete(fn);
     if (s.size === 0) listeners.delete(sessionId);
+  };
+}
+
+/**
+ * Subscribe to state changes across all sessions. Unlike {@link subscribeActivity},
+ * repeated events with an unchanged state are not reported.
+ */
+export function subscribeActivityTransitions(fn: TransitionListener): () => void {
+  transitionListeners.add(fn);
+  return () => {
+    transitionListeners.delete(fn);
   };
 }
 
@@ -233,6 +256,7 @@ export function useAggregateActivityState(
 export function _resetForTests(): void {
   records.clear();
   listeners.clear();
+  transitionListeners.clear();
   if (ws) {
     ws.onclose = null;
     ws.close();
