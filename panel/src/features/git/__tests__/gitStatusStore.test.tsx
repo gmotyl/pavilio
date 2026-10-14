@@ -189,6 +189,43 @@ describe("gitStatusStore", () => {
     unsub();
   });
 
+  it("a resubscribe while a fetch is in flight does not queue a second fetch", async () => {
+    const { fn, pending } = deferredFetch();
+    vi.stubGlobal("fetch", fn);
+    const listener = vi.fn();
+
+    // StrictMode mounts, unmounts and remounts an effect in one tick.
+    subscribeGitStatus(listener)();
+    const unsub = subscribeGitStatus(listener);
+    expect(statusCalls(fn)).toBe(1);
+
+    pending[0].resolve(ok([{ status: "M", path: "a.md" }]));
+    await waitFor(() => expect(listener).toHaveBeenCalled());
+    expect(getGitStatusSnapshot().files.map((f) => f.path)).toEqual(["a.md"]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(statusCalls(fn)).toBe(1);
+    unsub();
+  });
+
+  it("no trailing fetch after the last consumer unsubscribes", async () => {
+    const { fn, pending } = deferredFetch();
+    vi.stubGlobal("fetch", fn);
+
+    const unsub = subscribeGitStatus(() => {});
+    requestGitStatusRefresh();
+    unsub();
+
+    pending[0].resolve(ok([]));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(statusCalls(fn)).toBe(1);
+
+    // The next consumer still gets a fresh read.
+    const unsub2 = subscribeGitStatus(() => {});
+    expect(statusCalls(fn)).toBe(2);
+    pending[1].resolve(ok([]));
+    unsub2();
+  });
+
   it("a failed fetch keeps the previous files", async () => {
     const fetchMock = vi
       .fn()

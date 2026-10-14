@@ -53,9 +53,10 @@ async function load(): Promise<void> {
   } finally {
     if (gen === generation) {
       inFlight = false;
+      // With no consumer left, nobody would read the trailing result.
       if (dirty) {
         dirty = false;
-        void load();
+        if (listeners.size > 0) void load();
       }
     }
   }
@@ -89,7 +90,8 @@ export function subscribeGitStatus(listener: () => void): () => void {
   listeners.add(listener);
   if (listeners.size === 1) {
     attach();
-    requestGitStatusRefresh();
+    // An in-flight fetch is fresh enough (StrictMode resubscribes in one tick).
+    if (!inFlight) requestGitStatusRefresh();
   }
   return () => {
     if (!listeners.delete(listener)) return;
