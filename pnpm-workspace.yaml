@@ -1,4 +1,8 @@
 packages:
   - panel
+
 onlyBuiltDependencies:
   - node-pty
+
+patchedDependencies:
+  edge-tts-universal@1.4.0: patches/edge-tts-universal@1.4.0.patch

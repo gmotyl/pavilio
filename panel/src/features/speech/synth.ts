@@ -5,6 +5,13 @@
  * simpler `EdgeTTS` / `EdgeTTSBrowser` wrappers never await the async DRM token
  * (`generateSecMsGec`) when they build the WebSocket URL, while
  * `Communicate.stream()` does.
+ *
+ * The library is pnpm-patched (`patches/edge-tts-universal@1.4.0.patch`):
+ * Microsoft has required the Sec-MS-GEC **v2** token since ~2026-10-10 and
+ * answers v1 with HTTP 403, and an unpatched refused handshake never settles
+ * the stream. The patch sends v2 (see `./secMsGec.ts`) and rejects with a
+ * `WebSocketError` when the socket closes before it opened, so a refusal
+ * reaches the catch below at once — not retried, since only a stall is.
  */
 
 export interface SpeechSynthesisOptions {
