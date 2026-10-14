@@ -5,7 +5,7 @@ Agent guidance for the `panel/` app. Read this before making panel-specific chan
 ## Required Folder Rules
 
 - Treat `src/features/` as the source of truth for frontend structure.
-- Do **not** recreate generic top-level buckets such as `src/components`, `src/hooks`, `src/pages`, `src/lib`, or `src/types`.
+- Do **not** create generic top-level buckets such as `src/components`, `src/hooks`, `src/pages` or `src/types` (`pnpm knip` fails the push on any file nothing imports, so a half-finished migration cannot leave dead twins behind). `src/lib/` holds only small, framework-free helpers (`breakpoints`, `clipboard`); do not grow it.
 - New UI, hooks, helpers, types, and tests should live with the feature that owns them.
 - Prefer `src/features/<feature>/...` over universal folders. If code is reused, give it a named home such as `shell`, `realtime`, or `search`.
 - Keep tests beside their feature in `src/features/<feature>/__tests__/`.
@@ -36,7 +36,7 @@ Agent guidance for the `panel/` app. Read this before making panel-specific chan
 - `src/App.tsx` is the composition root. It wires `ActiveFileProvider`, `BreadcrumbActionsProvider`, and `FloatingActionProvider`, then mounts `QuickFinder` once for the whole app.
 - `features/shell/Layout/` owns the app chrome. `LeftSidebar` contains project/agent/git navigation; `RightSidebar` contains Explorer + Skills.
 - Pages should inject top-bar actions via `useBreadcrumbActions` / `useFloatingAction` rather than editing shell markup directly.
-- `features/realtime/useWebSocket.ts` is the shared refresh signal. `useProjects`, `useAgents`, `useFileIndex`, `useGitStatus`, `MarkdownViewer`, and `ProjectView` rely on it; reuse it instead of adding duplicate polling.
+- `features/realtime/useWebSocket.ts` is the shared refresh signal. `useProjects`, `useFileIndex`, `useGitStatus`, `MarkdownViewer`, and the git views rely on it; reuse it instead of adding duplicate polling.
 - `features/explorer/useActiveFile.ts` is the shared file-preview context used by multiple screens.
 - `features/projects/ProjectView.tsx` is an intentional composition page: it assembles markdown, git, search, explorer, and shell helpers in one place.
 - `features/git/file-tree.ts` is shared by git tree-based views; keep git-specific tree shaping there rather than moving it to a generic utility folder.

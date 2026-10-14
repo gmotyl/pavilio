@@ -32,9 +32,6 @@ vi.mock("../useAllTerminalSessions", () => ({
 vi.mock("../useTerminalMaximized", () => ({
   useTerminalMaximized: () => [false, () => {}, () => {}],
 }));
-vi.mock("../../projects/useProjects", () => ({
-  useProjects: () => [{ name: "vector", repos: [] }],
-}));
 
 import { TerminalsPage } from "../TerminalsPage";
 // The page reads the panel's one speech host from context.
