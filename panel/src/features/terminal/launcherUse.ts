@@ -28,7 +28,7 @@
  *
  * In memory on purpose. A reload starts every cell offering its launchers
  * again, which is honest: the panel tracks agents by pid and cwd
- * (`useAgents`), never by session id, so after a reload it genuinely does not
+ * (`server/lib/agent-registry.ts`), never by session id, so after a reload it genuinely does not
  * know whether the cell's agent is still there.
  *
  * A destroyed session drops its entry — see `destroyTerminal`.
