@@ -55,7 +55,7 @@ vi.mock("../../auto-sync/useAutoSyncStatus", () => ({
   useAutoSyncStatus: () => ({ status: null }),
 }));
 vi.mock("../../git/useGitStatus", () => ({
-  useGitStatus: () => ({ files: [], suggestion: "", refetch: () => {} }),
+  useGitStatus: () => ({ files: [], refetch: () => {} }),
 }));
 vi.mock("../../speech/useSpeechHost", async () => {
   const { INERT_SPEECH_HOST } = await import(

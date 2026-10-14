@@ -97,7 +97,7 @@ vi.mock("../../auto-sync/useAutoSyncStatus", () => ({
   useAutoSyncStatus: () => ({ status: null }),
 }));
 vi.mock("../../git/useGitStatus", () => ({
-  useGitStatus: () => ({ files: [], suggestion: "", refetch: () => {} }),
+  useGitStatus: () => ({ files: [], refetch: () => {} }),
 }));
 vi.mock("../createTerminalSession", () => ({
   createTerminalSession: vi.fn(),
