@@ -54,7 +54,16 @@ function applyEvent(ev: IncomingEvent): void {
   // not swallow a transition that later same-state events would never re-deliver.
   const prevState = prev?.state ?? "idle";
   if (prevState !== ev.state) {
-    for (const fn of transitionListeners) fn(ev.sessionId, prevState, ev.state);
+    // Copy first: a listener may unsubscribe while being notified.
+    for (const fn of [...transitionListeners]) {
+      // Isolated: one broken listener must not cut the others, or the per-session
+      // notify below, off from a transition that is never re-delivered.
+      try {
+        fn(ev.sessionId, prevState, ev.state);
+      } catch (err) {
+        console.warn("[terminal-activity] transition listener threw:", err);
+      }
+    }
   }
   notify(ev.sessionId, ev.state);
 }

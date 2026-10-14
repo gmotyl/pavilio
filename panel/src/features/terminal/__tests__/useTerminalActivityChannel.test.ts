@@ -89,6 +89,24 @@ describe("useTerminalActivityChannel", () => {
     expect(fn).toHaveBeenCalledWith("s1", "idle", "busy");
   });
 
+  it("a throwing transition listener does not block other listeners", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const other = vi.fn();
+    const seen: string[] = [];
+    subscribeActivityTransitions(() => {
+      throw new Error("transition boom");
+    });
+    subscribeActivityTransitions(other);
+    subscribeActivity("s1", (state) => seen.push(state));
+    expect(() =>
+      _applyEventForTests({ sessionId: "s1", state: "attention", at: 100 }),
+    ).not.toThrow();
+    expect(other).toHaveBeenCalledWith("s1", "idle", "attention");
+    expect(seen).toEqual(["attention"]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("unsubscribing a transition listener stops further calls", () => {
     const fn = vi.fn();
     const unsubscribe = subscribeActivityTransitions(fn);
