@@ -27,6 +27,10 @@ let snapshot: GitStatusSnapshot = EMPTY;
 const listeners = new Set<() => void>();
 let inFlight = false;
 let dirty = false;
+// Set once the store stayed detached past the tick it detached in, so realtime
+// triggers may have gone unheard. A StrictMode resubscribe in the same tick never
+// sets it.
+let missedTriggers = false;
 let detachRealtime: (() => void) | null = null;
 let detachTransitions: (() => void) | null = null;
 // Bumped by the test reset so a fetch from a previous test cannot land in the next.
@@ -84,14 +88,21 @@ function detach(): void {
   detachTransitions?.();
   detachRealtime = null;
   detachTransitions = null;
+  const gen = generation;
+  queueMicrotask(() => {
+    if (gen === generation && listeners.size === 0) missedTriggers = true;
+  });
 }
 
 export function subscribeGitStatus(listener: () => void): () => void {
   listeners.add(listener);
   if (listeners.size === 1) {
     attach();
-    // An in-flight fetch is fresh enough (StrictMode resubscribes in one tick).
+    // An in-flight fetch is fresh enough for a StrictMode resubscribe (same tick).
+    // After a real detach it may predate unheard changes, so a trailing fetch follows.
     if (!inFlight) requestGitStatusRefresh();
+    else if (missedTriggers) dirty = true;
+    missedTriggers = false;
   }
   return () => {
     if (!listeners.delete(listener)) return;
@@ -111,5 +122,6 @@ export function __resetGitStatusStoreForTests(): void {
   snapshot = EMPTY;
   inFlight = false;
   dirty = false;
+  missedTriggers = false;
   generation += 1;
 }

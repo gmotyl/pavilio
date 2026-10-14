@@ -207,6 +207,25 @@ describe("gitStatusStore", () => {
     unsub();
   });
 
+  it("a later remount during an in-flight request fetches again once it settles", async () => {
+    const { fn, pending } = deferredFetch();
+    vi.stubGlobal("fetch", fn);
+
+    subscribeGitStatus(() => {})();
+    // A later tick: changes made while detached went unheard.
+    await new Promise((r) => setTimeout(r, 0));
+    const unsub = subscribeGitStatus(() => {});
+    expect(statusCalls(fn)).toBe(1);
+
+    pending[0].resolve(ok([{ status: "M", path: "old.md" }]));
+    await waitFor(() => expect(statusCalls(fn)).toBe(2));
+    pending[1].resolve(ok([{ status: "M", path: "new.md" }]));
+    await waitFor(() =>
+      expect(getGitStatusSnapshot().files.map((f) => f.path)).toEqual(["new.md"]),
+    );
+    unsub();
+  });
+
   it("no trailing fetch after the last consumer unsubscribes", async () => {
     const { fn, pending } = deferredFetch();
     vi.stubGlobal("fetch", fn);
