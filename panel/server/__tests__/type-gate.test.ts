@@ -31,9 +31,9 @@ describe("type gate", () => {
     expect(build).not.toMatch(/\btsc\b/);
   });
 
-  it("pre-push runs lint before the test suite", () => {
+  it("pre-push runs lint, then knip, before the test suite", () => {
     const hook = readFileSync(join(REPO_ROOT, "panel/.husky/pre-push"), "utf8");
-    expect(hook).toMatch(/pnpm lint\s*&&\s*pnpm test/);
+    expect(hook).toMatch(/pnpm lint\s*&&\s*pnpm knip\s*&&\s*pnpm test/);
   });
 
   it("root lint delegates to the panel", () => {

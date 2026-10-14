@@ -16,7 +16,6 @@ import AgentSettings from "../../agents/AgentSettings";
 import LeftSidebar from "../../shell/LeftSidebar";
 import { SpeechHostProvider } from "../SpeechHostProvider";
 import { Breadcrumbs as ShellBreadcrumbs } from "../../shell/Breadcrumbs";
-import LegacyBreadcrumbs from "../../../components/Breadcrumbs";
 
 /**
  * LeftSidebar pulls in the whole project/terminal/git data layer; the sidebar
@@ -197,8 +196,7 @@ describe("VoiceSelect", () => {
     expect(entry).not.toHaveTextContent("Agent Settings");
     sidebar.unmount();
 
-    // Both breadcrumb copies carry the label; only changing one leaves the
-    // panel inconsistent depending on which module renders.
+    // The breadcrumb carries the relabelled entry too.
     const shell = render(
       <MemoryRouter initialEntries={["/settings"]}>
         <ShellBreadcrumbs />
@@ -209,13 +207,5 @@ describe("VoiceSelect", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("Agent Settings")).not.toBeInTheDocument();
     shell.unmount();
-
-    render(
-      <MemoryRouter initialEntries={["/settings"]}>
-        <LegacyBreadcrumbs />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText("Settings")).toBeInTheDocument();
-    expect(screen.queryByText("Agent Settings")).not.toBeInTheDocument();
   });
 });

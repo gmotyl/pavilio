@@ -27,6 +27,7 @@
     "pull": "bash scripts/update.sh",
     "test": "pnpm -C panel test",
     "lint": "pnpm -C panel lint",
+    "knip": "pnpm -C panel knip",
     "build": "pnpm -C panel build",
     "dev": "pnpm -C panel dev",
     "start": "./scripts/panel start",

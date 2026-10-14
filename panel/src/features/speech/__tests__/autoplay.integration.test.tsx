@@ -430,7 +430,7 @@ vi.mock("../../projects/useITermShortcuts", () => ({
 
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import ProjectTerminalsSurface from "../../terminal/ProjectTerminalsSurface";
-import TerminalsPage from "../../../pages/TerminalsPage";
+import { TerminalsPage } from "../../terminal/TerminalsPage";
 import { SpeechHostProvider } from "../SpeechHostProvider";
 import {
   __resetAlertsForTests,

@@ -3,7 +3,7 @@ import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 const surfaceProps = vi.fn();
-vi.mock("../../features/terminal/TerminalsSurface", () => ({
+vi.mock("../TerminalsSurface", () => ({
   __esModule: true,
   default: (props: Record<string, unknown>) => {
     surfaceProps(props);
@@ -19,7 +19,7 @@ const placeTiles = vi.fn();
 const applyPreset = vi.fn();
 const tiles = [{ sessionId: "s1", x: 0, y: 0, w: 12, h: 12 }];
 
-vi.mock("../../features/terminal/useAllTerminalSessions", () => ({
+vi.mock("../useAllTerminalSessions", () => ({
   useAllTerminalSessions: () => ({
     sessions: [{ id: "s1", project: "vector", name: "dev" }],
     refresh: async () => {},
@@ -29,20 +29,20 @@ vi.mock("../../features/terminal/useAllTerminalSessions", () => ({
     applyPreset,
   }),
 }));
-vi.mock("../../features/terminal/useTerminalMaximized", () => ({
+vi.mock("../useTerminalMaximized", () => ({
   useTerminalMaximized: () => [false, () => {}, () => {}],
 }));
-vi.mock("../../features/projects/useProjects", () => ({
+vi.mock("../../projects/useProjects", () => ({
   useProjects: () => [{ name: "vector", repos: [] }],
 }));
 
-import TerminalsPage from "../TerminalsPage";
+import { TerminalsPage } from "../TerminalsPage";
 // The page reads the panel's one speech host from context.
 import {
   readStandaloneTerminalFocus,
   subscribeStandaloneTerminalFocus,
-} from "../../features/terminal/standaloneTerminalFocus";
-import { SpeechHostProvider } from "../../features/speech/SpeechHostProvider";
+} from "../standaloneTerminalFocus";
+import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
 
 function renderPage() {
   surfaceProps.mockClear();
