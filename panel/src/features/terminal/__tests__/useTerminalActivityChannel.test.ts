@@ -70,6 +70,25 @@ describe("useTerminalActivityChannel", () => {
     expect(fn).toHaveBeenCalledWith("s2", "idle", "attention");
   });
 
+  it("a first idle event for an unknown session does not fire a transition", () => {
+    const fn = vi.fn();
+    subscribeActivityTransitions(fn);
+    _applyEventForTests({ sessionId: "s3", state: "idle", at: 100 });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("a throwing activity listener does not swallow the transition", () => {
+    const fn = vi.fn();
+    subscribeActivity("s1", () => {
+      throw new Error("listener boom");
+    });
+    subscribeActivityTransitions(fn);
+    expect(() =>
+      _applyEventForTests({ sessionId: "s1", state: "busy", at: 100 }),
+    ).toThrow("listener boom");
+    expect(fn).toHaveBeenCalledWith("s1", "idle", "busy");
+  });
+
   it("unsubscribing a transition listener stops further calls", () => {
     const fn = vi.fn();
     const unsubscribe = subscribeActivityTransitions(fn);

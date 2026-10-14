@@ -11,7 +11,7 @@ interface ChannelRecord {
 const records = new Map<string, ChannelRecord>();
 const listeners = new Map<string, Set<(state: ActivityState) => void>>();
 
-type TransitionListener = (
+export type TransitionListener = (
   sessionId: string,
   prev: ActivityState,
   next: ActivityState,
@@ -50,11 +50,13 @@ function applyEvent(ev: IncomingEvent): void {
         : null,
     busySinceAt: nextBusySinceAt,
   });
-  notify(ev.sessionId, ev.state);
+  // Deliver transitions before per-session listeners: a throwing listener must
+  // not swallow a transition that later same-state events would never re-deliver.
   const prevState = prev?.state ?? "idle";
   if (prevState !== ev.state) {
     for (const fn of transitionListeners) fn(ev.sessionId, prevState, ev.state);
   }
+  notify(ev.sessionId, ev.state);
 }
 
 export function _applyEventForTests(ev: IncomingEvent): void {
