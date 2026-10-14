@@ -344,6 +344,45 @@ describe("scripts/update.sh panel build", () => {
     // The bundle lands in the destination workspace, never copied from upstream.
     expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(true);
   }, 60000);
+
+  it("installs the synced panel dependencies before building the bundle", () => {
+    writePanelFixture(SUCCEEDING_BUILD);
+    commitUpstream("panel build succeeds");
+    // The package manager is the recording stub: sync mode used to rsync and go
+    // straight to the build, so a dependency (or a pnpm patch) changed upstream
+    // never reached the workspace's node_modules/.
+    const pnpmCalled = stubCommand("pnpm");
+
+    const { status, output } = runUpdate();
+
+    expect(status).toBe(0);
+    expect(output).toMatch(/Installing panel dependencies/);
+    const calls = invocations(pnpmCalled);
+    expect(calls).toContain(`-C ${join(dest, "panel")} install\n`);
+    // ...and before the build, which is the whole point of installing at all.
+    expect(calls.indexOf("install")).toBeLessThan(calls.indexOf("build"));
+  }, 60000);
+
+  it("stops when the synced panel dependency install fails, naming both commands and without building", () => {
+    writePanelFixture(SUCCEEDING_BUILD);
+    commitUpstream("panel build succeeds");
+    // A package manager whose `install` fails and whose every other subcommand
+    // succeeds, so the install step is the only thing that can stop the run.
+    const pnpmCalled = stubCommand(
+      "pnpm",
+      ['for arg in "$@"; do', '  [ "$arg" = "install" ] && exit 1', "done", "exit 0"].join("\n"),
+    );
+
+    const { status, output } = runUpdate();
+
+    expect(status).toBe(1);
+    expect(output).toMatch(/dependencies failed/i);
+    expect(output).toMatch(/pnpm -C .*panel.* install/);
+    expect(output).toMatch(/pnpm -C .*panel.* build/);
+    expect(output).not.toMatch(/panel bundle built/);
+    expect(output).not.toMatch(/^Done\./m);
+    expect(invocations(pnpmCalled)).not.toContain("build");
+  }, 60000);
 });
 
 describe("scripts/update.sh sync commit", () => {

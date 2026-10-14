@@ -316,6 +316,33 @@ rsync -a \
   "$UPSTREAM_DIR/scripts/" "$REPO_ROOT/scripts/"
 
 echo ""
+echo "Installing panel dependencies..."
+# The rsync above lands upstream's panel/package.json, but nothing else in sync
+# mode ever acts on it: without this step a dependency added, bumped or patched
+# upstream reaches the workspace as source only, and the build below runs over
+# the previous node_modules/ — the silent half-update clone mode installs to
+# prevent. It is also the only thing that applies panel/package.json's
+# `pnpm.patchedDependencies` here: the workspace has no root
+# pnpm-workspace.yaml (the repo root is never synced), so panel/ is installed
+# standalone and its own package.json is what pnpm reads.
+#
+# pm_install, not `pm_in … install`: dependency installation is the package
+# manager's own command, and panel/package.json has no script by that name.
+#
+# `if !` rather than a bare call, like every other fatal step here: under
+# `set -e` a failed install would abort with nothing but the package manager's
+# output, and by this point the synced files are already in the tree, so the
+# user needs to be told what state that leaves them in.
+if ! pm_install "$REPO_ROOT/panel"; then
+  echo ""
+  echo "Error: installing the panel dependencies failed — the upstream files are synced into the workspace (not committed yet), but node_modules/ is stale and the bundle was not rebuilt."
+  echo "Fix the install, then re-run the update, or finish it by hand:"
+  echo "  $PANEL_INSTALL_CMD"
+  echo "  $PANEL_BUILD_CMD"
+  exit 1
+fi
+
+echo ""
 echo "Regenerating agent commands from the freshly-synced skills/ ..."
 regenerate_agent_commands
 
