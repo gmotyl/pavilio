@@ -133,7 +133,7 @@ vi.mock("../../auto-sync/useAutoSyncStatus", () => ({
   useAutoSyncStatus: () => ({ status: null }),
 }));
 vi.mock("../../git/useGitStatus", () => ({
-  useGitStatus: () => ({ files: [], suggestion: "", refetch: () => {} }),
+  useGitStatus: () => ({ files: [], refetch: () => {} }),
 }));
 
 /** The writes the Last-open-view bookmark received, by the key the store uses. */

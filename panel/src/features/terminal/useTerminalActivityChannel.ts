@@ -11,6 +11,14 @@ interface ChannelRecord {
 const records = new Map<string, ChannelRecord>();
 const listeners = new Map<string, Set<(state: ActivityState) => void>>();
 
+export type TransitionListener = (
+  sessionId: string,
+  prev: ActivityState,
+  next: ActivityState,
+) => void;
+/** Global listeners called only when a session's state actually changes. */
+const transitionListeners = new Set<TransitionListener>();
+
 let ws: WebSocket | null = null;
 let wsRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -42,6 +50,21 @@ function applyEvent(ev: IncomingEvent): void {
         : null,
     busySinceAt: nextBusySinceAt,
   });
+  // Deliver transitions before per-session listeners: a throwing listener must
+  // not swallow a transition that later same-state events would never re-deliver.
+  const prevState = prev?.state ?? "idle";
+  if (prevState !== ev.state) {
+    // Copy first: a listener may unsubscribe while being notified.
+    for (const fn of [...transitionListeners]) {
+      // Isolated: one broken listener must not cut the others, or the per-session
+      // notify below, off from a transition that is never re-delivered.
+      try {
+        fn(ev.sessionId, prevState, ev.state);
+      } catch (err) {
+        console.warn("[terminal-activity] transition listener threw:", err);
+      }
+    }
+  }
   notify(ev.sessionId, ev.state);
 }
 
@@ -111,6 +134,17 @@ export function subscribeActivity(
     if (!s) return;
     s.delete(fn);
     if (s.size === 0) listeners.delete(sessionId);
+  };
+}
+
+/**
+ * Subscribe to state changes across all sessions. Unlike {@link subscribeActivity},
+ * repeated events with an unchanged state are not reported.
+ */
+export function subscribeActivityTransitions(fn: TransitionListener): () => void {
+  transitionListeners.add(fn);
+  return () => {
+    transitionListeners.delete(fn);
   };
 }
 
@@ -233,6 +267,7 @@ export function useAggregateActivityState(
 export function _resetForTests(): void {
   records.clear();
   listeners.clear();
+  transitionListeners.clear();
   if (ws) {
     ws.onclose = null;
     ws.close();
