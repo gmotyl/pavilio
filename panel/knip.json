@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "hooks/speak-question.mjs",
+    "hooks/speak-response.mjs",
+    "hooks/speak-response-codex.mjs",
+    "scripts/install-speech-hook.mjs",
+    "public/sw.js"
+  ]
+}
