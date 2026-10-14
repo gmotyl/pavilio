@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useProjectTodayMinutes } from "../features/time/TimeTrackingProvider";
-import { formatHHMM } from "../features/time/reportFormatters";
-import { EntriesList } from "../features/time/EntriesList";
-import { ManualEntryForm } from "../features/time/ManualEntryForm";
-import { ReportBlock } from "../features/time/ReportBlock";
+import { useProjectTodayMinutes } from "./TimeTrackingProvider";
+import { formatHHMM } from "./reportFormatters";
+import { EntriesList } from "./EntriesList";
+import { ManualEntryForm } from "./ManualEntryForm";
+import { ReportBlock } from "./ReportBlock";
 
 const overlineClass = "text-[10px] tracking-[0.2em] uppercase";
 const overlineStyle = { color: "var(--text-tertiary)" } as const;
@@ -21,7 +21,7 @@ function todayLabel(): string {
   });
 }
 
-export default function ProjectTimePage() {
+export function ProjectTimePage() {
   const { name } = useParams<{ name: string }>();
   const project = name ?? "";
   const { todayMinutes, resetToday } = useProjectTodayMinutes(project);

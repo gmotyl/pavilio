@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
-vi.mock("../../features/terminal/useAllTerminalSessions", () => ({
+vi.mock("../../terminal/useAllTerminalSessions", () => ({
   useAllTerminalSessions: () => ({
     // The TimeTrackingProvider mounts a tracker slot per project present in
     // sessions, so the test page needs at least one "metro" session for
@@ -23,12 +23,12 @@ vi.mock("../../features/terminal/useAllTerminalSessions", () => ({
   }),
 }));
 
-vi.mock("../../features/terminal/useTerminalActivityChannel", () => ({
+vi.mock("../../terminal/useTerminalActivityChannel", () => ({
   useAggregateActivityState: () => ({ state: "idle", attentionSinceAt: null }),
 }));
 
-import ProjectTimePage from "../ProjectTimePage";
-import { TimeTrackingProvider } from "../../features/time/TimeTrackingProvider";
+import { ProjectTimePage } from "../ProjectTimePage";
+import { TimeTrackingProvider } from "../TimeTrackingProvider";
 
 let fetchMock: ReturnType<typeof vi.fn>;
 

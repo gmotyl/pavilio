@@ -14,9 +14,6 @@ import { join, relative } from "path";
  */
 
 const FEATURES_ROOT = join(__dirname, "..", "features");
-const ROUTED_PAGES = ["TerminalsPage.tsx", "ArchivePage.tsx"].map((f) =>
-  join(__dirname, "..", "pages", f),
-);
 
 interface ButtonHit {
   file: string;
@@ -76,7 +73,7 @@ function findButtons(file: string): ButtonHit[] {
 }
 
 describe("button data-testid contract", () => {
-  const files = [...walkTsx(FEATURES_ROOT), ...ROUTED_PAGES];
+  const files = walkTsx(FEATURES_ROOT);
   const allHits = files.flatMap(findButtons);
 
   it("every <button> has data-testid", () => {

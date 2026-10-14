@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Inbox, RotateCcw, Search } from "lucide-react";
-import { useArchivedProjects } from "../features/projects/useArchivedProjects";
+import { useArchivedProjects } from "./useArchivedProjects";
 
 function formatDate(iso: string): string {
   try {
@@ -15,7 +15,7 @@ function formatDate(iso: string): string {
   }
 }
 
-export default function ArchivePage() {
+export function ArchivePage() {
   const { archived, restore, error } = useArchivedProjects();
   const [filter, setFilter] = useState("");
 

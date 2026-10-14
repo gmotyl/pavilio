@@ -432,7 +432,6 @@ describe("the enumeration the guard rests on", () => {
     // mechanism: the mechanism is `readdirSync`.
     for (const tree of [
       ROOT_TREE,
-      "pages",
       "lib",
       "features/explorer",
       "features/markdown",

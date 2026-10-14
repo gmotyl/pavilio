@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAllTerminalSessions } from "../features/terminal/useAllTerminalSessions";
-import { useTerminalMaximized } from "../features/terminal/useTerminalMaximized";
-import TerminalsSurface from "../features/terminal/TerminalsSurface";
-import { destroyTerminal } from "../features/terminal/terminalInstances";
-import type { TerminalHandle } from "../features/terminal/TerminalView";
-import { publishStandaloneTerminalFocus } from "../features/terminal/standaloneTerminalFocus";
-import { usePanelSpeech } from "../features/speech/SpeechHostProvider";
+import { useAllTerminalSessions } from "./useAllTerminalSessions";
+import { useTerminalMaximized } from "./useTerminalMaximized";
+import TerminalsSurface from "./TerminalsSurface";
+import { destroyTerminal } from "./terminalInstances";
+import type { TerminalHandle } from "./TerminalView";
+import { publishStandaloneTerminalFocus } from "./standaloneTerminalFocus";
+import { usePanelSpeech } from "../speech/SpeechHostProvider";
 
-export default function TerminalsPage() {
+export function TerminalsPage() {
   const {
     sessions: allSessions,
     refresh,
