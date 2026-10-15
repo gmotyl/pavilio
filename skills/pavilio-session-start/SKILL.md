@@ -29,11 +29,12 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 1. Load the most recent progress file from `<root>/projects/[project]/progress/`
 2. Read `PROJECT.md` — the resume card: overview, repos + working rules, gotchas (always; capped at 60 lines for exactly this read). `STATUS.md` is **not** read at start; it holds meeting-driven state for [[pavilio-question]] / [[pavilio-manager]]. Read it only when the session turns out to be meeting prep or a status question.
 3. Derive **active work** by listing the **names** of the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). Do not open their files at this point. There is no active-plan pointer file to read.
-4. **Branch on the active changes found:**
+4. **Always display the last-session summary first** — regardless of how many active changes exist: describe in 1-3 sentences what we worked on yesterday/today (from the latest progress file), then state the recommended next step in a separate sentence. Only the fast-entry variant skips this.
+5. **Branch on the active changes found:**
 
-   **None** → Display a brief last-session summary: describe in 1-3 sentences what we worked on yesterday/today (from the latest progress file), then state the recommended next step in a separate sentence. Then ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.
+   **None** → After the summary, ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.
 
-   **One active change** → Skip summary. Show:
+   **One active change** → After the summary, show:
    ```
    In-progress change: <change-id>
 
@@ -41,7 +42,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
    ```
    Wait for reply. If confirmed → the task is known: load its scope (below), read that change's `tasks.md` for the next unchecked task, and enter the workflow at **step 3: Execute**. If new task → treat as fast-entry with task description.
 
-   **Multiple active changes** → Skip summary. Show a numbered list of change names, wait for selection.
+   **Multiple active changes** → After the summary, show a numbered list of change names, wait for selection.
 
 **Once the task is known** (reply to the question above, a selected change, or fast-entry), load context for that scope only, guided by `PROJECT.md`:
 - `CONTEXT.md` (if present) — the project glossary
