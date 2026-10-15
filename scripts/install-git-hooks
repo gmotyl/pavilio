@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Install pavilio's git hooks — but only into a pavilio clone.
+#
+#   bash scripts/install-git-hooks      (run by panel/package.json "prepare")
+#
+# The hooks under panel/.husky are pavilio's own development gates: pre-push
+# runs `pnpm lint && pnpm knip && pnpm test` against pavilio's root scripts.
+# panel/ is also rsync'd into sync-mode workspaces (scripts/update.sh), where
+# `pnpm install` runs the same "prepare" — and a bare `husky panel/.husky` there
+# pointed the *workspace* repo's core.hooksPath at those gates. The workspace
+# root has none of pavilio's lint/knip scripts and knip judges a mirrored panel/
+# against a tree it was never configured for, so every push from the workspace —
+# the user's and auto-sync's alike — failed in a hook that was never meant for it.
+#
+# So the hooks go in only where the repository tracks pavilio itself (the same
+# remote-based answer scripts/update.sh uses for clone mode). Anywhere else this
+# is a no-op, except that it takes back a core.hooksPath an earlier install left
+# pointing at panel/.husky/_ — a hooksPath the user set themselves is left alone.
+
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=scripts/remotes
+. "$SCRIPT_DIR/remotes"
+
+cd "$REPO_ROOT"
+
+# Not a git checkout (a tarball, a CI cache): nothing to install into.
+git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+
+if repo_is_pavilio_clone "$REPO_ROOT"; then
+  exec husky panel/.husky
+fi
+
+if [ "$(git config --local --get core.hooksPath 2>/dev/null || true)" = "panel/.husky/_" ]; then
+  git config --local --unset core.hooksPath
+  echo "install-git-hooks: not a pavilio clone — removed core.hooksPath=panel/.husky/_ left by an earlier install"
+fi
