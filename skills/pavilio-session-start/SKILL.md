@@ -31,7 +31,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 3. Derive **active work** by listing the **names** of the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). Do not open their files at this point. There is no active-plan pointer file to read.
 4. **Branch on the active changes found:**
 
-   **None** → Display brief last-session summary, then ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.
+   **None** → Display a brief last-session summary: describe in 1-3 sentences what we worked on yesterday/today (from the latest progress file), then state the recommended next step in a separate sentence. Then ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.
 
    **One active change** → Skip summary. Show:
    ```
