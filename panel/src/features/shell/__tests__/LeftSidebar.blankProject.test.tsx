@@ -24,7 +24,7 @@ vi.mock("../../speech/useSpeechHost", async () => {
 });
 
 import LeftSidebar from "../LeftSidebar";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
 
 vi.mock("../../projects/useProjects", () => ({
   // A blank name is what a project list mid-resolution looks like; the sidebar
@@ -67,9 +67,9 @@ describe("LeftSidebar with an unresolved project name", () => {
     expect(() =>
       render(
         <MemoryRouter initialEntries={["/"]}>
-          <SpeechHostProvider>
+          <TerminalSpeechHost>
             <LeftSidebar />
-          </SpeechHostProvider>
+          </TerminalSpeechHost>
         </MemoryRouter>,
       ),
     ).not.toThrow();

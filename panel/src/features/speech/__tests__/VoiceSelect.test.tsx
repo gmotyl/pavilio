@@ -12,7 +12,7 @@ import { storageKey } from "../../../preferences/types";
 import { readPreference } from "../../../preferences/store";
 import AgentSettings from "../../agents/AgentSettings";
 import LeftSidebar from "../../shell/LeftSidebar";
-import { SpeechHostProvider } from "../SpeechHostProvider";
+import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
 import { Breadcrumbs as ShellBreadcrumbs } from "../../shell/Breadcrumbs";
 
 /**
@@ -338,9 +338,9 @@ describe("VoiceSelect", () => {
 
     const sidebar = render(
       <MemoryRouter initialEntries={["/settings"]}>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <LeftSidebar />
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
     // The test id is part of the contract and must survive the relabelling.

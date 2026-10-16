@@ -36,7 +36,7 @@ vi.mock("../../git/useGitStatus", () => ({
 }));
 
 import LeftSidebar from "../LeftSidebar";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
 
 afterEach(() => {
   cleanup();
@@ -48,9 +48,9 @@ afterEach(() => {
 function setup() {
   return render(
     <MemoryRouter initialEntries={["/"]}>
-      <SpeechHostProvider>
+      <TerminalSpeechHost>
         <LeftSidebar />
-      </SpeechHostProvider>
+      </TerminalSpeechHost>
     </MemoryRouter>,
   );
 }

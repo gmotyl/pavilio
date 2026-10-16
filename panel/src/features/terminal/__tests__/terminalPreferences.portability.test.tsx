@@ -40,7 +40,7 @@ vi.mock("../TerminalsSurface", () => ({
 }));
 
 import ProjectTerminalsSurface from "../ProjectTerminalsSurface";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../TerminalSpeechHost";
 import { TerminalDrawerProvider, useTerminalDrawer } from "../useTerminalDrawer";
 import { useTerminalSessions } from "../useTerminalSessions";
 import { useTerminalOrdering } from "../useTerminalOrdering";
@@ -184,11 +184,11 @@ describe("the terminal tier boundary", () => {
   it("writes nothing on a cold render of the terminal surface", async () => {
     render(
       <MemoryRouter initialEntries={["/project/vector/iterm"]}>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <TerminalDrawerProvider>
             <ProjectTerminalsSurface projectName="vector" active />
           </TerminalDrawerProvider>
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
     await screen.findByTestId("surface");
@@ -205,11 +205,11 @@ describe("the terminal tier boundary", () => {
     expect(() =>
       render(
         <MemoryRouter initialEntries={["/project//iterm"]}>
-          <SpeechHostProvider>
+          <TerminalSpeechHost>
             <TerminalDrawerProvider>
               <ProjectTerminalsSurface projectName="" active />
             </TerminalDrawerProvider>
-          </SpeechHostProvider>
+          </TerminalSpeechHost>
         </MemoryRouter>,
       ),
     ).not.toThrow();

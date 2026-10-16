@@ -94,7 +94,7 @@ vi.mock("../../speech/useSpeechHost", async () => {
 });
 
 import LeftSidebar from "../LeftSidebar";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
 import ProjectRedirect from "../../projects/ProjectRedirect";
 import { readLastPath, writeLastPath } from "../lastPath";
 import { writeTerminalFocus } from "../../terminal/useTerminalSessions";
@@ -227,7 +227,7 @@ function Landing() {
 function renderShell(initial = "/") {
   return render(
     <MemoryRouter initialEntries={[initial]}>
-      <SpeechHostProvider>
+      <TerminalSpeechHost>
         <LeftSidebar />
         <Routes>
           <Route
@@ -236,7 +236,7 @@ function renderShell(initial = "/") {
           />
           <Route path="/project/:name/:section" element={<Landing />} />
         </Routes>
-      </SpeechHostProvider>
+      </TerminalSpeechHost>
     </MemoryRouter>,
   );
 }
@@ -286,9 +286,9 @@ describe("LeftSidebar project link", () => {
   it("links the project name to the bare /project/:name route (not /iterm)", () => {
     render(
       <MemoryRouter initialEntries={["/"]}>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <LeftSidebar />
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
     const link = screen.getByRole("link", { name: "vector" });

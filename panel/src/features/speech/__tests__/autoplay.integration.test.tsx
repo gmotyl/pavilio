@@ -441,7 +441,7 @@ vi.mock("../../projects/useITermShortcuts", () => ({
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import ProjectTerminalsSurface from "../../terminal/ProjectTerminalsSurface";
 import { TerminalsPage } from "../../terminal/TerminalsPage";
-import { SpeechHostProvider } from "../SpeechHostProvider";
+import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
 import {
   __resetAlertsForTests,
   getAlertsSnapshot,
@@ -563,9 +563,9 @@ const barVisible = (sessionId: string): boolean =>
 async function renderProjectSurface(): Promise<{ unmount: () => void }> {
   const view = render(
     <MemoryRouter>
-      <SpeechHostProvider>
+      <TerminalSpeechHost>
         <ProjectTerminalsSurface projectName="vector" active />
-      </SpeechHostProvider>
+      </TerminalSpeechHost>
     </MemoryRouter>,
   );
   await act(async () => {
@@ -582,12 +582,12 @@ async function renderProjectSurface(): Promise<{ unmount: () => void }> {
 async function renderBothViews(): Promise<void> {
   render(
     <MemoryRouter>
-      <SpeechHostProvider>
+      <TerminalSpeechHost>
         {/* ProjectView's iTerm surface. */}
         <ProjectTerminalsSurface projectName="vector" active />
         {/* TerminalDrawer's, mounted over it on Cmd+B. */}
         <ProjectTerminalsSurface projectName="vector" active={false} fill />
-      </SpeechHostProvider>
+      </TerminalSpeechHost>
     </MemoryRouter>,
   );
   await act(async () => {
@@ -1057,9 +1057,9 @@ describe("autoplay — the surfaces and the session language", () => {
   it("the standalone terminals page wires its cells to the channel", async () => {
     render(
       <MemoryRouter>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <TerminalsPage />
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
     await act(async () => {
@@ -2142,10 +2142,10 @@ describe("the speaking alert, end to end", () => {
     sessionList.current = sessions;
     render(
       <MemoryRouter initialEntries={["/project/vector/iterm"]}>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <ProjectTerminalsSurface projectName="vector" active />
           <LocationProbe />
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
     await act(async () => {

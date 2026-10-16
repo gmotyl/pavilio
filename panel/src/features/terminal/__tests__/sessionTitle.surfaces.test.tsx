@@ -116,7 +116,7 @@ import { TerminalsSurface } from "../TerminalsSurface";
 import QuickTerminalModal from "../QuickTerminalModal";
 import { TerminalDrawerProvider } from "../useTerminalDrawer";
 import LeftSidebar from "../../shell/LeftSidebar";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../TerminalSpeechHost";
 
 const TITLE = "Pavilio crash after changes";
 
@@ -266,9 +266,9 @@ function renderSidebar(sessions: SessionMeta[]) {
   sidebarSessions.list = sessions;
   render(
     <MemoryRouter initialEntries={["/project/pavilio"]}>
-      <SpeechHostProvider>
+      <TerminalSpeechHost>
         <LeftSidebar />
-      </SpeechHostProvider>
+      </TerminalSpeechHost>
     </MemoryRouter>,
   );
   fireEvent.click(screen.getByTestId("sidebar-project-expand-pavilio"));

@@ -24,7 +24,7 @@ vi.mock("../../speech/useSpeechHost", async () => {
 });
 
 import { ProjectActivityLed } from "../ProjectActivityLed";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../TerminalSpeechHost";
 import {
   _applyEventForTests,
   _resetForTests,
@@ -44,7 +44,7 @@ const set = (sessionId: string, state: "idle" | "busy" | "attention") =>
   });
 
 const Wrap = ({ children }: { children: ReactNode }) => (
-  <SpeechHostProvider>{children}</SpeechHostProvider>
+  <TerminalSpeechHost>{children}</TerminalSpeechHost>
 );
 
 function leds(container: HTMLElement) {

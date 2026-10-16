@@ -27,7 +27,7 @@ vi.mock("../../speech/useSpeechHost", async () => {
 });
 
 import { SessionIndicator } from "../SessionIndicator";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../TerminalSpeechHost";
 import {
   _applyEventForTests,
   _resetForTests,
@@ -50,7 +50,7 @@ const setActivity = (
   });
 
 const Wrap = ({ children }: { children: ReactNode }) => (
-  <SpeechHostProvider>{children}</SpeechHostProvider>
+  <TerminalSpeechHost>{children}</TerminalSpeechHost>
 );
 
 /**
