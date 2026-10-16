@@ -206,6 +206,17 @@ describe("the declaration table", () => {
     expect(ALL_PREFERENCES.filter((d) => d.key.includes("@"))).toEqual([]);
   });
 
+  it("speech.engine is a portable global preference defaulting to edge", () => {
+    const engine = keyOf("speech.engine");
+    expect(engine).toBe(preferences.speechEngine);
+    expect(engine.scope).toBe("global");
+    expect(engine.portable).toBe(true);
+    expect(engine.default).toBe("edge");
+    // `str`: any stored string arrives intact; `voices.ts` maps an engine
+    // anytts does not list onto the default.
+    expect(engine.codec.parse("anything")).toBe("anything");
+  });
+
   it("session-scoped preferences are declared non-portable", () => {
     // Each of these names a live session id — meaningless on another machine,
     // and the one class of value that must never reach the committed file.

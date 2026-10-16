@@ -622,9 +622,9 @@ export const preferences = {
 
   // ── Speech ───────────────────────────────────────────────────────────────
   /**
-   * Typed `string`, not `SpeechVoiceId`: the voice list is long enough that a
-   * codec would have to duplicate it, and `resolveVoice()` already drops an
-   * unknown id at the boundary. The default lives here and `voices.ts`
+   * Typed `string`: the voice list is anytts' catalog, which a codec would
+   * have to duplicate, and `voices.ts` already resolves an id outside the
+   * engine's catalog onto the engine default at the boundary. The default lives here and `voices.ts`
    * imports it — upward, from the lower layer — so there is one copy. The
    * other direction is what would close a cycle once voices.ts reads the
    * registry.
@@ -638,8 +638,8 @@ export const preferences = {
   }),
   /**
    * Which anytts engine synthesizes. Typed `string` for the same reason
-   * `speech.voice` is: the engine list is the library's, and `synth.ts` only
-   * forwards it.
+   * `speech.voice` is: the engine list is the library's, and `voices.ts` /
+   * `synth.ts` map an engine it does not list onto the default.
    */
   speechEngine: definePreference({
     key: "speech.engine", // was: nothing — anytts brought engines

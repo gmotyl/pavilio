@@ -71,12 +71,22 @@ function isBlank(text: string): boolean {
   return !text || !text.trim();
 }
 
+/**
+ * The engine from the preference, read at call time. The codec is `str`, so a
+ * blank or stale id can be stored; one this instance does not configure would
+ * make anytts throw RangeError, so it synthesizes with the default engine.
+ */
+function engine(): string {
+  const stored = readPreference(preferences.speechEngine);
+  return Object.hasOwn(TTS_CONFIG.engines, stored) ? stored : TTS_CONFIG.defaultEngine;
+}
+
 /** The request for `text`, with the engine read from the preference at call time. */
 function request(text: string, options: SpeechSynthesisOptions): SynthesisRequest {
   return {
     text,
     voice: options.voice || undefined,
-    engine: readPreference(preferences.speechEngine),
+    engine: engine(),
   };
 }
 

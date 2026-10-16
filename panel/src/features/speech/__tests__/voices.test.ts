@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { listEngines, listVoices } from "anytts";
 import { INITIAL_LANGUAGE_STATE, nextLanguageState, voteLanguage } from "../language";
 import {
   DEFAULT_SPEECH_VOICE,
-  SPEECH_VOICES,
+  getStoredEngine,
   getStoredVoice,
+  setStoredEngine,
   setStoredVoice,
 } from "../voices";
 import { preferences } from "../../../preferences/declarations";
@@ -14,22 +16,9 @@ const globals = globalThis as unknown as PrefGlobals;
 
 /** The picked voice is a PORTABLE preference: the document, never localStorage. */
 const VOICE_KEY = storageKey(preferences.speechVoice);
+const ENGINE_KEY = storageKey(preferences.speechEngine);
 
-const voiceIds = (): string[] => SPEECH_VOICES.map((voice) => voice.id);
-
-describe("SPEECH_VOICES", () => {
-  it("offers multilingual voices only", () => {
-    const ids = voiceIds();
-
-    expect(ids).toHaveLength(10);
-    expect(ids).not.toContain("pl-PL-MarekNeural");
-    expect(ids).not.toContain("pl-PL-ZofiaNeural");
-    // Multilingual-only is what makes the language/voice split safe: every
-    // offered voice reads both languages, so a Polish voice can never be handed
-    // an English answer.
-    for (const id of ids) expect(id).toContain("Multilingual");
-  });
-});
+const voiceIds = (): string[] => listVoices("edge").map((voice) => voice.id);
 
 describe("getStoredVoice", () => {
   it("defaults to Vivienne when nothing is stored", () => {
@@ -42,15 +31,28 @@ describe("getStoredVoice", () => {
     expect(localStorage.length).toBe(0);
   });
 
-  it("falls back to the default for a dropped voice, an unknown id, and no document", () => {
-    // `resolveVoice` is still the boundary: the declaration's codec is `str`,
-    // so a dropped Polish voice and a plain nonsense id both arrive intact and
-    // are mapped onto a real voice here.
-    globals.__PAVILIO_PREFS__![VOICE_KEY] = "pl-PL-MarekNeural";
-    expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+  it("keeps any voice of the engine's catalog, single-language ones included", () => {
+    // The multilingual-only invariant is gone: the catalog is anytts', and a
+    // Polish voice is a voice of the edge engine like any other.
+    expect(voiceIds()).toContain("pl-PL-MarekNeural");
+    expect(setStoredVoice("pl-PL-MarekNeural")).toBe("pl-PL-MarekNeural");
+    expect(getStoredVoice()).toBe("pl-PL-MarekNeural");
+  });
 
-    globals.__PAVILIO_PREFS__![VOICE_KEY] = "not-a-voice";
+  it("a stale stored voice falls back to the engine default and is written back", () => {
+    // The declaration's codec is `str`, so a dropped or hand-edited id arrives
+    // intact and is resolved through the seam's `resolveSpeechVoice` here.
+    globals.__PAVILIO_PREFS__![VOICE_KEY] = "xx-XX-NobodyNeural";
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toBe(DEFAULT_SPEECH_VOICE);
+
+    globals.__PAVILIO_PREFS__![VOICE_KEY] = "";
+    expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toBe(DEFAULT_SPEECH_VOICE);
+
+    // An id outside the catalog is ignored by the setter.
+    expect(setStoredVoice("not-a-voice")).toBe(DEFAULT_SPEECH_VOICE);
+    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toBe(DEFAULT_SPEECH_VOICE);
 
     // The auth interlock stands in for the old "site data blocked" case: this
     // page received no document, so the read answers the default and the write
@@ -59,6 +61,33 @@ describe("getStoredVoice", () => {
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
     expect(() => setStoredVoice("en-US-EmmaMultilingualNeural")).not.toThrow();
     expect(setStoredVoice("en-US-EmmaMultilingualNeural")).toBe("en-US-EmmaMultilingualNeural");
+  });
+});
+
+describe("getStoredEngine", () => {
+  it("defaults to edge and keeps an engine anytts lists", () => {
+    expect(getStoredEngine()).toBe("edge");
+    expect(listEngines().map((engine) => engine.id)).toContain("edge");
+
+    expect(setStoredEngine("edge")).toBe("edge");
+    expect(globals.__PAVILIO_PREFS__![ENGINE_KEY]).toBe("edge");
+    expect(getStoredEngine()).toBe("edge");
+  });
+
+  it("an engine anytts does not list reads as the default engine", () => {
+    // A blank or stale engine reaching anytts would throw RangeError from
+    // `resolveVoice` and from `synthesize`; the boundary answers the default.
+    for (const stale of ["", "not-an-engine", "Edge"]) {
+      globals.__PAVILIO_PREFS__![ENGINE_KEY] = stale;
+      expect(getStoredEngine()).toBe("edge");
+      globals.__PAVILIO_PREFS__![VOICE_KEY] = "xx-XX-NobodyNeural";
+      expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+    }
+
+    // The setter ignores an unknown engine rather than storing it.
+    globals.__PAVILIO_PREFS__![ENGINE_KEY] = "edge";
+    expect(setStoredEngine("not-an-engine")).toBe("edge");
+    expect(globals.__PAVILIO_PREFS__![ENGINE_KEY]).toBe("edge");
   });
 });
 

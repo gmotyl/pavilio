@@ -85,7 +85,7 @@ describe("project voice", () => {
   });
 
   it("a stale project voice falls back to the default", () => {
-    globals.__PAVILIO_PREFS__![BY_PROJECT_KEY] = { p: "pl-PL-MarekNeural" };
+    globals.__PAVILIO_PREFS__![BY_PROJECT_KEY] = { p: "xx-XX-NobodyNeural" };
 
     expect(getProjectVoice("p")).toBeNull();
     expect(voiceForProject("p")).toBe(VIVIENNE);

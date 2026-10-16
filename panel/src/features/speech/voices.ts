@@ -1,17 +1,16 @@
 /**
- * The speech feature's per-browser preferences: the picked voice — vendored from
- * motyl's `lib/tts/voices.ts` with the Polish-only voices dropped — and each
- * cell's speech mode.
+ * The speech feature's per-browser preferences: the engine and the picked
+ * voice — both over anytts' catalog — and each cell's speech mode.
  *
  * The picked voice ALWAYS wins: nothing here consults
  * {@link import("./language").voteLanguage} or the per-session language
  * it feeds through {@link import("./language").nextLanguageState}, and
- * neither ever switches a voice. That split is only safe because every offered
- * voice is multilingual — a voice that reads both Polish and English — so "a
- * Polish voice reads an English answer" cannot arise. Do not add a
- * single-language voice to this list.
+ * neither ever switches a voice. A single-language voice therefore reads every
+ * answer in its own language; the Settings help text says so, and the
+ * multilingual voices are grouped first for that reason.
  */
 
+import { listEngines, listVoices } from "anytts";
 // One source of truth, in the lower layer: the preference registry declares
 // this value as `speech.voice`'s default. Re-exported so this module's
 // existing importers are untouched. The import points DOWN — registry →
@@ -21,113 +20,99 @@ import { clearPreference, readPreference, writePreference } from "../../preferen
 // Points DOWN too: sessionProject reaches only the session store and the
 // preference types, neither of which imports a speech module.
 import { projectOfSession } from "../terminal/sessionProject";
+import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
 
 export { DEFAULT_SPEECH_VOICE };
 
-export const SPEECH_VOICES = [
-  {
-    id: "en-US-AndrewMultilingualNeural",
-    label: "Andrew (multilingual · EN-US)",
-  },
-  {
-    id: "en-AU-WilliamMultilingualNeural",
-    label: "William (multilingual · EN-AU)",
-  },
-  {
-    id: "en-US-EmmaMultilingualNeural",
-    label: "Emma (multilingual · EN-US)",
-  },
-  {
-    id: "en-US-AvaMultilingualNeural",
-    label: "Ava (multilingual · EN-US)",
-  },
-  {
-    id: "en-US-BrianMultilingualNeural",
-    label: "Brian (multilingual · EN-US)",
-  },
-  {
-    id: "de-DE-SeraphinaMultilingualNeural",
-    label: "Seraphina (multilingual · DE)",
-  },
-  {
-    id: "de-DE-FlorianMultilingualNeural",
-    label: "Florian (multilingual · DE)",
-  },
-  {
-    id: "fr-FR-VivienneMultilingualNeural",
-    label: "Vivienne (multilingual · FR)",
-  },
-  {
-    id: "fr-FR-RemyMultilingualNeural",
-    label: "Remy (multilingual · FR)",
-  },
-  {
-    id: "it-IT-GiuseppeMultilingualNeural",
-    label: "Giuseppe (multilingual · IT)",
-  },
-] as const;
-
-export type SpeechVoiceId = (typeof SPEECH_VOICES)[number]["id"];
-
-const supportedVoices = new Set<string>(SPEECH_VOICES.map((voice) => voice.id));
-
-export function isSpeechVoice(value: string | null | undefined): value is SpeechVoiceId {
-  return typeof value === "string" && supportedVoices.has(value);
+function isKnownEngine(id: string): boolean {
+  return listEngines().some((engine) => engine.id === id);
 }
 
-/** Maps anything — a stale id, a dropped Polish voice, `null` — onto a real voice. */
-export function resolveVoice(value: string | null | undefined): SpeechVoiceId {
-  return isSpeechVoice(value) ? value : DEFAULT_SPEECH_VOICE;
+/**
+ * The engine that synthesizes, from `speech.engine`. The codec is `str`, so a
+ * blank or stale id arrives intact; anything anytts does not list reads as the
+ * declared default, because handing it on would make anytts throw RangeError.
+ */
+export function getStoredEngine(): string {
+  const stored = readPreference(preferences.speechEngine);
+  return isKnownEngine(stored) ? stored : preferences.speechEngine.default;
+}
+
+/** Stores `id` and returns the engine now in effect; an engine anytts does not list is ignored. */
+export function setStoredEngine(id: string): string {
+  if (!isKnownEngine(id)) return getStoredEngine();
+  writePreference(preferences.speechEngine, id);
+  return id;
+}
+
+function isCatalogVoice(engine: string, id: unknown): id is string {
+  return typeof id === "string" && listVoices(engine).some((voice) => voice.id === id);
+}
+
+/**
+ * Maps a stored default voice onto a voice of the current engine: a catalog
+ * voice is kept, anything else goes through the seam's lenient
+ * `resolveSpeechVoice`, which answers the engine default with `fellBack`.
+ *
+ * Read-only. The catalog check comes first so the common case — a valid pick —
+ * never builds the anytts instance and never reaches the seam, which a render
+ * path may call on every frame.
+ */
+export function resolveStoredVoice(stored: string): { voice: string; fellBack: boolean } {
+  const engine = getStoredEngine();
+  if (isCatalogVoice(engine, stored)) return { voice: stored, fellBack: false };
+  return resolveSpeechVoice({ engine, voice: stored });
 }
 
 /**
  * The voice, now a PORTABLE preference: which voice reads an answer is a choice
  * about the panel, not a fact about this machine, so it travels in the
- * workspace file. The guarded `getBrowserStorage()` accessor this module used
- * to export is gone with it — the store owns every try/catch around browser
- * storage now, and a wrapper the guard cannot see is exactly the evasion
- * `no-direct-storage.test.ts` documents.
+ * workspace file. The store owns every try/catch around browser storage.
  *
- * `resolveVoice` still sits on the way out. The declaration's codec is `str`
- * (the voice list is long enough that a codec would have to duplicate it), so
- * a stale or hand-edited id reaches here intact and is mapped onto a real voice
- * at this boundary, exactly as before.
+ * The declaration's codec is `str`, so a stale or hand-edited id reaches here
+ * intact. It is resolved onto the engine default and, when it fell back, the
+ * effective voice is WRITTEN BACK — so the stale id is replaced once, and a
+ * strict `unknown-voice` rejection never sees it.
  */
-export function getStoredVoice(): SpeechVoiceId {
-  return resolveVoice(readPreference(preferences.speechVoice));
+export function getStoredVoice(): string {
+  const { voice, fellBack } = resolveStoredVoice(readPreference(preferences.speechVoice));
+  if (fellBack) writePreference(preferences.speechVoice, voice);
+  return voice;
 }
 
 /**
- * Stores `id` and returns the voice now in effect; an unknown id is ignored.
+ * Stores `id` and returns the voice now in effect; an id outside the engine's
+ * catalog is ignored.
  *
  * The return value is still what the caller should hold: a page whose portable
  * document never arrived has its write dropped by the store, and the choice
  * then applies to this page only — the same contract the old
  * "storage unavailable" branch offered.
  */
-export function setStoredVoice(id: string): SpeechVoiceId {
-  if (!isSpeechVoice(id)) return getStoredVoice();
+export function setStoredVoice(id: string): string {
+  if (!isCatalogVoice(getStoredEngine(), id)) return getStoredVoice();
   writePreference(preferences.speechVoice, id);
   return id;
 }
 
 /**
- * The project's own voice, or `null` when it follows the default. A stale or
- * hand-edited id reads as `null` — the record's codec is plain `json`, so this
- * is the boundary that drops it, as `resolveVoice` is for the default.
+ * The project's own voice, or `null` when it follows the default. A project
+ * voice is a voice of the global engine: an id outside its catalog reads as
+ * `null` — the record's codec is plain `json`, so this is the boundary that
+ * drops it, and the project inherits the default.
  */
-export function getProjectVoice(project: string): SpeechVoiceId | null {
+export function getProjectVoice(project: string): string | null {
   const stored = readPreference(preferences.speechVoiceByProject);
   if (stored === null || typeof stored !== "object" || Array.isArray(stored)) return null;
   const id: unknown = Object.hasOwn(stored, project) ? stored[project] : null;
-  return typeof id === "string" && isSpeechVoice(id) ? id : null;
+  return isCatalogVoice(getStoredEngine(), id) ? id : null;
 }
 
 /** Sets the project's voice; `null` DELETES the entry, so it follows the default. */
-export function setProjectVoice(project: string, id: SpeechVoiceId | null): void {
+export function setProjectVoice(project: string, id: string | null): void {
   if (project.trim() === "") return;
-  if (id !== null && !isSpeechVoice(id)) return;
+  if (id !== null && !isCatalogVoice(getStoredEngine(), id)) return;
   const stored = readPreference(preferences.speechVoiceByProject);
   const others = Object.entries(
     stored !== null && typeof stored === "object" && !Array.isArray(stored) ? stored : {},
@@ -141,7 +126,7 @@ export function setProjectVoice(project: string, id: SpeechVoiceId | null): void
 }
 
 /** The voice a project speaks with: its own, else the default voice. */
-export function voiceForProject(project: string | undefined): SpeechVoiceId {
+export function voiceForProject(project: string | undefined): string {
   return (project ? getProjectVoice(project) : null) ?? getStoredVoice();
 }
 
@@ -149,7 +134,7 @@ export function voiceForProject(project: string | undefined): SpeechVoiceId {
  * The voice a cell speaks with, through the project its session belongs to;
  * a session the tab cannot place gets the default voice.
  */
-export function voiceForSession(sessionId: string): SpeechVoiceId {
+export function voiceForSession(sessionId: string): string {
   return voiceForProject(projectOfSession(sessionId) ?? undefined);
 }
 

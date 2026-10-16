@@ -103,7 +103,9 @@ describe("the anytts seam", () => {
   });
 
   it("synthesizeSpeech forwards voice, tier, signal and the engine preference and returns the bytes", async () => {
-    prefs.engine = "other";
+    // The only engine the instance configures; an unconfigured one falls back
+    // (see the next test), so "the preference is forwarded" is pinned by edge.
+    prefs.engine = "edge";
     const controller = new AbortController();
 
     const bytes = await synth.synthesizeSpeech("hello", {
@@ -119,10 +121,26 @@ describe("the anytts seam", () => {
       voice: "en-US-AvaMultilingualNeural",
       tier: "warm",
       signal: controller.signal,
-      engine: "other",
+      engine: "edge",
     });
     expect(req.signal).toBe(controller.signal);
     expect(bytes).toBe(lib.state.bytes);
+  });
+
+  it("an engine the instance does not configure synthesizes with the default engine", async () => {
+    // A blank or stale `speech.engine` would make anytts throw RangeError.
+    for (const stale of ["other", ""]) {
+      prefs.engine = stale;
+      lib.fake.synthesize.mockClear();
+
+      await synth.synthesizeSpeech("hello", { voice: "v" });
+      synth.prefetchSpeech("hello", { voice: "v" });
+      synth.speechCacheState("hello", { voice: "v" });
+
+      expect((lib.fake.synthesize.mock.calls[0]?.[0] as SynthesisRequest).engine).toBe("edge");
+      expect(lib.fake.prefetch).toHaveBeenLastCalledWith(expect.objectContaining({ engine: "edge" }));
+      expect(lib.fake.state).toHaveBeenLastCalledWith(expect.objectContaining({ engine: "edge" }));
+    }
   });
 
   it("tier defaults to run", async () => {
