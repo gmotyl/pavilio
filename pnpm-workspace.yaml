@@ -3,6 +3,3 @@ packages:
 
 onlyBuiltDependencies:
   - node-pty
-
-patchedDependencies:
-  edge-tts-universal@1.4.0: panel/patches/edge-tts-universal@1.4.0.patch

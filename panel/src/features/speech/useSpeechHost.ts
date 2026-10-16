@@ -628,7 +628,7 @@ export function useSpeechHost({
 
   useEffect(() => {
     // A lit control has to be ready to speak. Without this the first click pays
-    // for the dynamic `import("edge-tts-universal/browser")`, a DRM token and a
+    // for loading the synthesis engine, a DRM token and a
     // fresh WebSocket handshake — seconds of nothing, which reads as a dead
     // button. So unit 0 is synthesized the moment an utterance arrives.
     //

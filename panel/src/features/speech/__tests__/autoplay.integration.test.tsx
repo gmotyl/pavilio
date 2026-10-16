@@ -1607,7 +1607,7 @@ describe("one speech host for the panel, not one per surface", () => {
 /**
  * "A lit control is ready to speak": the glow used to mean only that an
  * utterance had arrived, and the first click then paid for the dynamic
- * `edge-tts-universal/browser` import, a DRM token and a WebSocket handshake —
+ * synthesis-engine import, a DRM token and a WebSocket handshake —
  * seconds of silence that read as a dead button. Unit 0 is warmed on arrival
  * instead, and these pin both halves: that the click is instant, and that
  * warming never becomes a quiet autoplay.
