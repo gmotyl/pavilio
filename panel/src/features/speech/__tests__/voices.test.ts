@@ -1,5 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { listEngines, listVoices } from "anytts";
+
+/**
+ * anytts lists an engine the seam does not configure: the settings boundary
+ * must treat it as unknown, or it would reach `resolveVoice` and throw.
+ */
+vi.mock("anytts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("anytts")>();
+  return {
+    ...actual,
+    listEngines: () => [
+      ...actual.listEngines(),
+      { id: "unconfigured", label: "Unconfigured engine", runtimes: ["browser"] },
+    ],
+  };
+});
 import { INITIAL_LANGUAGE_STATE, nextLanguageState, voteLanguage } from "../language";
 import {
   DEFAULT_SPEECH_VOICE,
@@ -87,6 +102,20 @@ describe("getStoredEngine", () => {
     // The setter ignores an unknown engine rather than storing it.
     globals.__PAVILIO_PREFS__![ENGINE_KEY] = "edge";
     expect(setStoredEngine("not-an-engine")).toBe("edge");
+    expect(globals.__PAVILIO_PREFS__![ENGINE_KEY]).toBe("edge");
+  });
+
+  it("an engine anytts lists but the seam does not configure reads as the default", () => {
+    expect(listEngines().map((engine) => engine.id)).toContain("unconfigured");
+
+    globals.__PAVILIO_PREFS__![ENGINE_KEY] = "unconfigured";
+    expect(getStoredEngine()).toBe("edge");
+    globals.__PAVILIO_PREFS__![VOICE_KEY] = "xx-XX-NobodyNeural";
+    expect(() => getStoredVoice()).not.toThrow();
+    expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+
+    globals.__PAVILIO_PREFS__![ENGINE_KEY] = "edge";
+    expect(setStoredEngine("unconfigured")).toBe("edge");
     expect(globals.__PAVILIO_PREFS__![ENGINE_KEY]).toBe("edge");
   });
 });

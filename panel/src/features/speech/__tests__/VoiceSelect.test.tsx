@@ -65,15 +65,17 @@ vi.mock("../useSpeechHost", async () => {
 
 /**
  * anytts ships one engine, so switching needs a second: this one is listed
- * beside edge with a two-voice catalog, and the seam resolves its default.
+ * beside edge with a two-voice catalog, configured by the seam, and the seam
+ * resolves its default. A second extra engine is listed by anytts but NOT
+ * configured, so the picker must leave it out.
  */
-const { FAKE_ENGINE, FAKE_DEFAULT, FAKE_VOICES } = vi.hoisted(() => {
+const { FAKE_ENGINE, UNCONFIGURED_ENGINE, FAKE_DEFAULT, FAKE_VOICES } = vi.hoisted(() => {
   const FAKE_DEFAULT = "xx-XX-FakeOneNeural";
   const FAKE_VOICES: VoiceInfo[] = [
     { id: FAKE_DEFAULT, label: "Fake One", locale: "xx-XX", gender: "female", multilingual: true },
     { id: "xx-XX-FakeTwoNeural", label: "Fake Two", locale: "xx-XX", gender: "male", multilingual: true },
   ];
-  return { FAKE_ENGINE: "fake", FAKE_DEFAULT, FAKE_VOICES };
+  return { FAKE_ENGINE: "fake", UNCONFIGURED_ENGINE: "unconfigured", FAKE_DEFAULT, FAKE_VOICES };
 });
 
 vi.mock("anytts", async (importOriginal) => {
@@ -83,10 +85,16 @@ vi.mock("anytts", async (importOriginal) => {
     listEngines: () => [
       ...actual.listEngines(),
       { id: FAKE_ENGINE, label: "Fake engine", runtimes: ["browser"] },
+      { id: UNCONFIGURED_ENGINE, label: "Unconfigured engine", runtimes: ["browser"] },
     ],
     listVoices: (engine: string) =>
       engine === FAKE_ENGINE ? FAKE_VOICES.map((v) => ({ ...v })) : actual.listVoices(engine),
   };
+});
+
+vi.mock("../engines", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../engines")>();
+  return { ...actual, speechEngines: () => [...actual.speechEngines(), FAKE_ENGINE] };
 });
 
 vi.mock("../synth", async (importOriginal) => {
@@ -139,11 +147,14 @@ describe("VoiceSelect", () => {
 
     render(<VoiceSelect />);
 
-    // The engine list is anytts' own.
+    // The engine list is the seam's configured engines, labelled by anytts;
+    // one anytts lists but the seam does not configure is never offered.
     const engine = engineSelect();
     const engines = within(engine).getAllByRole("option") as HTMLOptionElement[];
-    expect(engines.map((option) => option.value)).toEqual(listEngines().map((e) => e.id));
-    expect(engines.map((option) => option.textContent)).toEqual(listEngines().map((e) => e.label));
+    const offered = listEngines().filter((e) => e.id !== UNCONFIGURED_ENGINE);
+    expect(engines.map((option) => option.value)).toEqual(offered.map((e) => e.id));
+    expect(engines.map((option) => option.textContent)).toEqual(offered.map((e) => e.label));
+    expect(engines.map((option) => option.value)).not.toContain(UNCONFIGURED_ENGINE);
     expect(engine).toHaveValue("edge");
 
     // The voices are the engine's catalog, in the groups `groupVoices` builds

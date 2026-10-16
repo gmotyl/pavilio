@@ -1,8 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { listEngines, listVoices } from "anytts";
 
+import { preferences } from "../../preferences/declarations";
+import { readPreference } from "../../preferences/store";
+import { speechEngines } from "./engines";
 import { groupVoices } from "./voiceGroups";
-import { getStoredEngine, getStoredVoice, setStoredEngine, setStoredVoice } from "./voices";
+import {
+  getStoredEngine,
+  getStoredVoice,
+  resolveStoredVoice,
+  setStoredEngine,
+  setStoredVoice,
+} from "./voices";
 
 const SELECT_CLASS = "text-sm px-2 py-1.5 rounded";
 const SELECT_STYLE = {
@@ -17,15 +26,30 @@ const SELECT_STYLE = {
  * project can override the voice from its Overview → Project settings.
  *
  * The lists are anytts' catalog; `voices.ts` owns the storage keys and the
- * boundary that maps a stale engine or voice onto a real one. `getStoredVoice`
- * resolves the stored voice against the current engine and writes the engine
- * default back when it fell back, so a stale pick is shown as — and becomes —
- * the default. The setters return the value now in effect, so a browser that
- * refuses to store still gets the pick applied for this page view.
+ * boundary that maps a stale engine or voice onto a real one. The first render
+ * shows the stored voice resolved READ-ONLY against the current engine; the
+ * mount effect then calls `getStoredVoice`, which writes the engine default
+ * back when it fell back, so a stale pick is shown as — and becomes — the
+ * default. The write stays out of render because it notifies every
+ * `speech.voice` subscriber synchronously. The setters return the value now in
+ * effect, so a browser that refuses to store still gets the pick applied for
+ * this page view.
+ *
+ * The engine options are the seam's configured engines, labelled from anytts'
+ * list: an engine anytts lists but the panel does not configure is not offered.
  */
 export function VoiceSelect() {
   const [engine, setEngine] = useState(getStoredEngine);
-  const [voice, setVoice] = useState(getStoredVoice);
+  const [voice, setVoice] = useState(
+    () => resolveStoredVoice(readPreference(preferences.speechVoice)).voice,
+  );
+  useEffect(() => {
+    setVoice(getStoredVoice());
+  }, []);
+  const engines = useMemo(() => {
+    const configured = speechEngines();
+    return listEngines().filter((option) => configured.includes(option.id));
+  }, []);
   const groups = useMemo(
     () => groupVoices(listVoices(engine), typeof navigator === "undefined" ? "" : navigator.language),
     [engine],
@@ -53,7 +77,7 @@ export function VoiceSelect() {
         className={`${SELECT_CLASS} mb-3`}
         style={SELECT_STYLE}
       >
-        {listEngines().map((option) => (
+        {engines.map((option) => (
           <option key={option.id} value={option.id}>
             {option.label}
           </option>

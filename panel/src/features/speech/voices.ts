@@ -10,7 +10,7 @@
  * multilingual voices are grouped first for that reason.
  */
 
-import { listEngines, listVoices } from "anytts";
+import { listVoices } from "anytts";
 // One source of truth, in the lower layer: the preference registry declares
 // this value as `speech.voice`'s default. Re-exported so this module's
 // existing importers are untouched. The import points DOWN — registry →
@@ -20,26 +20,32 @@ import { clearPreference, readPreference, writePreference } from "../../preferen
 // Points DOWN too: sessionProject reaches only the session store and the
 // preference types, neither of which imports a speech module.
 import { projectOfSession } from "../terminal/sessionProject";
+import { speechEngines } from "./engines";
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
 
 export { DEFAULT_SPEECH_VOICE };
 
+/**
+ * The seam's configured engines are the one list: an engine anytts lists but
+ * the panel does not configure would make `resolveVoice` and `synthesize`
+ * throw RangeError, so it is as unknown here as a typo.
+ */
 function isKnownEngine(id: string): boolean {
-  return listEngines().some((engine) => engine.id === id);
+  return speechEngines().includes(id);
 }
 
 /**
  * The engine that synthesizes, from `speech.engine`. The codec is `str`, so a
- * blank or stale id arrives intact; anything anytts does not list reads as the
- * declared default, because handing it on would make anytts throw RangeError.
+ * blank or stale id arrives intact; anything the seam does not configure reads
+ * as the declared default, because handing it on would make anytts throw.
  */
 export function getStoredEngine(): string {
   const stored = readPreference(preferences.speechEngine);
   return isKnownEngine(stored) ? stored : preferences.speechEngine.default;
 }
 
-/** Stores `id` and returns the engine now in effect; an engine anytts does not list is ignored. */
+/** Stores `id` and returns the engine now in effect; an engine the seam does not configure is ignored. */
 export function setStoredEngine(id: string): string {
   if (!isKnownEngine(id)) return getStoredEngine();
   writePreference(preferences.speechEngine, id);
@@ -74,6 +80,11 @@ export function resolveStoredVoice(stored: string): { voice: string; fellBack: b
  * intact. It is resolved onto the engine default and, when it fell back, the
  * effective voice is WRITTEN BACK — so the stale id is replaced once, and a
  * strict `unknown-voice` rejection never sees it.
+ *
+ * NEVER CALL THIS DURING RENDER. The write notifies every `speech.voice`
+ * subscriber synchronously, which from a render is a setState on a sibling
+ * mid-render plus a PATCH. Render paths read {@link defaultVoice}; the
+ * Settings picker writes back from a mount effect and from its engine handler.
  */
 export function getStoredVoice(): string {
   const { voice, fellBack } = resolveStoredVoice(readPreference(preferences.speechVoice));
@@ -125,9 +136,17 @@ export function setProjectVoice(project: string, id: string | null): void {
   writePreference(preferences.speechVoiceByProject, next);
 }
 
-/** The voice a project speaks with: its own, else the default voice. */
+/** The default voice in effect, resolved read-only — safe on a render path. */
+function defaultVoice(): string {
+  return resolveStoredVoice(readPreference(preferences.speechVoice)).voice;
+}
+
+/**
+ * The voice a project speaks with: its own, else the default voice. Read-only:
+ * the answer pane and the control bar call it during render.
+ */
 export function voiceForProject(project: string | undefined): string {
-  return (project ? getProjectVoice(project) : null) ?? getStoredVoice();
+  return (project ? getProjectVoice(project) : null) ?? defaultVoice();
 }
 
 /**

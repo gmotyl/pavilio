@@ -15,8 +15,9 @@
  * test that mocks anytts) never builds one.
  */
 import { createTts, resolveVoice, type SynthesisRequest, type Tts, type TtsConfig } from "anytts";
-import { DEFAULT_SPEECH_VOICE, preferences } from "../../preferences/declarations";
+import { preferences } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
+import { SPEECH_ENGINES, speechEngines } from "./engines";
 
 export interface SpeechSynthesisOptions {
   voice?: string;
@@ -36,22 +37,11 @@ export const SPEECH_AUDIO_MIME_TYPE = "audio/mpeg";
  */
 export const SPEECH_CACHE_MAX_ENTRIES = 200;
 
-/** Max gap between audio chunks before anytts treats the stream as stalled and retries. */
-export const SPEECH_STREAM_STALL_TIMEOUT_MS = 15000;
-
 /** Absent, in flight, or in hand — the three answers the cache can give. */
 export type SpeechCacheState = "cold" | "warming" | "ready";
 
 const TTS_CONFIG: TtsConfig = {
-  engines: {
-    edge: {
-      voices: { default: DEFAULT_SPEECH_VOICE },
-      // The panel server mounts anytts' relay here for browsers that cannot
-      // open the Edge socket themselves.
-      relayUrl: "/api/tts",
-      stallMs: SPEECH_STREAM_STALL_TIMEOUT_MS,
-    },
-  },
+  engines: SPEECH_ENGINES,
   defaultEngine: "edge",
   scheduler: {
     concurrency: 3,
@@ -78,7 +68,7 @@ function isBlank(text: string): boolean {
  */
 function engine(): string {
   const stored = readPreference(preferences.speechEngine);
-  return Object.hasOwn(TTS_CONFIG.engines, stored) ? stored : TTS_CONFIG.defaultEngine;
+  return speechEngines().includes(stored) ? stored : TTS_CONFIG.defaultEngine;
 }
 
 /** The request for `text`, with the engine read from the preference at call time. */
