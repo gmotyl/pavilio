@@ -7,7 +7,7 @@ import {
   nextLanguageState,
   voteLanguage,
   type LanguageState,
-} from "./pronunciation";
+} from "./language";
 import type { CellSpeechState, SpeechMode, Utterance } from "./types";
 import {
   emptyUtteranceQueue,

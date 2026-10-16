@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_LANGUAGE_STATE, nextLanguageState, voteLanguage } from "../pronunciation";
+import { INITIAL_LANGUAGE_STATE, nextLanguageState, voteLanguage } from "../language";
 import {
   DEFAULT_SPEECH_VOICE,
   SPEECH_VOICES,

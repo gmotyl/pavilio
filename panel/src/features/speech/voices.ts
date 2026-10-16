@@ -4,8 +4,8 @@
  * cell's speech mode.
  *
  * The picked voice ALWAYS wins: nothing here consults
- * {@link import("./pronunciation").voteLanguage} or the per-session language
- * it feeds through {@link import("./pronunciation").nextLanguageState}, and
+ * {@link import("./language").voteLanguage} or the per-session language
+ * it feeds through {@link import("./language").nextLanguageState}, and
  * neither ever switches a voice. That split is only safe because every offered
  * voice is multilingual — a voice that reads both Polish and English — so "a
  * Polish voice reads an English answer" cannot arise. Do not add a
