@@ -226,9 +226,9 @@ export interface WarmableUtterance {
  *
  * Deliberately NOT "everything the cell might yet be asked to speak". That list
  * is up to eleven utterances per cell; the host fires a `synthesizeSpeech` for
- * each of them with no await and no limiter, and the player's own
- * `SYNTHESIS_CONCURRENCY` bounds the units of the one RUN it is playing and
- * nothing else — so back when history was a single slot, a full queue behind a
+ * each of them with no await and no limiter of its own, and the player's
+ * concurrency bound covered the units of the one RUN it was playing and nothing
+ * else — so back when history was a single slot, a full queue behind a
  * live run put seven requests in flight against the audio somebody is actually
  * listening to, and the list-shaped history would now make that eleven.
  *

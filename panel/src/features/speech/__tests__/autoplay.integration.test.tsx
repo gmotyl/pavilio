@@ -54,6 +54,8 @@ const synth = vi.hoisted(() => {
   let requests: string[] = [];
   /** The voice each request carried, in the same order. */
   let requestVoices: (string | undefined)[] = [];
+  /** The anytts tier each request was made on, in the same order. */
+  let requestTiers: (string | undefined)[] = [];
   /** A synthesizer that is simply down, for the three-consecutive-failures rule. */
   let failing = false;
   /** A synthesizer that goes down partway: the first `n` requests succeed. */
@@ -76,13 +78,17 @@ const synth = vi.hoisted(() => {
     return buffer;
   }
 
-  function synthesizeSpeech(text: string, options: { voice?: string } = {}): Promise<ArrayBuffer> {
+  function synthesizeSpeech(
+    text: string,
+    options: { voice?: string; tier?: string } = {},
+  ): Promise<ArrayBuffer> {
     const key = `${options.voice ?? ""}::${text}`;
     const cached = cache.get(key);
     if (cached) return cached.promise;
 
     requests.push(text);
     requestVoices.push(options.voice);
+    requestTiers.push(options.tier);
     const promise = (async (): Promise<ArrayBuffer> => {
       if (held) await held;
       if (failing || requests.length > healthyRequests) {
@@ -173,9 +179,13 @@ const synth = vi.hoisted(() => {
     get requestVoices() {
       return requestVoices;
     },
+    get requestTiers() {
+      return requestTiers;
+    },
     reset: () => {
       requests = [];
       requestVoices = [];
+      requestTiers = [];
       cache.clear();
       // Subscribers are NOT cleared: they belong to mounted components, which
       // unsubscribe themselves on unmount.
@@ -944,7 +954,13 @@ describe("autoplay — refusal and synthesis failure", () => {
     // no unit ever lands. A single failure mid-run would merely defer the
     // warming to the next unit that did land — see `useSpeechPlayer.test.ts`,
     // "cascades from the next unit that lands when one fails".
-    expect(new Set(synth.requests)).toEqual(
+    //
+    // The armed cell's preloads are left out: anytts queues at call time, so
+    // the host hands the whole remainder over at once on the `preload` tier,
+    // and the first failure calls the queued rest off (the library's side of
+    // that is anytts' own suite; the host's is `useSpeechHost.preload.test.ts`).
+    const unpreloaded = synth.requests.filter((_text, i) => synth.requestTiers[i] !== "preload");
+    expect(new Set(unpreloaded)).toEqual(
       new Set(prepared.units.slice(0, 3).map((unit) => unit.text)),
     );
     expect(played).toEqual([]);

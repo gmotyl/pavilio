@@ -640,7 +640,7 @@ describe("SpeechControlBar", () => {
       // Distinct lengths, so distinct texts: the cache is keyed by text, and
       // four identical units would be one entry with one state.
       const all = units(200, 210, 220, 230);
-      // SYNTHESIS_CONCURRENCY slots open in the same tick.
+      // Three of the cascade's requests in flight in the same tick.
       for (const unit of all.slice(0, 3)) warming.add(unit.text);
 
       render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor(all)} />);

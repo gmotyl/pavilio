@@ -19,32 +19,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { synthesizeSpeech, toSpeechBlob } from "./synth";
-import {
-  createSynthesisWindow,
-  SYNTHESIS_WINDOW_SIZE,
-  type SynthesisWindow,
-} from "./synthesisWindow";
 import type { SpeechUnit } from "./types";
 import { voiceForSession } from "./voices";
-
-/**
- * How many syntheses the run keeps in flight while it warms its remainder.
- *
- * A bound on *concurrency*, not on distance: the cascade reaches the last unit
- * of the run no matter how long the answer is, it just never has more than this
- * many connections open at once. Distance was the wrong bound — it made the
- * warming keep pace with playback, so the tail of an answer was always
- * synthesized late.
- *
- * Three, and not "all of them", because `prefetchSpeech`/`synthesizeSpeech`
- * have no concurrency limit whatsoever: warming a ten-unit answer in one go
- * opens ten edge-tts WebSocket handshakes, each with its own DRM token, all
- * competing with the unit the listener is actually waiting for — and
- * `SPEECH_STREAM_STALL_TIMEOUT_MS` is 15 s, so the losers stall rather than
- * merely queue. Three is already many multiples ahead of playback: a unit is
- * 20-30 s of audio and a synthesis a few seconds.
- */
-export const SYNTHESIS_CONCURRENCY = SYNTHESIS_WINDOW_SIZE;
 
 /**
  * Consecutive unit failures that stop the run. Consecutive is the point: a
@@ -143,14 +119,6 @@ export interface SpeechPlayerOptions {
    * silent — the player logs instead.
    */
   onError?: (error: SpeechPlaybackError) => void;
-  /**
-   * The window the cascade shares with the rest of the panel's speculative
-   * synthesis, at the top tier. Optional: a player on its own gets a private
-   * window, which is exactly the {@link SYNTHESIS_CONCURRENCY} bound it always
-   * had. The host passes its panel-wide one, so armed cells' preloads queue
-   * behind the run instead of beside it. Read once, at mount.
-   */
-  synthesisWindow?: SynthesisWindow;
 }
 
 export interface SpeechPlayer {
@@ -249,6 +217,12 @@ interface PlaybackRun {
   paused: boolean;
   /** Object URLs built for this run and not yet revoked. */
   readonly urls: Set<string>;
+  /**
+   * Carried by the cascade's requests and aborted with the run, so a torn-down
+   * or barged-in run calls off the remainder it queued with anytts. Only this
+   * run's own claim: a host preload of the same unit keeps the flight alive.
+   */
+  readonly cascade: AbortController;
   /** Set while a unit is playing; unblocks that wait on barge-in. */
   abandonUnit: (() => void) | null;
   /**
@@ -288,6 +262,7 @@ function releaseUrl(run: PlaybackRun, url: string): void {
 /** Ends a run: no further advance, and every URL it still holds is revoked. */
 function teardownRun(run: PlaybackRun): void {
   run.active = false;
+  run.cascade.abort();
   run.abandonUnit?.();
   for (const url of run.urls) URL.revokeObjectURL(url);
   run.urls.clear();
@@ -348,16 +323,19 @@ async function loadUnit(
 }
 
 /**
- * Warms the synthesis cache for `[from, end)` through the synthesis window at
- * its top tier, `run`: at most {@link SYNTHESIS_CONCURRENCY} in flight, each
- * freed slot handed to this run's next unit before any warm or preload gets it.
+ * Warms the synthesis cache for `[from, end)` on anytts' top tier, `run`: the
+ * library's scheduler bounds how many are in flight and hands each freed slot to
+ * the run before any warm or preload gets it.
  *
- * `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the whole
- * point — it is what frees the slot — and a fire-and-forget warm cannot bound
- * anything, since nothing can observe it finishing. The failure is swallowed
- * exactly as `prefetchSpeech` swallows it, and the cache dedupes an in-flight
- * request, so the ladder materializing a unit this is already warming costs no
- * second connection.
+ * Every unit is asked for, including one the host already queued as a warm or
+ * preload: the request on `run` is what promotes that queued job, so skipping it
+ * as "already on its way" would leave it behind every other preload. The
+ * library dedupes onto the one flight, so it costs no second connection.
+ *
+ * `synthesizeSpeech` rather than `prefetchSpeech`, for the signal: the run's
+ * own, aborted when the run is torn down, so a run that lost the element stops
+ * synthesizing what nobody will play. The failure is swallowed exactly as
+ * `prefetchSpeech` swallows it.
  *
  * Fire-and-forget as a whole: nothing awaits this, which is what keeps a stalled
  * unit far ahead of playback from touching the audio the listener is on.
@@ -368,21 +346,13 @@ function cascadeWarm(
   from: number,
   end: number,
   voice: string,
-  synthesisWindow: SynthesisWindow,
 ): void {
+  const { signal } = run.cascade;
   for (let index = from; index < end; index += 1) {
-    const { text } = units[index];
-    synthesisWindow.schedule("run", () =>
-      // A torn-down or barged-in run must stop opening sockets the moment it
-      // loses the element: nothing will ever play what it warms from here on.
-      // Declining hands the slot straight on.
-      run.active
-        ? synthesizeSpeech(text, { voice }).catch(() => {
-            // Best-effort: the unit is synthesized for real when the ladder
-            // reaches it, and that is where a failure gets reported.
-          })
-        : null,
-    );
+    synthesizeSpeech(units[index].text, { voice, tier: "run", signal }).catch(() => {
+      // Best-effort: the unit is synthesized for real when the ladder reaches
+      // it, and that is where a failure gets reported.
+    });
   }
 }
 
@@ -501,11 +471,6 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
   const elementRef = useRef<HTMLAudioElement | null>(null);
   const runRef = useRef<PlaybackRun | null>(null);
   const onErrorRef = useRef<SpeechPlayerOptions["onError"]>(undefined);
-  // Fixed at mount, and lazily, so a player handed the host's window never
-  // builds a private one.
-  const [synthesisWindow] = useState<SynthesisWindow>(
-    () => options.synthesisWindow ?? createSynthesisWindow(),
-  );
 
   useEffect(() => {
     onErrorRef.current = options.onError;
@@ -693,6 +658,7 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
         active: true,
         paused: false,
         urls: new Set<string>(),
+        cascade: new AbortController(),
         abandonUnit: null,
         resumeUnit: null,
       };
@@ -721,16 +687,14 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
        * one flaky unit does not cost the run its remainder. Three consecutive
        * failures, not one, are what stop a run.
        *
-       * The `isStale()` below is defence in depth, not the thing that holds
-       * the line: `cascadeWarm`'s own `!run.active` check is what stops an
-       * abandoned run from warming on, and removing this one alone changes no
-       * behaviour. It is kept because declining to start a cascade for a run
-       * that is already gone costs nothing.
+       * The `isStale()` below is what keeps a cascade from starting for a run
+       * that is already gone; one that started before the run ended is called
+       * off by the run's own signal (`teardownRun`).
        */
       const startCascade = (loaded: LoadedUnit): void => {
         if (cascaded || "error" in loaded || isStale()) return;
         cascaded = true;
-        cascadeWarm(run, units, loaded.index + 1, units.length, voice, synthesisWindow);
+        cascadeWarm(run, units, loaded.index + 1, units.length, voice);
       };
       /**
        * Materializes one unit's object URL — that is what makes the swap local
@@ -855,7 +819,7 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
 
       stop();
     },
-    [ensureElement, publishUnit, report, stop, synthesisWindow],
+    [ensureElement, publishUnit, report, stop],
   );
 
   const jumpToUnit = useCallback(
