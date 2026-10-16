@@ -187,6 +187,7 @@ vi.mock("../synth", () => ({
 
 import type { SpeechPlaybackError, SpeechPlayer } from "../useSpeechPlayer";
 import { useSpeechPlayer } from "../useSpeechPlayer";
+import { voiceForSession } from "../../terminal/sessionVoice";
 import type { SpeechUnit } from "../types";
 import { refreshSessions } from "../../terminal/sessionStore";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice, setStoredVoice } from "../voices";
@@ -390,7 +391,7 @@ describe("useSpeechPlayer", () => {
     // playback could not have started at all.
     synth.hangOn("unit-1");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
 
@@ -433,7 +434,7 @@ describe("useSpeechPlayer", () => {
       vi.unstubAllGlobals();
     }
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-p", manyUnits(4));
 
@@ -445,9 +446,26 @@ describe("useSpeechPlayer", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it("the player resolves the run's voice through voiceFor", async () => {
+    const EMMA = "en-US-EmmaMultilingualNeural";
+    // A port that knows nothing of sessions or projects: the voice is whatever
+    // the host says it is, asked once when the run starts.
+    const voiceFor = vi.fn((_sessionId: string) => EMMA);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor }));
+
+    await startPlay(result.current, "cell-x", manyUnits(3));
+
+    expect(played).toEqual(["blob:unit-0"]);
+    expect(voiceFor).toHaveBeenCalledTimes(1);
+    expect(voiceFor).toHaveBeenCalledWith("cell-x");
+    expect(new Set(synth.requests.map((request) => request.voice))).toEqual(new Set([EMMA]));
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("has the next unit's object URL ready before the current unit ends", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
 
@@ -479,7 +497,7 @@ describe("useSpeechPlayer", () => {
     // and long since finished — at the moment unit 0 reaches the element.
     synth.deferOn("unit-1");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(4));
 
@@ -502,7 +520,7 @@ describe("useSpeechPlayer", () => {
     // landing alone — waiting for playback is the head start unit 0, which is
     // deliberately tiny, cannot give.
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(6));
 
@@ -530,7 +548,7 @@ describe("useSpeechPlayer", () => {
     // answer its warming — three consecutive failures are what stop a run.
     synth.failOn("unit-1");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(6));
 
@@ -564,7 +582,7 @@ describe("useSpeechPlayer", () => {
     synth.deferOn("unit-3");
     void synth.synthesizeSpeech("unit-3", { voice: DEFAULT_SPEECH_VOICE, tier: "preload" });
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(6));
 
@@ -591,7 +609,7 @@ describe("useSpeechPlayer", () => {
     // against the run that replaced it.
     for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(9));
     const cascade = synth.calls.filter((call) => call.tier === "run" && call.signal);
@@ -616,7 +634,7 @@ describe("useSpeechPlayer", () => {
     // A subrange play: the slice is the bound at both ends. Warming the whole
     // array would synthesize units this run will never speak.
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(6), 2);
 
@@ -632,7 +650,7 @@ describe("useSpeechPlayer", () => {
     // it, and playback must not notice at all.
     synth.hangOn("unit-4");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(8));
 
@@ -662,7 +680,7 @@ describe("useSpeechPlayer", () => {
 
   it("stops the speaking session when another session starts", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2", "unit-3"));
     expect(result.current.speakingSessionId).toBe("cell-a");
@@ -690,7 +708,7 @@ describe("useSpeechPlayer", () => {
     synth.failOn("unit-3");
     synth.failOn("unit-5");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(
       result.current,
@@ -718,7 +736,7 @@ describe("useSpeechPlayer", () => {
     synth.failOn("unit-1");
     synth.failOn("unit-2");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(
       result.current,
@@ -749,7 +767,7 @@ describe("useSpeechPlayer", () => {
     // report at all, which the cell then reads as a finished answer.
     synth.failOn("only-unit");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("only-unit"));
 
@@ -768,7 +786,7 @@ describe("useSpeechPlayer", () => {
     synth.failOn("unit-0");
     synth.failOn("unit-1");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
 
@@ -783,7 +801,7 @@ describe("useSpeechPlayer", () => {
 
   it("does not report a run whose units all played", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
     await endCurrentUnit();
@@ -804,7 +822,7 @@ describe("useSpeechPlayer", () => {
     synth.failOn("unit-2");
     synth.failOn("unit-3");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2", "unit-3"));
     expect(played).toEqual(["blob:unit-0"]);
@@ -820,7 +838,7 @@ describe("useSpeechPlayer", () => {
   it("resumes at fromUnit", async () => {
     setStoredVoice("en-US-EmmaMultilingualNeural");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2", "unit-3"), 2);
 
@@ -844,7 +862,7 @@ describe("useSpeechPlayer", () => {
     });
     playResult = () => Promise.reject(refusal);
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     expect(result.current.unlocked).toBe(false);
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
@@ -869,7 +887,7 @@ describe("useSpeechPlayer", () => {
 
   it("revokes object URLs", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
     expect(revokedUrls).toEqual([]);
@@ -903,7 +921,7 @@ describe("useSpeechPlayer", () => {
 
   it("revokes a URL that finishes loading after the run was barged in on", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     // The two plays' synchronous prefixes run back to back, so cell-a's unit is
     // still mid-synthesis when cell-b tears its run down. Its URL is therefore
@@ -928,7 +946,9 @@ describe("useSpeechPlayer", () => {
 
   it("stops speaking and revokes every URL on unmount", async () => {
     const onError = vi.fn();
-    const { result, unmount } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result, unmount } = renderHook(() =>
+      useSpeechPlayer({ onError, voiceFor: voiceForSession }),
+    );
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
     expect(createdUrls).toEqual(["blob:unit-0", "blob:unit-1"]);
@@ -962,7 +982,7 @@ describe("useSpeechPlayer", () => {
 
   it("drives one audio element for the whole player", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
     await startPlay(result.current, "cell-b", units("other-0", "other-1"));
@@ -985,7 +1005,7 @@ describe("useSpeechPlayer", () => {
 
   it("pause holds the element without tearing the run down", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
     const element = currentElement();
@@ -1006,7 +1026,7 @@ describe("useSpeechPlayer", () => {
 
   it("resume continues from the retained position, not the start of the unit", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
     const element = currentElement();
@@ -1040,7 +1060,7 @@ describe("useSpeechPlayer", () => {
 
   it("a unit that ends while paused does not advance the ladder", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
     await settle(() => result.current.pause());
@@ -1064,7 +1084,7 @@ describe("useSpeechPlayer", () => {
   it("reports waiting while the first unit synthesizes", async () => {
     synth.deferOn("unit-0");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
 
@@ -1085,7 +1105,7 @@ describe("useSpeechPlayer", () => {
   it("reports waiting again on a mid-response underrun", async () => {
     synth.deferOn("unit-1");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
 
@@ -1109,7 +1129,7 @@ describe("useSpeechPlayer", () => {
 
   it("stop from paused tears down like stop from playing", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
     const element = currentElement();
@@ -1131,7 +1151,7 @@ describe("useSpeechPlayer", () => {
 
   it("a new play discards another session's paused position", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
     await settle(() => result.current.pause());
@@ -1158,7 +1178,7 @@ describe("useSpeechPlayer", () => {
     synth.failOn("unit-1");
     synth.failOn("unit-2");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(
       result.current,
@@ -1182,7 +1202,7 @@ describe("useSpeechPlayer", () => {
     // itself or the cell stays red with nothing behind it.
     synth.deferOn("unit-0");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1"));
     expect(result.current.waitingForSynthesis).toBe(true);
@@ -1202,7 +1222,7 @@ describe("useSpeechPlayer", () => {
   it("keeps a unit that arrives during a pause silent until resume", async () => {
     synth.deferOn("unit-1");
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
     await endCurrentUnit();
@@ -1235,7 +1255,7 @@ describe("useSpeechPlayer", () => {
     // session — and pausing it there is silent, with no `ended` and no error,
     // so the run simply hangs.
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     // Both clicks go through the host's order: spend the gesture, then play.
     await settle(() => result.current.unlock());
@@ -1266,7 +1286,7 @@ describe("useSpeechPlayer", () => {
 
   it("jumping to a synthesized unit starts without synthesizing", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     // Unit 0 is speaking and the cascade has warmed the whole remainder, so
     // every unit of this run is already in the synthesis cache.
@@ -1291,7 +1311,7 @@ describe("useSpeechPlayer", () => {
     // but unit 5 is genuinely un-synthesized when the jump lands on it.
     for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(9));
     expect(synth.inFlight).toContain("unit-5");
@@ -1317,7 +1337,7 @@ describe("useSpeechPlayer", () => {
 
   it("seeking inside the playing unit moves currentTime without re-synthesis", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(3));
     const element = currentElement();
@@ -1340,7 +1360,7 @@ describe("useSpeechPlayer", () => {
 
   it("seeking back ten seconds crosses into the previous unit", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(5));
     // Walk to unit 3, each unit reporting twenty seconds as its audio loads.
@@ -1378,7 +1398,7 @@ describe("useSpeechPlayer", () => {
 
   it("seeking back from the first unit restarts it at zero", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(3));
     await loadDuration(20);
@@ -1412,7 +1432,7 @@ describe("useSpeechPlayer", () => {
   it("seeking back during a stall does not move on the torn-down unit's clock", async () => {
     for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(9));
     await loadDuration(20);
@@ -1464,7 +1484,7 @@ describe("useSpeechPlayer", () => {
   it("seeking back during a stall does not pick a landing unit off a foreign clock", async () => {
     for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(9));
     await loadDuration(20);
@@ -1502,7 +1522,7 @@ describe("useSpeechPlayer", () => {
   it("seeking inside a stalled unit publishes nothing playback will discard", async () => {
     for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(9));
     await loadDuration(20);
@@ -1526,7 +1546,7 @@ describe("useSpeechPlayer", () => {
 
   it("a unit's real duration is recorded once its audio loads", async () => {
     const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
     await startPlay(result.current, "cell-a", manyUnits(3));
 
@@ -1559,7 +1579,9 @@ describe("useSpeechPlayer", () => {
 
   it("every object URL created by a seek is revoked on teardown", async () => {
     const onError = vi.fn();
-    const { result, unmount } = renderHook(() => useSpeechPlayer({ onError }));
+    const { result, unmount } = renderHook(() =>
+      useSpeechPlayer({ onError, voiceFor: voiceForSession }),
+    );
 
     await startPlay(result.current, "cell-a", manyUnits(4));
     await loadDuration(20);

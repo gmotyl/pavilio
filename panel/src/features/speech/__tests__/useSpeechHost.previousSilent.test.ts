@@ -113,6 +113,7 @@ import {
 } from "../../terminal/answerWaiting";
 import { prepare } from "../prepare";
 import { useSpeechHost } from "../useSpeechHost";
+import { voiceForSession } from "../../terminal/sessionVoice";
 import { utteranceUnderCursor } from "../utteranceQueue";
 
 /** The `src` of every started playback, in order. A silent press adds none. */
@@ -213,7 +214,7 @@ beforeEach(() => {
 
 describe("useSpeechHost — stepping back navigates without playing", () => {
   it("previous moves the cursor", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -227,7 +228,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
   });
 
   it("previous speaks nothing", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -240,7 +241,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
   });
 
   it("previous speaks nothing on the ARMED cell either", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     // Arming is the state Greg actually listens in, and it is the one route by
@@ -262,7 +263,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
   });
 
   it("previous does not record the answer as played", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -276,7 +277,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
   });
 
   it("previous at the oldest answer moves nothing and speaks nothing", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -293,7 +294,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
 
   it("play after stepping back speaks the answer under the cursor", async () => {
     const second = unitsOf(SECOND);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -307,7 +308,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
   });
 
   it("next moves the cursor and speaks nothing", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -322,7 +323,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
   });
 
   it("next speaks nothing on the ARMED cell either", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -346,7 +347,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
   });
 
   it("next does not record the answer as played", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -362,7 +363,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
 
   it("play speaks what a forward step navigated to", async () => {
     const second = unitsOf(SECOND);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));
@@ -377,7 +378,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
   });
 
   it("stepping back while busy still holds the body", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     // The hold is taken by the BAR, right before it calls `onPrevious` — it is
@@ -406,7 +407,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
  */
 describe("useSpeechHost — the wave is a position the transport stands on", () => {
   it("lands the first press back on the newest answer without moving the cursor", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
     noteAgentStarting("cell-a");
     expect(getAnswerWaiting("cell-a").waiting).toBe(true);
@@ -423,7 +424,7 @@ describe("useSpeechHost — the wave is a position the transport stands on", () 
   });
 
   it("walks into the history on the second press", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
     noteAgentStarting("cell-a");
 
@@ -435,7 +436,7 @@ describe("useSpeechHost — the wave is a position the transport stands on", () 
   });
 
   it("steps forward onto the wave without moving the cursor", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
     noteAgentStarting("cell-a");
 
@@ -450,7 +451,7 @@ describe("useSpeechHost — the wave is a position the transport stands on", () 
   });
 
   it("steps into a backlog rather than onto the wave while answers are waiting", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     // A live run with an answer QUEUED behind it: the newest answer the cell
     // holds is `pending.at(-1)`, not `current`, so the wave sits above the
@@ -479,7 +480,7 @@ describe("useSpeechHost — the wave is a position the transport stands on", () 
   });
 
   it("still spends the autoplay grant on both wave steps", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
     noteAgentStarting("cell-a");
     unlocks.length = 0;
@@ -509,7 +510,7 @@ describe("useSpeechHost — the wave is a position the transport stands on", () 
  */
 describe("useSpeechHost — the wave step on the surfaces the row used to guard", () => {
   it("steps off a SEND-owned wave without skipping the newest answer", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     // The ordinary path: a draft was sent, the body handed over to the wave,
@@ -529,7 +530,7 @@ describe("useSpeechHost — the wave step on the surfaces the row used to guard"
   });
 
   it("takes no hold on a backward press the list refuses", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     // One answer, no history, and no wave: there is nowhere to step back to.
     // The row renders this press `disabled`; the chord and the OS media keys
@@ -547,7 +548,7 @@ describe("useSpeechHost — the wave step on the surfaces the row used to guard"
   });
 
   it("still takes the hold on a backward press that moves", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
     await threeAnswers("cell-a");
 
     await settle(() => result.current.onPrevious("cell-a"));

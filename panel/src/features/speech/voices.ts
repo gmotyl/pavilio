@@ -17,9 +17,6 @@ import { listVoices } from "anytts";
 // feature would be the direction that closes a cycle.
 import { DEFAULT_SPEECH_VOICE, preferences } from "../../preferences/declarations";
 import { clearPreference, readPreference, writePreference } from "../../preferences/store";
-// Points DOWN too: sessionProject reaches only the session store and the
-// preference types, neither of which imports a speech module.
-import { projectOfSession } from "../terminal/sessionProject";
 import { speechEngines } from "./engines";
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
@@ -143,18 +140,11 @@ function defaultVoice(): string {
 
 /**
  * The voice a project speaks with: its own, else the default voice. Read-only:
- * the answer pane and the control bar call it during render.
+ * the answer pane and the control bar call it during render, through the
+ * terminal's `voiceForSession`.
  */
 export function voiceForProject(project: string | undefined): string {
   return (project ? getProjectVoice(project) : null) ?? defaultVoice();
-}
-
-/**
- * The voice a cell speaks with, through the project its session belongs to;
- * a session the tab cannot place gets the default voice.
- */
-export function voiceForSession(sessionId: string): string {
-  return voiceForProject(projectOfSession(sessionId) ?? undefined);
 }
 
 /** One click on a cell's speech control: `off → armed → autoplay → off`. */

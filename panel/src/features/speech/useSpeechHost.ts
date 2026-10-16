@@ -79,7 +79,6 @@ import {
 } from "../terminal/answerWaiting";
 import { stepsOffTheWave, stepsOntoTheWave } from "./waveStep";
 import { MAX_PENDING, MAX_PREVIOUS, utteranceUnderCursor } from "./utteranceQueue";
-import { voiceForSession } from "./voices";
 
 /**
  * How many utterances an autoplay cell's record keeps.
@@ -216,6 +215,12 @@ export interface SpeechHostOptions {
    * cell it is in and whoever started it. See {@link SpeechRunEvent}.
    */
   onRunChange?: (event: SpeechRunEvent) => void;
+  /**
+   * The voice a session speaks with. One port for the player's runs and the
+   * host's warms and preloads alike: the synthesis cache keys on voice + text,
+   * so a warm in any other voice is a synthesis the click never finds.
+   */
+  voiceFor: (sessionId: string) => string;
 }
 
 /**
@@ -245,7 +250,8 @@ export function useSpeechHost({
   onAnswer,
   isSessionOpen = ALWAYS_OPEN,
   onRunChange,
-}: SpeechHostOptions = {}): SpeechHost {
+  voiceFor,
+}: SpeechHostOptions): SpeechHost {
   /**
    * `onRunChange`, mirrored: it is called from inside `speakUtterance`, whose
    * identity the whole grid depends on, so it must not be a dependency.
@@ -254,6 +260,14 @@ export function useSpeechHost({
   useEffect(() => {
     onRunChangeRef.current = onRunChange;
   }, [onRunChange]);
+  /**
+   * `voiceFor`, mirrored for the same reason: the warm and the preload read it,
+   * and their identities must not follow the caller's callback.
+   */
+  const voiceForRef = useRef(voiceFor);
+  useEffect(() => {
+    voiceForRef.current = voiceFor;
+  }, [voiceFor]);
   /**
    * The run that held the element ended, and whether the voice has fallen
    * silent is still to be settled: the autoplay queue gets its turn first. See
@@ -404,7 +418,7 @@ export function useSpeechHost({
     alerts.error(speechFailureAlert(error));
   }, []);
 
-  const player = useSpeechPlayer({ onError });
+  const player = useSpeechPlayer({ onError, voiceFor });
   /**
    * Destructured on purpose, and depended on **as methods** everywhere below —
    * never as `player`.
@@ -621,11 +635,11 @@ export function useSpeechHost({
       // exactly as `prefetchSpeech` swallows it.
       //
       // The voice is the one the click will use — the session's, through its
-      // project, from the same `voiceForSession` `useSpeechPlayer` reads. The
+      // project, from the same `voiceFor` `useSpeechPlayer` reads. The
       // cache keys on voice + text, so warming with any other one is a
       // synthesis nobody ever plays.
       synthesizeSpeech(first.text, {
-        voice: voiceForSession(utterance.sessionId),
+        voice: voiceForRef.current(utterance.sessionId),
         tier: "warm",
         signal,
       })
@@ -683,7 +697,7 @@ export function useSpeechHost({
           // flight counts as held) -> ask again.
           const evicted =
             preloadStartedRef.current.has(key) &&
-            !isSpeechSynthesized(text, { voice: voiceForSession(sessionId) });
+            !isSpeechSynthesized(text, { voice: voiceForRef.current(sessionId) });
           if (!evicted) continue;
           preloadStartedRef.current.delete(key);
         }
@@ -694,7 +708,8 @@ export function useSpeechHost({
         synthesis.preload ??= new AbortController();
         const { signal } = synthesis.preload;
         // The session's voice, for the same reasons the warm uses it.
-        synthesizeSpeech(text, { voice: voiceForSession(sessionId), tier: "preload", signal }).catch(
+        const voice = voiceForRef.current(sessionId);
+        synthesizeSpeech(text, { voice, tier: "preload", signal }).catch(
           (error: unknown) => {
             // Called off: whoever aborted already forgot the unit, and a late
             // rejection must not touch a fresh controller's bookkeeping.

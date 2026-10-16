@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 
-import { DEFAULT_SPEECH_VOICE, voiceForSession } from "../voices";
+import { DEFAULT_SPEECH_VOICE } from "../voices";
+import { voiceForSession } from "../../terminal/sessionVoice";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import { storageKey } from "../../../preferences/types";

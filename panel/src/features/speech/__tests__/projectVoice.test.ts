@@ -1,14 +1,12 @@
 /**
  * The per-project voice: `speech.voiceByProject` overrides the default voice
- * for one project, and `voiceForSession` resolves a cell's voice through the
- * project its session belongs to.
+ * for one project. Resolving a cell's voice through its session's project is
+ * the terminal's `voiceForSession` (`terminal/__tests__/sessionVoice.test.ts`).
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
-import { refreshSessions } from "../../terminal/sessionStore";
-import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import {
   DEFAULT_SPEECH_VOICE,
   getProjectVoice,
@@ -16,7 +14,6 @@ import {
   setProjectVoice,
   setStoredVoice,
   voiceForProject,
-  voiceForSession,
 } from "../voices";
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
@@ -28,37 +25,6 @@ const BY_PROJECT_KEY = storageKey(preferences.speechVoiceByProject);
 const VIVIENNE = "fr-FR-VivienneMultilingualNeural";
 const ANDREW = "en-US-AndrewMultilingualNeural";
 const EMMA = "en-US-EmmaMultilingualNeural";
-
-function session(id: string, project: string): SessionMeta {
-  return {
-    id,
-    name: id,
-    project,
-    cwd: `/srv/git/${project}`,
-    pid: 4242,
-    createdAt: "2026-01-01T00:00:00.000Z",
-  };
-}
-
-/** Loads a session list through the store's own fetch, as the panel does. */
-async function seedSessions(sessions: SessionMeta[]): Promise<void> {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      () =>
-        Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve(sessions),
-        }) as unknown as Promise<Response>,
-    ),
-  );
-  await refreshSessions();
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe("project voice", () => {
   it("the shipped default voice is Vivienne", () => {
@@ -111,14 +77,6 @@ describe("project voice", () => {
     setProjectVoice("__proto__", null);
     expect(getProjectVoice("__proto__")).toBeNull();
     expect(globals.__PAVILIO_PREFS__![BY_PROJECT_KEY]).toEqual({ p: ANDREW });
-  });
-
-  it("an unknown session gets the default voice", async () => {
-    setProjectVoice("p", EMMA);
-    await seedSessions([session("sess-p", "p")]);
-
-    expect(voiceForSession("sess-p")).toBe(EMMA);
-    expect(voiceForSession("sess-unknown")).toBe(VIVIENNE);
   });
 
   it("projects without an override follow a changed default", () => {

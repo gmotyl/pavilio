@@ -25,7 +25,6 @@ const TERMINAL = join(SPEECH, "..", "terminal");
 const KNOWN_OFFENDERS: readonly string[] = [
   "SpeechHostProvider.tsx",
   "useSpeechHost.ts",
-  "voices.ts",
 ];
 
 const SPECIFIER_PATTERNS = [

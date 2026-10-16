@@ -20,7 +20,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { synthesizeSpeech, toSpeechBlob } from "./synth";
 import type { SpeechUnit } from "./types";
-import { voiceForSession } from "./voices";
 
 /**
  * Consecutive unit failures that stop the run. Consecutive is the point: a
@@ -119,6 +118,12 @@ export interface SpeechPlayerOptions {
    * silent — the player logs instead.
    */
   onError?: (error: SpeechPlaybackError) => void;
+  /**
+   * The voice a session's run speaks with. The player knows nothing of
+   * projects: the host hands this in, and warms and preloads with the same
+   * one, because the synthesis cache keys on voice + text.
+   */
+  voiceFor: (sessionId: string) => string;
 }
 
 export interface SpeechPlayer {
@@ -434,7 +439,7 @@ function playUnit(
   });
 }
 
-export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer {
+export function useSpeechPlayer(options: SpeechPlayerOptions): SpeechPlayer {
   const [speakingSessionId, setSpeakingSessionId] = useState<string | null>(null);
   const [pausedSessionId, setPausedSessionId] = useState<string | null>(null);
   const [waitingForSynthesis, setWaitingForSynthesis] = useState(false);
@@ -475,6 +480,14 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
   useEffect(() => {
     onErrorRef.current = options.onError;
   }, [options.onError]);
+  /**
+   * `voiceFor`, mirrored like `onError`: `play` reads it when a run starts, and
+   * `play`'s identity must not follow the host's callback.
+   */
+  const voiceForRef = useRef(options.voiceFor);
+  useEffect(() => {
+    voiceForRef.current = options.voiceFor;
+  }, [options.voiceFor]);
 
   /** Publishes a position, skipping the render when nothing actually moved. */
   const publishProgress = useCallback((next: SpeechProgress | null): void => {
@@ -652,7 +665,7 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}): SpeechPlayer
       // The session's voice — its project's own, else the default — resolved
       // once, when the run starts. The cache keys on voice + text, so this has
       // to be the voice the host warmed and preloaded with.
-      const voice = voiceForSession(sessionId);
+      const voice = voiceForRef.current(sessionId);
       const run: PlaybackRun = {
         sessionId,
         active: true,

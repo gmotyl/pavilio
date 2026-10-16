@@ -59,6 +59,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
 
 import { prepare } from "../prepare";
 import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
+import { voiceForSession } from "../../terminal/sessionVoice";
 
 /** The `src` of every started playback, in order. Warming must never add one. */
 const played: string[] = [];
@@ -177,7 +178,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("an armed cell's arriving answer is synthesized whole and stays silent", async () => {
     const markdown = response(5);
     const units = unitsOf(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await cycle(() => result.current, "cell-a"); // armed
     expect(result.current.speechModeOf("cell-a")).toBe("armed");
@@ -199,7 +200,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("an autoplay cell's arriving answer is synthesized whole too", async () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await cycle(() => result.current, "cell-a", 2); // autoplay
     await emitUtterance("cell-a", "u-1", markdown);
@@ -211,7 +212,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("arming a cell preloads its held unheard answer", async () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await emitUtterance("cell-a", "u-1", markdown);
     expect(requestedTexts()).toEqual([units[0]]);
@@ -225,7 +226,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("an off cell only warms unit 0", async () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await emitUtterance("cell-a", "u-1", markdown);
 
@@ -235,7 +236,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
 
   it("heard answers are never preloaded", async () => {
     const markdown = response(4);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await emitUtterance("cell-a", "u-1", markdown);
     await settle(() => result.current.onSpeak("cell-a"));
@@ -256,7 +257,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("unit 0 is warmed on the warm tier and armed units on the preload tier, each on its own signal", async () => {
     const markdown = response(4);
     const [first, ...rest] = unitsOf(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -288,7 +289,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("a heard utterance's controller is aborted", async () => {
     const markdown = response(3);
     const units = unitsOf(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -310,7 +311,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("an utterance evicted from the queue has its controller aborted", async () => {
     const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf"];
     const firstUnitOf = (word: string): string => unitsOf(response(3, word))[0];
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     // u-1 speaks and is never let finish, so everything after it queues.
     await emitUtterance("cell-a", "u-1", response(3, words[0]));
@@ -338,7 +339,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("disarming aborts the cell's pending preloads", async () => {
     const markdown = response(5);
     const units = holdAll(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -377,7 +378,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("a disarm keeps unit 0's pending warm alive", async () => {
     const markdown = response(4);
     const units = holdAll(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -405,7 +406,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("a failed preload does not abort unit 0's warm", async () => {
     const markdown = response(4);
     const units = holdAll(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -434,7 +435,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("a failed preload stops the rest of the pass and is retried on the next arrival", async () => {
     const markdown = response(5);
     const units = holdAll(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
 
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -462,7 +463,9 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const units = holdAll(markdown);
     // StrictMode mounts, unmounts and remounts the host on the same state, so
     // the cleanup that aborts on the way out must not leave it dead.
-    const { result } = renderHook(() => useSpeechHost(), { reactStrictMode: true });
+    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }), {
+      reactStrictMode: true,
+    });
 
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -482,7 +485,9 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
       setMode = set;
       return createElement(Activity, { mode, children });
     }
-    const { result, unmount } = renderHook(() => useSpeechHost(), { wrapper: Wrapper });
+    const { result, unmount } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }), {
+      wrapper: Wrapper,
+    });
 
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);

@@ -29,6 +29,7 @@ import {
 import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
 import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
 import { getSessions } from "../terminal/sessionStore";
+import { voiceForSession } from "../terminal/sessionVoice";
 import { useTerminalDrawerVisible } from "../terminal/useTerminalDrawer";
 import {
   readStandaloneTerminalFocus,
@@ -164,6 +165,7 @@ export function SpeechHostProvider({ children }: Props) {
     onAnswer,
     isSessionOpen,
     onRunChange: speakingAlert.onRunChange,
+    voiceFor: voiceForSession,
   });
 
   // Here for the same reason the host is: `navigator.mediaSession` is one state
