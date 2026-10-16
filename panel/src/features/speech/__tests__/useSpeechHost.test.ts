@@ -14,6 +14,7 @@
  * panel as ready while every click still paid for a fresh synthesis.
  */
 import { act, renderHook } from "@testing-library/react";
+import { TtsError } from "anytts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const synth = vi.hoisted(() => {
@@ -64,13 +65,13 @@ const synth = vi.hoisted(() => {
     return promise;
   }
 
-  function settle(text: string, outcome: "release" | "fail"): void {
+  function settle(text: string, outcome: "release" | "fail", error?: unknown): void {
     const held = waiting.get(text);
     if (!held) throw new Error(`no synthesis is being held for ${text}`);
     waiting.delete(text);
     holds.delete(text);
     if (outcome === "release") held.release();
-    else held.fail(new Error(`synthesis failed: ${text}`));
+    else held.fail(error ?? new Error(`synthesis failed: ${text}`));
   }
 
   return {
@@ -90,7 +91,8 @@ const synth = vi.hoisted(() => {
       holds.add(text);
     },
     release: (text: string): void => settle(text, "release"),
-    fail: (text: string): void => settle(text, "fail"),
+    /** Rejects the held synthesis — with `error` when given, as anytts rejects with a `TtsError`. */
+    fail: (text: string, error?: unknown): void => settle(text, "fail", error),
     get requests() {
       return requests;
     },
@@ -143,6 +145,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
   };
 });
 
+import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { prepare } from "../prepare";
 import { idleTransportTarget } from "../idleTransportTarget";
 import { useSpeechHost, type SpeechHost, type SpeechRunEvent } from "../useSpeechHost";
@@ -1452,5 +1455,31 @@ describe("useSpeechHost — the voice's run events", () => {
       { type: "start", sessionId: "cell-b" },
       { type: "end" },
     ]);
+  });
+});
+
+describe("useSpeechHost — the speech-stopped alert", () => {
+  beforeEach(() => {
+    __resetAlertsForTests();
+  });
+
+  it("onError raises the kind-specific alert", async () => {
+    // End to end: the TtsError anytts rejects with travels through the player
+    // as the SpeechPlaybackError's `cause`, and the host words the alert by it.
+    const markdown = response(1, "Refused");
+    const [only] = unitsOf(markdown);
+    synth.hold(only);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", markdown);
+    await settle(() => result.current.onSpeak("cell-a"));
+    await settle(() => synth.fail(only, new TtsError("rejected", "HTTP 403", { status: 403 })));
+
+    expect(getAlertsSnapshot().map((alert) => [alert.kind, alert.title])).toEqual([
+      ["error", "Speech stopped — the speech service refused the request."],
+    ]);
+    // Still a failed run: nothing was heard, so the pip keeps inviting the retry.
+    expect(played).toEqual([]);
+    expect(result.current.stateFor("cell-a")).toBe("ready");
   });
 });

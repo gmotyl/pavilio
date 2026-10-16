@@ -59,6 +59,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { alerts } from "../alerts/store";
 import { createAutoplayQueue, type AutoplayQueue } from "./autoplayQueue";
+import { speechFailureAlert } from "./failureAlert";
 import { prepare } from "./prepare";
 import { isSpeechSynthesized, synthesizeSpeech } from "./synth";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
@@ -399,7 +400,8 @@ export function useSpeechHost({
     // silence is a failure rather than the end of the answer. Every kind must
     // land somewhere: a handler that returns early also suppresses the player's
     // own `console.error` fallback, which only runs when there is no handler.
-    alerts.error("Speech stopped — the voice could not be synthesized.");
+    // Worded by the TtsError the player carries as `cause`, when there is one.
+    alerts.error(speechFailureAlert(error));
   }, []);
 
   const player = useSpeechPlayer({ onError });
