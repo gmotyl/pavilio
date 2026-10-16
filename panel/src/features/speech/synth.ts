@@ -12,12 +12,16 @@
  * subscription out to the panel's cache listeners.
  *
  * The instance is created lazily, on first use, so importing the module (or a
- * test that mocks anytts) never builds one.
+ * test that mocks anytts) never builds one. The `speech.route` preference is
+ * baked into it (the edge engine's `mode`), so every use compares the route
+ * against the one the instance was built with and rebuilds on a change —
+ * dropping the cache, which was synthesized the same way either route.
  */
 import { createTts, resolveVoice, type SynthesisRequest, type Tts, type TtsConfig } from "anytts";
 import { preferences } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
 import { SPEECH_ENGINES, speechEngines } from "./engines";
+import { SPEECH_ROUTE_MODES, toSpeechRoute, type SpeechRoute } from "./route";
 
 export interface SpeechSynthesisOptions {
   voice?: string;
@@ -50,10 +54,36 @@ const TTS_CONFIG: TtsConfig = {
   cache: { max: SPEECH_CACHE_MAX_ENTRIES },
 };
 
-let instance: Tts | undefined;
+/** The config for `route`: the edge engine's `mode` is the route's. */
+function configFor(route: SpeechRoute): TtsConfig {
+  const engines = { ...TTS_CONFIG.engines };
+  engines.edge = { ...engines.edge, mode: SPEECH_ROUTE_MODES[route] };
+  return { ...TTS_CONFIG, engines };
+}
 
+const cacheListeners = new Set<() => void>();
+let libraryUnsubscribe: (() => void) | undefined;
+
+let instance: Tts | undefined;
+let instanceRoute: SpeechRoute | undefined;
+
+/**
+ * The instance for the route stored now. A route change lets the old instance
+ * go and builds a new one; the library subscription moves with it, and the
+ * panel's listeners hear about the (now empty) cache on a microtask, since
+ * this can run inside a render-time peek.
+ */
 function tts(): Tts {
-  instance ??= createTts(TTS_CONFIG);
+  const route = toSpeechRoute(readPreference(preferences.speechRoute));
+  if (instance && instanceRoute === route) return instance;
+  const swapped = instance !== undefined;
+  instance = createTts(configFor(route));
+  instanceRoute = route;
+  if (swapped && libraryUnsubscribe) {
+    libraryUnsubscribe();
+    libraryUnsubscribe = instance.subscribe(notifyCacheListeners);
+    queueMicrotask(notifyCacheListeners);
+  }
   return instance;
 }
 
@@ -79,9 +109,6 @@ function request(text: string, options: SpeechSynthesisOptions): SynthesisReques
     engine: engine(),
   };
 }
-
-const cacheListeners = new Set<() => void>();
-let libraryUnsubscribe: (() => void) | undefined;
 
 /**
  * Announces that what a peek would report has changed somewhere — once per

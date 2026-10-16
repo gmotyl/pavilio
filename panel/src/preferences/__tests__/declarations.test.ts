@@ -75,6 +75,7 @@ const MACHINE_LOCAL = [
   "speech.answerPane.height",
   "speech.armedCell",
   "speech.modes",
+  "speech.route",
   "terminal.focus",
   "terminal.grid",
   "terminal.order",
@@ -165,6 +166,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["speech.armedCell", null, "global"],
   ["speech.modes", null, "global"],
   ["speech.engine", "edge", "global"],
+  ["speech.route", "auto", "global"],
   ["speech.voice", "fr-FR-VivienneMultilingualNeural", "global"],
   ["speech.voiceByProject", {}, "global"],
   ["terminal.drawer.open", false, "global"],
@@ -215,6 +217,17 @@ describe("the declaration table", () => {
     // `str`: any stored string arrives intact; `voices.ts` maps an engine
     // anytts does not list onto the default.
     expect(engine.codec.parse("anything")).toBe("anything");
+  });
+
+  it("speech.route is a non-portable global preference defaulting to auto", () => {
+    const route = keyOf("speech.route");
+    expect(route).toBe(preferences.speechRoute);
+    expect(route.scope).toBe("global");
+    // Whether this browser reaches Edge directly is a fact about the device.
+    expect(route.portable).toBe(false);
+    expect(route.default).toBe("auto");
+    // `str`: `synth.ts` maps an unknown stored route onto auto.
+    expect(route.codec.parse("anything")).toBe("anything");
   });
 
   it("session-scoped preferences are declared non-portable", () => {

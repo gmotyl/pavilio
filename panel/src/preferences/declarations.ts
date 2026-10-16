@@ -649,6 +649,21 @@ export const preferences = {
     portable: true,
   }),
   /**
+   * How Edge synthesis reaches Microsoft: `auto` (straight from the browser in
+   * Edge, through the panel server's `/api/tts` relay elsewhere) or `server`
+   * (always the relay). Non-portable: whether a browser can open the Edge
+   * socket itself is a fact about this device, not about the workspace. It
+   * names no session, so it is not on the portability guard's SESSION_NAMING
+   * list. Typed `string`; `speech/route.ts` maps an unknown value onto `auto`.
+   */
+  speechRoute: definePreference({
+    key: "speech.route", // was: nothing — the route is new
+    scope: "global",
+    default: "auto",
+    codec: str,
+    portable: false,
+  }),
+  /**
    * Each project's own voice — `project → voice id`; a project that follows
    * the default voice has no entry. Portable, unlike `speech.modes`: the keys
    * are project names, which mean the same thing on every machine. The codec

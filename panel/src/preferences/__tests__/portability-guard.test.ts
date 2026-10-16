@@ -146,6 +146,9 @@ const FIXTURES: Record<string, Fixture> = {
   "speech.answerPane.height": { value: 412, scopeArg: "pavilio" },
   "speech.armedCell": { value: "sess-0b2e55d1" },
   "speech.modes": { value: { "sess-0b2e55d1": "autoplay" } },
+  // Non-portable and naming no session: whether this browser can reach the
+  // Edge service directly is a fact about the device.
+  "speech.route": { value: "server" },
 
   // ── Notifications ────────────────────────────────────────────────────────
   // Non-portable and naming no session: the browser permission it pairs with
@@ -248,9 +251,9 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(51);
+    expect(ALL_PREFERENCES.length).toBe(52);
     expect(portable.length).toBe(39);
-    expect(machineLocal.length).toBe(12);
+    expect(machineLocal.length).toBe(13);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the
     // shipped table agrees with it, not merely that it type-checked.

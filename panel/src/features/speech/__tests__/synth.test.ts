@@ -47,7 +47,10 @@ vi.mock("anytts", async (importOriginal) => {
   return { ...actual, createTts: lib.createTts };
 });
 
-const prefs = vi.hoisted(() => ({ engine: undefined as string | undefined }));
+const prefs = vi.hoisted(() => ({
+  engine: undefined as string | undefined,
+  route: undefined as string | undefined,
+}));
 
 vi.mock("../../../preferences/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../preferences/store")>();
@@ -56,7 +59,9 @@ vi.mock("../../../preferences/store", async (importOriginal) => {
     readPreference: (def: { key: string; default: unknown }, scope?: string) =>
       def.key === "speech.engine"
         ? (prefs.engine ?? def.default)
-        : actual.readPreference(def as never, scope),
+        : def.key === "speech.route"
+          ? (prefs.route ?? def.default)
+          : actual.readPreference(def as never, scope),
   };
 });
 
@@ -75,6 +80,7 @@ beforeEach(async () => {
   lib.state.listeners.clear();
   lib.state.stateAnswer = "cold";
   prefs.engine = undefined;
+  prefs.route = undefined;
   synth = await import("../synth");
 });
 
@@ -90,7 +96,12 @@ describe("the anytts seam", () => {
     expect(lib.createTts).toHaveBeenCalledTimes(1);
     const expected: TtsConfig = {
       engines: {
-        edge: { voices: { default: DEFAULT_SPEECH_VOICE }, relayUrl: "/api/tts", stallMs: 15_000 },
+        edge: {
+          voices: { default: DEFAULT_SPEECH_VOICE },
+          relayUrl: "/api/tts",
+          stallMs: 15_000,
+          mode: "auto",
+        },
       },
       defaultEngine: "edge",
       scheduler: {
@@ -100,6 +111,55 @@ describe("the anytts seam", () => {
       cache: { max: 200 },
     };
     expect(lib.createTts.mock.calls[0]?.[0]).toEqual(expected);
+  });
+
+  it("route=server creates the instance in relay mode, and a route change re-creates it", async () => {
+    prefs.route = "server";
+    await synth.synthesizeSpeech("hello");
+    expect(lib.createTts).toHaveBeenCalledTimes(1);
+    const first = lib.createTts.mock.calls[0]?.[0] as TtsConfig;
+    expect(first.engines.edge).toMatchObject({ relayUrl: "/api/tts", mode: "relay" });
+
+    // Same route: the instance (and its cache) is kept.
+    await synth.synthesizeSpeech("again");
+    expect(lib.createTts).toHaveBeenCalledTimes(1);
+
+    prefs.route = "auto";
+    await synth.synthesizeSpeech("hello");
+    expect(lib.createTts).toHaveBeenCalledTimes(2);
+    const second = lib.createTts.mock.calls[1]?.[0] as TtsConfig;
+    expect(second.engines.edge).toMatchObject({ mode: "auto" });
+  });
+
+  it("an unknown stored route synthesizes in auto mode", async () => {
+    prefs.route = "browser";
+    await synth.synthesizeSpeech("hello");
+    const config = lib.createTts.mock.calls[0]?.[0] as TtsConfig;
+    expect(config.engines.edge).toMatchObject({ mode: "auto" });
+  });
+
+  it("cache listeners follow the instance across a route change", async () => {
+    const unsubscribeFirst = vi.fn();
+    const first = { ...lib.fake, subscribe: vi.fn(() => unsubscribeFirst) };
+    lib.createTts.mockImplementationOnce(() => first);
+
+    const listener = vi.fn();
+    synth.subscribeSpeechCache(listener);
+    expect(first.subscribe).toHaveBeenCalledTimes(1);
+
+    prefs.route = "server";
+    synth.speechCacheState("hello");
+
+    // The old instance is let go and the new one carries the subscription.
+    expect(unsubscribeFirst).toHaveBeenCalledTimes(1);
+    expect(lib.fake.subscribe).toHaveBeenCalledTimes(1);
+    // Readers are told to re-peek — the new cache starts empty — but not
+    // synchronously: the swap can happen inside a render-time peek.
+    expect(listener).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledTimes(1);
+    lib.emit("add");
+    expect(listener).toHaveBeenCalledTimes(2);
   });
 
   it("synthesizeSpeech forwards voice, tier, signal and the engine preference and returns the bytes", async () => {

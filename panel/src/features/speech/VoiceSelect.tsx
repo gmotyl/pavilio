@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { listEngines, listVoices } from "anytts";
 
 import { preferences } from "../../preferences/declarations";
-import { readPreference } from "../../preferences/store";
+import { readPreference, writePreference } from "../../preferences/store";
 import { speechEngines } from "./engines";
+import { SPEECH_ROUTE_OPTIONS, toSpeechRoute } from "./route";
 import { groupVoices } from "./voiceGroups";
 import {
   getStoredEngine,
@@ -37,11 +38,18 @@ const SELECT_STYLE = {
  *
  * The engine options are the seam's configured engines, labelled from anytts'
  * list: an engine anytts lists but the panel does not configure is not offered.
+ *
+ * The speech route is per device (`speech.route` is non-portable) and is
+ * written from the change handler only; `synth.ts` picks it up on its next
+ * request.
  */
 export function VoiceSelect() {
   const [engine, setEngine] = useState(getStoredEngine);
   const [voice, setVoice] = useState(
     () => resolveStoredVoice(readPreference(preferences.speechVoice)).voice,
+  );
+  const [route, setRoute] = useState(() =>
+    toSpeechRoute(readPreference(preferences.speechRoute)),
   );
   useEffect(() => {
     setVoice(getStoredVoice());
@@ -112,6 +120,35 @@ export function VoiceSelect() {
         Multilingual voices read both Polish and English; a single-language voice
         reads every answer in its own language. Saved in the workspace; a project
         can override it in its Overview → Project settings.
+      </p>
+      <label
+        htmlFor="speech-route"
+        className="block text-xs mt-4 mb-1"
+        style={{ color: "var(--text-muted)" }}
+      >
+        Speech route
+      </label>
+      <select
+        id="speech-route"
+        data-testid="speech-route-select"
+        value={route}
+        onChange={(e) => {
+          const next = toSpeechRoute(e.target.value);
+          writePreference(preferences.speechRoute, next);
+          setRoute(next);
+        }}
+        className={SELECT_CLASS}
+        style={SELECT_STYLE}
+      >
+        {SPEECH_ROUTE_OPTIONS.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+        Kept on this device. Microsoft&apos;s speech service answers only Edge, so other
+        browsers always go through the panel server.
       </p>
     </div>
   );

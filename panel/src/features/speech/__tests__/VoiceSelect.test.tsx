@@ -9,6 +9,7 @@ import { groupVoices } from "../voiceGroups";
 import { DEFAULT_SPEECH_VOICE, getStoredVoice, setStoredVoice } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
+import { readPreference } from "../../../preferences/store";
 import AgentSettings from "../../agents/AgentSettings";
 import LeftSidebar from "../../shell/LeftSidebar";
 import { SpeechHostProvider } from "../SpeechHostProvider";
@@ -132,6 +133,13 @@ function stubEmptyAgentSettingsApi(): void {
   );
 }
 
+function routeSelect(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: "Speech route" }) as HTMLSelectElement;
+}
+
+const ROUTE_HELP_TEXT =
+  "Kept on this device. Microsoft's speech service answers only Edge, so other browsers always go through the panel server.";
+
 function voiceSelect(): HTMLSelectElement {
   return screen.getByRole("combobox", { name: VOICE_LABEL }) as HTMLSelectElement;
 }
@@ -252,6 +260,35 @@ describe("VoiceSelect", () => {
     // Nothing was persisted, so a reload falls back to the default — that is
     // the documented consequence, not a crash.
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+  });
+
+  it("renders the speech route select, defaulting to auto", () => {
+    render(<VoiceSelect />);
+
+    const route = routeSelect();
+    const options = within(route).getAllByRole("option") as HTMLOptionElement[];
+    expect(options.map((option) => option.value)).toEqual(["auto", "server"]);
+    expect(options.map((option) => option.textContent)).toEqual([
+      "Auto — straight from the browser in Edge, through the panel server elsewhere",
+      "Panel server — always synthesize through /api/tts",
+    ]);
+    expect(route).toHaveValue("auto");
+    expect(screen.getByText(ROUTE_HELP_TEXT)).toBeInTheDocument();
+    // Rendering alone stores nothing.
+    expect(localStorage.getItem(storageKey(preferences.speechRoute))).toBeNull();
+  });
+
+  it("changing the speech route stores speech.route on this device only", async () => {
+    const user = userEvent.setup();
+    render(<VoiceSelect />);
+
+    await user.selectOptions(routeSelect(), "server");
+
+    expect(routeSelect()).toHaveValue("server");
+    expect(readPreference(preferences.speechRoute)).toBe("server");
+    // Non-portable: kept in browser storage, never in the workspace document.
+    expect(localStorage.getItem(storageKey(preferences.speechRoute))).toBe("server");
+    expect(prefsDocument()[storageKey(preferences.speechRoute)]).toBeUndefined();
   });
 
   it("the settings picker is labelled Default voice", () => {
