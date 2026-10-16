@@ -990,9 +990,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     for (const word of words) synth.hold(firstUnitOf(word));
 
     const { result } = renderHook(() =>
-
       useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-
     );
 
     for (let i = 0; i < words.length; i += 1) {

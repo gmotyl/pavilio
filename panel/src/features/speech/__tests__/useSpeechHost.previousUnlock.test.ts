@@ -198,9 +198,7 @@ describe("useSpeechHost — what a silent step back still unlocks", () => {
     localStorage.setItem(MODES_KEY, '{"cell-a":"autoplay"}');
 
     const { result } = renderHook(() =>
-
       useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-
     );
     expect(result.current.speechModeOf("cell-a")).toBe("autoplay");
 

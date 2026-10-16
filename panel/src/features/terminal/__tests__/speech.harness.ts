@@ -44,7 +44,7 @@ export const INERT_SPEECH: GridSpeech = {
 
 /**
  * The same inert host, but as a `SpeechHost` — what a `vi.mock` of
- * `useSpeechHost` has to return so a real `SpeechHostProvider` can be mounted
+ * `useSpeechHost` has to return so a real `TerminalSpeechHost` can be mounted
  * above the subject.
  *
  * `SpeechHost` is `GridSpeech` plus what the document-wide media-session
