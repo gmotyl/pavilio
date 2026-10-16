@@ -637,6 +637,18 @@ export const preferences = {
     portable: true,
   }),
   /**
+   * Which anytts engine synthesizes. Typed `string` for the same reason
+   * `speech.voice` is: the engine list is the library's, and `synth.ts` only
+   * forwards it.
+   */
+  speechEngine: definePreference({
+    key: "speech.engine", // was: nothing — anytts brought engines
+    scope: "global",
+    default: "edge",
+    codec: str,
+    portable: true,
+  }),
+  /**
    * Each project's own voice — `project → voice id`; a project that follows
    * the default voice has no entry. Portable, unlike `speech.modes`: the keys
    * are project names, which mean the same thing on every machine. The codec
