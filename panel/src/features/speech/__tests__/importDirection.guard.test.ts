@@ -34,9 +34,90 @@ const SPECIFIER_PATTERNS = [
   /\brequire\s*\(\s*['"`]([^'"`$]+)/g,
 ];
 
+/**
+ * `source` with every comment blanked to spaces (newlines kept, so line
+ * structure survives). String and template literals are skipped intact, so a
+ * `//` or `/*` inside one is not taken for a comment; `${…}` inside a template
+ * is scanned as code. Regex literals are not recognised: a quote inside one
+ * opens a string that a single-quoted or double-quoted literal ends at the line
+ * break, which keeps any damage to that line.
+ */
+function stripComments(source: string): string {
+  let out = "";
+  let i = 0;
+  let depth = 0;
+  // Brace depth at each open `${`, innermost last.
+  const substitutions: number[] = [];
+
+  // Copies a template literal's text from `i` up to and including its closing
+  // backtick, or up to and including a `${` (which is then pushed).
+  const scanTemplate = () => {
+    while (i < source.length) {
+      const c = source[i] as string;
+      if (c === "\\") {
+        out += source.slice(i, i + 2);
+        i += 2;
+      } else if (c === "`") {
+        out += c;
+        i += 1;
+        return;
+      } else if (c === "$" && source[i + 1] === "{") {
+        out += "${";
+        i += 2;
+        substitutions.push(depth);
+        depth += 1;
+        return;
+      } else {
+        out += c;
+        i += 1;
+      }
+    }
+  };
+
+  while (i < source.length) {
+    const c = source[i] as string;
+    const next = source[i + 1];
+    if (c === "/" && next === "/") {
+      const end = source.indexOf("\n", i);
+      const stop = end === -1 ? source.length : end;
+      out += " ".repeat(stop - i);
+      i = stop;
+    } else if (c === "/" && next === "*") {
+      const end = source.indexOf("*/", i + 2);
+      const stop = end === -1 ? source.length : end + 2;
+      out += source.slice(i, stop).replace(/[^\n]/g, " ");
+      i = stop;
+    } else if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < source.length && source[j] !== c && source[j] !== "\n") {
+        j += source[j] === "\\" ? 2 : 1;
+      }
+      out += source.slice(i, j + 1);
+      i = j + 1;
+    } else if (c === "`") {
+      out += c;
+      i += 1;
+      scanTemplate();
+    } else if (c === "}" && substitutions.at(-1) === depth - 1) {
+      substitutions.pop();
+      depth -= 1;
+      out += c;
+      i += 1;
+      scanTemplate();
+    } else {
+      if (c === "{") depth += 1;
+      if (c === "}") depth -= 1;
+      out += c;
+      i += 1;
+    }
+  }
+  return out;
+}
+
 function specifiersOf(source: string): string[] {
+  const code = stripComments(source);
   return SPECIFIER_PATTERNS.flatMap((pattern) =>
-    [...source.matchAll(pattern)].map((match) => match[1] as string),
+    [...code.matchAll(pattern)].map((match) => match[1] as string),
   );
 }
 
@@ -110,6 +191,27 @@ describe("speech → terminal import direction", () => {
         "../../terminal/l",
         "../../terminal/m",
         "../../terminal/side-effect",
+      ].sort(),
+    );
+  });
+
+  it("comments inside an import do not hide it, and string contents are not comments", () => {
+    const file = join(SPEECH, "nested", "fake.ts");
+    const source = [
+      'import /* "note" */ { x } from "../../terminal/x";',
+      "import {\n  y, // it's needed\n  z,\n} from '../../terminal/y';",
+      'const url = "https://x"; import { w } from "../../terminal/w";',
+      "const glob = '/* not a comment'; import { v } from '../../terminal/v'; const end = '*/';",
+      'const t = `https://${host}/*`; import { u } from "../../terminal/u";',
+    ].join("\n");
+
+    expect(terminalImports(file, source).sort()).toEqual(
+      [
+        "../../terminal/u",
+        "../../terminal/v",
+        "../../terminal/w",
+        "../../terminal/x",
+        "../../terminal/y",
       ].sort(),
     );
   });
