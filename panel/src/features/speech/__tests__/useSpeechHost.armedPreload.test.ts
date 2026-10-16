@@ -336,7 +336,8 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
       expect(last?.signal).not.toBe(signal);
       expect(last?.signal?.aborted).toBe(false);
     }
-    expect(synth.heldTexts).toEqual(units.slice(1));
+    // Unit 0's warm was never called off: a disarm leaves it running.
+    expect(synth.heldTexts).toEqual(units);
 
     // Nor did they forget the fresh preloads: the next opportunity asks for
     // none of them again.

@@ -253,7 +253,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     expect(synth.requests.length).toBe(before);
   });
 
-  it("unit 0 is warmed on the warm tier and armed units on the preload tier, with the utterance's signal", async () => {
+  it("unit 0 is warmed on the warm tier and armed units on the preload tier, each on its own signal", async () => {
     const markdown = response(4);
     const [first, ...rest] = unitsOf(markdown);
     const { result } = renderHook(() => useSpeechHost());
@@ -265,9 +265,15 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     for (const unit of rest) {
       expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload"]);
     }
-    // One signal for the whole utterance: one abort calls all of it off.
-    const signal = synth.callsFor(first)[0].signal;
+    // One signal for the whole remainder, so one abort calls all of it off —
+    // and another for unit 0's warm, which a disarm or a failed preload must
+    // not take down with it.
+    const warmSignal = synth.callsFor(first)[0].signal;
+    const signal = synth.callsFor(rest[0])[0].signal;
+    expect(warmSignal).toBeInstanceOf(AbortSignal);
     expect(signal).toBeInstanceOf(AbortSignal);
+    expect(warmSignal).not.toBe(signal);
+    expect(warmSignal?.aborted).toBe(false);
     expect(signal?.aborted).toBe(false);
     for (const unit of rest) expect(synth.callsFor(unit)[0].signal).toBe(signal);
 
@@ -276,6 +282,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     await emitUtterance("cell-b", "b-1", response(2, "Bravo"));
     expect(synth.callsFor(other[0])[0].tier).toBe("warm");
     expect(synth.callsFor(other[0])[0].signal).not.toBe(signal);
+    expect(synth.callsFor(other[0])[0].signal).not.toBe(warmSignal);
   });
 
   it("a heard utterance's controller is aborted", async () => {
@@ -344,16 +351,20 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     await cycle(() => result.current, "cell-a"); // off
     expect(result.current.speechModeOf("cell-a")).toBe("off");
 
-    // Called off: the library holds nothing for it any more, and nothing of it
-    // is asked for again — not even at the next opportunity.
+    // Called off: the library holds nothing of the remainder any more, and
+    // none of it is asked for again — not even at the next opportunity. Unit
+    // 0's warm is not a preload: an off cell still warms it, so it survives.
     expect(signal?.aborted).toBe(true);
-    expect(synth.held).toBe(0);
+    expect(synth.callsFor(units[0])[0].signal?.aborted).toBe(false);
+    expect(synth.heldTexts).toEqual([units[0]]);
     await emitUtterance("cell-b", "b-1", response(2, "Bravo"));
     for (const unit of units) expect(timesRequested(unit)).toBe(1);
     expect(played).toEqual([]);
 
-    // Arming again picks the remainder up, on a fresh signal.
+    // Arming again picks the remainder up, on a fresh signal; unit 0 is still
+    // the one warm already out.
     await cycle(() => result.current, "cell-a");
+    expect(timesRequested(units[0])).toBe(1);
     for (const unit of units.slice(1)) {
       expect(timesRequested(unit)).toBe(2);
       const last = synth.callsFor(unit).at(-1);
@@ -361,6 +372,63 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
       expect(last?.signal).not.toBe(signal);
       expect(last?.signal?.aborted).toBe(false);
     }
+  });
+
+  it("a disarm keeps unit 0's pending warm alive", async () => {
+    const markdown = response(4);
+    const units = holdAll(markdown);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    const warm = synth.callsFor(units[0])[0].signal;
+    expect(result.current.stateFor("cell-a")).toBe("preparing");
+
+    await cycle(() => result.current, "cell-a", 2); // autoplay, then off
+    expect(result.current.speechModeOf("cell-a")).toBe("off");
+
+    // The warm is still out, and the cell is still red for it…
+    expect(warm?.aborted).toBe(false);
+    expect(synth.heldTexts).toEqual([units[0]]);
+    expect(result.current.stateFor("cell-a")).toBe("preparing");
+
+    // …until it lands, and only then is the cell ready — with unit 0 warm.
+    await act(async () => {
+      synth.release(units[0]);
+      await drain();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    expect(synth.isSpeechSynthesized(units[0], { voice: synth.callsFor(units[0])[0].voice })).toBe(true);
+    expect(timesRequested(units[0])).toBe(1);
+  });
+
+  it("a failed preload does not abort unit 0's warm", async () => {
+    const markdown = response(4);
+    const units = holdAll(markdown);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    const warm = synth.callsFor(units[0])[0].signal;
+
+    await act(async () => {
+      synth.fail(units[1]);
+      await drain();
+    });
+    // The remainder is called off; the warm is not.
+    for (const unit of units.slice(2)) {
+      expect(synth.callsFor(unit)[0].signal?.aborted).toBe(true);
+    }
+    expect(warm?.aborted).toBe(false);
+    expect(synth.heldTexts).toEqual([units[0]]);
+    expect(result.current.stateFor("cell-a")).toBe("preparing");
+
+    await act(async () => {
+      synth.release(units[0]);
+      await drain();
+    });
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    expect(synth.isSpeechSynthesized(units[0], { voice: synth.callsFor(units[0])[0].voice })).toBe(true);
   });
 
   it("a failed preload stops the rest of the pass and is retried on the next arrival", async () => {
@@ -380,7 +448,8 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     for (const unit of units.slice(2)) {
       expect(synth.callsFor(unit)[0].signal?.aborted).toBe(true);
     }
-    expect(synth.held).toBe(0);
+    // Only unit 0's warm is still out.
+    expect(synth.heldTexts).toEqual([units[0]]);
 
     // An arrival elsewhere is the next opportunity: the failed unit is asked
     // for again, once.

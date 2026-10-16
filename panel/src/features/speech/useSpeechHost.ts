@@ -26,7 +26,10 @@
  * cell's remainder on `preload`, both behind the player's `run`; the library's
  * scheduler bounds and orders them. What only this module knows is when an
  * utterance stops being wanted — heard, out of the queue, its cell disarmed —
- * so it holds one `AbortController` per utterance and aborts it then.
+ * so it holds two `AbortController`s per utterance and aborts them then: one
+ * for unit 0's warm, which only heard, out of the queue and unmount call off —
+ * an off cell still warms unit 0 — and one for the armed remainder, which a
+ * disarm or a failed preload calls off as well.
  *
  * ## Why a run object rather than `await play(); markHeard()`
  *
@@ -117,14 +120,22 @@ function isAbortError(error: unknown): boolean {
 }
 
 /**
- * One utterance's claim on the synthesizer: the signal every warm and preload of
- * it carries, and whether any of those were preloads — only an armed
- * utterance's controller has anything for a disarm to call off.
+ * One utterance's claim on the synthesizer, as two signals.
+ *
+ * `warm` is unit 0's, and it is NOT the preloads'. An off cell still warms unit
+ * 0 ("The first unit is warmed before it is asked for"), so a disarm — or a
+ * preload that failed — must not call it off: with one shared controller it
+ * did, the cell went green, and unit 0 was never warmed again. Only an
+ * utterance that is heard, leaves the queue, or outlives its host loses it.
+ *
+ * `preload` is the armed remainder's, created on its first preload unit and
+ * dropped (`null`) when a disarm or a failure calls it off, so the next pass
+ * requests the units again on a fresh one.
  */
 interface UtteranceSynthesis {
-  readonly controller: AbortController;
   readonly sessionId: string;
-  preloading: boolean;
+  warm: AbortController | null;
+  preload: AbortController | null;
 }
 
 /**
@@ -286,11 +297,12 @@ export function useSpeechHost({
    */
   const warmingRef = useRef<Map<string, AbortSignal>>(new Map());
   /**
-   * One controller per utterance with a warm or preload out, keyed by utterance
-   * id. anytts queues at call time, so "is this still wanted?" is no longer
-   * asked when a job starts but answered for the utterance's whole lifetime:
-   * the controller is aborted when the utterance is heard, leaves the queue, or
-   * — if it was preloading — its cell is disarmed, and on unmount. A queued job
+   * The controllers of every utterance with a warm or preload out, keyed by
+   * utterance id (see {@link UtteranceSynthesis}). anytts queues at call time,
+   * so "is this still wanted?" is no longer asked when a job starts but
+   * answered for the utterance's whole lifetime: both controllers are aborted
+   * when the utterance is heard, leaves the queue, and on unmount; the preload
+   * one alone when its cell is disarmed or a preload unit fails. A queued job
    * with no caller left is dropped without touching the network; one in flight
    * is closed once nobody holds it (the player's run may still).
    *
@@ -521,31 +533,31 @@ export function useSpeechHost({
     [],
   );
 
-  /** The utterance's controller, created on its first warm or preload. */
+  /** The utterance's record, created on its first warm or preload. */
   const synthesisFor = useCallback((utterance: Utterance): UtteranceSynthesis => {
     const existing = synthesesRef.current.get(utterance.id);
     if (existing) return existing;
 
     const created: UtteranceSynthesis = {
-      controller: new AbortController(),
       sessionId: utterance.sessionId,
-      preloading: false,
+      warm: null,
+      preload: null,
     };
     synthesesRef.current.set(utterance.id, created);
     return created;
   }, []);
 
   /**
-   * Calls an utterance off: every warm and preload it still has queued or in
-   * flight rejects `AbortError`, and its preload units are forgotten so a later
-   * opportunity — arming the cell again, the retry after a failure — requests
-   * them on a fresh controller. Its unit-0 warm is NOT forgotten: once called
-   * off, no further unit of it is requested until it is preloaded again.
+   * Calls an utterance's PRELOADS off, and only those: every remainder unit it
+   * still has queued or in flight rejects `AbortError`, and is forgotten so a
+   * later opportunity — arming the cell again, the retry after a failure —
+   * requests it on a fresh controller. Unit 0's warm is left running: a cell
+   * that is disarmed, or whose synthesizer dropped one unit, still wants its
+   * first unit in hand.
    */
-  const abortUtterance = useCallback((utteranceId: string): void => {
+  const abortPreloads = useCallback((utteranceId: string): void => {
     const synthesis = synthesesRef.current.get(utteranceId);
     if (!synthesis) return;
-    synthesesRef.current.delete(utteranceId);
 
     const prefix = `${utteranceId}#`;
     for (const key of preloadedRef.current) {
@@ -554,8 +566,31 @@ export function useSpeechHost({
     for (const key of preloadStartedRef.current) {
       if (key.startsWith(prefix)) preloadStartedRef.current.delete(key);
     }
-    synthesis.controller.abort();
+    const { preload } = synthesis;
+    synthesis.preload = null;
+    if (!synthesis.warm) synthesesRef.current.delete(utteranceId);
+    preload?.abort();
   }, []);
+
+  /**
+   * Calls an utterance off entirely — heard, out of the queue, or its host
+   * gone: its preloads as {@link abortPreloads} does, and its unit-0 warm with
+   * them. The warm is NOT forgotten: once called off, no further unit of it is
+   * requested until it is preloaded again.
+   */
+  const abortUtterance = useCallback(
+    (utteranceId: string): void => {
+      const synthesis = synthesesRef.current.get(utteranceId);
+      if (!synthesis) return;
+
+      abortPreloads(utteranceId);
+      synthesesRef.current.delete(utteranceId);
+      const { warm } = synthesis;
+      synthesis.warm = null;
+      warm?.abort();
+    },
+    [abortPreloads],
+  );
 
   /** Unit 0 of an arriving utterance, on anytts' `warm` tier, once. */
   const warmFirstUnit = useCallback(
@@ -568,7 +603,10 @@ export function useSpeechHost({
       const first = units[0];
       if (!first) return;
 
-      const { signal } = synthesisFor(utterance).controller;
+      // Its own controller, never the preloads': see `UtteranceSynthesis`.
+      const warm = new AbortController();
+      synthesisFor(utterance).warm = warm;
+      const { signal } = warm;
       warmingRef.current.set(utterance.sessionId, signal);
       // Red from the moment it is asked for, whether the library starts it now
       // or queues it behind the playing run and the warms ahead of it: a cell
@@ -610,12 +648,13 @@ export function useSpeechHost({
    * in the order they are handed in. Unit 0 is the warm's.
    *
    * All of them are requested now — the library queues them behind the run and
-   * the warms — on the utterance's signal, so a cell disarmed or an answer
-   * heard while they wait calls them off in one abort (see the release effect).
-   * Called off is not failed: an `AbortError` is never counted below.
+   * the warms — on the utterance's preload signal, so a cell disarmed or an
+   * answer heard while they wait calls them off in one abort (see the release
+   * effect). Called off is not failed: an `AbortError` is never counted below.
    *
    * A failed unit stops the rest of that utterance's preload too — by aborting
-   * its controller, which drops the units still queued — and it stays stopped
+   * its preload controller, which drops the units still queued but leaves unit
+   * 0's warm running — and it stays stopped
    * until the next warming-effect run (`preloadFailedRef`): a synthesizer that
    * is down must not be walked through a twelve-unit answer nobody has asked
    * for yet. The run, if one starts, reports the failure. The next pass
@@ -650,8 +689,8 @@ export function useSpeechHost({
         preloadStartedRef.current.add(key);
 
         const synthesis = synthesisFor(utterance);
-        synthesis.preloading = true;
-        const { signal } = synthesis.controller;
+        synthesis.preload ??= new AbortController();
+        const { signal } = synthesis.preload;
         // The session's voice, for the same reasons the warm uses it.
         synthesizeSpeech(text, { voice: voiceForSession(sessionId), tier: "preload", signal }).catch(
           (error: unknown) => {
@@ -659,40 +698,42 @@ export function useSpeechHost({
             // rejection must not touch a fresh controller's bookkeeping.
             if (isAbortError(error)) return;
             // Best-effort, like every warm: the click synthesizes it for real.
-            // The unit is forgotten so a retry reaches it, and the answer is
-            // marked and called off so nothing after it is synthesized until
-            // that retry.
+            // The unit is forgotten so a retry reaches it, and the answer's
+            // preloads are marked and called off so nothing after it is
+            // synthesized until that retry. Its unit-0 warm is not a preload,
+            // and keeps going.
             preloadedRef.current.delete(key);
             preloadStartedRef.current.delete(key);
             const failed = preloadFailedRef.current.get(sessionId) ?? new Set<string>();
             rememberAutoplayed(failed, id);
             preloadFailedRef.current.set(sessionId, failed);
-            if (synthesesRef.current.get(id)?.controller.signal === signal) abortUtterance(id);
+            if (synthesesRef.current.get(id)?.preload?.signal === signal) abortPreloads(id);
           },
         );
       }
     },
-    [abortUtterance, synthesisFor],
+    [abortPreloads, synthesisFor],
   );
 
-  // The release effect: an utterance's controller is aborted the moment it
+  // The release effect: an utterance's controllers are aborted the moment it
   // stops being wanted. Heard — a replay is a click away and pays for itself.
   // Out of the queue (`MAX_PENDING` / `MAX_PREVIOUS`) — nothing can reach it
-  // any more. Its cell disarmed while it was preloading — the remainder was
-  // only ever for an armed cell. `heardFor` and `queueFor` move with every
-  // channel update and `speechModeOf` with every mode change, which is exactly
-  // when one of those can have become true.
+  // any more. Both of those call off unit 0's warm too. Its cell disarmed while
+  // it was preloading calls off the PRELOADS alone — the remainder was only
+  // ever for an armed cell, but an off cell still warms unit 0. `heardFor` and
+  // `queueFor` move with every channel update and `speechModeOf` with every
+  // mode change, which is exactly when one of those can have become true.
   useEffect(() => {
-    for (const [id, { sessionId, preloading }] of [...synthesesRef.current]) {
+    for (const [id, { sessionId, preload }] of [...synthesesRef.current]) {
       const queue = queueFor(sessionId);
       const queued =
         queue.current?.id === id ||
         queue.previous.some((utterance) => utterance.id === id) ||
         queue.pending.some((utterance) => utterance.id === id);
-      const disarmed = preloading && speechModeOf(sessionId) === "off";
-      if (!queued || heardFor(sessionId).has(id) || disarmed) abortUtterance(id);
+      if (!queued || heardFor(sessionId).has(id)) abortUtterance(id);
+      else if (preload && speechModeOf(sessionId) === "off") abortPreloads(id);
     }
-  }, [abortUtterance, heardFor, queueFor, speechModeOf]);
+  }, [abortPreloads, abortUtterance, heardFor, queueFor, speechModeOf]);
 
   // A host that unmounts calls off everything it still has out: queued warms
   // and preloads must not go on firing syntheses for a panel nobody is looking
