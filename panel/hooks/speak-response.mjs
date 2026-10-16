@@ -68,6 +68,21 @@
  * whole feature silently dead, so it prints a single line to stderr (never the
  * token itself) and still exits 0.
  *
+ * ## The diagnostic log
+ *
+ * "Never in the way" made a missed answer leave no trace: nothing on screen, no
+ * stderr, nothing to tell a slow transcript from a refused POST from a payload
+ * this Claude Code build does not send. So every run inside a panel terminal
+ * appends ONE JSON line to `speak-response.jsonl` in the panel's state dir
+ * (`PANEL_AUTH_STATE_DIR`, default `~/.panel` — next to
+ * `terminal-reconnect.jsonl`): where the text came from, why it stayed silent
+ * when it did, what the panel answered, how long the run took. Never the text
+ * itself — answers can carry anything a session saw. See `writeLog`.
+ *
+ * The log is best-effort like everything else here: a write that fails is
+ * dropped, and it is rotated once to `.1` past `LOG_MAX_BYTES` so it cannot
+ * grow without bound on a machine nobody reads it on.
+ *
  * ## Which session
  *
  * `PAVILIO_TERMINAL_ID` is put into the PTY's environment by
@@ -105,7 +120,17 @@
  * terminals therefore hit the 401 path (one stderr line, exit 0); on an
  * untokened panel they work like any other terminal.
  */
-import { readFileSync, writeSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Override for tests and for a panel that moved off its configured port.
@@ -164,6 +189,47 @@ const BODY_MARGIN_BYTES = 1024;
  */
 const TRANSCRIPT_WAIT_MS = 500;
 const TRANSCRIPT_POLL_MS = 20;
+
+/**
+ * Size past which the diagnostic log is rotated to `.1` before the next append.
+ * A line is ~200 bytes, so this holds thousands of turns — far more than any
+ * "why did that answer not arrive" question needs.
+ */
+const LOG_MAX_BYTES = 1024 * 1024;
+
+/** Same dir, same override, as `server/lib/reconnect-log.ts`. */
+function logFile() {
+  return join(
+    process.env.PANEL_AUTH_STATE_DIR ?? join(homedir(), ".panel"),
+    "speak-response.jsonl",
+  );
+}
+
+/**
+ * Append one record, stamping the time. Never throws: a log that cannot be
+ * written must not cost the answer, which is already on its way by now.
+ */
+function writeLog(record) {
+  try {
+    const file = logFile();
+    mkdirSync(join(file, ".."), { recursive: true, mode: 0o700 });
+    try {
+      if (statSync(file).size >= LOG_MAX_BYTES) renameSync(file, `${file}.1`);
+    } catch {
+      // No log yet: nothing to rotate.
+    }
+    appendFileSync(
+      file,
+      `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`,
+      {
+        mode: 0o600,
+      },
+    );
+    chmodSync(file, 0o600);
+  } catch {
+    // Best-effort, like the POST.
+  }
+}
 
 function readStdin() {
   try {
@@ -342,7 +408,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * The current turn's response, waiting out a transcript the writer has not
- * caught up with. `null` for every ending that must stay silent: an unreadable
+ * caught up with. `text` is `null` for every ending that must stay silent, and
+ * `reason` then names which one it was, for the diagnostic log: an unreadable
  * transcript, one with no assistant prose in it, and one still stale when
  * `TRANSCRIPT_WAIT_MS` runs out.
  */
@@ -353,14 +420,16 @@ async function currentResponseText(transcriptPath) {
     try {
       transcript = readFileSync(transcriptPath, "utf8");
     } catch {
-      return null;
+      return { text: null, reason: "transcript-unreadable" };
     }
 
     const { stale, text } = currentResponse(transcript);
-    if (!stale) return text;
+    if (!stale)
+      return { text, reason: text === null ? "transcript-no-text" : undefined };
     // Re-read rather than watch: the file is local and tiny next to the cost of
     // being wrong, and a watcher would have to be torn down on every path out.
-    if (Date.now() >= deadline) return null;
+    if (Date.now() >= deadline)
+      return { text: null, reason: "transcript-stale" };
     await sleep(TRANSCRIPT_POLL_MS);
   }
 }
@@ -377,6 +446,14 @@ function payloadResponseText(payload) {
   if (typeof message !== "string") return null;
   const text = message.trim();
   return text === "" ? null : text;
+}
+
+/** What the payload carried in `last_assistant_message`, for the diagnostic log. */
+function payloadFieldOf(payload) {
+  const message = payload?.last_assistant_message;
+  if (message === undefined) return "absent";
+  if (typeof message !== "string") return "not-string";
+  return message.trim() === "" ? "empty" : "string";
 }
 
 /** Bytes this pair will actually put on the wire — exactly what `post` sends. */
@@ -442,36 +519,62 @@ async function post(sessionId, text) {
         "(terminals started as another user do not inherit it).\n",
     );
   }
+  return response.status;
 }
 
-async function main() {
-  // No cell to attribute the response to: do nothing, quietly.
-  const sessionId = process.env.PAVILIO_TERMINAL_ID;
-  if (!sessionId) return;
-
+/**
+ * Fills `record` as it goes, so whatever path out is taken, the log line says
+ * how far the run got. See "The diagnostic log" above.
+ */
+async function main(record) {
   let payload;
   try {
     payload = JSON.parse(readStdin());
   } catch {
+    record.source = "none";
+    record.reason = "payload-unparseable";
     return;
   }
+  record.payloadField = payloadFieldOf(payload);
   // The payload first: it cannot be a turn behind, and it costs no wait. Only
   // without it is the transcript needed at all — see "Which turn" above.
   let text = payloadResponseText(payload);
+  record.source = "payload";
   if (text === null) {
     const transcriptPath = payload?.transcript_path;
-    if (typeof transcriptPath !== "string" || transcriptPath === "") return;
-    text = await currentResponseText(transcriptPath);
+    if (typeof transcriptPath !== "string" || transcriptPath === "") {
+      record.source = "none";
+      record.reason = "no-transcript-path";
+      return;
+    }
+    const fromTranscript = await currentResponseText(transcriptPath);
+    text = fromTranscript.text;
+    record.source = text === null ? "none" : "transcript";
+    if (fromTranscript.reason) record.reason = fromTranscript.reason;
   }
   if (text === null) return;
 
-  await post(sessionId, trimToCap(sessionId, text));
+  record.chars = text.length;
+  try {
+    record.status = await post(sessionId, trimToCap(sessionId, text));
+  } catch (error) {
+    // `TypeError` for a refused connection, `TimeoutError` for an abandoned one.
+    record.error = error?.name ?? "Error";
+  }
 }
 
-try {
-  await main();
-} catch {
-  // Every failure is a non-event: the agent's turn is not this hook's business.
+// No cell to attribute the response to: do nothing, quietly — and log nothing,
+// since every Claude Code session outside the panel runs this hook too.
+const sessionId = process.env.PAVILIO_TERMINAL_ID;
+if (sessionId) {
+  const startedAt = Date.now();
+  const record = { emitter: "claude", sessionId };
+  try {
+    await main(record);
+  } catch {
+    // Every failure is a non-event: the agent's turn is not this hook's business.
+  }
+  writeLog({ ...record, ms: Date.now() - startedAt });
 }
 // Explicit: Node's fetch keeps its connection pool warm, which would otherwise
 // hold the event loop open after the POST is already done.
