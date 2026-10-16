@@ -47,9 +47,10 @@ export function getStoredEngine(): string {
 
 /** Stores `id` and returns the engine now in effect; an engine the seam does not configure is ignored. */
 export function setStoredEngine(id: string): string {
-  if (!isKnownEngine(id)) return getStoredEngine();
-  writePreference(preferences.speechEngine, id);
-  return id;
+  if (isKnownEngine(id)) writePreference(preferences.speechEngine, id);
+  // Read back rather than echo `id`: a dropped write (no document) leaves the
+  // old engine in effect, and synthesis reads the stored one.
+  return getStoredEngine();
 }
 
 function isCatalogVoice(engine: string, id: unknown): id is string {
@@ -96,15 +97,14 @@ export function getStoredVoice(): string {
  * Stores `id` and returns the voice now in effect; an id outside the engine's
  * catalog is ignored.
  *
- * The return value is still what the caller should hold: a page whose portable
- * document never arrived has its write dropped by the store, and the choice
- * then applies to this page only — the same contract the old
- * "storage unavailable" branch offered.
+ * The return value is what the caller should hold, and it is read back from
+ * the store rather than echoed: a page whose portable document never arrived
+ * has its write dropped, the player goes on reading the stored voice, and a
+ * control showing the attempted one would claim a choice that never applied.
  */
 export function setStoredVoice(id: string): string {
-  if (!isCatalogVoice(getStoredEngine(), id)) return getStoredVoice();
-  writePreference(preferences.speechVoice, id);
-  return id;
+  if (isCatalogVoice(getStoredEngine(), id)) writePreference(preferences.speechVoice, id);
+  return getStoredVoice();
 }
 
 /**

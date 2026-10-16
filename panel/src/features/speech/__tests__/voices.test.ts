@@ -71,11 +71,12 @@ describe("getStoredVoice", () => {
 
     // The auth interlock stands in for the old "site data blocked" case: this
     // page received no document, so the read answers the default and the write
-    // is dropped without throwing.
+    // is dropped without throwing. The setter answers what is now in effect —
+    // the stored default the player will synthesize with, not the attempt.
     delete globals.__PAVILIO_PREFS__;
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
     expect(() => setStoredVoice("en-US-EmmaMultilingualNeural")).not.toThrow();
-    expect(setStoredVoice("en-US-EmmaMultilingualNeural")).toBe("en-US-EmmaMultilingualNeural");
+    expect(setStoredVoice("en-US-EmmaMultilingualNeural")).toBe(DEFAULT_SPEECH_VOICE);
   });
 });
 

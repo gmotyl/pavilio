@@ -243,23 +243,23 @@ describe("VoiceSelect", () => {
     expect(select).toHaveValue("fr-FR-VivienneMultilingualNeural");
   });
 
-  it("keeps the pick for this page view when the document never arrived", async () => {
+  it("shows the stored voice and engine when the document never arrived", async () => {
     const user = userEvent.setup();
     // The auth interlock stands in for the old blocked-site-data case.
     delete (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__;
 
     render(<VoiceSelect />);
 
-    const select = voiceSelect();
     await expect(
-      user.selectOptions(select, "it-IT-GiuseppeMultilingualNeural"),
+      user.selectOptions(voiceSelect(), "it-IT-GiuseppeMultilingualNeural"),
     ).resolves.not.toThrow();
+    await user.selectOptions(engineSelect(), FAKE_ENGINE);
 
-    // Blocked site data must not strand the control on the old voice.
-    expect(select).toHaveValue("it-IT-GiuseppeMultilingualNeural");
-    // Nothing was persisted, so a reload falls back to the default — that is
-    // the documented consequence, not a crash.
+    // Nothing was persisted, and synthesis reads what is stored — so the
+    // controls show the stored picks rather than an attempt that never applied.
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+    expect(voiceSelect()).toHaveValue(DEFAULT_SPEECH_VOICE);
+    expect(engineSelect()).toHaveValue("edge");
   });
 
   it("renders the speech route select, defaulting to auto", () => {
@@ -289,6 +289,22 @@ describe("VoiceSelect", () => {
     // Non-portable: kept in browser storage, never in the workspace document.
     expect(localStorage.getItem(storageKey(preferences.speechRoute))).toBe("server");
     expect(prefsDocument()[storageKey(preferences.speechRoute)]).toBeUndefined();
+  });
+
+  it("keeps the stored route when browser storage refuses the write", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    render(<VoiceSelect />);
+
+    await user.selectOptions(routeSelect(), "server");
+
+    expect(setItem).toHaveBeenCalled();
+    // synth.ts reads the stored route per request, so the select must too.
+    expect(readPreference(preferences.speechRoute)).toBe("auto");
+    expect(routeSelect()).toHaveValue("auto");
   });
 
   it("the settings picker is labelled Default voice", () => {

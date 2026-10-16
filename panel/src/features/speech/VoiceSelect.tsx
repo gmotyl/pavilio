@@ -32,9 +32,9 @@ const SELECT_STYLE = {
  * mount effect then calls `getStoredVoice`, which writes the engine default
  * back when it fell back, so a stale pick is shown as — and becomes — the
  * default. The write stays out of render because it notifies every
- * `speech.voice` subscriber synchronously. The setters return the value now in
- * effect, so a browser that refuses to store still gets the pick applied for
- * this page view.
+ * `speech.voice` subscriber synchronously. Every control shows the value read
+ * back after its write — what synthesis will actually use — so a refused write
+ * leaves the select on the stored pick rather than on the attempt.
  *
  * The engine options are the seam's configured engines, labelled from anytts'
  * list: an engine anytts lists but the panel does not configure is not offered.
@@ -133,9 +133,10 @@ export function VoiceSelect() {
         data-testid="speech-route-select"
         value={route}
         onChange={(e) => {
-          const next = toSpeechRoute(e.target.value);
-          writePreference(preferences.speechRoute, next);
-          setRoute(next);
+          writePreference(preferences.speechRoute, toSpeechRoute(e.target.value));
+          // Read back: a refused browser-storage write leaves the old route in
+          // effect, and synth.ts reads the stored one on every request.
+          setRoute(toSpeechRoute(readPreference(preferences.speechRoute)));
         }}
         className={SELECT_CLASS}
         style={SELECT_STYLE}
