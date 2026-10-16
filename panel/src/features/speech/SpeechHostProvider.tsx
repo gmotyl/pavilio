@@ -27,6 +27,13 @@ import {
   type ReactNode,
 } from "react";
 import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
+import {
+  getAnswerWaiting,
+  holdAnswer,
+  isAnswerHeld,
+  noteTransport,
+  releaseAnswer,
+} from "../terminal/answerWaiting";
 import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
 import { getSessions } from "../terminal/sessionStore";
 import { voiceForSession } from "../terminal/sessionVoice";
@@ -44,9 +51,19 @@ import {
 } from "./answerAlert";
 import { createSpeakingAlert } from "./speakingAlert";
 import { useMediaSessionTransport } from "./useMediaSessionTransport";
-import { useSpeechHost } from "./useSpeechHost";
+import { useSpeechHost, type AnswerWaitingPort } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
 import type { GridSpeech, Utterance } from "./types";
+
+/** The terminal's answer-waiting store, as the host's port. One object, so its
+ *  identity is stable across renders. */
+const answerWaiting: AnswerWaitingPort = {
+  get: getAnswerWaiting,
+  hold: holdAnswer,
+  release: releaseAnswer,
+  noteTransport,
+  isHeld: isAnswerHeld,
+};
 
 const SpeechHostContext = createContext<GridSpeech | null>(null);
 
@@ -166,6 +183,7 @@ export function SpeechHostProvider({ children }: Props) {
     isSessionOpen,
     onRunChange: speakingAlert.onRunChange,
     voiceFor: voiceForSession,
+    answerWaiting,
   });
 
   // Here for the same reason the host is: `navigator.mediaSession` is one state

@@ -99,6 +99,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
 import { prepare } from "../prepare";
 import { useSpeechHost } from "../useSpeechHost";
 import { voiceForSession } from "../../terminal/sessionVoice";
+import { storeAnswerWaiting } from "./answerWaitingPort";
 
 /** The `src` of every started playback, in order. */
 const played: string[] = [];
@@ -179,7 +180,9 @@ beforeEach(() => {
 describe("useSpeechHost jumps", () => {
   it("a segment click on a cell that has never spoken starts it at that unit", async () => {
     const units = unitsOf(response(4));
-    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     // Arrived and warmed, never played: `player.jumpToUnit` would return here
     // without a sound, because `unitsRef` only ever learns from `play`.
@@ -193,7 +196,9 @@ describe("useSpeechHost jumps", () => {
 
   it("jumping inside a live run does not mark the cell heard", async () => {
     const units = unitsOf(response(4));
-    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(4));
     await settle(() => result.current.onSpeak("cell-a"));

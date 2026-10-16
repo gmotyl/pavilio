@@ -104,6 +104,7 @@ import { prepare } from "../prepare";
 import type { GridSpeech } from "../types";
 import { useSpeechHost } from "../useSpeechHost";
 import { voiceForSession } from "../../terminal/sessionVoice";
+import { storeAnswerWaiting } from "./answerWaitingPort";
 
 const elements: HTMLMediaElement[] = [];
 
@@ -140,7 +141,7 @@ Object.defineProperty(HTMLMediaElement.prototype, "src", {
 let host: GridSpeech;
 
 function Harness({ sessionId }: { sessionId: string }) {
-  const speech = useSpeechHost({ voiceFor: voiceForSession });
+  const speech = useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting });
   host = speech;
   return (
     <SpeechControlBar

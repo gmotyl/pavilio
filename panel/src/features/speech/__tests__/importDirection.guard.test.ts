@@ -22,10 +22,7 @@ const SPEECH = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TERMINAL = join(SPEECH, "..", "terminal");
 
 /** Paths relative to `features/speech/`. */
-const KNOWN_OFFENDERS: readonly string[] = [
-  "SpeechHostProvider.tsx",
-  "useSpeechHost.ts",
-];
+const KNOWN_OFFENDERS: readonly string[] = ["SpeechHostProvider.tsx"];
 
 const SPECIFIER_PATTERNS = [
   // import x from "…", import { a } from "…", import type { T } from "…",

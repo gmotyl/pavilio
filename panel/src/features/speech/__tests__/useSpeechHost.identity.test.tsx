@@ -96,6 +96,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
 import type { SpeechHost } from "../useSpeechHost";
 import { useSpeechHost } from "../useSpeechHost";
 import { voiceForSession } from "../../terminal/sessionVoice";
+import { storeAnswerWaiting } from "./answerWaitingPort";
 
 const elements: HTMLMediaElement[] = [];
 
@@ -197,7 +198,9 @@ beforeEach(() => {
 
 describe("the speech context outlives the playhead", () => {
   it("a timeupdate moves the progress store and leaves GridSpeech identical", async () => {
-    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await settle(() => result.current.onSpeak("cell-a"));
@@ -225,7 +228,9 @@ describe("the speech context outlives the playhead", () => {
   });
 
   it("a unit reporting its real duration leaves GridSpeech identical too", async () => {
-    const { result } = renderHook(() => useSpeechHost({ voiceFor: voiceForSession }));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await settle(() => result.current.onSpeak("cell-a"));

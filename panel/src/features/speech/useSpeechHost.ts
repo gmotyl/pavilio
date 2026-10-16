@@ -66,17 +66,6 @@ import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types"
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
 import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
-// The waiting store lives under `features/terminal` because the wave is the
-// CELL's state, not the voice's — but the wave STEP belongs here, in the one
-// place every transport surface funnels through. See `onPrevious`. No cycle:
-// the store imports only its own debounce and the activity channel.
-import {
-  getAnswerWaiting,
-  holdAnswer,
-  isAnswerHeld,
-  noteTransport,
-  releaseAnswer,
-} from "../terminal/answerWaiting";
 import { stepsOffTheWave, stepsOntoTheWave } from "./waveStep";
 import { MAX_PENDING, MAX_PREVIOUS, utteranceUnderCursor } from "./utteranceQueue";
 
@@ -221,6 +210,38 @@ export interface SpeechHostOptions {
    * so a warm in any other voice is a synthesis the click never finds.
    */
   voiceFor: (sessionId: string) => string;
+  /**
+   * The cell's answer-waiting state: the hold on the text and the wave. See
+   * {@link AnswerWaitingPort}.
+   */
+  answerWaiting: AnswerWaitingPort;
+}
+
+/**
+ * What the host reads off a cell's wait for an answer — structurally the
+ * terminal's `AnswerWaitingSnapshot`, restated here so speech imports nothing
+ * from the terminal.
+ */
+interface AnswerWaitingView {
+  /** The pane's body has handed over to the waiting state. */
+  readonly waiting: boolean;
+  /** A reply to a draft this cell sent is still expected. */
+  readonly pending: boolean;
+}
+
+/**
+ * The answer-waiting store, as the host reaches it. The store lives with the
+ * terminal because the wave is the CELL's state, not the voice's — but the
+ * wave STEP belongs here, in the one place every transport surface funnels
+ * through. See `onPrevious`, and its note on why `get` is asked before
+ * `noteTransport`.
+ */
+export interface AnswerWaitingPort {
+  get(sessionId: string): AnswerWaitingView;
+  hold(sessionId: string): void;
+  release(sessionId: string): void;
+  noteTransport(sessionId: string): void;
+  isHeld(sessionId: string): boolean;
 }
 
 /**
@@ -251,6 +272,7 @@ export function useSpeechHost({
   isSessionOpen = ALWAYS_OPEN,
   onRunChange,
   voiceFor,
+  answerWaiting,
 }: SpeechHostOptions): SpeechHost {
   /**
    * `onRunChange`, mirrored: it is called from inside `speakUtterance`, whose
@@ -268,6 +290,14 @@ export function useSpeechHost({
   useEffect(() => {
     voiceForRef.current = voiceFor;
   }, [voiceFor]);
+  /**
+   * `answerWaiting`, mirrored for the same reason: `onPrevious` and `onNext`
+   * are transport identities the grid and the media keys hold on to.
+   */
+  const answerWaitingRef = useRef(answerWaiting);
+  useEffect(() => {
+    answerWaitingRef.current = answerWaiting;
+  }, [answerWaiting]);
   /**
    * The run that held the element ended, and whether the voice has fallen
    * silent is still to be settled: the autoplay queue gets its turn first. See
@@ -1061,8 +1091,8 @@ export function useSpeechHost({
       // press holds AND steps, skipping the newest answer. The row used to
       // read its render-time snapshot, which is to say: before the press.
       const steppingOffTheWave = stepsOffTheWave(
-        getAnswerWaiting(sessionId).waiting,
-        isAnswerHeld(sessionId),
+        answerWaitingRef.current.get(sessionId).waiting,
+        answerWaitingRef.current.isHeld(sessionId),
         utteranceUnderCursor(queue) !== null,
       );
 
@@ -1071,7 +1101,7 @@ export function useSpeechHost({
       // row for the same reason the step does — the chord and the media keys
       // are transport presses too, and a row that kept this to itself left
       // them unable to give the body back at all.
-      noteTransport(sessionId);
+      answerWaitingRef.current.noteTransport(sessionId);
       // The transport is on this cell now, whatever the press turns out to
       // move: the idle play that follows stays here (`idleTransportTarget`).
       setSteppedSessionId(sessionId);
@@ -1079,7 +1109,7 @@ export function useSpeechHost({
       if (steppingOffTheWave) {
         // A backward press is the user saying *I want the text*, and this
         // branch is a real move, so it takes the hold.
-        holdAnswer(sessionId);
+        answerWaitingRef.current.hold(sessionId);
         // The grant is spent even though the cursor did not move — see the
         // note on `unlock()` below. This branch is the one that most needs it:
         // on the reloaded cell it and the forward step back onto the wave are
@@ -1109,7 +1139,7 @@ export function useSpeechHost({
       // `Ctrl+Shift+←` on a cell with no history would set a hold that nothing
       // in that run clears. `derive` answers a standing hold with `SETTLED`,
       // so the cell's pane would stop handing over to the wave altogether.
-      holdAnswer(sessionId);
+      answerWaitingRef.current.hold(sessionId);
 
       // And the press is SILENT: the cursor moves and nothing else happens.
       //
@@ -1161,7 +1191,7 @@ export function useSpeechHost({
       // it. Releasing here on a queued cell would spend the hold without
       // moving, and cost a second press to go one place.
       const steppingOntoTheWave = stepsOntoTheWave(
-        isAnswerHeld(sessionId),
+        answerWaitingRef.current.isHeld(sessionId),
         queue.cursor,
         queue.pending.length,
       );
@@ -1169,13 +1199,13 @@ export function useSpeechHost({
       // The send wait's rule, as on the backward press — and read after the
       // gate above for the same reason: `noteTransport` moves what `derive`
       // reports, so anything asked of the store belongs before it.
-      noteTransport(sessionId);
+      answerWaitingRef.current.noteTransport(sessionId);
       // As on the backward press: the idle play that follows stays here.
       setSteppedSessionId(sessionId);
 
       if (steppingOntoTheWave) {
         unlock();
-        releaseAnswer(sessionId);
+        answerWaitingRef.current.release(sessionId);
         return;
       }
 
