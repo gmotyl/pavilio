@@ -10,19 +10,15 @@ import { describe, expect, it } from "vitest";
  *
  * The walk covers every production file under `features/speech/` (anything in
  * `__tests__/` or named `*.test.*` is exempt) and reads every static import,
- * re-export, side-effect import and dynamic `import()`. `import type` counts:
- * a type-only import is still a dependency on terminal's module, and moving a
- * type across the boundary is part of the decoupling.
- *
- * KNOWN_OFFENDERS is a ratchet. It names the files allowed to import terminal
- * today; a file that stops needing the allowance must leave the list, so the
- * list can only shrink until it is deleted.
+ * re-export, side-effect import, dynamic `import()` with a string or template
+ * literal (a template's static prefix is what gets resolved), `require()` and
+ * `import x = require()`. `import type` counts: a type-only import is still a
+ * dependency on terminal's module, and moving a type across the boundary is
+ * part of the decoupling. Specifiers computed at runtime (a variable passed to
+ * `import()`) are out of reach of a source scan and are not covered.
  */
 const SPEECH = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TERMINAL = join(SPEECH, "..", "terminal");
-
-/** Paths relative to `features/speech/`. */
-const KNOWN_OFFENDERS: readonly string[] = [];
 
 const SPECIFIER_PATTERNS = [
   // import x from "…", import { a } from "…", import type { T } from "…",
@@ -32,6 +28,10 @@ const SPECIFIER_PATTERNS = [
   /\bimport\s*['"]([^'"]+)['"]/g,
   // import("…")
   /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  // import(`…`), import(`…/${name}`): the static prefix up to the first `${`
+  /\bimport\s*\(\s*`([^`$]+)/g,
+  // require("…"), import x = require("…")
+  /\brequire\s*\(\s*['"`]([^'"`$]+)/g,
 ];
 
 function specifiersOf(source: string): string[] {
@@ -88,6 +88,10 @@ describe("speech → terminal import direction", () => {
       'export * from "../../terminal";',
       'import "../../terminal/side-effect";',
       'const f = await import("../../terminal/f");',
+      "const j = await import(`../../terminal/j`);",
+      "const k = await import(`../../terminal/${name}`);",
+      'const l = require("../../terminal/l");',
+      "import m = require('../../terminal/m');",
       'import { g } from "../voices";',
       'import { h } from "../../terminalish/h";',
       'import { i } from "react";',
@@ -101,25 +105,20 @@ describe("speech → terminal import direction", () => {
         "../../terminal/c",
         "../../terminal/e",
         "../../terminal/f",
+        "../../terminal/j",
+        "../../terminal/",
+        "../../terminal/l",
+        "../../terminal/m",
         "../../terminal/side-effect",
       ].sort(),
     );
   });
 
-  it("no production speech file outside the allowlist imports features/terminal", () => {
-    const unexpected = [...offenders()]
-      .filter(([file]) => !KNOWN_OFFENDERS.includes(file))
-      .flatMap(([file, specifiers]) => specifiers.map((specifier) => `${file} → ${specifier}`));
-
-    expect(unexpected).toEqual([]);
-  });
-
-  it("every allowlisted file still needs the allowance", () => {
-    const found = offenders();
-    const stale = KNOWN_OFFENDERS.filter((file) => !found.has(file)).map(
-      (file) => `${file} no longer imports terminal — remove it from the allowlist`,
+  it("no production speech file imports features/terminal", () => {
+    const found = [...offenders()].flatMap(([file, specifiers]) =>
+      specifiers.map((specifier) => `${file} → ${specifier}`),
     );
 
-    expect(stale).toEqual([]);
+    expect(found).toEqual([]);
   });
 });
