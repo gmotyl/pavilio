@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -9,116 +10,58 @@ import { describe, expect, it } from "vitest";
  * both sides lives in terminal and hands speech its ports.
  *
  * The walk covers every production file under `features/speech/` (anything in
- * `__tests__/` or named `*.test.*` is exempt) and reads every static import,
- * re-export, side-effect import, dynamic `import()` with a string or template
- * literal (a template's static prefix is what gets resolved), `require()` and
- * `import x = require()`. `import type` counts: a type-only import is still a
- * dependency on terminal's module, and moving a type across the boundary is
- * part of the decoupling. Specifiers computed at runtime (a variable passed to
- * `import()`) are out of reach of a source scan and are not covered.
+ * `__tests__/` or named `*.test.*` is exempt) and reads its imports from the
+ * TypeScript syntax tree: static imports, re-exports, side-effect imports,
+ * dynamic `import()` with a string or template literal (a template's static
+ * prefix is what gets resolved), `require()`, `import x = require()` and type
+ * positions such as `typeof import("…")`. A specifier is taken at the value it
+ * evaluates to, so escapes are resolved, and text that only looks like an
+ * import (inside a string, a comment or a regex literal) is not one. `import
+ * type` counts: a type-only import is still a dependency on terminal's module,
+ * and moving a type across the boundary is part of the decoupling. Specifiers
+ * computed at runtime (a variable passed to `import()`) are out of reach of a
+ * source scan and are not covered.
  */
 const SPEECH = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TERMINAL = join(SPEECH, "..", "terminal");
 
-const SPECIFIER_PATTERNS = [
-  // import x from "…", import { a } from "…", import type { T } from "…",
-  // export { a } from "…", export * from "…"
-  /\b(?:import|export)\b[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]/g,
-  // import "…"
-  /\bimport\s*['"]([^'"]+)['"]/g,
-  // import("…")
-  /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  // import(`…`), import(`…/${name}`): the static prefix up to the first `${`
-  /\bimport\s*\(\s*`([^`$]+)/g,
-  // require("…"), import x = require("…")
-  /\brequire\s*\(\s*['"`]([^'"`$]+)/g,
-];
-
-/**
- * `source` with every comment blanked to spaces (newlines kept, so line
- * structure survives). String and template literals are skipped intact, so a
- * `//` or `/*` inside one is not taken for a comment; `${…}` inside a template
- * is scanned as code. Regex literals are not recognised: a quote inside one
- * opens a string that a single-quoted or double-quoted literal ends at the line
- * break, which keeps any damage to that line.
- */
-function stripComments(source: string): string {
-  let out = "";
-  let i = 0;
-  let depth = 0;
-  // Brace depth at each open `${`, innermost last.
-  const substitutions: number[] = [];
-
-  // Copies a template literal's text from `i` up to and including its closing
-  // backtick, or up to and including a `${` (which is then pushed).
-  const scanTemplate = () => {
-    while (i < source.length) {
-      const c = source[i] as string;
-      if (c === "\\") {
-        out += source.slice(i, i + 2);
-        i += 2;
-      } else if (c === "`") {
-        out += c;
-        i += 1;
-        return;
-      } else if (c === "$" && source[i + 1] === "{") {
-        out += "${";
-        i += 2;
-        substitutions.push(depth);
-        depth += 1;
-        return;
-      } else {
-        out += c;
-        i += 1;
-      }
-    }
-  };
-
-  while (i < source.length) {
-    const c = source[i] as string;
-    const next = source[i + 1];
-    if (c === "/" && next === "/") {
-      const end = source.indexOf("\n", i);
-      const stop = end === -1 ? source.length : end;
-      out += " ".repeat(stop - i);
-      i = stop;
-    } else if (c === "/" && next === "*") {
-      const end = source.indexOf("*/", i + 2);
-      const stop = end === -1 ? source.length : end + 2;
-      out += source.slice(i, stop).replace(/[^\n]/g, " ");
-      i = stop;
-    } else if (c === "'" || c === '"') {
-      let j = i + 1;
-      while (j < source.length && source[j] !== c && source[j] !== "\n") {
-        j += source[j] === "\\" ? 2 : 1;
-      }
-      out += source.slice(i, j + 1);
-      i = j + 1;
-    } else if (c === "`") {
-      out += c;
-      i += 1;
-      scanTemplate();
-    } else if (c === "}" && substitutions.at(-1) === depth - 1) {
-      substitutions.pop();
-      depth -= 1;
-      out += c;
-      i += 1;
-      scanTemplate();
-    } else {
-      if (c === "{") depth += 1;
-      if (c === "}") depth -= 1;
-      out += c;
-      i += 1;
-    }
-  }
-  return out;
+/** The string a module-specifier node evaluates to, or a template's static prefix. */
+function specifierText(node: ts.Node | undefined): string | undefined {
+  if (node === undefined) return undefined;
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) return node.head.text;
+  return undefined;
 }
 
-function specifiersOf(source: string): string[] {
-  const code = stripComments(source);
-  return SPECIFIER_PATTERNS.flatMap((pattern) =>
-    [...code.matchAll(pattern)].map((match) => match[1] as string),
-  );
+/** Every module specifier `source` (a file at `file`) depends on, read from its syntax tree. */
+function specifiersOf(file: string, source: string): string[] {
+  const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
+  const found: string[] = [];
+  const add = (node: ts.Node | undefined) => {
+    const text = specifierText(node);
+    if (text !== undefined) found.push(text);
+  };
+
+  const visit = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      add(node.moduleSpecifier);
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      add(node.moduleReference.expression);
+    } else if (ts.isCallExpression(node)) {
+      const isImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(node.expression) && node.expression.text === "require";
+      if (isImport || isRequire) add(node.arguments[0]);
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      add(node.argument.literal);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
+  return found;
 }
 
 function isUnderTerminal(resolved: string): boolean {
@@ -128,7 +71,7 @@ function isUnderTerminal(resolved: string): boolean {
 
 /** The specifiers in `source` (a file at `file`) that resolve under `features/terminal/`. */
 function terminalImports(file: string, source: string): string[] {
-  return specifiersOf(source).filter(
+  return specifiersOf(file, source).filter(
     (specifier) =>
       specifier.startsWith(".") && isUnderTerminal(resolve(dirname(file), specifier)),
   );
@@ -173,6 +116,8 @@ describe("speech → terminal import direction", () => {
       "const k = await import(`../../terminal/${name}`);",
       'const l = require("../../terminal/l");',
       "import m = require('../../terminal/m');",
+      'type N = typeof import("../../terminal/n");',
+      'type O = import("../../terminal/o").O;',
       'import { g } from "../voices";',
       'import { h } from "../../terminalish/h";',
       'import { i } from "react";',
@@ -190,6 +135,8 @@ describe("speech → terminal import direction", () => {
         "../../terminal/",
         "../../terminal/l",
         "../../terminal/m",
+        "../../terminal/n",
+        "../../terminal/o",
         "../../terminal/side-effect",
       ].sort(),
     );
@@ -213,6 +160,20 @@ describe("speech → terminal import direction", () => {
         "../../terminal/x",
         "../../terminal/y",
       ].sort(),
+    );
+  });
+
+  it("regex literals, string contents and escaped separators are read as the language reads them", () => {
+    const file = join(SPEECH, "nested", "fake.ts");
+    const source = [
+      'const re = /\\/\\//; import { r } from "../../terminal/r";',
+      "const example = 'import X from \"../../terminal/not-an-import\"';",
+      "const other = `export * from '../../terminal/not-either'`;",
+      'import "..\\/..\\/terminal\\/s";',
+    ].join("\n");
+
+    expect(terminalImports(file, source).sort()).toEqual(
+      ["../../terminal/r", "../../terminal/s"].sort(),
     );
   });
 
