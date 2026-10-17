@@ -14,6 +14,7 @@
  * panel as ready while every click still paid for a fresh synthesis.
  */
 import { act, renderHook } from "@testing-library/react";
+import { TtsError } from "anytts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const synth = vi.hoisted(() => {
@@ -24,7 +25,7 @@ const synth = vi.hoisted(() => {
   /** Texts whose synthesis is held open until `release`/`fail` says otherwise. */
   const holds = new Set<string>();
   const waiting = new Map<string, { release: () => void; fail: (error: unknown) => void }>();
-  let requests: Array<{ text: string; voice: string | undefined }> = [];
+  let requests: Array<{ text: string; voice: string | undefined; tier: string | undefined }> = [];
 
   function bufferFor(text: string): ArrayBuffer {
     const existing = buffers.get(text);
@@ -36,12 +37,15 @@ const synth = vi.hoisted(() => {
     return buffer;
   }
 
-  function synthesizeSpeech(text: string, options: { voice?: string } = {}): Promise<ArrayBuffer> {
+  function synthesizeSpeech(
+    text: string,
+    options: { voice?: string; tier?: string } = {},
+  ): Promise<ArrayBuffer> {
     const key = `${options.voice ?? ""}::${text}`;
     const cached = cache.get(key);
     if (cached) return cached;
 
-    requests.push({ text, voice: options.voice });
+    requests.push({ text, voice: options.voice, tier: options.tier });
 
     const promise = holds.has(text)
       ? new Promise<ArrayBuffer>((resolve, reject) => {
@@ -61,13 +65,13 @@ const synth = vi.hoisted(() => {
     return promise;
   }
 
-  function settle(text: string, outcome: "release" | "fail"): void {
+  function settle(text: string, outcome: "release" | "fail", error?: unknown): void {
     const held = waiting.get(text);
     if (!held) throw new Error(`no synthesis is being held for ${text}`);
     waiting.delete(text);
     holds.delete(text);
     if (outcome === "release") held.release();
-    else held.fail(new Error(`synthesis failed: ${text}`));
+    else held.fail(error ?? new Error(`synthesis failed: ${text}`));
   }
 
   return {
@@ -87,7 +91,8 @@ const synth = vi.hoisted(() => {
       holds.add(text);
     },
     release: (text: string): void => settle(text, "release"),
-    fail: (text: string): void => settle(text, "fail"),
+    /** Rejects the held synthesis — with `error` when given, as anytts rejects with a `TtsError`. */
+    fail: (text: string, error?: unknown): void => settle(text, "fail", error),
     get requests() {
       return requests;
     },
@@ -140,6 +145,7 @@ vi.mock("../../realtime/useWebSocket", async () => {
   };
 });
 
+import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { prepare } from "../prepare";
 import { idleTransportTarget } from "../idleTransportTarget";
 import { useSpeechHost, type SpeechHost, type SpeechRunEvent } from "../useSpeechHost";
@@ -443,9 +449,9 @@ describe("useSpeechHost — the session's project voice", () => {
     await emitUtterance("cell-q", "u-2", response(2, "Other"));
 
     expect(synth.requests).toEqual([
-      { text: units[0], voice: EMMA },
+      { text: units[0], voice: EMMA, tier: "warm" },
       // A cell the tab cannot place in a project keeps the default voice.
-      { text: unitsOf(response(2, "Other"))[0], voice: DEFAULT_SPEECH_VOICE },
+      { text: unitsOf(response(2, "Other"))[0], voice: DEFAULT_SPEECH_VOICE, tier: "warm" },
     ]);
   });
 
@@ -875,7 +881,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
 
   /**
    * Warming sits outside every concurrency bound in the feature. The player's
-   * `SYNTHESIS_CONCURRENCY` limits the units of the ONE run it is playing; the
+   * own bound (anytts' scheduler now) limits the units of the ONE run it is playing; the
    * host's warming loop fires a synthesis per warmable utterance with no await
    * and no limiter at all. With a full queue behind a live run that was seven
    * requests in flight, competing with the audio being listened to.
@@ -908,22 +914,13 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   });
 
   /**
-   * The per-cell bound above is two. There was no PANEL bound at all: the warm
-   * loop walks every warmable utterance in every cell and fires a synthesis for
-   * each with no await, so a grid of ten busy terminals opened ten edge-tts
-   * WebSocket handshakes at once — each with its own DRM token, all competing
-   * with the unit the listener is actually waiting for.
-   *
-   * The synthesis window's `SPECULATIVE_SLOTS` is that bound, and the rest
-   * queue. Two, matching the per-cell bound, so one cell's pair still goes out
-   * together — the common case is unchanged — while speculation across the
-   * panel never grows with the number of terminals. The live run keeps the
-   * larger share: it ranks first in the same three-slot window.
-   *
-   * A queued warm is still an honest red: the cell IS waiting for its audio,
-   * and which side of the gate it is waiting on is not the user's question.
+   * The per-cell bound above is two. The PANEL bound is anytts' scheduler: every
+   * arriving answer's unit 0 is asked for at once, on the `warm` tier, which the
+   * library caps at two in flight behind the playing run. So the host owes it
+   * the tier, and the red: a warm still queued with the library is an honest
+   * red, since the cell IS waiting for its audio.
    */
-  it("the panel warms two utterances at a time, however many cells have one", async () => {
+  it("the panel warms every arriving answer on the warm tier, however many cells have one", async () => {
     const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
     const firstUnitOf = (word: string): string => unitsOf(response(3, word))[0];
     // Every warm held open, so "in flight" is observable rather than instant.
@@ -931,43 +928,32 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
 
     const { result } = renderHook(() => useSpeechHost());
 
-    // Eight cells, one arriving answer each: eight warmable utterances, and
-    // before the gate, eight sockets.
     for (let i = 0; i < words.length; i += 1) {
       await emitUtterance(`cell-${i}`, `u-${i}`, response(3, words[i]));
     }
 
-    const requested = (): string[] => words.filter((w) => requestedTexts().includes(firstUnitOf(w)));
-
-    expect(requested()).toEqual([words[0], words[1]]);
-    // …and every one of the eight cells is reported preparing, including the
-    // six that have not reached the synthesizer yet.
+    const warms = synth.requests.filter((request) =>
+      words.some((word) => firstUnitOf(word) === request.text),
+    );
+    expect(warms.map((request) => request.text)).toEqual(words.map(firstUnitOf));
+    expect(new Set(warms.map((request) => request.tier))).toEqual(new Set(["warm"]));
+    // …and every one of the eight cells is reported preparing.
     expect(result.current.preparingSessionIds.size).toBe(words.length);
 
-    // A slot frees exactly one queued warm, in arrival order.
     await act(async () => {
       synth.release(firstUnitOf(words[0]));
       await drain();
     });
-    expect(requested()).toEqual([words[0], words[1], words[2]]);
     expect(result.current.preparingSessionIds.has("cell-0")).toBe(false);
 
-    await act(async () => {
-      synth.release(firstUnitOf(words[1]));
-      await drain();
-    });
-    expect(requested()).toEqual([words[0], words[1], words[2], words[3]]);
-
-    // A FAILED warm frees its slot too: the gate must not be closed by the one
-    // outcome the warm swallows.
+    // A FAILED warm clears the red too — the click pays for the synthesis
+    // itself, which is how the user gets a retry.
     await act(async () => {
       synth.fail(firstUnitOf(words[2]));
       await drain();
     });
-    expect(requested()).toHaveLength(5);
-    // And the cell whose warm failed is reported ready anyway — the click pays
-    // for the synthesis itself, which is how the user gets a retry.
     expect(result.current.preparingSessionIds.has("cell-2")).toBe(false);
+    expect(result.current.preparingSessionIds.size).toBe(words.length - 2);
   });
 });
 
@@ -1469,5 +1455,31 @@ describe("useSpeechHost — the voice's run events", () => {
       { type: "start", sessionId: "cell-b" },
       { type: "end" },
     ]);
+  });
+});
+
+describe("useSpeechHost — the speech-stopped alert", () => {
+  beforeEach(() => {
+    __resetAlertsForTests();
+  });
+
+  it("onError raises the kind-specific alert", async () => {
+    // End to end: the TtsError anytts rejects with travels through the player
+    // as the SpeechPlaybackError's `cause`, and the host words the alert by it.
+    const markdown = response(1, "Refused");
+    const [only] = unitsOf(markdown);
+    synth.hold(only);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await emitUtterance("cell-a", "u-1", markdown);
+    await settle(() => result.current.onSpeak("cell-a"));
+    await settle(() => synth.fail(only, new TtsError("rejected", "HTTP 403", { status: 403 })));
+
+    expect(getAlertsSnapshot().map((alert) => [alert.kind, alert.title])).toEqual([
+      ["error", "Speech stopped — the speech service refused the request."],
+    ]);
+    // Still a failed run: nothing was heard, so the pip keeps inviting the retry.
+    expect(played).toEqual([]);
+    expect(result.current.stateFor("cell-a")).toBe("ready");
   });
 });

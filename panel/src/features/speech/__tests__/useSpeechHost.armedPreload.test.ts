@@ -1,121 +1,20 @@
 /**
  * Armed cells, seen from the host: the whole of an unheard answer is
- * synthesized up front, silently, through the same synthesis window the playing
- * run and the unit-0 warms use — and always behind them.
+ * synthesized up front, silently, on anytts' `preload` tier — behind the
+ * playing run and the unit-0 warms, which the library ranks — and called off
+ * through the utterance's one signal.
  *
- * The harness is `useSpeechHost.test.ts`'s: a cache-shaped synthesis stand-in
- * whose texts can be held open, a state-backed socket, and the real channel
- * and player. What it adds is a count of the syntheses held open at once, which
- * is what "in flight" means here: units that resolve on the spot never occupy
- * a slot long enough to be anyone's competition.
+ * The harness is `useSpeechHost.test.ts`'s, with the synthesis stand-in
+ * swapped for `fakeTieredSynth.ts`: requests queue at call time, texts can be
+ * held open, each caller aborts on its own signal, and `clearCache` models the
+ * LRU evicting results.
  */
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const synth = vi.hoisted(() => {
-  const buffers = new Map<string, ArrayBuffer>();
-  const bufferText = new Map<ArrayBuffer, string>();
-  const blobText = new Map<Blob, string>();
-  const cache = new Map<string, Promise<ArrayBuffer>>();
-  /** Texts whose synthesis is held open until `release`/`fail` says otherwise. */
-  const holds = new Set<string>();
-  const waiting = new Map<string, { release: () => void; fail: (error: unknown) => void }>();
-  let requests: Array<{ text: string; voice: string | undefined }> = [];
-  /** The most syntheses ever held open at the same moment. */
-  let peakHeld = 0;
-
-  function bufferFor(text: string): ArrayBuffer {
-    const existing = buffers.get(text);
-    if (existing) return existing;
-
-    const buffer = new Uint8Array([text.length % 255]).buffer;
-    buffers.set(text, buffer);
-    bufferText.set(buffer, text);
-    return buffer;
-  }
-
-  function synthesizeSpeech(text: string, options: { voice?: string } = {}): Promise<ArrayBuffer> {
-    const key = `${options.voice ?? ""}::${text}`;
-    const cached = cache.get(key);
-    if (cached) return cached;
-
-    requests.push({ text, voice: options.voice });
-
-    const promise = holds.has(text)
-      ? new Promise<ArrayBuffer>((resolve, reject) => {
-          waiting.set(text, {
-            release: () => resolve(bufferFor(text)),
-            fail: (error: unknown) => reject(error),
-          });
-          peakHeld = Math.max(peakHeld, waiting.size);
-        })
-      : Promise.resolve(bufferFor(text));
-
-    cache.set(key, promise);
-    // Never cache a failure, exactly as the real module does not: a retry has
-    // to be able to reach the synthesizer again.
-    void promise.catch(() => {
-      if (cache.get(key) === promise) cache.delete(key);
-    });
-    return promise;
-  }
-
-  function settle(text: string, outcome: "release" | "fail"): void {
-    const held = waiting.get(text);
-    if (!held) throw new Error(`no synthesis is being held for ${text}`);
-    waiting.delete(text);
-    holds.delete(text);
-    if (outcome === "release") held.release();
-    else held.fail(new Error(`synthesis failed: ${text}`));
-  }
-
-  return {
-    synthesizeSpeech,
-    /** Exactly what the real one is: a fire-and-forget `synthesizeSpeech`. */
-    prefetchSpeech: (text: string, options: { voice?: string } = {}): void => {
-      void synthesizeSpeech(text, options).catch(() => {});
-    },
-    toSpeechBlob: (buffer: ArrayBuffer): Blob => {
-      const blob = new Blob([buffer], { type: "audio/mpeg" });
-      blobText.set(blob, bufferText.get(buffer) ?? "unknown");
-      return blob;
-    },
-    /** The real one's peek: is the audio cached (or in flight) for this text. */
-    isSpeechSynthesized: (text: string, options: { voice?: string } = {}): boolean =>
-      cache.has(`${options.voice ?? ""}::${text}`),
-    textForBlob: (blob: Blob): string => blobText.get(blob) ?? "unknown",
-    /** Holds this text's synthesis open, so "while it is warming" is observable. */
-    hold: (text: string): void => {
-      holds.add(text);
-    },
-    release: (text: string): void => settle(text, "release"),
-    fail: (text: string): void => settle(text, "fail"),
-    get requests() {
-      return requests;
-    },
-    /** How many syntheses are held open right now. */
-    get held() {
-      return waiting.size;
-    },
-    /** The held texts, oldest request first. */
-    get heldTexts() {
-      return [...waiting.keys()];
-    },
-    get peakHeld() {
-      return peakHeld;
-    },
-    /** Forgets every synthesized result, so a re-request is visible. */
-    clearCache: (): void => {
-      cache.clear();
-    },
-    reset: (): void => {
-      requests = [];
-      peakHeld = 0;
-      cache.clear();
-      holds.clear();
-      waiting.clear();
-    },
-  };
+const synth = await vi.hoisted(async () => {
+  const { createTieredSynth } = await import("./fakeTieredSynth");
+  return createTieredSynth();
 });
 
 vi.mock("../synth", () => ({
@@ -268,7 +167,7 @@ function holdAll(text: string): string[] {
   return units;
 }
 
-/** Releases one held synthesis and lets the window hand its slot on. */
+/** Releases one held synthesis and lets everything waiting on it settle. */
 async function release(text: string): Promise<void> {
   await act(async () => {
     synth.release(text);
@@ -335,8 +234,8 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
       synth.fail(units[1]);
       await drain();
     });
-    await release(units[0]);
-    expect(timesRequested(units[2])).toBe(0);
+    // Everything after it was already queued with the library, and is called off.
+    expect(synth.callsFor(units[2])[0].signal?.aborted).toBe(true);
 
     // Next opportunity: another arrival anywhere (a different cell).
     await emitUtterance("cell-b", "b-1", response(2, "Later"));
@@ -364,6 +263,8 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
   });
 
   it("preloads never delay the playing run's next unit", async () => {
+    // The ranking itself is anytts' scheduler; what the host and player owe it
+    // is the tier each request is made on.
     const answerX = response(6, "Xray");
     const answerP = response(5, "Papa");
     const x = holdAll(answerX);
@@ -375,11 +276,72 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     await emitUtterance("cell-x", "x-1", answerX);
     await emitUtterance("cell-p", "p-1", answerP);
     await settle(() => result.current.onSpeak("cell-p"));
-    // Free a slot: it must go to P's run (p[2..]) ahead of X's queued preloads.
-    await release(x[0]);
-    expect(requestedTexts()).toContain(p[2]);
-    const idxP = requestedTexts().indexOf(p[2]);
-    const idxX = requestedTexts().indexOf(x[2]);
-    expect(idxX === -1 || idxP < idxX).toBe(true);
+
+    for (const unit of x.slice(1)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload"]);
+    }
+    // P's remainder goes out on the run tier, the top of the library's ranking.
+    for (const unit of p.slice(2)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toContain("run");
+    }
+  });
+
+  it("an evicted unit is requested again when its cache state is cold", async () => {
+    const answerX = response(6, "Xray");
+    const x = unitsOf(answerX);
+    // x[2] stays in flight: warming, not cold, so it must not be asked again.
+    synth.hold(x[2]);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await cycle(() => result.current, "cell-x");
+    await emitUtterance("cell-x", "x-1", answerX);
+    for (const unit of x) expect(timesRequested(unit)).toBe(1);
+    const signal = synth.callsFor(x[1])[0].signal;
+
+    // The LRU pushes every landed result out.
+    synth.clearCache();
+    await emitUtterance("cell-y", "y-1", response(2, "Yankee"));
+
+    for (const unit of [x[1], ...x.slice(3)]) {
+      expect(timesRequested(unit)).toBe(2);
+      const last = synth.callsFor(unit).at(-1);
+      expect(last?.tier).toBe("preload");
+      expect(last?.signal).toBe(signal);
+    }
+    expect(synth.callsFor(x[2])).toHaveLength(1);
+  });
+
+  it("an aborted preload is not a failed preload", async () => {
+    const markdown = response(5);
+    const units = holdAll(markdown);
+    const { result } = renderHook(() => useSpeechHost());
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    const signal = synth.callsFor(units[1])[0].signal;
+
+    // Disarm and arm again inside one task: the aborted preloads' rejections
+    // land only after the fresh preloads are out. Counted as failures, they
+    // would call off the utterance again — the fresh preloads with it.
+    act(() => result.current.cycleSpeechMode("cell-a")); // autoplay
+    act(() => result.current.cycleSpeechMode("cell-a")); // off
+    act(() => result.current.cycleSpeechMode("cell-a")); // armed
+    await act(async () => {
+      await drain();
+    });
+
+    expect(signal?.aborted).toBe(true);
+    for (const unit of units.slice(1)) {
+      const last = synth.callsFor(unit).at(-1);
+      expect(last?.signal).not.toBe(signal);
+      expect(last?.signal?.aborted).toBe(false);
+    }
+    // Unit 0's warm was never called off: a disarm leaves it running.
+    expect(synth.heldTexts).toEqual(units);
+
+    // Nor did they forget the fresh preloads: the next opportunity asks for
+    // none of them again.
+    await emitUtterance("cell-b", "b-1", response(2, "Bravo"));
+    for (const unit of units.slice(1)) expect(synth.callsFor(unit)).toHaveLength(2);
   });
 });

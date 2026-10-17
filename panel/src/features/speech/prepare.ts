@@ -17,7 +17,7 @@
  * here is a marker the voice reads out loud.
  *
  * Language is **received, not detected**. It is a property of the session (see
- * `voteLanguage` / `nextLanguageState` in `pronunciation.ts`), accumulated
+ * `voteLanguage` / `nextLanguageState` in `language.ts`), accumulated
  * across utterances, and defaults to English — the branch that changes nothing.
  *
  * It is also this module that turns `strip.ts`'s neutral sentinels into words,
@@ -25,7 +25,7 @@
  * {@link speakSentinels}, where the collision that forces that order is spelled
  * out.
  */
-import { applyPronunciation } from "./pronunciation";
+import { applyPronunciation, firstSentence, packUnits } from "anytts/text";
 import { SENTINEL, SENTINEL_ONLY_RE, stripToSpeakableText } from "./strip";
 import type { PreparedSpeech, SpeechUnit } from "./types";
 
@@ -308,7 +308,7 @@ function toSpokenText(text: string, language: "pl" | "en"): string {
   const spoken = speakSentinels(removeMarkers(text).replace(/\s+/g, " ").trim(), language);
   const said = speakCodeShapes(spoken, language);
 
-  return language === "pl" ? applyPronunciation(said) : said;
+  return language === "pl" ? applyPronunciation(said, "pl") : said;
 }
 
 /** A paragraph paired with its spoken form, or `null` when nothing is left to say. */
@@ -324,59 +324,6 @@ function splitParagraphs(text: string): string[] {
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter((paragraph) => paragraph.length > 0);
-}
-
-/**
- * Sentences, for cutting an oversized paragraph. The trailing alternative keeps
- * a final fragment that never got its terminator — dropping it would silently
- * lose the end of a paragraph.
- */
-function splitSentences(text: string): string[] {
-  const matches = text.match(/[^.!?…]+[.!?…]+["'”’)\]]*|[^.!?…]+$/g);
-
-  return matches ? matches.map((part) => part.trim()).filter((part) => part.length > 0) : [text];
-}
-
-/** Greedily fills pieces up to `max`, splitting on words only as a last resort. */
-function cutAtCeiling(text: string, max: number): string[] {
-  const pieces: string[] = [];
-  let pending = "";
-
-  const flush = (): void => {
-    if (pending) pieces.push(pending);
-    pending = "";
-  };
-
-  for (const sentence of splitSentences(text)) {
-    if (pending && `${pending} ${sentence}`.length > max) flush();
-
-    if (sentence.length > max) {
-      flush();
-      for (const word of sentence.split(/\s+/)) {
-        if (pending && `${pending} ${word}`.length > max) flush();
-        pending = pending ? `${pending} ${word}` : word;
-      }
-      continue;
-    }
-
-    pending = pending ? `${pending} ${sentence}` : sentence;
-  }
-  flush();
-
-  return pieces;
-}
-
-/**
- * {@link cutAtCeiling} for a paragraph in both readings. The spoken text decides
- * the pieces; every piece carries the whole paragraph as its source. The
- * consumer of `source` — `matchUnitsToBlocks` — works at the granularity of a
- * rendered block, and a paragraph is one block, so a slice of it would map to
- * exactly the block the whole does. Cutting the source too would only buy a
- * second sentence splitter to keep aligned with the first, and a wrong slice
- * would be a lie where the whole is merely coarse.
- */
-function cutPackedAtCeiling(paragraph: Packed, max: number): Packed[] {
-  return cutAtCeiling(paragraph.text, max).map((text) => ({ source: paragraph.source, text }));
 }
 
 /**
@@ -403,61 +350,40 @@ function joinPacked(pending: string, paragraph: string): string {
 }
 
 /**
- * Packs spoken paragraphs into units: merge consecutive ones until the unit
- * reaches {@link UNIT_MIN_CHARS}, never merging past {@link UNIT_MAX_CHARS}, and
- * cut a paragraph that is oversized on its own.
+ * Packs spoken paragraphs into units with `anytts/text`'s `packUnits`: merge
+ * consecutive ones until the unit reaches {@link UNIT_MIN_CHARS}, never merging
+ * past {@link UNIT_MAX_CHARS}, and cut a paragraph that is oversized on its own.
  *
  * The floor exists because a two-word paragraph costs a whole synthesis round
  * trip for half a second of audio; the ceiling exists because a unit is also the
  * barge-in granularity, and a 40-second unit cannot be interrupted mid-thought.
+ *
+ * The library reports each unit's paragraph range `from..to`; `source` is the
+ * join of those paragraphs' sources. A unit that spans one paragraph keeps the
+ * library's text — it is either the whole paragraph or a piece cut from it, and
+ * a piece carries the whole paragraph as its source, because the consumer of
+ * `source` (`matchUnitsToBlocks`) works at the granularity of a rendered block.
+ * A unit that merges several paragraphs is re-joined with {@link joinPacked},
+ * which only ever drops characters at a placeholder seam, so the ceiling holds.
+ *
+ * Source paragraphs never open with a placeholder's comma — the sentinel is
+ * still a sentinel there — so a single space is the same join `joinPacked`
+ * performs on the spoken side.
  */
-function packUnits(paragraphs: readonly Packed[]): Packed[] {
-  const units: Packed[] = [];
-  let pending: Packed | null = null;
+function packBody(paragraphs: readonly Packed[]): Packed[] {
+  return packUnits(paragraphs, { min: UNIT_MIN_CHARS, max: UNIT_MAX_CHARS }).map(({ text, from, to }) => {
+    const range = paragraphs.slice(from, to + 1);
+    const source = range.map((paragraph) => paragraph.source).join(" ");
+    if (from === to) return { source, text };
 
-  const flush = (): void => {
-    if (pending) units.push(pending);
-    pending = null;
-  };
-
-  for (const paragraph of paragraphs) {
-    if (paragraph.text.length > UNIT_MAX_CHARS) {
-      flush();
-      units.push(...cutPackedAtCeiling(paragraph, UNIT_MAX_CHARS));
-      continue;
-    }
-
-    if (!pending) pending = paragraph;
-    else {
-      const joined = joinPacked(pending.text, paragraph.text);
-
-      if (joined.length > UNIT_MAX_CHARS) {
-        flush();
-        pending = paragraph;
-      } else {
-        // Source paragraphs never open with a placeholder's comma — the
-        // sentinel is still a sentinel there — so a single space is the same
-        // join `joinPacked` performs on the spoken side.
-        pending = { source: `${pending.source} ${paragraph.source}`, text: joined };
-      }
-    }
-
-    if (pending.text.length >= UNIT_MIN_CHARS) flush();
-  }
-  flush();
-
-  return units;
-}
-
-/** The opening sentence, used as a small fast-start unit when there is no TLDR. */
-function firstSentence(text: string): string | null {
-  return text.match(/^[\s\S]*?[.!?…]+(?=\s|$)/)?.[0].trim() ?? null;
+    return { source, text: range.map((paragraph) => paragraph.text).reduce(joinPacked) };
+  });
 }
 
 /**
  * The fast-start unit taken off the front of the body, paired with what is left
  * to pack. `null` when there is no sentence to open with at all, which leaves
- * the first unit to {@link packUnits} exactly as it was before this rule existed.
+ * the first unit to {@link packBody} exactly as it was before this rule existed.
  *
  * The second branch is the one that needs arguing for, because it is the only
  * place a unit is built from two paragraphs before packing. A lead-in ending in
@@ -493,7 +419,7 @@ function takeFastStart(first: Packed, rest: readonly Packed[]): { unit: Packed; 
 
   // This unit is built before packing runs, so nothing downstream would cut it:
   // over the ceiling, the fast start would hand playback a unit larger than any
-  // {@link packUnits} would ever emit — the opposite of what it exists for. So
+  // {@link packBody} would ever emit — the opposite of what it exists for. So
   // it stands down and lets the normal packing path cut the sentence instead.
   if (joinPacked(first.text, sentence).length > UNIT_MAX_CHARS) return null;
 
@@ -600,7 +526,7 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
     // No TLDR: the fast-start unit is the body's first sentence, and what is
     // left of the paragraph it came from goes back to the head of the packing
     // queue. Both halves keep the whole paragraph as their source — see
-    // `cutPackedAtCeiling` for why a piece is never sliced.
+    // `packBody` for why a piece is never sliced.
     const [first, ...rest] = body;
     const fastStart = first ? takeFastStart(first, rest) : null;
 
@@ -610,5 +536,5 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
     }
   }
 
-  return { units: toUnits([...opening, ...packUnits(body)]), language };
+  return { units: toUnits([...opening, ...packBody(body)]), language };
 }

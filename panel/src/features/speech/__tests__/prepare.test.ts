@@ -1,6 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { applyPronunciation } from "../pronunciation";
+import { applyPronunciation, packUnits } from "anytts/text";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UNIT_MAX_CHARS, UNIT_MIN_CHARS, prepare, removeMarkers } from "../prepare";
+
+// Pass-through spies: the library still does the work, the tests can see the calls.
+vi.mock("anytts/text", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("anytts/text")>();
+  return {
+    ...actual,
+    applyPronunciation: vi.fn(actual.applyPronunciation),
+    packUnits: vi.fn(actual.packUnits),
+  };
+});
+
+beforeEach(() => {
+  vi.mocked(applyPronunciation).mockClear();
+  vi.mocked(packUnits).mockClear();
+});
 
 /** Five short paragraphs, each well under the packing floor. */
 const short = (n: number): string => `Short paragraph ${n} about the panel and its speech units.`;
@@ -377,6 +392,23 @@ describe("prepare", () => {
     );
   });
 
+  it("polish branch respells a preset key and leaves a longer word that starts with it alone", () => {
+    const polish = "Macierz liczę na mac, a codebase czyta code.";
+    const { units } = prepare(polish, { language: "pl" });
+
+    // `mac` and `code` are preset keys; `macierz` and `codebase` merely start with one.
+    expect(units[0].text).toBe("Macierz liczę na mak, a codebase czyta koud.");
+    expect(applyPronunciation).toHaveBeenCalledWith(expect.any(String), "pl");
+  });
+
+  it("english branch applies no map", () => {
+    const text = "We build the mac app and update the code.";
+    const { units } = prepare(text, { language: "en" });
+
+    expect(units[0].text).toBe(text);
+    expect(applyPronunciation).not.toHaveBeenCalled();
+  });
+
   it("returns no units for a response that is only code", () => {
     const result = prepare("```ts\nconst x = 1;\n```\n");
 
@@ -588,8 +620,8 @@ describe("prepare", () => {
     // boundary. Run the map first and the sentinel is no longer a sentinel —
     // a Polish session then says the literal "⟦koud⟧" out loud, which is what
     // it did before this commit.
-    expect(applyPronunciation("⟦code⟧")).toBe("⟦koud⟧");
-    expect(applyPronunciation("⟦html⟧")).toBe("⟦ejcz-ti-em-el⟧");
+    expect(applyPronunciation("⟦code⟧", "pl")).toBe("⟦koud⟧");
+    expect(applyPronunciation("⟦html⟧", "pl")).toBe("⟦ejcz-ti-em-el⟧");
 
     const text = spoken(everySentinelResponse, "pl");
 
@@ -671,7 +703,7 @@ describe("prepare", () => {
     // acronym table matches `html` only as a STANDALONE word, and `_` is a word
     // character to it, so `HTML_PARSER` is invisible to the map until this
     // stage has split it — run the map first and the acronym is never said.
-    expect(applyPronunciation("HTML_PARSER")).toBe("HTML_PARSER");
+    expect(applyPronunciation("HTML_PARSER", "pl")).toBe("HTML_PARSER");
 
     expect(spoken("Zmieniamy HTML_PARSER dzisiaj.\n", "pl")).toBe(
       "Zmieniamy zmienna ejcz-ti-em-el parser dzisiaj.",
@@ -755,6 +787,31 @@ describe("prepare", () => {
     );
     expect(worded?.source).toContain("⟦code⟧");
     expect(worded?.source).not.toContain("blok kodu");
+  });
+
+  it("unit source is joined from the packed paragraph range", () => {
+    const { units } = prepare(packingResponse);
+
+    expect(packUnits).toHaveBeenCalledTimes(1);
+    const [paragraphs, options] = vi.mocked(packUnits).mock.calls[0] as unknown as [
+      readonly { source: string; text: string }[],
+      { min: number; max: number },
+    ];
+    expect(options).toEqual({ min: 200, max: 450 });
+    expect(options).toEqual({ min: UNIT_MIN_CHARS, max: UNIT_MAX_CHARS });
+
+    const packed = vi.mocked(packUnits).mock.results[0].value as { from: number; to: number }[];
+    expect(packed.some(({ from, to }) => to > from)).toBe(true);
+
+    // The packed units are the tail of the prepared ones, after the opening units.
+    const body = units.slice(units.length - packed.length);
+    packed.forEach(({ from, to }, i) => {
+      const joined = paragraphs
+        .slice(from, to + 1)
+        .map((paragraph) => paragraph.source)
+        .join(" ");
+      expect(body[i].source).toBe(joined);
+    });
   });
 
   it("pieces cut from one paragraph share the paragraph as their source", () => {

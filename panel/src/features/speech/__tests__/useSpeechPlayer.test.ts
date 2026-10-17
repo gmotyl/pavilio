@@ -26,8 +26,8 @@ const synth = vi.hoisted(() => {
    * it: a second caller is handed the promise the first one started — whether
    * it is still in flight or long since resolved — and a rejection is evicted
    * so a retry can reach the synthesizer again. A stub that re-synthesized on
-   * every call would make the window's occupancy a fiction, since the ladder
-   * materializing a unit the window already warmed would read here as a
+   * every call would make "in flight" a fiction, since the ladder
+   * materializing a unit the cascade already warmed would read here as a
    * connection production never opens.
    */
   let cache = new Map<string, { text: string; promise: Promise<ArrayBuffer>; done: boolean }>();
@@ -39,6 +39,9 @@ const synth = vi.hoisted(() => {
    */
   let timeline: string[] = [];
   let requests: Array<{ text: string; voice: string | undefined }> = [];
+  /** Every call, cache hits included, with the tier and signal it was made on. */
+  let calls: Array<{ text: string; tier: string | undefined; signal: AbortSignal | undefined }> =
+    [];
   let prefetches: Array<{ text: string; voice: string | undefined }> = [];
   let blobbed: ArrayBuffer[] = [];
 
@@ -71,7 +74,11 @@ const synth = vi.hoisted(() => {
   }
 
   return {
-    synthesizeSpeech: (text: string, options: { voice?: string } = {}): Promise<ArrayBuffer> => {
+    synthesizeSpeech: (
+      text: string,
+      options: { voice?: string; tier?: string; signal?: AbortSignal } = {},
+    ): Promise<ArrayBuffer> => {
+      calls.push({ text, tier: options.tier, signal: options.signal });
       const key = `${options.voice ?? ""}::${text}`;
       const cached = cache.get(key);
       // A hit is a *recorded* non-request: the caller is served what is already
@@ -85,9 +92,8 @@ const synth = vi.hoisted(() => {
       const entry = { text, promise, done: false };
       cache.set(key, entry);
       peakInFlight = Math.max(peakInFlight, inFlightEntries().length);
-      // Registered before the caller's own continuation, so a unit has already
-      // left the window by the time the player reacts to it landing — which is
-      // what makes "at most three in flight" measurable at all.
+      // Registered before the caller's own continuation, so a unit is already
+      // out of `inFlight` by the time the player reacts to it landing.
       promise.then(
         () => {
           entry.done = true;
@@ -116,6 +122,9 @@ const synth = vi.hoisted(() => {
     textForBlob: (blob: Blob): string => blobText.get(blob) ?? "unknown",
     get requests() {
       return requests;
+    },
+    get calls() {
+      return calls;
     },
     get prefetches() {
       return prefetches;
@@ -162,6 +171,7 @@ const synth = vi.hoisted(() => {
       peakInFlight = 0;
       timeline = [];
       requests = [];
+      calls = [];
       prefetches = [];
       blobbed = [];
     },
@@ -176,7 +186,7 @@ vi.mock("../synth", () => ({
 }));
 
 import type { SpeechPlaybackError, SpeechPlayer } from "../useSpeechPlayer";
-import { SYNTHESIS_CONCURRENCY, useSpeechPlayer } from "../useSpeechPlayer";
+import { useSpeechPlayer } from "../useSpeechPlayer";
 import type { SpeechUnit } from "../types";
 import { refreshSessions } from "../../terminal/sessionStore";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice, setStoredVoice } from "../voices";
@@ -546,89 +556,59 @@ describe("useSpeechPlayer", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it("keeps at most the window's worth of syntheses in flight", async () => {
-    // Everything from unit 2 on is held open, so the window cannot drain:
-    // whatever is in flight when the dust settles *is* the window.
-    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
+  it("the cascade requests on the run tier even for units already queued", async () => {
+    // Unit 3 is already queued with the library on a lower tier — a host
+    // preload of the same answer. The cascade must still ask for it on `run`:
+    // that second request is what promotes the queued job, so skipping a unit
+    // because it is "already on its way" would leave it at the back.
+    synth.deferOn("unit-3");
+    void synth.synthesizeSpeech("unit-3", { voice: DEFAULT_SPEECH_VOICE, tier: "preload" });
     const onError = vi.fn();
     const { result } = renderHook(() => useSpeechPlayer({ onError }));
 
-    await startPlay(result.current, "cell-a", manyUnits(9));
+    await startPlay(result.current, "cell-a", manyUnits(6));
 
-    expect(SYNTHESIS_CONCURRENCY).toBe(3);
-    // Seven units are still unwarmed and every one of them would resolve on
-    // its own connection. Three sockets, not seven.
-    expect(synth.inFlight).toEqual(["unit-2", "unit-3", "unit-4"]);
-    expect(synth.peakInFlight).toBe(SYNTHESIS_CONCURRENCY);
-    expect(requested()).toEqual(["unit-0", "unit-1", "unit-2", "unit-3", "unit-4"]);
-    expect(played).toEqual(["blob:unit-0"]);
-    expect(onError).not.toHaveBeenCalled();
-  });
-
-  it("refills the window as each synthesis completes", async () => {
-    for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
-    const onError = vi.fn();
-    const { result } = renderHook(() => useSpeechPlayer({ onError }));
-
-    await startPlay(result.current, "cell-a", manyUnits(9));
-    expect(synth.inFlight).toEqual(["unit-2", "unit-3", "unit-4"]);
-
-    // One lands mid-window. A batch of three followed by a wait for all three
-    // would leave two in flight here; a rolling window starts unit 5 at once.
-    await settle(() => synth.release("unit-3"));
-    expect(synth.inFlight).toEqual(["unit-2", "unit-4", "unit-5"]);
-
-    await settle(() => {
-      synth.release("unit-2");
-      synth.release("unit-4");
-    });
-    expect(synth.inFlight).toEqual(["unit-5", "unit-6", "unit-7"]);
-
-    // And it runs to the end of the run rather than to a fixed distance: the
-    // last unit is reached with playback still sitting on unit 0.
-    await settle(() => {
-      synth.release("unit-5");
-      synth.release("unit-6");
-      synth.release("unit-7");
-    });
-    expect(synth.inFlight).toEqual(["unit-8"]);
-    expect(requested()).toHaveLength(9);
-    // Never once did a fourth connection open.
-    expect(synth.peakInFlight).toBe(SYNTHESIS_CONCURRENCY);
-    expect(played).toEqual(["blob:unit-0"]);
+    const cascaded = synth.calls.filter((call) => call.text !== "unit-0" && call.text !== "unit-1");
+    expect(cascaded.filter((call) => call.text === "unit-3").map((call) => call.tier)).toEqual([
+      "preload",
+      "run",
+    ]);
+    for (const text of ["unit-2", "unit-4", "unit-5"]) {
+      expect(cascaded.filter((call) => call.text === text).map((call) => call.tier)).toContain(
+        "run",
+      );
+    }
+    // One flight for unit 3 all the same: the request joined, it did not
+    // reach the synthesizer twice.
+    expect(requested().filter((text) => text === "unit-3")).toHaveLength(1);
     expect(onError).not.toHaveBeenCalled();
   });
 
   it("stops warming the moment the run loses the element", async () => {
-    // The window is what makes an abandoned run expensive: every slot it still
-    // holds refills itself when its request settles, so a run that was stopped
-    // or barged in on would go on opening sockets for its whole remaining tail
-    // — against the run that replaced it. Nothing else in the player notices,
-    // because warming touches neither the element nor any object URL.
+    // anytts queues at call time, so the whole tail is with the library the
+    // moment the cascade starts; what stops it is the run's signal. A run that
+    // was stopped or barged in on must not go on synthesizing its remainder
+    // against the run that replaced it.
     for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
     const onError = vi.fn();
     const { result } = renderHook(() => useSpeechPlayer({ onError }));
 
     await startPlay(result.current, "cell-a", manyUnits(9));
-    expect(synth.inFlight).toEqual(["unit-2", "unit-3", "unit-4"]);
+    const cascade = synth.calls.filter((call) => call.tier === "run" && call.signal);
+    expect(cascade.map((call) => call.text)).toEqual([
+      "unit-2",
+      "unit-3",
+      "unit-4",
+      "unit-5",
+      "unit-6",
+      "unit-7",
+      "unit-8",
+    ]);
+    expect(cascade.every((call) => call.signal?.aborted === false)).toBe(true);
 
     await settle(() => result.current.stop());
-    const before = requested().length;
 
-    // A slot comes free *after* the stop. On a live run this is exactly what
-    // starts unit 5; on a run that is over it must start nothing at all.
-    await settle(() => synth.release("unit-3"));
-
-    expect(requested()).toHaveLength(before);
-    expect(requested()).not.toContain("unit-5");
-
-    // And it stays stopped as the rest of the tail settles, rather than merely
-    // skipping the one refill.
-    await settle(() => {
-      synth.release("unit-2");
-      synth.release("unit-4");
-    });
-    expect(requested()).toHaveLength(before);
+    expect(cascade.every((call) => call.signal?.aborted === true)).toBe(true);
     expect(onError).not.toHaveBeenCalled();
   });
 
@@ -1307,14 +1287,14 @@ describe("useSpeechPlayer", () => {
   });
 
   it("jumping to a cold unit reports stalled and then plays it", async () => {
-    // Everything from unit 2 on is held open, so the warming window never gets
-    // past unit 4: unit 5 is genuinely un-synthesized when the jump lands on it.
+    // Everything from unit 2 on is held open: the cascade has asked for it all,
+    // but unit 5 is genuinely un-synthesized when the jump lands on it.
     for (let index = 2; index < 9; index += 1) synth.deferOn(`unit-${index}`);
     const onError = vi.fn();
     const { result } = renderHook(() => useSpeechPlayer({ onError }));
 
     await startPlay(result.current, "cell-a", manyUnits(9));
-    expect(requested()).toEqual(["unit-0", "unit-1", "unit-2", "unit-3", "unit-4"]);
+    expect(synth.inFlight).toContain("unit-5");
 
     await settle(() => result.current.jumpToUnit("cell-a", 5));
 

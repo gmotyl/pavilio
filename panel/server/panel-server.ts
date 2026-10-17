@@ -37,6 +37,7 @@ import { mountTimeRoutes } from "./routes/time.js";
 import autoSyncRouter from "./routes/auto-sync.js";
 import systemRouter from "./routes/system.js";
 import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
+import { createTtsHandler } from "./routes/tts.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
 import skillsRouter from "./routes/skills.js";
@@ -183,6 +184,14 @@ export async function startPanel(
     }
     next(err);
   });
+
+  // The anytts relay reads the raw request stream itself, so it must run before
+  // the global `express.json()`: a parsed body is a consumed stream, and the
+  // relay would read nothing. Both auth gates run here, ahead of their global
+  // mounts below. `app.all` rather than a path-scoped `app.use`: `use` strips
+  // the mount path from `req.path`, and both gates only 401 paths that start
+  // with `/api/`, so under `use` they would wave every request through.
+  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler());
 
   app.use(express.json());
   app.use(mobileAuthMiddleware);

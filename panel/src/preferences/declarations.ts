@@ -622,9 +622,9 @@ export const preferences = {
 
   // ── Speech ───────────────────────────────────────────────────────────────
   /**
-   * Typed `string`, not `SpeechVoiceId`: the voice list is long enough that a
-   * codec would have to duplicate it, and `resolveVoice()` already drops an
-   * unknown id at the boundary. The default lives here and `voices.ts`
+   * Typed `string`: the voice list is anytts' catalog, which a codec would
+   * have to duplicate, and `voices.ts` already resolves an id outside the
+   * engine's catalog onto the engine default at the boundary. The default lives here and `voices.ts`
    * imports it — upward, from the lower layer — so there is one copy. The
    * other direction is what would close a cycle once voices.ts reads the
    * registry.
@@ -635,6 +635,33 @@ export const preferences = {
     default: DEFAULT_SPEECH_VOICE,
     codec: str,
     portable: true,
+  }),
+  /**
+   * Which anytts engine synthesizes. Typed `string` for the same reason
+   * `speech.voice` is: the engine list is the library's, and `voices.ts` /
+   * `synth.ts` map an engine it does not list onto the default.
+   */
+  speechEngine: definePreference({
+    key: "speech.engine", // was: nothing — anytts brought engines
+    scope: "global",
+    default: "edge",
+    codec: str,
+    portable: true,
+  }),
+  /**
+   * How Edge synthesis reaches Microsoft: `auto` (straight from the browser in
+   * Edge, through the panel server's `/api/tts` relay elsewhere) or `server`
+   * (always the relay). Non-portable: whether a browser can open the Edge
+   * socket itself is a fact about this device, not about the workspace. It
+   * names no session, so it is not on the portability guard's SESSION_NAMING
+   * list. Typed `string`; `speech/route.ts` maps an unknown value onto `auto`.
+   */
+  speechRoute: definePreference({
+    key: "speech.route", // was: nothing — the route is new
+    scope: "global",
+    default: "auto",
+    codec: str,
+    portable: false,
   }),
   /**
    * Each project's own voice — `project → voice id`; a project that follows

@@ -1,17 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 import { VoiceSelect } from "../VoiceSelect";
-import {
-  DEFAULT_SPEECH_VOICE,
-  SPEECH_VOICES,
-  getStoredVoice,
-  setStoredVoice,
-} from "../voices";
+import { listEngines, listVoices, type VoiceInfo } from "anytts";
+import { groupVoices } from "../voiceGroups";
+import { DEFAULT_SPEECH_VOICE, getStoredVoice, setStoredVoice } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
+import { readPreference } from "../../../preferences/store";
 import AgentSettings from "../../agents/AgentSettings";
 import LeftSidebar from "../../shell/LeftSidebar";
 import { SpeechHostProvider } from "../SpeechHostProvider";
@@ -66,7 +64,66 @@ vi.mock("../useSpeechHost", async () => {
   };
 });
 
+/**
+ * anytts ships one engine, so switching needs a second: this one is listed
+ * beside edge with a two-voice catalog, configured by the seam, and the seam
+ * resolves its default. A second extra engine is listed by anytts but NOT
+ * configured, so the picker must leave it out.
+ */
+const { FAKE_ENGINE, UNCONFIGURED_ENGINE, FAKE_DEFAULT, FAKE_VOICES } = vi.hoisted(() => {
+  const FAKE_DEFAULT = "xx-XX-FakeOneNeural";
+  const FAKE_VOICES: VoiceInfo[] = [
+    { id: FAKE_DEFAULT, label: "Fake One", locale: "xx-XX", gender: "female", multilingual: true },
+    { id: "xx-XX-FakeTwoNeural", label: "Fake Two", locale: "xx-XX", gender: "male", multilingual: true },
+  ];
+  return { FAKE_ENGINE: "fake", UNCONFIGURED_ENGINE: "unconfigured", FAKE_DEFAULT, FAKE_VOICES };
+});
+
+vi.mock("anytts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("anytts")>();
+  return {
+    ...actual,
+    listEngines: () => [
+      ...actual.listEngines(),
+      { id: FAKE_ENGINE, label: "Fake engine", runtimes: ["browser"] },
+      { id: UNCONFIGURED_ENGINE, label: "Unconfigured engine", runtimes: ["browser"] },
+    ],
+    listVoices: (engine: string) =>
+      engine === FAKE_ENGINE ? FAKE_VOICES.map((v) => ({ ...v })) : actual.listVoices(engine),
+  };
+});
+
+vi.mock("../engines", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../engines")>();
+  return { ...actual, speechEngines: () => [...actual.speechEngines(), FAKE_ENGINE] };
+});
+
+vi.mock("../synth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../synth")>();
+  return {
+    ...actual,
+    resolveSpeechVoice: (q: { engine: string; voice?: string }) =>
+      q.engine === FAKE_ENGINE
+        ? FAKE_VOICES.some((v) => v.id === q.voice)
+          ? { voice: q.voice!, fellBack: false }
+          : { voice: FAKE_DEFAULT, fellBack: q.voice !== undefined }
+        : actual.resolveSpeechVoice(q),
+  };
+});
+
 const VOICE_LABEL = "Default voice";
+const VOICE_KEY = storageKey(preferences.speechVoice);
+
+const HELP_TEXT =
+  "Multilingual voices read both Polish and English; a single-language voice reads every answer in its own language. Saved in the workspace; a project can override it in its Overview → Project settings.";
+
+function prefsDocument(): Record<string, unknown> {
+  return (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__!;
+}
+
+function engineSelect(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: "Engine" }) as HTMLSelectElement;
+}
 
 /** The settings page lists agent config files over `fetch`; it needs none here. */
 function stubEmptyAgentSettingsApi(): void {
@@ -76,40 +133,91 @@ function stubEmptyAgentSettingsApi(): void {
   );
 }
 
+function routeSelect(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: "Speech route" }) as HTMLSelectElement;
+}
+
+const ROUTE_HELP_TEXT =
+  "Kept on this device. Microsoft's speech service answers only Edge, so other browsers always go through the panel server.";
+
 function voiceSelect(): HTMLSelectElement {
   return screen.getByRole("combobox", { name: VOICE_LABEL }) as HTMLSelectElement;
 }
 
 describe("VoiceSelect", () => {
-  it("lists the multilingual voices and marks the stored one selected", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders an engine select and grouped voice options for a Polish browser", () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
     setStoredVoice("de-DE-SeraphinaMultilingualNeural");
 
     render(<VoiceSelect />);
 
+    // The engine list is the seam's configured engines, labelled by anytts;
+    // one anytts lists but the seam does not configure is never offered.
+    const engine = engineSelect();
+    const engines = within(engine).getAllByRole("option") as HTMLOptionElement[];
+    const offered = listEngines().filter((e) => e.id !== UNCONFIGURED_ENGINE);
+    expect(engines.map((option) => option.value)).toEqual(offered.map((e) => e.id));
+    expect(engines.map((option) => option.textContent)).toEqual(offered.map((e) => e.label));
+    expect(engines.map((option) => option.value)).not.toContain(UNCONFIGURED_ENGINE);
+    expect(engine).toHaveValue("edge");
+
+    // The voices are the engine's catalog, in the groups `groupVoices` builds
+    // for the browser language — same labels, same ids, same order, no extras.
     const select = voiceSelect();
-    const options = within(select).getAllByRole("option") as HTMLOptionElement[];
-
-    // The picker is `voices.ts` verbatim — same ids, same order, no extras.
-    expect(options.map((option) => option.value)).toEqual(
-      SPEECH_VOICES.map((voice) => voice.id),
-    );
-    expect(options.map((option) => option.textContent)).toEqual(
-      SPEECH_VOICES.map((voice) => voice.label),
-    );
-
-    // Multilingual-only: a single-language voice on this page would let a
-    // Polish voice be handed an English answer.
-    for (const option of options) expect(option.value).toContain("Multilingual");
-    expect(options.map((option) => option.value)).not.toContain("pl-PL-MarekNeural");
-    expect(options.map((option) => option.value)).not.toContain("pl-PL-ZofiaNeural");
+    const expected = groupVoices(listVoices("edge"), "pl-PL");
+    expect(expected.map((group) => group.label)).toEqual(["Multilingual", "Polish"]);
+    const groups = Array.from(select.querySelectorAll("optgroup"));
+    expect(groups.map((group) => group.label)).toEqual(expected.map((group) => group.label));
+    groups.forEach((group, index) => {
+      const options = Array.from(group.querySelectorAll("option"));
+      expect(options.map((option) => option.value)).toEqual(expected[index]!.voices.map((v) => v.id));
+      expect(options.map((option) => option.textContent)).toEqual(
+        expected[index]!.voices.map((v) => v.label),
+      );
+    });
+    expect(within(select).getAllByRole("option")).toHaveLength(listVoices("edge").length);
 
     // Selected state read off the accessible option, not a class name.
-    const stored = options.find(
-      (option) => option.value === "de-DE-SeraphinaMultilingualNeural",
-    );
-    expect(stored?.selected).toBe(true);
-    expect(options.filter((option) => option.selected)).toHaveLength(1);
+    const options = within(select).getAllByRole("option") as HTMLOptionElement[];
+    expect(options.filter((option) => option.selected).map((option) => option.value)).toEqual([
+      "de-DE-SeraphinaMultilingualNeural",
+    ]);
     expect(select).toHaveValue("de-DE-SeraphinaMultilingualNeural");
+
+    expect(screen.getByText(HELP_TEXT)).toBeInTheDocument();
+  });
+
+  it("a stale stored voice falls back to the engine default and is written back", () => {
+    prefsDocument()[VOICE_KEY] = "xx-XX-NobodyNeural";
+
+    render(<VoiceSelect />);
+
+    expect(voiceSelect()).toHaveValue(DEFAULT_SPEECH_VOICE);
+    expect(prefsDocument()[VOICE_KEY]).toBe(DEFAULT_SPEECH_VOICE);
+  });
+
+  it("changing the engine stores speech.engine and reloads the voice list", async () => {
+    const user = userEvent.setup();
+    render(<VoiceSelect />);
+    expect(within(voiceSelect()).getAllByRole("option")).toHaveLength(listVoices("edge").length);
+
+    await user.selectOptions(engineSelect(), FAKE_ENGINE);
+
+    expect(prefsDocument()[storageKey(preferences.speechEngine)]).toBe(FAKE_ENGINE);
+    expect(engineSelect()).toHaveValue(FAKE_ENGINE);
+    // The list is now the other engine's catalog, and the edge voice that was
+    // picked is not in it, so the engine default is shown and written back.
+    const options = within(voiceSelect()).getAllByRole("option") as HTMLOptionElement[];
+    expect(options.map((option) => option.value)).toEqual(FAKE_VOICES.map((v) => v.id));
+    expect(voiceSelect()).toHaveValue(FAKE_DEFAULT);
+    expect(prefsDocument()[VOICE_KEY]).toBe(FAKE_DEFAULT);
+
+    await user.selectOptions(engineSelect(), "edge");
+    expect(within(voiceSelect()).getAllByRole("option")).toHaveLength(listVoices("edge").length);
   });
 
   it("persists the selection as a portable preference", async () => {
@@ -135,23 +243,68 @@ describe("VoiceSelect", () => {
     expect(select).toHaveValue("fr-FR-VivienneMultilingualNeural");
   });
 
-  it("keeps the pick for this page view when the document never arrived", async () => {
+  it("shows the stored voice and engine when the document never arrived", async () => {
     const user = userEvent.setup();
     // The auth interlock stands in for the old blocked-site-data case.
     delete (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__;
 
     render(<VoiceSelect />);
 
-    const select = voiceSelect();
     await expect(
-      user.selectOptions(select, "it-IT-GiuseppeMultilingualNeural"),
+      user.selectOptions(voiceSelect(), "it-IT-GiuseppeMultilingualNeural"),
     ).resolves.not.toThrow();
+    await user.selectOptions(engineSelect(), FAKE_ENGINE);
 
-    // Blocked site data must not strand the control on the old voice.
-    expect(select).toHaveValue("it-IT-GiuseppeMultilingualNeural");
-    // Nothing was persisted, so a reload falls back to the default — that is
-    // the documented consequence, not a crash.
+    // Nothing was persisted, and synthesis reads what is stored — so the
+    // controls show the stored picks rather than an attempt that never applied.
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+    expect(voiceSelect()).toHaveValue(DEFAULT_SPEECH_VOICE);
+    expect(engineSelect()).toHaveValue("edge");
+  });
+
+  it("renders the speech route select, defaulting to auto", () => {
+    render(<VoiceSelect />);
+
+    const route = routeSelect();
+    const options = within(route).getAllByRole("option") as HTMLOptionElement[];
+    expect(options.map((option) => option.value)).toEqual(["auto", "server"]);
+    expect(options.map((option) => option.textContent)).toEqual([
+      "Auto — straight from the browser in Edge, through the panel server elsewhere",
+      "Panel server — always synthesize through /api/tts",
+    ]);
+    expect(route).toHaveValue("auto");
+    expect(screen.getByText(ROUTE_HELP_TEXT)).toBeInTheDocument();
+    // Rendering alone stores nothing.
+    expect(localStorage.getItem(storageKey(preferences.speechRoute))).toBeNull();
+  });
+
+  it("changing the speech route stores speech.route on this device only", async () => {
+    const user = userEvent.setup();
+    render(<VoiceSelect />);
+
+    await user.selectOptions(routeSelect(), "server");
+
+    expect(routeSelect()).toHaveValue("server");
+    expect(readPreference(preferences.speechRoute)).toBe("server");
+    // Non-portable: kept in browser storage, never in the workspace document.
+    expect(localStorage.getItem(storageKey(preferences.speechRoute))).toBe("server");
+    expect(prefsDocument()[storageKey(preferences.speechRoute)]).toBeUndefined();
+  });
+
+  it("keeps the stored route when browser storage refuses the write", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    render(<VoiceSelect />);
+
+    await user.selectOptions(routeSelect(), "server");
+
+    expect(setItem).toHaveBeenCalled();
+    // synth.ts reads the stored route per request, so the select must too.
+    expect(readPreference(preferences.speechRoute)).toBe("auto");
+    expect(routeSelect()).toHaveValue("auto");
   });
 
   it("the settings picker is labelled Default voice", () => {
@@ -167,7 +320,7 @@ describe("VoiceSelect", () => {
 
     expect(
       screen.getByText(
-        "Every voice reads both Polish and English. Saved in the workspace; a project can override it in its Overview → Project settings.",
+        HELP_TEXT,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/this browser/)).not.toBeInTheDocument();

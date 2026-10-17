@@ -60,6 +60,8 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 
   // ── str: the values that would round-trip WRONG through a JSON re-parse ──
   "git.branchDiff.base": ["", "main", "true", "240", "null", "{}", "[]", "release/1.0"],
+  "speech.engine": ["edge", "", "true", "240", "null"],
+  "speech.route": ["auto", "server", "", "true", "240", "null"],
   "speech.voice": ["fr-FR-VivienneMultilingualNeural", "", "true", "240", "null"],
   "plans.taskPrompt": ["Implement all tasks in {path}.", "", "true", "240", "null", "{}"],
   // `optionalStr`: text that may be absent. No "" sample — a blank stored
@@ -118,7 +120,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 50;
+const DECLARATION_COUNT = 52;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

@@ -321,10 +321,9 @@ echo "Installing panel dependencies..."
 # mode ever acts on it: without this step a dependency added, bumped or patched
 # upstream reaches the workspace as source only, and the build below runs over
 # the previous node_modules/ — the silent half-update clone mode installs to
-# prevent. It is also the only thing that applies panel/package.json's
-# `pnpm.patchedDependencies` here: the workspace has no root
-# pnpm-workspace.yaml (the repo root is never synced), so panel/ is installed
-# standalone and its own package.json is what pnpm reads.
+# prevent. The workspace has no root pnpm-workspace.yaml (the repo root is
+# never synced), so panel/ is installed standalone and its own package.json is
+# what pnpm reads.
 #
 # pm_install, not `pm_in … install`: dependency installation is the package
 # manager's own command, and panel/package.json has no script by that name.

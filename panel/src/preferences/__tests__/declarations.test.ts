@@ -36,6 +36,7 @@ const PORTABLE = [
   "shell.rightSidebar.width",
   "speech.answerComposer.on",
   "speech.answerPane.autoOpen",
+  "speech.engine",
   "speech.voice",
   "speech.voiceByProject",
   "terminal.drawer.open",
@@ -74,6 +75,7 @@ const MACHINE_LOCAL = [
   "speech.answerPane.height",
   "speech.armedCell",
   "speech.modes",
+  "speech.route",
   "terminal.focus",
   "terminal.grid",
   "terminal.order",
@@ -163,6 +165,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["speech.answerPane.height", 4000, "project"],
   ["speech.armedCell", null, "global"],
   ["speech.modes", null, "global"],
+  ["speech.engine", "edge", "global"],
+  ["speech.route", "auto", "global"],
   ["speech.voice", "fr-FR-VivienneMultilingualNeural", "global"],
   ["speech.voiceByProject", {}, "global"],
   ["terminal.drawer.open", false, "global"],
@@ -202,6 +206,28 @@ describe("the declaration table", () => {
     // `storageKey` joins key and scope argument with "@". A key carrying one of
     // its own would make `shell.project.expanded@a@b` ambiguous to any reader.
     expect(ALL_PREFERENCES.filter((d) => d.key.includes("@"))).toEqual([]);
+  });
+
+  it("speech.engine is a portable global preference defaulting to edge", () => {
+    const engine = keyOf("speech.engine");
+    expect(engine).toBe(preferences.speechEngine);
+    expect(engine.scope).toBe("global");
+    expect(engine.portable).toBe(true);
+    expect(engine.default).toBe("edge");
+    // `str`: any stored string arrives intact; `voices.ts` maps an engine
+    // anytts does not list onto the default.
+    expect(engine.codec.parse("anything")).toBe("anything");
+  });
+
+  it("speech.route is a non-portable global preference defaulting to auto", () => {
+    const route = keyOf("speech.route");
+    expect(route).toBe(preferences.speechRoute);
+    expect(route.scope).toBe("global");
+    // Whether this browser reaches Edge directly is a fact about the device.
+    expect(route.portable).toBe(false);
+    expect(route.default).toBe("auto");
+    // `str`: `synth.ts` maps an unknown stored route onto auto.
+    expect(route.codec.parse("anything")).toBe("anything");
   });
 
   it("session-scoped preferences are declared non-portable", () => {

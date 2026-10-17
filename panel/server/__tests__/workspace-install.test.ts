@@ -10,13 +10,6 @@ import { join, resolve } from "node:path";
  * panel, or install settings left in panel/package.json, would silently split
  * the install back into two — pnpm ignores the `pnpm` field of a non-root
  * workspace package.
- *
- * One deliberate exception: `pnpm.patchedDependencies`. A workspace synced by
- * scripts/update.sh receives panel/ alone, with no root pnpm-workspace.yaml, and
- * installs it standalone — there panel/package.json IS the root, so the patch
- * has to be declared in it too. Inside this repo pnpm warns that the field
- * "will not take effect" and applies the root entry instead; both entries name
- * the same single file under panel/patches/, so they cannot drift apart.
  */
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -47,8 +40,8 @@ describe("workspace install", () => {
 
   it("onlyBuiltDependencies lives at the workspace root, not in panel/package.json", () => {
     const panelPkg = JSON.parse(readFileSync(join(PANEL_DIR, "package.json"), "utf8"));
-    // patchedDependencies is the only install setting panel/package.json may carry.
-    expect(Object.keys(panelPkg.pnpm ?? {})).toEqual(["patchedDependencies"]);
+    // panel/package.json carries no install settings of its own.
+    expect(panelPkg.pnpm).toBeUndefined();
 
     const workspace = readFileSync(join(REPO_ROOT, "pnpm-workspace.yaml"), "utf8");
     // A minimal parse of the two top-level lists the contract names.
@@ -62,36 +55,6 @@ describe("workspace install", () => {
     };
     expect(list("packages")).toEqual(["panel"]);
     expect(list("onlyBuiltDependencies")).toEqual(["node-pty"]);
-  });
-
-  it("declares each pnpm patch at the root and in panel/package.json, pointing at one file in panel/", () => {
-    const panelPatches: Record<string, string> = JSON.parse(
-      readFileSync(join(PANEL_DIR, "package.json"), "utf8"),
-    ).pnpm.patchedDependencies;
-    const workspace = readFileSync(join(REPO_ROOT, "pnpm-workspace.yaml"), "utf8");
-    // A minimal parse of the top-level `patchedDependencies:` map.
-    const block = /^patchedDependencies:\s*\n((?:[ \t]+[^\n]*\n?)+)/m.exec(workspace)?.[1] ?? "";
-    const rootPatches = Object.fromEntries(
-      block
-        .split("\n")
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .map((l) => {
-          const i = l.lastIndexOf(": ");
-          return [l.slice(0, i).replace(/^['"]|['"]$/g, ""), l.slice(i + 2).replace(/^['"]|['"]$/g, "")];
-        }),
-    );
-
-    expect(Object.keys(rootPatches).sort()).toEqual(Object.keys(panelPatches).sort());
-    expect(Object.keys(rootPatches).length).toBeGreaterThan(0);
-    for (const [dep, rel] of Object.entries(panelPatches)) {
-      // The patch lives inside panel/, the only part of the repo a synced
-      // workspace receives — a root-level patches/ would never reach it.
-      const fromPanel = resolve(PANEL_DIR, rel);
-      expect(fromPanel.startsWith(PANEL_DIR + "/")).toBe(true);
-      expect(resolve(REPO_ROOT, rootPatches[dep])).toBe(fromPanel);
-      expect(statSync(fromPanel).isFile()).toBe(true);
-    }
   });
 
   it("fix-node-pty-perms finds node-pty in the workspace root store", () => {
