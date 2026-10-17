@@ -25,11 +25,11 @@ function languageName(code: string): string {
  * empty groups omitted:
  *
  * 1. `Multilingual` — voices that read both Polish and English;
- * 2. the browser's language — single-language voices whose locale shares its
- *    primary subtag with `browserLanguage`;
- * 3. `English` — single-language `en-*` voices (one group with 2. when the
- *    browser language is English);
- * 4. `Other voices`.
+ * 2. one group per language for the single-language voices, keyed by the
+ *    locale's primary subtag (so `en-US` and `en-GB` share `English`) and
+ *    labelled with the language's English name: the browser's language first,
+ *    then English, then the remaining languages alphabetically by label;
+ * 3. `Other voices` — only voices whose locale has no language subtag.
  *
  * Every voice lands in exactly one group, and each group keeps the catalog's
  * own order.
@@ -37,24 +37,24 @@ function languageName(code: string): string {
 export function groupVoices(voices: VoiceInfo[], browserLanguage: string): VoiceGroup[] {
   const browser = primaryLanguage(browserLanguage);
   const multilingual: VoiceInfo[] = [];
-  const local: VoiceInfo[] = [];
-  const english: VoiceInfo[] = [];
+  const byLanguage = new Map<string, VoiceInfo[]>();
   const other: VoiceInfo[] = [];
 
   for (const voice of voices) {
     const language = primaryLanguage(voice.locale);
     if (voice.multilingual) multilingual.push(voice);
-    else if (language === "en") english.push(voice);
-    else if (browser !== "" && language === browser) local.push(voice);
-    else other.push(voice);
+    else if (language === "") other.push(voice);
+    else byLanguage.set(language, [...(byLanguage.get(language) ?? []), voice]);
   }
 
-  // An English browser's own group IS the English group, so `local` stays
-  // empty for it and needs no merge.
+  const rank = (code: string) => (code === browser ? 0 : code === "en" ? 1 : 2);
+  const languages = [...byLanguage.entries()]
+    .map(([code, group]) => ({ code, label: languageName(code), voices: group }))
+    .sort((a, b) => rank(a.code) - rank(b.code) || a.label.localeCompare(b.label, "en"));
+
   const groups: VoiceGroup[] = [
     { label: "Multilingual", voices: multilingual },
-    { label: languageName(browser), voices: local },
-    { label: "English", voices: english },
+    ...languages.map(({ label, voices: group }) => ({ label, voices: group })),
     { label: "Other voices", voices: other },
   ];
   return groups.filter((group) => group.voices.length > 0);
