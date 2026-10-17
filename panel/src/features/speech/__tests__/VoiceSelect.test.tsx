@@ -169,7 +169,7 @@ describe("VoiceSelect", () => {
     // for the browser language — same labels, same ids, same order, no extras.
     const select = voiceSelect();
     const expected = groupVoices(listVoices("edge"), "pl-PL");
-    expect(expected.map((group) => group.label)).toEqual(["Multilingual", "Polish"]);
+    expect(expected.map((group) => group.label)).toEqual(["Multilingual", "Polish", "English"]);
     const groups = Array.from(select.querySelectorAll("optgroup"));
     expect(groups.map((group) => group.label)).toEqual(expected.map((group) => group.label));
     groups.forEach((group, index) => {
