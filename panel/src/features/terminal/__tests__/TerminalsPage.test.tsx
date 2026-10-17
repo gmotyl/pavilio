@@ -39,15 +39,15 @@ import {
   readStandaloneTerminalFocus,
   subscribeStandaloneTerminalFocus,
 } from "../standaloneTerminalFocus";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../TerminalSpeechHost";
 
 function renderPage() {
   surfaceProps.mockClear();
   render(
     <MemoryRouter>
-      <SpeechHostProvider>
+      <TerminalSpeechHost>
         <TerminalsPage />
-      </SpeechHostProvider>
+      </TerminalSpeechHost>
     </MemoryRouter>,
   );
   return surfaceProps.mock.calls[0][0] as Record<string, unknown>;
@@ -79,9 +79,9 @@ describe("TerminalsPage", () => {
     const off = subscribeStandaloneTerminalFocus(() => seen.push(readStandaloneTerminalFocus()));
     const { unmount } = render(
       <MemoryRouter>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <TerminalsPage />
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
     const onFocus = () =>

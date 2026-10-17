@@ -58,6 +58,8 @@ vi.mock("../../realtime/useWebSocket", async () => {
 
 import { prepare } from "../prepare";
 import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
+import { voiceForSession } from "../../terminal/sessionVoice";
+import { storeAnswerWaiting } from "./answerWaitingPort";
 
 /** The `src` of every started playback, in order. Warming must never add one. */
 const played: string[] = [];
@@ -185,7 +187,9 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const answerX = response(6, "Xray");
     const answerY = response(4, "Yankee");
     const x = unitsOf(answerX);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await cycle(() => result.current, "cell-x");
     await emitUtterance("cell-x", "x-1", answerX);
@@ -209,7 +213,9 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const answerY = response(4, "Yankee");
     const x = holdAll(answerX);
     const y = holdAll(answerY);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await cycle(() => result.current, "cell-x");
     await emitUtterance("cell-x", "x-1", answerX);
@@ -226,7 +232,9 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
   it("a failed preload unit is retried on the next opportunity", async () => {
     const markdown = response(5);
     const units = holdAll(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await cycle(() => result.current, "cell-a");
     await emitUtterance("cell-a", "u-1", markdown);
@@ -247,7 +255,9 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const answerX = response(6, "Xray");
     const answerY = response(4, "Yankee");
     const x = unitsOf(answerX);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await cycle(() => result.current, "cell-x");
     await emitUtterance("cell-x", "x-1", answerX);
@@ -270,7 +280,9 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const x = holdAll(answerX);
     const p = unitsOf(answerP);
     synth.hold(p[2]);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await cycle(() => result.current, "cell-x");
     await emitUtterance("cell-x", "x-1", answerX);
@@ -291,7 +303,9 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const x = unitsOf(answerX);
     // x[2] stays in flight: warming, not cold, so it must not be asked again.
     synth.hold(x[2]);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await cycle(() => result.current, "cell-x");
     await emitUtterance("cell-x", "x-1", answerX);
@@ -314,7 +328,9 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
   it("an aborted preload is not a failed preload", async () => {
     const markdown = response(5);
     const units = holdAll(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);

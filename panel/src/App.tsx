@@ -23,7 +23,7 @@ import { useHostModeRoot } from "./features/host-mode/useHostModeRoot";
 import AlertHost from "./features/alerts/AlertHost";
 import PreferencesReadOnlyAlert from "./features/alerts/PreferencesReadOnlyAlert";
 import { TimeTrackingProvider } from "./features/time/TimeTrackingProvider";
-import { SpeechHostProvider } from "./features/speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "./features/terminal/TerminalSpeechHost";
 import { Notifier } from "./features/notifications/useNotifier";
 
 function AppShell() {
@@ -48,7 +48,7 @@ function AppShell() {
                 in here would crash the panel at mount rather than degrade.
                 Both currently draw the provider-free `TerminalActivityLed`;
                 keep it that way, or move the surface inside
-                `SpeechHostProvider` first. The provider is not hoisted over
+                `TerminalSpeechHost` first. The provider is not hoisted over
                 them because exactly one host may exist for the whole panel —
                 see its comment just below. */}
             <QuickFinder />
@@ -57,7 +57,7 @@ function AppShell() {
             {/* One speech host for the whole panel: above the routes AND above
                 the drawer Layout mounts, so the two terminals surfaces that can
                 be on screen at once share one player and one channel. */}
-            <SpeechHostProvider>
+            <TerminalSpeechHost>
             {/* The favicon's sibling for when the tab is not being looked at:
                 same activity channel, same session list. Inside the speech
                 host, unlike FaviconUpdater, because the notification previews
@@ -85,7 +85,7 @@ function AppShell() {
                 <Route path="/archive" element={<ArchivePage />} />
               </Routes>
             </Layout>
-            </SpeechHostProvider>
+            </TerminalSpeechHost>
             <AlertHost />
             <PreferencesReadOnlyAlert />
             </TerminalDrawerProvider>

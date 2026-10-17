@@ -148,7 +148,14 @@ vi.mock("../../realtime/useWebSocket", async () => {
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { prepare } from "../prepare";
 import { idleTransportTarget } from "../idleTransportTarget";
-import { useSpeechHost, type SpeechHost, type SpeechRunEvent } from "../useSpeechHost";
+import {
+  useSpeechHost,
+  type AnswerWaitingPort,
+  type SpeechHost,
+  type SpeechRunEvent,
+} from "../useSpeechHost";
+import { voiceForSession } from "../../terminal/sessionVoice";
+import { storeAnswerWaiting } from "./answerWaitingPort";
 import { utteranceUnderCursor } from "../utteranceQueue";
 import { refreshSessions } from "../../terminal/sessionStore";
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
@@ -279,7 +286,9 @@ beforeEach(() => {
 describe("useSpeechHost warming", () => {
   it("warms the first unit of an unarmed cell on arrival", async () => {
     const units = unitsOf(response(3));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
 
@@ -291,7 +300,9 @@ describe("useSpeechHost warming", () => {
   });
 
   it("warming makes no sound, even with the element unlocked", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     // Arming cell-a spends a gesture on the element, so nothing after this is
     // kept silent merely by the browser's autoplay lock.
@@ -307,7 +318,9 @@ describe("useSpeechHost warming", () => {
 
   it("does not synthesize beyond the first unit before playback", async () => {
     const units = unitsOf(response(4));
-    renderHook(() => useSpeechHost());
+    renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(4));
 
@@ -318,7 +331,9 @@ describe("useSpeechHost warming", () => {
   it("reports preparing while the first unit warms, then ready", async () => {
     const units = unitsOf(response(3));
     synth.hold(units[0]);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     expect(result.current.preparingSessionIds.has("cell-a")).toBe(true);
@@ -329,7 +344,9 @@ describe("useSpeechHost warming", () => {
 
   it("a click on a ready cell starts without synthesizing that unit again", async () => {
     const units = unitsOf(response(3));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     expect(result.current.preparingSessionIds.has("cell-a")).toBe(false);
@@ -343,7 +360,9 @@ describe("useSpeechHost warming", () => {
   it("a failed warm still leaves the cell clickable", async () => {
     const units = unitsOf(response(2));
     synth.hold(units[0]);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(2));
     expect(result.current.preparingSessionIds.has("cell-a")).toBe(true);
@@ -361,7 +380,9 @@ describe("useSpeechHost warming", () => {
   it("a newer utterance re-warms and reports preparing in between", async () => {
     const first = unitsOf(response(2))[0];
     const second = unitsOf(response(2, "Newer"))[0];
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(2));
     expect(result.current.preparingSessionIds.has("cell-a")).toBe(false);
@@ -380,7 +401,9 @@ describe("useSpeechHost warming", () => {
     const second = unitsOf(response(2, "Newer"))[0];
     synth.hold(first);
     synth.hold(second);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(2));
     await emitUtterance("cell-a", "u-2", response(2, "Newer"));
@@ -397,7 +420,9 @@ describe("useSpeechHost warming", () => {
 
   it("an armed cell autoplays without a double synthesis", async () => {
     const units = unitsOf(response(3));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await settle(() => {
       result.current.cycleSpeechMode("cell-a"); // armed
@@ -443,7 +468,9 @@ describe("useSpeechHost — the session's project voice", () => {
     setProjectVoice("p", EMMA);
     await seedSession("cell-p", "p");
     const units = unitsOf(response(3));
-    renderHook(() => useSpeechHost());
+    renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-p", "u-1", response(3));
     await emitUtterance("cell-q", "u-2", response(2, "Other"));
@@ -459,7 +486,9 @@ describe("useSpeechHost — the session's project voice", () => {
     setProjectVoice("p", EMMA);
     await seedSession("cell-p", "p");
     const units = unitsOf(response(4));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await settle(() => result.current.cycleSpeechMode("cell-p")); // armed
     await emitUtterance("cell-p", "u-1", response(4));
@@ -488,7 +517,9 @@ describe("useSpeechHost — heard is the end of the last unit", () => {
     const units = unitsOf(markdown);
     // Fixture guard: two units, so a run that plays them both is a natural end.
     expect(prepare(markdown, { language: "en" }).units).toHaveLength(2);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", markdown);
     await settle(() => result.current.onSpeak("cell-a"));
@@ -504,7 +535,9 @@ describe("useSpeechHost — heard is the end of the last unit", () => {
   });
 
   it("a barge-in leaves the interrupted cell ready, not heard", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(2));
     await emitUtterance("cell-b", "u-2", response(2, "Other"));
@@ -519,7 +552,9 @@ describe("useSpeechHost — heard is the end of the last unit", () => {
   });
 
   it("a user stop leaves the cell ready, not heard", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await settle(() => result.current.onSpeak("cell-a"));
@@ -549,7 +584,9 @@ describe("useSpeechHost — heard is the end of the last unit", () => {
 describe("useSpeechHost — a newer utterance abandons a paused run", () => {
   it("a newer utterance takes a paused cell out of the paused state", async () => {
     const newer = unitsOf(response(3, "Newer"))[0];
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
@@ -571,7 +608,9 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
   it("playing a superseded paused cell starts the new utterance at unit 0", async () => {
     const stale = unitsOf(response(3));
     const newer = unitsOf(response(3, "Newer"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
@@ -602,7 +641,9 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
   it("a newer utterance that arrived while speaking still frees the cell once it is paused", async () => {
     const stale = unitsOf(response(3));
     const newer = unitsOf(response(3, "Newer"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
@@ -626,7 +667,9 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
 
   it("supersession does not disarm the armed cell", async () => {
     const newer = unitsOf(response(3, "Newer"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await settle(() => {
       result.current.cycleSpeechMode("cell-a"); // armed
@@ -652,7 +695,9 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
    */
   it("a newer utterance for a speaking cell leaves the run alone", async () => {
     const stale = unitsOf(response(3));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
@@ -666,7 +711,9 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
 
   it("a newer utterance for an idle cell is unchanged", async () => {
     const newer = unitsOf(response(3, "Newer"))[0];
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     expect(result.current.stateFor("cell-a")).toBe("ready");
@@ -689,7 +736,9 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
    * terminals is the ordinary case rather than the exotic one.
    */
   it("a newer utterance for another cell leaves a paused cell paused", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
@@ -720,7 +769,9 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
 describe("useSpeechHost — arrivals queue behind a live run", () => {
   it("a newer utterance queues behind a live run instead of superseding it", async () => {
     const stale = unitsOf(response(3));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
@@ -740,7 +791,9 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   it("an armed cell auto-advances into the queue when the run ends", async () => {
     const stale = unitsOf(response(2));
     const newer = unitsOf(response(2, "Newer"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await settle(() => {
       result.current.cycleSpeechMode("cell-a"); // armed
@@ -767,7 +820,9 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
 
   it("an unarmed cell holds the queued utterance without speaking", async () => {
     const stale = unitsOf(response(2));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     // A click, not an arming: the run is the user's, and nothing about it says
     // the cell may start talking again on its own when it ends.
@@ -790,7 +845,9 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   it("a paused cell is superseded, not held hostage", async () => {
     const stale = unitsOf(response(3));
     const newer = unitsOf(response(3, "Newer"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
@@ -823,7 +880,9 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
    */
   it("pausing a cell releases the answer queued behind it", async () => {
     const newer = unitsOf(response(3, "Newer"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
@@ -855,7 +914,9 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
    */
   it("pausing a cell with two answers queued releases only the oldest", async () => {
     const newer = unitsOf(response(3, "Newer"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3));
     await clickControl(result.current, "cell-a");
@@ -892,7 +953,9 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   it("a full five-deep queue warms two utterances, not seven", async () => {
     const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"];
     const firstUnitOf = (word: string): string => unitsOf(response(3, word))[0];
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3, words[0]));
     await clickControl(result.current, "cell-a");
@@ -926,7 +989,9 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     // Every warm held open, so "in flight" is observable rather than instant.
     for (const word of words) synth.hold(firstUnitOf(word));
 
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     for (let i = 0; i < words.length; i += 1) {
       await emitUtterance(`cell-${i}`, `u-${i}`, response(3, words[i]));
@@ -967,7 +1032,9 @@ describe("useSpeechHost — no budget, no resume point", () => {
   it("speaks no closing marker", async () => {
     const markdown = response(12);
     const units = unitsOf(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", markdown);
     await settle(() => result.current.onSpeak("cell-a"));
@@ -982,7 +1049,9 @@ describe("useSpeechHost — no budget, no resume point", () => {
   it("replays a heard cell from the first unit", async () => {
     const markdown = response(12);
     const units = unitsOf(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", markdown);
     await settle(() => result.current.onSpeak("cell-a"));
@@ -998,7 +1067,9 @@ describe("useSpeechHost — no budget, no resume point", () => {
   it("still resumes a paused run where it was paused", async () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", markdown);
     await clickControl(result.current, "cell-a");
@@ -1033,7 +1104,9 @@ describe("useSpeechHost — no budget, no resume point", () => {
   it("still supersedes a paused run when a newer utterance arrives", async () => {
     const stale = unitsOf(response(4));
     const newer = unitsOf(response(4, "Newer"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(4));
     await clickControl(result.current, "cell-a");
@@ -1074,7 +1147,9 @@ describe("useSpeechHost — the transport walks the whole history", () => {
   it("lands the cursor on the answer a step back, without speaking it", async () => {
     const first = unitsOf(response(2, "First"));
     const second = unitsOf(response(2, "Second"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     // Three answers, none of them played: u-3 is current, u-2 and u-1 are the
     // two steps of history behind it, newest first.
@@ -1144,7 +1219,9 @@ describe("useSpeechHost — the transport walks the whole history", () => {
    */
   it("a paused replay of history keeps its place when a newer answer arrives", async () => {
     const older = unitsOf(response(3, "Older"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3, "Older"));
     await emitUtterance("cell-a", "u-2", response(3, "Newer"));
@@ -1203,7 +1280,9 @@ describe("useSpeechHost — the transport walks the whole history", () => {
    */
   it("a paused replay of history is not stepped forward to release a queued answer", async () => {
     const older = unitsOf(response(3, "Older"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(3, "Older"));
     await emitUtterance("cell-a", "u-2", response(3, "Newer"));
@@ -1254,7 +1333,9 @@ describe("useSpeechHost — the transport walks the whole history", () => {
 describe("useSpeechHost — the snap to the newest answer", () => {
   it("returns the cursor to the newest answer without speaking", async () => {
     const first = unitsOf(response(2, "First"));
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(2, "First"));
     await emitUtterance("cell-a", "u-2", response(2, "Second"));
@@ -1290,7 +1371,9 @@ describe("useSpeechHost — the snap to the newest answer", () => {
   });
 
   it("changes nothing when the cursor is already on the newest answer", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", response(2, "First"));
     await emitUtterance("cell-a", "u-2", response(2, "Second"));
@@ -1318,7 +1401,9 @@ describe("useSpeechHost — the idle transport", () => {
 
   it("idle previous keeps the transport on the same cell", async () => {
     const answerA1 = response(1, "AlphaOne");
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
     const host = (): SpeechHost => result.current;
     await autoplay(host, "cell-a");
     await autoplay(host, "cell-b");
@@ -1350,7 +1435,9 @@ describe("useSpeechHost — the idle transport", () => {
   });
 
   it("an autoplay cell whose answer is heard is not an idle candidate", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
     const host = (): SpeechHost => result.current;
     await autoplay(host, "cell-a");
 
@@ -1372,7 +1459,11 @@ describe("useSpeechHost — the idle transport", () => {
   it("a closed cell is never the idle target", async () => {
     const closed = new Set<string>();
     const { result } = renderHook(() =>
-      useSpeechHost({ isSessionOpen: (sessionId) => !closed.has(sessionId) }),
+      useSpeechHost({
+        voiceFor: voiceForSession,
+        answerWaiting: storeAnswerWaiting,
+        isSessionOpen: (sessionId) => !closed.has(sessionId),
+      }),
     );
     const host = (): SpeechHost => result.current;
 
@@ -1400,7 +1491,11 @@ describe("useSpeechHost — the voice's run events", () => {
   it("reports the voice starting, holding, continuing and falling silent", async () => {
     const events: SpeechRunEvent[] = [];
     const { result } = renderHook(() =>
-      useSpeechHost({ onRunChange: (event) => events.push(event) }),
+      useSpeechHost({
+        voiceFor: voiceForSession,
+        answerWaiting: storeAnswerWaiting,
+        onRunChange: (event) => events.push(event),
+      }),
     );
     const host = (): SpeechHost => result.current;
 
@@ -1431,7 +1526,11 @@ describe("useSpeechHost — the voice's run events", () => {
   it("a barge-in and the queue's next answer move the voice without an end between", async () => {
     const events: SpeechRunEvent[] = [];
     const { result } = renderHook(() =>
-      useSpeechHost({ onRunChange: (event) => events.push(event) }),
+      useSpeechHost({
+        voiceFor: voiceForSession,
+        answerWaiting: storeAnswerWaiting,
+        onRunChange: (event) => events.push(event),
+      }),
     );
     const host = (): SpeechHost => result.current;
     await settle(() => {
@@ -1469,7 +1568,9 @@ describe("useSpeechHost — the speech-stopped alert", () => {
     const markdown = response(1, "Refused");
     const [only] = unitsOf(markdown);
     synth.hold(only);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", markdown);
     await settle(() => result.current.onSpeak("cell-a"));
@@ -1481,5 +1582,115 @@ describe("useSpeechHost — the speech-stopped alert", () => {
     // Still a failed run: nothing was heard, so the pip keeps inviting the retry.
     expect(played).toEqual([]);
     expect(result.current.stateFor("cell-a")).toBe("ready");
+  });
+});
+
+/**
+ * The answer-waiting store reaches the host through a port, and the host must
+ * ask it exactly what it asked the store, in the same order — the order is the
+ * whole of the wave-step bug `onPrevious` documents (the snapshot is read
+ * BEFORE `noteTransport`).
+ *
+ * The fake keeps its own state rather than delegating, so a host that still
+ * read the terminal's store directly would not see what these tests set up.
+ */
+describe("useSpeechHost — the answerWaiting port", () => {
+  type Call = [method: keyof AnswerWaitingPort, sessionId: string];
+
+  function recordingAnswerWaiting(waiting = false): { port: AnswerWaitingPort; calls: Call[] } {
+    const calls: Call[] = [];
+    const held = new Set<string>();
+    const port: AnswerWaitingPort = {
+      get: (sessionId) => {
+        calls.push(["get", sessionId]);
+        return { waiting, pending: waiting };
+      },
+      hold: (sessionId) => {
+        calls.push(["hold", sessionId]);
+        held.add(sessionId);
+      },
+      release: (sessionId) => {
+        calls.push(["release", sessionId]);
+        held.delete(sessionId);
+      },
+      noteTransport: (sessionId) => {
+        calls.push(["noteTransport", sessionId]);
+      },
+      isHeld: (sessionId) => {
+        calls.push(["isHeld", sessionId]);
+        return held.has(sessionId);
+      },
+    };
+    return { port, calls };
+  }
+
+  it("hold, release and transport notes reach the answerWaiting port in order", async () => {
+    const { port, calls } = recordingAnswerWaiting();
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: port }),
+    );
+
+    await emitUtterance("cell-a", "u-1", response(1, "First"));
+    await emitUtterance("cell-a", "u-2", response(1, "Second"));
+    calls.length = 0;
+
+    // Back into history: the snapshot and the hold are read first, then the
+    // transport note, then the hold the step takes.
+    await settle(() => result.current.onPrevious("cell-a"));
+    expect(calls).toEqual([
+      ["get", "cell-a"],
+      ["isHeld", "cell-a"],
+      ["noteTransport", "cell-a"],
+      ["hold", "cell-a"],
+    ]);
+    expect(result.current.queueFor("cell-a").cursor).toBe(1);
+
+    // Forward from history: the hold survives the step towards the newest.
+    calls.length = 0;
+    await settle(() => result.current.onNext("cell-a"));
+    expect(calls).toEqual([
+      ["isHeld", "cell-a"],
+      ["noteTransport", "cell-a"],
+    ]);
+    expect(result.current.queueFor("cell-a").cursor).toBe(0);
+
+    // Forward from the newest answer: the step back onto the wave spends it.
+    calls.length = 0;
+    await settle(() => result.current.onNext("cell-a"));
+    expect(calls).toEqual([
+      ["isHeld", "cell-a"],
+      ["noteTransport", "cell-a"],
+      ["release", "cell-a"],
+    ]);
+  });
+
+  it("the port's snapshot drives the wave step exactly as the store did", async () => {
+    // The body is handed over to the wave: the first press back lands on the
+    // answer under the cursor and takes the hold without moving the cursor.
+    const onTheWave = recordingAnswerWaiting(true);
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: onTheWave.port }),
+    );
+    await emitUtterance("cell-a", "u-1", response(1, "First"));
+    await emitUtterance("cell-a", "u-2", response(1, "Second"));
+
+    await settle(() => result.current.onPrevious("cell-a"));
+    expect(result.current.queueFor("cell-a").cursor).toBe(0);
+    expect(onTheWave.calls.filter(([method]) => method === "hold")).toEqual([["hold", "cell-a"]]);
+
+    // Already held: the next press is an ordinary step into history.
+    await settle(() => result.current.onPrevious("cell-a"));
+    expect(result.current.queueFor("cell-a").cursor).toBe(1);
+
+    // Not on the wave: the very first press steps.
+    const offTheWave = recordingAnswerWaiting(false);
+    const second = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: offTheWave.port }),
+    );
+    await emitUtterance("cell-b", "b-1", response(1, "First"));
+    await emitUtterance("cell-b", "b-2", response(1, "Second"));
+
+    await settle(() => second.result.current.onPrevious("cell-b"));
+    expect(second.result.current.queueFor("cell-b").cursor).toBe(1);
   });
 });

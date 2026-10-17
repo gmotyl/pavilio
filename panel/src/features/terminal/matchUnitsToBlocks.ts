@@ -50,7 +50,7 @@
  *   be distinctive, short enough to sit on one side of the sentinel. The
  *   window subsumes the old opening-prefix comparison — a block packed whole
  *   into a unit starts inside it, and a block under 24 characters compares
- *   whole. `b.includes(u)` stays for the unit `cutAtCeiling` carves out of a
+ *   whole. `b.includes(u)` stays for the unit anytts `packUnits` carves out of a
  *   longer block. Accepted residue: a paragraph that opens AND closes with a
  *   sentinel is not found; two paragraphs that share their first or last 24
  *   characters both mark for the unit that speaks either of them, so the rail

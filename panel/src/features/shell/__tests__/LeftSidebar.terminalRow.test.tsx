@@ -42,7 +42,7 @@ vi.mock("../../speech/useSpeechHost", async () => {
 import LeftSidebar from "../LeftSidebar";
 import { writeLastPath } from "../lastPath";
 import ProjectRedirect from "../../projects/ProjectRedirect";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
 import {
   _applyEventForTests,
   _resetForTests,
@@ -128,9 +128,9 @@ function LocationProbe() {
 function setup(initialPath = "/") {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
-      <SpeechHostProvider>
+      <TerminalSpeechHost>
         <LeftSidebar />
-      </SpeechHostProvider>
+      </TerminalSpeechHost>
       {/* Mount the real ProjectRedirect at the bare project route, the same
           way App.tsx does, so a navigate to the bare route resolves through
           the Last-open-view bookmark exactly as it does in the real app. */}

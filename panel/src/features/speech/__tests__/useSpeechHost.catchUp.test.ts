@@ -120,6 +120,8 @@ vi.mock("../../realtime/channel", async () => {
 import { REALTIME_RECONNECT_FRAME } from "../../realtime/channel";
 import { prepare } from "../prepare";
 import { useSpeechHost } from "../useSpeechHost";
+import { voiceForSession } from "../../terminal/sessionVoice";
+import { storeAnswerWaiting } from "./answerWaitingPort";
 import { utteranceUnderCursor } from "../utteranceQueue";
 
 /** The `src` of every started playback, in order. A restart adds one. */
@@ -241,7 +243,9 @@ beforeEach(() => {
 describe("useSpeechHost — a catch-up disturbs nothing the listener is on", () => {
   it("does not restart the run the user is listening to", async () => {
     const first = unitsOf(FIRST);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await settle(() => {
       result.current.cycleSpeechMode("cell-a"); // armed
@@ -265,7 +269,9 @@ describe("useSpeechHost — a catch-up disturbs nothing the listener is on", () 
   });
 
   it("leaves a cursor parked in the history where the listener put it", async () => {
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await emitUtterance("cell-a", "u-1", FIRST);
     await emitUtterance("cell-a", "u-2", SECOND);
@@ -293,7 +299,9 @@ describe("useSpeechHost — a catch-up disturbs nothing the listener is on", () 
 
   it("a recovered answer reached by the transport is still not spoken", async () => {
     const first = unitsOf(FIRST);
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
 
     await settle(() => {
       result.current.cycleSpeechMode("cell-a"); // armed

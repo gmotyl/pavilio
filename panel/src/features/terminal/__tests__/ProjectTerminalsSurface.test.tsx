@@ -45,16 +45,16 @@ vi.mock("../../projects/useITermShortcuts", () => ({
 import ProjectTerminalsSurface from "../ProjectTerminalsSurface";
 // The surface reads the panel's one speech host from context, so every mount
 // needs the provider above it — see SpeechHostProvider.
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../TerminalSpeechHost";
 import { useITermShortcuts } from "../../projects/useITermShortcuts";
 
 describe("ProjectTerminalsSurface", () => {
   it("passes the project's sessions to TerminalsSurface", () => {
     render(
       <MemoryRouter>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <ProjectTerminalsSurface projectName="vector" active />
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
     expect(screen.getByTestId("surface")).toHaveTextContent("vector");
@@ -66,9 +66,9 @@ describe("ProjectTerminalsSurface", () => {
   it("wires useTerminalSessions's tiling and callbacks into TerminalsSurface", () => {
     render(
       <MemoryRouter>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <ProjectTerminalsSurface projectName="vector" active />
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
     const props = surfaceProps.mock.calls.at(-1)?.[0];
@@ -80,9 +80,9 @@ describe("ProjectTerminalsSurface", () => {
   it("enables iterm shortcuts only when active", () => {
     render(
       <MemoryRouter>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <ProjectTerminalsSurface projectName="vector" active={false} />
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
     const call = (useITermShortcuts as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];

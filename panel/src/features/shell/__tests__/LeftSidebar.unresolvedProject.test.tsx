@@ -28,7 +28,7 @@ vi.mock("../../speech/useSpeechHost", async () => {
 });
 
 import LeftSidebar from "../LeftSidebar";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
 
 vi.mock("../../projects/useProjects", () => ({
   // `undefined` is what a route param that never resolved looks like once it
@@ -90,9 +90,9 @@ describe("LeftSidebar with an undefined project name", () => {
   function mount(): void {
     render(
       <MemoryRouter initialEntries={["/"]}>
-        <SpeechHostProvider>
+        <TerminalSpeechHost>
           <LeftSidebar />
-        </SpeechHostProvider>
+        </TerminalSpeechHost>
       </MemoryRouter>,
     );
   }

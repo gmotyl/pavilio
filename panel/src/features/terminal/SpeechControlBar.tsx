@@ -18,7 +18,7 @@ import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { stepsOffTheWave, stepsOntoTheWave } from "../speech/waveStep";
 import type { CellSpeechState, GridSpeech, SpeechMode, SpeechUnit } from "../speech/types";
-import { voiceForSession } from "../speech/voices";
+import { voiceForSession } from "./sessionVoice";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 

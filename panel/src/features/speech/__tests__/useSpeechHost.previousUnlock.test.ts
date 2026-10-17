@@ -112,6 +112,8 @@ import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
 import { prepare } from "../prepare";
 import { useSpeechHost } from "../useSpeechHost";
+import { voiceForSession } from "../../terminal/sessionVoice";
+import { storeAnswerWaiting } from "./answerWaitingPort";
 
 /**
  * Speech modes name LIVE SESSIONS, so they are `portable: false` and live in
@@ -195,7 +197,9 @@ describe("useSpeechHost — what a silent step back still unlocks", () => {
     // reload can produce, and the one this whole chain lives in.
     localStorage.setItem(MODES_KEY, '{"cell-a":"autoplay"}');
 
-    const { result } = renderHook(() => useSpeechHost());
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
     expect(result.current.speechModeOf("cell-a")).toBe("autoplay");
 
     // Two answers land on the armed-but-locked cell. Both are ABSORBED, not

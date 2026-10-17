@@ -66,16 +66,16 @@ vi.mock("../../speech/useSpeechHost", async () => {
 
 import LeftSidebar from "../LeftSidebar";
 import SidebarHamburger from "../SidebarHamburger";
-import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
+import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
 
 function setup(starred: string[] = []) {
   favorites.starred = new Set(starred);
   return render(
     <MemoryRouter initialEntries={["/project/vector/memo"]}>
       <SidebarHamburger expanded onToggle={() => {}} />
-      <SpeechHostProvider>
+      <TerminalSpeechHost>
         <LeftSidebar />
-      </SpeechHostProvider>
+      </TerminalSpeechHost>
     </MemoryRouter>,
   );
 }

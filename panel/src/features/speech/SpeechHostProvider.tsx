@@ -27,14 +27,6 @@ import {
   type ReactNode,
 } from "react";
 import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
-import { dismissAttentionOnArrival } from "../terminal/attentionArrival";
-import { getSessions } from "../terminal/sessionStore";
-import { useTerminalDrawerVisible } from "../terminal/useTerminalDrawer";
-import {
-  readStandaloneTerminalFocus,
-  subscribeStandaloneTerminalFocus,
-} from "../terminal/standaloneTerminalFocus";
-import { readTerminalFocus, TERMINAL_FOCUS_EVENT } from "../terminal/useTerminalSessions";
 import {
   alertOnAnswer,
   focusedVisibleSessionIdFor,
@@ -42,15 +34,44 @@ import {
   type AnswerAlertDeps,
 } from "./answerAlert";
 import { createSpeakingAlert } from "./speakingAlert";
-import { useMediaSessionTransport } from "./useMediaSessionTransport";
-import { useSpeechHost } from "./useSpeechHost";
+import { useMediaSessionTransport, type TransportArrival } from "./useMediaSessionTransport";
+import { useSpeechHost, type AnswerWaitingPort } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
 import type { GridSpeech, Utterance } from "./types";
 
 const SpeechHostContext = createContext<GridSpeech | null>(null);
 
+/**
+ * Where the focused cell is read from. The provider combines it with the route
+ * and the drawer (`focusedVisibleSessionIdFor`) into the cell on screen.
+ */
+export interface FocusedCellPort {
+  /** The project's focused cell. */
+  read: (project: string) => string | null;
+  /** The standalone `/terminals` page's focused cell. */
+  readStandalone: () => string | null;
+  /** Calls `onChange` whenever either focus may have changed; returns the unsubscribe. */
+  subscribe: (onChange: () => void) => () => void;
+}
+
+/**
+ * Everything the provider knows about the terminals comes in here: the speech
+ * feature does not import `features/terminal`. `TerminalSpeechHost` is the one
+ * component that reads the terminal's stores and builds these.
+ */
 interface Props {
   children: ReactNode;
+  /** The session's project and names at the moment of asking, or undefined. */
+  sessionOf: AnswerAlertDeps["sessionOf"];
+  /** Whether the session is still open, for the idle transport. */
+  isSessionOpen: (sessionId: string) => boolean;
+  focusedCell: FocusedCellPort;
+  /** Whether the terminal drawer is on screen. */
+  drawerVisible: boolean;
+  /** What a person working the transport does to the cell: clear its attention LED. */
+  onArrival: TransportArrival;
+  answerWaiting: AnswerWaitingPort;
+  voiceFor: (sessionId: string) => string;
 }
 
 /** What the answer alert reads off the router, kept current by {@link RouterBridge}. */
@@ -83,13 +104,28 @@ function RouterBridge({
 }
 
 /** Mount once, above every terminals surface. See `App.tsx`. */
-export function SpeechHostProvider({ children }: Props) {
+export function SpeechHostProvider({
+  children,
+  sessionOf,
+  isSessionOpen,
+  focusedCell,
+  drawerVisible,
+  onArrival,
+  answerWaiting,
+  voiceFor,
+}: Props) {
   // The answer alert (see `answerAlert.ts`): raised for a live arrival, read at
   // the moment it lands — what is on screen then, the session list then. The
   // speaking alert below shares its plumbing.
   const inRouter = useInRouterContext();
   const routerView = useRef<RouterView>({ navigate: null, pathname: "" });
-  const drawerVisible = useTerminalDrawerVisible();
+  // The readers are called from callbacks made once per provider, so they are
+  // read through a ref rather than captured; mirrored in an effect, like the
+  // router view, so a render React throws away never runs the mirror ahead.
+  const portsRef = useRef({ sessionOf, focusedCell });
+  useEffect(() => {
+    portsRef.current = { sessionOf, focusedCell };
+  }, [sessionOf, focusedCell]);
   const drawerVisibleRef = useRef(drawerVisible);
   useEffect(() => {
     drawerVisibleRef.current = drawerVisible;
@@ -97,7 +133,7 @@ export function SpeechHostProvider({ children }: Props) {
   // What both speech alerts read to name a cell and to arrive at it: the
   // session list at the moment of asking, and the router's navigate.
   const [cellPlumbing] = useState<Pick<AnswerAlertDeps, "sessionOf" | "navigate">>(() => ({
-    sessionOf: (sessionId) => getSessions().find((session) => session.id === sessionId),
+    sessionOf: (sessionId) => portsRef.current.sessionOf(sessionId),
     navigate: (path) => routerView.current.navigate?.(path),
   }));
   /** The focused cell on screen right now: the project's, the drawer's, or the standalone page's. */
@@ -106,8 +142,8 @@ export function SpeechHostProvider({ children }: Props) {
       focusedVisibleSessionIdFor(
         routerView.current.pathname,
         drawerVisibleRef.current,
-        readTerminalFocus,
-        readStandaloneTerminalFocus,
+        portsRef.current.focusedCell.read,
+        portsRef.current.focusedCell.readStandalone,
       ),
     [],
   );
@@ -140,30 +176,22 @@ export function SpeechHostProvider({ children }: Props) {
     // After drawerVisibleRef's own effect has run (effects run in order).
     recheckSpeakingAlert();
   }, [drawerVisible, recheckSpeakingAlert]);
+  const subscribeFocus = focusedCell.subscribe;
   useEffect(() => {
-    const unsubscribe = subscribeStandaloneTerminalFocus(recheckSpeakingAlert);
-    window.addEventListener(TERMINAL_FOCUS_EVENT, recheckSpeakingAlert);
+    const unsubscribe = subscribeFocus(recheckSpeakingAlert);
     document.addEventListener("visibilitychange", recheckSpeakingAlert);
     return () => {
       unsubscribe();
-      window.removeEventListener(TERMINAL_FOCUS_EVENT, recheckSpeakingAlert);
       document.removeEventListener("visibilitychange", recheckSpeakingAlert);
     };
-  }, [recheckSpeakingAlert]);
-
-  // The channel never forgets a session, so the idle transport learns a cell
-  // has closed from the session list: a session it no longer lists, while it
-  // lists any, is gone. An empty list is read as not loaded yet and rules
-  // nothing out — a panel that has not fetched its sessions must not go mute.
-  const isSessionOpen = useCallback((sessionId: string): boolean => {
-    const sessions = getSessions();
-    return sessions.length === 0 || sessions.some((session) => session.id === sessionId);
-  }, []);
+  }, [subscribeFocus, recheckSpeakingAlert]);
 
   const speech = useSpeechHost({
     onAnswer,
     isSessionOpen,
     onRunChange: speakingAlert.onRunChange,
+    voiceFor,
+    answerWaiting,
   });
 
   // Here for the same reason the host is: `navigator.mediaSession` is one state
@@ -175,17 +203,17 @@ export function SpeechHostProvider({ children }: Props) {
   // autoplay — works the transport: it clears that cell's attention LED. The
   // hooks are handed it rather than importing it, because the rule reads the
   // terminal's activity channel and writes to the terminal's socket, and
-  // `features/speech` does not depend on `features/terminal` in either
-  // direction that would survive (`terminalInstances.ts` already imports
-  // `speechTransportKeyFor` from `./useSpeechKeys`). This provider is the one
-  // place that legitimately sees both features at once, so it is where the two
-  // are joined. See `features/terminal/attentionArrival`.
-  useMediaSessionTransport(speech, dismissAttentionOnArrival);
+  // `features/speech` does not depend on `features/terminal`
+  // (`terminalInstances.ts` already imports `speechTransportKeyFor` from
+  // `./useSpeechKeys`). `TerminalSpeechHost` is the one place that sees both
+  // features at once, so it hands the rule in as `onArrival`. See
+  // `features/terminal/attentionArrival`.
+  useMediaSessionTransport(speech, onArrival);
 
   // And here for the same reason again: one `window` keydown listener, not one
   // per surface, or a single Ctrl+Shift+Space would toggle the transport twice
   // — pause, then resume — and read as a key that does nothing at all.
-  useSpeechKeys(speech, dismissAttentionOnArrival);
+  useSpeechKeys(speech, onArrival);
 
   return (
     <SpeechHostContext.Provider value={speech}>
