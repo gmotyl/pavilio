@@ -6,7 +6,7 @@ import { clearRetryTicket } from "./answerRetry";
 import { noteAgentStarting } from "./answerWaiting";
 import { noteLauncherUsed, useLauncherUsed } from "./launcherUse";
 import { submitToPty } from "./ptySubmit";
-import { getSessions } from "./sessionStore";
+import { getSessions, refreshSessions } from "./sessionStore";
 
 export interface LauncherPillsProps {
   /** Only for test ids — the pills act on the `send` they are handed. */
@@ -36,9 +36,22 @@ const SESSION_START = "pavilio-session-start";
  * invocation: the skill then asks which project rather than being handed the
  * word `undefined`, and there is no trailing space to type a stray argument
  * separator into the prompt.
+ *
+ * A cell missing from the list is refetched once before settling for the bare
+ * command. The store polls every 8s, so a terminal created moments ago — an
+ * agent that boots fast enough for `start` to be pressed inside that window —
+ * is a real miss, not a projectless session. A cell that IS in the list with a
+ * blank project is not refetched: the list has answered, and the answer is
+ * "none".
  */
-function sessionStartCommand(sessionId: string): string {
-  const project = getSessions().find((session) => session.id === sessionId)?.project?.trim();
+async function sessionStartCommand(sessionId: string): Promise<string> {
+  const find = () => getSessions().find((session) => session.id === sessionId);
+  let session = find();
+  if (!session) {
+    await refreshSessions();
+    session = find();
+  }
+  const project = session?.project?.trim();
   return project ? `${SESSION_START} ${project}` : SESSION_START;
 }
 
@@ -216,7 +229,11 @@ export function LauncherPills({ sessionId, send }: LauncherPillsProps) {
           // place this row has no live answer to compose it from.
           data-testid={`speech-bar-start-${sessionId}`}
           className="speech-bar-launch"
-          onClick={() => runCommand(sessionId, send, sessionStartCommand(sessionId))}
+          onClick={() =>
+            void sessionStartCommand(sessionId).then((command) =>
+              runCommand(sessionId, send, command),
+            )
+          }
         >
           start
         </button>

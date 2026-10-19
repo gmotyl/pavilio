@@ -128,6 +128,12 @@ function pillLabels(): string[] {
  * start the poll, and `test-setup.ts` clears the store between tests.
  */
 async function seedSessions(sessions: SessionMeta[]): Promise<void> {
+  seedServer(sessions);
+  await refreshSessions();
+}
+
+/** What the server answers from now on, without loading it into the store. */
+function seedServer(sessions: SessionMeta[]): void {
   vi.stubGlobal(
     "fetch",
     vi.fn(
@@ -139,7 +145,6 @@ async function seedSessions(sessions: SessionMeta[]): Promise<void> {
         }) as unknown as Promise<Response>,
     ),
   );
-  await refreshSessions();
 }
 
 function session(id: string, project: string): SessionMeta {
@@ -384,11 +389,30 @@ describe("LauncherPills", () => {
       await expectRan(send, "pavilio-session-start my-blog");
     });
 
+    it("refetches the list when the cell is newer than the last load", async () => {
+      const user = userEvent.setup();
+      const send = vi.fn((_data: string) => true);
+      // The store loaded before this cell existed — the real case for a
+      // terminal created a moment ago, which the 8s poll has not seen yet.
+      await seedSessions([session("cell-b", "pavilio")]);
+      renderBar(makeSpeech({ state: "empty" }), send);
+
+      await user.click(screen.getByRole("button", { name: "claude" }));
+      resetSends(send);
+
+      // The server already knows the cell; only the store is behind.
+      seedServer([session("cell-b", "pavilio"), session("cell-a", "my-blog")]);
+      await user.click(screen.getByRole("button", { name: "start" }));
+
+      await expectRan(send, "pavilio-session-start my-blog");
+    });
+
     it("sends the bare command when the cell's project is unknown", async () => {
       const user = userEvent.setup();
       const send = vi.fn((_data: string) => true);
-      // Nothing seeded: the store has not loaded, which is the real case on a
-      // fresh tab, and the session is simply not in the list.
+      // Nothing loaded: the store has not loaded, which is the real case on a
+      // fresh tab, and the refetch a miss earns finds no such session either.
+      seedServer([]);
       renderBar(makeSpeech({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
