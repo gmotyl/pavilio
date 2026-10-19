@@ -4,6 +4,7 @@ import {
   type SessionMeta,
   type CreateSessionOpts,
 } from "./useTerminalSessions";
+import { refreshSessions } from "./sessionStore";
 
 /**
  * Create a terminal session in `project` via the API, persisting focus so the
@@ -48,6 +49,13 @@ export async function createTerminalSession(
   } catch (err) {
     console.warn("[terminal] session created, but its focus could not be remembered:", err);
   }
+
+  // The server publishes no frame for a created session, so without this the
+  // tab's store learns of it only on its next 8s poll — and a reader in that
+  // window (the `start` pill composing `pavilio-session-start <project>`)
+  // finds no such session. Awaited so the caller hands on a session the store
+  // already holds; `load` swallows its own failures, so this cannot throw.
+  await refreshSessions();
 
   return created;
 }

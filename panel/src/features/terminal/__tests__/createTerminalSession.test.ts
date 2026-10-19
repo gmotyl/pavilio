@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTerminalSession } from "../createTerminalSession";
+import { getSessions } from "../sessionStore";
 import { readTerminalFocus, writeTerminalFocus } from "../useTerminalSessions";
 
 /**
@@ -30,6 +31,24 @@ describe("createTerminalSession", () => {
     const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
     expect(body.project).toBe("vector");
     expect(typeof body.name).toBe("string");
+  });
+
+  it("loads the created session into the tab's store before returning", async () => {
+    // Without this the store learns of a new terminal only on its next 8s poll,
+    // and anything reading it in that window — the `start` pill composing
+    // `pavilio-session-start <project>` — finds no such session.
+    const created = { id: "s9", project: "vector", name: "vector-2" };
+    global.fetch = vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => (init?.method === "POST" ? created : [created]),
+      }),
+    ) as unknown as typeof fetch;
+
+    await createTerminalSession("vector", []);
+
+    expect(getSessions().find((s) => s.id === "s9")?.project).toBe("vector");
   });
 
   it("returns null on non-ok response without persisting focus", async () => {
