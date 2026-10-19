@@ -99,6 +99,7 @@ describe("the anytts seam", () => {
         edge: {
           voices: { default: DEFAULT_SPEECH_VOICE },
           relayUrl: "/api/tts",
+          firstByteMs: 25_000,
           stallMs: 15_000,
           mode: "auto",
         },
@@ -119,6 +120,11 @@ describe("the anytts seam", () => {
     expect(lib.createTts).toHaveBeenCalledTimes(1);
     const first = lib.createTts.mock.calls[0]?.[0] as TtsConfig;
     expect(first.engines.edge).toMatchObject({ relayUrl: "/api/tts", mode: "relay" });
+    // The relay answers only once the server has synthesized the WHOLE clip,
+    // so the browser's first-byte wait covers the server's own first-byte wait
+    // (anytts default 8s) plus the synthesis. At anytts' 8s default every slow
+    // Edge turn failed in the browser while the server went on to succeed.
+    expect(first.engines.edge?.firstByteMs).toBeGreaterThan(8_000 * 2);
 
     // Same route: the instance (and its cache) is kept.
     await synth.synthesizeSpeech("again");
