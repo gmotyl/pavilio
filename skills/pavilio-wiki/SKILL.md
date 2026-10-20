@@ -44,17 +44,21 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 2. Walk `CONVENTIONS.md § Reading ladder`. Enter `wiki/repos/<repo>/` only for a code question.
 3. Answer with D14 citations to the pages used. If the wiki does not answer, say so — never fill
    the gap from general knowledge presented as the wiki's.
-4. Write (see `PAGES.md` for shapes):
+4. `scripts/wiki lock take <p> --session <id>` (session id as in § Ingest). `held: false` → give
+   the answer, say the trace was not written because an ingest is running, stop.
+5. Write (see `PAGES.md` for shapes):
    - always `wiki/questions/<YYYY-MM-DD>-<slug>.md`;
    - a `wiki/notes/` page only when the answer cited ≥2 wiki pages or the user asks to save it —
      enrich the existing note on that topic in place rather than adding a second one;
    - each gap, and each knowledge page found wrong or stale, as an item under `## Gaps` in
      `wiki/open-questions.md`;
    - one query entry in `wiki/log.md`.
-5. Code question the repo pages do not answer, with the clone present in `wiki/raw/repos/` →
-   take the lock, run `repo_writer` in question mode (a new repo note), release.
-6. Never edit `entities/`, `concepts/`, `repos/`, `sources/` or `overview.md` from a query.
-7. `scripts/wiki index <p>`, then commit `projects/<p>/wiki` as `<p>: wiki query <slug>`.
+6. Code question the repo pages do not answer, with the clone present in `wiki/raw/repos/` →
+   run `repo_writer` in question mode (a new repo note).
+7. Never edit `entities/`, `concepts/`, `repos/` pages other than the new note, `sources/` or
+   `overview.md` from a query.
+8. `scripts/wiki index <p>`. Exit 1 → no commit; report `error` and `page`, release, stop.
+9. Commit `projects/<p>/wiki` as `<p>: wiki query <slug>`, then `lock release`.
 
 ## 4. Ingest
 
@@ -70,40 +74,49 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 | other URL | `scripts/wiki fetch-article <p> <url>` → `wiki/raw/article-<slug>.md` |
 | quoted text | verbatim to `wiki/raw/snippet-<YYYY-MM-DD>-<slug>.md` |
 
-A raw snapshot is then a record: `pending <p> --only wiki/raw/<file>` gives its hash.
-A `fetch-article` receipt with `warning` → delete that raw file, write no source page, report the
-warning. No `wiki/` yet → this ingest creates it; mention `/pavilio-wiki-migrate <p>` for the
-backfill. More than 10 pending on a user-invoked catch-up → show the count and confirm first.
+An in-project path that is not a record (`tasks.md`, a delta spec under `specs/`, an active
+change's files, today's progress — `CONVENTIONS.md § Identity and the ledger`) is refused with
+the reason before any `--only`. A raw snapshot is then a record: `pending <p> --only wiki/raw/<file>`
+gives its hash. A `fetch-article` receipt with `warning` → delete that raw file, write no source
+page, report the warning. No `wiki/` yet → this ingest creates it; mention
+`/pavilio-wiki-migrate <p>` for the backfill. More than 10 pending on a user-invoked catch-up →
+show the count and confirm first.
 
 ### Sequence
 
 Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMINAL_ID`, else
 `<hostname>-<epoch>`). Read `scripts/wiki config` once for `writerModel`.
 
-1. **Lock** — `scripts/wiki lock take <p> --session <id>`. `held: false` → say another session is
-   ingesting and stop without writing. `takenOver: true` → note it for the log entry.
-2. **Gitignore** — ensure `wiki/.gitignore` lists `.ingest.lock` and `raw/repos/`.
-3. **Pending** — the routed records with their hashes. Nothing pending and no repo input → release,
-   report "nothing to ingest", stop.
-4. **Source writers** — one `source_writer` per record (target `wiki/sources/<kind>-<stem>.md`
+1. **Gitignore** — ensure `wiki/.gitignore` lists `.ingest.lock` and `raw/repos/`.
+2. **Lock** — `scripts/wiki lock take <p> --session <id>`. `held: false` → say another session is
+   ingesting and stop without writing. `takenOver: true` → note it for the log entry. Nothing
+   is written to `raw/` before this step.
+3. **Route** — apply § Route the inputs (raw snapshots, `fetch-article`, `clone-repo`).
+4. **Pending** — the routed records with their hashes. A catch-up (no inputs) also lists the
+   `wiki/raw/*.md` files and adds each one `pending <p> --only wiki/raw/<file>` still reports, so a
+   snapshot left unledgered by an interrupted run is retried. Nothing pending and no repo input →
+   release, report "nothing to ingest", stop.
+5. **Source writers** — one `source_writer` per record (target `wiki/sources/<kind>-<stem>.md`
    per `CONVENTIONS.md § Identity and the ledger`), in parallel, ≤10 at a time; one `repo_writer`
    (architecture mode) per cloned repo, skipped when `action: "refreshed"` left `commit` unchanged.
-5. **Mentions** — `scripts/wiki mentions <p> --touched <all namespaced slugs from the receipts>`.
-6. **Page writers** — one `page_writer` per `qualifying` slug, given the slug, its existing page
-   (if any) and only this run's source pages that name it. Touched slugs that do not qualify are
-   reported as "waiting at 1 mention".
-7. **Overview** — one `overview_writer` when any knowledge page was created or updated.
-8. **Index** — `scripts/wiki index <p>`. Exit 1 → stop here: no ledger, no commit; report
-   `error` and `page`, release the lock.
-9. **Record** — `scripts/wiki record <p> <path> <hash>` for each record whose source page landed
-   (repo pages carry `commit` instead).
-10. **Log** — append the ingest entry (`PAGES.md § log.md`); append every `generic:` finding under
+6. **Mentions** — `scripts/wiki mentions <p> --touched <slug>,<slug>,…` — every namespaced slug
+   from the receipts, comma-separated.
+7. **Page writers** — one `page_writer` per `qualifying` slug, given the slug, its existing page
+   (if any), only this run's source pages that name it, and the slug's `CONTEXT.md` glossary line
+   when it has one. Touched slugs that do not qualify are reported as "waiting at 1 mention".
+8. **Index** — `scripts/wiki index <p>`, so the overview sees this run's pages. Exit 1 → stop
+   here: no ledger, no commit; report `error` and `page`, release the lock.
+9. **Overview** — one `overview_writer` when any knowledge page was created or updated, then
+   `scripts/wiki index <p>` again (same exit-1 rule).
+10. **Record** — `scripts/wiki record <p> <path> <hash>` for each record whose source page landed
+    (repo pages carry `commit` instead).
+11. **Log** — append the ingest entry (`PAGES.md § log.md`); append every `generic:` finding under
     `## Knowledge candidates` in `wiki/open-questions.md`, and every `contradictions` item under
     `## Gaps`.
-11. **Commit** — `git add projects/<p>/wiki` and commit `<p>: wiki ingest <n> records` right away;
+12. **Commit** — `git add projects/<p>/wiki` and commit `<p>: wiki ingest <n> records` right away;
     nothing else from the working tree.
-12. **Release** — `scripts/wiki lock release <p> --session <id>`, also on every early stop after
-    step 1.
+13. **Release** — `scripts/wiki lock release <p> --session <id>`, also on every early stop after
+    step 2.
 
 Report: source pages written, knowledge pages created/updated, slugs waiting, failures, warnings.
 A checkpoint caller (note, session-start, archive-plan) gets the same report in one line.
@@ -118,7 +131,7 @@ tier. Each writer returns exactly one JSON receipt.
 
 - Receipt missing or not JSON → re-run that writer once → still not JSON: log `failed: <path>`,
   no ledger entry for that record, continue with the rest.
-- `index` exit 1 → stop before record and commit (step 8).
+- `index` exit 1 → stop before record and commit (steps 8–9).
 - Stale lock taken over → `lock: taken over from <session>` in the log entry.
 - Fetch warning → no source page, reported.
 - Any `scripts/wiki` exit 1 → report its `error`, release the lock, stop.

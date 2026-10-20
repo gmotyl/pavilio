@@ -39,8 +39,9 @@ Never edit one by hand; regenerate it.
   (clones are refreshed in place by `clone-repo`).
 - **Source page** — `wiki/sources/<kind>-<stem>.md`, one per record or raw file. `<kind>` is
   `note`, `memo`, `progress`, `adr`, `proposal`, `design`, `file`, `article`, `snippet` or
-  `context`; `<stem>` is the file stem (the change id for `proposal`/`design`). On a stem
-  collision append the parent directory name. A changed record rewrites its existing source page.
+  `context`; `<stem>` is the file stem with a leading `<kind>-` stripped (the change id for
+  `proposal`/`design`), so raw `article-edge-tts.md` → `sources/article-edge-tts.md`, never
+  `article-article-…`. On a stem collision append the parent directory name. A changed record rewrites its existing source page.
 - **Slug** — lowercase kebab-case ASCII; people `first-last`. Frontmatter lists carry bare names
   (`concepts: [utterance]`); receipts, `mentions --touched` and page writers use the namespaced
   form `entities/<name>` / `concepts/<name>`, whose page is `wiki/<slug>.md`. Reuse an existing
@@ -90,6 +91,10 @@ One syntax (D14): `[[<path from project root>]]`, no `.md`, optional `<project>:
 Never relative paths (`../`), never markdown links to workspace files, never a bare slug
 (`[[utterance]]`). Every claim on a knowledge page cites the source page it came from.
 
+Frontmatter paths: `sources:` and `cited:` entries are project-root paths with `.md`
+(`wiki/sources/<kind>-<stem>.md`) so lint resolves them; `record:` and `raw:` are project-relative
+paths with `.md`. A YAML list item that starts with `[[` must be quoted (`- "[[wiki/…]]"`).
+
 ## No code identifiers outside `repos/`
 
 `entities/` and `concepts/` describe the domain: what a thing is, why it is so, what broke and why,
@@ -100,8 +105,8 @@ detail lives only under `wiki/repos/<repo>/`. `scripts/wiki lint` flags violatio
 
 ## Reading ladder
 
-The fixed read order for any skill or query that needs project knowledge. It is the budget, not a
-minimum — stop as soon as the question is answered.
+The reading ladder is the fixed read order for any skill or query that needs project knowledge.
+It is the budget, not a minimum — stop as soon as the question is answered.
 
 1. `CONTEXT.md` — the glossary, always, whole.
 2. `wiki/index.md` — sections only.

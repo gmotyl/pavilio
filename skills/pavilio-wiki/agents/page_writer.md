@@ -9,8 +9,9 @@ tool's `model`; elsewhere the harness's small-model tier).
 
 - `project`
 - `slug` — namespaced: `entities/<name>` or `concepts/<name>`; the page is `wiki/<slug>.md`
-- `sources` — wiki-relative paths of this run's new or refreshed source pages naming the slug
-- `glossary` — the slug's `CONTEXT.md` line, if it has one (passed in, not read)
+- `sources` — project-root paths (`wiki/sources/<kind>-<stem>.md`) of this run's new or refreshed
+  source pages naming the slug
+- `glossary` — the slug's `CONTEXT.md` line, if it has one (passed in by the orchestrator, not read)
 
 ## Read limits
 
@@ -26,7 +27,8 @@ One file, `wiki/<slug>.md`, shaped per `skills/pavilio-wiki/PAGES.md § Entity p
 `§ Concept page`.
 
 - Existing page: keep `created`, every human-added `aliases` entry and every still-true claim;
-  merge the new knowledge in; append the new paths to `sources:`; bump `updated`.
+  merge the new knowledge in; append the new paths to `sources:` in project-root form
+  (`wiki/sources/<kind>-<stem>.md`); bump `updated`. Quote any YAML list item that starts with `[[`.
 - New page: synthesise from `sources`; `created` = `updated` = today.
 - Cite every claim with the source page it came from: `([[wiki/sources/<kind>-<stem>]])`.
 - Entities: set `kind`. A `repository` entity links `Code: [[wiki/repos/<name>/index]]`.

@@ -15,8 +15,8 @@ updated: 2026-10-20           # bumped on every rewrite
 ```
 
 A page without `type` stops `scripts/wiki index` and the ingest with it. Path fields hold real
-paths with `.md`: `record` and `raw` relative to the project, `sources` and `cited` relative to
-`wiki/`. Links in bodies use the D14 form without `.md`.
+paths with `.md`: `record` and `raw` relative to the project, `sources` and `cited` as project-root
+paths (`wiki/sources/….md`). Quote any YAML list item that starts with `[[`. Links in bodies use the D14 form without `.md`.
 
 ## Source page — `wiki/sources/<kind>-<stem>.md`
 
@@ -42,7 +42,7 @@ type: entity
 kind: person | repository | service | organization
 description: Who or what it is, in one line
 aliases: [Jane, J. Doe]                          # human-added aliases are kept forever
-sources: [sources/note-2026-10-01-kickoff.md, sources/progress-2026-10-19-tts-relay-node20.md]
+sources: [wiki/sources/note-2026-10-01-kickoff.md, wiki/sources/progress-2026-10-19-tts-relay-node20.md]
 ```
 
 Body: `# <name>`, what it is, its role in this project, relationships (`[[wiki/entities/…]]`),
@@ -55,7 +55,7 @@ node that links down: `Code: [[wiki/repos/<repo>/index]]`.
 type: concept
 description: What the concept is and why it matters, in one line
 aliases: []
-sources: [sources/….md, sources/….md]
+sources: [wiki/sources/….md, wiki/sources/….md]
 ```
 
 Body: `# <term>`, definition (agreeing with the `CONTEXT.md` line when one exists), why it is so,
@@ -91,7 +91,7 @@ Repo pages count as sources for the ≥2 threshold.
 ```yaml
 type: question
 description: The question, in one line
-cited: [concepts/utterance.md, sources/progress-2026-10-19-tts-relay-node20.md]
+cited: [wiki/concepts/utterance.md, wiki/sources/progress-2026-10-19-tts-relay-node20.md]
 ```
 
 Body: `# <question>`, the answer as given, `## Cited` with the D14 links, `## Gaps` if the wiki
