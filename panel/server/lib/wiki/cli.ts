@@ -18,7 +18,7 @@ import { resolveProject, type FetchLike } from "./project";
  * Every command prints exactly one JSON object on stdout and exits 0 (ok), 1 (error, `{error}`)
  * or 2 (ask the user, `{ask: true, reason}`). Diagnostics and usage go to stderr only.
  *
- * Paths in receipts: `pending` and `record` paths are project-relative; `index` `written`,
+ * Paths in receipts: `pending` and `record` paths are project-relative; `index` `written`/`removed`,
  * `fetch-article` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
  * wiki-relative (relative to `projects/<p>/wiki/`), except `lint`'s own `wiki/…` page keys.
  *
@@ -34,7 +34,7 @@ const USAGE = `usage: scripts/wiki <command> [args]
   record <p> <path> <hash>                  {ok: true}
   lock take|release <p> --session <id>      {held, takenOver} (release adds released)
   mentions <p> [--touched a,b]              {slugs, qualifying}; slugs are entities/x, concepts/x
-  index <p>                                 {written} | exit 1 {error, page}
+  index <p>                                 {written, removed} | exit 1 {error, page}
   lint <p>                                  {broken, orphans, untyped, stale, codeIdentifiers}
   config                                    {sessionStartIngest, writerModel}
   fetch-article <p> <url>                   {raw, title, warning?}
@@ -179,7 +179,7 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
     case "index": {
       const [p] = only(parsed, 1, "index <p>");
       const result = buildIndex(join(projectDir(workspaceRoot, p), "wiki"));
-      if (result.ok) return ok({ written: result.written });
+      if (result.ok) return ok({ written: result.written, removed: result.removed });
       return { code: 1, body: { error: result.error, page: result.page } };
     }
     case "lint": {

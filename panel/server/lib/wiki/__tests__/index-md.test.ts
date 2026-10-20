@@ -63,6 +63,7 @@ describe("buildIndex", () => {
         "repos/pavilio/index.md",
         "sources/index.md",
       ],
+      removed: [],
     });
     const root = read("index.md");
     const items = root.split("\n").filter((l) => l.startsWith("- "));
@@ -153,5 +154,24 @@ describe("buildIndex", () => {
     });
     expect(existsSync(join(wikiDir, "index.md"))).toBe(false);
     expect(existsSync(join(wikiDir, "concepts/index.md"))).toBe(false);
+  });
+
+  it("removes generated indexes whose section or repo has no pages left", () => {
+    seed();
+    write("notes/idea.md", page({ type: "note", description: "An idea" }));
+    buildIndex(wikiDir);
+    rmSync(join(wikiDir, "notes/idea.md"));
+    rmSync(join(wikiDir, "repos/pavilio"), { recursive: true, force: true });
+    write("repos/pavilio/index.md", read("index.md")); // stale generated index left behind
+    // A hand-written index.md (no `type: index`) is never removed.
+    write("questions/index.md", "# My own index\n");
+
+    const result = buildIndex(wikiDir);
+
+    expect(result).toMatchObject({ ok: true, removed: ["notes/index.md", "repos/index.md", "repos/pavilio/index.md"] });
+    expect(existsSync(join(wikiDir, "notes/index.md"))).toBe(false);
+    expect(existsSync(join(wikiDir, "repos/pavilio/index.md"))).toBe(false);
+    expect(existsSync(join(wikiDir, "questions/index.md"))).toBe(true);
+    expect(read("index.md")).not.toContain("notes/index");
   });
 });

@@ -107,6 +107,7 @@ describe("wiki cli", () => {
     const index = await cli(["index", "demo"]);
     expect(index.code).toBe(0);
     expect(index.json.written).toContain("index.md");
+    expect(index.json.removed).toEqual([]);
     expect(existsSync(join(project, "wiki", "index.md"))).toBe(true);
     write("wiki/sources/untyped.md", "no frontmatter\n");
     const failed = await cli(["index", "demo"]);

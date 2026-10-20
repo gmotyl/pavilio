@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "fs";
+import { existsSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 
 import { ENTITY_KINDS, walkWikiPages, type WikiPage } from "./pages";
@@ -15,7 +15,9 @@ import { ENTITY_KINDS, walkWikiPages, type WikiPage } from "./pages";
  * - `repos/` is two-level: `repos/index.md` lists one line per repo, and each
  *   `repos/<repo>/index.md` lists that repo's pages. A repo line borrows the description of its
  *   `ARCHITECTURE.md`.
- * - Every `index.md` is output, never input: excluded from listings and the type check.
+ * - Every `index.md` is output, never input: excluded from listings and the type check. A
+ *   generated one (`type: index`) whose section or repo has no pages left is removed; a
+ *   hand-written `index.md` (any other type, or none) is never touched.
  * - Links are D14 wikilinks (`[[wiki/concepts/x|Title]]`): the same form every other wiki page
  *   uses, rendered by the panel and resolved by `links.ts`, so an agent follows them like any
  *   other link. Consumers of the backlink map (lint orphans) must therefore ignore index pages as
@@ -24,7 +26,7 @@ import { ENTITY_KINDS, walkWikiPages, type WikiPage } from "./pages";
  */
 
 export type IndexResult =
-  | { ok: true; written: string[] } // wiki-relative paths, sorted
+  | { ok: true; written: string[]; removed: string[] } // wiki-relative paths, sorted
   | { ok: false; error: string; page?: string }; // `page` is wiki-relative
 
 /** Fixed order and one-line blurbs of the known sections; unknown sections follow, sorted. */
@@ -187,13 +189,19 @@ function renderRepos(pages: WikiPage[], files: Map<string, string>): Group[] {
 
 /**
  * Regenerate every index under `wikiDir`. All-or-nothing: on an untyped page nothing is written.
- * Maps onto the CLI contract `scripts/wiki index <p>` → `{written}` | exit 1 `{error, page}`.
+ * Generated indexes left without pages are removed.
+ * Maps onto the CLI contract `scripts/wiki index <p>` → `{written, removed}` | exit 1 `{error, page}`.
  */
 export function buildIndex(wikiDir: string): IndexResult {
   if (!existsSync(wikiDir)) return { ok: false, error: "wiki dir not found" };
-  const rendered = renderIndexes(walkWikiPages(wikiDir));
+  const pages = walkWikiPages(wikiDir);
+  const rendered = renderIndexes(pages);
   if (!rendered.ok) return rendered;
   const written = [...rendered.files.keys()].sort(byString);
+  const removed = pages
+    .filter((p) => isIndexFile(p.path) && p.frontmatter.type === "index" && !rendered.files.has(p.path))
+    .map((p) => p.path);
   for (const path of written) writeFileSync(join(wikiDir, ...path.split("/")), rendered.files.get(path)!);
-  return { ok: true, written };
+  for (const path of removed) unlinkSync(join(wikiDir, ...path.split("/")));
+  return { ok: true, written, removed };
 }
