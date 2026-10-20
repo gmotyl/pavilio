@@ -71,11 +71,12 @@ describe("lintWiki", () => {
       page(
         "concept",
         "See [[wiki/concepts/missing]], [[metro:wiki/entities/y]], [[metro:wiki/entities/gone|Gone]] and `[[wiki/in/code]]`.\n",
-        "sources:\n  - \"[[wiki/sources/absent]]\"\n",
+        "sources:\n  - \"[[wiki/sources/absent]]\"\n  - sources/gone.md\n",
       ),
     );
     expect(lintWiki(root, "pavilio").broken).toEqual([
       { page: "wiki/concepts/linked.md", target: "metro:wiki/entities/gone" },
+      { page: "wiki/concepts/linked.md", target: "sources/gone" },
       { page: "wiki/concepts/linked.md", target: "wiki/concepts/missing" },
       { page: "wiki/concepts/linked.md", target: "wiki/sources/absent" },
     ]);
@@ -83,8 +84,12 @@ describe("lintWiki", () => {
 
   it("reports orphans", () => {
     write(`${W}/sources/cited.md`, page("source", "A record.\n"));
+    write(`${W}/sources/bare.md`, page("source", "Cited wiki-relative.\n"));
     write(`${W}/sources/uncited.md`, page("source", "Another record.\n"));
-    write(`${W}/concepts/linked.md`, page("concept", "Prose.\n", "sources:\n  - wiki/sources/cited\n"));
+    write(
+      `${W}/concepts/linked.md`,
+      page("concept", "Prose.\n", "sources:\n  - wiki/sources/cited.md\n  - sources/bare.md\n"),
+    );
     write(`${W}/notes/n.md`, page("note", "Free-form.\n"));
     write(`${W}/repos/r/ARCHITECTURE.md`, page("architecture", "Repo.\n"));
     write(`${W}/repos/r/index.md`, page("index", "- [[wiki/repos/r/ARCHITECTURE]]\n"));
@@ -107,14 +112,14 @@ describe("lintWiki", () => {
       page(
         "concept",
         "Prose.\n",
-        "sources:\n  - \"[[wiki/sources/meeting]]\"\n  - wiki/sources/old\n  - [[wiki/sources/created-only]]\n",
+        "sources:\n  - wiki/sources/meeting.md\n  - sources/old\n  - [[wiki/sources/created-only]]\n",
       ),
     );
     setMtime(`${W}/sources/meeting.md`, "2026-10-01");
     setMtime(`${W}/sources/old.md`, "2026-10-20"); // touched by a checkout: still fresh
     // Untracked record and raw files fall back to their mtime.
     write("projects/pavilio/notes/2026-10-05-meeting.md", "# Meeting\n");
-    write(`${W}/sources/untracked.md`, page("source", "U.\n", "record: projects/pavilio/notes/2026-10-05-meeting.md\n"));
+    write(`${W}/sources/untracked.md`, page("source", "U.\n", "record: notes/2026-10-05-meeting.md\n"));
     write(`${W}/raw/article.md`, "# Article\n");
     write(`${W}/sources/article.md`, page("source", "Article.\n", "raw: raw/article.md\n"));
     setMtime("projects/pavilio/notes/2026-10-05-meeting.md", "2026-10-15");
@@ -124,7 +129,7 @@ describe("lintWiki", () => {
       { page: "wiki/concepts/linked.md", source: "wiki/sources/meeting", updated: "2026-10-10", modified: "2026-10-12" },
       {
         page: "wiki/sources/untracked.md",
-        source: "projects/pavilio/notes/2026-10-05-meeting.md",
+        source: "notes/2026-10-05-meeting.md",
         updated: "2026-10-10",
         modified: "2026-10-15",
       },
@@ -134,15 +139,15 @@ describe("lintWiki", () => {
   it("dates committed records by their last commit", () => {
     write("projects/pavilio/notes/edited.md", "# Edited\n");
     write("projects/pavilio/notes/kept.md", "# Kept\n");
-    write(`${W}/sources/edited.md`, page("source", "E.\n", "record: projects/pavilio/notes/edited.md\n"));
-    write(`${W}/sources/kept.md`, page("source", "K.\n", "record: projects/pavilio/notes/kept.md\n"));
+    write(`${W}/sources/edited.md`, page("source", "E.\n", "record: notes/edited.md\n"));
+    write(`${W}/sources/kept.md`, page("source", "K.\n", "record: notes/kept.md\n"));
     git("init", "-q");
     commitAt("2026-10-05T12:00:00", "projects/pavilio/notes/kept.md");
     commitAt("2026-10-14T12:00:00", "projects/pavilio/notes/edited.md");
     setMtime("projects/pavilio/notes/edited.md", "2026-10-01"); // checkout mtimes say nothing
     setMtime("projects/pavilio/notes/kept.md", "2026-10-20");
     expect(lintWiki(root, "pavilio").stale).toEqual([
-      { page: "wiki/sources/edited.md", source: "projects/pavilio/notes/edited.md", updated: "2026-10-10", modified: "2026-10-14" },
+      { page: "wiki/sources/edited.md", source: "notes/edited.md", updated: "2026-10-10", modified: "2026-10-14" },
     ]);
   });
 

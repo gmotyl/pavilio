@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from "fs";
 import { basename, dirname, join } from "path";
 
 import { parsePage, walkWikiPages } from "./pages";
-import { resolveWikiLink } from "./links";
+import { resolveWikiLink, type LinkContext } from "./links";
 import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./wikilinks";
 
 /**
@@ -25,7 +25,7 @@ import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./w
  *   interaction layer `questions/**` and `notes/**`, which are reached from the log, not linked.
  * - **untyped** — pages without a frontmatter `type`.
  * - **stale** — a page whose `updated` (YYYY-MM-DD) is older than one of its sources: each
- *   resolvable `sources:` entry, the `record:` file (workspace-relative) and the `raw:` file
+ *   resolvable `sources:` entry, the `record:` file (project-relative, as in the ledger) and the `raw:` file
  *   (wiki-relative, `wiki/…` accepted). Day granularity: stale when the source's date is after
  *   `updated`. Checkout mtimes are never trusted for tracked files (clone, pull and auto-sync
  *   reset them): a wiki-page source is dated by its own frontmatter `updated` (else `created`);
@@ -72,10 +72,25 @@ function isOrphanExempt(wikiRel: string): boolean {
   );
 }
 
-/** A `sources:` entry is a wikilink, bracketed or bare (`[[wiki/sources/x]]`, `wiki/sources/x.md`). */
+/**
+ * A `sources:` entry is a project-root path, bracketed or bare, with or without `.md`
+ * (`wiki/sources/note-x.md`, `[[wiki/sources/note-x]]`).
+ */
 function parseSourceEntry(entry: string): WikiLink | null {
   const inner = /^\s*\[\[([^\[\]\n]+)\]\]\s*$/.exec(entry);
   return parseWikiLink(inner ? inner[1] : entry);
+}
+
+/**
+ * Resolve a `sources:` entry; a wiki-relative entry (`sources/note-x`) that misses as a
+ * project-root path is retried under `wiki/`. Returns the link that resolved, else the original.
+ */
+function resolveSourceEntry(link: WikiLink, ctx: LinkContext): { link: WikiLink; exists: boolean; absPath: string } {
+  const direct = resolveWikiLink(link, ctx);
+  if (direct.exists || link.project || link.target.startsWith("wiki/")) return { link, ...direct };
+  const wikiLink = { ...link, target: `wiki/${link.target}` };
+  const fallback = resolveWikiLink(wikiLink, ctx);
+  return fallback.exists ? { link: wikiLink, ...fallback } : { link, ...direct };
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -235,17 +250,21 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
         brokenTargets.add(entry.trim());
         continue;
       }
-      const resolved = resolveWikiLink(link, ctx);
-      if (!resolved.exists) brokenTargets.add(linkText(link));
-      else sourceFiles.push({ source: linkText(link), absPath: resolved.absPath, isPage: link.target.startsWith("wiki/") });
-      if (!fromIndex) addInbound(link, from);
+      const resolved = resolveSourceEntry(link, ctx);
+      const source = resolved.link;
+      if (!resolved.exists) brokenTargets.add(linkText(source));
+      else sourceFiles.push({ source: linkText(source), absPath: resolved.absPath, isPage: source.target.startsWith("wiki/") });
+      if (!fromIndex) addInbound(source, from);
     }
     for (const target of brokenTargets) broken.push({ page: path, target });
 
     if (!page.frontmatter.type) untyped.push(path);
 
     const { record, raw, updated } = page.frontmatter;
-    if (record) sourceFiles.push({ source: record, absPath: join(workspaceRoot, record), isPage: false });
+    if (record) {
+      const rel = record.replace(/^\/+/, "");
+      sourceFiles.push({ source: record, absPath: join(projectDir, rel), isPage: false });
+    }
     if (raw) {
       const rel = raw.replace(/^\/+/, "");
       sourceFiles.push({ source: raw, absPath: rel.startsWith("wiki/") ? join(projectDir, rel) : join(wikiDir, rel), isPage: false });
