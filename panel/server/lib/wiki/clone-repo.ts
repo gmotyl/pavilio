@@ -78,8 +78,12 @@ export function gitEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return { ...env, ...extra };
 }
 
+/**
+ * `/tree/<branch>` takes the whole rest of the path, since branch names may contain `/`
+ * (`/tree/feature/fix` → `feature/fix`); `/blob/<branch>` keeps one segment.
+ */
 const GITHUB_RE =
-  /^(?:https?:\/\/|git@|ssh:\/\/git@)(?:www\.)?github\.com[/:]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:\/(?:tree|blob)\/([^/\s?#]+))?\/?$/i;
+  /^(?:https?:\/\/|git@|ssh:\/\/git@)(?:www\.)?github\.com[/:]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:\/tree\/([^\s?#]+?)|\/blob\/([^/\s?#]+))?\/?$/i;
 const SCP_RE = /^[\w.-]+@[\w.-]+:(.+)$/;
 
 /**
@@ -120,7 +124,8 @@ export function parseRepoUrl(url: string): ParsedRepoUrl {
   const input = url.trim();
   const gh = GITHUB_RE.exec(input);
   if (gh) {
-    const [, owner, repo, branch] = gh;
+    const [, owner, repo, treeBranch, blobBranch] = gh;
+    const branch = treeBranch ?? blobBranch;
     if (branch !== undefined && !isSafeBranch(branch)) throw new Error(`unsafe branch name in repo URL: ${url}`);
     return { owner, repo, cloneUrl: `https://github.com/${owner}/${repo}.git`, branch: branch ?? null };
   }

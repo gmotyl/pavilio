@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { pathToFileURL } from "url";
 
-import { cloneRepo, gitEnv } from "../clone-repo";
+import { cloneRepo, gitEnv, parseRepoUrl } from "../clone-repo";
 
 let root = "";
 let projectDir = "";
@@ -133,5 +133,22 @@ describe("cloneRepo", () => {
 
     await expect(cloneRepo(projectDir, repoUrl, { env: ENV })).rejects.toThrow(/symlink/i);
     expect(existsSync(join(elsewhere, "README.md"))).toBe(true);
+  });
+});
+
+describe("parseRepoUrl", () => {
+  it("keeps a slash-containing branch from a /tree/ URL", () => {
+    expect(parseRepoUrl("https://github.com/acme/widget/tree/feature/fix")).toEqual({
+      owner: "acme",
+      repo: "widget",
+      cloneUrl: "https://github.com/acme/widget.git",
+      branch: "feature/fix",
+    });
+    expect(parseRepoUrl("https://github.com/acme/widget/tree/main/").branch).toBe("main");
+  });
+
+  it("rejects an unsafe slash-containing branch", () => {
+    expect(() => parseRepoUrl("https://github.com/acme/widget/tree/feature//fix")).toThrow(/branch/i);
+    expect(() => parseRepoUrl("https://github.com/acme/widget/tree/a/../b")).toThrow(/branch/i);
   });
 });
