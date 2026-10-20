@@ -67,7 +67,7 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 | Input | Becomes |
 |---|---|
 | none | every pending record (`scripts/wiki pending <p>`) |
-| path inside `projects/<p>/` | cited in place — `pending <p> --only <path>` |
+| path inside `projects/<p>/` | cited in place — `pending <p> --only <path>`, path project-relative (`notes/<file>.md`, `plans/openspec/changes/archive/<id>/proposal.md`) |
 | path outside the workspace, or a workspace path outside every `projects/<p>/` (e.g. `skills/…`) | outside path — verbatim copy to `wiki/raw/<slug>.md` |
 | path in another project | stop; suggest ingesting into that project's wiki |
 | repo URL (`<forge>/<owner>/<repo>`, `.git`) | `scripts/wiki clone-repo <p> <url>` → `repo_writer` (architecture mode) |

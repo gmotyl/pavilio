@@ -53,7 +53,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 **Wiki catch-up** (once per session, right after the project is resolved; it reads no wiki pages, so the lazy rule holds):
 1. `scripts/wiki config` → `sessionStartIngest` false → skip silently, ingest nothing.
 2. No `projects/<p>/wiki/` → one line: `No wiki yet — /pavilio-wiki-migrate <p> to build it.` Ingest nothing.
-3. `scripts/wiki pending <p>`: 0 → nothing; 1–5 → spawn a **background** subagent running `/pavilio-wiki <p> ingest` (it locks, ingests and commits on its own) and show one line: `Wiki catch-up: ingesting <n> records in the background.`; >5 → one line: `Wiki has <n> pending records — /pavilio-wiki-migrate <p> to catch up.` Ingest nothing.
+3. `scripts/wiki pending <p>` (no `--only`; any path a skill passes to `--only` is project-relative, e.g. `notes/<file>.md`): 0 → nothing; 1–5 → spawn a **background** subagent running `/pavilio-wiki <p> ingest` (it locks, ingests and commits on its own) and show one line: `Wiki catch-up: ingesting <n> records in the background.`; >5 → one line: `Wiki has <n> pending records — /pavilio-wiki-migrate <p> to catch up.` Ingest nothing.
 4. Never wait on the subagent; its one-line report is shown when it lands.
 
 **Fast-entry variant** (`/pavilio-session-start [project] <task description>`):
@@ -77,7 +77,7 @@ The one thing that holds in **both** lanes: never jump straight into editing sou
 
 Build work lands in **planning mode**, never directly in code edits. Follow the four-step workflow:
 
-1. **Design → Plan** — [[pavilio-grill]]: stress-test the task against the project's `CONTEXT.md` and `adr/`. Sharpen terminology, surface hidden constraints, and update docs inline. Once you approve the design, grill invokes [[pavilio-writing-plans]] itself (its §6, mandatory) to write the bite-sized plan — don't invoke the plan writer by hand. Grill is finished only when the change dir holds all four of `proposal.md`, `design.md`, `specs/<capability>/spec.md`, `tasks.md`.
+1. **Design → Plan** — [[pavilio-grill]]: stress-test the task against the project's `CONTEXT.md` and `adr/`. Sharpen terminology and surface hidden constraints; resolved terms go to the change's `design.md § Glossary` (never `CONTEXT.md` — archive-plan folds them in). Once you approve the design, grill invokes [[pavilio-writing-plans]] itself (its §6, mandatory) to write the bite-sized plan — don't invoke the plan writer by hand. Grill is finished only when the change dir holds all four of `proposal.md`, `design.md`, `specs/<capability>/spec.md`, `tasks.md`.
 2. **Execute** — [[pavilio-execute-plan]]: run the change's `tasks.md` task-by-task with review checkpoints. Enter here directly when an un-archived change dir already exists; if it is missing `tasks.md`, execute-plan writes the contract first (its step 1.0) rather than stalling. Check off each step as it lands.
 3. **Implement** — red-green-refactor for every feature or bugfix: write the failing test → see it fail → minimal implementation → see it pass → commit. (The per-step rhythm inside Execute.)
 
