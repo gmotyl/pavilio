@@ -13,7 +13,8 @@ is `/pavilio-wiki ingest`, not this skill.
 Before the first write, read `skills/pavilio-wiki/CONVENTIONS.md` (layout, identity and the
 ledger, glossary exemption, links) and `skills/pavilio-wiki/SKILL.md § 4. Ingest` (sequence,
 writers, errors). Writers are `skills/pavilio-wiki/agents/*.md`; spawn them exactly as
-`pavilio-wiki SKILL.md § Writers` says.
+`pavilio-wiki SKILL.md § Writers` says. Steps of that skill are cited by their **bold title**
+(e.g. **Page writers**), never by number.
 
 ## Usage
 
@@ -37,16 +38,16 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 
 1. `scripts/wiki pending <p>` → the records not yet ingested (or changed). The ledger already
    excludes `tasks.md`, delta specs, active changes and today's progress.
-2. Group by kind: `notes/` → note, `memo/` → memo, `adr/` → adr, `progress/` → progress,
-   `…/changes/archive/<id>/proposal.md` → proposal, `…/design.md` → design. Count `new` and
-   `changed` separately; count ledger lines in `wiki/log.md` as done.
+2. Group by kind: `notes/` → note, `memo/` or `memos/` → memo, `adr/` → adr, `progress/` →
+   progress, `…/changes/archive/<id>/proposal.md` → proposal, `…/design.md` → design. Count `new`
+   and `changed` separately; count ledger lines in `wiki/log.md` as done.
 3. Resume state: snapshot present (`wiki/raw/context-snapshot-*.md`)? `CONTEXT.md` rewritten
-   (every term line carries `See [[wiki/concepts/`)? Snapshot ledgered?
+   (every term line carries `See [[wiki/concepts/`)? Snapshot sections all ledgered?
 4. Token estimate (writer input + output, rounded to 10k):
    - records: Σ bytes of pending records ÷ 4 + 8k per record (agent file, conventions, page
      contract, indexes, receipt) + 4k per record for page writers;
-   - glossary (only if not yet rewritten): `CONTEXT.md` bytes ÷ 4 × 2 for the rewrite, + 4k per
-     glossary term for seeded concept pages.
+   - glossary (only if not yet rewritten): `CONTEXT.md` bytes ÷ 4 × 3 (rewrite + section source
+     writers) + 4k per glossary term for seeded concept pages.
 5. Show one table: kind | new | changed | KB | est. tokens; then totals, batch count
    (⌈records ÷ 10⌉), resume state, writer model.
 6. Nothing pending and glossary done → say the wiki is migrated, suggest `/pavilio-wiki <p> lint`,
@@ -57,7 +58,8 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 ## 2. Lock and gitignore
 
 1. `scripts/wiki lock take <p> --session <id>`. `held: false` → another session is ingesting;
-   report and stop. `takenOver: true` → note it for the first log entry.
+   report and stop. `takenOver: true` → note it for the first log entry. Nothing is written
+   before this step.
 2. Ensure `wiki/.gitignore` lists `.ingest.lock` and `raw/repos/`.
 3. Hold the lock for the whole migration. Before each batch (and before any step that may run
    long) re-run `lock take` with the same session — that refreshes `ts`, so a run longer than
@@ -66,67 +68,86 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 
 ## 3. Snapshot `CONTEXT.md`
 
-Skip steps 3–4 when a `wiki/raw/context-snapshot-*.md` exists **and** `CONTEXT.md` is already
-rewritten; use that snapshot for step 5.
-
 1. No `CONTEXT.md` → skip steps 3–5 (no glossary, no seeded pages).
-2. Copy `CONTEXT.md` byte for byte to `wiki/raw/context-snapshot-<today>.md`. A raw file is never
-   rewritten afterwards.
+2. Any `wiki/raw/context-snapshot-*.md` exists → **never snapshot again**: reuse the newest one as
+   `<snapshot>` (the live `CONTEXT.md` may already be rewritten). Else copy `CONTEXT.md` byte for
+   byte to `wiki/raw/context-snapshot-<today>.md`. A raw file is never rewritten.
+3. Split `<snapshot>` into one verbatim raw file per `##` section:
+   `wiki/raw/<snapshot stem>/<nn>-<section-slug>.md` (`nn` = section order, two digits; text
+   before the first `##` goes into `00-preamble.md`). Write only files that are missing. These
+   section files are the records the concept pages are seeded from; `pending --only` takes each.
+4. `CONTEXT.md` already rewritten → skip step 4.
 
 ## 4. Rewrite `CONTEXT.md` as a strict glossary
 
-1. Build the spec map: every `projects/<p>/**/openspec/specs/<name>/spec.md` →
-   `<name>` → `[[<project-relative path without .md>]]` (e.g. `speech` →
-   `[[plans/openspec/specs/speech/spec]]`).
+1. Build the link map the subagent applies to every legacy `[[<name>]]`, first match wins:
+   1. spec: `projects/<p>/**/openspec/specs/<name>/spec.md` →
+      `[[<project-relative path without .md>]]` (e.g. `[[plans/openspec/specs/speech/spec]]`);
+   2. another glossary term → `[[wiki/concepts/<slug>]]`;
+   3. `[[ADR NNNN]]` (or `[[adr NNNN]]`, `[[NNNN]]`) → the one `adr/NNNN-*.md`, as `[[adr/NNNN-…]]`;
+   4. a workspace skill name (`skills/<name>/` exists) → plain text, no brackets;
+   5. anything else → plain text, listed in `unresolved`.
 2. Spawn **one** subagent (default model, not `writerModel` — every session reads the glossary)
-   with: the snapshot path, the spec map, and these rules:
-   - Write `CONTEXT.md` only. Read the snapshot only.
+   with: `<snapshot>`, the spec map, the ADR list, the skill names, and these rules:
+   - Write `CONTEXT.md` only. Read `<snapshot>` only.
    - Keep the title, the one-line preamble and the `##` section headings.
    - Exactly one line per term:
      `- **<Term>** — <one-sentence definition>. See [[wiki/concepts/<slug>]].` Slug per
      `CONVENTIONS.md § Identity and the ledger`; aliases and `_Avoid_` notes stay in the sentence.
-   - Everything beyond the definition is dropped — it lives in the snapshot and reaches the
-     concept page in step 5.
-   - Legacy `[[<name>]]` capability links → the spec map path, placed after the `See` link
-     (`; spec [[plans/openspec/specs/speech/spec]]`). A name not in the map → plain text, listed in
-     `unresolved`.
+     Spec links go after the `See` link (`; spec [[plans/openspec/specs/speech/spec]]`).
+   - Everything beyond the definition is dropped, and so is every prose paragraph that is not a
+     term line — both survive in `<snapshot>` and reach the concept pages in step 5.
    - No file paths, functions or flags in definitions.
-   - Receipt, one JSON object: `{"status":"ok","terms":[{"term","slug"}],"specLinks":<n>,"unresolved":[…]}`.
+   - Receipt, one JSON object:
+     `{"status":"ok","terms":[{"term","slug","section"}],"links":{"spec":n,"term":n,"adr":n,"skill":n},"unresolved":[…]}`.
 3. Verify with `grep`: every `- **` line carries `See [[wiki/concepts/<slug>]]`, and those slugs
-   equal the receipt's. A mismatch → re-run the subagent once with the offending lines, then stop
-   and report.
-4. Commit `CONTEXT.md`, `wiki/.gitignore` and the snapshot: `<p>: wiki migrate — glossary`.
+   equal the receipt's. A mismatch → re-run the subagent once with the offending lines. Still
+   wrong → `cp <snapshot> CONTEXT.md` (restore the original), release the lock, report, stop.
+4. Commit `CONTEXT.md`, `wiki/.gitignore`, `<snapshot>` and its section files:
+   `<p>: wiki migrate — glossary`.
 
 ## 5. Seed glossary concept pages
 
-Skip when `scripts/wiki pending <p> --only wiki/raw/<snapshot>` reports nothing (already seeded).
+Run for the section files `pending <p> --only wiki/raw/<snapshot stem>/<file>` still reports;
+skip the step when none are pending.
 
-1. One `source_writer` for the snapshot → `wiki/sources/context-<snapshot stem>.md`. Tell it every
-   glossary term the snapshot defines goes in `concepts:` under its glossary slug.
-2. `scripts/wiki mentions <p> --touched <every concepts/<slug> from the step 4 receipt>`. Glossary
-   terms qualify with this one source (`CONVENTIONS.md § Two sources, and the glossary exemption`).
-3. One `page_writer` per `qualifying` slug, ≤10 in parallel: `sources` = the snapshot's source
-   page, `glossary` = the term's `CONTEXT.md` line. Refresh the lock between groups of 10.
-4. A glossary slug that did not qualify (the source page missed it) → list it in the report.
-5. `scripts/wiki index <p>` (exit 1 → stop: no record, no commit, report, release),
-   `scripts/wiki record <p> wiki/raw/<snapshot> <hash>`, append a log entry
-   (`PAGES.md § log.md`, kind `migrate`), commit `projects/<p>/wiki` as
-   `<p>: wiki migrate — seeded <n> concepts`.
+1. One `source_writer` per pending section file, ≤10 in parallel, with
+   `page` = `wiki/sources/<snapshot stem>-<section-slug>.md`. Tell it: keep every term's detail
+   (mechanism, reasons, gotchas, history) under a heading per term — this page is the only route
+   from the old glossary prose to the concept pages; list each glossary term of the section in
+   `concepts:` under its receipt slug.
+2. **Mentions** — `scripts/wiki mentions <p> --touched <every concepts/<slug> from the step 4
+   receipt>`. Glossary terms qualify with one source (`CONVENTIONS.md § Two sources, and the
+   glossary exemption`).
+3. One `page_writer` per `qualifying` slug, ≤10 in parallel, refreshing the lock between groups:
+   `sources` = the section source pages `mentions.slugs[<slug>]` lists, `glossary` = the term's
+   `CONTEXT.md` line.
+4. A glossary slug that did not qualify (its section page missed it) → list it in the report.
+5. `scripts/wiki index <p>` (exit 1 → stop: no record, no commit, report, release).
+6. `scripts/wiki record` each section file whose source page landed; once every section is
+   ledgered, also `record` `<snapshot>` itself (from `pending --only wiki/raw/<snapshot file>`), so
+   a later catch-up does not ingest the whole snapshot again as one page.
+7. Append a log entry (`PAGES.md § log.md`) headed `ingest (migrate)`; commit `projects/<p>/wiki`
+   as `<p>: wiki migrate — seeded <n> concepts`.
 
 ## 6. Batches, oldest first
 
 1. `scripts/wiki pending <p>` again (the ledger is the resume point — finished records are gone).
-2. Sort oldest first: the first `YYYY-MM-DD` in the path (progress, notes, memo, change ids); else
-   else the date the file was added, `git log --diff-filter=A --format=%as -1 -- <path>`
-   (ADRs). Ties by path.
+2. Sort oldest first: the first `YYYY-MM-DD` in the path (progress, notes, memo, change ids), else
+   the date the file was added, `git log --diff-filter=A --format=%as -1 -- <path>` (ADRs). Ties
+   by path.
 3. Cut into batches of 10. For each batch:
    1. Refresh the lock.
-   2. Run `pavilio-wiki SKILL.md § 4. Ingest § Sequence` steps 4–11 for the batch: source writers
-      (≤10 in parallel), mentions `--touched` this batch's slugs, page writers given only this
-      batch's source pages, index, record, log, `generic:` and contradictions into
-      `open-questions.md`. Skip step 7 (overview) — it runs once at the end.
-   3. Commit `projects/<p>/wiki` as `<p>: wiki migrate batch <k>/<n> (<m> records)`.
-   4. One progress line: batch, records done/total, pages created/updated, failures.
+   2. Run these steps of `pavilio-wiki SKILL.md § 4. Ingest § Sequence` for the batch:
+      **Source writers**, **Mentions** (`--touched` this batch's slugs), **Page writers**,
+      **Index**, **Record**, **Log** (entry headed `ingest (migrate)`; `generic:` and
+      contradictions into `open-questions.md`), **Commit**. Skip **Overview** and the second
+      index that follows it — the overview runs once in step 7.
+   3. Page writer inputs: a slug whose page already exists gets only this batch's source pages
+      that name it; a slug whose page is **new** gets every source page `mentions.slugs[<slug>]`
+      lists, so mentions from earlier batches are not lost.
+   4. Commit message: `<p>: wiki migrate batch <k>/<n> (<m> records)`.
+   5. One progress line: batch, records done/total, pages created/updated, failures.
 4. Errors follow `pavilio-wiki SKILL.md § 4. Ingest § Errors`: a failed record is not ledgered and
    comes back on resume; `index` exit 1 stops the run after releasing the lock.
 
@@ -137,8 +158,8 @@ spec or an active change to a writer, even by hand.
 
 1. One `overview_writer` with every knowledge page created or updated during the run.
 2. `scripts/wiki index <p>`, then `scripts/wiki lint <p>`.
-3. Append a final log entry, commit `projects/<p>/wiki` as `<p>: wiki migrate — overview`,
-   release the lock.
+3. Append a final `ingest (migrate)` log entry, commit `projects/<p>/wiki` as
+   `<p>: wiki migrate — overview`, release the lock.
 4. Report: records ingested by kind, failed records (rerun to retry), source pages, knowledge
    pages created, slugs waiting at 1 mention, glossary terms without a page, unresolved legacy
    links, lint groups with counts (`pavilio-wiki SKILL.md § 5. Lint` for remedies), actual vs
@@ -148,6 +169,7 @@ spec or an active change to a writer, even by hand.
 
 - Does not ingest `tasks.md`, delta specs, active changes or today's progress.
 - Does not start without the survey confirmation, and does not ask more than that one question.
+- Does not re-snapshot `CONTEXT.md` once a snapshot exists, or leave a half-rewritten glossary.
 - Does not edit records or raw files, hand-edit any `index.md`, or fix lint findings.
 - Does not ingest outside files, articles or repos — that is `/pavilio-wiki ingest`.
 - Does not push, and does not commit anything outside `CONTEXT.md` and `projects/<p>/wiki`.
