@@ -102,9 +102,16 @@ function Subgroup({
   defaultOpen: boolean;
   filter: WikiFilter;
 }) {
-  const [open, setOpen] = useState(
-    () => defaultOpen || pages.some((p) => p.path === filter.selectedPath),
-  );
+  const holdsSelection = pages.some((p) => p.path === filter.selectedPath);
+  const [open, setOpen] = useState(() => defaultOpen || holdsSelection);
+  // A selection moving into this subgroup (e.g. from the "Built from" footer) opens it,
+  // so its row is visible; otherwise the user's own toggle stands. Adjusted during
+  // render, not in an effect, so the row shows in the same commit as the selection.
+  const [seenSelection, setSeenSelection] = useState(filter.selectedPath);
+  if (seenSelection !== filter.selectedPath) {
+    setSeenSelection(filter.selectedPath);
+    if (holdsSelection) setOpen(true);
+  }
   const isOpen = open || filter.query !== "";
   return (
     <div>

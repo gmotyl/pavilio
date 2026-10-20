@@ -359,6 +359,25 @@ describe("WikiTab", () => {
     );
   });
 
+  it("reveals a folded subgroup when the selection moves into it", async () => {
+    renderTab(fileParam(FILE));
+    const built = within(await screen.findByTestId("wiki-built-from"));
+    expect(sub("sources:progress").getAttribute("aria-expanded")).toBe("false");
+    expect(row(progress[0].path)).toBeNull();
+
+    // Selecting a page from the footer opens the subgroup that holds its row.
+    fireEvent.click(built.getByText(progress[0].title));
+    await waitFor(() =>
+      expect(sub("sources:progress").getAttribute("aria-expanded")).toBe("true"),
+    );
+    expect(row(progress[0].path)).not.toBeNull();
+
+    // The user can still fold it again while the selection stays inside.
+    fireEvent.click(sub("sources:progress"));
+    expect(sub("sources:progress").getAttribute("aria-expanded")).toBe("false");
+    expect(row(progress[0].path)).toBeNull();
+  });
+
   it("records and restores the selection via ?file=", async () => {
     renderTab();
     fireEvent.click(await screen.findByTestId("wiki-page-wiki/concepts/utterance.md"));
