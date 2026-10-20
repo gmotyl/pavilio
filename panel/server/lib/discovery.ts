@@ -16,6 +16,7 @@ export interface Project {
   hasNotes: boolean;
   hasProgress: boolean;
   hasPlans: boolean;
+  hasWiki: boolean; // `<project>/wiki/` exists — gates the wiki tab
   latestProgressDate: string | null;
   repos: RepoEntry[];
 }
@@ -75,6 +76,7 @@ export function discoverProjects(): Project[] {
         hasNotes: existsSync(join(dir, "notes")),
         hasProgress: existsSync(join(dir, "progress")),
         hasPlans: existsSync(join(dir, "plans")),
+        hasWiki: existsSync(join(dir, "wiki")),
         latestProgressDate,
         repos,
       };

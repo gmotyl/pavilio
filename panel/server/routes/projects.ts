@@ -15,6 +15,9 @@ import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, resolveOpenSpecRoot } from "../lib/openspec.js";
 import { getAllDefaultUsers, setDefaultUser } from "../lib/project-default-user.js";
 import { listOsUsers } from "../lib/os-users.js";
+import { buildWikiTree } from "../lib/wiki/tree.js";
+
+export type { WikiTree, WikiPageInfo, WikiPageGroup } from "../lib/wiki/tree.js";
 
 const router = Router();
 
@@ -685,6 +688,21 @@ router.get("/:name/plans/read", (req, res) => {
   }
   const content = readFileSync(absPath, "utf-8");
   res.json({ absolutePath: absPath, content });
+});
+
+// Wiki tab payload: the section tree with per-page chips, backlinks and source pages. All paths
+// in the response are project-relative with `.md` (`wiki/concepts/x.md`).
+router.get("/:name/wiki", (req, res) => {
+  const { projectsDir } = getConfig();
+  const projectDir = resolve(projectsDir, req.params.name);
+  if (!isPathUnder(projectDir, projectsDir) || dirname(projectDir) !== resolve(projectsDir)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  const wikiDir = join(projectDir, "wiki");
+  if (!existsSync(wikiDir) || !statSync(wikiDir).isDirectory()) {
+    return res.status(404).json({ error: "Project has no wiki" });
+  }
+  res.json(buildWikiTree(projectsDir, req.params.name));
 });
 
 router.get("/", (_req, res) => {
