@@ -9,7 +9,8 @@ import { extractWikiLinks } from "./wikilinks";
  * `.md`: `entities/<slug>` (from frontmatter `entities:`) and `concepts/<slug>` (from
  * `concepts:`). A page writer for slug `concepts/x` writes `wiki/concepts/x.md`, so an entity and a
  * concept sharing a bare name never collide. Frontmatter lists carry bare names; a name that
- * already carries its own namespace prefix (`concepts/x` under `concepts:`) is accepted as is.
+ * already carries its own namespace prefix (`concepts/x`) or is written as a wikilink
+ * (`[[wiki/concepts/x]]`, `[[x]]`) is normalised to the same slug.
  */
 export type MentionsResult = {
   slugs: Record<string, string[]>; // slug → sorted wiki-relative paths of the source-like pages naming it
@@ -31,12 +32,27 @@ function isSourceLike(path: string): boolean {
   return path.startsWith("sources/") || /^repos\/[^/]+\/.+/.test(path);
 }
 
+/**
+ * The namespaced slug a frontmatter item under `ns` names. Accepts a bare name (`x`), a namespaced
+ * one (`concepts/x`) and a wikilink (`[[x]]`, `[[wiki/concepts/x|Label]]`); an explicit namespace
+ * in the item wins over the field it sits in. Empty → null.
+ */
+function itemSlug(ns: (typeof NAMESPACES)[number], raw: string): string | null {
+  let name = raw.trim();
+  const link = /^\[\[(.*)\]\]$/.exec(name);
+  if (link) name = link[1].split("|")[0].split("#")[0].trim();
+  name = name.replace(/\.md$/i, "").replace(/^wiki\//, "");
+  const explicit = NAMESPACES.find((n) => name.startsWith(`${n}/`));
+  if (explicit) return name.length > explicit.length + 1 ? name : null;
+  return name ? `${ns}/${name}` : null;
+}
+
 function pageSlugs(page: WikiPage): Set<string> {
   const slugs = new Set<string>();
   for (const ns of NAMESPACES) {
     for (const raw of page.frontmatter[ns] ?? []) {
-      const name = raw.trim().replace(/\.md$/i, "").replace(new RegExp(`^${ns}/`), "");
-      if (name) slugs.add(`${ns}/${name}`);
+      const slug = itemSlug(ns, raw);
+      if (slug) slugs.add(slug);
     }
   }
   return slugs;

@@ -88,6 +88,20 @@ describe("countMentions", () => {
     expect(Object.keys(result.slugs)).toEqual(["concepts/cells", "concepts/speech", "entities/greg"]);
   });
 
+  it("strips wikilink brackets from slugs", () => {
+    const linked = (items: string[]) =>
+      `---\ntype: source\ndescription: d\nconcepts:\n${items.map((i) => `  - ${i}`).join("\n")}\n---\nbody\n`;
+    write("wiki/sources/a.md", linked(["[[wiki/concepts/speech]]", "[[wiki/entities/greg|Greg]]"]));
+    write("wiki/sources/b.md", linked(["[[speech]]", "'[[concepts/cells.md]]'"]));
+    write("wiki/sources/c.md", linked(["concepts/speech", "cells"]));
+
+    expect(countMentions(projectDir).slugs).toEqual({
+      "concepts/cells": ["sources/b.md", "sources/c.md"],
+      "concepts/speech": ["sources/a.md", "sources/b.md", "sources/c.md"],
+      "entities/greg": ["sources/a.md"],
+    });
+  });
+
   it("uses pre-walked pages instead of walking again", () => {
     write("wiki/sources/a.md", page("source", { concepts: ["speech"] }));
     write("wiki/sources/b.md", page("source", { concepts: ["speech"] }));
