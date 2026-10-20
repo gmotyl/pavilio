@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
 import type { WikiPageInfo, WikiTree } from "../../../server/lib/wiki/tree";
 
@@ -14,9 +14,17 @@ export function useProjectWiki(projectName: string) {
   const [data, setData] = useState<WikiTree | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Only the latest request may land: a slower answer for a previous project (or an older
+  // refresh of this one) is dropped.
+  const latest = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!projectName) return;
+    const id = ++latest.current;
+    if (!projectName) {
+      setLoading(false);
+      return;
+    }
+    const current = () => latest.current === id;
     setLoading(true);
     setError(null);
     try {
@@ -25,15 +33,19 @@ export function useProjectWiki(projectName: string) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
-      setData(await res.json());
+      const tree = (await res.json()) as WikiTree;
+      if (current()) setData(tree);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (current()) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [projectName]);
 
   useEffect(() => {
+    // Another project's tree must never show under this one, not even while loading.
+    setData(null);
+    setError(null);
     refresh();
   }, [refresh]);
 
