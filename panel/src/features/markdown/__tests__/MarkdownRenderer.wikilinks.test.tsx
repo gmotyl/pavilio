@@ -75,6 +75,50 @@ describe("MarkdownRenderer wikilinks", () => {
     expect(screen.queryByRole("link", { name: "Nope" })).toBeNull();
   });
 
+  it("renders an unprefixed wikilink without a basePath as warning text, unchecked", async () => {
+    render(
+      <MemoryRouter>
+        <MarkdownRenderer content="See [[wiki/concepts/x|X]]." />
+      </MemoryRouter>,
+    );
+
+    const warning = screen.getByText("X", { selector: ".wikilink-missing" });
+    expect(warning.closest("a")).toBeNull();
+    // Past the debounce: nothing to check, so no request.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the links when the existence check fails", async () => {
+    fetchMock.mockImplementationOnce(async () => {
+      throw new TypeError("network down");
+    });
+    renderMd("See [[wiki/concepts/x|X]].");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole("link", { name: "X" }).getAttribute("href")).toBe(
+      "/view/pavilio/wiki/concepts/x.md",
+    );
+    expect(document.querySelector(".wikilink-missing")).toBeNull();
+  });
+
+  it("keeps missing marks while the next check is pending", async () => {
+    const { rerender } = renderMd("Broken: [[wiki/concepts/nope|Nope]].");
+    await screen.findByText("Nope", { selector: ".wikilink-missing" });
+
+    rerender(
+      <MemoryRouter>
+        <MarkdownRenderer content="Broken: [[wiki/concepts/nope|Nope]] and [[wiki/b|B]]." basePath={BASE} />
+      </MemoryRouter>,
+    );
+    // No flash back to a link before the new answer arrives.
+    expect(screen.getByText("Nope", { selector: ".wikilink-missing" })).toBeTruthy();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await screen.findByText("B", { selector: ".wikilink-missing" });
+    expect(screen.getByText("Nope", { selector: ".wikilink-missing" })).toBeTruthy();
+  });
+
   it("leaves wikilinks in code untouched", () => {
     const { container } = renderMd(
       "Inline `[[wiki/concepts/x]]` code.\n\n```\n[[wiki/concepts/y]]\n```\n",

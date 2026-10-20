@@ -133,17 +133,26 @@ function wikiLinkTargets(content: string, basePath: string | undefined): string 
   return [...paths].sort().join("\n");
 }
 
+/** Quiet period before an existence check, so typing in a live preview does not fire a request per keystroke. */
+const WIKILINK_CHECK_DEBOUNCE_MS = 250;
+
+const NO_MISSING: ReadonlySet<string> = new Set();
+
 /**
  * Which wikilink targets do not exist. Links render optimistically; once the server answers,
- * the missing ones turn into warning text. A failed check leaves every link in place.
+ * the missing ones turn into warning text. The previous answer stays until the next one
+ * arrives (no flashing while editing), and a failed check leaves the current marks in place.
  */
 function useMissingWikiLinks(targets: string): ReadonlySet<string> {
-  const [missing, setMissing] = useState<ReadonlySet<string>>(() => new Set());
+  const [missing, setMissing] = useState<ReadonlySet<string>>(NO_MISSING);
   useEffect(() => {
-    setMissing(new Set());
-    if (!targets) return;
+    if (!targets) {
+      // Same identity when already empty, so a document without wikilinks never re-renders.
+      setMissing(NO_MISSING);
+      return;
+    }
     let cancelled = false;
-    (async () => {
+    const timer = setTimeout(async () => {
       try {
         const res = await fetch("/api/files/exists", {
           method: "POST",
@@ -153,13 +162,15 @@ function useMissingWikiLinks(targets: string): ReadonlySet<string> {
         if (!res.ok) return;
         const { exists } = (await res.json()) as { exists?: Record<string, boolean> };
         if (cancelled || !exists) return;
-        setMissing(new Set(Object.keys(exists).filter((p) => exists[p] === false)));
+        const next = Object.keys(exists).filter((p) => exists[p] === false);
+        setMissing(next.length ? new Set(next) : NO_MISSING);
       } catch {
-        // Offline or no endpoint: keep the optimistic links.
+        // Offline or no endpoint: keep the current marks.
       }
-    })();
+    }, WIKILINK_CHECK_DEBOUNCE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [targets]);
   return missing;

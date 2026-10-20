@@ -1,3 +1,5 @@
+// Imported by the client bundle (src/features/markdown) — keep free of node imports.
+
 /**
  * Pure wikilink parsing (D14) — no `fs`, no `path`, so the client markdown renderer can reuse it.
  *

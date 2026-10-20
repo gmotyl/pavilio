@@ -276,9 +276,14 @@ router.post("/exists", (req, res) => {
   const { projectsDir } = getConfig();
   const exists: Record<string, boolean> = {};
   for (const relPath of paths as string[]) {
-    const absolutePath = resolve(projectsDir, relPath);
-    exists[relPath] = !!relPath && isPathUnder(absolutePath, projectsDir) && absolutePath !== projectsDir
-      && existsSync(absolutePath) && statSync(absolutePath).isFile();
+    // Per path, so one unreadable entry (EACCES, a file removed mid-check) cannot fail the batch.
+    try {
+      const absolutePath = resolve(projectsDir, relPath);
+      exists[relPath] = !!relPath && isPathUnder(absolutePath, projectsDir) && absolutePath !== projectsDir
+        && !!statSync(absolutePath, { throwIfNoEntry: false })?.isFile();
+    } catch {
+      exists[relPath] = false;
+    }
   }
   return res.json({ exists });
 });
