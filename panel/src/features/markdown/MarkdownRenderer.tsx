@@ -123,7 +123,9 @@ function markBlockCode(children: ReactNode): ReactNode {
  * sorted — joined with newlines so it is a stable effect dependency.
  */
 function wikiLinkTargets(content: string, basePath: string | undefined): string {
-  if (!content.includes("[[")) return "";
+  // Typed as a string, but it comes straight from a JSON response: a reply without
+  // `content` must render as nothing (as react-markdown does), not crash the tab.
+  if (typeof content !== "string" || !content.includes("[[")) return "";
   const fromProject = owningProject(basePath);
   const paths = new Set<string>();
   for (const link of extractWikiLinks(content)) {

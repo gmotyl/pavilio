@@ -130,4 +130,13 @@ describe("MarkdownRenderer wikilinks", () => {
     expect(codes.some((t) => t?.includes("[[wiki/concepts/y]]"))).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("survives content that is not a string, as before wikilinks", () => {
+    // A file endpoint that answers without `content` hands the renderer undefined at
+    // runtime; react-markdown renders that as nothing, and so must the wikilink scan.
+    renderMd(undefined as unknown as string);
+
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
