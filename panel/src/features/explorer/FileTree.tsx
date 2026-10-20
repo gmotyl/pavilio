@@ -11,6 +11,7 @@ import { useGitStatus } from "../git/useGitStatus";
 import { useActiveFile } from "./useActiveFile";
 import { useFileIndex, FileEntry, RootId } from "./useFileIndex";
 import { useFileDragSource, useFileDropTarget } from "./useFileDrag";
+import { decodePathSegments, viewFilePath } from "../markdown/viewRoute";
 
 /**
  * Repo-relative on-disk path for a file under the given root.
@@ -98,11 +99,20 @@ export function buildTree(files: FileEntry[]): Record<string, ProjectNode> {
   return tree;
 }
 
-/** Parse /view/project/subfolder/file.md into segments */
+/** Parse /view/project/subfolder/file.md into (decoded) segments */
 export function parseViewPath(pathname: string) {
-  const m = pathname.match(/^\/view\/([^/]+)(?:\/([^/]+))?/);
+  const m = decodePathSegments(pathname).match(/^\/view\/([^/]+)(?:\/([^/]+))?/);
   if (!m) return null;
   return { project: m[1], subfolder: m[2] || "" };
+}
+
+/**
+ * The `/view/<raw path>` a FileButton matches as active: the URL's file (decoded, since the route
+ * may be percent-encoded while file paths are raw), else the inline viewer's active file.
+ */
+export function activeViewPath(pathname: string, activeFile: string | null): string {
+  if (pathname.startsWith("/view/")) return `/view/${viewFilePath(pathname)}`;
+  return activeFile ? `/view/${activeFile}` : pathname;
 }
 
 function FileButton({
@@ -355,11 +365,7 @@ export default function FileTree({ root = "projects" }: FileTreeProps = {}) {
 
   // Build the "current path" that FileButton uses for isActive matching
   // Either the real URL path or a synthetic /view/ path from context
-  const currentPath = location.pathname.startsWith("/view/")
-    ? location.pathname
-    : activeFile
-      ? `/view/${activeFile}`
-      : location.pathname;
+  const currentPath = activeViewPath(location.pathname, activeFile);
 
   return (
     <div className="text-sm">

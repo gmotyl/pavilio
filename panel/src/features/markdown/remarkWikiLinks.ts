@@ -3,6 +3,7 @@
  * `<project>:` prefix, optional `|label`. Parsing is the server's pure module, shared as is.
  */
 import { parseWikiLink, type WikiLink } from "../../../server/lib/wiki/wikilinks";
+import { encodePathSegments } from "./viewRoute";
 
 /** Attribute the plugin puts on every wikilink anchor: the target's projectsDir-relative path. */
 export const WIKILINK_ATTR = "data-wikilink";
@@ -33,10 +34,9 @@ type MdNode = {
 
 /**
  * The viewer route for a projectsDir-relative path, each segment percent-encoded so `#`, `?` and
- * spaces stay part of the path. The viewer reads the still-encoded `location.pathname` and hands
- * it to `/api/files/read/…`, which decodes it, exactly as for a browser-encoded file-tree link.
+ * spaces stay part of the path. Route consumers decode it back (`viewRoute.ts`).
  */
-const viewerHref = (path: string) => `/view/${path.split("/").map(encodeURIComponent).join("/")}`;
+const viewerHref = (path: string) => `/view/${encodePathSegments(path)}`;
 
 const LINK = /\[\[([^[\]\n]+)\]\]/g;
 

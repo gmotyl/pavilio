@@ -13,6 +13,7 @@ import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import ImageDropZone from "./ImageDropZone";
 import MarkdownRenderer from "./MarkdownRenderer";
+import { encodePathSegments, viewFilePath } from "./viewRoute";
 
 /**
  * Build the /api/files/read/... URL from a route path.
@@ -24,14 +25,15 @@ export function buildReadUrl(routePath: string): string {
   if (parts[0] === "_root" && parts[1]) {
     const rootId = parts[1];
     const rest = parts.slice(2).join("/");
-    return `/api/files/read/${rest}?root=${encodeURIComponent(rootId)}`;
+    return `/api/files/read/${encodePathSegments(rest)}?root=${encodeURIComponent(rootId)}`;
   }
-  return `/api/files/read/${routePath}`;
+  return `/api/files/read/${encodePathSegments(routePath)}`;
 }
 
 export default function MarkdownViewer() {
   const location = useLocation();
-  const filePath = location.pathname.replace(/^\/view\//, "");
+  // Raw path: the route may be percent-encoded, file-change paths and file trees are not.
+  const filePath = viewFilePath(location.pathname);
   const { setActiveFile } = useActiveFile();
 
   // Clear context active file — URL is the source of truth here
