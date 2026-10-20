@@ -109,6 +109,13 @@ describe("GET /api/projects (wiki)", () => {
     const byName = Object.fromEntries(res.body.map((p: { name: string; hasWiki: boolean }) => [p.name, p.hasWiki]));
     expect(byName).toEqual({ alpha: true, beta: false });
   });
+
+  it("a plain file named wiki is not a wiki", async () => {
+    seed("gamma/PROJECT.md", "# gamma");
+    seed("gamma/wiki", "not a dir");
+    const res = await request(makeApp()).get("/api/projects");
+    expect(res.body.find((p: { name: string }) => p.name === "gamma").hasWiki).toBe(false);
+  });
 });
 
 describe("GET /api/projects/:name/wiki", () => {

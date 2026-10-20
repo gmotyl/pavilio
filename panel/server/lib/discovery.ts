@@ -1,4 +1,4 @@
-import { readdirSync, existsSync, readFileSync } from "fs";
+import { readdirSync, existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
@@ -16,7 +16,7 @@ export interface Project {
   hasNotes: boolean;
   hasProgress: boolean;
   hasPlans: boolean;
-  hasWiki: boolean; // `<project>/wiki/` exists — gates the wiki tab
+  hasWiki: boolean; // `<project>/wiki/` is a directory — gates the wiki tab
   latestProgressDate: string | null;
   repos: RepoEntry[];
 }
@@ -76,7 +76,7 @@ export function discoverProjects(): Project[] {
         hasNotes: existsSync(join(dir, "notes")),
         hasProgress: existsSync(join(dir, "progress")),
         hasPlans: existsSync(join(dir, "plans")),
-        hasWiki: existsSync(join(dir, "wiki")),
+        hasWiki: statSync(join(dir, "wiki"), { throwIfNoEntry: false })?.isDirectory() ?? false,
         latestProgressDate,
         repos,
       };
