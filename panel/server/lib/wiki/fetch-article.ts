@@ -121,16 +121,24 @@ function refuseSymlink(file: string): void {
   }
 }
 
+/** Hex lengths of the URL-hash suffix, tried in order. */
+const SUFFIX_LENGTHS = [6, 12, 64];
+
 /**
  * The snapshot file name for `url`: `article-<slug>.md`, refreshed in place when it already holds
- * the same URL. Taken by another URL → `article-<slug>-<6 hex of the URL's sha256>.md`.
+ * the same URL. Taken by another URL → `article-<slug>-<6 hex of the URL's sha256>.md`, then 12,
+ * then the full 64 hex while each is taken by yet another URL.
  */
 function snapshotName(rawDir: string, slug: string, url: string): string {
-  const plain = `article-${slug}.md`;
-  const file = join(rawDir, plain);
-  refuseSymlink(file);
-  if (!existsSync(file) || snapshotUrl(file) === url) return plain;
-  return `article-${slug}-${createHash("sha256").update(url).digest("hex").slice(0, 6)}.md`;
+  const hex = createHash("sha256").update(url).digest("hex");
+  // Longer suffixes only when a shorter one is taken by yet another URL; never overwrite one.
+  const names = [`article-${slug}.md`, ...SUFFIX_LENGTHS.map((n) => `article-${slug}-${hex.slice(0, n)}.md`)];
+  for (const name of names) {
+    const file = join(rawDir, name);
+    refuseSymlink(file);
+    if (!existsSync(file) || snapshotUrl(file) === url) return name;
+  }
+  throw new Error(`every snapshot name for ${url} is taken by another URL`);
 }
 
 function metaContent(document: Document, selector: string): string | null {

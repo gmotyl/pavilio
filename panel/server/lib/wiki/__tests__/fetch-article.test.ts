@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync, existsSync, symlinkSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
 import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
 import { tmpdir } from "os";
@@ -70,6 +71,20 @@ afterEach(() => {
 });
 
 describe("fetchArticle", () => {
+  it("extends the hash suffix when the suffixed name is taken by yet another URL", async () => {
+    await fetchArticle(projectDir, `${baseUrl}/a/story`);
+    const url = `${baseUrl}/b/story`;
+    const hex = createHash("sha256").update(url).digest("hex");
+    const planted = join(projectDir, "wiki", "raw", `article-story-${hex.slice(0, 6)}.md`);
+    writeFileSync(planted, `---\nsource_url: "https://elsewhere.invalid/x"\n---\nkeep\n`);
+
+    const receipt = await fetchArticle(projectDir, url);
+    expect(receipt.raw).toBe(`raw/article-story-${hex.slice(0, 12)}.md`);
+    expect(readFileSync(planted, "utf8")).toContain("keep");
+    // Same URL again lands on the same extended name.
+    expect((await fetchArticle(projectDir, url)).raw).toBe(receipt.raw);
+  });
+
   it("refuses to write through a symlinked snapshot file", async () => {
     const outside = mkdtempSync(join(tmpdir(), "wiki-fetch-outside-"));
     try {
