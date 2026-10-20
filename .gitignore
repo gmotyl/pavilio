@@ -43,7 +43,7 @@ Thumbs.db
 projects/*/config.local.json
 
 # Wiki ingest lock: transient, held by one agent session while it ingests
-projects/*/wiki/.ingest.lock
+projects/*/wiki/.ingest.lock*
 
 # Private workspace config
 .projects.local.md

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, readdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -61,16 +61,52 @@ describe("takeLock", () => {
     expect(readLock()).toEqual({ session: "rival", ts: NOW });
   });
 
+  it("lets exactly one of two sessions racing a stale lock hold it", () => {
+    writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
+    let rival: ReturnType<typeof takeLock> | undefined;
+    // s2 runs its whole takeover after s1 judged the lock stale but before s1 acts on it.
+    const race = () => {
+      rival = takeLock(projectDir, "s2", NOW);
+    };
+    const mine = takeLock(projectDir, "s1", NOW, { beforeTakeover: race });
+
+    expect(rival).toEqual({ held: true, takenOver: true });
+    expect(mine).toEqual({ held: false, takenOver: false });
+    expect(readLock()).toEqual({ session: "s2", ts: NOW });
+    // No stale-rename leftovers next to the lock.
+    expect(readdirSync(join(projectDir, "wiki")).filter((f) => f.startsWith(".ingest.lock."))).toEqual([]);
+  });
+
+  it("lets exactly one of two sessions racing a corrupt lock hold it", () => {
+    writeLock("{not json");
+    let rival: ReturnType<typeof takeLock> | undefined;
+    const mine = takeLock(projectDir, "s1", NOW, {
+      beforeTakeover: () => {
+        rival = takeLock(projectDir, "s2", NOW);
+      },
+    });
+
+    expect([mine.held, rival?.held].filter(Boolean)).toHaveLength(1);
+    expect(readLock()).toEqual({ session: "s2", ts: NOW });
+  });
+
+  it("does not refresh an own lock taken over meanwhile", () => {
+    writeLock(JSON.stringify({ session: "s1", ts: NOW - 1000 }));
+    const rival = () => writeLock(JSON.stringify({ session: "rival", ts: NOW }));
+    expect(takeLock(projectDir, "s1", NOW, { beforeTakeover: rival })).toEqual({ held: false, takenOver: false });
+    expect(readLock()).toEqual({ session: "rival", ts: NOW });
+  });
+
   it("ensures the wiki gitignore lists the lock and repo clones", () => {
     takeLock(projectDir, "s1", NOW);
     const gitignore = join(projectDir, "wiki", ".gitignore");
-    expect(readFileSync(gitignore, "utf8")).toBe(".ingest.lock\nraw/repos/\n");
+    expect(readFileSync(gitignore, "utf8")).toBe(".ingest.lock*\nraw/repos/\n");
 
     // An existing file keeps its lines and gains only the missing ones, once.
     writeFileSync(gitignore, "*.tmp\nraw/repos/");
     takeLock(projectDir, "s1", NOW);
     takeLock(projectDir, "s1", NOW);
-    expect(readFileSync(gitignore, "utf8")).toBe("*.tmp\nraw/repos/\n.ingest.lock\n");
+    expect(readFileSync(gitignore, "utf8")).toBe("*.tmp\nraw/repos/\n.ingest.lock*\n");
   });
 });
 

@@ -1,4 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { randomBytes } from "crypto";
+import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 
 /** A lock older than this is considered abandoned and may be taken over. */
@@ -15,10 +16,10 @@ export function lockPath(projectDir: string): string {
 }
 
 /** Test seams for the read-back windows; production callers never pass them. */
-type LockHooks = { afterWrite?: () => void; beforeRemove?: () => void };
+type LockHooks = { beforeTakeover?: () => void; afterWrite?: () => void; beforeRemove?: () => void };
 
 /** Lines `<projectDir>/wiki/.gitignore` must carry (workspaces older than the root entry lack them). */
-const WIKI_GITIGNORE_LINES = [".ingest.lock", "raw/repos/"];
+const WIKI_GITIGNORE_LINES = [".ingest.lock*", "raw/repos/"]; // `*`: takeover temp and aside files too
 
 /** Append the missing wiki gitignore lines, creating the file when absent. */
 function ensureWikiGitignore(projectDir: string): void {
@@ -53,13 +54,16 @@ function readLock(path: string): LockFile | null | "corrupt" {
 
 /**
  * Take the ingest lock for `session`.
- * - no lock → create it atomically (`wx`), held
- * - own lock → refresh `ts`, held
+ * - no lock → create it atomically (temp file + no-clobber link), held
+ * - own lock → refresh `ts` (temp file + rename, only while still ours), held
  * - foreign lock younger than STALE_LOCK_MS → not held, left untouched
- * - foreign lock that is stale or corrupt → overwritten, held + takenOver
+ * - foreign lock that is stale or corrupt → taken over, held + takenOver
  *
- * A non-atomic overwrite (refresh or takeover) is read back: when a rival overwrote it in the
- * meantime the lock is reported as not held. Also ensures `wiki/.gitignore` ignores the lock.
+ * A takeover first renames the stale lock aside under a unique name: only one rival's rename
+ * can succeed, and the loser sees ENOENT and falls back to the atomic create. The winner then
+ * creates the new lock with the same atomic create. If what was renamed aside turns out to be a fresh lock (a rival
+ * finished its takeover in between), it is put back and the lock is reported as not held.
+ * The result is read back once more. Also ensures `wiki/.gitignore` ignores the lock.
  */
 export function takeLock(
   projectDir: string,
@@ -71,33 +75,74 @@ export function takeLock(
   mkdirSync(join(projectDir, "wiki"), { recursive: true });
   ensureWikiGitignore(projectDir);
   const content = JSON.stringify({ session, ts: now } satisfies LockFile) + "\n";
-
-  try {
-    writeFileSync(path, content, { flag: "wx" });
-    return { held: true, takenOver: false };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-  }
-
-  const existing = readLock(path);
-  if (existing === null) {
-    // Released between our create attempt and the read: retry the atomic create once.
+  const unique = () => `${session.replace(/[^\w.-]+/g, "_")}-${randomBytes(4).toString("hex")}`;
+  /**
+   * Atomic no-clobber create with the content already in place: write a private temp file and
+   * hard-link it as the lock (fails with EEXIST like `wx`), so no rival ever reads a half-written
+   * lock and mistakes it for a corrupt one.
+   */
+  const create = (): boolean => {
+    const temp = `${path}.tmp-${unique()}`;
+    writeFileSync(temp, content, { flag: "wx" });
     try {
-      writeFileSync(path, content, { flag: "wx" });
-      return { held: true, takenOver: false };
+      linkSync(temp, path);
+      return true;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      return false;
+    } finally {
+      rmSync(temp, { force: true });
+    }
+  };
+  const readBack = (takenOver: boolean): TakeResult => {
+    hooks.afterWrite?.();
+    return isOwnedBy(path, session) ? { held: true, takenOver } : { held: false, takenOver: false };
+  };
+  /** May this session replace `lock`? Own, corrupt and stale locks yes; a fresh foreign one no. */
+  const replaceable = (lock: LockFile | "corrupt") =>
+    lock === "corrupt" || lock.session === session || now - lock.ts >= STALE_LOCK_MS;
+
+  if (create()) return { held: true, takenOver: false };
+
+  const existing = readLock(path);
+  // Released between our create attempt and the read: retry the atomic create once.
+  if (existing === null) return create() ? { held: true, takenOver: false } : { held: false, takenOver: false };
+  if (!replaceable(existing)) return { held: false, takenOver: false };
+  hooks.beforeTakeover?.();
+
+  if (existing !== "corrupt" && existing.session === session) {
+    const temp = `${path}.tmp-${unique()}`;
+    writeFileSync(temp, content);
+    if (!isOwnedBy(path, session)) {
+      rmSync(temp, { force: true });
       return { held: false, takenOver: false };
     }
+    renameSync(temp, path);
+    return readBack(false);
   }
-  const own = existing !== "corrupt" && existing.session === session;
-  if (!own && existing !== "corrupt" && now - existing.ts < STALE_LOCK_MS) {
+
+  const aside = `${path}.stale-${unique()}`;
+  try {
+    renameSync(path, aside);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    // A rival renamed it first: the lock is free or theirs now.
+    return create() ? { held: true, takenOver: false } : { held: false, takenOver: false };
+  }
+  const moved = readLock(aside);
+  if (moved !== null && !replaceable(moved)) {
+    // We moved a rival's fresh lock, not the stale one: put it back without clobbering.
+    try {
+      linkSync(aside, path);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+    rmSync(aside, { force: true });
     return { held: false, takenOver: false };
   }
-  writeFileSync(path, content);
-  hooks.afterWrite?.();
-  if (!isOwnedBy(path, session)) return { held: false, takenOver: false };
-  return { held: true, takenOver: !own };
+  rmSync(aside, { force: true });
+  if (!create()) return { held: false, takenOver: false };
+  return readBack(true);
 }
 
 function isOwnedBy(path: string, session: string): boolean {

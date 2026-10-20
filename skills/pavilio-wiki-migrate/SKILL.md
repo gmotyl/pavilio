@@ -60,7 +60,7 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 1. `scripts/wiki lock take <p> --session <id>`. `held: false` → another session is ingesting;
    report and stop. `takenOver: true` → note it for the first log entry. Nothing is written
    before this step.
-2. Ensure `wiki/.gitignore` lists `.ingest.lock` and `raw/repos/`.
+2. Ensure `wiki/.gitignore` lists `.ingest.lock*` and `raw/repos/`.
 3. Hold the lock for the whole migration. Before each batch (and before any step that may run
    long) re-run `lock take` with the same session — that refreshes `ts`, so a run longer than
    15 min is not taken over. `held: false` on a refresh → stop after committing what landed.

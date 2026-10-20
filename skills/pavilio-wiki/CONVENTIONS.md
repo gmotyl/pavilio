@@ -9,7 +9,7 @@ The rules every wiki reader and writer follows. Other skills cite sections of th
 projects/<p>/
 ├── CONTEXT.md                 # strict glossary: one line per term + See [[wiki/concepts/<term>]]
 └── wiki/
-    ├── .gitignore             # .ingest.lock, raw/repos/
+    ├── .gitignore             # .ingest.lock*, raw/repos/
     ├── log.md                 # append-only: ingest/query entries + the ledger
     ├── .ingest.lock           # transient, never committed
     ├── raw/                   # raw layer: verbatim snapshots of outside material
