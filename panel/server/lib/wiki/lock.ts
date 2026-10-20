@@ -27,6 +27,8 @@ type LockHooks = {
   onGuardWait?: (waitMs: number) => void;
   renameGuard?: (from: string, to: string) => void;
   pidAlive?: (pid: number) => boolean;
+  procStart?: (pid: number) => string | null;
+  linkGuard?: (existing: string, target: string) => void;
   afterFallbackWrite?: () => void;
   link?: (existing: string, target: string) => void;
   rename?: (from: string, to: string) => void;
@@ -68,6 +70,8 @@ function readLock(path: string): LockFile | null | "corrupt" {
 
 /** A takeover guard older than this belongs to a crashed session and may be claimed. */
 const STALE_GUARD_MS = 30 * 1000;
+/** Without a usable process start time, a guard older than this is claimable even if its pid lives. */
+const HARD_GUARD_MS = 10 * 60 * 1000;
 /** How long a free or foreign take waits for a busy guard before answering `busy`. */
 const TAKE_GUARD_WAIT_MS = 2000;
 /** A corrupt lock modified more recently than this may be a write in progress: left alone. */
@@ -110,19 +114,27 @@ function withGuard<T>(
   fn: () => T,
 ): { ok: true; value: T } | { ok: false } {
   const guard = `${path}.takeover`;
-  const token = JSON.stringify({ token: unique(session), pid: process.pid, host: hostname() }) + "\n";
   const renameGuard = hooks.renameGuard ?? renameSync;
+  const linkGuard = hooks.linkGuard ?? linkSync;
   const pidAlive = hooks.pidAlive ?? isPidAlive;
+  const procStart = hooks.procStart ?? readProcStart;
+  const start = procStart(process.pid) ?? undefined;
+  const token = JSON.stringify({ token: unique(session), pid: process.pid, start, host: hostname() }) + "\n";
   /**
-   * A guard may be claimed only when it is older than STALE_GUARD_MS and its owner is gone:
-   * on this host its recorded pid must be dead; another host's (or an unreadable) guard counts
-   * as gone once old. A live same-host owner's guard is never claimed.
+   * A guard may be claimed only when it is older than STALE_GUARD_MS and its owner is gone.
+   * Another host's (or an unreadable) guard counts as gone once old. On this host the recorded
+   * pid must be dead, or alive but a different process (its `/proc` start time differs: PID
+   * reuse). Without a recorded or readable start time a live pid's guard is claimable only past
+   * HARD_GUARD_MS. A live same-host owner's guard is never claimed.
    */
   const claimable = (file: string): boolean => {
     const age = ageMs(file);
     if (age === undefined || age < STALE_GUARD_MS) return false;
     const owner = guardOwner(readText(file));
-    return !owner || owner.host !== hostname() || !pidAlive(owner.pid);
+    if (!owner || owner.host !== hostname() || !pidAlive(owner.pid)) return true;
+    const current = owner.start === undefined ? null : procStart(owner.pid);
+    if (current !== null) return current !== owner.start;
+    return age >= HARD_GUARD_MS;
   };
   const deadline = Date.now() + waitMs;
   for (;;) {
@@ -151,10 +163,7 @@ function withGuard<T>(
       // Residual window: two claimants of one crashed guard, both inside the sub-millisecond gap
       // between a check and a rename, can still displace each other's fresh guard. Node offers
       // no OS-level flock, so this needs a crashed holder plus simultaneous claimants to bite.
-      try {
-        linkSync(aside, guard);
-        rmSync(aside, { force: true }); // the guard path holds the same file again
-      } catch {
+      if (!restoreGuard(aside, guard, linkGuard)) {
         renameSync(aside, `${guard}.displaced-${randomBytes(4).toString("hex")}`);
         return { ok: false };
       }
@@ -170,14 +179,53 @@ function withGuard<T>(
   }
 }
 
-/** `{pid, host}` recorded in a guard, or null for an unreadable or legacy one. */
-function guardOwner(text: string | null): { pid: number; host: string } | null {
+/**
+ * Put a displaced guard back at the canonical path without clobbering: a hard link, or where
+ * hard links are unsupported an exclusive write of the same content (same token, so its owner's
+ * `finally` still removes it). The displaced copy goes only once the canonical one is in place.
+ * False when the canonical path is already taken (or the restore failed otherwise).
+ */
+function restoreGuard(aside: string, guard: string, link: (from: string, to: string) => void): boolean {
   try {
-    const data = JSON.parse(text ?? "") as { pid?: unknown; host?: unknown };
-    return typeof data.pid === "number" && typeof data.host === "string" ? { pid: data.pid, host: data.host } : null;
+    link(aside, guard);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code ?? "";
+    if (!NO_LINK_CODES.has(code)) return false;
+    const content = readText(aside);
+    if (content === null) return false;
+    try {
+      writeFileSync(guard, content, { flag: "wx" });
+    } catch {
+      return false;
+    }
+  }
+  rmSync(aside, { force: true });
+  return true;
+}
+
+type GuardOwner = { pid: number; host: string; start?: string };
+
+/** `{pid, host, start?}` recorded in a guard, or null for an unreadable or legacy one. */
+function guardOwner(text: string | null): GuardOwner | null {
+  try {
+    const data = JSON.parse(text ?? "") as { pid?: unknown; host?: unknown; start?: unknown };
+    if (typeof data.pid !== "number" || typeof data.host !== "string") return null;
+    return { pid: data.pid, host: data.host, ...(typeof data.start === "string" ? { start: data.start } : {}) };
   } catch {
     return null;
   }
+}
+
+/**
+ * Process start time (field 22 of `/proc/<pid>/stat`, clock ticks since boot): with the pid it
+ * identifies a process across PID reuse. Null where `/proc` is unavailable or the pid is gone.
+ */
+function readProcStart(pid: number): string | null {
+  const stat = readText(`/proc/${pid}/stat`);
+  if (stat === null) return null;
+  // Field 2 (comm) is parenthesised and may contain spaces; fields 3… follow the last `)`.
+  const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  return rest[19] ?? null;
 }
 
 /** `process.kill(pid, 0)`: ESRCH means dead; success or EPERM means a live process. */

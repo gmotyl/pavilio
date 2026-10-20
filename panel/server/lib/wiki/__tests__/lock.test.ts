@@ -16,9 +16,9 @@ function writeLock(content: string) {
 /** Temp, guard and aside files next to the lock. */
 const sideFiles = () => readdirSync(join(projectDir, "wiki")).filter((f) => f.startsWith(".ingest.lock."));
 
-/** Backdate a file's mtime by a minute. */
-function age(path: string) {
-  const old = new Date(Date.now() - 60_000);
+/** Backdate a file's mtime (by a minute unless told otherwise). */
+function age(path: string, ms = 60_000) {
+  const old = new Date(Date.now() - ms);
   utimesSync(path, old, old);
 }
 
@@ -228,6 +228,27 @@ describe("takeLock", () => {
     expect(sideFiles()).toEqual([".ingest.lock.takeover"]);
   });
 
+  it("restores a displaced fresh guard by an exclusive write where hard links are unsupported", () => {
+    writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
+    const guard = `${lockPath(projectDir)}.takeover`;
+    writeFileSync(guard, "crashed\n");
+    age(guard);
+    const result = takeLock(projectDir, "s1", NOW, {
+      guardWaitMs: 0,
+      renameGuard: (from, to) => {
+        rmSync(from);
+        writeFileSync(from, "fresh-claimant\n");
+        renameSync(from, to);
+      },
+      linkGuard: () => {
+        throw Object.assign(new Error("not permitted"), { code: "EPERM" });
+      },
+    });
+    expect(result).toEqual({ held: false, takenOver: false, busy: true });
+    expect(readFileSync(guard, "utf8")).toBe("fresh-claimant\n");
+    expect(sideFiles()).toEqual([".ingest.lock.takeover"]);
+  });
+
   it("never deletes a displaced fresh guard it cannot put back", () => {
     writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
     const guard = `${lockPath(projectDir)}.takeover`;
@@ -251,7 +272,7 @@ describe("takeLock", () => {
   });
 
   describe("claiming an old guard", () => {
-    const guardOf = (owner: { pid: number; host: string }) => {
+    const guardOf = (owner: { pid: number; host: string; start?: string }) => {
       writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
       const guard = `${lockPath(projectDir)}.takeover`;
       writeFileSync(guard, JSON.stringify({ token: "t", ...owner }) + "\n");
@@ -270,6 +291,30 @@ describe("takeLock", () => {
       const pidAlive = (pid: number) => pid !== 424242;
       expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0, pidAlive })).toEqual({ held: true, takenOver: true });
       expect(sideFiles()).toEqual([]);
+    });
+
+    it("claims a same-host guard whose pid was reused by another process", () => {
+      guardOf({ pid: process.pid, host: hostname(), start: "111" });
+      const procStart = () => "222";
+      expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0, procStart })).toEqual({ held: true, takenOver: true });
+    });
+
+    it("never claims a same-host guard whose pid and start time still match", () => {
+      guardOf({ pid: process.pid, host: hostname(), start: "111" });
+      const procStart = () => "111";
+      expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0, procStart })).toEqual({
+        held: false,
+        takenOver: false,
+        busy: true,
+      });
+    });
+
+    it("without /proc, claims a live-pid guard only past the hard bound", () => {
+      const guard = guardOf({ pid: process.pid, host: hostname(), start: "111" });
+      const procStart = () => null;
+      expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0, procStart })).toMatchObject({ busy: true });
+      age(guard, 11 * 60_000);
+      expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0, procStart })).toEqual({ held: true, takenOver: true });
     });
 
     it("claims another host's guard once it is old", () => {
