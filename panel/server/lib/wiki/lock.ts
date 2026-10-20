@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "fs";
+import { hostname } from "os";
 import { join } from "path";
 
 /** A lock older than this is considered abandoned and may be taken over. */
@@ -25,6 +26,7 @@ type LockHooks = {
   guardWaitMs?: number;
   onGuardWait?: (waitMs: number) => void;
   renameGuard?: (from: string, to: string) => void;
+  pidAlive?: (pid: number) => boolean;
   afterFallbackWrite?: () => void;
   link?: (existing: string, target: string) => void;
   rename?: (from: string, to: string) => void;
@@ -95,9 +97,10 @@ function readText(path: string): string | null {
 /**
  * Run `fn` holding `<lock>.takeover`, so every replace or removal of the lock is serialized.
  * The guard is created with `wx` and holds a random token; `finally` removes it only while it
- * still holds that token. A guard older than STALE_GUARD_MS was left by a crashed session and
- * is claimed by renaming it to a unique name (only one claimant's rename wins) before creating
- * ours; a moved guard that turns out fresh (created in the claim window) is put back. Waits up to `waitMs` for a busy guard; `{ ok: false }` when it stays busy.
+ * still holds that token. The guard records `pid` and `host`; an old guard whose owner is gone
+ * (see `claimable`) is claimed by renaming it to a unique name (only one claimant's rename wins)
+ * before creating ours; a moved guard that turns out claimable no more is put back, never
+ * deleted. Waits up to `waitMs` for a busy guard; `{ ok: false }` when it stays busy.
  */
 function withGuard<T>(
   path: string,
@@ -107,8 +110,20 @@ function withGuard<T>(
   fn: () => T,
 ): { ok: true; value: T } | { ok: false } {
   const guard = `${path}.takeover`;
-  const token = `${session}-${randomBytes(8).toString("hex")}\n`;
+  const token = JSON.stringify({ token: unique(session), pid: process.pid, host: hostname() }) + "\n";
   const renameGuard = hooks.renameGuard ?? renameSync;
+  const pidAlive = hooks.pidAlive ?? isPidAlive;
+  /**
+   * A guard may be claimed only when it is older than STALE_GUARD_MS and its owner is gone:
+   * on this host its recorded pid must be dead; another host's (or an unreadable) guard counts
+   * as gone once old. A live same-host owner's guard is never claimed.
+   */
+  const claimable = (file: string): boolean => {
+    const age = ageMs(file);
+    if (age === undefined || age < STALE_GUARD_MS) return false;
+    const owner = guardOwner(readText(file));
+    return !owner || owner.host !== hostname() || !pidAlive(owner.pid);
+  };
   const deadline = Date.now() + waitMs;
   for (;;) {
     try {
@@ -117,8 +132,7 @@ function withGuard<T>(
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
-    const age = ageMs(guard);
-    if (age !== undefined && age >= STALE_GUARD_MS) {
+    if (claimable(guard)) {
       const aside = `${guard}.stale-${unique(session)}`;
       try {
         renameGuard(guard, aside);
@@ -126,26 +140,24 @@ function withGuard<T>(
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; // another claimant won
         continue;
       }
-      // Between the age check and the rename a claimant may have created a new guard: what we
-      // moved must itself be stale, otherwise put it back (no-clobber) and keep waiting.
-      const movedAge = ageMs(aside);
-      if (movedAge !== undefined && movedAge < STALE_GUARD_MS) {
-        try {
-          linkSync(aside, guard);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-            rmSync(aside, { force: true });
-            return { ok: false }; // cannot restore it safely: busy, never enter
-          }
-        }
-        rmSync(aside, { force: true });
-        if (Date.now() >= deadline) return { ok: false };
-        hooks.onGuardWait?.(waitMs);
-        sleep(10);
+      if (claimable(aside)) {
+        rmSync(aside, { force: true }); // really a crashed owner's guard
         continue;
       }
-      rmSync(aside, { force: true });
-      continue;
+      // Between the check and the rename a claimant created a new guard and we moved it: put it
+      // back without clobbering. If another guard already took its place, never delete the
+      // displaced one — leave it under a `displaced-` name (gitignored) and answer busy.
+      //
+      // Residual window: two claimants of one crashed guard, both inside the sub-millisecond gap
+      // between a check and a rename, can still displace each other's fresh guard. Node offers
+      // no OS-level flock, so this needs a crashed holder plus simultaneous claimants to bite.
+      try {
+        linkSync(aside, guard);
+        rmSync(aside, { force: true }); // the guard path holds the same file again
+      } catch {
+        renameSync(aside, `${guard}.displaced-${randomBytes(4).toString("hex")}`);
+        return { ok: false };
+      }
     }
     if (Date.now() >= deadline) return { ok: false };
     hooks.onGuardWait?.(waitMs);
@@ -155,6 +167,26 @@ function withGuard<T>(
     return { ok: true, value: fn() };
   } finally {
     if (readText(guard) === token) rmSync(guard, { force: true });
+  }
+}
+
+/** `{pid, host}` recorded in a guard, or null for an unreadable or legacy one. */
+function guardOwner(text: string | null): { pid: number; host: string } | null {
+  try {
+    const data = JSON.parse(text ?? "") as { pid?: unknown; host?: unknown };
+    return typeof data.pid === "number" && typeof data.host === "string" ? { pid: data.pid, host: data.host } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `process.kill(pid, 0)`: ESRCH means dead; success or EPERM means a live process. */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== "ESRCH";
   }
 }
 

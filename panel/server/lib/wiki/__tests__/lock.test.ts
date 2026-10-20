@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync, existsSync, utimesSync } from "fs";
-import { tmpdir } from "os";
+import { hostname, tmpdir } from "os";
 import { join } from "path";
 
 import { takeLock, releaseLock, lockPath, STALE_LOCK_MS } from "../lock";
@@ -226,6 +226,56 @@ describe("takeLock", () => {
     expect(result).toEqual({ held: false, takenOver: false, busy: true });
     expect(readFileSync(guard, "utf8")).toBe("fresh-claimant\n");
     expect(sideFiles()).toEqual([".ingest.lock.takeover"]);
+  });
+
+  it("never deletes a displaced fresh guard it cannot put back", () => {
+    writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
+    const guard = `${lockPath(projectDir)}.takeover`;
+    writeFileSync(guard, "crashed\n");
+    age(guard);
+    const result = takeLock(projectDir, "s1", NOW, {
+      guardWaitMs: 0,
+      // A claimant replaced the stale guard (A), and yet another one (B) appears once A is moved.
+      renameGuard: (from, to) => {
+        rmSync(from);
+        writeFileSync(from, "A\n");
+        renameSync(from, to);
+        writeFileSync(from, "B\n");
+      },
+    });
+    expect(result).toEqual({ held: false, takenOver: false, busy: true });
+    expect(readFileSync(guard, "utf8")).toBe("B\n");
+    const displaced = sideFiles().filter((f) => f.startsWith(".ingest.lock.takeover.displaced-"));
+    expect(displaced).toHaveLength(1);
+    expect(readFileSync(join(projectDir, "wiki", displaced[0]), "utf8")).toBe("A\n");
+  });
+
+  describe("claiming an old guard", () => {
+    const guardOf = (owner: { pid: number; host: string }) => {
+      writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
+      const guard = `${lockPath(projectDir)}.takeover`;
+      writeFileSync(guard, JSON.stringify({ token: "t", ...owner }) + "\n");
+      age(guard);
+      return guard;
+    };
+
+    it("never claims a live same-host owner's guard", () => {
+      const guard = guardOf({ pid: process.pid, host: hostname() });
+      expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0 })).toEqual({ held: false, takenOver: false, busy: true });
+      expect(existsSync(guard)).toBe(true);
+    });
+
+    it("claims a same-host guard whose pid is dead", () => {
+      guardOf({ pid: 424242, host: hostname() });
+      const pidAlive = (pid: number) => pid !== 424242;
+      expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0, pidAlive })).toEqual({ held: true, takenOver: true });
+      expect(sideFiles()).toEqual([]);
+    });
+
+    it("claims another host's guard once it is old", () => {
+      guardOf({ pid: process.pid, host: `${hostname()}-elsewhere` });
+      expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0 })).toEqual({ held: true, takenOver: true });
+    });
   });
 
   it("own refresh and release wait out a crashed guard; a foreign take waits briefly", () => {
