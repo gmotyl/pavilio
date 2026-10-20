@@ -204,6 +204,30 @@ describe("takeLock", () => {
     expect(sideFiles()).toEqual([]);
   });
 
+  it("puts back a fresh guard renamed aside in the claim window and does not enter", () => {
+    writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
+    const guard = `${lockPath(projectDir)}.takeover`;
+    writeFileSync(guard, "crashed\n");
+    age(guard);
+    let entered = false;
+    const result = takeLock(projectDir, "s1", NOW, {
+      guardWaitMs: 0,
+      // Between our age check and our rename, another claimant replaced the stale guard.
+      renameGuard: (from, to) => {
+        rmSync(from);
+        writeFileSync(from, "fresh-claimant\n");
+        renameSync(from, to);
+      },
+      underGuard: () => {
+        entered = true;
+      },
+    });
+    expect(entered).toBe(false);
+    expect(result).toEqual({ held: false, takenOver: false, busy: true });
+    expect(readFileSync(guard, "utf8")).toBe("fresh-claimant\n");
+    expect(sideFiles()).toEqual([".ingest.lock.takeover"]);
+  });
+
   it("own refresh and release wait out a crashed guard; a foreign take waits briefly", () => {
     const guard = `${lockPath(projectDir)}.takeover`;
     const budgets: number[] = [];

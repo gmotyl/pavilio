@@ -97,7 +97,7 @@ function readText(path: string): string | null {
  * The guard is created with `wx` and holds a random token; `finally` removes it only while it
  * still holds that token. A guard older than STALE_GUARD_MS was left by a crashed session and
  * is claimed by renaming it to a unique name (only one claimant's rename wins) before creating
- * ours. Waits up to `waitMs` for a busy guard; `{ ok: false }` when it stays busy.
+ * ours; a moved guard that turns out fresh (created in the claim window) is put back. Waits up to `waitMs` for a busy guard; `{ ok: false }` when it stays busy.
  */
 function withGuard<T>(
   path: string,
@@ -122,10 +122,29 @@ function withGuard<T>(
       const aside = `${guard}.stale-${unique(session)}`;
       try {
         renameGuard(guard, aside);
-        rmSync(aside, { force: true });
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; // another claimant won
+        continue;
       }
+      // Between the age check and the rename a claimant may have created a new guard: what we
+      // moved must itself be stale, otherwise put it back (no-clobber) and keep waiting.
+      const movedAge = ageMs(aside);
+      if (movedAge !== undefined && movedAge < STALE_GUARD_MS) {
+        try {
+          linkSync(aside, guard);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+            rmSync(aside, { force: true });
+            return { ok: false }; // cannot restore it safely: busy, never enter
+          }
+        }
+        rmSync(aside, { force: true });
+        if (Date.now() >= deadline) return { ok: false };
+        hooks.onGuardWait?.(waitMs);
+        sleep(10);
+        continue;
+      }
+      rmSync(aside, { force: true });
       continue;
     }
     if (Date.now() >= deadline) return { ok: false };
