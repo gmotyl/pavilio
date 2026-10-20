@@ -25,10 +25,12 @@
  * SOFTWARE.
  */
 import { execFile } from "child_process";
-import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "fs";
+import { existsSync, lstatSync, realpathSync, rmSync, statSync, writeFileSync } from "fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { promisify } from "util";
+
+import { ensureContainedDir } from "./contained-dir";
 
 /**
  * Shallow-clone a git repo into `<projectDir>/wiki/raw/repos/<owner>-<repo>/` and
@@ -206,19 +208,20 @@ async function refresh(parsed: ParsedRepoUrl, target: string, options: CloneRepo
   await git(["reset", "--hard", "--quiet", "FETCH_HEAD"], target, options);
 }
 
-function ensureReposDir(reposDir: string): void {
-  mkdirSync(reposDir, { recursive: true });
+/** Create `wiki/raw/repos/` (containment-checked) with its catch-all `.gitignore`. */
+function ensureReposDir(projectDir: string): string {
+  const reposDir = ensureContainedDir(projectDir, ["wiki", "raw", "repos"]);
   const ignore = join(reposDir, ".gitignore");
   if (!existsSync(ignore)) {
     writeFileSync(ignore, "# Shallow clones are a regenerable cache with their own .git — never commit them.\n*\n");
   }
+  return reposDir;
 }
 
 /** Clone `url` (shallow) into the project's wiki raw layer, or refresh an existing clone. */
 export async function cloneRepo(projectDir: string, url: string, options: CloneRepoOptions = {}): Promise<CloneReceipt> {
   const parsed = parseRepoUrl(url);
-  const reposDir = join(projectDir, "wiki", "raw", "repos");
-  ensureReposDir(reposDir);
+  const reposDir = ensureReposDir(projectDir);
   const clonePath = `raw/repos/${cloneDirName(parsed.owner, parsed.repo)}`;
   const target = join(projectDir, "wiki", clonePath);
   // Every rm below is confined to a direct child of raw/repos/.

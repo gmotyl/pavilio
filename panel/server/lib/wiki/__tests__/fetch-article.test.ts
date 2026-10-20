@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync, existsSync, symlinkSync } from "fs";
 import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
 import { tmpdir } from "os";
@@ -70,6 +70,19 @@ afterEach(() => {
 });
 
 describe("fetchArticle", () => {
+  it("refuses a symlinked wiki/raw without writing through it", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "wiki-fetch-outside-"));
+    try {
+      mkdirSync(join(projectDir, "wiki"));
+      symlinkSync(outside, join(projectDir, "wiki", "raw"));
+
+      await expect(fetchArticle(projectDir, `${baseUrl}/p/x`)).rejects.toThrow(/symlink/i);
+      expect(readdirSync(outside)).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it("converts an article to markdown", async () => {
     const url = `${baseUrl}/p/how-wikis-beat-context-windows`;
     const receipt = await fetchArticle(projectDir, url, { now: new Date("2026-10-20T12:00:00Z") });

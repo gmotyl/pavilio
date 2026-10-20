@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, symlinkSync } from "fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, existsSync, readFileSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { pathToFileURL } from "url";
@@ -134,6 +134,21 @@ describe("cloneRepo", () => {
     await expect(cloneRepo(projectDir, repoUrl, { env: ENV })).rejects.toThrow(/symlink/i);
     expect(existsSync(join(elsewhere, "README.md"))).toBe(true);
   });
+});
+
+describe("cloneRepo containment", () => {
+  for (const linked of ["wiki", "wiki/raw", "wiki/raw/repos"]) {
+    it(`refuses a symlinked ${linked} before touching anything`, async () => {
+      const outside = join(root, "outside");
+      mkdirSync(outside);
+      const parts = linked.split("/");
+      mkdirSync(join(projectDir, ...parts.slice(0, -1)), { recursive: true });
+      symlinkSync(outside, join(projectDir, ...parts));
+
+      await expect(cloneRepo(projectDir, repoUrl, { env: ENV })).rejects.toThrow(/symlink/i);
+      expect(readdirSync(outside)).toEqual([]);
+    });
+  }
 });
 
 describe("parseRepoUrl", () => {

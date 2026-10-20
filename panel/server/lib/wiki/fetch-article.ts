@@ -24,11 +24,13 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-import { mkdirSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
 import { join } from "path";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
+
+import { ensureContainedDir } from "./contained-dir";
 
 /**
  * Fetch a web article into `<projectDir>/wiki/raw/article-<slug>.md` as markdown.
@@ -137,6 +139,8 @@ export async function fetchArticle(
   url: string,
   options: FetchArticleOptions = {},
 ): Promise<ArticleReceipt> {
+  // Refuse a symlinked or escaping wiki/raw before any network or disk work.
+  const rawDir = ensureContainedDir(projectDir, ["wiki", "raw"]);
   const html = await fetchHtml(url, options);
   const { document } = parseHTML(html);
 
@@ -171,8 +175,7 @@ export async function fetchArticle(
     "",
     "",
   ].join("\n");
-  const file = join(projectDir, "wiki", raw);
-  mkdirSync(join(projectDir, "wiki", "raw"), { recursive: true });
+  const file = join(rawDir, `article-${slug}.md`);
   writeFileSync(file, `${header}${body}\n`);
 
   const receipt: ArticleReceipt = { raw, title };
