@@ -35,8 +35,10 @@ Never edit one by hand; regenerate it.
   progress. Records are cited in place by their project-relative path, never copied.
 - **Raw file** — anything without a stable workspace home, snapshotted verbatim under `wiki/raw/`:
   `<slug>.md` (outside file), `article-<slug>.md`, `snippet-<YYYY-MM-DD>-<slug>.md`,
-  `context-snapshot-<YYYY-MM-DD>.md`, `repos/<owner>-<repo>/`. A raw file is never rewritten
-  (clones are refreshed in place by `clone-repo`).
+  `context-snapshot-<YYYY-MM-DD>.md`, its per-section split
+  `context-snapshot-<YYYY-MM-DD>/<nn>-<section-slug>.md` (written by migrate; source page
+  `sources/context-snapshot-<YYYY-MM-DD>-<section-slug>.md`), `repos/<owner>-<repo>/`. A raw file
+  is never rewritten (clones are refreshed in place by `clone-repo`).
 - **Source page** — `wiki/sources/<kind>-<stem>.md`, one per record or raw file. `<kind>` is
   `note`, `memo`, `progress`, `adr`, `proposal`, `design`, `file`, `article`, `snippet` or
   `context`; `<stem>` is the file stem with a leading `<kind>-` stripped (the change id for
