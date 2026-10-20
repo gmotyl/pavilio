@@ -70,6 +70,19 @@ afterEach(() => {
 });
 
 describe("fetchArticle", () => {
+  it("refreshes the same URL in place and suffixes a colliding slug from another URL", async () => {
+    const first = await fetchArticle(projectDir, `${baseUrl}/a/story`);
+    expect(first.raw).toBe("raw/article-story.md");
+    expect((await fetchArticle(projectDir, `${baseUrl}/a/story`)).raw).toBe("raw/article-story.md");
+
+    const other = await fetchArticle(projectDir, `${baseUrl}/b/story`);
+    expect(other.raw).toMatch(/^raw\/article-story-[0-9a-f]{6}\.md$/);
+    expect(readFileSync(join(projectDir, "wiki", first.raw), "utf8")).toContain(`${baseUrl}/a/story`);
+    expect(readFileSync(join(projectDir, "wiki", other.raw), "utf8")).toContain(`${baseUrl}/b/story`);
+    // Deterministic: the other URL lands on its suffixed file again.
+    expect((await fetchArticle(projectDir, `${baseUrl}/b/story`)).raw).toBe(other.raw);
+  });
+
   it("refuses a symlinked wiki/raw without writing through it", async () => {
     const outside = mkdtempSync(join(tmpdir(), "wiki-fetch-outside-"));
     try {

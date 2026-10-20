@@ -24,7 +24,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-import { writeFileSync } from "fs";
+import { createHash } from "crypto";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
@@ -33,7 +34,8 @@ import TurndownService from "turndown";
 import { ensureContainedDir } from "./contained-dir";
 
 /**
- * Fetch a web article into `<projectDir>/wiki/raw/article-<slug>.md` as markdown.
+ * Fetch a web article into `<projectDir>/wiki/raw/article-<slug>.md` as markdown (a slug
+ * already taken by a different URL gets a short URL-hash suffix).
  *
  * Three jobs, in order: get the HTML (with a browser user agent, because most
  * publishers block default client UAs), find the part of the page that is the
@@ -101,6 +103,28 @@ export function articleSlug(url: string, title: string): string {
   return slugify(segment) || slugify(title) || "untitled";
 }
 
+/** `source_url` of an existing raw snapshot, or null when unreadable. */
+function snapshotUrl(file: string): string | null {
+  try {
+    const match = /^source_url: (.+)$/m.exec(readFileSync(file, "utf8"));
+    const value: unknown = match ? JSON.parse(match[1]) : null;
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The snapshot file name for `url`: `article-<slug>.md`, refreshed in place when it already holds
+ * the same URL. Taken by another URL → `article-<slug>-<6 hex of the URL's sha256>.md`.
+ */
+function snapshotName(rawDir: string, slug: string, url: string): string {
+  const plain = `article-${slug}.md`;
+  const file = join(rawDir, plain);
+  if (!existsSync(file) || snapshotUrl(file) === url) return plain;
+  return `article-${slug}-${createHash("sha256").update(url).digest("hex").slice(0, 6)}.md`;
+}
+
 function metaContent(document: Document, selector: string): string | null {
   const value = document.querySelector(selector)?.getAttribute("content")?.trim();
   return value ? value : null;
@@ -160,8 +184,8 @@ export async function fetchArticle(
   // The title is written as the H1 below; drop a duplicate leading H1.
   body = body.replace(/^#\s+(.+)\n+/, (line, heading: string) => (heading.trim() === title ? "" : line));
 
-  const slug = articleSlug(url, title);
-  const raw = `raw/article-${slug}.md`;
+  const name = snapshotName(rawDir, articleSlug(url, title), url);
+  const raw = `raw/${name}`;
   const fetched = (options.now ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
   const header = [
     "---",
@@ -175,7 +199,7 @@ export async function fetchArticle(
     "",
     "",
   ].join("\n");
-  const file = join(rawDir, `article-${slug}.md`);
+  const file = join(rawDir, name);
   writeFileSync(file, `${header}${body}\n`);
 
   const receipt: ArticleReceipt = { raw, title };
