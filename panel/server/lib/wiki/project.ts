@@ -1,7 +1,8 @@
 import { realpathSync } from "fs";
 import { isAbsolute, join, relative, resolve, sep } from "path";
 
-import { readActiveProjects } from "../registry";
+import { isProjectDir } from "../project-dir";
+import { readActiveProjects, readArchivedProjects } from "../registry";
 
 /** Same default the speech hooks use when the panel did not publish its URL. */
 const DEFAULT_PANEL_URL = "http://127.0.0.1:3010";
@@ -75,29 +76,34 @@ async function projectFromCell(
 /**
  * Resolve the target project: explicit name → cwd under `projects/<name>/` → the panel cell
  * (`PAVILIO_TERMINAL_ID` looked up in `GET <PAVILIO_PANEL_URL>/api/terminal/sessions`). Every
- * candidate must be an active project in `.projects.local.md`. An explicit name that does not
- * match asks rather than falling through, and so does a failed sessions call.
+ * candidate must be a known project: a `projects/<name>/PROJECT.md` (the panel's discovery rule)
+ * or an active row in `.projects.local.md` — the registry is optional — and never one the
+ * registry lists under `## Archived Projects`. An explicit name that does not match asks rather
+ * than falling through, and so does a failed sessions call.
  */
 export async function resolveProject(input: ResolveProjectInput): Promise<ProjectResolution> {
-  const registered = readActiveProjects(join(input.workspaceRoot, "projects"));
-  const isRegistered = (p: string) => registered.includes(p);
+  const projectsDir = join(input.workspaceRoot, "projects");
+  const active = readActiveProjects(projectsDir);
+  const archived = readArchivedProjects(projectsDir);
+  const isKnown = (p: string) =>
+    !archived.includes(p) && (active.includes(p) || isProjectDir(projectsDir, p));
 
   if (input.name !== undefined) {
     const name = input.name.trim().replace(/:$/, "");
-    return isRegistered(name)
+    return isKnown(name)
       ? { ok: true, project: name, via: "arg" }
-      : ask(`"${input.name}" is not a registered project`);
+      : ask(`"${input.name}" is not a known project`);
   }
 
   const fromCwd = projectFromCwd(input.workspaceRoot, input.cwd);
-  if (fromCwd && isRegistered(fromCwd)) return { ok: true, project: fromCwd, via: "cwd" };
+  if (fromCwd && isKnown(fromCwd)) return { ok: true, project: fromCwd, via: "cwd" };
 
   const terminalId = input.env.PAVILIO_TERMINAL_ID;
   if (!terminalId) return ask("no --name, cwd is not inside a project, and no panel cell");
 
   const cell = await projectFromCell(input.env, terminalId, input.fetch);
   if ("reason" in cell) return ask(cell.reason);
-  return isRegistered(cell.project)
+  return isKnown(cell.project)
     ? { ok: true, project: cell.project, via: "cell" }
-    : ask(`panel cell project "${cell.project}" is not registered`);
+    : ask(`panel cell project "${cell.project}" is not a known project`);
 }

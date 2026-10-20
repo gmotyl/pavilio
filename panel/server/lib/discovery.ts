@@ -2,6 +2,7 @@ import { readdirSync, existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
+import { isProjectDir } from "./project-dir.js";
 
 export interface RepoEntry {
   name: string;
@@ -27,7 +28,7 @@ export function discoverProjects(): Project[] {
 
   return entries
     .filter((e) => e.isDirectory())
-    .filter((e) => existsSync(join(projectsDir, e.name, "PROJECT.md")))
+    .filter((e) => isProjectDir(projectsDir, e.name))
     .map((e) => {
       const dir = join(projectsDir, e.name);
 

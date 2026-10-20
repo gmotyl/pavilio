@@ -134,4 +134,58 @@ describe("resolveProject", () => {
       expect(res).toMatchObject({ ok: false, ask: true });
     }
   });
+
+  describe("like discovery: a projects/<name>/PROJECT.md is a project", () => {
+    beforeEach(() => {
+      mkdirSync(join(root, "projects", "my-pet-project", "notes"), { recursive: true });
+      writeFileSync(join(root, "projects", "my-pet-project", "PROJECT.md"), "# my pet project\n");
+    });
+
+    it("resolves via arg, cwd and cell without a registry", async () => {
+      rmSync(join(root, ".projects.local.md"));
+      const base = { workspaceRoot: root, env: {}, fetch: noFetch };
+      expect(await resolveProject({ ...base, cwd: root, name: "my-pet-project" })).toEqual({
+        ok: true,
+        project: "my-pet-project",
+        via: "arg",
+      });
+      expect(await resolveProject({ ...base, cwd: join(root, "projects", "my-pet-project", "notes") })).toEqual({
+        ok: true,
+        project: "my-pet-project",
+        via: "cwd",
+      });
+      const { fetch } = stubFetch([{ id: "t1", project: "my-pet-project" }]);
+      expect(await resolveProject({ workspaceRoot: root, cwd: root, env: { PAVILIO_TERMINAL_ID: "t1" }, fetch })).toEqual({
+        ok: true,
+        project: "my-pet-project",
+        via: "cell",
+      });
+    });
+
+    it("resolves an unlisted project dir next to a registry", async () => {
+      expect(await resolveProject({ workspaceRoot: root, cwd: root, env: {}, fetch: noFetch, name: "my-pet-project" })).toMatchObject({
+        ok: true,
+        project: "my-pet-project",
+      });
+    });
+
+    it("asks for a project the registry lists as archived, even with a PROJECT.md", async () => {
+      mkdirSync(join(root, "projects", "old"), { recursive: true });
+      writeFileSync(join(root, "projects", "old", "PROJECT.md"), "# old\n");
+      expect(await resolveProject({ workspaceRoot: root, cwd: root, env: {}, fetch: noFetch, name: "old" })).toMatchObject({
+        ok: false,
+        ask: true,
+      });
+    });
+
+    it("asks for an unknown dir", async () => {
+      rmSync(join(root, ".projects.local.md"));
+      mkdirSync(join(root, "projects", "scratch"), { recursive: true }); // no PROJECT.md
+      const base = { workspaceRoot: root, env: {}, fetch: noFetch };
+      expect(await resolveProject({ ...base, cwd: root, name: "scratch" })).toMatchObject({ ok: false, ask: true });
+      expect(await resolveProject({ ...base, cwd: root, name: "ghost" })).toMatchObject({ ok: false, ask: true });
+      expect(await resolveProject({ ...base, cwd: root, name: "../projects" })).toMatchObject({ ok: false, ask: true });
+      expect(await resolveProject({ ...base, cwd: join(root, "projects", "scratch") })).toMatchObject({ ok: false, ask: true });
+    });
+  });
 });

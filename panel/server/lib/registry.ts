@@ -127,6 +127,21 @@ export function markRestoredInRegistry(projectsDir: string, name: string): void 
   writeFileSync(path, lines.join(eol));
 }
 
+/** Project names listed under `## Archived Projects`. A missing registry yields `[]`. */
+export function readArchivedProjects(projectsDir: string): string[] {
+  const path = registryPath(projectsDir);
+  if (!existsSync(path)) return [];
+  const lines = readFileSync(path, "utf8").split(/\r?\n/);
+  const archStart = lines.findIndex((l) => l.trim() === ARCHIVED_HEADER);
+  if (archStart === -1) return [];
+  const names: string[] = [];
+  for (let i = archStart + 1; i < sectionEnd(lines, archStart); i++) {
+    const name = rowName(lines[i]);
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
 /**
  * Active project names from the registry — every table row above the archived section, in file
  * order. A missing registry yields `[]`.

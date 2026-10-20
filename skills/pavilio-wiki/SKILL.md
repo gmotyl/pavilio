@@ -30,6 +30,9 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 3. Else `scripts/wiki project` (cwd, then the panel cell).
 4. Exit 2 → ask which project's wiki to use, and do nothing else.
 
+A project is any `projects/<p>/` with a `PROJECT.md`, as the panel lists them — `.projects.local.md`
+is optional, and only its `## Archived Projects` rows are refused.
+
 ## 2. Pick the mode
 
 - First remaining word is `ingest` → **Ingest**. Only this verb ingests: paths and URLs inside a
