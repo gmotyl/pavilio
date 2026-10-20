@@ -1,11 +1,18 @@
 import { useNavigate } from "react-router-dom";
-import { Children, cloneElement, isValidElement, lazy, Suspense, useMemo, type MouseEvent, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, lazy, Suspense, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
 import CopyIconButton from "../shell/CopyIconButton";
+import { extractWikiLinks } from "../../../server/lib/wiki/wikilinks";
+import remarkWikiLinks, {
+  owningProject,
+  wikiLinkPath,
+  WIKILINK_ATTR,
+  WIKILINK_MISSING_CLASS,
+} from "./remarkWikiLinks";
 
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
@@ -111,8 +118,56 @@ function markBlockCode(children: ReactNode): ReactNode {
   });
 }
 
+/**
+ * The projectsDir-relative paths of every wikilink target in `content`, deduplicated and
+ * sorted — joined with newlines so it is a stable effect dependency.
+ */
+function wikiLinkTargets(content: string, basePath: string | undefined): string {
+  if (!content.includes("[[")) return "";
+  const fromProject = owningProject(basePath);
+  const paths = new Set<string>();
+  for (const link of extractWikiLinks(content)) {
+    const path = wikiLinkPath(link, fromProject);
+    if (path) paths.add(path);
+  }
+  return [...paths].sort().join("\n");
+}
+
+/**
+ * Which wikilink targets do not exist. Links render optimistically; once the server answers,
+ * the missing ones turn into warning text. A failed check leaves every link in place.
+ */
+function useMissingWikiLinks(targets: string): ReadonlySet<string> {
+  const [missing, setMissing] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    setMissing(new Set());
+    if (!targets) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/files/exists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths: targets.split("\n") }),
+        });
+        if (!res.ok) return;
+        const { exists } = (await res.json()) as { exists?: Record<string, boolean> };
+        if (cancelled || !exists) return;
+        setMissing(new Set(Object.keys(exists).filter((p) => exists[p] === false)));
+      } catch {
+        // Offline or no endpoint: keep the optimistic links.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [targets]);
+  return missing;
+}
+
 export default function MarkdownRenderer({ content, basePath }: MarkdownRendererProps) {
   const navigate = useNavigate();
+  const missingWikiLinks = useMissingWikiLinks(useMemo(() => wikiLinkTargets(content, basePath), [content, basePath]));
 
   const components = useMemo<Components>(() => {
     // Fenced-code handling does not depend on where the file lives. Keep it out
@@ -216,6 +271,14 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
     // basePath too (e.g. a design doc from an OpenSpec backend outside projectsDir).
     const a: Components["a"] = ({ href, children, ...props }) => {
       if (!href) return <a {...props}>{children}</a>;
+      const wikiTarget = (props as Record<string, unknown>)[WIKILINK_ATTR];
+      if (typeof wikiTarget === "string" && missingWikiLinks.has(wikiTarget)) {
+        return (
+          <span className={WIKILINK_MISSING_CLASS} title={`Missing: ${wikiTarget}`}>
+            {children}
+          </span>
+        );
+      }
       if (isAppRoute(href)) return inAppLink(href, children, props);
       if (!basePath) return <a href={href} {...props}>{children}</a>;
 
@@ -246,12 +309,12 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
         return <img src={rawFileUrl(resolved)} alt={alt} {...props} />;
       },
     };
-  }, [basePath, navigate]);
+  }, [basePath, navigate, missingWikiLinks]);
 
   return (
     <div className="prose prose-invert prose-zinc max-w-none">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath }]]}
         rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }], rehypeRaw]}
         components={components}
       >
