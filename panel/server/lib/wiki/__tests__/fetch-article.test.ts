@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync, existsSync, symlinkSync } from "fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync, existsSync, symlinkSync, writeFileSync } from "fs";
 import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
 import { tmpdir } from "os";
@@ -70,6 +70,20 @@ afterEach(() => {
 });
 
 describe("fetchArticle", () => {
+  it("refuses to write through a symlinked snapshot file", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "wiki-fetch-outside-"));
+    try {
+      writeFileSync(join(outside, "target.md"), "keep\n");
+      mkdirSync(join(projectDir, "wiki", "raw"), { recursive: true });
+      symlinkSync(join(outside, "target.md"), join(projectDir, "wiki", "raw", "article-story.md"));
+
+      await expect(fetchArticle(projectDir, `${baseUrl}/a/story`)).rejects.toThrow(/symlink/i);
+      expect(readFileSync(join(outside, "target.md"), "utf8")).toBe("keep\n");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it("refreshes the same URL in place and suffixes a colliding slug from another URL", async () => {
     const first = await fetchArticle(projectDir, `${baseUrl}/a/story`);
     expect(first.raw).toBe("raw/article-story.md");

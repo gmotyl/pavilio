@@ -25,7 +25,7 @@
  * SOFTWARE.
  */
 import { createHash } from "crypto";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
@@ -114,6 +114,13 @@ function snapshotUrl(file: string): string | null {
   }
 }
 
+/** A planted `raw/article-*.md` symlink must never redirect the write. */
+function refuseSymlink(file: string): void {
+  if (lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new Error(`refusing a symlinked raw snapshot: ${file}`);
+  }
+}
+
 /**
  * The snapshot file name for `url`: `article-<slug>.md`, refreshed in place when it already holds
  * the same URL. Taken by another URL → `article-<slug>-<6 hex of the URL's sha256>.md`.
@@ -121,6 +128,7 @@ function snapshotUrl(file: string): string | null {
 function snapshotName(rawDir: string, slug: string, url: string): string {
   const plain = `article-${slug}.md`;
   const file = join(rawDir, plain);
+  refuseSymlink(file);
   if (!existsSync(file) || snapshotUrl(file) === url) return plain;
   return `article-${slug}-${createHash("sha256").update(url).digest("hex").slice(0, 6)}.md`;
 }
@@ -200,6 +208,7 @@ export async function fetchArticle(
     "",
   ].join("\n");
   const file = join(rawDir, name);
+  refuseSymlink(file);
   writeFileSync(file, `${header}${body}\n`);
 
   const receipt: ArticleReceipt = { raw, title };
