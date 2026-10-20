@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -24,12 +24,14 @@ const REGISTRY = [
 /** A fetch stub that records the URL and answers with `body` (or throws when `body` is an Error). */
 function stubFetch(body: unknown, status = 200) {
   const calls: string[] = [];
-  const fetch: FetchLike = async (url) => {
+  const headers: (Record<string, string> | undefined)[] = [];
+  const fetch: FetchLike = async (url, init) => {
     calls.push(String(url));
+    headers.push(init?.headers);
     if (body instanceof Error) throw body;
     return new Response(JSON.stringify(body), { status });
   };
-  return { fetch, calls };
+  return { fetch, calls, headers };
 }
 
 const noFetch: FetchLike = async () => {
@@ -70,10 +72,22 @@ describe("resolveProject", () => {
       fetch: noFetch,
     });
     expect(res).toEqual({ ok: true, project: "metro", via: "cwd" });
+    // a workspace reached through a symlink still resolves
+    const linkDir = mkdtempSync(join(tmpdir(), "wiki-project-link-"));
+    const link = join(linkDir, "ws");
+    symlinkSync(root, link);
+    const viaLink = await resolveProject({
+      workspaceRoot: root,
+      cwd: join(link, "projects", "metro"),
+      env: {},
+      fetch: noFetch,
+    });
+    rmSync(linkDir, { recursive: true, force: true });
+    expect(viaLink).toEqual({ ok: true, project: "metro", via: "cwd" });
   });
 
   it("resolves from the panel cell", async () => {
-    const { fetch, calls } = stubFetch([
+    const { fetch, calls, headers } = stubFetch([
       { id: "t0", project: "metro" },
       { id: "t1", project: "pavilio" },
     ]);
@@ -85,6 +99,17 @@ describe("resolveProject", () => {
     });
     expect(res).toEqual({ ok: true, project: "pavilio", via: "cell" });
     expect(calls).toEqual(["http://127.0.0.1:4999/api/terminal/sessions"]);
+    expect(headers[0]?.authorization).toBeUndefined();
+
+    // a token-protected panel gets the bearer token
+    const withToken = stubFetch([{ id: "t1", project: "pavilio" }]);
+    await resolveProject({
+      workspaceRoot: root,
+      cwd: root,
+      env: { PAVILIO_TERMINAL_ID: "t1", PANEL_TOKEN: "s3cret" },
+      fetch: withToken.fetch,
+    });
+    expect(withToken.headers[0]).toEqual({ authorization: "Bearer s3cret" });
   });
 
   it("asks when nothing resolves", async () => {

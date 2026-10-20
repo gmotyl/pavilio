@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { markArchivedInRegistry, markRestoredInRegistry } from "../registry";
+import { markArchivedInRegistry, markRestoredInRegistry, readActiveProjects } from "../registry";
 
 let root = "";
 let projectsDir = "";
@@ -71,5 +71,13 @@ describe("registry sync", () => {
     markArchivedInRegistry(projectsDir, "gamma");
     const out = readFileSync(registryFile(), "utf8");
     expect(out).toContain("| gamma | `projects/archived/gamma/` |");
+  });
+
+  it("reads active projects, skipping archived rows", () => {
+    expect(readActiveProjects(projectsDir)).toEqual(["alpha", "beta"]);
+    markArchivedInRegistry(projectsDir, "alpha");
+    expect(readActiveProjects(projectsDir)).toEqual(["beta"]);
+    rmSync(registryFile());
+    expect(readActiveProjects(projectsDir)).toEqual([]);
   });
 });

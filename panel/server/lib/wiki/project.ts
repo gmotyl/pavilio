@@ -1,4 +1,5 @@
-import { join, relative, resolve, sep } from "path";
+import { realpathSync } from "fs";
+import { isAbsolute, join, relative, resolve, sep } from "path";
 
 import { readActiveProjects } from "../registry";
 
@@ -6,7 +7,10 @@ import { readActiveProjects } from "../registry";
 const DEFAULT_PANEL_URL = "http://127.0.0.1:3010";
 const SESSIONS_TIMEOUT_MS = 2000;
 
-export type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
+export type FetchLike = (
+  url: string,
+  init?: { signal?: AbortSignal; headers?: Record<string, string> },
+) => Promise<Response>;
 
 export type ResolveProjectInput = {
   workspaceRoot: string; // the dir that contains `projects/` and `.projects.local.md`
@@ -22,10 +26,19 @@ export type ProjectResolution =
 
 const ask = (reason: string): ProjectResolution => ({ ok: false, ask: true, reason });
 
+/** Canonical path, so a symlinked workspace or cwd still compares equal; plain resolve if missing. */
+function canonical(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}
+
 /** `projects/<name>/…` → `<name>` when cwd sits inside the workspace's projects dir. */
 function projectFromCwd(workspaceRoot: string, cwd: string): string | null {
-  const rel = relative(join(resolve(workspaceRoot), "projects"), resolve(cwd));
-  if (!rel || rel.startsWith("..") || rel.startsWith(sep)) return null;
+  const rel = relative(canonical(join(workspaceRoot, "projects")), canonical(cwd));
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
   return rel.split(sep)[0] || null;
 }
 
@@ -38,7 +51,11 @@ async function projectFromCell(
   const base = (env.PAVILIO_PANEL_URL || DEFAULT_PANEL_URL).replace(/\/+$/, "");
   let sessions: unknown;
   try {
+    // `/api/terminal` sits behind the panel's auth middleware; the token is never logged.
+    const headers: Record<string, string> = {};
+    if (env.PANEL_TOKEN) headers.authorization = `Bearer ${env.PANEL_TOKEN}`;
     const res = await fetch(`${base}/api/terminal/sessions`, {
+      headers,
       signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS),
     });
     if (!res.ok) return { reason: `sessions api answered ${res.status}` };
