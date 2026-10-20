@@ -24,7 +24,8 @@ export type WikiFrontmatter = {
   sources?: string[];
 };
 
-export type ParsedPage = { frontmatter: WikiFrontmatter; body: string };
+/** `frontmatterError`: a frontmatter fence exists but its YAML does not parse (frontmatter is `{}`). */
+export type ParsedPage = { frontmatter: WikiFrontmatter; body: string; frontmatterError?: string };
 
 export type WikiPage = ParsedPage & {
   path: string; // relative to the wiki dir, always "/"-separated
@@ -36,7 +37,7 @@ const DATE_FIELDS = ["created", "updated"] as const;
 
 const FENCE = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 
-/** Split a page into typed frontmatter and body; never throws. */
+/** Split a page into typed frontmatter and body; never throws (a YAML error is reported instead). */
 export function parsePage(text: string): ParsedPage {
   // Editors on Windows may save a UTF-8 BOM, which would hide the opening fence.
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
@@ -47,8 +48,10 @@ export function parsePage(text: string): ParsedPage {
   try {
     // A duplicated key must not cost the whole frontmatter; the last value wins.
     data = parseYaml(match[1] ?? "", { uniqueKeys: false });
-  } catch {
-    return { frontmatter: {}, body };
+  } catch (err) {
+    // First line only: the YAML library appends a multi-line source excerpt.
+    const message = (err instanceof Error ? err.message : String(err)).split("\n")[0].trim();
+    return { frontmatter: {}, body, frontmatterError: message || "invalid YAML" };
   }
   return { frontmatter: toFrontmatter(data), body };
 }

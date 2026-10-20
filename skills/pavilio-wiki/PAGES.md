@@ -8,26 +8,31 @@ the indexes and the panel show it — so make it say what the page answers.
 
 ```yaml
 type: source | entity | concept | repo | overview | question | note | open-questions
-title: Human title            # optional; else the first "# " heading
-description: One line the indexes show
+title: "Human title"          # optional; else the first "# " heading
+description: "One line the indexes show"
 created: 2026-10-20           # set once, never changed
 updated: 2026-10-20           # bumped on every rewrite
 ```
 
+**Quote every string scalar** — `title`, `description`, `record`, `raw` and every list item — as
+a double-quoted JSON string (`description: "Tailscale HTTPS: needs MagicDNS"`, `\"` and `\\`
+escaped). An unquoted `: ` or a leading `[`, `{`, `#`, `*` or `&` breaks the YAML; the page then
+reads as having no frontmatter, `scripts/wiki index` stops, and lint lists it as `malformed`.
+
 A page without `type` stops `scripts/wiki index` and the ingest with it. Path fields hold real
 paths with `.md`: `record` and `raw` relative to the project, `sources` and `cited` as project-root
-paths (`wiki/sources/….md`). Quote any YAML list item that starts with `[[`. Links in bodies use the D14 form without `.md`.
+paths (`wiki/sources/….md`). Links in bodies use the D14 form without `.md`.
 
 ## Source page — `wiki/sources/<kind>-<stem>.md`
 
 ```yaml
 type: source
-description: What this record adds to the project's knowledge
-record: progress/2026-10-19-tts-relay-node20.md  # workspace record
+description: "What this record adds to the project's knowledge"
+record: "progress/2026-10-19-tts-relay-node20.md"  # workspace record
 # or
-raw: wiki/raw/article-edge-tts-limits.md         # raw-layer file
-entities: [jane-doe, edge-tts]                   # bare names
-concepts: [utterance, speech-relay]
+raw: "wiki/raw/article-edge-tts-limits.md"       # raw-layer file
+entities: ["jane-doe", "edge-tts"]               # bare names
+concepts: ["utterance", "speech-relay"]
 ```
 
 Body: `# <title>`, a one-line provenance line linking the record (`From [[progress/…]]`), then
@@ -40,9 +45,9 @@ checklists. Code detail is allowed here; it is cited from `repos/` pages, not co
 ```yaml
 type: entity
 kind: person | repository | service | organization
-description: Who or what it is, in one line
-aliases: [Jane, J. Doe]                          # human-added aliases are kept forever
-sources: [wiki/sources/note-2026-10-01-kickoff.md, wiki/sources/progress-2026-10-19-tts-relay-node20.md]
+description: "Who or what it is, in one line"
+aliases: ["Jane", "J. Doe"]                      # human-added aliases are kept forever
+sources: ["wiki/sources/note-2026-10-01-kickoff.md", "wiki/sources/progress-2026-10-19-tts-relay-node20.md"]
 ```
 
 Body: `# <name>`, what it is, its role in this project, relationships (`[[wiki/entities/…]]`),
@@ -53,9 +58,9 @@ node that links down: `Code: [[wiki/repos/<repo>/index]]`.
 
 ```yaml
 type: concept
-description: What the concept is and why it matters, in one line
+description: "What the concept is and why it matters, in one line"
 aliases: []
-sources: [wiki/sources/….md, wiki/sources/….md]
+sources: ["wiki/sources/….md", "wiki/sources/….md"]
 ```
 
 Body: `# <term>`, definition (agreeing with the `CONTEXT.md` line when one exists), why it is so,
@@ -68,10 +73,10 @@ history and what broke, related concepts, each claim cited. Implementation lives
 
 ```yaml
 type: repo
-description: One line
-raw: wiki/raw/repos/<owner>-<repo>               # the clone directory
+description: "One line"
+raw: "wiki/raw/repos/<owner>-<repo>"             # the clone directory
 commit: 1a2b3c4                                  # clone commit the page was written from
-entities: [<repo>, …]
+entities: ["<repo>", …]
 concepts: […]
 ```
 
@@ -90,8 +95,8 @@ Repo pages count as sources for the ≥2 threshold.
 
 ```yaml
 type: question
-description: The question, in one line
-cited: [wiki/concepts/utterance.md, wiki/sources/progress-2026-10-19-tts-relay-node20.md]
+description: "The question, in one line"
+cited: ["wiki/concepts/utterance.md", "wiki/sources/progress-2026-10-19-tts-relay-node20.md"]
 ```
 
 Body: `# <question>`, the answer as given, `## Cited` with the D14 links, `## Gaps` if the wiki
@@ -107,7 +112,7 @@ save. Enrich in place: append or fold a new section, bump `updated`, keep the re
 ```markdown
 ---
 type: open-questions
-description: Gaps the wiki could not answer and knowledge waiting for a home
+description: "Gaps the wiki could not answer and knowledge waiting for a home"
 ---
 # Open questions
 

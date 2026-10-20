@@ -26,6 +26,10 @@ One file, `wiki/overview.md`, shaped per `skills/pavilio-wiki/PAGES.md § Overvi
 project is, its main actors and concepts, where to start reading. ≤40 lines, D14 links only to
 pages listed in the indexes, no code identifiers, keep `created`, bump `updated`.
 
+- Frontmatter strings — `title`, `description`, `record`, `raw` and every list item — are
+  double-quoted JSON strings: `description: "Tailscale HTTPS: needs MagicDNS"`. An unquoted `: `
+  breaks the YAML (lint reports the page as `malformed`).
+
 ## Receipt
 
 Reply with exactly one JSON object and nothing else:

@@ -99,6 +99,16 @@ describe("parsePage", () => {
     expect(frontmatter).toEqual({ concepts: ["ok"] });
   });
 
+  it("exposes a YAML error instead of silently dropping the frontmatter", () => {
+    const parsed = parsePage("---\ntype: concept\ndescription: Tailscale HTTPS: needs MagicDNS\n---\nBody\n");
+    expect(parsed.frontmatter).toEqual({});
+    expect(parsed.body).toBe("Body\n");
+    expect(parsed.frontmatterError).toMatch(/\S/);
+    // Valid and missing frontmatter carry no error.
+    expect(parsePage("---\ntype: concept\n---\nx\n").frontmatterError).toBeUndefined();
+    expect(parsePage("no fence\n").frontmatterError).toBeUndefined();
+  });
+
   it("strips a leading BOM before the frontmatter", () => {
     expect(parsePage("\uFEFF---\ntype: concept\n---\nBody\n")).toEqual({
       frontmatter: { type: "concept" },
@@ -126,6 +136,7 @@ describe("parsePage", () => {
     expect(parsePage("---\ntype: [unclosed\n---\nBody\n")).toEqual({
       frontmatter: {},
       body: "Body\n",
+      frontmatterError: expect.stringMatching(/\S/),
     });
     expect(parsePage("---\n- just\n- a list\n---\nBody\n").frontmatter).toEqual({});
     expect(parsePage("No frontmatter here\n")).toEqual({

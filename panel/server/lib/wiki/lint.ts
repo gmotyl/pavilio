@@ -23,6 +23,8 @@ import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./w
  *   they are the mentions ledger, not navigation. Exempt: index pages, `overview.md`,
  *   `open-questions.md`, `repos/<repo>/ARCHITECTURE.md` (the repo entry point), and the
  *   interaction layer `questions/**` and `notes/**`, which are reached from the log, not linked.
+ * - **malformed** — pages whose frontmatter fence holds YAML that does not parse (typically an
+ *   unquoted `: ` in a value); reported with the parser's error, and not again as untyped.
  * - **untyped** — pages without a frontmatter `type`.
  * - **stale** — a page whose `updated` (YYYY-MM-DD) is older than one of its sources: each
  *   resolvable `sources:` entry, the `record:` file (project-relative, as in the ledger) and the `raw:` file
@@ -47,8 +49,11 @@ export type StalePage = { page: string; source: string; updated: string; modifie
 export type CodeIdentifierRule = "call" | "path" | "component" | "fence";
 export type CodeIdentifier = { page: string; line: number; rule: CodeIdentifierRule; match: string };
 
+export type MalformedPage = { page: string; error: string };
+
 export type LintReport = {
   broken: BrokenLink[];
+  malformed: MalformedPage[];
   orphans: string[];
   untyped: string[];
   stale: StalePage[];
@@ -220,6 +225,7 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
 
   const broken: BrokenLink[] = [];
   const untyped: string[] = [];
+  const malformed: MalformedPage[] = [];
   const stale: StalePage[] = [];
   const codeIdentifiers: CodeIdentifier[] = [];
   const inbound = new Map<string, Set<string>>(); // target key → linking page keys
@@ -258,7 +264,8 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
     }
     for (const target of brokenTargets) broken.push({ page: path, target });
 
-    if (!page.frontmatter.type) untyped.push(path);
+    if (page.frontmatterError) malformed.push({ page: path, error: page.frontmatterError });
+    else if (!page.frontmatter.type) untyped.push(path);
 
     const { record, raw, updated } = page.frontmatter;
     if (record) {
@@ -298,6 +305,7 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
   return {
     broken: broken.sort((a, b) => byString(a.page, b.page) || byString(a.target, b.target)),
     orphans: orphans.sort(byString),
+    malformed: malformed.sort((a, b) => byString(a.page, b.page)),
     untyped: untyped.sort(byString),
     stale: stale.sort((a, b) => byString(a.page, b.page) || byString(a.source, b.source)),
     codeIdentifiers: codeIdentifiers.sort(

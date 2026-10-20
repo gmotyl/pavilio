@@ -27,7 +27,9 @@ Nothing outside `clonePath` and `wiki/repos/<repo>/`; no web, no other wiki page
 ## Write
 
 Shaped per `skills/pavilio-wiki/PAGES.md § Repo pages`, with `commit: <commitSha>`.
-
+- Frontmatter strings — `title`, `description`, `record`, `raw` and every list item — are
+  double-quoted JSON strings: `description: "Tailscale HTTPS: needs MagicDNS"`. An unquoted `: `
+  breaks the YAML (lint reports the page as `malformed`).
 - Architecture mode: one file, `wiki/repos/<repo>/ARCHITECTURE.md` (rewrite; keep `created`).
 - Question mode: one new file, `wiki/repos/<repo>/<topic-slug>.md`, answering the question with
   file paths and symbols. Never edit `ARCHITECTURE.md` in this mode.

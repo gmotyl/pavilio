@@ -25,10 +25,12 @@ pages by slug from what the sources say; do not open them.
 
 One file, `wiki/<slug>.md`, shaped per `skills/pavilio-wiki/PAGES.md § Entity page` or
 `§ Concept page`.
-
+- Frontmatter strings — `title`, `description`, `record`, `raw` and every list item — are
+  double-quoted JSON strings: `description: "Tailscale HTTPS: needs MagicDNS"`. An unquoted `: `
+  breaks the YAML (lint reports the page as `malformed`).
 - Existing page: keep `created`, every human-added `aliases` entry and every still-true claim;
   merge the new knowledge in; append the new paths to `sources:` in project-root form
-  (`wiki/sources/<kind>-<stem>.md`); bump `updated`. Quote any YAML list item that starts with `[[`.
+  (`wiki/sources/<kind>-<stem>.md`); bump `updated`.
 - New page: synthesise from `sources`; `created` = `updated` = today.
 - Cite every claim with the source page it came from: `([[wiki/sources/<kind>-<stem>]])`.
 - Entities: set `kind`. A `repository` entity links `Code: [[wiki/repos/<name>/index]]`.

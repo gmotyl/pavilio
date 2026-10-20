@@ -143,9 +143,11 @@ tier. Each writer returns exactly one JSON receipt.
 
 ## 5. Lint
 
-`scripts/wiki lint <p>` and present the five groups (`broken`, `orphans`, `untyped`, `stale`,
-`codeIdentifiers`) with page paths and one remedy each — stale pages are refreshed by the next
-ingest, code identifiers move to `wiki/repos/<repo>/` on the next page write. Lint writes nothing
+`scripts/wiki lint <p>` and present the six groups (`broken`, `orphans`, `malformed`, `untyped`,
+`stale`, `codeIdentifiers`) with page paths and one remedy each — malformed frontmatter (the YAML
+error is given) is fixed by re-running that page's writer or quoting the offending value
+(`PAGES.md § Common frontmatter`), stale pages are refreshed by the next ingest, code identifiers
+move to `wiki/repos/<repo>/` on the next page write. Lint writes nothing
 and this skill does not fix the findings in the same run.
 
 ## Non-goals

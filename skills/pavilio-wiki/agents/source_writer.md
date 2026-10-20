@@ -24,7 +24,9 @@ Nothing else: no other records, wiki pages, code or web.
 
 One file, `page`, shaped per `skills/pavilio-wiki/PAGES.md § Source page`; links per
 `skills/pavilio-wiki/CONVENTIONS.md § Links`.
-
+- Frontmatter strings — `title`, `description`, `record`, `raw` and every list item — are
+  double-quoted JSON strings: `description: "Tailscale HTTPS: needs MagicDNS"`. An unquoted `: `
+  breaks the YAML (lint reports the page as `malformed`).
 - Keep mechanisms, decisions and their reasons, gotchas, what broke and why, people and their roles.
 - Drop status lines: PR and issue numbers, test counts, branch and commit names, "pending
   restart", "done/in progress", checklists, timings of the session itself.

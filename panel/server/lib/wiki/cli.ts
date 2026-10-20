@@ -36,7 +36,7 @@ const USAGE = `usage: scripts/wiki <command> [args]
                                             busy: guard still busy, nothing decided — retry)
   mentions <p> [--touched a,b]              {slugs, qualifying}; slugs are entities/x, concepts/x
   index <p>                                 {written, removed} | exit 1 {error, page}
-  lint <p>                                  {broken, orphans, untyped, stale, codeIdentifiers}
+  lint <p>                                  {broken, orphans, malformed, untyped, stale, codeIdentifiers}
   config                                    {sessionStartIngest, writerModel}
   fetch-article <p> <url>                   {raw, title, warning?}
   clone-repo <p> <url>                      {clonePath, commitSha, action}

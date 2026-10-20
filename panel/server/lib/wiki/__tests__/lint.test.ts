@@ -96,6 +96,13 @@ describe("lintWiki", () => {
     expect(lintWiki(root, "pavilio").orphans).toEqual(["wiki/concepts/lonely.md", "wiki/sources/uncited.md"]);
   });
 
+  it("reports malformed frontmatter once, not as untyped", () => {
+    write(`${W}/concepts/broken-yaml.md`, "---\ntype: concept\ndescription: foo: bar\n---\n[[wiki/concepts/linked]]\n");
+    const report = lintWiki(root, "pavilio");
+    expect(report.malformed).toEqual([{ page: "wiki/concepts/broken-yaml.md", error: expect.stringMatching(/\S/) }]);
+    expect(report.untyped).not.toContain("wiki/concepts/broken-yaml.md");
+  });
+
   it("reports untyped pages", () => {
     write(`${W}/concepts/untyped.md`, page(null, "No type. [[wiki/concepts/linked]]\n"));
     write(`${W}/entities/bare.md`, "Just text, no frontmatter.\n");

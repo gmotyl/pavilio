@@ -124,6 +124,8 @@ function groupByKind(pages: WikiPage[]): Group[] {
  */
 export function renderIndexes(pages: WikiPage[]): { ok: true; files: Map<string, string> } | { ok: false; error: string; page: string } {
   const content = pages.filter((p) => !isIndexFile(p.path));
+  const malformed = content.find((p) => p.frontmatterError);
+  if (malformed) return { ok: false, error: `malformed frontmatter: ${malformed.frontmatterError}`, page: malformed.path };
   const untyped = content.find((p) => !p.frontmatter.type?.trim());
   if (untyped) return { ok: false, error: "page has no type", page: untyped.path };
 

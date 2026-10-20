@@ -143,6 +143,12 @@ describe("buildIndex", () => {
     expect(files.map(read)).toEqual(first);
   });
 
+  it("names malformed frontmatter instead of calling the page untyped", () => {
+    seed();
+    write("concepts/bad.md", "---\ntype: concept\ndescription: a: b\n---\nx\n");
+    expect(buildIndex(wikiDir)).toMatchObject({ ok: false, error: expect.stringMatching(/^malformed frontmatter: /), page: "concepts/bad.md" });
+  });
+
   it("fails on an untyped page without writing", () => {
     seed();
     write("concepts/untyped.md", "---\ndescription: forgot the type\n---\nx\n");
