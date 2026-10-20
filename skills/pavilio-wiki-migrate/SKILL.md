@@ -76,14 +76,17 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
    `wiki/raw/<snapshot stem>/<nn>-<section-slug>.md` (`nn` = section order, two digits; text
    before the first `##` goes into `00-preamble.md`). Write only files that are missing. These
    section files are the records the concept pages are seeded from; `pending --only` takes each.
-4. `CONTEXT.md` already rewritten → skip step 4.
+4. `CONTEXT.md` already rewritten → skip step 4 items 1–3; still run items 4–5 when the
+   top-level snapshot is not yet ledgered.
 
 ## 4. Rewrite `CONTEXT.md` as a strict glossary
 
 1. Build the link map the subagent applies to every legacy `[[<name>]]`, first match wins:
    1. spec: `projects/<p>/**/openspec/specs/<name>/spec.md` →
       `[[<project-relative path without .md>]]` (e.g. `[[plans/openspec/specs/speech/spec]]`);
-   2. another glossary term → `[[wiki/concepts/<slug>]]`;
+   2. another glossary term — slugify the name first (lowercase kebab-case ASCII, as
+      `CONVENTIONS.md § Identity and the ledger`), then match the term slugs →
+      `[[wiki/concepts/<slug>]]`;
    3. `[[ADR NNNN]]` (or `[[adr NNNN]]`, `[[NNNN]]`) → the one `adr/NNNN-*.md`, as `[[adr/NNNN-…]]`;
    4. a workspace skill name (`skills/<name>/` exists) → plain text, no brackets;
    5. anything else → plain text, listed in `unresolved`.
@@ -103,7 +106,10 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 3. Verify with `grep`: every `- **` line carries `See [[wiki/concepts/<slug>]]`, and those slugs
    equal the receipt's. A mismatch → re-run the subagent once with the offending lines. Still
    wrong → `cp <snapshot> CONTEXT.md` (restore the original), release the lock, report, stop.
-4. Commit `CONTEXT.md`, `wiki/.gitignore`, `<snapshot>` and its section files:
+4. Ledger the top-level snapshot now — its content is carried by the section files, so a later
+   catch-up must never ingest it as one page: `scripts/wiki pending <p> --only wiki/raw/<snapshot
+   file>` → `scripts/wiki record <p> wiki/raw/<snapshot file> <hash>` (skip when already done).
+5. Commit `CONTEXT.md`, `wiki/.gitignore`, `wiki/log.md`, `<snapshot>` and its section files:
    `<p>: wiki migrate — glossary`.
 
 ## 5. Seed glossary concept pages
@@ -116,17 +122,19 @@ skip the step when none are pending.
    (mechanism, reasons, gotchas, history) under a heading per term — this page is the only route
    from the old glossary prose to the concept pages; list each glossary term of the section in
    `concepts:` under its receipt slug.
-2. **Mentions** — `scripts/wiki mentions <p> --touched <every concepts/<slug> from the step 4
-   receipt>`. Glossary terms qualify with one source (`CONVENTIONS.md § Two sources, and the
-   glossary exemption`).
+2. **Mentions** — `scripts/wiki mentions <p> --touched <slugs>`. First run: every
+   `concepts/<slug>` from the step 4 receipt. Resume (some sections already ledgered): only the
+   slugs from this run's section receipts plus glossary slugs (`See [[wiki/concepts/<slug>]]` in
+   `CONTEXT.md`) whose `wiki/concepts/<slug>.md` is missing — seeded pages are not rewritten.
+   Glossary terms qualify with one source (`CONVENTIONS.md § Two sources, and the glossary
+   exemption`).
 3. One `page_writer` per `qualifying` slug, ≤10 in parallel, refreshing the lock between groups:
-   `sources` = the section source pages `mentions.slugs[<slug>]` lists, `glossary` = the term's
+   `sources` = the section source pages `mentions.slugs[<slug>]` lists, each prefixed `wiki/`
+   (mentions paths are wiki-relative; writers take project-root paths), `glossary` = the term's
    `CONTEXT.md` line.
 4. A glossary slug that did not qualify (its section page missed it) → list it in the report.
 5. `scripts/wiki index <p>` (exit 1 → stop: no record, no commit, report, release).
-6. `scripts/wiki record` each section file whose source page landed; once every section is
-   ledgered, also `record` `<snapshot>` itself (from `pending --only wiki/raw/<snapshot file>`), so
-   a later catch-up does not ingest the whole snapshot again as one page.
+6. `scripts/wiki record` each section file whose source page landed.
 7. Append a log entry (`PAGES.md § log.md`) headed `ingest (migrate)`; commit `projects/<p>/wiki`
    as `<p>: wiki migrate — seeded <n> concepts`.
 
@@ -145,7 +153,7 @@ skip the step when none are pending.
       index that follows it — the overview runs once in step 7.
    3. Page writer inputs: a slug whose page already exists gets only this batch's source pages
       that name it; a slug whose page is **new** gets every source page `mentions.slugs[<slug>]`
-      lists, so mentions from earlier batches are not lost.
+      lists, each prefixed `wiki/`, so mentions from earlier batches are not lost.
    4. Commit message: `<p>: wiki migrate batch <k>/<n> (<m> records)`.
    5. One progress line: batch, records done/total, pages created/updated, failures.
 4. Errors follow `pavilio-wiki SKILL.md § 4. Ingest § Errors`: a failed record is not ledgered and
