@@ -45,6 +45,8 @@ const USER_AGENT =
 export const FETCH_TIMEOUT_MS = 60_000;
 /** A body shorter than this is most likely a paywall, bot wall or teaser. */
 export const MIN_ARTICLE_WORDS = 300;
+/** Paywall markers only count on bodies shorter than this; long articles often carry subscribe CTAs. */
+export const PAYWALL_MARKER_MAX_WORDS = 600;
 
 const PAYWALL_MARKERS = [
   /for paid subscribers/i,
@@ -160,7 +162,7 @@ export async function fetchArticle(
   const header = [
     "---",
     `title: ${JSON.stringify(title)}`,
-    `source_url: ${url}`,
+    `source_url: ${JSON.stringify(url)}`,
     "origin: article",
     `fetched: ${fetched}`,
     "---",
@@ -175,7 +177,7 @@ export async function fetchArticle(
 
   const receipt: ArticleReceipt = { raw, title };
   const words = countWords(parsed?.textContent ?? body);
-  const marker = PAYWALL_MARKERS.find((re) => re.test(body));
+  const marker = words < PAYWALL_MARKER_MAX_WORDS && PAYWALL_MARKERS.some((re) => re.test(body));
   if (marker) {
     receipt.warning = "body matches a paywall marker — likely a subscriber-only stub";
   } else if (words < MIN_ARTICLE_WORDS) {

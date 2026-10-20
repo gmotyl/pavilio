@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { pathToFileURL } from "url";
@@ -84,5 +84,54 @@ describe("cloneRepo", () => {
     const clone = join(projectDir, "wiki", second.clonePath);
     expect(readFileSync(join(clone, "README.md"), "utf8")).toBe("three\n");
     expect(git(["rev-list", "--count", "HEAD"], clone)).toBe("1");
+  });
+
+  it("refuses a branch that would inject git options", async () => {
+    const first = await cloneRepo(projectDir, repoUrl, { env: ENV });
+    const clone = join(projectDir, "wiki", first.clonePath);
+    // Same dir name (acme-widget) as the existing file:// clone.
+    const evil = "https://github.com/acme/widget/tree/--upload-pack=touch${IFS}PWNED;git-upload-pack";
+
+    await expect(cloneRepo(projectDir, evil, { env: ENV })).rejects.toThrow(/branch/i);
+    expect(existsSync(join(clone, "PWNED"))).toBe(false);
+    expect(existsSync(join(projectDir, "PWNED"))).toBe(false);
+    expect(existsSync(join(root, "PWNED"))).toBe(false);
+  });
+
+  it("re-clones when the existing clone has a different origin", async () => {
+    await cloneRepo(projectDir, repoUrl, { env: ENV });
+    // <root>/other/ACME/widget.git maps to the same dir name "acme-widget".
+    const otherBare = join(root, "other", "ACME", "widget.git");
+    mkdirSync(otherBare, { recursive: true });
+    git(["init", "-q", "--bare"], otherBare);
+    git(["symbolic-ref", "HEAD", "refs/heads/main"], otherBare);
+    const otherWork = join(root, "other-work");
+    git(["clone", "-q", otherBare, otherWork], root);
+    git(["checkout", "-q", "-b", "main"], otherWork);
+    writeFileSync(join(otherWork, "README.md"), "other\n");
+    git(["add", "README.md"], otherWork);
+    git(["commit", "-q", "-m", "other"], otherWork);
+    git(["push", "-q", "origin", "HEAD:main"], otherWork);
+    const otherHead = git(["rev-parse", "HEAD"], otherWork);
+    const otherUrl = pathToFileURL(otherBare).href;
+
+    const receipt = await cloneRepo(projectDir, otherUrl, { env: ENV });
+
+    expect(receipt.action).toBe("cloned");
+    expect(receipt.clonePath).toBe("raw/repos/acme-widget");
+    expect(receipt.commitSha).toBe(otherHead);
+    const clone = join(projectDir, "wiki", receipt.clonePath);
+    expect(readFileSync(join(clone, "README.md"), "utf8")).toBe("other\n");
+    expect(git(["remote", "get-url", "origin"], clone)).toBe(otherUrl);
+  });
+
+  it("refuses a symlinked clone dir", async () => {
+    const elsewhere = join(root, "elsewhere");
+    mkdirSync(join(projectDir, "wiki", "raw", "repos"), { recursive: true });
+    git(["clone", "-q", repoUrl, elsewhere], root);
+    symlinkSync(elsewhere, join(projectDir, "wiki", "raw", "repos", "acme-widget"));
+
+    await expect(cloneRepo(projectDir, repoUrl, { env: ENV })).rejects.toThrow(/symlink/i);
+    expect(existsSync(join(elsewhere, "README.md"))).toBe(true);
   });
 });

@@ -36,13 +36,20 @@ const PAYWALL_HTML = `<!doctype html>
 </article>
 </body></html>`;
 
+// A full-length article whose footer CTA mentions subscribers must not be flagged.
+const LONG_WITH_CTA_HTML = ARTICLE_HTML.replace(
+  "</article>",
+  `<p>${PARAGRAPH.repeat(20)}</p><p>Already a subscriber? This post is for paid subscribers too.</p></article>`,
+);
+
 let server: Server;
 let baseUrl = "";
 let projectDir = "";
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    const body = req.url === "/p/paywalled" ? PAYWALL_HTML : ARTICLE_HTML;
+    const body =
+      req.url === "/p/paywalled" ? PAYWALL_HTML : req.url === "/p/long-with-cta" ? LONG_WITH_CTA_HTML : ARTICLE_HTML;
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(body);
   });
@@ -74,7 +81,7 @@ describe("fetchArticle", () => {
     const file = join(projectDir, "wiki", receipt.raw);
     expect(existsSync(file)).toBe(true);
     const text = readFileSync(file, "utf8");
-    expect(text).toContain(`source_url: ${url}`);
+    expect(text).toContain(`source_url: ${JSON.stringify(url)}`);
     expect(text).toContain("fetched: 2026-10-20T12:00:00Z");
     expect(text).toContain("# How Wikis Beat Context Windows");
     expect(text).toContain("## Why raw snapshots");
@@ -92,5 +99,11 @@ describe("fetchArticle", () => {
     expect(receipt.raw).toBe("raw/article-paywalled.md");
     expect(receipt.warning).toMatch(/paywall|words/i);
     expect(existsSync(join(projectDir, "wiki", receipt.raw))).toBe(true);
+  });
+
+  it("does not flag a long article that mentions subscribers", async () => {
+    const receipt = await fetchArticle(projectDir, `${baseUrl}/p/long-with-cta`);
+
+    expect(receipt.warning).toBeUndefined();
   });
 });

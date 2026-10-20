@@ -25,8 +25,8 @@
  * SOFTWARE.
  */
 import { execFile } from "child_process";
-import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "fs";
-import { basename, dirname, isAbsolute, join, resolve } from "path";
+import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { promisify } from "util";
 
@@ -82,6 +82,22 @@ const GITHUB_RE =
   /^(?:https?:\/\/|git@|ssh:\/\/git@)(?:www\.)?github\.com[/:]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:\/(?:tree|blob)\/([^/\s?#]+))?\/?$/i;
 const SCP_RE = /^[\w.-]+@[\w.-]+:(.+)$/;
 
+/**
+ * Conservative branch-name check, applied before git ever sees the name: no leading
+ * `-` (option injection), only ref-safe characters, none of git's forbidden sequences.
+ */
+export function isSafeBranch(branch: string): boolean {
+  return (
+    /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/.test(branch) &&
+    !branch.includes("..") &&
+    !branch.includes("//") &&
+    !branch.startsWith("/") &&
+    !branch.endsWith("/") &&
+    !branch.endsWith(".") &&
+    !branch.endsWith(".lock")
+  );
+}
+
 function stripGit(name: string): string {
   return name.replace(/\.git$/i, "");
 }
@@ -105,6 +121,7 @@ export function parseRepoUrl(url: string): ParsedRepoUrl {
   const gh = GITHUB_RE.exec(input);
   if (gh) {
     const [, owner, repo, branch] = gh;
+    if (branch !== undefined && !isSafeBranch(branch)) throw new Error(`unsafe branch name in repo URL: ${url}`);
     return { owner, repo, cloneUrl: `https://github.com/${owner}/${repo}.git`, branch: branch ?? null };
   }
 
@@ -160,6 +177,15 @@ async function isOwnClone(dir: string, options: CloneRepoOptions): Promise<boole
   }
 }
 
+/** The clone's `origin` URL, or null when it cannot be read. */
+async function originUrl(dir: string, options: CloneRepoOptions): Promise<string | null> {
+  try {
+    return await git(["remote", "get-url", "origin"], dir, options);
+  } catch {
+    return null;
+  }
+}
+
 async function freshClone(parsed: ParsedRepoUrl, target: string, options: CloneRepoOptions): Promise<void> {
   const args = ["clone", "--depth", "1", "--quiet"];
   if (parsed.branch) args.push("--branch", parsed.branch);
@@ -169,7 +195,9 @@ async function freshClone(parsed: ParsedRepoUrl, target: string, options: CloneR
 
 async function refresh(parsed: ParsedRepoUrl, target: string, options: CloneRepoOptions): Promise<void> {
   const branch = parsed.branch ?? (await git(["rev-parse", "--abbrev-ref", "HEAD"], target, options));
-  await git(["fetch", "--depth", "1", "--quiet", "origin", branch], target, options);
+  if (!isSafeBranch(branch)) throw new Error(`unsafe branch name: ${branch}`);
+  // `--` ends option parsing, so neither remote nor refspec can be read as a flag.
+  await git(["fetch", "--depth", "1", "--quiet", "--", "origin", branch], target, options);
   await git(["reset", "--hard", "--quiet", "FETCH_HEAD"], target, options);
 }
 
@@ -188,9 +216,17 @@ export async function cloneRepo(projectDir: string, url: string, options: CloneR
   ensureReposDir(reposDir);
   const clonePath = `raw/repos/${cloneDirName(parsed.owner, parsed.repo)}`;
   const target = join(projectDir, "wiki", clonePath);
+  // Every rm below is confined to a direct child of raw/repos/.
+  const rel = relative(reposDir, target);
+  if (!rel || rel.startsWith("..") || rel.includes(sep)) throw new Error(`clone path escapes raw/repos: ${clonePath}`);
+  if (existsSync(target) && lstatSync(target).isSymbolicLink()) {
+    throw new Error(`refusing a symlinked clone dir: ${clonePath}`);
+  }
 
   let action: CloneReceipt["action"];
-  if (await isOwnClone(target, options)) {
+  // Different sources can map to one dir name (case, host, a-b/c vs a/b-c): only
+  // refresh a clone whose origin is exactly the requested URL, otherwise re-clone.
+  if ((await isOwnClone(target, options)) && (await originUrl(target, options)) === parsed.cloneUrl) {
     try {
       await refresh(parsed, target, options);
       action = "refreshed";
