@@ -52,6 +52,26 @@ describe("takeLock", () => {
     expect(takeLock(projectDir, "s2", NOW)).toEqual({ held: true, takenOver: true });
     expect(readLock()).toEqual({ session: "s2", ts: NOW });
   });
+
+  it("is not held when another session wins the takeover race", () => {
+    writeLock(JSON.stringify({ session: "other", ts: NOW - STALE_LOCK_MS - 1 }));
+    // A rival takes over between our write and the read-back.
+    const rival = () => writeLock(JSON.stringify({ session: "rival", ts: NOW }));
+    expect(takeLock(projectDir, "s1", NOW, { afterWrite: rival })).toEqual({ held: false, takenOver: false });
+    expect(readLock()).toEqual({ session: "rival", ts: NOW });
+  });
+
+  it("ensures the wiki gitignore lists the lock and repo clones", () => {
+    takeLock(projectDir, "s1", NOW);
+    const gitignore = join(projectDir, "wiki", ".gitignore");
+    expect(readFileSync(gitignore, "utf8")).toBe(".ingest.lock\nraw/repos/\n");
+
+    // An existing file keeps its lines and gains only the missing ones, once.
+    writeFileSync(gitignore, "*.tmp\nraw/repos/");
+    takeLock(projectDir, "s1", NOW);
+    takeLock(projectDir, "s1", NOW);
+    expect(readFileSync(gitignore, "utf8")).toBe("*.tmp\nraw/repos/\n.ingest.lock\n");
+  });
 });
 
 describe("releaseLock", () => {
@@ -65,5 +85,12 @@ describe("releaseLock", () => {
 
     // Releasing when no lock exists is a no-op.
     expect(releaseLock(projectDir, "other")).toEqual({ released: false });
+  });
+
+  it("release keeps a lock taken over just before removal", () => {
+    writeLock(JSON.stringify({ session: "s1", ts: NOW }));
+    const rival = () => writeLock(JSON.stringify({ session: "rival", ts: NOW }));
+    expect(releaseLock(projectDir, "s1", { beforeRemove: rival })).toEqual({ released: false });
+    expect(readLock()).toEqual({ session: "rival", ts: NOW });
   });
 });
