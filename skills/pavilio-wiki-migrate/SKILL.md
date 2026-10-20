@@ -40,7 +40,8 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
    excludes `tasks.md`, delta specs, active changes and today's progress.
 2. Group by kind: `notes/` → note, `memo/` or `memos/` → memo, `adr/` → adr, `progress/` →
    progress, `…/changes/archive/<id>/proposal.md` → proposal, `…/design.md` → design,
-   `wiki/raw/*.md` → raw snapshot (one left unledgered by an interrupted ingest). Count `new`
+   `wiki/raw/*.md` → raw snapshot (one left unledgered by an interrupted ingest; `pending` never
+   lists `context-snapshot-*.md`). Count `new`
    and `changed` separately; count ledger lines in `wiki/log.md` as done.
 3. Resume state: snapshot present (`wiki/raw/context-snapshot-*.md`)? `CONTEXT.md` rewritten
    (every term line carries `See [[wiki/concepts/`)? Snapshot sections all ledgered?
@@ -74,8 +75,9 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 2. Any `wiki/raw/context-snapshot-*.md` exists → **never snapshot again**: reuse the newest one as
    `<snapshot>` (the live `CONTEXT.md` may already be rewritten). Else copy `CONTEXT.md` byte for
    byte to `wiki/raw/context-snapshot-<today>.md`. A raw file is never rewritten. Ledger the
-   top-level snapshot right away — its content is carried by the section files, and `pending`
-   lists unledgered top-level raw files, so a catch-up must never ingest it as one page:
+   top-level snapshot right away — its content is carried by the section files, so it is never
+   ingested as one page (a plain `pending` already skips `context-snapshot-*.md`; the ledger line
+   marks it handled):
    `scripts/wiki pending <p> --only wiki/raw/<snapshot file>` → `scripts/wiki record <p>
    wiki/raw/<snapshot file> <hash>` (skip when already done).
 3. Split `<snapshot>` into one verbatim raw file per `##` section:

@@ -19,7 +19,7 @@ import { isAbsolute, join, relative, resolve, sep } from "path";
  * Raw snapshots — top-level `wiki/raw/*.md` (fetched articles, CONTEXT.md snapshots) — are not
  * records, but `pendingRecords` lists them too while they are unledgered or changed, so a
  * snapshot written without an ingest is caught up. Sub-dirs (`raw/repos/` clones and the like)
- * are never included.
+ * and the migration's `context-snapshot-*.md` files are never included.
  */
 
 export type PendingStatus = "new" | "changed";
@@ -94,11 +94,17 @@ export function listRecords(projectDir: string, today: string | Date = new Date(
   return [...new Set(out)].sort();
 }
 
-/** Top-level `wiki/raw/*.md` files, sorted, project-relative. */
+/**
+ * `CONTEXT.md` snapshots of the wiki migration: their content reaches the wiki through the
+ * per-section files, so only the migration takes them, via `--only`.
+ */
+const MIGRATION_SNAPSHOT = /^context-snapshot-.*\.md$/;
+
+/** Top-level `wiki/raw/*.md` files except migration snapshots, sorted, project-relative. */
 function listRawSnapshots(projectDir: string): string[] {
   try {
     return readdirSync(join(projectDir, "wiki", "raw"), { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith(".md"))
+      .filter((e) => e.isFile() && e.name.endsWith(".md") && !MIGRATION_SNAPSHOT.test(e.name))
       .map((e) => `wiki/raw/${e.name}`)
       .sort();
   } catch {

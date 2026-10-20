@@ -51,7 +51,8 @@ Never edit one by hand; regenerate it.
 - **Ledger** — `- ingested: <project-relative path> #<sha256 first 12 hex>` lines in `wiki/log.md`,
   appended only by `scripts/wiki record`, and only after the record's source page landed. A path
   whose latest hash matches is done; a different hash is `changed`; no line is pending. `pending`
-  also lists top-level `wiki/raw/*.md` snapshots on the same terms (never sub-dirs). Repo clones
+  also lists top-level `wiki/raw/*.md` snapshots on the same terms (never sub-dirs, never the
+  migration's `context-snapshot-*.md`, which only migrate takes via `--only`). Repo clones
   are tracked by `commit` in their repo pages, not by the ledger.
 - **Lock** — `wiki/.ingest.lock` (`{session, ts}`) via `scripts/wiki lock`; one ingest per wiki;
   older than 15 min is taken over.

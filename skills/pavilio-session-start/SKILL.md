@@ -53,7 +53,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 **Wiki catch-up** (once per session, right after the project is resolved; it reads no wiki pages, so the lazy rule holds):
 1. `scripts/wiki config` → `sessionStartIngest` false → skip silently, ingest nothing.
 2. No `projects/<p>/wiki/` → one line: `No wiki yet — /pavilio-wiki-migrate <p> to build it.` Ingest nothing.
-3. `scripts/wiki pending <p>` (no `--only`; any path a skill passes to `--only` is project-relative, e.g. `notes/<file>.md`). It already includes unledgered or changed top-level `wiki/raw/*.md` snapshots, so a snapshot an interrupted ingest left behind counts too: 0 → nothing; 1–5 → spawn a **background** subagent running `/pavilio-wiki <p> ingest` (it locks, ingests and commits on its own) and show one line: `Wiki catch-up: ingesting <n> records in the background.`; >5 → one line: `Wiki has <n> pending records — /pavilio-wiki-migrate <p> to catch up.` Ingest nothing.
+3. `scripts/wiki pending <p>` (no `--only`; any path a skill passes to `--only` is project-relative, e.g. `notes/<file>.md`). It already includes unledgered or changed top-level `wiki/raw/*.md` snapshots (migration's `context-snapshot-*.md` excepted), so a snapshot an interrupted ingest left behind counts too: 0 → nothing; 1–5 → spawn a **background** subagent running `/pavilio-wiki <p> ingest` (it locks, ingests and commits on its own) and show one line: `Wiki catch-up: ingesting <n> records in the background.`; >5 → one line: `Wiki has <n> pending records — /pavilio-wiki-migrate <p> to catch up.` Ingest nothing.
 4. Never wait on the subagent; its one-line report is shown when it lands.
 
 **Fast-entry variant** (`/pavilio-session-start [project] <task description>`):

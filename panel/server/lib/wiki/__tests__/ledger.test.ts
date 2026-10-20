@@ -61,20 +61,28 @@ describe("ledger", () => {
 
   it("includes unledgered top-level raw snapshots, not subdirs or repo clones", () => {
     write("wiki/raw/article-x.md", "# article\n");
-    write("wiki/raw/CONTEXT-2026-10-20.md", "# snapshot\n");
+    write("wiki/raw/snippet-2026-10-20-y.md", "# snippet\n");
     write("wiki/raw/context-sections/a.md", "# section\n");
     write("wiki/raw/repos/acme-widget/README.md", "# readme\n");
     write("wiki/raw/notes.txt", "not markdown\n");
-    recordIngested(projectDir, "wiki/raw/CONTEXT-2026-10-20.md", hashRecord("# snapshot\n"));
+    recordIngested(projectDir, "wiki/raw/snippet-2026-10-20-y.md", hashRecord("# snippet\n"));
 
     const raw = pendingRecords(projectDir, { today: TODAY }).filter((p) => p.path.startsWith("wiki/"));
     expect(raw).toEqual([{ path: "wiki/raw/article-x.md", hash: hashRecord("# article\n"), status: "new" }]);
 
     // A refreshed snapshot is pending again, as changed.
-    write("wiki/raw/CONTEXT-2026-10-20.md", "# snapshot v2\n");
-    expect(pendingRecords(projectDir, { today: TODAY }).find((p) => p.path === "wiki/raw/CONTEXT-2026-10-20.md")?.status).toBe(
+    write("wiki/raw/snippet-2026-10-20-y.md", "# snippet v2\n");
+    expect(pendingRecords(projectDir, { today: TODAY }).find((p) => p.path === "wiki/raw/snippet-2026-10-20-y.md")?.status).toBe(
       "changed",
     );
+  });
+
+  it("leaves migration's CONTEXT.md snapshots to --only", () => {
+    write("wiki/raw/context-snapshot-2026-10-20.md", "# glossary snapshot\n");
+    expect(paths()).not.toContain("wiki/raw/context-snapshot-2026-10-20.md");
+    expect(pendingRecords(projectDir, { only: "wiki/raw/context-snapshot-2026-10-20.md" })).toEqual([
+      { path: "wiki/raw/context-snapshot-2026-10-20.md", hash: hashRecord("# glossary snapshot\n"), status: "new" },
+    ]);
   });
 
   it("skips verbatim transcripts under notes/log", () => {
