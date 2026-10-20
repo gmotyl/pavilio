@@ -53,6 +53,19 @@ export function parsePage(text: string): ParsedPage {
   return { frontmatter: toFrontmatter(data), body };
 }
 
+/**
+ * A list entry as a string. YAML reads an unquoted wikilink item `- [[wiki/sources/a]]` as a
+ * nested flow sequence `[["wiki/sources/a"]]`; a one-string inner sequence is folded back to
+ * `[[wiki/sources/a]]`. Anything else that is not a string is dropped.
+ */
+function listItem(v: unknown): string | null {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && v.length === 1 && Array.isArray(v[0]) && v[0].length === 1 && typeof v[0][0] === "string") {
+    return `[[${v[0][0]}]]`;
+  }
+  return null;
+}
+
 function toFrontmatter(data: unknown): WikiFrontmatter {
   if (!data || typeof data !== "object" || Array.isArray(data)) return {};
   const raw = data as Record<string, unknown>;
@@ -62,7 +75,10 @@ function toFrontmatter(data: unknown): WikiFrontmatter {
   }
   for (const key of LIST_FIELDS) {
     const value = raw[key];
-    if (Array.isArray(value)) fm[key] = value.filter((v): v is string => typeof v === "string");
+    if (!Array.isArray(value)) continue;
+    // A whole field written as one unquoted link, `aliases: [[x]]`, arrives as `[["x"]]`.
+    const items = listItem(value) !== null ? [value] : value;
+    fm[key] = items.map(listItem).filter((v): v is string => v !== null);
   }
   for (const key of DATE_FIELDS) {
     const value = raw[key];

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSync, utimesSync } from "fs";
 import { tmpdir } from "os";
+import { execFileSync } from "child_process";
 import { join, dirname } from "path";
 
 import { lintWiki } from "../lint";
@@ -13,8 +14,26 @@ function write(rel: string, text: string) {
   writeFileSync(abs, text);
 }
 
-const page = (type: string | null, body: string, extra = "") =>
-  `---\n${type ? `type: ${type}\n` : ""}description: d\ncreated: 2026-10-01\nupdated: 2026-10-10\n${extra}---\n${body}`;
+const pageAt = (type: string | null, body: string, updated: string, extra = "") =>
+  `---\n${type ? `type: ${type}\n` : ""}description: d\ncreated: 2026-10-01\nupdated: ${updated}\n${extra}---\n${body}`;
+const page = (type: string | null, body: string, extra = "") => pageAt(type, body, "2026-10-10", extra);
+
+/** Git isolated from the machine: no user config, no inherited repo env (hooks export GIT_DIR). */
+function git(...args: string[]) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
+  return execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+    cwd: root,
+    env: { ...env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", ...gitDates },
+    stdio: "pipe",
+  });
+}
+let gitDates: Record<string, string> = {};
+function commitAt(date: string, rel: string) {
+  gitDates = { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date };
+  git("add", rel);
+  git("commit", "-q", "-m", rel);
+  gitDates = {};
+}
 
 /** Noon local time, so the local calendar date is unambiguous in every timezone. */
 function setMtime(rel: string, date: string) {
@@ -79,26 +98,32 @@ describe("lintWiki", () => {
   });
 
   it("reports stale pages", () => {
-    write("projects/pavilio/notes/2026-10-05-meeting.md", "# Meeting\n");
-    write(`${W}/sources/meeting.md`, page("source", "Meeting.\n", "record: projects/pavilio/notes/2026-10-05-meeting.md\n"));
-    write("projects/pavilio/notes/2026-10-06-old.md", "# Old\n");
-    write(`${W}/sources/old.md`, page("source", "Old.\n", "record: projects/pavilio/notes/2026-10-06-old.md\n"));
-    write(`${W}/raw/article.md`, "# Article\n");
-    write(`${W}/sources/article.md`, page("source", "Article.\n", "raw: raw/article.md\n"));
+    // Wiki-page sources are dated by their own frontmatter, never by checkout mtimes.
+    write(`${W}/sources/meeting.md`, pageAt("source", "Meeting.\n", "2026-10-12"));
+    write(`${W}/sources/old.md`, pageAt("source", "Old.\n", "2026-10-09"));
+    write(`${W}/sources/created-only.md`, "---\ntype: source\ncreated: 2026-10-11\n---\nNew.\n");
     write(
       `${W}/concepts/linked.md`,
-      page("concept", "Prose.\n", "sources:\n  - \"[[wiki/sources/meeting]]\"\n  - wiki/sources/old\n"),
+      page(
+        "concept",
+        "Prose.\n",
+        "sources:\n  - \"[[wiki/sources/meeting]]\"\n  - wiki/sources/old\n  - [[wiki/sources/created-only]]\n",
+      ),
     );
-    setMtime("projects/pavilio/notes/2026-10-05-meeting.md", "2026-10-15"); // edited after ingest
-    setMtime("projects/pavilio/notes/2026-10-06-old.md", "2026-10-10"); // same day: fresh
-    setMtime(`${W}/raw/article.md`, "2026-10-11");
-    setMtime(`${W}/sources/meeting.md`, "2026-10-12");
-    setMtime(`${W}/sources/old.md`, "2026-10-09");
+    setMtime(`${W}/sources/meeting.md`, "2026-10-01");
+    setMtime(`${W}/sources/old.md`, "2026-10-20"); // touched by a checkout: still fresh
+    // Untracked record and raw files fall back to their mtime.
+    write("projects/pavilio/notes/2026-10-05-meeting.md", "# Meeting\n");
+    write(`${W}/sources/untracked.md`, page("source", "U.\n", "record: projects/pavilio/notes/2026-10-05-meeting.md\n"));
+    write(`${W}/raw/article.md`, "# Article\n");
+    write(`${W}/sources/article.md`, page("source", "Article.\n", "raw: raw/article.md\n"));
+    setMtime("projects/pavilio/notes/2026-10-05-meeting.md", "2026-10-15");
+    setMtime(`${W}/raw/article.md`, "2026-10-10"); // same day: fresh
     expect(lintWiki(root, "pavilio").stale).toEqual([
+      { page: "wiki/concepts/linked.md", source: "wiki/sources/created-only", updated: "2026-10-10", modified: "2026-10-11" },
       { page: "wiki/concepts/linked.md", source: "wiki/sources/meeting", updated: "2026-10-10", modified: "2026-10-12" },
-      { page: "wiki/sources/article.md", source: "raw/article.md", updated: "2026-10-10", modified: "2026-10-11" },
       {
-        page: "wiki/sources/meeting.md",
+        page: "wiki/sources/untracked.md",
         source: "projects/pavilio/notes/2026-10-05-meeting.md",
         updated: "2026-10-10",
         modified: "2026-10-15",
@@ -106,12 +131,27 @@ describe("lintWiki", () => {
     ]);
   });
 
+  it("dates committed records by their last commit", () => {
+    write("projects/pavilio/notes/edited.md", "# Edited\n");
+    write("projects/pavilio/notes/kept.md", "# Kept\n");
+    write(`${W}/sources/edited.md`, page("source", "E.\n", "record: projects/pavilio/notes/edited.md\n"));
+    write(`${W}/sources/kept.md`, page("source", "K.\n", "record: projects/pavilio/notes/kept.md\n"));
+    git("init", "-q");
+    commitAt("2026-10-05T12:00:00", "projects/pavilio/notes/kept.md");
+    commitAt("2026-10-14T12:00:00", "projects/pavilio/notes/edited.md");
+    setMtime("projects/pavilio/notes/edited.md", "2026-10-01"); // checkout mtimes say nothing
+    setMtime("projects/pavilio/notes/kept.md", "2026-10-20");
+    expect(lintWiki(root, "pavilio").stale).toEqual([
+      { page: "wiki/sources/edited.md", source: "projects/pavilio/notes/edited.md", updated: "2026-10-10", modified: "2026-10-14" },
+    ]);
+  });
+
   it("warns on code identifiers in concept pages", () => {
     const body = [
       "The relay calls `startRelay()` once.", // line 7
-      "It lives in panel/server/relay.ts and the UI in `src/App.tsx`.", // line 8
+      "It lives in panel/server/relay.ts and the UI in `src/AppShell.tsx`.", // line 8
       "Rendered by `MarkdownRenderer` and <SpeechPane open />.", // line 9
-      "Plain prose: The Quick Brown fox, e.g. a JavaScript-free note, <Project> placeholder.", // line 10
+      "Plain prose: The Quick Brown fox, `TypeScript`, <GitHub> and `PostgreSQL`, <Project> placeholder.", // line 10
       "```ts", // line 11
       "export function doThing() {}", // line 12
       "```", // line 13
@@ -122,7 +162,7 @@ describe("lintWiki", () => {
     expect(lintWiki(root, "pavilio").codeIdentifiers).toEqual([
       { page: "wiki/concepts/linked.md", line: 7, rule: "call", match: "startRelay(" },
       { page: "wiki/concepts/linked.md", line: 8, rule: "path", match: "panel/server/relay.ts" },
-      { page: "wiki/concepts/linked.md", line: 8, rule: "path", match: "src/App.tsx" },
+      { page: "wiki/concepts/linked.md", line: 8, rule: "path", match: "src/AppShell.tsx" },
       { page: "wiki/concepts/linked.md", line: 9, rule: "component", match: "MarkdownRenderer" },
       { page: "wiki/concepts/linked.md", line: 9, rule: "component", match: "SpeechPane" },
       { page: "wiki/concepts/linked.md", line: 11, rule: "fence", match: "```ts" },

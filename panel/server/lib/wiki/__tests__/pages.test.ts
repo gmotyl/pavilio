@@ -112,6 +112,16 @@ describe("parsePage", () => {
     expect(frontmatter.description).toBe("b");
   });
 
+  it("keeps unquoted wikilinks in list fields", () => {
+    // YAML reads an unquoted `- [[x]]` as a nested flow sequence `[["x"]]`.
+    const { frontmatter } = parsePage(
+      "---\nsources:\n  - [[wiki/sources/a]]\n  - \"[[wiki/sources/b|B]]\"\n  - [[wiki/sources/c|C]]\n  - [[a, b]]\n" +
+        "aliases: [[Alias]]\n---\nx\n",
+    );
+    expect(frontmatter.sources).toEqual(["[[wiki/sources/a]]", "[[wiki/sources/b|B]]", "[[wiki/sources/c|C]]"]);
+    expect(frontmatter.aliases).toEqual(["[[Alias]]"]);
+  });
+
   it("yields empty frontmatter for malformed yaml", () => {
     expect(parsePage("---\ntype: [unclosed\n---\nBody\n")).toEqual({
       frontmatter: {},

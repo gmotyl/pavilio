@@ -1,7 +1,8 @@
+import { execFileSync } from "child_process";
 import { existsSync, readFileSync, statSync } from "fs";
-import { join } from "path";
+import { basename, dirname, join } from "path";
 
-import { walkWikiPages } from "./pages";
+import { parsePage, walkWikiPages } from "./pages";
 import { resolveWikiLink } from "./links";
 import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./wikilinks";
 
@@ -25,14 +26,20 @@ import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./w
  * - **untyped** — pages without a frontmatter `type`.
  * - **stale** — a page whose `updated` (YYYY-MM-DD) is older than one of its sources: each
  *   resolvable `sources:` entry, the `record:` file (workspace-relative) and the `raw:` file
- *   (wiki-relative, `wiki/…` accepted). Day granularity: stale when the source's mtime, as a
- *   local calendar date, is after `updated`. Pages with no valid `updated` and missing source
+ *   (wiki-relative, `wiki/…` accepted). Day granularity: stale when the source's date is after
+ *   `updated`. Checkout mtimes are never trusted for tracked files (clone, pull and auto-sync
+ *   reset them): a wiki-page source is dated by its own frontmatter `updated` (else `created`);
+ *   any other file by its last commit date (`git log -1 --format=%cs`), falling back to its mtime
+ *   as a local calendar date when untracked or git is unavailable. Uncommitted edits to a tracked
+ *   file are therefore not seen until committed. Pages with no valid `updated` and missing source
  *   files are skipped (the latter are `broken` when they come from `sources:`).
  * - **codeIdentifiers** — `concepts/` and `entities/` pages naming code, which belongs under
  *   `repos/`. Rules, kept conservative so prose never trips them: `call` — a backticked
  *   `camelCase(`; `path` — a `*.ts` / `*.tsx` path anywhere; `component` — a multi-hump
- *   `PascalCase` name that is backticked or written `<Component …>`; `fence` — a fenced code
- *   block, itself a violation in a knowledge page (its contents are scanned too).
+ *   `PascalCase` name that is backticked or written `<Component …>`, minus a small allowlist of
+ *   product names (`TypeScript`, `GitHub`, …); `fence` — a fenced code block, itself a violation
+ *   in a knowledge page (its contents are scanned too). A name that is part of a reported path on
+ *   the same line is reported once, as the path.
  */
 
 export type BrokenLink = { page: string; target: string };
@@ -74,12 +81,49 @@ function parseSourceEntry(entry: string): WikiLink | null {
 const pad = (n: number) => String(n).padStart(2, "0");
 const localDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 function mtimeDate(absPath: string): string | null {
   try {
     return localDate(statSync(absPath).mtime);
   } catch {
     return null;
   }
+}
+
+/** Git env a hook may have exported; it would point the lookup at the hook's repo. */
+const REPO_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX"];
+
+/** Last commit date (YYYY-MM-DD) of a file, or null when untracked or git fails. */
+function commitDate(absPath: string): string | null {
+  const env = { ...process.env };
+  for (const key of REPO_ENV) delete env[key];
+  try {
+    const out = execFileSync("git", ["log", "-1", "--format=%cs", "--", basename(absPath)], {
+      cwd: dirname(absPath),
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return DATE.test(out) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Date of a non-page source file: last commit, else mtime. */
+const fileDate = (absPath: string) => commitDate(absPath) ?? mtimeDate(absPath);
+
+/** Date of a wiki-page source: its frontmatter `updated`, else `created`, else its file date. */
+function pageDate(absPath: string): string | null {
+  try {
+    const { updated, created } = parsePage(readFileSync(absPath, "utf8")).frontmatter;
+    if (updated && DATE.test(updated)) return updated;
+    if (created && DATE.test(created)) return created;
+  } catch {
+    return null;
+  }
+  return fileDate(absPath);
 }
 
 // --- code identifiers ---------------------------------------------------------------------------
@@ -91,13 +135,23 @@ const JSX = new RegExp(`<\\/?(${PASCAL})(?=[\\s/>])`, "g");
 const BACKTICKED_PASCAL = new RegExp(`(?<![\\w.])${PASCAL}(?![\\w])`, "g");
 const CODE_SPAN = /(`+)(?!`)(.*?[^`])\1(?!`)/g;
 
+/** Product names that are PascalCase without being components. */
+const PRODUCT_NAMES = new Set([
+  "TypeScript", "JavaScript", "GitHub", "GitLab", "OpenSpec", "PowerShell", "PostgreSQL", "MySQL",
+  "MongoDB", "YouTube", "LinkedIn", "WordPress", "PayPal", "OpenAI", "DevOps", "NextJs", "NodeJs",
+  "WebSocket", "OAuth", "GraphQL", "JetBrains", "IntelliJ", "PyPI", "VsCode", "ChatGPT", "DynamoDB",
+]);
+
 function scanCodeIdentifiers(page: string, text: string, firstLine: number): CodeIdentifier[] {
   const found: CodeIdentifier[] = [];
   const add = (line: number, rule: CodeIdentifierRule, match: string) =>
     found.push({ page, line, rule, match: match.trim() });
+  const addComponent = (line: number, name: string) => {
+    if (!PRODUCT_NAMES.has(name)) add(line, "component", name);
+  };
   const scanCode = (code: string, line: number) => {
     for (const m of code.matchAll(CALL)) add(line, "call", m[0].replace(/\s+/g, ""));
-    for (const m of code.matchAll(BACKTICKED_PASCAL)) add(line, "component", m[0]);
+    for (const m of code.matchAll(BACKTICKED_PASCAL)) addComponent(line, m[0]);
   };
   let fence: { char: string; len: number } | null = null;
   text.split("\n").forEach((content, i) => {
@@ -120,9 +174,13 @@ function scanCodeIdentifiers(page: string, text: string, firstLine: number): Cod
     }
     for (const m of content.matchAll(CODE_SPAN)) scanCode(m[2], line);
     for (const m of content.matchAll(PATH)) add(line, "path", m[0]);
-    for (const m of content.matchAll(JSX)) add(line, "component", m[1]);
+    for (const m of content.matchAll(JSX)) addComponent(line, m[1]);
   });
-  return found;
+  // `src/AppShell.tsx` is one finding, the path, not also the component `AppShell`.
+  const paths = found.filter((f) => f.rule === "path");
+  return found.filter(
+    (f) => f.rule !== "component" || !paths.some((p) => p.line === f.line && p.match.includes(f.match)),
+  );
 }
 
 /** 1-based file line of the body's first line: the frontmatter block sits above it. */
@@ -170,7 +228,7 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
       if (!fromIndex) addInbound(link, from);
     }
 
-    const sourceFiles: { source: string; absPath: string }[] = [];
+    const sourceFiles: { source: string; absPath: string; isPage: boolean }[] = [];
     for (const entry of page.frontmatter.sources ?? []) {
       const link = parseSourceEntry(entry);
       if (!link) {
@@ -179,7 +237,7 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
       }
       const resolved = resolveWikiLink(link, ctx);
       if (!resolved.exists) brokenTargets.add(linkText(link));
-      else sourceFiles.push({ source: linkText(link), absPath: resolved.absPath });
+      else sourceFiles.push({ source: linkText(link), absPath: resolved.absPath, isPage: link.target.startsWith("wiki/") });
       if (!fromIndex) addInbound(link, from);
     }
     for (const target of brokenTargets) broken.push({ page: path, target });
@@ -187,17 +245,17 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
     if (!page.frontmatter.type) untyped.push(path);
 
     const { record, raw, updated } = page.frontmatter;
-    if (record) sourceFiles.push({ source: record, absPath: join(workspaceRoot, record) });
+    if (record) sourceFiles.push({ source: record, absPath: join(workspaceRoot, record), isPage: false });
     if (raw) {
       const rel = raw.replace(/^\/+/, "");
-      sourceFiles.push({ source: raw, absPath: rel.startsWith("wiki/") ? join(projectDir, rel) : join(wikiDir, rel) });
+      sourceFiles.push({ source: raw, absPath: rel.startsWith("wiki/") ? join(projectDir, rel) : join(wikiDir, rel), isPage: false });
     }
-    if (updated && /^\d{4}-\d{2}-\d{2}$/.test(updated)) {
+    if (updated && DATE.test(updated)) {
       const seen = new Set<string>();
-      for (const { source, absPath } of sourceFiles) {
+      for (const { source, absPath, isPage } of sourceFiles) {
         if (seen.has(source)) continue;
         seen.add(source);
-        const modified = mtimeDate(absPath);
+        const modified = isPage ? pageDate(absPath) : fileDate(absPath);
         if (modified && modified > updated) stale.push({ page: path, source, updated, modified });
       }
     }
