@@ -11,7 +11,7 @@ import { useGitStatus } from "../git/useGitStatus";
 import { useActiveFile } from "./useActiveFile";
 import { useFileIndex, FileEntry, RootId } from "./useFileIndex";
 import { useFileDragSource, useFileDropTarget } from "./useFileDrag";
-import { decodePathSegments, viewFilePath } from "../markdown/viewRoute";
+import { decodePathSegments, encodePathSegments, viewFilePath } from "../markdown/viewRoute";
 
 /**
  * Repo-relative on-disk path for a file under the given root.
@@ -115,6 +115,17 @@ export function activeViewPath(pathname: string, activeFile: string | null): str
   return activeFile ? `/view/${activeFile}` : pathname;
 }
 
+/** The raw (decoded) `/view/` key of a tree file, the form `activeViewPath` compares against. */
+export function fileViewKey(root: RootId, relativePath: string): string {
+  return root === "projects" ? `/view/${relativePath}` : `/view/_root/${root}/${relativePath}`;
+}
+
+/** The `/view/` href of a tree file, each raw segment percent-encoded (`a%20b` stays literal). */
+export function fileViewHref(root: RootId, relativePath: string): string {
+  const path = root === "projects" ? relativePath : `_root/${root}/${relativePath}`;
+  return `/view/${encodePathSegments(path)}`;
+}
+
 function FileButton({
   file,
   isActive,
@@ -129,10 +140,7 @@ function FileButton({
   root?: RootId;
 }) {
   const fileName = file.relativePath.split("/").pop() ?? file.relativePath;
-  const viewPath =
-    root === "projects"
-      ? `/view/${file.relativePath}`
-      : `/view/_root/${root}/${file.relativePath}`;
+  const viewPath = fileViewHref(root, file.relativePath);
   const ref = useRef<HTMLButtonElement>(null);
   const drag = useFileDragSource(file.relativePath);
 
@@ -233,10 +241,7 @@ function SubfolderSection({
           style={{ borderLeft: "1px solid var(--border-subtle)" }}
         >
           {files.map((file) => {
-            const fp =
-              root === "projects"
-                ? `/view/${file.relativePath}`
-                : `/view/_root/${root}/${file.relativePath}`;
+            const fp = fileViewKey(root, file.relativePath);
             return (
               <FileButton
                 key={file.relativePath}
@@ -322,10 +327,7 @@ function ProjectTreeSection({
             />
           ))}
           {node.root.map((file) => {
-            const fp =
-              root === "projects"
-                ? `/view/${file.relativePath}`
-                : `/view/_root/${root}/${file.relativePath}`;
+            const fp = fileViewKey(root, file.relativePath);
             return (
               <FileButton
                 key={file.relativePath}

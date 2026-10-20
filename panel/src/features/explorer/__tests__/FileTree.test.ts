@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { activeViewPath, buildTree, parseViewPath } from "../FileTree";
+import { activeViewPath, buildTree, fileViewHref, fileViewKey, parseViewPath } from "../FileTree";
 
 describe("buildTree", () => {
   it("groups files by project", () => {
@@ -61,5 +61,15 @@ describe("encoded /view/ routes", () => {
     expect(activeViewPath("/view/p/notes/a%20b%23c.md", null)).toBe("/view/p/notes/a b#c.md");
     expect(activeViewPath("/project/p", "p/notes/x.md")).toBe("/view/p/notes/x.md");
     expect(activeViewPath("/project/p", null)).toBe("/project/p");
+  });
+});
+
+describe("fileViewHref", () => {
+  it("encodes each raw path segment, so a literal %20 survives the round trip", () => {
+    const href = fileViewHref("projects", "p/notes/a%20b #.md");
+    expect(href).toBe("/view/p/notes/a%2520b%20%23.md");
+    expect(fileViewHref("skills", "memo/SKILL.md")).toBe("/view/_root/skills/memo/SKILL.md");
+    // The highlight compares the decoded route with the raw key of the same file.
+    expect(activeViewPath(href, null)).toBe(fileViewKey("projects", "p/notes/a%20b #.md"));
   });
 });
