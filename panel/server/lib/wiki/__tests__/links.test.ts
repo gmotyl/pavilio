@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 
-import { resolveWikiLink, buildBacklinks } from "../links";
+import { resolveWikiLink, buildBacklinks, buildBacklinksIn } from "../links";
+import { walkWikiPages } from "../pages";
 import { extractWikiLinks, parseWikiLink } from "../wikilinks";
 
 let root = "";
@@ -107,5 +108,26 @@ describe("buildBacklinks", () => {
       "progress/2026-10-19-a": ["wiki/entities/greg"],
       "metro:wiki/entities/y": ["wiki/entities/greg"],
     });
+  });
+
+  it("honours a projectsDir not named projects", () => {
+    write("store/pavilio/wiki/concepts/x.md", "# X\n");
+    write("store/pavilio/wiki/entities/z.md", "[[wiki/concepts/x]]\n");
+    const projectsDir = join(root, "store");
+    expect(buildBacklinksIn(projectsDir, "pavilio")).toEqual({
+      "wiki/concepts/x": ["wiki/entities/z"],
+      "wiki/entities/z": [],
+    });
+    const link = parseWikiLink("wiki/concepts/x")!;
+    expect(resolveWikiLink(link, { projectsDir, project: "pavilio" })).toMatchObject({
+      absPath: join(projectsDir, "pavilio", "wiki", "concepts", "x.md"),
+      exists: true,
+    });
+  });
+
+  it("uses pre-walked pages instead of walking again", () => {
+    write("projects/pavilio/wiki/entities/z.md", "[[wiki/concepts/x]]\n");
+    const pages = walkWikiPages(join(root, "projects", "pavilio", "wiki")).filter((p) => p.path !== "entities/z.md");
+    expect(buildBacklinks(root, "pavilio", pages)).toEqual({ "wiki/concepts/x": [] });
   });
 });

@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join, dirname } from "path";
 
 import { countMentions } from "../mentions";
+import { walkWikiPages } from "../pages";
 
 let projectDir = "";
 
@@ -85,5 +86,12 @@ describe("countMentions", () => {
     const result = countMentions(projectDir, { touched: ["concepts/speech", "entities/greg", "concepts/nope"] });
     expect(result.qualifying).toEqual(["concepts/speech", "entities/greg"]);
     expect(Object.keys(result.slugs)).toEqual(["concepts/cells", "concepts/speech", "entities/greg"]);
+  });
+
+  it("uses pre-walked pages instead of walking again", () => {
+    write("wiki/sources/a.md", page("source", { concepts: ["speech"] }));
+    write("wiki/sources/b.md", page("source", { concepts: ["speech"] }));
+    const pages = walkWikiPages(join(projectDir, "wiki")).filter((p) => p.path !== "sources/b.md");
+    expect(countMentions(projectDir, { pages }).slugs).toEqual({ "concepts/speech": ["sources/a.md"] });
   });
 });

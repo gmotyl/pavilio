@@ -58,7 +58,10 @@ function seedWiki() {
   seed(w + "repos/pavilio/index.md", page({ type: "index" }, "# pavilio code"));
   seed(w + "repos/pavilio/ARCHITECTURE.md", page({ type: "repo", concepts: ["caching"] }, "# Architecture\n"));
   seed(w + "repos/pavilio/server.md", page({ type: "repo" }, "# Server\n[[wiki/concepts/caching]]"));
-  seed(w + "open-questions.md", page({ type: "questions" }, "# Open questions\n"));
+  seed(
+    w + "open-questions.md",
+    page({ type: "questions" }, "# Open questions\n\n- one?\n  - nested detail\n* two?\n\n```\n- fenced\n```\n- three?\n"),
+  );
   seed(w + "notes/n1.md", page({ type: "note" }, "# Note one\n"));
   seed(w + "questions/q1.md", page({ type: "question" }, "# Why?\n[[wiki/concepts/caching]]"));
   seed(
@@ -153,6 +156,7 @@ describe("GET /api/projects/:name/wiki", () => {
     expect(paths(tree.interaction.notes)).toEqual(["wiki/notes/n1.md"]);
     expect(paths(tree.interaction.questions)).toEqual(["wiki/questions/q1.md"]);
     expect(tree.interaction.count).toBe(3);
+    expect(tree.interaction.openQuestionsCount).toBe(3);
 
     // Kind from the filename prefix or from a subdir.
     expect(tree.sources.count).toBe(4);
@@ -201,6 +205,25 @@ describe("GET /api/projects/:name/wiki", () => {
     const bob = findPage(tree, "wiki/entities/bob.md")!;
     expect(bob.backlinks).toEqual([]);
     expect(bob.sources).toEqual(["wiki/sources/meeting-2026-10-19-sync.md"]);
+  });
+
+  it("reports a null open-questions count without open-questions.md", async () => {
+    seed("beta/PROJECT.md", "# beta");
+    seed("beta/wiki/overview.md", page({ type: "overview" }, "# O\n"));
+    const tree = (await request(makeApp()).get("/api/projects/beta/wiki")).body as WikiTree;
+    expect(tree.interaction.openQuestions).toBeNull();
+    expect(tree.interaction.openQuestionsCount).toBeNull();
+  });
+
+  it("honours a projectsDir not named projects", async () => {
+    projectsDir = join(tmpRoot, "workspace", "store");
+    mkdirSync(projectsDir, { recursive: true });
+    seedWiki();
+    const tree = (await request(makeApp()).get("/api/projects/alpha/wiki")).body as WikiTree;
+    expect(findPage(tree, "wiki/concepts/caching.md")!.backlinks).toEqual([
+      "wiki/questions/q1.md",
+      "wiki/repos/pavilio/server.md",
+    ]);
   });
 
   it("404s without a wiki", async () => {

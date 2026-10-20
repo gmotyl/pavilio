@@ -1,7 +1,7 @@
-import { dirname, join } from "path";
+import { join } from "path";
 
 import { pageTitle } from "./index-md";
-import { buildBacklinks } from "./links";
+import { buildBacklinksIn } from "./links";
 import { countMentions } from "./mentions";
 import { ENTITY_KINDS, walkWikiPages, type WikiPage } from "./pages";
 import { parseWikiLink } from "./wikilinks";
@@ -34,6 +34,7 @@ export type WikiTree = {
   interaction: {
     count: number;
     openQuestions: WikiPageInfo | null;
+    openQuestionsCount: number | null; // top-level bullets in open-questions.md; null without it
     notes: WikiPageInfo[];
     questions: WikiPageInfo[];
   };
@@ -72,14 +73,30 @@ function ownSourcePath(entry: string, project: string): string | null {
   return target ? `${target}.md` : null;
 }
 
+/** Unindented `- ` / `* ` / `+ ` list items outside code fences: one per open question. */
+export function countTopLevelBullets(markdown: string): number {
+  let count = 0;
+  let fence: string | null = null;
+  for (const line of markdown.split(/\r?\n/)) {
+    const marker = /^(`{3,}|~{3,})/.exec(line);
+    if (marker) {
+      if (fence === null) fence = marker[1][0];
+      else if (marker[1][0] === fence) fence = null;
+      continue;
+    }
+    if (fence === null && /^[-*+][ \t]+\S/.test(line)) count++;
+  }
+  return count;
+}
+
 /** Build the wiki tab payload for `<projectsDir>/<project>/wiki`. */
 export function buildWikiTree(projectsDir: string, project: string): WikiTree {
   const projectDir = join(projectsDir, project);
   const pages = walkWikiPages(join(projectDir, "wiki"));
   const indexKeys = new Set(pages.filter(isIndexPage).map((p) => `wiki/${p.path.replace(/\.md$/, "")}`));
-  // buildBacklinks addresses projects as `<workspaceRoot>/projects/<project>`.
-  const backlinks = buildBacklinks(dirname(projectsDir), project);
-  const mentions = countMentions(projectDir).slugs;
+  // One walk per request, shared by the backlink map and the mention count.
+  const backlinks = buildBacklinksIn(projectsDir, project, pages);
+  const mentions = countMentions(projectDir, { pages }).slugs;
   const existing = new Set(pages.map((p) => p.path));
 
   const info = (page: WikiPage): WikiPageInfo => {
@@ -110,7 +127,7 @@ export function buildWikiTree(projectsDir: string, project: string): WikiTree {
     entities: { count: 0, kinds: [] },
     concepts: { count: 0, pages: [] },
     repos: { count: 0, repos: [] },
-    interaction: { count: 0, openQuestions: null, notes: [], questions: [] },
+    interaction: { count: 0, openQuestions: null, openQuestionsCount: null, notes: [], questions: [] },
     sources: { count: 0, kinds: [] },
     other: [],
   };
@@ -132,7 +149,10 @@ export function buildWikiTree(projectsDir: string, project: string): WikiTree {
     else if (p.startsWith("entities/")) push(entityKinds, page.frontmatter.kind ?? OTHER_KIND, item);
     else if (p.startsWith("concepts/")) tree.concepts.pages.push(item);
     else if (/^repos\/[^/]+\/.+/.test(p)) push(repos, p.split("/")[1], item);
-    else if (p === "open-questions.md") tree.interaction.openQuestions = item;
+    else if (p === "open-questions.md") {
+      tree.interaction.openQuestions = item;
+      tree.interaction.openQuestionsCount = countTopLevelBullets(page.body);
+    }
     else if (p.startsWith("notes/")) tree.interaction.notes.push(item);
     else if (p.startsWith("questions/")) tree.interaction.questions.push(item);
     else if (p.startsWith("sources/")) push(sourceKinds, sourceKind(p), item);

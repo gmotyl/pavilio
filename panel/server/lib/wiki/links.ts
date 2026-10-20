@@ -1,24 +1,29 @@
 import { existsSync } from "fs";
 import { join } from "path";
 
-import { walkWikiPages } from "./pages";
+import { walkWikiPages, type WikiPage } from "./pages";
 import { extractWikiLinks, wikiLinkKey, type WikiLink } from "./wikilinks";
 
+/**
+ * Where projects live: pass `projectsDir` (the configured projects dir, any name) or, for the
+ * classic layout, `workspaceRoot` (the dir that contains `projects/`). `projectsDir` wins.
+ */
 export type LinkContext = {
-  workspaceRoot: string; // the dir that contains `projects/`
   project: string; // project the linking page belongs to
-};
+} & ({ projectsDir: string; workspaceRoot?: string } | { workspaceRoot: string; projectsDir?: undefined });
+
+const projectsDirOf = (ctx: LinkContext) => ctx.projectsDir ?? join(ctx.workspaceRoot!, "projects");
 
 export type ResolvedWikiLink = WikiLink & {
   project: string; // the prefix, else the current project
-  absPath: string; // `<workspaceRoot>/projects/<project>/<target>.md`
+  absPath: string; // `<projectsDir>/<project>/<target>.md`
   exists: boolean;
 };
 
-/** Resolve a parsed link to its `.md` file under `projects/<project>/`. */
+/** Resolve a parsed link to its `.md` file under `<projectsDir>/<project>/`. */
 export function resolveWikiLink(link: WikiLink, ctx: LinkContext): ResolvedWikiLink {
   const project = link.project ?? ctx.project;
-  const absPath = join(ctx.workspaceRoot, "projects", project, ...link.target.split("/")) + ".md";
+  const absPath = join(projectsDirOf(ctx), project, ...link.target.split("/")) + ".md";
   return { ...link, project, absPath, exists: existsSync(absPath) };
 }
 
@@ -32,9 +37,17 @@ const pageKey = (wikiRelPath: string) => `wiki/${wikiRelPath.replace(/\.md$/, ""
  * Every wiki page has an entry (empty when nothing links to it); non-wiki targets appear only when
  * linked.
  */
-export function buildBacklinks(workspaceRoot: string, project: string): Record<string, string[]> {
+export function buildBacklinks(workspaceRoot: string, project: string, pages?: WikiPage[]): Record<string, string[]> {
+  return buildBacklinksIn(join(workspaceRoot, "projects"), project, pages);
+}
+
+/**
+ * `buildBacklinks` against the projects dir itself (any name). `pages` — the project's
+ * `walkWikiPages` result — skips the walk when the caller already has it.
+ */
+export function buildBacklinksIn(projectsDir: string, project: string, pages?: WikiPage[]): Record<string, string[]> {
   const sets = new Map<string, Set<string>>();
-  const pages = walkWikiPages(join(workspaceRoot, "projects", project, "wiki"));
+  pages ??= walkWikiPages(join(projectsDir, project, "wiki"));
   for (const page of pages) sets.set(pageKey(page.path), new Set());
   for (const page of pages) {
     const from = pageKey(page.path);

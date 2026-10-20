@@ -18,6 +18,7 @@ export type MentionsResult = {
 
 export type MentionsOptions = {
   touched?: string[]; // namespaced slugs this run touched; narrows `qualifying`
+  pages?: WikiPage[]; // the project's `walkWikiPages` result, to skip walking again
 };
 
 /** Mentions needed before a slug earns a knowledge page, unless it is a glossary term. */
@@ -71,7 +72,7 @@ const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
  */
 export function countMentions(projectDir: string, options: MentionsOptions = {}): MentionsResult {
   const sets = new Map<string, Set<string>>();
-  for (const page of walkWikiPages(join(projectDir, "wiki"))) {
+  for (const page of options.pages ?? walkWikiPages(join(projectDir, "wiki"))) {
     if (!isSourceLike(page.path)) continue;
     for (const slug of pageSlugs(page)) {
       let set = sets.get(slug);
