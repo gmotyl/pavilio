@@ -14,6 +14,8 @@ interface Options {
   projectName: string | undefined;
   section: string | undefined;
   hasRepos: boolean;
+  /** The project has `wiki/` — adds the `wiki` tab right after `context`. */
+  hasWiki?: boolean;
 }
 
 const SECTIONS = [
@@ -31,8 +33,10 @@ export function useProjectTabs({
   projectName,
   section,
   hasRepos,
+  hasWiki = false,
 }: Options): { tabs: ProjectTab[]; activeTab: ProjectTab } {
   const sections = [...SECTIONS];
+  if (hasWiki) sections.splice(sections.indexOf("context") + 1, 0, "wiki");
   if (hasRepos) sections.push("repos");
   const nonIterm = sections.filter((s) => s !== "iterm");
   const name = projectName ?? "";

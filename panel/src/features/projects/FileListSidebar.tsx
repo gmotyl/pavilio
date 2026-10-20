@@ -52,6 +52,8 @@ export interface FileListSource {
   renderHeader?: (defaultHeader: ReactNode) => ReactNode;
   /** Suffix after the label, e.g. "(.kilo)". */
   hint?: string;
+  /** Small marker after the label, e.g. the wiki's `code` badge on Repos. */
+  badge?: ReactNode;
   /** Initial expand state of the group header. Defaults to open. */
   defaultOpen?: boolean;
 }
@@ -96,6 +98,7 @@ function SourceGroup({
     >
       {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       <span className="truncate">{source.label}</span>
+      {source.badge}
       {source.hint && (
         <span className="font-normal" style={{ color: "var(--text-muted)" }}>
           &nbsp;{source.hint}
