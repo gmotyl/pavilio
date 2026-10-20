@@ -8,8 +8,10 @@ import { isAbsolute, join, relative, resolve, sep } from "path";
  * hash is the first 12 hex of the record's sha256.
  *
  * Records (closed workspace files the wiki learns from):
- * - `notes/**` and `memo/**` (or `memos/**`) — every `.md`, recursively
- * - `progress/**` — `YYYY-MM-DD-*.md` dated before today (local date); today's file is still open
+ * - `notes/**` and `memo/**` (or `memos/**`) — every `.md`, recursively, except `notes/log/**`
+ *   (verbatim transcripts that duplicate the processed note)
+ * - `progress/**` — `YYYY-MM-DD-*.md` or `YYYY-MM-DD_*.md` dated before today (local date);
+ *   today's file is still open
  * - `adr/**` — every `.md`
  * - `{plans/openspec,openspec}/changes/archive/<id>/proposal.md|design.md` — never `tasks.md`
  *   or the delta specs under `specs/`, and never an active (un-archived) change
@@ -31,7 +33,9 @@ export type PendingOptions = {
 
 const LEDGER_FILE = join("wiki", "log.md");
 const LEDGER_LINE = /^- ingested: (.+?) #([0-9a-f]{12})\s*$/;
-const PROGRESS_FILE = /^(\d{4}-\d{2}-\d{2})-.*\.md$/;
+const PROGRESS_FILE = /^(\d{4}-\d{2}-\d{2})[-_].*\.md$/;
+/** Verbatim transcripts; the processed note next to them is the record. */
+const EXCLUDED_PREFIXES = ["notes/log/"];
 const RECURSIVE_DIRS = ["notes", "memo", "memos", "adr"];
 const OPENSPEC_ROOTS = ["plans/openspec", "openspec"];
 const CHANGE_RECORDS = ["proposal.md", "design.md"];
@@ -64,7 +68,9 @@ export function listRecords(projectDir: string, today: string | Date = new Date(
   const day = typeof today === "string" ? today : localDate(today);
   const out: string[] = [];
   for (const dir of RECURSIVE_DIRS) {
-    for (const path of walkMarkdown(projectDir, dir)) out.push(path);
+    for (const path of walkMarkdown(projectDir, dir)) {
+      if (!EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix))) out.push(path);
+    }
   }
   for (const path of walkMarkdown(projectDir, "progress")) {
     const match = PROGRESS_FILE.exec(path.slice(path.lastIndexOf("/") + 1));

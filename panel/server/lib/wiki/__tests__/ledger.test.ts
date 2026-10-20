@@ -50,7 +50,6 @@ describe("ledger", () => {
       "adr/0001-first.md",
       "memo/2026-10-03_1200_idea.md",
       "notes/2026-10-01_1000_kickoff.md",
-      "notes/log/2026-10-02_transcript.md",
       "plans/openspec/changes/archive/2026-10-01-thing/design.md",
       "plans/openspec/changes/archive/2026-10-01-thing/proposal.md",
       "progress/2026-10-19-yesterday.md",
@@ -58,6 +57,20 @@ describe("ledger", () => {
     expect(pending.every((p) => p.status === "new")).toBe(true);
     expect(pending[0].hash).toBe(hashRecord("# adr\n"));
     expect(pending[0].hash).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  it("skips verbatim transcripts under notes/log", () => {
+    write("notes/log/nested/2026-10-04_transcript.md", "# transcript\n");
+    expect(paths().filter((p) => p.startsWith("notes/log/"))).toEqual([]);
+    // The processed note itself is still a record.
+    expect(paths()).toContain("notes/2026-10-01_1000_kickoff.md");
+  });
+
+  it("accepts underscore-dated progress files", () => {
+    write("progress/2026-10-18_1400_session.md", "# underscore\n");
+    write(`progress/${TODAY}_0900_open.md`, "# today\n");
+    expect(paths()).toContain("progress/2026-10-18_1400_session.md");
+    expect(paths()).not.toContain(`progress/${TODAY}_0900_open.md`);
   });
 
   it("excludes today's progress", () => {
@@ -78,7 +91,7 @@ describe("ledger", () => {
   it("skips ledgered unchanged records", () => {
     write("wiki/log.md", `# Log\n\n- ingested: adr/0001-first.md #${hashRecord("# adr\n")}\n`);
     expect(paths()).not.toContain("adr/0001-first.md");
-    expect(paths()).toHaveLength(6);
+    expect(paths()).toHaveLength(5);
   });
 
   it("reports changed hash as changed", () => {
