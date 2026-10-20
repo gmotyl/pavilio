@@ -25,7 +25,7 @@ Done only when an HTML file exists on disk, written by [[pavilio-mockup]], and i
 
 Resolve `<project>` exactly as [[pavilio-mockup]] does (the invocation, else the working directory); if it cannot be resolved, that is the one question this skill is allowed.
 
-Read the request, then `projects/<project>/PROJECT.md` and `projects/<project>/CONTEXT.md`. Take the surface, its users, the vocabulary, and the job it does from there. Look at the real screen in the project's repo when it exists — the code answers more than the user will.
+Read the request, then `projects/<project>/PROJECT.md` and the `projects/<project>/CONTEXT.md` glossary; with `wiki/`, walk the reading ladder (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder`) for the surface and its users (no `wiki/` → `CONTEXT.md` whole). Take the surface, its users, the vocabulary, and the job it does from there. Look at the real screen in the project's repo when it exists — the code answers more than the user will.
 
 **State your assumptions in one short block and design.** Do not run an interview.
 

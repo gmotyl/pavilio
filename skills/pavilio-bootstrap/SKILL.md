@@ -17,17 +17,18 @@ Analyze existing meeting notes in a project folder and generate the `PROJECT.md`
 ## Process
 
 1. **Get project name** from user (or process all projects if user says "all")
-2. **Scan the projects/project folder** for all `*.md` files (excluding PROJECT.md)
-3. **Read and analyze each note** to extract:
+2. **Orient on the glossary.** Read `projects/<p>/CONTEXT.md` (the glossary) so names and terms match it; with `projects/<p>/wiki/`, walk the reading ladder (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder` — `overview.md` and the repository/person entity pages are the usual stops) for stable facts the notes leave implicit. No `wiki/` → `CONTEXT.md` whole. Bootstrap never writes `CONTEXT.md` or `wiki/`.
+3. **Scan the projects/project folder** for all `*.md` files (excluding PROJECT.md)
+4. **Read and analyze each note** to extract:
    - People mentioned (names, roles, responsibilities)
    - Decisions made
    - Technologies discussed
    - Action items
    - Key topics
-4. **Aggregate data** across all notes
-5. **Generate PROJECT.md** (resume card — stable facts only) and **STATUS.md** (volatile state — from the most recent notes, within caps)
-6. **Generate _index.json** with structured search data
-7. **Commit changes**
+5. **Aggregate data** across all notes
+6. **Generate PROJECT.md** (resume card — stable facts only) and **STATUS.md** (volatile state — from the most recent notes, within caps)
+7. **Generate _index.json** with structured search data
+8. **Commit changes**
 
 ---
 
@@ -81,7 +82,7 @@ When reading existing notes, look for:
 Use the **PROJECT.md Template (resume card)** from [[pavilio-note]] verbatim. Only stable facts go in: overview, repositories + working rules, environment gotchas, stack, links. Header line: `> Last updated: [today] · bootstrap (from [N] notes)`.
 
 - **No Team, no Focus, no Open Questions, no Key Decisions table** — those are `STATUS.md` / `DECISIONS.md`
-- Hard cap **60 lines**; anything longer belongs in `CONTEXT.md`, an ADR, or a memo
+- Hard cap **60 lines**; anything longer belongs in the wiki (via [[pavilio-wiki]] ingest), an ADR, or a memo — `CONTEXT.md` is a one-line glossary
 - Working rules and gotchas come from notes *and* from `progress/` files — that is where "never push panel changes to X" and "MCP Y is blocked" get written down
 
 ## Output: STATUS.md (volatile)

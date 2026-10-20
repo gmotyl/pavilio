@@ -24,7 +24,7 @@ Start work on a project by loading context, checking in-progress plans, and ente
 
 If the resolved folder is missing, say so and re-resolve via `.projects.local.md` — never guess a sibling path like `<root>/<name>/`.
 
-**Then follow the lazy start logic.** With no task known yet, read only the two files below and nothing else — no git history, no `CONTEXT.md`, no `adr/`, no repo code, no `tasks.md`:
+**Then follow the lazy start logic.** With no task known yet, read only the two files below and nothing else — no git history, no `CONTEXT.md`, no `adr/`, no wiki pages, no repo code, no `tasks.md`:
 
 1. Load the most recent progress file from `<root>/projects/[project]/progress/`
 2. Read `PROJECT.md` — the resume card: overview, repos + working rules, gotchas (always; capped at 60 lines for exactly this read). `STATUS.md` is **not** read at start; it holds meeting-driven state for [[pavilio-question]] / [[pavilio-manager]]. Read it only when the session turns out to be meeting prep or a status question.
@@ -45,13 +45,19 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
    **Multiple active changes** → After the summary, show a numbered list of change names, wait for selection.
 
 **Once the task is known** (reply to the question above, a selected change, or fast-entry), load context for that scope only, guided by `PROJECT.md`:
-- `CONTEXT.md` (if present) — the project glossary
+- `CONTEXT.md` (if present) — the project glossary; with `wiki/`, walk on from it per `skills/pavilio-wiki/CONVENTIONS.md § Reading ladder` (the reading ladder: wiki index → ≤2 section indexes → ≤3 pages, no logging) instead of sweeping notes; no `wiki/` → `CONTEXT.md` whole, as before
 - `adr/` (if present) — **list filenames/titles only**, read a body only when the task touches it
 - the relevant change dir (`proposal.md`, `design.md`, `tasks.md`) and only the specs under `openspec/specs/` for the capabilities in scope
 - repo code only when the task needs it, via targeted reads
 
+**Wiki catch-up** (once per session, right after the project is resolved; it reads no wiki pages, so the lazy rule holds):
+1. `scripts/wiki config` → `sessionStartIngest` false → skip silently, ingest nothing.
+2. No `projects/<p>/wiki/` → one line: `No wiki yet — /pavilio-wiki-migrate <p> to build it.` Ingest nothing.
+3. `scripts/wiki pending <p>`: 0 → nothing; 1–5 → spawn a **background** subagent running `/pavilio-wiki <p> ingest` (it locks, ingests and commits on its own) and show one line: `Wiki catch-up: ingesting <n> records in the background.`; >5 → one line: `Wiki has <n> pending records — /pavilio-wiki-migrate <p> to catch up.` Ingest nothing.
+4. Never wait on the subagent; its one-line report is shown when it lands.
+
 **Fast-entry variant** (`/pavilio-session-start [project] <task description>`):
-1. Load PROJECT.md silently (no display); the task is known, so apply the same lazy rule — load `CONTEXT.md`, ADR titles, and the relevant change and specs for that scope
+1. Load PROJECT.md silently (no display); the task is known, so apply the same lazy rule — load `CONTEXT.md` plus the reading ladder (as above), ADR titles, and the relevant change and specs for that scope
 2. Skip progress summary
 3. Classify the argument: a build task → enter the workflow at **step 1: Design** with it in hand. A question or a non-build ask ("what did we decide about X", "prep me for the call with Y") → answer it directly in the non-build lane; fast-entry is a shortcut past the summary, not a commitment to grill.
 

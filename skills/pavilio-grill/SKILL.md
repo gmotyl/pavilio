@@ -1,6 +1,6 @@
 ---
 name: pavilio-grill
-description: Stress-test an idea or plan into a sharp, domain-aligned design, then chain straight into the implementation contract. Auto-detects whether you have a raw idea (design it first) or an existing plan/draft (grill it), then interviews relentlessly one question at a time, challenges terminology against the project glossary, cross-references code, and captures the result as a complete OpenSpec change dir — proposal.md, design.md, delta specs, and `tasks.md` (written by [[pavilio-writing-plans]], which grill invokes itself) — plus inline CONTEXT.md / ADR updates. Use when the user invokes `/pavilio-grill` or wants to harden a plan before implementing.
+description: Stress-test an idea or plan into a sharp, domain-aligned design, then chain straight into the implementation contract. Auto-detects whether you have a raw idea (design it first) or an existing plan/draft (grill it), then interviews relentlessly one question at a time, challenges terminology against the project glossary, cross-references code, and captures the result as a complete OpenSpec change dir — proposal.md, design.md, delta specs, and `tasks.md` (written by [[pavilio-writing-plans]], which grill invokes itself) — plus a glossary delta in `design.md § Glossary` and inline ADRs. Use when the user invokes `/pavilio-grill` or wants to harden a plan before implementing.
 ---
 
 # pavilio-grill
@@ -32,12 +32,12 @@ Then **resolve the OpenSpec backend for the target scope before writing anything
 
 Other project-scoped docs live under the workspace repo root:
 
-- Glossary: `projects/<project>/CONTEXT.md` (or `CONTEXT-MAP.md` if multi-context)
+- Glossary (read-only for grill): `projects/<project>/CONTEXT.md` (or `CONTEXT-MAP.md` if multi-context); new or changed terms go to the change's `design.md § Glossary`
 - ADRs: `projects/<project>/adr/NNNN-slug.md`
 
 ## 1. Auto-detect entry mode
 
-Explore context first: read recent commits, the un-archived change dirs under the backend's `openspec/changes/`, any spec/draft the user points at, `CONTEXT.md`, the `adr/` listing (don't pre-read every ADR — open one only when the topic touches it), and the `openspec/specs/` listing — the capability filenames are the project's area index; open only the living spec(s) (`openspec/specs/<capability>/spec.md`) whose capability the topic touches, never all of them. If no capability maps to the topic, ask which one (one question) before reading any. Living specs describe shipped behavior and are the base the new design's deltas are written against.
+Explore context first: read recent commits, the un-archived change dirs under the backend's `openspec/changes/`, any spec/draft the user points at, the glossary and — when the project has `wiki/` — the reading ladder for the topic (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder`; no `wiki/` → the glossary whole), the `adr/` listing (don't pre-read every ADR — open one only when the topic touches it), and the `openspec/specs/` listing — the capability filenames are the project's area index; open only the living spec(s) (`openspec/specs/<capability>/spec.md`) whose capability the topic touches, never all of them. If no capability maps to the topic, ask which one (one question) before reading any. Living specs describe shipped behavior and are the base the new design's deltas are written against.
 
 - **Plan/spec/draft exists** → **grill mode**: stress-test what's there.
 - **Only a raw idea** → **design mode**: build the design first, applying grill tactics throughout.
@@ -80,8 +80,7 @@ A mockup named in a grill becomes binding: it is turned into a **mockup check** 
 
 Capture decisions as they crystallise — don't batch.
 
-- **CONTEXT.md** — when a term is resolved, write it right there using the format in
-  [CONTEXT-FORMAT.md](CONTEXT-FORMAT.md). Create the file lazily on the first resolved term. Keep it domain-level; don't couple to implementation details. Multi-context repos use `CONTEXT-MAP.md`.
+- **Glossary delta** — when a term is resolved, write it right there to the change's `design.md § Glossary` (create the section — and `design.md` itself if it does not exist yet — lazily on the first resolved term), one strict line per term in the format of [CONTEXT-FORMAT.md](CONTEXT-FORMAT.md). Keep it domain-level; don't couple to implementation details. **Never edit the project glossary file from a grill** — [[pavilio-archive-plan]] folds the delta in when the change ships.
 - **ADRs** — offer sparingly, only when ALL THREE hold: hard to reverse, surprising without context, result of a real trade-off. Format + guidance in [ADR-FORMAT.md](ADR-FORMAT.md). Location: `projects/<project>/adr/`; scan it for the highest number and increment.
 
 ## 4. Present the design

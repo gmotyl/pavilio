@@ -16,7 +16,7 @@ Package THIS session's remaining work into a handoff for [[pavilio-resume]]. Dis
 ## Behavior
 
 1. **Resolve project**: argument → project remembered earlier this conversation → ask.
-2. **Distill from the current conversation + today's progress file ONLY.** No repo sweep, no PROJECT.md/CONTEXT.md/ADR reads.
+2. **Distill from the current conversation + today's progress file ONLY.** No repo sweep, no PROJECT.md/CONTEXT.md/ADR reads. In the handoff's Context section, point the resumer at the `CONTEXT.md` glossary and the reading ladder (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder`) — or wiki pages already used this session — rather than at `CONTEXT.md` whole; no `wiki/` → point at `CONTEXT.md`.
 3. Draft the handoff in the standard format:
 
 ```markdown

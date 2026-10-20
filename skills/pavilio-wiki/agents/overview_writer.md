@@ -8,7 +8,8 @@ tool's `model`; elsewhere the harness's small-model tier).
 ## Inputs
 
 - `project`
-- `changed` — wiki-relative paths of the knowledge pages this run created or updated
+- `changed` — project-root paths (`wiki/…` form, e.g. `wiki/concepts/speech-relay.md`) of the
+  knowledge pages this run created or updated
 
 ## Read limits
 

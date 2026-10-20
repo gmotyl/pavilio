@@ -55,8 +55,8 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
    - one query entry in `wiki/log.md`.
 6. Code question the repo pages do not answer, with the clone present in `wiki/raw/repos/` →
    run `repo_writer` in question mode (a new repo note).
-7. Never edit `entities/`, `concepts/`, `repos/` pages other than the new note, `sources/` or
-   `overview.md` from a query.
+7. Never edit any existing page under `entities/`, `concepts/`, `repos/`, `sources/`, or
+   `overview.md` from a query; the only repo write is the new question-mode note.
 8. `scripts/wiki index <p>`. Exit 1 → no commit; report `error` and `page`, release, stop.
 9. Commit `projects/<p>/wiki` as `<p>: wiki query <slug>`, then `lock release`.
 
@@ -68,7 +68,7 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 |---|---|
 | none | every pending record (`scripts/wiki pending <p>`) |
 | path inside `projects/<p>/` | cited in place — `pending <p> --only <path>` |
-| path outside the workspace | verbatim copy to `wiki/raw/<slug>.md` |
+| path outside the workspace, or a workspace path outside every `projects/<p>/` (e.g. `skills/…`) | outside path — verbatim copy to `wiki/raw/<slug>.md` |
 | path in another project | stop; suggest ingesting into that project's wiki |
 | repo URL (`<forge>/<owner>/<repo>`, `.git`) | `scripts/wiki clone-repo <p> <url>` → `repo_writer` (architecture mode) |
 | other URL | `scripts/wiki fetch-article <p> <url>` → `wiki/raw/article-<slug>.md` |
