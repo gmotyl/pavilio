@@ -1,0 +1,230 @@
+import { existsSync, readFileSync, statSync } from "fs";
+import { join } from "path";
+
+import { walkWikiPages } from "./pages";
+import { resolveWikiLink } from "./links";
+import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./wikilinks";
+
+/**
+ * Read-only health check of one project's wiki (`scripts/wiki lint <p>`). Never writes.
+ *
+ * Every page is named by its project-relative path with `.md` (`wiki/concepts/x.md`), the file an
+ * agent opens to fix it. Link targets keep their D14 form (`wiki/concepts/x`, `metro:wiki/…`).
+ * Every array is sorted in code-unit order, so the same wiki always lints byte-identical.
+ *
+ * - **broken** — a body wikilink or a frontmatter `sources:` entry whose `.md` does not exist.
+ *   Cross-project links resolve against the workspace root. All walked pages are checked,
+ *   generated indexes included (a dangling index line means the index is stale).
+ * - **orphans** — pages nothing links to. Inbound links are body wikilinks from non-index wiki
+ *   pages, frontmatter `sources:` citations, and body wikilinks in the project's `CONTEXT.md`.
+ *   Links from generated `index.md` pages never count: every page is listed in one, so otherwise
+ *   nothing could be an orphan. Frontmatter `entities:` / `concepts:` slugs do not count either —
+ *   they are the mentions ledger, not navigation. Exempt: index pages, `overview.md`,
+ *   `open-questions.md`, `repos/<repo>/ARCHITECTURE.md` (the repo entry point), and the
+ *   interaction layer `questions/**` and `notes/**`, which are reached from the log, not linked.
+ * - **untyped** — pages without a frontmatter `type`.
+ * - **stale** — a page whose `updated` (YYYY-MM-DD) is older than one of its sources: each
+ *   resolvable `sources:` entry, the `record:` file (workspace-relative) and the `raw:` file
+ *   (wiki-relative, `wiki/…` accepted). Day granularity: stale when the source's mtime, as a
+ *   local calendar date, is after `updated`. Pages with no valid `updated` and missing source
+ *   files are skipped (the latter are `broken` when they come from `sources:`).
+ * - **codeIdentifiers** — `concepts/` and `entities/` pages naming code, which belongs under
+ *   `repos/`. Rules, kept conservative so prose never trips them: `call` — a backticked
+ *   `camelCase(`; `path` — a `*.ts` / `*.tsx` path anywhere; `component` — a multi-hump
+ *   `PascalCase` name that is backticked or written `<Component …>`; `fence` — a fenced code
+ *   block, itself a violation in a knowledge page (its contents are scanned too).
+ */
+
+export type BrokenLink = { page: string; target: string };
+export type StalePage = { page: string; source: string; updated: string; modified: string };
+export type CodeIdentifierRule = "call" | "path" | "component" | "fence";
+export type CodeIdentifier = { page: string; line: number; rule: CodeIdentifierRule; match: string };
+
+export type LintReport = {
+  broken: BrokenLink[];
+  orphans: string[];
+  untyped: string[];
+  stale: StalePage[];
+  codeIdentifiers: CodeIdentifier[];
+};
+
+const byString = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+const pagePath = (wikiRel: string) => `wiki/${wikiRel}`;
+const pageKey = (wikiRel: string) => `wiki/${wikiRel.replace(/\.md$/, "")}`;
+const isIndexPage = (wikiRel: string) => wikiRel === "index.md" || wikiRel.endsWith("/index.md");
+const linkText = (link: WikiLink) => (link.project ? `${link.project}:${link.target}` : link.target);
+
+function isOrphanExempt(wikiRel: string): boolean {
+  return (
+    isIndexPage(wikiRel) ||
+    wikiRel === "overview.md" ||
+    wikiRel === "open-questions.md" ||
+    wikiRel.startsWith("questions/") ||
+    wikiRel.startsWith("notes/") ||
+    /^repos\/[^/]+\/ARCHITECTURE\.md$/.test(wikiRel)
+  );
+}
+
+/** A `sources:` entry is a wikilink, bracketed or bare (`[[wiki/sources/x]]`, `wiki/sources/x.md`). */
+function parseSourceEntry(entry: string): WikiLink | null {
+  const inner = /^\s*\[\[([^\[\]\n]+)\]\]\s*$/.exec(entry);
+  return parseWikiLink(inner ? inner[1] : entry);
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const localDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+function mtimeDate(absPath: string): string | null {
+  try {
+    return localDate(statSync(absPath).mtime);
+  } catch {
+    return null;
+  }
+}
+
+// --- code identifiers ---------------------------------------------------------------------------
+
+const PASCAL = "[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+";
+const CALL = /\b[a-z][a-z0-9]*[A-Z]\w*\s*\(/g;
+const PATH = /(?<![\w./-])[\w-]+(?:\/[\w.-]+)*\.tsx?(?![\w-])/g;
+const JSX = new RegExp(`<\\/?(${PASCAL})(?=[\\s/>])`, "g");
+const BACKTICKED_PASCAL = new RegExp(`(?<![\\w.])${PASCAL}(?![\\w])`, "g");
+const CODE_SPAN = /(`+)(?!`)(.*?[^`])\1(?!`)/g;
+
+function scanCodeIdentifiers(page: string, text: string, firstLine: number): CodeIdentifier[] {
+  const found: CodeIdentifier[] = [];
+  const add = (line: number, rule: CodeIdentifierRule, match: string) =>
+    found.push({ page, line, rule, match: match.trim() });
+  const scanCode = (code: string, line: number) => {
+    for (const m of code.matchAll(CALL)) add(line, "call", m[0].replace(/\s+/g, ""));
+    for (const m of code.matchAll(BACKTICKED_PASCAL)) add(line, "component", m[0]);
+  };
+  let fence: { char: string; len: number } | null = null;
+  text.split("\n").forEach((content, i) => {
+    const line = firstLine + i;
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(content);
+    if (fence) {
+      const close = open && open[1][0] === fence.char && open[1].length >= fence.len
+        && content.slice(open[0].length).trim() === "";
+      if (close) fence = null;
+      else {
+        scanCode(content, line);
+        for (const m of content.matchAll(PATH)) add(line, "path", m[0]);
+      }
+      return;
+    }
+    if (open) {
+      fence = { char: open[1][0], len: open[1].length };
+      add(line, "fence", content);
+      return;
+    }
+    for (const m of content.matchAll(CODE_SPAN)) scanCode(m[2], line);
+    for (const m of content.matchAll(PATH)) add(line, "path", m[0]);
+    for (const m of content.matchAll(JSX)) add(line, "component", m[1]);
+  });
+  return found;
+}
+
+/** 1-based file line of the body's first line: the frontmatter block sits above it. */
+function bodyFirstLine(absPath: string, body: string): number {
+  try {
+    const text = readFileSync(absPath, "utf8");
+    const prefix = text.slice(0, text.length - body.length);
+    return prefix.split("\n").length;
+  } catch {
+    return 1;
+  }
+}
+
+// --- lint ---------------------------------------------------------------------------------------
+
+/** Lint `projects/<project>/wiki` under `workspaceRoot` (the dir containing `projects/`). */
+export function lintWiki(workspaceRoot: string, project: string): LintReport {
+  const projectDir = join(workspaceRoot, "projects", project);
+  const wikiDir = join(projectDir, "wiki");
+  const pages = walkWikiPages(wikiDir);
+  const ctx = { workspaceRoot, project };
+
+  const broken: BrokenLink[] = [];
+  const untyped: string[] = [];
+  const stale: StalePage[] = [];
+  const codeIdentifiers: CodeIdentifier[] = [];
+  const inbound = new Map<string, Set<string>>(); // target key → linking page keys
+
+  const addInbound = (link: WikiLink, from: string) => {
+    const to = wikiLinkKey(link, project);
+    if (to === from) return;
+    let set = inbound.get(to);
+    if (!set) inbound.set(to, (set = new Set()));
+    set.add(from);
+  };
+
+  for (const page of pages) {
+    const path = pagePath(page.path);
+    const from = pageKey(page.path);
+    const fromIndex = isIndexPage(page.path);
+
+    const brokenTargets = new Set<string>();
+    for (const link of extractWikiLinks(page.body)) {
+      if (!resolveWikiLink(link, ctx).exists) brokenTargets.add(linkText(link));
+      if (!fromIndex) addInbound(link, from);
+    }
+
+    const sourceFiles: { source: string; absPath: string }[] = [];
+    for (const entry of page.frontmatter.sources ?? []) {
+      const link = parseSourceEntry(entry);
+      if (!link) {
+        brokenTargets.add(entry.trim());
+        continue;
+      }
+      const resolved = resolveWikiLink(link, ctx);
+      if (!resolved.exists) brokenTargets.add(linkText(link));
+      else sourceFiles.push({ source: linkText(link), absPath: resolved.absPath });
+      if (!fromIndex) addInbound(link, from);
+    }
+    for (const target of brokenTargets) broken.push({ page: path, target });
+
+    if (!page.frontmatter.type) untyped.push(path);
+
+    const { record, raw, updated } = page.frontmatter;
+    if (record) sourceFiles.push({ source: record, absPath: join(workspaceRoot, record) });
+    if (raw) {
+      const rel = raw.replace(/^\/+/, "");
+      sourceFiles.push({ source: raw, absPath: rel.startsWith("wiki/") ? join(projectDir, rel) : join(wikiDir, rel) });
+    }
+    if (updated && /^\d{4}-\d{2}-\d{2}$/.test(updated)) {
+      const seen = new Set<string>();
+      for (const { source, absPath } of sourceFiles) {
+        if (seen.has(source)) continue;
+        seen.add(source);
+        const modified = mtimeDate(absPath);
+        if (modified && modified > updated) stale.push({ page: path, source, updated, modified });
+      }
+    }
+
+    if (page.path.startsWith("concepts/") || page.path.startsWith("entities/")) {
+      const abs = join(wikiDir, ...page.path.split("/"));
+      codeIdentifiers.push(...scanCodeIdentifiers(path, page.body, bodyFirstLine(abs, page.body)));
+    }
+  }
+
+  // The glossary points at concept pages; those links make them reachable.
+  const contextPath = join(projectDir, "CONTEXT.md");
+  if (existsSync(contextPath)) {
+    for (const link of extractWikiLinks(readFileSync(contextPath, "utf8"))) addInbound(link, "CONTEXT");
+  }
+
+  const orphans = pages
+    .filter((p) => !isOrphanExempt(p.path) && !(inbound.get(pageKey(p.path))?.size))
+    .map((p) => pagePath(p.path));
+
+  return {
+    broken: broken.sort((a, b) => byString(a.page, b.page) || byString(a.target, b.target)),
+    orphans: orphans.sort(byString),
+    untyped: untyped.sort(byString),
+    stale: stale.sort((a, b) => byString(a.page, b.page) || byString(a.source, b.source)),
+    codeIdentifiers: codeIdentifiers.sort(
+      (a, b) => byString(a.page, b.page) || a.line - b.line || byString(a.rule, b.rule) || byString(a.match, b.match),
+    ),
+  };
+}
