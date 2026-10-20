@@ -35,6 +35,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "shell.project.expanded": [true, false],
   "view.wide": [true, false],
   "fileList.sidebarCollapsed": [true, false],
+  "wiki.sessionStartIngest": [true, false],
   "search.includeArchived": [true, false],
   "git.commitsOpen": [true, false],
   "git.branchDiff.open": [true, false],
@@ -106,6 +107,9 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 
   // ── project identity (validating text codecs) ───────────────────────────
   "project.color": ["", "#112233", "#abc"],
+
+  // ── wiki ────────────────────────────────────────────────────────────────
+  "wiki.writerModel": ["haiku", "sonnet", "claude-haiku-4-5", "true", "240"],
   "project.mark": ["", "lucide:rocket", "emoji:🚀", "emoji:🇵🇱"],
 
   // ── json whose payload can be a BARE STRING — the shape that breaks a
@@ -120,7 +124,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 52;
+const DECLARATION_COUNT = 54;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

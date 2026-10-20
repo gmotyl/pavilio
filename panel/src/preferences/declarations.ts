@@ -890,6 +890,31 @@ export const preferences = {
     codec: bool,
     portable: true,
   }),
+
+  // ── Wiki ─────────────────────────────────────────────────────────────────
+  // Read by the server, not the panel UI: `server/lib/wiki/config.ts` takes
+  // both defaults from here and `scripts/wiki config` prints them. Portable,
+  // because that reader only ever sees `.pavilio/preferences.json`.
+  /**
+   * Whether session start catches the wiki up on records written since the
+   * last ingest. `false` leaves ingest to note, session end and explicit runs
+   * — the escape hatch design.md's Cost section names.
+   */
+  wikiSessionStartIngest: definePreference({
+    key: "wiki.sessionStartIngest", // was: nothing — the wiki is new
+    scope: "global",
+    default: true,
+    codec: bool,
+    portable: true,
+  }),
+  /** The model every wiki writer subagent runs on. */
+  wikiWriterModel: definePreference({
+    key: "wiki.writerModel", // was: nothing — the wiki is new
+    scope: "global",
+    default: "haiku",
+    codec: str,
+    portable: true,
+  }),
 };
 
 /** The whole table, for the registry's own invariants and the store's lookups. */
