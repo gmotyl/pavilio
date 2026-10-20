@@ -11,4 +11,9 @@ describe("countTopLevelBullets", () => {
     const md = ["- one", "   ```", "- fenced", "   ```", "  ~~~md", "- also fenced", "  ~~~", "- two"].join("\n");
     expect(countTopLevelBullets(md)).toBe(2);
   });
+
+  it("a fence line with an info string never closes a fence", () => {
+    const md = ["```md", "- fenced", "```js", "- still fenced", "```", "- counted", "- counted too"].join("\n");
+    expect(countTopLevelBullets(md)).toBe(2);
+  });
 });

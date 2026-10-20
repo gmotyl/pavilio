@@ -76,13 +76,16 @@ function ownSourcePath(entry: string, project: string): string | null {
 /** Unindented `- ` / `* ` / `+ ` list items outside code fences: one per open question. */
 export function countTopLevelBullets(markdown: string): number {
   let count = 0;
-  // CommonMark fences: up to three spaces of indent; closed by the same char, at least as long.
+  // CommonMark fences: up to three spaces of indent; closed by the same char, at least as long,
+  // with nothing after it (a line with an info string never closes a fence).
   let fence: string | null = null;
   for (const line of markdown.split(/\r?\n/)) {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
     if (marker) {
       if (fence === null) fence = marker[1];
-      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && line.slice(marker[0].length).trim() === "") {
+        fence = null;
+      }
       continue;
     }
     if (fence === null && /^[-*+][ \t]+\S/.test(line)) count++;
