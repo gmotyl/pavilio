@@ -15,6 +15,11 @@ import { isAbsolute, join, relative, resolve, sep } from "path";
  * - `adr/**` — every `.md`
  * - `{plans/openspec,openspec}/changes/archive/<id>/proposal.md|design.md` — never `tasks.md`
  *   or the delta specs under `specs/`, and never an active (un-archived) change
+ *
+ * Raw snapshots — top-level `wiki/raw/*.md` (fetched articles, CONTEXT.md snapshots) — are not
+ * records, but `pendingRecords` lists them too while they are unledgered or changed, so a
+ * snapshot written without an ingest is caught up. Sub-dirs (`raw/repos/` clones and the like)
+ * are never included.
  */
 
 export type PendingStatus = "new" | "changed";
@@ -89,14 +94,29 @@ export function listRecords(projectDir: string, today: string | Date = new Date(
   return [...new Set(out)].sort();
 }
 
-/** Records that are not in the ledger (`new`) or whose latest ledgered hash differs (`changed`). */
+/** Top-level `wiki/raw/*.md` files, sorted, project-relative. */
+function listRawSnapshots(projectDir: string): string[] {
+  try {
+    return readdirSync(join(projectDir, "wiki", "raw"), { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".md"))
+      .map((e) => `wiki/raw/${e.name}`)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Records — plus top-level raw snapshots — that are not in the ledger (`new`) or whose latest
+ * ledgered hash differs (`changed`).
+ */
 export function pendingRecords(projectDir: string, opts: PendingOptions = {}): PendingRecord[] {
   let candidates: string[];
   if (opts.only !== undefined) {
     const only = toProjectPath(projectDir, opts.only);
     candidates = only && isFile(join(projectDir, only)) ? [only] : [];
   } else {
-    candidates = listRecords(projectDir, opts.today);
+    candidates = [...listRecords(projectDir, opts.today), ...listRawSnapshots(projectDir)].sort();
   }
   const ledger = readLedger(projectDir);
   const pending: PendingRecord[] = [];

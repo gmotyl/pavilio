@@ -59,6 +59,24 @@ describe("ledger", () => {
     expect(pending[0].hash).toMatch(/^[0-9a-f]{12}$/);
   });
 
+  it("includes unledgered top-level raw snapshots, not subdirs or repo clones", () => {
+    write("wiki/raw/article-x.md", "# article\n");
+    write("wiki/raw/CONTEXT-2026-10-20.md", "# snapshot\n");
+    write("wiki/raw/context-sections/a.md", "# section\n");
+    write("wiki/raw/repos/acme-widget/README.md", "# readme\n");
+    write("wiki/raw/notes.txt", "not markdown\n");
+    recordIngested(projectDir, "wiki/raw/CONTEXT-2026-10-20.md", hashRecord("# snapshot\n"));
+
+    const raw = pendingRecords(projectDir, { today: TODAY }).filter((p) => p.path.startsWith("wiki/"));
+    expect(raw).toEqual([{ path: "wiki/raw/article-x.md", hash: hashRecord("# article\n"), status: "new" }]);
+
+    // A refreshed snapshot is pending again, as changed.
+    write("wiki/raw/CONTEXT-2026-10-20.md", "# snapshot v2\n");
+    expect(pendingRecords(projectDir, { today: TODAY }).find((p) => p.path === "wiki/raw/CONTEXT-2026-10-20.md")?.status).toBe(
+      "changed",
+    );
+  });
+
   it("skips verbatim transcripts under notes/log", () => {
     write("notes/log/nested/2026-10-04_transcript.md", "# transcript\n");
     expect(paths().filter((p) => p.startsWith("notes/log/"))).toEqual([]);

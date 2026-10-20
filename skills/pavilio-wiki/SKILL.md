@@ -66,7 +66,7 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 
 | Input | Becomes |
 |---|---|
-| none | every pending record (`scripts/wiki pending <p>`) |
+| none | every pending record, unledgered top-level `wiki/raw/*.md` snapshots included (`scripts/wiki pending <p>`) |
 | path inside `projects/<p>/` | cited in place — `pending <p> --only <path>`, path project-relative (`notes/<file>.md`, `plans/openspec/changes/archive/<id>/proposal.md`) |
 | path outside the workspace, or a workspace path outside every `projects/<p>/` (e.g. `skills/…`) | outside path — verbatim copy to `wiki/raw/<slug>.md` |
 | path in another project | stop; suggest ingesting into that project's wiki |
@@ -92,9 +92,9 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    ingesting and stop without writing. `takenOver: true` → note it for the log entry. Nothing
    is written to `raw/` before this step.
 3. **Route** — apply § Route the inputs (raw snapshots, `fetch-article`, `clone-repo`).
-4. **Pending** — the routed records with their hashes. A catch-up (no inputs) also lists the
-   `wiki/raw/*.md` files and adds each one `pending <p> --only wiki/raw/<file>` still reports, so a
-   snapshot left unledgered by an interrupted run is retried. Nothing pending and no repo input →
+4. **Pending** — the routed records with their hashes. A catch-up (no inputs) takes
+   `scripts/wiki pending <p>` as is: it already includes unledgered or changed top-level
+   `wiki/raw/*.md` snapshots, so a snapshot left unledgered by an interrupted run is retried. Nothing pending and no repo input →
    release, report "nothing to ingest", stop.
 5. **Source writers** — one `source_writer` per record (target `wiki/sources/<kind>-<stem>.md`
    per `CONVENTIONS.md § Identity and the ledger`), in parallel, ≤10 at a time; one `repo_writer`

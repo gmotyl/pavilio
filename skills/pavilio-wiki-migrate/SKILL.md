@@ -39,7 +39,8 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 1. `scripts/wiki pending <p>` → the records not yet ingested (or changed). The ledger already
    excludes `tasks.md`, delta specs, active changes and today's progress.
 2. Group by kind: `notes/` → note, `memo/` or `memos/` → memo, `adr/` → adr, `progress/` →
-   progress, `…/changes/archive/<id>/proposal.md` → proposal, `…/design.md` → design. Count `new`
+   progress, `…/changes/archive/<id>/proposal.md` → proposal, `…/design.md` → design,
+   `wiki/raw/*.md` → raw snapshot (one left unledgered by an interrupted ingest). Count `new`
    and `changed` separately; count ledger lines in `wiki/log.md` as done.
 3. Resume state: snapshot present (`wiki/raw/context-snapshot-*.md`)? `CONTEXT.md` rewritten
    (every term line carries `See [[wiki/concepts/`)? Snapshot sections all ledgered?
@@ -71,13 +72,18 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 1. No `CONTEXT.md` → skip steps 3–5 (no glossary, no seeded pages).
 2. Any `wiki/raw/context-snapshot-*.md` exists → **never snapshot again**: reuse the newest one as
    `<snapshot>` (the live `CONTEXT.md` may already be rewritten). Else copy `CONTEXT.md` byte for
-   byte to `wiki/raw/context-snapshot-<today>.md`. A raw file is never rewritten.
+   byte to `wiki/raw/context-snapshot-<today>.md`. A raw file is never rewritten. Ledger the
+   top-level snapshot right away — its content is carried by the section files, and `pending`
+   lists unledgered top-level raw files, so a catch-up must never ingest it as one page:
+   `scripts/wiki pending <p> --only wiki/raw/<snapshot file>` → `scripts/wiki record <p>
+   wiki/raw/<snapshot file> <hash>` (skip when already done).
 3. Split `<snapshot>` into one verbatim raw file per `##` section:
    `wiki/raw/<snapshot stem>/<nn>-<section-slug>.md` (`nn` = section order, two digits; text
    before the first `##` goes into `00-preamble.md`). Write only files that are missing. These
-   section files are the records the concept pages are seeded from; `pending --only` takes each.
-4. `CONTEXT.md` already rewritten → skip step 4 items 1–3; still run items 4–5 when the
-   top-level snapshot is not yet ledgered.
+   section files are the records the concept pages are seeded from; `pending --only` takes each
+   (they sit in a sub-dir, so a plain `pending` never lists them).
+4. `CONTEXT.md` already rewritten → skip step 4 items 1–3; still run item 4 (commit) when the
+   snapshot, its section files or its ledger line are not yet committed.
 
 ## 4. Rewrite `CONTEXT.md` as a strict glossary
 
@@ -106,10 +112,7 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 3. Verify with `grep`: every `- **` line carries `See [[wiki/concepts/<slug>]]`, and those slugs
    equal the receipt's. A mismatch → re-run the subagent once with the offending lines. Still
    wrong → `cp <snapshot> CONTEXT.md` (restore the original), release the lock, report, stop.
-4. Ledger the top-level snapshot now — its content is carried by the section files, so a later
-   catch-up must never ingest it as one page: `scripts/wiki pending <p> --only wiki/raw/<snapshot
-   file>` → `scripts/wiki record <p> wiki/raw/<snapshot file> <hash>` (skip when already done).
-5. Commit `CONTEXT.md`, `wiki/.gitignore`, `wiki/log.md`, `<snapshot>` and its section files:
+4. Commit `CONTEXT.md`, `wiki/.gitignore`, `wiki/log.md`, `<snapshot>` and its section files:
    `<p>: wiki migrate — glossary`.
 
 ## 5. Seed glossary concept pages
