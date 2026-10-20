@@ -58,7 +58,8 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 
 ## 2. Lock and gitignore
 
-1. `scripts/wiki lock take <p> --session <id>`. `held: false` → another session is ingesting;
+1. `scripts/wiki lock take <p> --session <id>`. `busy: true` → retry once after a few seconds.
+   `held: false` → another session is ingesting;
    report and stop. `takenOver: true` → note it for the first log entry. Nothing is written
    before this step.
 2. Ensure `wiki/.gitignore` lists `.ingest.lock*` and `raw/repos/`.

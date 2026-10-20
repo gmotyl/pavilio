@@ -88,7 +88,8 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
 `<hostname>-<epoch>`). Read `scripts/wiki config` once for `writerModel`.
 
 1. **Gitignore** — ensure `wiki/.gitignore` lists `.ingest.lock*` and `raw/repos/`.
-2. **Lock** — `scripts/wiki lock take <p> --session <id>`. `held: false` → say another session is
+2. **Lock** — `scripts/wiki lock take <p> --session <id>`. `busy: true` → retry once after a few
+   seconds. `held: false` → say another session is
    ingesting and stop without writing. `takenOver: true` → note it for the log entry. Nothing
    is written to `raw/` before this step.
 3. **Route** — apply § Route the inputs (raw snapshots, `fetch-article`, `clone-repo`).

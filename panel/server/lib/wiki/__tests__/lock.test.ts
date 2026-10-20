@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, readdirSync, writeFileSync, readFileSync, existsSync, utimesSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync, existsSync, utimesSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -15,6 +15,12 @@ function writeLock(content: string) {
 
 /** Temp, guard and aside files next to the lock. */
 const sideFiles = () => readdirSync(join(projectDir, "wiki")).filter((f) => f.startsWith(".ingest.lock."));
+
+/** Backdate a file's mtime by a minute. */
+function age(path: string) {
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(path, old, old);
+}
 
 function readLock() {
   return JSON.parse(readFileSync(lockPath(projectDir), "utf8"));
@@ -50,8 +56,9 @@ describe("takeLock", () => {
     expect(takeLock(projectDir, "s1", NOW)).toEqual({ held: true, takenOver: true });
     expect(readLock()).toEqual({ session: "s1", ts: NOW });
 
-    // A corrupt lock file counts as stale.
+    // A corrupt lock file counts as stale (once it is not a write in progress).
     writeLock("{not json");
+    age(lockPath(projectDir));
     expect(takeLock(projectDir, "s2", NOW)).toEqual({ held: true, takenOver: true });
     expect(readLock()).toEqual({ session: "s2", ts: NOW });
   });
@@ -81,6 +88,7 @@ describe("takeLock", () => {
 
   it("lets exactly one of two sessions racing a corrupt lock hold it", () => {
     writeLock("{not json");
+    age(lockPath(projectDir));
     let rival: ReturnType<typeof takeLock> | undefined;
     const mine = takeLock(projectDir, "s1", NOW, {
       beforeTakeover: () => {
@@ -129,8 +137,7 @@ describe("takeLock", () => {
     writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
     const guard = `${lockPath(projectDir)}.takeover`;
     writeFileSync(guard, "");
-    const old = new Date(Date.now() - 60_000);
-    utimesSync(guard, old, old);
+    age(guard);
 
     expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0 })).toEqual({ held: true, takenOver: true });
     expect(sideFiles()).toEqual([]);
@@ -140,7 +147,7 @@ describe("takeLock", () => {
     writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
     writeFileSync(`${lockPath(projectDir)}.takeover`, "");
 
-    expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0 })).toEqual({ held: false, takenOver: false });
+    expect(takeLock(projectDir, "s1", NOW, { guardWaitMs: 0 })).toEqual({ held: false, takenOver: false, busy: true });
     expect(readLock()).toEqual({ session: "old", ts: NOW - STALE_LOCK_MS - 1 });
   });
 
@@ -160,6 +167,72 @@ describe("takeLock", () => {
     };
     expect(() => takeLock(projectDir, "s1", NOW, { rename })).toThrow(/busy/);
     expect(sideFiles()).toEqual([]);
+  });
+
+  it("a freshly written corrupt lock is a write in progress, not replaceable", () => {
+    writeLock("{half");
+    expect(takeLock(projectDir, "s1", NOW)).toEqual({ held: false, takenOver: false });
+    expect(readFileSync(lockPath(projectDir), "utf8")).toBe("{half");
+  });
+
+  it("the guard is token-owned: a guard claimed by another session is not removed by us", () => {
+    writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
+    const guard = `${lockPath(projectDir)}.takeover`;
+    // While s1 holds the guard, someone else replaces it with their own.
+    const result = takeLock(projectDir, "s1", NOW, {
+      underGuard: () => writeFileSync(guard, "someone-else\n"),
+    });
+    expect(result).toEqual({ held: true, takenOver: true });
+    expect(readFileSync(guard, "utf8")).toBe("someone-else\n");
+  });
+
+  it("claims a stale guard by renaming it aside", () => {
+    writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
+    const guard = `${lockPath(projectDir)}.takeover`;
+    writeFileSync(guard, "crashed\n");
+    age(guard);
+    const renamed: string[] = [];
+    const result = takeLock(projectDir, "s1", NOW, {
+      guardWaitMs: 0,
+      renameGuard: (from, to) => {
+        renamed.push(from);
+        renameSync(from, to);
+      },
+    });
+    expect(result).toEqual({ held: true, takenOver: true });
+    expect(renamed).toEqual([guard]);
+    expect(sideFiles()).toEqual([]);
+  });
+
+  it("own refresh and release wait out a crashed guard; a foreign take waits briefly", () => {
+    const guard = `${lockPath(projectDir)}.takeover`;
+    const budgets: number[] = [];
+    const freeGuard = (budget: number) => {
+      budgets.push(budget);
+      rmSync(guard, { force: true });
+    };
+
+    writeLock(JSON.stringify({ session: "s1", ts: NOW - 1000 }));
+    writeFileSync(guard, "busy\n");
+    expect(takeLock(projectDir, "s1", NOW, { onGuardWait: freeGuard })).toEqual({ held: true, takenOver: false });
+
+    writeFileSync(guard, "busy\n");
+    expect(releaseLock(projectDir, "s1", { onGuardWait: freeGuard })).toEqual({ released: true });
+
+    writeLock(JSON.stringify({ session: "old", ts: NOW - STALE_LOCK_MS - 1 }));
+    writeFileSync(guard, "busy\n");
+    expect(takeLock(projectDir, "s2", NOW, { onGuardWait: freeGuard })).toEqual({ held: true, takenOver: true });
+
+    expect(budgets).toEqual([30_000, 30_000, 2_000]);
+  });
+
+  it("no-hardlink fallback holds only when the read-back is ours", () => {
+    const link = () => {
+      throw Object.assign(new Error("not permitted"), { code: "EPERM" });
+    };
+    const rival = () => writeLock(JSON.stringify({ session: "rival", ts: NOW }));
+    expect(takeLock(projectDir, "s1", NOW, { link, afterFallbackWrite: rival })).toEqual({ held: false, takenOver: false });
+    expect(readLock()).toEqual({ session: "rival", ts: NOW });
   });
 
   it("ensures the wiki gitignore lists the lock and repo clones", () => {

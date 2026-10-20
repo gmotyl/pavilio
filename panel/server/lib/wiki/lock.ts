@@ -6,7 +6,8 @@ import { join } from "path";
 export const STALE_LOCK_MS = 15 * 60 * 1000;
 
 export type LockFile = { session: string; ts: number };
-export type TakeResult = { held: boolean; takenOver: boolean };
+/** `busy`: the takeover guard stayed busy, so nothing was decided — retry shortly. */
+export type TakeResult = { held: boolean; takenOver: boolean; busy?: true };
 /** `released` is true only when this call removed a lock owned by the session. */
 export type ReleaseResult = { released: boolean };
 
@@ -22,6 +23,9 @@ type LockHooks = {
   afterWrite?: () => void;
   beforeRemove?: () => void;
   guardWaitMs?: number;
+  onGuardWait?: (waitMs: number) => void;
+  renameGuard?: (from: string, to: string) => void;
+  afterFallbackWrite?: () => void;
   link?: (existing: string, target: string) => void;
   rename?: (from: string, to: string) => void;
 };
@@ -60,10 +64,12 @@ function readLock(path: string): LockFile | null | "corrupt" {
   return "corrupt";
 }
 
-/** A takeover guard older than this belongs to a crashed session and may be removed. */
+/** A takeover guard older than this belongs to a crashed session and may be claimed. */
 const STALE_GUARD_MS = 30 * 1000;
-/** How long a replace or release waits for a busy guard before giving up. */
-const GUARD_WAIT_MS = 2000;
+/** How long a free or foreign take waits for a busy guard before answering `busy`. */
+const TAKE_GUARD_WAIT_MS = 2000;
+/** A corrupt lock modified more recently than this may be a write in progress: left alone. */
+const CORRUPT_GRACE_MS = 1000;
 /** `linkSync` failures meaning "no hard links here", not "the lock exists". */
 const NO_LINK_CODES = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"]);
 
@@ -73,33 +79,63 @@ function sleep(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+const ageMs = (path: string) => {
+  const mtime = statSync(path, { throwIfNoEntry: false })?.mtimeMs;
+  return mtime === undefined ? undefined : Date.now() - mtime;
+};
+
+function readText(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Run `fn` holding `<lock>.takeover`, created with `wx`, so every replace or removal of the lock
- * is serialized. Waits up to `waitMs` for a busy guard; a guard older than STALE_GUARD_MS is left
- * by a crashed session and removed. Returns null when the guard could not be had.
+ * Run `fn` holding `<lock>.takeover`, so every replace or removal of the lock is serialized.
+ * The guard is created with `wx` and holds a random token; `finally` removes it only while it
+ * still holds that token. A guard older than STALE_GUARD_MS was left by a crashed session and
+ * is claimed by renaming it to a unique name (only one claimant's rename wins) before creating
+ * ours. Waits up to `waitMs` for a busy guard; `{ ok: false }` when it stays busy.
  */
-function withGuard<T>(path: string, session: string, waitMs: number, fn: () => T): T | null {
+function withGuard<T>(
+  path: string,
+  session: string,
+  waitMs: number,
+  hooks: LockHooks,
+  fn: () => T,
+): { ok: true; value: T } | { ok: false } {
   const guard = `${path}.takeover`;
+  const token = `${session}-${randomBytes(8).toString("hex")}\n`;
+  const renameGuard = hooks.renameGuard ?? renameSync;
   const deadline = Date.now() + waitMs;
   for (;;) {
     try {
-      writeFileSync(guard, `${session}\n`, { flag: "wx" });
+      writeFileSync(guard, token, { flag: "wx" });
       break;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
-    const mtime = statSync(guard, { throwIfNoEntry: false })?.mtimeMs;
-    if (mtime !== undefined && Date.now() - mtime >= STALE_GUARD_MS) {
-      rmSync(guard, { force: true });
+    const age = ageMs(guard);
+    if (age !== undefined && age >= STALE_GUARD_MS) {
+      const aside = `${guard}.stale-${unique(session)}`;
+      try {
+        renameGuard(guard, aside);
+        rmSync(aside, { force: true });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; // another claimant won
+      }
       continue;
     }
-    if (Date.now() >= deadline) return null;
+    if (Date.now() >= deadline) return { ok: false };
+    hooks.onGuardWait?.(waitMs);
     sleep(10);
   }
   try {
-    return fn();
+    return { ok: true, value: fn() };
   } finally {
-    rmSync(guard, { force: true });
+    if (readText(guard) === token) rmSync(guard, { force: true });
   }
 }
 
@@ -108,7 +144,10 @@ function withGuard<T>(path: string, session: string, waitMs: number, fn: () => T
  * - no lock → create it atomically (temp file + no-clobber hard link, else `wx`), held
  * - own lock → refresh `ts`, held
  * - foreign lock younger than STALE_LOCK_MS → not held, left untouched
- * - foreign lock that is stale or corrupt → taken over, held + takenOver
+ * - foreign lock that is stale or corrupt → taken over, held + takenOver (a corrupt lock modified
+ *   under a second ago is a write in progress: not held)
+ * - takeover guard still busy after a short wait → not held + `busy` (retry shortly); an own
+ *   refresh waits out a crashed guard instead
  *
  * Every replace (refresh or takeover) runs under the takeover guard: it re-reads the lock and
  * re-checks ownership or staleness there, then writes a temp file and renames it over the lock, so
@@ -150,15 +189,22 @@ export function takeLock(
     }
     try {
       writeFileSync(path, content, { flag: "wx" });
-      return true;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       return false;
     }
+    // A plain write is not atomic: hold only when the read-back is still ours.
+    hooks.afterFallbackWrite?.();
+    return isOwnedBy(path, session);
   };
-  /** May this session replace `lock`? Own, corrupt and stale locks yes; a fresh foreign one no. */
+  /**
+   * May this session replace `lock`? Own and stale locks yes, a fresh foreign one no. A corrupt
+   * one yes, unless modified under CORRUPT_GRACE_MS ago: that may be a rival's write in progress.
+   */
   const replaceable = (lock: LockFile | "corrupt") =>
-    lock === "corrupt" || lock.session === session || now - lock.ts >= STALE_LOCK_MS;
+    lock === "corrupt"
+      ? (ageMs(path) ?? Infinity) >= CORRUPT_GRACE_MS
+      : lock.session === session || now - lock.ts >= STALE_LOCK_MS;
 
   if (create()) return { held: true, takenOver: false };
 
@@ -168,7 +214,10 @@ export function takeLock(
   if (!replaceable(existing)) return notHeld;
   hooks.beforeTakeover?.();
 
-  const result = withGuard(path, session, hooks.guardWaitMs ?? GUARD_WAIT_MS, (): TakeResult => {
+  // An own refresh waits out even a crashed guard; a takeover answers `busy` after a short wait.
+  const ownBefore = existing !== "corrupt" && existing.session === session;
+  const waitMs = hooks.guardWaitMs ?? (ownBefore ? STALE_GUARD_MS : TAKE_GUARD_WAIT_MS);
+  const guarded = withGuard(path, session, waitMs, hooks, (): TakeResult => {
     hooks.underGuard?.();
     const current = readLock(path);
     if (current === null) return create() ? { held: true, takenOver: false } : notHeld;
@@ -183,7 +232,9 @@ export function takeLock(
     }
     return { held: true, takenOver: !own };
   });
-  if (result === null || !result.held) return notHeld;
+  if (!guarded.ok) return { held: false, takenOver: false, busy: true };
+  const result = guarded.value;
+  if (!result.held) return notHeld;
   hooks.afterWrite?.();
   return isOwnedBy(path, session) ? result : notHeld;
 }
@@ -200,10 +251,11 @@ export function releaseLock(projectDir: string, session: string, hooks: LockHook
   hooks.beforeRemove?.();
   // Under the takeover guard, so no replace sits between its re-check and its rename meanwhile;
   // the re-check keeps a lock taken over just before.
-  const released = withGuard(path, session, hooks.guardWaitMs ?? GUARD_WAIT_MS, () => {
+  // Waits out even a crashed guard, so a finished ingest does not leave its lock behind.
+  const guarded = withGuard(path, session, hooks.guardWaitMs ?? STALE_GUARD_MS, hooks, () => {
     if (!isOwnedBy(path, session)) return false;
     rmSync(path, { force: true });
     return true;
   });
-  return { released: released === true };
+  return { released: guarded.ok && guarded.value };
 }

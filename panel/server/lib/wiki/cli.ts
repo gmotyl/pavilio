@@ -32,7 +32,8 @@ const USAGE = `usage: scripts/wiki <command> [args]
   project [--name <p>] [--cwd <dir>]        {project, via} | exit 2 {ask, reason}
   pending <p> [--only <path>]               {pending: [{path, hash, status}]}
   record <p> <path> <hash>                  {ok: true}
-  lock take|release <p> --session <id>      {held, takenOver} (release adds released)
+  lock take|release <p> --session <id>      {held, takenOver[, busy]} (release adds released;
+                                            busy: guard still busy, nothing decided — retry)
   mentions <p> [--touched a,b]              {slugs, qualifying}; slugs are entities/x, concepts/x
   index <p>                                 {written, removed} | exit 1 {error, page}
   lint <p>                                  {broken, orphans, untyped, stale, codeIdentifiers}
