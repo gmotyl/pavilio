@@ -38,12 +38,15 @@ const FENCE = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 
 /** Split a page into typed frontmatter and body; never throws. */
 export function parsePage(text: string): ParsedPage {
+  // Editors on Windows may save a UTF-8 BOM, which would hide the opening fence.
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const match = FENCE.exec(text);
   if (!match) return { frontmatter: {}, body: text };
   const body = text.slice(match[0].length);
   let data: unknown;
   try {
-    data = parseYaml(match[1] ?? "");
+    // A duplicated key must not cost the whole frontmatter; the last value wins.
+    data = parseYaml(match[1] ?? "", { uniqueKeys: false });
   } catch {
     return { frontmatter: {}, body };
   }

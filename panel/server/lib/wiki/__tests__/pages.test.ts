@@ -99,6 +99,19 @@ describe("parsePage", () => {
     expect(frontmatter).toEqual({ concepts: ["ok"] });
   });
 
+  it("strips a leading BOM before the frontmatter", () => {
+    expect(parsePage("\uFEFF---\ntype: concept\n---\nBody\n")).toEqual({
+      frontmatter: { type: "concept" },
+      body: "Body\n",
+    });
+  });
+
+  it("keeps frontmatter when a key is duplicated", () => {
+    const { frontmatter } = parsePage("---\ntype: concept\ndescription: a\ndescription: b\n---\nx\n");
+    expect(frontmatter.type).toBe("concept");
+    expect(frontmatter.description).toBe("b");
+  });
+
   it("yields empty frontmatter for malformed yaml", () => {
     expect(parsePage("---\ntype: [unclosed\n---\nBody\n")).toEqual({
       frontmatter: {},
