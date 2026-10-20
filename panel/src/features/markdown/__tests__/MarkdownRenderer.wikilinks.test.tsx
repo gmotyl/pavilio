@@ -66,6 +66,19 @@ describe("MarkdownRenderer wikilinks", () => {
     expect(screen.getByRole("link", { name: "Jane" })).toBeTruthy();
   });
 
+  it("percent-encodes each path segment of the viewer href", async () => {
+    existing.add("pavilio/wiki/notes/a b#c?d.md");
+    renderMd("See [[wiki/notes/a b#c?d|Odd]].");
+
+    const link = screen.getByRole("link", { name: "Odd" });
+    expect(link.getAttribute("href")).toBe("/view/pavilio/wiki/notes/a%20b%23c%3Fd.md");
+    // The existence check still uses the raw path.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const { paths } = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(paths).toEqual(["pavilio/wiki/notes/a b#c?d.md"]);
+    expect(screen.getByRole("link", { name: "Odd" })).toBeTruthy();
+  });
+
   it("renders a missing target as warning text", async () => {
     renderMd("Broken: [[wiki/concepts/nope|Nope]] here.");
 

@@ -31,6 +31,13 @@ type MdNode = {
   data?: Record<string, unknown>;
 };
 
+/**
+ * The viewer route for a projectsDir-relative path, each segment percent-encoded so `#`, `?` and
+ * spaces stay part of the path. The viewer reads the still-encoded `location.pathname` and hands
+ * it to `/api/files/read/…`, which decodes it, exactly as for a browser-encoded file-tree link.
+ */
+const viewerHref = (path: string) => `/view/${path.split("/").map(encodeURIComponent).join("/")}`;
+
 const LINK = /\[\[([^[\]\n]+)\]\]/g;
 
 /** Nodes whose text must not become links: code is verbatim, and links cannot nest. */
@@ -50,7 +57,7 @@ function splitText(value: string, fromProject: string | undefined): MdNode[] | n
       path
         ? {
             type: "link",
-            url: `/view/${path}`,
+            url: viewerHref(path),
             children: [text],
             data: { hProperties: { [WIKILINK_ATTR]: path } },
           }
