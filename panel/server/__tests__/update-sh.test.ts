@@ -239,7 +239,7 @@ describe("scripts/update.sh upstream branch handling", () => {
     expect(currentBranch()).toBe("main");
     expect(output).toMatch(/switch/i);
     expect(output).toMatch(/feature\/wip/);
-  }, 60000);
+  });
 
   it("leaves an upstream clone already on main alone", () => {
     const { output } = runUpdate();
@@ -247,7 +247,7 @@ describe("scripts/update.sh upstream branch handling", () => {
     expect(currentBranch()).toBe("main");
     expect(output).not.toMatch(/switch/i);
     expect(output).toMatch(/Syncing panel/);
-  }, 60000);
+  });
 
   it("refuses to switch while an interactive rebase is in progress", () => {
     git(upstream, "checkout", "-q", "-b", "feature/wip");
@@ -259,7 +259,7 @@ describe("scripts/update.sh upstream branch handling", () => {
     expect(output).toMatch(/rebase/i);
     expect(output).not.toMatch(/Syncing panel/);
     expect(currentBranch()).toBe("feature/wip");
-  }, 60000);
+  });
 
   it("refuses to switch while an am-style rebase is in progress", () => {
     git(upstream, "checkout", "-q", "-b", "feature/wip");
@@ -271,7 +271,7 @@ describe("scripts/update.sh upstream branch handling", () => {
     expect(output).toMatch(/rebase/i);
     expect(output).not.toMatch(/Syncing panel/);
     expect(currentBranch()).toBe("feature/wip");
-  }, 60000);
+  });
 
   it("refuses to switch while a merge is in progress", () => {
     git(upstream, "checkout", "-q", "-b", "feature/wip");
@@ -284,7 +284,7 @@ describe("scripts/update.sh upstream branch handling", () => {
     expect(output).not.toMatch(/rebase/i);
     expect(output).not.toMatch(/Syncing panel/);
     expect(currentBranch()).toBe("feature/wip");
-  }, 60000);
+  });
 
   it("refuses when checkout would overwrite local modifications, leaving the branch unchanged", () => {
     git(upstream, "checkout", "-q", "-b", "feature/wip");
@@ -305,7 +305,7 @@ describe("scripts/update.sh upstream branch handling", () => {
     // non-zero exit alone does not prove that — the fixture's build fails too, so
     // the run would exit non-zero even if it had synced the wrong branch first.
     expect(output).not.toMatch(/Syncing panel/);
-  }, 60000);
+  });
 
   it("syncs despite a harmless dirty file in the upstream clone", () => {
     git(upstream, "checkout", "-q", "-b", "feature/wip");
@@ -317,7 +317,7 @@ describe("scripts/update.sh upstream branch handling", () => {
     expect(currentBranch()).toBe("main");
     expect(output).toMatch(/Syncing panel/);
     expect(git(upstream, "status", "--porcelain")).toMatch(/panel\/src\/app\.ts/);
-  }, 60000);
+  });
 });
 
 describe("scripts/update.sh panel build", () => {
@@ -328,7 +328,7 @@ describe("scripts/update.sh panel build", () => {
     expect(output).toMatch(/build failed/i);
     expect(output).toMatch(/pnpm -C .*panel.* build/);
     expect(output).not.toMatch(/^Done\./m);
-  }, 60000);
+  });
 
   it("finishes with the summary and tells the user the panel is built and startable", () => {
     writePanelFixture(SUCCEEDING_BUILD);
@@ -343,7 +343,7 @@ describe("scripts/update.sh panel build", () => {
     expect(output).not.toMatch(/build failed/i);
     // The bundle lands in the destination workspace, never copied from upstream.
     expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(true);
-  }, 60000);
+  });
 
   it("installs the synced panel dependencies before building the bundle", () => {
     writePanelFixture(SUCCEEDING_BUILD);
@@ -361,7 +361,7 @@ describe("scripts/update.sh panel build", () => {
     expect(calls).toContain(`-C ${join(dest, "panel")} install\n`);
     // ...and before the build, which is the whole point of installing at all.
     expect(calls.indexOf("install")).toBeLessThan(calls.indexOf("build"));
-  }, 60000);
+  });
 
   it("stops when the synced panel dependency install fails, naming both commands and without building", () => {
     writePanelFixture(SUCCEEDING_BUILD);
@@ -382,7 +382,7 @@ describe("scripts/update.sh panel build", () => {
     expect(output).not.toMatch(/panel bundle built/);
     expect(output).not.toMatch(/^Done\./m);
     expect(invocations(pnpmCalled)).not.toContain("build");
-  }, 60000);
+  });
 });
 
 describe("scripts/update.sh sync commit", () => {
@@ -395,7 +395,7 @@ describe("scripts/update.sh sync commit", () => {
     expect(output).toMatch(/committed sync of upstream/);
     expect(destStatus()).toBe("");
     expect(git(dest, "log", "-1", "--pretty=%s")).toMatch(/^chore\(sync\): pavilio upstream @ /);
-  }, 60000);
+  });
 
   it("names the upstream revision and subject it synced", () => {
     initDestRepo();
@@ -405,7 +405,7 @@ describe("scripts/update.sh sync commit", () => {
 
     expect(git(dest, "log", "-1", "--pretty=%s")).toContain(sha);
     expect(git(dest, "log", "-1", "--pretty=%b")).toContain("panel build succeeds");
-  }, 60000);
+  });
 
   it("leaves the user's own unrelated edits uncommitted", () => {
     initDestRepo();
@@ -426,7 +426,7 @@ describe("scripts/update.sh sync commit", () => {
     const committed = git(dest, "show", "--name-only", "--pretty=", "HEAD");
     expect(committed).not.toMatch(/BRIEFING\.md/);
     expect(committed).not.toMatch(/notes\.md/);
-  }, 60000);
+  });
 
   it("commits files that upstream retired, not just changed ones", () => {
     initDestRepo();
@@ -442,7 +442,7 @@ describe("scripts/update.sh sync commit", () => {
     expect(git(dest, "show", "--name-status", "--pretty=", "HEAD")).toMatch(
       /^D\s+panel\/src\/app\.ts$/m,
     );
-  }, 60000);
+  });
 
   it("skips a synced path the workspace gitignores instead of aborting the pull", () => {
     initDestRepo();
@@ -465,7 +465,7 @@ describe("scripts/update.sh sync commit", () => {
     // The ignored path is left alone; everything else still lands.
     expect(destStatus()).toBe("");
     expect(git(dest, "show", "--name-only", "--pretty=", "HEAD")).toMatch(/panel\//);
-  }, 60000);
+  });
 
   it("says there is nothing to commit when the workspace is already in sync", () => {
     initDestRepo();
@@ -477,7 +477,7 @@ describe("scripts/update.sh sync commit", () => {
     expect(status).toBe(0);
     expect(output).toMatch(/nothing to commit/);
     expect(git(dest, "rev-parse", "HEAD")).toBe(head);
-  }, 60000);
+  });
 
   it("skips committing when PAVILIO_PULL_COMMIT=0, leaving the sync in the tree", () => {
     initDestRepo();
@@ -487,7 +487,7 @@ describe("scripts/update.sh sync commit", () => {
     expect(status).toBe(0);
     expect(output).toMatch(/PAVILIO_PULL_COMMIT=0/);
     expect(destStatus()).toMatch(/panel\//);
-  }, 60000);
+  });
 
   it("refuses to commit into a workspace with a merge in progress", () => {
     initDestRepo();
@@ -503,7 +503,7 @@ describe("scripts/update.sh sync commit", () => {
     // HEAD, and the synced files are left in the tree for them to commit.
     expect(git(dest, "rev-parse", "HEAD")).toBe(head);
     expect(destStatus()).toMatch(/panel\//);
-  }, 60000);
+  });
 
   it("still finishes the pull when the workspace is not a git repo at all", () => {
     writePanelFixture(SUCCEEDING_BUILD);
@@ -514,7 +514,7 @@ describe("scripts/update.sh sync commit", () => {
     expect(status).toBe(0);
     expect(output).toMatch(/not a git repo/);
     expect(output).toMatch(/^Done\./m);
-  }, 60000);
+  });
 });
 
 describe("scripts/update.sh clone mode", () => {
@@ -538,7 +538,7 @@ describe("scripts/update.sh clone mode", () => {
     // A clone has nothing to mirror from: the sync path must not run at all.
     expect(output).not.toMatch(/Syncing panel/);
     expect(existsSync(rsyncCalled)).toBe(false);
-  }, 120000);
+  });
 
   it("still selects clone mode when the repository itself is passed as the upstream directory", () => {
     // The pre-existing spelling — `bash scripts/update.sh "$(pwd)"`. Asking to
@@ -552,7 +552,7 @@ describe("scripts/update.sh clone mode", () => {
     expect(status).toBe(0);
     expect(output).toMatch(/Updating in place \(clone mode\)/);
     expect(existsSync(rsyncCalled)).toBe(false);
-  }, 120000);
+  });
 
   it("stays in sync mode when a positional upstream directory is given", () => {
     // A canonical remote does not outrank an explicit argument: a team workspace
@@ -566,7 +566,7 @@ describe("scripts/update.sh clone mode", () => {
     expect(output).not.toMatch(/clone mode/);
     expect(output).toMatch(/Syncing panel/);
     expect(existsSync(rsyncCalled)).toBe(true);
-  }, 120000);
+  });
 
   it("fails usefully in a repo with no canonical remote and no argument", () => {
     // Neither shape: not a pavilio clone, and no sibling clone to mirror from.
@@ -587,7 +587,7 @@ describe("scripts/update.sh clone mode", () => {
     expect(output).toContain(CANONICAL_UPSTREAM_URL);
     expect(output).not.toMatch(/clone mode/);
     expect(output).not.toMatch(/Syncing panel/);
-  }, 60000);
+  });
 
   it("refuses clone mode without an upstream remote and names pnpm bootstrap", () => {
     // A Quick Start clone that has not been bootstrapped yet: `origin` is still
@@ -604,7 +604,7 @@ describe("scripts/update.sh clone mode", () => {
     expect(output).toMatch(/No 'upstream' remote/);
     expect(output).toMatch(/pnpm bootstrap/);
     expect(output).not.toMatch(/panel bundle built/);
-  }, 60000);
+  });
 
   it("rebases the workspace's own commits on upstream/main and builds", () => {
     initCloneRepo();
@@ -627,7 +627,7 @@ describe("scripts/update.sh clone mode", () => {
     expect(git(dest, "rev-parse", "HEAD~1")).toBe(upstreamHead);
     expect(output).toMatch(/panel bundle built/);
     expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(true);
-  }, 120000);
+  });
 
   it("stops on a rebase conflict with the path and continue/abort commands, without building", () => {
     initCloneRepo();
@@ -644,7 +644,7 @@ describe("scripts/update.sh clone mode", () => {
     expect(output).toMatch(/rebase --abort/);
     expect(output).not.toMatch(/panel bundle built/);
     expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(false);
-  }, 60000);
+  });
 
   it("installs the panel dependencies before building the bundle", () => {
     initCloneRepo();
@@ -662,7 +662,7 @@ describe("scripts/update.sh clone mode", () => {
     expect(calls).toContain(`-C ${join(dest, "panel")} install\n`);
     // ...and before the build, which is the whole point of installing at all.
     expect(calls.indexOf("install")).toBeLessThan(calls.indexOf("build"));
-  }, 120000);
+  });
 
   it("stops when the panel dependency install fails, naming both commands and without building", () => {
     initCloneRepo();
@@ -684,7 +684,7 @@ describe("scripts/update.sh clone mode", () => {
     expect(output).not.toMatch(/panel bundle built/);
     expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(false);
     expect(invocations(pnpmCalled)).not.toContain("build");
-  }, 120000);
+  });
 
   it("update.sh rerun hints use the resolved pnpm command", () => {
     initCloneRepo();
@@ -712,7 +712,7 @@ describe("scripts/update.sh clone mode", () => {
     expect(output).toContain(`corepack pnpm -C "${join(dest, "panel")}" build`);
     expect(output).not.toMatch(/npm --prefix/);
     expect(invocations(npmCalled)).toBe("");
-  }, 120000);
+  });
 
   it("ends clone mode with the restart hint and never restarts the panel", () => {
     initCloneRepo();
@@ -735,5 +735,5 @@ describe("scripts/update.sh clone mode", () => {
     // The recording stub above is the real assertion: scripts/panel — the only
     // thing that can stop or start the panel — was never invoked at all.
     expect(existsSync(panelInvoked)).toBe(false);
-  }, 120000);
+  });
 });

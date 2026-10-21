@@ -356,7 +356,7 @@ describe("scripts/bootstrap", () => {
     // And the last thing the user reads is how to start the panel.
     const lines = stdout.trimEnd().split("\n");
     expect(lines[lines.length - 1]).toBe("Done. Start the panel: pnpm start  →  http://localhost:3010");
-  }, 60000);
+  });
 
   it("is idempotent: a second run changes no seeded file and no remote", () => {
     mkdirSync(join(home, ".claude"), { recursive: true });
@@ -386,7 +386,7 @@ describe("scripts/bootstrap", () => {
     const steps = second.stdout.split("\n").filter((l) => /^[✓–✗]/u.test(l));
     expect(steps.length).toBeGreaterThan(5);
     expect(steps.filter((l) => l.startsWith("✗"))).toEqual([]);
-  }, 60000);
+  });
 
   it("refuses node older than 22 before installing anything", () => {
     writeNodeStub("v20.19.0");
@@ -406,7 +406,7 @@ describe("scripts/bootstrap", () => {
     expect(countRecordedTool("pnpm")).toBe(0);
     expect(countRecorded("install:speech")).toBe(0);
     expect(existsSync(join(repo, ".projects.local.md"))).toBe(false);
-  }, 60000);
+  });
 
   it("chooses corepack pnpm when pnpm is absent, and says so", () => {
     // No pnpm on PATH, but corepack — which ships with node below 25 — can
@@ -426,7 +426,7 @@ describe("scripts/bootstrap", () => {
     const source = readFileSync(BOOTSTRAP, "utf8");
     expect(source).not.toMatch(/^\s*pnpm\(\)\s*\{/m);
     expect(source).not.toMatch(/command -v npm\b/);
-  }, 60000);
+  });
 
   it("stops before installing when neither pnpm nor corepack exists", () => {
     // npm alone is no longer a package manager this workspace will drive.
@@ -446,7 +446,7 @@ describe("scripts/bootstrap", () => {
     expect(countRecorded(" -C ")).toBe(0);
     expect(countRecorded("install:speech")).toBe(0);
     expect(existsSync(join(repo, ".projects.local.md"))).toBe(false);
-  }, 60000);
+  });
 
   it("skips agents whose config directory is absent", () => {
     // Only Claude Code is installed in this sandbox home.
@@ -465,7 +465,7 @@ describe("scripts/bootstrap", () => {
 
     // The run continues past the skips.
     expect(stdout).toContain("Done. Start the panel: pnpm start");
-  }, 60000);
+  });
 
   it("reports a failed tail step with the command to rerun and still exits 0", () => {
     writeExec(join(repo, "scripts", "install:speech"), [
@@ -486,7 +486,7 @@ describe("scripts/bootstrap", () => {
     // …and the steps after it still ran.
     expect(countRecorded("setup:shortcut")).toBe(1);
     expect(stdout).toContain("Done. Start the panel: pnpm start");
-  }, 60000);
+  });
 
   it("renames a canonical origin to a push-disabled upstream", () => {
     const { status, stdout, output } = run(["--yes"]);
@@ -517,7 +517,7 @@ describe("scripts/bootstrap", () => {
     expect(git(["rev-parse", "--abbrev-ref", "main@{upstream}"], other).stdout.trim()).toBe(
       "origin/main",
     );
-  }, 60000);
+  });
 
   it("leaves a fork origin alone and adds upstream", () => {
     const fork = join(sandbox, "repo-fork");
@@ -536,7 +536,7 @@ describe("scripts/bootstrap", () => {
     );
     // …but the canonical repo is reachable for updates.
     expect(git(["remote", "get-url", "upstream"], fork).stdout.trim()).toBe(CANONICAL_HTTPS);
-  }, 60000);
+  });
 
   it("pins PAVILIO_NODE_BIN without disturbing other local env keys", () => {
     // A per-host file the user (or the Windows launcher) already owns, carrying
@@ -567,7 +567,7 @@ describe("scripts/bootstrap", () => {
       { encoding: "utf8", env: { HOME: home, PATH: sysBin }, cwd: repo },
     );
     expect(readBack.stdout.trim()).toBe(join(stubBin, "node"));
-  }, 60000);
+  });
 
   // -------------------------------------------------------------------------
   // remotes: the user's own remotes are never collateral damage
@@ -595,7 +595,7 @@ describe("scripts/bootstrap", () => {
     expect(git(["remote", "get-url", "origin"], dir).stdout.trim()).toBe(
       "git@github.com:someone-else/pavilio.git",
     );
-  }, 60000);
+  });
 
   it("re-stamps no_push on an upstream that is itself the canonical repo", () => {
     // The third mechanism of the upstream_is_ours fix, reached on its own: a
@@ -620,7 +620,7 @@ describe("scripts/bootstrap", () => {
     expect(git(["remote", "get-url", "--push", "origin"], dir).stdout.trim()).toBe(
       "git@github.com:someone-else/pavilio.git",
     );
-  }, 60000);
+  });
 
   it("reports a non-canonical upstream as a skip, and never advises deleting it", () => {
     const dir = join(sandbox, "repo-team-upstream");
@@ -649,7 +649,7 @@ describe("scripts/bootstrap", () => {
     expect(git(["remote", "get-url", "--push", "upstream"], dir).stdout.trim()).toBe(
       "https://github.com/acme/pavilio-team.git",
     );
-  }, 60000);
+  });
 
   it("gives a repo with no remotes at all a canonical upstream on the first run", () => {
     // An unzipped archive, a `gh repo create` from a local directory, a user who
@@ -665,7 +665,7 @@ describe("scripts/bootstrap", () => {
     // One run is enough — scripts/update.sh refuses to pull without this.
     expect(git(["remote", "get-url", "upstream"], bare).stdout.trim()).toBe(CANONICAL_HTTPS);
     expect(git(["remote", "get-url", "--push", "upstream"], bare).stdout.trim()).toBe("no_push");
-  }, 60000);
+  });
 
   it("recognises every spelling of the canonical repo", () => {
     const spellings = [
@@ -693,7 +693,7 @@ describe("scripts/bootstrap", () => {
       expect(git(["remote", "get-url", "--push", "upstream"], dir).stdout.trim(), url).toBe("no_push");
       expect(git(["remote", "get-url", "origin"], dir).status, url).not.toBe(0);
     });
-  }, 120000);
+  });
 
   it("does not mistake a repo that merely contains the canonical path for it", () => {
     // Widening the match until ssh:// and case variants pass must not widen it
@@ -716,7 +716,7 @@ describe("scripts/bootstrap", () => {
       // …and the canonical repo arrives beside it.
       expect(git(["remote", "get-url", "upstream"], dir).stdout.trim(), url).toBe(CANONICAL_HTTPS);
     });
-  }, 120000);
+  });
 
   it("reports a canonical origin next to an existing upstream as a skip with the fix", () => {
     const dir = join(sandbox, "repo-both");
@@ -745,7 +745,7 @@ describe("scripts/bootstrap", () => {
     expect(git(["remote", "get-url", "--push", "upstream"], dir).stdout.trim()).toBe(
       "git@github.com:someone-else/pavilio.git",
     );
-  }, 60000);
+  });
 
   it("adds a notes origin without letting git open a credential prompt", () => {
     // A stub `ssh`, so the fetch of a freshly added remote is observable without
@@ -771,7 +771,7 @@ describe("scripts/bootstrap", () => {
     // follows it shares a line with it.
     expect(stdout).toMatch(/✓ remotes\b.*origin added, but main still tracks upstream/);
     expect(stdout).toContain("git branch --set-upstream-to=origin/main main");
-  }, 60000);
+  });
 
   // -------------------------------------------------------------------------
   // the fatal steps really are fatal
@@ -802,7 +802,7 @@ describe("scripts/bootstrap", () => {
       expect(countRecorded(name), name).toBe(0);
     }
     expect(stdout).not.toContain("Done. Start the panel");
-  }, 60000);
+  });
 
   it("stops the run when panel build fails, before any tail step", () => {
     writeExec(join(stubBin, "pnpm"), [
@@ -826,7 +826,7 @@ describe("scripts/bootstrap", () => {
       expect(countRecorded(name), name).toBe(0);
     }
     expect(stdout).not.toContain("Done. Start the panel");
-  }, 60000);
+  });
 
   it("reports a non-writable node pin without a sentence where the command goes", () => {
     // pin_node_bin's only externals are the shell and `mv`; a `mv` that refuses
@@ -840,7 +840,7 @@ describe("scripts/bootstrap", () => {
     const line = stdout.split("\n").find((l) => l.startsWith("✗ toolchain failed"));
     expect(line, stdout).toBeTruthy();
     expect(stdout).toContain("Done. Start the panel");
-  }, 60000);
+  });
 
   // -------------------------------------------------------------------------
   // the report mechanics
@@ -863,7 +863,7 @@ describe("scripts/bootstrap", () => {
     expect(stdout).not.toMatch(/^✓ shortcut$/m);
     // The sub-script's own output is not echoed — one line per step.
     expect(stdout.split("\n").filter((l) => l.includes("not WSL"))).toHaveLength(1);
-  }, 60000);
+  });
 
   it("closes stdin for every sub-script, so none of them can consume the run's input", () => {
     writeExec(join(repo, "scripts", "install:speech"), [
@@ -882,7 +882,7 @@ describe("scripts/bootstrap", () => {
 
     expect(recorded()).toContain("install:speech stdin:none");
     expect(recorded().join("\n")).not.toContain("SHOULD-NOT-REACH-A-SUBSCRIPT");
-  }, 60000);
+  });
 
   // -------------------------------------------------------------------------
   // flags
@@ -904,7 +904,7 @@ describe("scripts/bootstrap", () => {
     expect(noShortcut.stdout).toMatch(/^– shortcut skipped \(--no-shortcut\)$/mu);
     expect(countRecorded("setup:shortcut")).toBe(0);
     expect(countRecorded("install:speech")).toBe(1);
-  }, 60000);
+  });
 
   it("prints usage for -h/--help and refuses an unknown option with exit 2", () => {
     for (const flag of ["-h", "--help"]) {
@@ -925,7 +925,7 @@ describe("scripts/bootstrap", () => {
     expect(bogus.output).toContain("Unknown option: --frobnicate");
     expect(bogus.output).toContain("Usage: pnpm bootstrap");
     expect(recorded()).toEqual([]);
-  }, 60000);
+  });
 
   // -------------------------------------------------------------------------
   // the toolchain pin
@@ -954,7 +954,7 @@ describe("scripts/bootstrap", () => {
     expect(lines[lines.length - 1]).toBe(
       "Done. Start the panel: corepack pnpm start  →  http://localhost:3010",
     );
-  }, 60000);
+  });
 
   it("escapes the pinned path, which scripts/pm eval's back", () => {
     // Legal on every POSIX filesystem, and every one of these characters means
@@ -988,5 +988,5 @@ describe("scripts/bootstrap", () => {
       { encoding: "utf8", env: { HOME: home, PATH: sysBin }, cwd: repo },
     );
     expect(readBack.stdout.trim()).toBe(join(weird, "node"));
-  }, 60000);
+  });
 });

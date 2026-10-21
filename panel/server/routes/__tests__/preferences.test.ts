@@ -321,7 +321,7 @@ describe("PATCH /api/preferences", () => {
     const without = await runShutdownChild({ install: false });
     expect(without.code, without.stderr).not.toBe(9);
     expect(existsSync(without.file)).toBe(false);
-  }, 30_000);
+  });
 });
 
 describe("boot wiring", () => {

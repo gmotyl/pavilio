@@ -67,7 +67,7 @@ describe("syncRepo", () => {
     expect(readFileSync(join(mac, "projects/p/win-note.md"), "utf-8")).toBe("win\n");
     const merges = git(mac, "rev-list", "--merges", "--count", "HEAD").trim();
     expect(merges).toBe("0");
-  }, 30_000);
+  });
 
   it("auto-merges append-only jsonl on both sides via union driver", async () => {
     appendFileSync(join(mac, "projects/p/time/mac.jsonl"), "mac1\n");
@@ -79,7 +79,7 @@ describe("syncRepo", () => {
     const body = readFileSync(join(win, "projects/p/time/mac.jsonl"), "utf-8");
     expect(body).toContain("mac1");
     expect(body).toContain("win1");
-  }, 30_000);
+  });
 
   it("on a real same-line conflict, aborts cleanly and reports conflict (no half-rebase)", async () => {
     writeFileSync(join(mac, "projects/p/note.md"), "MAC EDIT\n");
@@ -91,7 +91,7 @@ describe("syncRepo", () => {
     expect(() => git(win, "status")).not.toThrow();
     const status = git(win, "status", "--porcelain=v2", "--branch");
     expect(status).not.toContain("rebase");
-  }, 30_000);
+  });
 
   it("captures the conflicted paths before aborting the rebase", async () => {
     writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
@@ -105,7 +105,7 @@ describe("syncRepo", () => {
     // the abort still ran: nothing is half-applied
     expect(existsSync(join(win, ".git/rebase-merge"))).toBe(false);
     expect(existsSync(join(win, ".git/rebase-apply"))).toBe(false);
-  }, 30_000);
+  });
 
   it("clears conflictFiles once a later sync succeeds", async () => {
     writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
@@ -119,7 +119,7 @@ describe("syncRepo", () => {
 
     expect(r.state).toBe("synced");
     expect(r.conflictFiles).toEqual([]);
-  }, 30_000);
+  });
 
   it("builds a conflict prompt classifying the conflicted path", async () => {
     writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
@@ -132,7 +132,7 @@ describe("syncRepo", () => {
     expect(r.conflictPrompt).toContain("projects/p/note.md");
     expect(r.conflictPrompt).toContain(win);
     expect(r.conflictPrompt).toContain("branch main");
-  }, 30_000);
+  });
 
   it("names the files and hands over a prompt when the repo is already mid-rebase", async () => {
     // A mid-rebase repo lives under .git/rebase-merge (merge backend, git ≥2.26
@@ -165,7 +165,7 @@ describe("syncRepo", () => {
     expect(r.conflictPrompt).toContain("rebase --abort");
     // it must NOT abort someone else's in-progress rebase
     expect(midRebase()).toBe(true);
-  }, 30_000);
+  });
 
   /**
    * Regression: a successful sync only broadcast sync-status, so open file lists kept
@@ -180,7 +180,7 @@ describe("syncRepo", () => {
 
     expect(r.state).toBe("synced");
     expect(sent.messages.filter((m) => m.type === "git-change")).toHaveLength(1);
-  }, 30_000);
+  });
 
   it("broadcasts git-change when a sync only pulls commits in", async () => {
     writeFileSync(join(mac, "projects/p/from-mac.md"), "mac\n");
@@ -193,7 +193,7 @@ describe("syncRepo", () => {
     expect(r.state).toBe("synced");
     expect(r.summary).toContain("↓1");
     expect(sent.messages.filter((m) => m.type === "git-change")).toHaveLength(1);
-  }, 30_000);
+  });
 
   it("does not broadcast git-change on a no-op sync", async () => {
     // Nothing dirty, nothing ahead, nothing behind.
@@ -208,14 +208,14 @@ describe("syncRepo", () => {
     expect(sent.messages.filter((m) => m.type === "git-change")).toHaveLength(0);
     // status still broadcast, so the UI keeps its lastSync fresh
     expect(sent.messages.filter((m) => m.type === "sync-status").length).toBeGreaterThan(0);
-  }, 30_000);
+  });
 
   it("reports offline when the remote is unreachable", async () => {
     git(mac, "remote", "set-url", "origin", join(root, "does-not-exist.git"));
     writeFileSync(join(mac, "projects/p/x.md"), "x\n");
     const r = await syncRepo(mac, opts("mac"));
     expect(r.state).toBe("offline");
-  }, 30_000);
+  });
 
   it("times out a hung fetch (stalled ssh) and reports offline, leaving no orphan", async () => {
     // GIT_SSH_COMMAND that hangs forever simulates the stalled ssh from the incident
@@ -257,7 +257,7 @@ describe("syncRepo", () => {
       }
       rmSync(decoyRoot, { recursive: true, force: true });
     }
-  }, 30_000);
+  });
 
   it("reports offline (not conflict) when pull fails for network reasons", async () => {
     // fetch succeeds against the local remote; then we break the remote before pull
@@ -271,7 +271,7 @@ describe("syncRepo", () => {
     const r = await syncRepo(mac, opts("mac"));
     expect(["offline"]).toContain(r.state);
     expect(r.detail).not.toMatch(/Rebase conflict/);
-  }, 30_000);
+  });
 
   it("watchdog: a stuck previous run does not block syncing forever", async () => {
     const hang = join(root, "hang-ssh2.sh");
@@ -298,7 +298,7 @@ describe("syncRepo", () => {
     const r3 = await syncRepo(mac, opts("mac"));
     expect(r3.state).not.toBe("busy");
     expect(r3.state).toBe("synced");
-  }, 60_000);
+  });
 
   it("isStale flags a lastSync older than 3x the interval", async () => {
     // fresh module state: never synced → not stale (now=0 predates any lastSync)
@@ -309,5 +309,5 @@ describe("syncRepo", () => {
     expect(isStale(30)).toBe(false); // just synced
     const in2h = Date.now() + 2 * 60 * 60_000;
     expect(isStale(30, in2h)).toBe(true); // 2h > 3 * 30min
-  }, 30_000);
+  });
 });

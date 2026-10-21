@@ -260,7 +260,7 @@ describe("POST /api/projects/:name/scripts/:id/run — execution", () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(false);
     expect(res.body.output).toMatch(/timed out/i);
-  }, 10_000);
+  });
 
   it("passes the project name as argv to bash", async () => {
     seedProject("alpha");

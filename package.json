@@ -26,6 +26,8 @@
     "sync": "bash scripts/update.sh",
     "pull": "bash scripts/update.sh",
     "test": "pnpm -C panel test",
+    "test:slow": "pnpm -C panel test:slow",
+    "test:all": "pnpm -C panel test:all",
     "lint": "pnpm -C panel lint",
     "knip": "pnpm -C panel knip",
     "build": "pnpm -C panel build",

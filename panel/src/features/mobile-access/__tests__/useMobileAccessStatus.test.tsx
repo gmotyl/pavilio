@@ -35,7 +35,7 @@ describe("useMobileAccessStatus", () => {
         ).toBeGreaterThan(initialCalls),
       { timeout: 3500 },
     );
-  }, 5000);
+  });
 
   it("does not poll when disabled prop is false", async () => {
     const { result } = renderHook(() => useMobileAccessStatus(false));

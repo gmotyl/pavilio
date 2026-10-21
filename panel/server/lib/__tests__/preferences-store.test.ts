@@ -253,7 +253,7 @@ describe("durability", () => {
     // Nothing staged is left behind — wherever it was staged.
     expect(filesUnder(dir)).toEqual(["preferences.json"]);
     expect(Object.keys(JSON.parse(readFileSync(file(), "utf8")))).toHaveLength(66);
-  }, 30_000);
+  });
 
   it("patches within the debounce window collapse into one write", async () => {
     freshDir();
@@ -292,7 +292,7 @@ describe("durability", () => {
     expect(seen[0]).toBeNull();
     expect(seen[1]).not.toBeNull();
     expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({ version: 1, a: 1, b: 2, c: 3 });
-  }, 30_000);
+  });
 
   it.skipIf(CROSS_DEVICE_ROOT === "")(
     "commits a target that is not on the temp filesystem",

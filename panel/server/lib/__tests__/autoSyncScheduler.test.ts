@@ -44,7 +44,7 @@ describe("autoSyncScheduler notify", () => {
     }
     expect(linesOf(out)).toEqual(["conflict", "conflict"]);
     rmSync(dir, { recursive: true, force: true });
-  }, 15_000);
+  });
 
   it("treats stale as an attention state even when state is offline", async () => {
     const dir = mkdtempSync(join(tmpdir(), "notify-"));
@@ -57,7 +57,7 @@ describe("autoSyncScheduler notify", () => {
     await waitForLines(out, 1);
     expect(linesOf(out)).toEqual(["stale"]);
     rmSync(dir, { recursive: true, force: true });
-  }, 15_000);
+  });
 
   it("fires push-failed (not stale) when a concrete attention state follows conflict while stale is also true", async () => {
     const dir = mkdtempSync(join(tmpdir(), "notify-"));
@@ -79,5 +79,5 @@ describe("autoSyncScheduler notify", () => {
     isStaleMock.mockReturnValue(false);
     expect(linesOf(out)).toEqual(["conflict", "push-failed"]);
     rmSync(dir, { recursive: true, force: true });
-  }, 15_000);
+  });
 });
