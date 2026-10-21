@@ -83,7 +83,7 @@ const reconnectOnActivate = vi.hoisted(() => vi.fn<(sessionId: string) => void>(
 // for, and asked for THIS session. What the real one REFUSES to do — a
 // healthy socket, an exited session, a second ask mid-handshake — is a
 // property of the pool, invisible through a spy, and is pinned against the
-// real pool in `AnswerComposer.focusReconnect.test.tsx`.
+// real pool in `AnswerComposer.send.test.tsx` ("focus repair").
 vi.mock("../terminalInstances", () => ({
   sendDismiss: (sessionId: string) => sendDismiss(sessionId),
   reconnectOnActivate: (sessionId: string) => reconnectOnActivate(sessionId),
@@ -251,7 +251,7 @@ describe("attention clears when the user actually arrives", () => {
    * the composer asks again, unconditionally, and `reconnectOnActivate` drops
    * the ask because the handshake it started is still in flight. So the count
    * below is 2 rather than 1 — the second ask costs nothing, and that it costs
-   * nothing is `AnswerComposer.focusReconnect.test.tsx`'s claim, made against
+   * nothing is `AnswerComposer.send.test.tsx` ("focus repair")'s claim, made against
    * the real pool where the sockets it did or did not open can be counted.
    * Were this file to stub that refusal in, it would be asserting its own mock.
    */

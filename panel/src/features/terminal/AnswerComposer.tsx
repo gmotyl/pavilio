@@ -1177,7 +1177,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
             // itself on an arriving answer never reaches this. Adding
             // `autoFocus` would turn an answer LANDING into a reconnect, which
             // is the "reopened unasked" case the living terminal forbids —
-            // `AnswerComposer.focusReconnect.test.tsx` guards that.
+            // `AnswerComposer.send.test.tsx` ("focus repair") guards that.
             onFocus={() => {
               dismissAttentionOnArrival(sessionId);
               reconnectOnActivate(sessionId);

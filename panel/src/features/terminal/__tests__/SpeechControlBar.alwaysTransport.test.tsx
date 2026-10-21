@@ -97,17 +97,13 @@ vi.mock("../terminalInstances", () => {
 vi.mock("../useMobileReconnect", () => ({ useMobileReconnect: () => {} }));
 
 // mermaid pulls in a browser-only rendering stack the pane never needs here.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 // The synthesis cache the bar peeks into: everything is cold, and nothing
 // notifies. The segments' own states are asserted in `SpeechControlBar.test.tsx`.
 vi.mock("../../speech/synth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/synth")>()),
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
+  ...(await import("./answerPane.mocks")).synthMock(),
 }));
 
 // Imported after the mocks so they pick them up.

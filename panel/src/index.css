@@ -1660,7 +1660,7 @@ input[type="checkbox"] {
    while the colour lived in an inline style. Tertiary (#6d6b67) on this row's
    #17171d is 3.36:1, and WCAG AA asks 4.5:1 of normal text — which 10px
    JetBrains Mono emphatically is. Secondary (#9d9b97) is 6.43:1.
-   `AnswerComposer.pendingRow.test.tsx` computes both ratios rather than
+   `AnswerComposer.reconnect.test.tsx` ("pending row") computes both ratios rather than
    trusting this comment. */
 .answer-pane-send-failed[data-state="pending"] {
   color: var(--text-secondary);

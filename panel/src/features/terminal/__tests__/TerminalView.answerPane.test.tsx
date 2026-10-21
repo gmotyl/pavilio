@@ -93,16 +93,12 @@ vi.mock("../terminalInstances", () => {
 vi.mock("../useMobileReconnect", () => ({ useMobileReconnect: () => {} }));
 
 // mermaid pulls in a browser-only rendering stack the pane never needs here.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 // The synthesis cache the bar and the rail peek into: everything is cold.
 vi.mock("../../speech/synth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/synth")>()),
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
+  ...(await import("./answerPane.mocks")).synthMock(),
 }));
 
 // Imported after the mocks so it picks them up.

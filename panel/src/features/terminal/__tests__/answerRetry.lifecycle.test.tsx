@@ -2,7 +2,7 @@
  * Who SPENDS the retry ticket, and who must not.
  *
  * `answerRetry.test.ts` proves the store's own arithmetic and
- * `AnswerComposer.retryEnter.test.tsx` proves the composer opens, shows and
+ * `AnswerComposer.reconnect.test.tsx` ("retry") proves the composer opens, shows and
  * consumes a ticket. Neither of them can see the fact this file exists for:
  * the three call sites that end a ticket are in three different modules, they
  * are reached from three different lifetimes, and each one is wrong in a way
@@ -100,16 +100,10 @@ vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 // The synthesis cache the rail and the scrubber peek into. Nothing is warm and
 // nothing subscribes: no test here draws a segment.
-vi.mock("../../speech/synth", () => ({
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
-}));
+vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // mermaid's rendering stack is browser-only and no answer here holds a fence.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import type { UtteranceQueue } from "../../speech/utteranceQueue";

@@ -57,18 +57,12 @@ import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 // The pane's rail peeks into the synthesis cache; nothing here is warm and
 // nothing subscribes, exactly as in the other composer suites.
-vi.mock("../../speech/synth", () => ({
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
-}));
+vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // No answer is put under the cursor in this file, so the markdown renderer is
 // never mounted — but the mock keeps mermaid's browser-only stack from being a
 // reason the suite cannot run.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 const SESSION = "cell-a";
 const PROJECT = "alpha";
@@ -397,7 +391,7 @@ describe("a launcher pill on a dead socket", () => {
    * with `AlertHost` beside it, because what the pills promise is that the
    * refusal is ANNOUNCED. Asserting the store alone would have rested that
    * claim on the host's own suite rather than on this path, which is the same
-   * reason `AnswerComposer.paste.test.tsx` mounts it for its failed upload.
+   * reason `AnswerComposer.picker.test.tsx` ("paste") mounts it for its failed upload.
    */
   function renderBar(send: (data: string) => boolean) {
     return render(

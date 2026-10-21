@@ -35,6 +35,7 @@ import { fakeOnNext, fakeOnPrevious } from "../../speech/__tests__/fakeTransport
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
 import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
+import { readySpeech } from "./answerPane.harness";
 
 // The activity channel opens a WebSocket at import time and re-arms a 2s
 // reconnect timer whenever that socket closes. jsdom would really try to dial
@@ -55,20 +56,11 @@ vi.hoisted(() => {
 
 // The synthesis cache the rail peeks into. Nothing is warm and nothing
 // subscribes: no test here draws a segment.
-vi.mock("../../speech/synth", () => ({
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
-}));
+vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // mermaid's rendering stack is browser-only and no answer here holds a fence.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
-/** Referentially stable — a fresh array per call is a `useSyncExternalStore` loop. */
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
 const SESSION = "cell-a";
 
@@ -125,23 +117,13 @@ const queueBehind = (older: Utterance, u: Utterance): UtteranceQueue => ({
 /** Nothing has been played — referentially stable, like every other snapshot. */
 const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 
-function makeSpeech(
+function waitingSpeech(
   queueFor: () => UtteranceQueue,
   heardFor: () => ReadonlySet<string> = () => NOTHING_HEARD,
 ): GridSpeech {
-  return {
-    stateFor: () => "ready",
+  return readySpeech({
     queueFor,
     heardFor,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
     // A spy alone is no longer a faithful host: the hold moved into
     // `onPrevious`/`onNext` so that the chord and the media keys take it too.
     // See `fakeTransportHost.ts`.
@@ -150,11 +132,7 @@ function makeSpeech(
       const queue = queueFor();
       fakeOnNext(sessionId, isAnswerHeld(sessionId), queue.cursor, queue.pending.length);
     }),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
+  });
 }
 
 /**
@@ -335,7 +313,7 @@ afterEach(() => {
 
 describe("the answer pane while a reply is pending", () => {
   it("shows the waiting state after a send", () => {
-    render(paneTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    render(paneTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
     expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
 
     sendReply();
@@ -358,7 +336,7 @@ describe("the answer pane while a reply is pending", () => {
    * second.
    */
   it("the waiting state reads Waiting for agent", () => {
-    const sent = render(surfaceTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    const sent = render(surfaceTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
 
     sendReply();
     expect(within(waiting() as HTMLElement).getByText("Waiting for agent")).toBeInTheDocument();
@@ -367,14 +345,14 @@ describe("the answer pane while a reply is pending", () => {
     __resetAnswerWaitingForTests();
     _resetForTests();
 
-    render(surfaceTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    render(surfaceTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
     activity("busy", 2);
 
     expect(within(waiting() as HTMLElement).getByText("Waiting for agent")).toBeInTheDocument();
   });
 
   it("touches nothing on the speech host when it starts waiting", () => {
-    const host = makeSpeech(() => queueOf(utterance("u-1", ANSWER)));
+    const host = waitingSpeech(() => queueOf(utterance("u-1", ANSWER)));
     const { speech, arm } = armable(host);
     render(paneTree(speech));
 
@@ -395,7 +373,7 @@ describe("the answer pane while a reply is pending", () => {
   // inside the row's own condition.
   it("renders the new answer when one arrives", () => {
     let queue = queueOf(utterance("u-1", ANSWER));
-    const speech = makeSpeech(() => queue);
+    const speech = waitingSpeech(() => queue);
     const { rerender } = render(surfaceTree(speech));
 
     sendReply();
@@ -409,7 +387,7 @@ describe("the answer pane while a reply is pending", () => {
   });
 
   it("returns to the answer when the transport is used, keeping a pending mark", () => {
-    render(surfaceTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    render(surfaceTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
@@ -436,7 +414,7 @@ describe("the answer pane while a reply is pending", () => {
    */
   it("keeps the wave while the agent works, and gives the body back on a step back", () => {
     const older = utterance("u-0", NEXT_ANSWER);
-    render(surfaceTree(makeSpeech(() => queueBehind(older, utterance("u-1", ANSWER)))));
+    render(surfaceTree(waitingSpeech(() => queueBehind(older, utterance("u-1", ANSWER)))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
@@ -464,7 +442,7 @@ describe("the answer pane while a reply is pending", () => {
 
   it("returns to the answer when the session goes idle having spoken nothing", () => {
     _applyEventForTests({ sessionId: SESSION, state: "busy", at: 1 });
-    render(paneTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    render(paneTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
@@ -482,7 +460,7 @@ describe("the answer pane while a reply is pending", () => {
   it("does not schedule a timeout to leave the waiting state", () => {
     vi.useFakeTimers();
     _applyEventForTests({ sessionId: SESSION, state: "busy", at: 1 });
-    render(paneTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    render(paneTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
 
     const timeout = vi.spyOn(globalThis, "setTimeout");
     const interval = vi.spyOn(globalThis, "setInterval");
@@ -514,7 +492,7 @@ describe("the answer pane while a reply is pending", () => {
 
   it("notices the reply even when it lands with the pane closed", () => {
     let queue = queueOf(utterance("u-1", ANSWER));
-    const speech = makeSpeech(() => queue);
+    const speech = waitingSpeech(() => queue);
     const { rerender } = render(surfaceTree(speech));
 
     sendReply();
@@ -547,7 +525,7 @@ describe("the answer pane while a reply is pending", () => {
     // wait begins in. A server re-broadcast of that same `idle` is a reading,
     // not a transition, and an agent that has not started yet has certainly not
     // finished.
-    render(paneTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    render(paneTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
@@ -562,7 +540,7 @@ describe("the answer pane while a reply is pending", () => {
     const OTHER = "cell-b";
     let otherId = "v-1";
     const speech: GridSpeech = {
-      ...makeSpeech(() => queueOf(utterance("u-1", ANSWER))),
+      ...waitingSpeech(() => queueOf(utterance("u-1", ANSWER))),
       queueFor: (sessionId: string) =>
         sessionId === OTHER
           ? queueOf({ id: otherId, sessionId: OTHER, text: NEXT_ANSWER, at: 1 })
@@ -670,7 +648,7 @@ const crestHeights = (): number[] => {
 
 describe("the waiting animation", () => {
   beforeEach(() => {
-    render(paneTree(makeSpeech(() => queueOf(utterance("u-1", ANSWER)))));
+    render(paneTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
     sendReply();
     expect(waiting()).toBeInTheDocument();
   });
@@ -789,7 +767,7 @@ const PROGRESS = Object.freeze({ unitIndex: 0, unitTime: 0, unitDuration: null }
 /** The same host with the voice's own units behind it. */
 function spokenSpeech(queueFor: () => UtteranceQueue): GridSpeech {
   return {
-    ...makeSpeech(queueFor),
+    ...waitingSpeech(queueFor),
     unitsFor: () => unitsOf(queueFor().current?.text ?? ""),
     progressFor: () => PROGRESS,
   };
@@ -882,7 +860,7 @@ describe("the waiting state counts what has not been played", () => {
   it("shows how many answers have not been played", () => {
     // The last played is the oldest of the four, so the three that arrived
     // after it are the backlog.
-    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
+    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-1"))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
@@ -897,7 +875,7 @@ describe("the waiting state counts what has not been played", () => {
     // the case the positional rule exists for: the listener is caught up, so
     // there is nothing to show, however much unplayed history is still
     // reachable behind them.
-    const { unmount } = render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-4"))));
+    const { unmount } = render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-4"))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
@@ -912,7 +890,7 @@ describe("the waiting state counts what has not been played", () => {
     _resetForTests();
 
     // ...and the same when every reachable answer has been played.
-    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1", "u-2", "u-3", "u-4"))));
+    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-1", "u-2", "u-3", "u-4"))));
     sendReply();
     expect(waiting()).toBeInTheDocument();
     expect(notPlayedCount()).toBeNull();
@@ -920,7 +898,7 @@ describe("the waiting state counts what has not been played", () => {
 
   it("the label is singular for one answer", () => {
     // The last played is u-3, so exactly one answer arrived behind it.
-    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-3"))));
+    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-3"))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
@@ -931,7 +909,7 @@ describe("the waiting state counts what has not been played", () => {
   });
 
   it("the label is plural for more than one", () => {
-    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
+    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-1"))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
@@ -942,7 +920,7 @@ describe("the waiting state counts what has not been played", () => {
   });
 
   it("shows no count while the body is rendering an answer", () => {
-    render(paneTree(makeSpeech(() => BACKLOG)));
+    render(paneTree(waitingSpeech(() => BACKLOG)));
 
     // Nothing sent, nothing busy — the body is the answer, and the count is
     // the waiting state's, not the pane's.
@@ -952,7 +930,7 @@ describe("the waiting state counts what has not been played", () => {
   });
 
   it("names the count in text, not in the animation", () => {
-    render(paneTree(makeSpeech(() => BACKLOG, () => heardOf("u-1"))));
+    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-1"))));
     sendReply();
 
     // In the status region, as a sentence a screen reader reads out...
@@ -991,7 +969,7 @@ describe("the waiting state counts what has not been played", () => {
 describe("the way back out of a hold", () => {
   /** The cell with a backlog, its agent at work, and the answer held on screen. */
   function heldOnScreen(): void {
-    render(surfaceTree(makeSpeech(() => BACKLOG)));
+    render(surfaceTree(waitingSpeech(() => BACKLOG)));
     activity("busy", 2);
     expect(waiting()).toBeInTheDocument();
 
@@ -1058,7 +1036,7 @@ describe("the way back out of a hold", () => {
   });
 
   it("releases onto the wave once nothing is waiting", () => {
-    render(surfaceTree(makeSpeech(() => ({ ...BACKLOG, pending: [] }))));
+    render(surfaceTree(waitingSpeech(() => ({ ...BACKLOG, pending: [] }))));
     activity("busy", 2);
     fireEvent.click(previousButton());
     expect(nextAnswerControl()).not.toBeNull();
@@ -1072,7 +1050,7 @@ describe("the way back out of a hold", () => {
   });
 
   it("shows no Next answer control while the body is already waiting", () => {
-    render(surfaceTree(makeSpeech(() => BACKLOG)));
+    render(surfaceTree(waitingSpeech(() => BACKLOG)));
     activity("busy", 2);
 
     // The wave has the body. A control carrying a second copy of it would be
@@ -1092,7 +1070,7 @@ describe("the way back out of a hold", () => {
    * moved, and it is exactly the fact this control draws.
    */
   const speakingCell = (voice: { state: CellSpeechState }): GridSpeech => ({
-    ...makeSpeech(() => BACKLOG),
+    ...waitingSpeech(() => BACKLOG),
     stateFor: () => voice.state,
   });
 

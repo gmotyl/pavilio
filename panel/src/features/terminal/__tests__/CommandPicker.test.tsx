@@ -7,7 +7,7 @@
  * matches, or does nothing while the list loads. A literal `/command` is sent
  * with Escape, then Enter.
  *
- * Asserted through `AnswerPane`, like `AnswerComposer.test.tsx`, because two of
+ * Asserted through `AnswerPane`, like `AnswerComposer.send.test.tsx` ("send"), because two of
  * the criteria are about keys the PANE owns — Escape closes the pane from its
  * root, Enter sends from the field — and the picker's whole job is to take
  * them first and give them back. A harness that rendered the picker alone
@@ -30,15 +30,9 @@ import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
 import { installMatchMedia, jsonResponse, StubResizeObserver, stubFetch } from "../../../test-utils";
 
-vi.mock("../../speech/synth", () => ({
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
-}));
+vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 function readySpeech(): GridSpeech {
   return makeSpeech({ stateFor: () => "ready" });
