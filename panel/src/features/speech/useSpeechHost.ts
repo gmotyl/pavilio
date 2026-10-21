@@ -461,7 +461,7 @@ export function useSpeechHost({
    * churn. Nine of the callbacks below did, which handed 4 Hz back to the
    * `GridSpeech` memo and re-rendered every bar in the grid through the
    * `speech` prop — precisely what moving the playhead onto an external store
-   * was done to prevent. `useSpeechHost.identity.test.tsx` is the pin.
+   * was done to prevent. `useSpeechHost.preload.test.ts` (identity) is the pin.
    *
    * The readings in here are state, not methods, and they change on run
    * transitions rather than on the clock: a host identity that moves when a
@@ -1312,7 +1312,7 @@ export function useSpeechHost({
    * returned object may move at that rate either, which is why the player is
    * destructured at the top of this hook: a callback that depends on `player`
    * depends on `progress`, and the whole saving is gone. Both halves are pinned
-   * by `useSpeechHost.identity.test.tsx`.
+   * by `useSpeechHost.preload.test.ts` (identity).
    *
    * `progressFor` is `[]`-stable; `unitDurationsFor` depends on `queueFor`,
    * because measurements belong to an utterance rather than to a cell and the
@@ -1356,7 +1356,7 @@ export function useSpeechHost({
    * first pass of this effect after a barge-in already sees the cleared map.
    * There is no render in between to catch, on any of the three routes onto a
    * new utterance — `onNext`, `onJumpToUnit`, or an arrival superseding a
-   * paused run. `useSpeechHost.durations.test.tsx` records every intermediate
+   * paused run. `useSpeechHost.preload.test.ts` records every intermediate
    * pass across a live barge-in and pins that; deferring the player's clear by
    * a single tick turns it red.
    *
@@ -1650,7 +1650,7 @@ export function useSpeechHost({
       // move this object's identity when a run starts, is held or ends — which
       // is exactly when every cell's state changed anyway. Not on the 4 Hz
       // clock: `progress` and `unitDurations` stay out on the store, and
-      // `useSpeechHost.identity.test.tsx` is the pin that says so.
+      // `useSpeechHost.preload.test.ts` (identity) is the pin that says so.
       speakingSessionId,
       pausedSessionId,
       onSeekBackward,

@@ -16,134 +16,25 @@
 import { act, renderHook } from "@testing-library/react";
 import { TtsError } from "anytts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  drain,
+  emitUtterance,
+  endCurrentUnit,
+  endRun,
+  played,
+  requestedTexts,
+  resetSpeechHarness,
+  response,
+  settle,
+  synth,
+  synthMock,
+  timesRequested,
+  unitsOf,
+  useWebSocketMock,
+} from "./speech.harness";
 
-const synth = vi.hoisted(() => {
-  const buffers = new Map<string, ArrayBuffer>();
-  const bufferText = new Map<ArrayBuffer, string>();
-  const blobText = new Map<Blob, string>();
-  const cache = new Map<string, Promise<ArrayBuffer>>();
-  /** Texts whose synthesis is held open until `release`/`fail` says otherwise. */
-  const holds = new Set<string>();
-  const waiting = new Map<string, { release: () => void; fail: (error: unknown) => void }>();
-  let requests: Array<{ text: string; voice: string | undefined; tier: string | undefined }> = [];
-
-  function bufferFor(text: string): ArrayBuffer {
-    const existing = buffers.get(text);
-    if (existing) return existing;
-
-    const buffer = new Uint8Array([text.length % 255]).buffer;
-    buffers.set(text, buffer);
-    bufferText.set(buffer, text);
-    return buffer;
-  }
-
-  function synthesizeSpeech(
-    text: string,
-    options: { voice?: string; tier?: string } = {},
-  ): Promise<ArrayBuffer> {
-    const key = `${options.voice ?? ""}::${text}`;
-    const cached = cache.get(key);
-    if (cached) return cached;
-
-    requests.push({ text, voice: options.voice, tier: options.tier });
-
-    const promise = holds.has(text)
-      ? new Promise<ArrayBuffer>((resolve, reject) => {
-          waiting.set(text, {
-            release: () => resolve(bufferFor(text)),
-            fail: (error: unknown) => reject(error),
-          });
-        })
-      : Promise.resolve(bufferFor(text));
-
-    cache.set(key, promise);
-    // Never cache a failure, exactly as the real module does not: a retry has
-    // to be able to reach the synthesizer again.
-    void promise.catch(() => {
-      if (cache.get(key) === promise) cache.delete(key);
-    });
-    return promise;
-  }
-
-  function settle(text: string, outcome: "release" | "fail", error?: unknown): void {
-    const held = waiting.get(text);
-    if (!held) throw new Error(`no synthesis is being held for ${text}`);
-    waiting.delete(text);
-    holds.delete(text);
-    if (outcome === "release") held.release();
-    else held.fail(error ?? new Error(`synthesis failed: ${text}`));
-  }
-
-  return {
-    synthesizeSpeech,
-    /** Exactly what the real one is: a fire-and-forget `synthesizeSpeech`. */
-    prefetchSpeech: (text: string, options: { voice?: string } = {}): void => {
-      void synthesizeSpeech(text, options).catch(() => {});
-    },
-    toSpeechBlob: (buffer: ArrayBuffer): Blob => {
-      const blob = new Blob([buffer], { type: "audio/mpeg" });
-      blobText.set(blob, bufferText.get(buffer) ?? "unknown");
-      return blob;
-    },
-    textForBlob: (blob: Blob): string => blobText.get(blob) ?? "unknown",
-    /** Holds this text's synthesis open, so "while it is warming" is observable. */
-    hold: (text: string): void => {
-      holds.add(text);
-    },
-    release: (text: string): void => settle(text, "release"),
-    /** Rejects the held synthesis — with `error` when given, as anytts rejects with a `TtsError`. */
-    fail: (text: string, error?: unknown): void => settle(text, "fail", error),
-    get requests() {
-      return requests;
-    },
-    reset: (): void => {
-      requests = [];
-      cache.clear();
-      holds.clear();
-      waiting.clear();
-    },
-  };
-});
-
-vi.mock("../synth", () => ({
-  synthesizeSpeech: synth.synthesizeSpeech,
-  prefetchSpeech: synth.prefetchSpeech,
-  toSpeechBlob: synth.toSpeechBlob,
-  // Nothing is ever evicted in this harness.
-  isSpeechSynthesized: () => true,
-  SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
-}));
-
-/**
- * A state-backed socket stand-in: `emit` pushes a frame into every mounted
- * `useWebSocket`, so an arrival is a real React state update rather than a
- * module variable plus a manual rerender.
- */
-const ws = vi.hoisted(() => {
-  const setters = new Set<(message: Record<string, unknown> | null) => void>();
-  return {
-    setters,
-    emit(message: Record<string, unknown>): void {
-      for (const set of setters) set(message);
-    },
-  };
-});
-
-vi.mock("../../realtime/useWebSocket", async () => {
-  const React = await import("react");
-  return {
-    useWebSocket: () => {
-      const [lastMessage, setLastMessage] = React.useState<Record<string, unknown> | null>(null);
-      React.useEffect(() => {
-        ws.setters.add(setLastMessage);
-        return () => {
-          ws.setters.delete(setLastMessage);
-        };
-      }, []);
-      return { lastMessage };
-    },
-  };
-});
+vi.mock("../synth", () => synthMock());
+vi.mock("../../realtime/useWebSocket", () => useWebSocketMock());
 
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { prepare } from "../prepare";
@@ -160,52 +51,6 @@ import { utteranceUnderCursor } from "../utteranceQueue";
 import { refreshSessions } from "../../terminal/sessionStore";
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
-
-/** The `src` of every started playback, in order. Warming must never add one. */
-const played: string[] = [];
-/** The element each playback was started on, so a unit's `ended` can be fired. */
-const elements: HTMLMediaElement[] = [];
-
-/** Drains the microtask ladder the host and player run on. */
-async function drain(): Promise<void> {
-  for (let i = 0; i < 100; i += 1) await Promise.resolve();
-}
-
-/** Broadcasts one `speech-utterance` frame and lets the host react to it. */
-async function emitUtterance(sessionId: string, id: string, text: string): Promise<void> {
-  await act(async () => {
-    ws.emit({ type: "speech-utterance", id, sessionId, text, at: Date.now() });
-    await drain();
-  });
-}
-
-/** Runs a host callback and lets everything it started settle. */
-async function settle(action: () => void): Promise<void> {
-  await act(async () => {
-    action();
-    await drain();
-  });
-}
-
-/** Ends the unit that is currently playing, as the browser's `ended` would. */
-async function endCurrentUnit(): Promise<void> {
-  const element = elements[elements.length - 1];
-  if (!element) throw new Error("nothing is playing");
-  await act(async () => {
-    element.dispatchEvent(new Event("ended"));
-    await drain();
-  });
-}
-
-/** Ends every unit of the run that is playing, up to a bound. */
-async function endRun(max = 40): Promise<void> {
-  for (let i = 0; i < max; i += 1) {
-    if (!played.length) return;
-    const before = played.length;
-    await endCurrentUnit();
-    if (played.length === before) return;
-  }
-}
 
 /**
  * One click on the cell's control, routed exactly as `CellSpeakButton` routes
@@ -228,60 +73,7 @@ async function clickControl(host: SpeechHost, sessionId: string): Promise<void> 
   });
 }
 
-const requestedTexts = (): string[] => synth.requests.map((request) => request.text);
-const timesRequested = (text: string): number =>
-  requestedTexts().filter((requested) => requested === text).length;
-
-/**
- * A response of `count` units: every paragraph is one sentence over the
- * 200-char packing floor and under the 450-char ceiling, so it is neither
- * merged with its neighbour nor cut in half.
- */
-function response(count: number, word = "Paragraph"): string {
-  return Array.from({ length: count }, (_, i) => {
-    const head = `${word} ${String(i).padStart(2, "0")} `;
-    return head + "x".repeat(238 - head.length) + ".";
-  }).join("\n\n");
-}
-
-/** What `prepare` will make of a response — the texts synthesis will be asked for. */
-const unitsOf = (text: string): string[] =>
-  prepare(text, { language: "en" }).units.map((unit) => unit.text);
-
-beforeEach(() => {
-  synth.reset();
-  played.length = 0;
-  elements.length = 0;
-  ws.setters.clear();
-
-  global.fetch = vi.fn(
-    async () => ({ ok: true, json: async () => ({ utterances: [] }) }) as Response,
-  ) as unknown as typeof fetch;
-
-  Object.defineProperty(URL, "createObjectURL", {
-    configurable: true,
-    writable: true,
-    value: (blob: Blob) => `blob:${synth.textForBlob(blob)}`,
-  });
-  Object.defineProperty(URL, "revokeObjectURL", {
-    configurable: true,
-    writable: true,
-    value: () => {},
-  });
-
-  vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (
-    this: HTMLMediaElement,
-  ) {
-    const src = this.getAttribute("src");
-    // `unlock()` plays a source-less element on purpose; that is not audio.
-    if (src) {
-      played.push(src);
-      elements.push(this);
-    }
-    return Promise.resolve();
-  });
-  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
-});
+beforeEach(resetSpeechHarness);
 
 describe("useSpeechHost warming", () => {
   it("warms the first unit of an unarmed cell on arrival", async () => {

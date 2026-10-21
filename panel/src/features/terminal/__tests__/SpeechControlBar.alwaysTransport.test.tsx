@@ -40,6 +40,7 @@ import { join } from "node:path";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
 import { prepare } from "../../speech/prepare";
 import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
@@ -123,8 +124,6 @@ const answerAt = (id: string): Utterance => ({ id, sessionId: SESSION, text: ANS
 
 /** Shared, because a `useSyncExternalStore` snapshot must be referentially
  *  stable between notifications — a fresh value per call is a render loop. */
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 
 interface HostOverrides {
@@ -133,27 +132,12 @@ interface HostOverrides {
   units?: readonly SpeechUnit[];
 }
 
-function makeSpeech(over: HostOverrides = {}): GridSpeech {
-  return {
+function speechWith(over: HostOverrides = {}): GridSpeech {
+  return makeSpeech({
     stateFor: () => over.state ?? "empty",
     queueFor: () => over.queue ?? emptyUtteranceQueue,
-    heardFor: () => NOTHING_HEARD,
     unitsFor: () => over.units ?? NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  };
+  });
 }
 
 /**
@@ -163,7 +147,7 @@ function makeSpeech(over: HostOverrides = {}): GridSpeech {
  * that would disable them for a second reason.
  */
 function spokenSpeech(): GridSpeech {
-  return makeSpeech({
+  return speechWith({
     state: "ready",
     queue: {
       previous: [answerAt("u-0")],
@@ -273,7 +257,7 @@ afterEach(() => {
 
 describe("the bar always carries the eye and the transport", () => {
   it("a cell that has never spoken still shows the eye", () => {
-    renderBar(makeSpeech());
+    renderBar(speechWith());
 
     // The eye is on the row from mount, and it is a live control — it has a
     // pane to open, which is exactly the reason that lapsed.
@@ -289,7 +273,7 @@ describe("the bar always carries the eye and the transport", () => {
   });
 
   it("a cell that has never spoken shows the transport disabled", () => {
-    const speech = makeSpeech();
+    const speech = speechWith();
     renderBar(speech);
 
     // Reasons one and two of the old comment, kept — as DISABLED rather than
@@ -312,7 +296,7 @@ describe("the bar always carries the eye and the transport", () => {
   });
 
   it("a cell that has never spoken has a scrubber with nothing in it", () => {
-    renderBar(makeSpeech());
+    renderBar(speechWith());
 
     // No segments, because there are no units — and so no fill and no
     // playhead: the strip claims no progress it does not have.
@@ -325,7 +309,7 @@ describe("the bar always carries the eye and the transport", () => {
 
   it("the eye works before the first answer", () => {
     const onToggleAnswer = vi.fn();
-    renderBar(makeSpeech(), onToggleAnswer);
+    renderBar(speechWith(), onToggleAnswer);
 
     fireEvent.click(eye() as HTMLElement);
 
@@ -337,7 +321,7 @@ describe("the bar always carries the eye and the transport", () => {
     render(
       <SpeechControlBar
         sessionId={SESSION}
-        speech={makeSpeech()}
+        speech={speechWith()}
         answerOpen={false}
         onToggleAnswer={noop}
         send={send}
@@ -359,7 +343,7 @@ describe("the bar always carries the eye and the transport", () => {
   });
 
   it("the first answer enables the transport", () => {
-    const view = renderBar(makeSpeech());
+    const view = renderBar(speechWith());
 
     expect(playPause()).toBeDisabled();
     const pillsBefore = pillLabels();
@@ -401,7 +385,7 @@ describe("the bar always carries the eye and the transport", () => {
   it("the eye reopens a pane closed with Escape", async () => {
     render(
       <MemoryRouter>
-        <TerminalView sessionId={SESSION} speech={makeSpeech()} speechBarVisible />
+        <TerminalView sessionId={SESSION} speech={speechWith()} speechBarVisible />
       </MemoryRouter>,
     );
     await act(async () => {
@@ -471,7 +455,7 @@ describe("the bar always carries the eye and the transport", () => {
     }
 
     it("the row's height is the same before and after the first answer", () => {
-      const view = renderBar(makeSpeech());
+      const view = renderBar(speechWith());
       const empty = getComputedStyle(rowOf());
       const emptyHeight = empty.height;
 
@@ -505,7 +489,7 @@ describe("the bar always carries the eye and the transport", () => {
     });
 
     it("the empty row's line is no wider than the one the cell already carries", () => {
-      const view = renderBar(makeSpeech());
+      const view = renderBar(speechWith());
       const withPills = minimumRowWidth(rowOf());
 
       view.rerender(

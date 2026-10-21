@@ -36,8 +36,9 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
-import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
+import type { CellSpeechState, GridSpeech, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 import { SpeechControlBar } from "../SpeechControlBar";
 import {
@@ -71,10 +72,6 @@ vi.mock("../../speech/synth", () => ({
 
 const SESSION = "cell-a";
 
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
 const answer = (id: string): Utterance => ({
   id,
   sessionId: SESSION,
@@ -102,27 +99,8 @@ interface Cell {
   queue: UtteranceQueue;
 }
 
-function makeSpeech(cell: Cell): GridSpeech {
-  return {
-    stateFor: () => cell.state,
-    queueFor: () => cell.queue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
+function cellSpeech(cell: Cell): GridSpeech {
+  return makeSpeech({ stateFor: () => cell.state, queueFor: () => cell.queue });
 }
 
 const send = vi.fn((_data: string) => true);
@@ -178,7 +156,7 @@ afterEach(() => {
 
 describe("the wave is a step the transport can stand on", () => {
   it("leaves backward live on the one answer a reloaded tab has", () => {
-    render(barTree(makeSpeech({ state: "ready", queue: AFTER_A_REFRESH })));
+    render(barTree(cellSpeech({ state: "ready", queue: AFTER_A_REFRESH })));
 
     // Before the wave there is genuinely nowhere to go: no history, and the
     // cursor is already on the only answer.
@@ -193,7 +171,7 @@ describe("the wave is a step the transport can stand on", () => {
   });
 
   it("adds no step when the wave does not own the body", () => {
-    render(barTree(makeSpeech({ state: "ready", queue: AFTER_A_REFRESH })));
+    render(barTree(cellSpeech({ state: "ready", queue: AFTER_A_REFRESH })));
 
     // An idle session: the body is already the answer, so there is nothing to
     // step back FROM. The new arm is the wave's, not a blanket enable — without
@@ -204,7 +182,7 @@ describe("the wave is a step the transport can stand on", () => {
   });
 
   it("leaves forward live while a hold stands with nothing waiting", () => {
-    render(barTree(makeSpeech({ state: "ready", queue: AFTER_A_REFRESH })));
+    render(barTree(cellSpeech({ state: "ready", queue: AFTER_A_REFRESH })));
 
     activity("busy", 2);
     // The hold is set on the STORE, not by clicking: the click now delegates to
@@ -222,7 +200,7 @@ describe("the wave is a step the transport can stand on", () => {
   });
 
   it("keeps both ends dead on a cell that has never spoken", () => {
-    render(barTree(makeSpeech({ state: "empty", queue: emptyUtteranceQueue })));
+    render(barTree(cellSpeech({ state: "empty", queue: emptyUtteranceQueue })));
 
     activity("busy", 2);
     expect(bodyHandedOver()).toBe(true);
@@ -235,7 +213,7 @@ describe("the wave is a step the transport can stand on", () => {
   });
 
   it("still asks the list once the cursor is below the wave", () => {
-    render(barTree(makeSpeech({ state: "ready", queue: WITH_HISTORY })));
+    render(barTree(cellSpeech({ state: "ready", queue: WITH_HISTORY })));
 
     // No wave, but a step of real history: the old derivation, unchanged.
     expect(previousButton()).not.toBeDisabled();
@@ -245,7 +223,7 @@ describe("the wave is a step the transport can stand on", () => {
 
 describe("the row delegates the step instead of deciding it", () => {
   it("raises onPrevious even when the wave owns the body", () => {
-    const speech = makeSpeech({ state: "ready", queue: AFTER_A_REFRESH });
+    const speech = cellSpeech({ state: "ready", queue: AFTER_A_REFRESH });
     render(barTree(speech));
 
     activity("busy", 2);
@@ -261,7 +239,7 @@ describe("the row delegates the step instead of deciding it", () => {
   });
 
   it("raises onNext even when a hold is standing on the newest answer", () => {
-    const speech = makeSpeech({ state: "ready", queue: AFTER_A_REFRESH });
+    const speech = cellSpeech({ state: "ready", queue: AFTER_A_REFRESH });
     render(barTree(speech));
 
     activity("busy", 2);
@@ -274,7 +252,7 @@ describe("the row delegates the step instead of deciding it", () => {
   });
 
   it("raises the plain step below the wave too", () => {
-    const speech = makeSpeech({ state: "ready", queue: WITH_HISTORY });
+    const speech = cellSpeech({ state: "ready", queue: WITH_HISTORY });
     render(barTree(speech));
 
     fireEvent.click(previousButton());

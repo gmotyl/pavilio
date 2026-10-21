@@ -42,6 +42,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
 import { prepare } from "../../speech/prepare";
 import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
@@ -138,8 +139,6 @@ const utterance: Utterance = { id: "u-1", sessionId: SESSION, text: ANSWER, at: 
 
 /** Shared, because a `useSyncExternalStore` snapshot must be referentially
  *  stable between notifications — a fresh value per call is a render loop. */
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 
 /**
@@ -152,36 +151,23 @@ const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
  */
 type Host = GridSpeech & { arrive: () => void };
 
-function makeSpeech(): Host {
+function arrivingSpeech(): Host {
   let queue: UtteranceQueue = emptyUtteranceQueue;
   let spoken = false;
   const units = prepare(ANSWER).units;
 
   return {
+    ...makeSpeech({
+      // One direction only, exactly as the real host: a cell never returns to
+      // `empty` once it has an answer, so the pills never come back.
+      stateFor: () => (spoken ? "ready" : "empty"),
+      queueFor: () => queue,
+      unitsFor: () => (spoken ? units : NO_UNITS),
+    }),
     arrive: () => {
       queue = { ...emptyUtteranceQueue, current: utterance };
       spoken = true;
     },
-    // One direction only, exactly as the real host: a cell never returns to
-    // `empty` once it has an answer, so the pills never come back.
-    stateFor: () => (spoken ? "ready" : "empty"),
-    queueFor: () => queue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => (spoken ? units : NO_UNITS),
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
   };
 }
 
@@ -243,7 +229,7 @@ afterEach(() => {
 
 describe("a launcher press opens the answer pane", () => {
   it("a launcher press opens the pane and leaves no opened-for-wait mark", async () => {
-    render(cell(makeSpeech()));
+    render(cell(arrivingSpeech()));
     // The cell has never spoken, so the pane is closed. The eye is on the row
     // — it has been since the strip stopped being conditional — but nothing
     // has pressed it, which is what makes the press below the opener.
@@ -268,7 +254,7 @@ describe("a launcher press opens the answer pane", () => {
 
   it("a refused launcher press opens nothing", async () => {
     term.accept = false;
-    render(cell(makeSpeech()));
+    render(cell(arrivingSpeech()));
 
     fireEvent.click(launcher());
     await settleSubmit();
@@ -284,7 +270,7 @@ describe("a launcher press opens the answer pane", () => {
   });
 
   it("a hidden speech bar suppresses the open", async () => {
-    const speech = makeSpeech();
+    const speech = arrivingSpeech();
     const view = render(cell(speech, false));
 
     // With the row hidden there is no pill to press at all — the bar's
@@ -312,7 +298,7 @@ describe("a launcher press opens the answer pane", () => {
     // cell starts fresh.
     setStoredAutoOpenAnswer(false);
     forgetAnswerPane(SESSION);
-    render(cell(makeSpeech()));
+    render(cell(arrivingSpeech()));
 
     fireEvent.click(launcher());
     await settleSubmit();
@@ -328,7 +314,7 @@ describe("a launcher press opens the answer pane", () => {
   });
 
   it("the wait ending on idle does not close a press-opened pane", async () => {
-    render(cell(makeSpeech()));
+    render(cell(arrivingSpeech()));
 
     fireEvent.click(launcher());
     await settleSubmit();
@@ -351,7 +337,7 @@ describe("a launcher press opens the answer pane", () => {
   });
 
   it("an answer arriving leaves the pane open on the answer", async () => {
-    const speech = makeSpeech();
+    const speech = arrivingSpeech();
     const view = render(cell(speech));
 
     fireEvent.click(launcher());
@@ -393,7 +379,7 @@ describe("a launcher press opens the answer pane", () => {
     // starts fresh.
     setStoredAutoOpenAnswer(false);
     forgetAnswerPane(SESSION);
-    const speech = makeSpeech();
+    const speech = arrivingSpeech();
     const view = render(cell(speech));
 
     fireEvent.click(launcher());

@@ -27,6 +27,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 import { prepare } from "../../speech/prepare";
 import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import {
@@ -128,41 +129,21 @@ const { TerminalView } = await import("../TerminalView");
 const { TerminalLayoutGrid } = await import("../TerminalLayoutGrid");
 
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
 const MARKDOWN = "The cell finally says something.";
 const utterance: Utterance = { id: "u-1", sessionId: "cell-a", text: MARKDOWN, at: 1 };
 
-/** A cell that has played nothing has heard nothing — shared, like every other
- *  "nothing here" snapshot on a host. */
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
 /** A speech host reporting one fixed reading of the cell. */
-function makeSpeech(
+function speechIn(
   state: CellSpeechState,
   queue: UtteranceQueue = emptyUtteranceQueue,
   units: readonly SpeechUnit[] = NO_UNITS,
 ): GridSpeech {
-  return {
+  return makeSpeech({
     stateFor: () => state,
     queueFor: () => queue,
-    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  };
+  });
 }
 
 /** The same host once the cell's first answer has landed. */
@@ -172,7 +153,7 @@ function spokenSpeech(): GridSpeech {
     utterance,
     speaking: false,
   });
-  return makeSpeech("ready", queue, prepare(MARKDOWN).units);
+  return speechIn("ready", queue, prepare(MARKDOWN).units);
 }
 
 const sessions: SessionMeta[] = [
@@ -252,7 +233,7 @@ describe("the speech row", () => {
   // asserts on the bytes the terminal instance received.
   // -------------------------------------------------------------------------
   it("hands the row the cell's own PTY write", async () => {
-    render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
+    render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
     await settle();
 
     // A silent cell shows the launchers; the first is the `claude` default.
@@ -273,14 +254,14 @@ describe("the speech row", () => {
     // Nothing in the queue, nothing to play, no interaction — and the row is
     // there anyway. That is what "reserved from mount" means: the height is
     // spent before the cell has anything to say, so an arrival cannot claim it.
-    render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
+    render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
     await settle();
 
     expect(bar()).toBeInTheDocument();
   });
 
   it("places the row before the terminal container, not over it", async () => {
-    render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
+    render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
     await settle();
 
     const container = StubResizeObserver.observed[0];
@@ -312,7 +293,7 @@ describe("the speech row", () => {
     // to open is a deliberate act, like the hide toggle below; what must cost
     // nothing is the arrival ITSELF.
     setStoredAutoOpenAnswer(false);
-    const view = render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
+    const view = render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
     await settle();
 
     const container = StubResizeObserver.observed[0];
@@ -352,7 +333,7 @@ describe("the speech row", () => {
     // Seeding `lastBarVisible` with the CURRENT value of `speechBarVisible` is
     // what prevents it — seed it with anything else and the counts below go to
     // four. So the number is the point, not an incidental total.
-    const shown = render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
+    const shown = render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
     await settle();
 
     expect(bar()).toBeInTheDocument();
@@ -366,7 +347,7 @@ describe("the speech row", () => {
     term.fit.mockClear();
     term.sent.length = 0;
     render(
-      <TerminalView sessionId="cell-b" speech={makeSpeech("empty")} speechBarVisible={false} />,
+      <TerminalView sessionId="cell-b" speech={speechIn("empty")} speechBarVisible={false} />,
     );
     await settle();
 
@@ -376,7 +357,7 @@ describe("the speech row", () => {
   });
 
   it("refits once when the row is hidden", async () => {
-    const speech = makeSpeech("empty");
+    const speech = speechIn("empty");
     const view = render(<TerminalView sessionId="cell-a" speech={speech} />);
     await settle();
 
@@ -412,7 +393,7 @@ describe("the speech row", () => {
 
   it("an arriving answer opens the pane when the stored preference is on", async () => {
     setStoredAutoOpenAnswer(true);
-    const view = render(cell(makeSpeech("empty")));
+    const view = render(cell(speechIn("empty")));
     await settle();
     expect(answerPane()).toBeNull();
 
@@ -424,7 +405,7 @@ describe("the speech row", () => {
   it("a preference cleared after the cell exists stops the next arrival opening it", async () => {
     // The cell and its pane entry exist while the preference is still on…
     setStoredAutoOpenAnswer(true);
-    const view = render(cell(makeSpeech("empty")));
+    const view = render(cell(speechIn("empty")));
     await settle();
 
     // …then Settings clears it, and only afterwards does the answer land.
@@ -436,7 +417,7 @@ describe("the speech row", () => {
 
   it("a hidden speech bar still outranks the preference", async () => {
     setStoredAutoOpenAnswer(true);
-    const view = render(cell(makeSpeech("empty"), false));
+    const view = render(cell(speechIn("empty"), false));
     await settle();
 
     const spoken = spokenSpeech();
@@ -467,7 +448,7 @@ describe("the speech row", () => {
     // The derivation lives in the cell, so this mounts the cell rather than the
     // view: `speechBarVisible` used to read the session's speech state, which
     // made the row's EXISTENCE conditional on having spoken. It no longer does.
-    const silent = render(grid(makeSpeech("empty")));
+    const silent = render(grid(speechIn("empty")));
     await settle();
     expect(bar()).toBeInTheDocument();
     silent.unmount();

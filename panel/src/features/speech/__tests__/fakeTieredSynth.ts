@@ -135,7 +135,7 @@ export function createTieredSynth() {
     });
   }
 
-  function settle(text: string, outcome: "release" | "fail"): void {
+  function finish(text: string, outcome: "release" | "fail"): void {
     const key = waiting.get(text);
     const flight = key === undefined ? undefined : flights.get(key);
     if (key === undefined || !flight) throw new Error(`no synthesis is being held for ${text}`);
@@ -173,8 +173,8 @@ export function createTieredSynth() {
     hold: (text: string): void => {
       holds.add(text);
     },
-    release: (text: string): void => settle(text, "release"),
-    fail: (text: string): void => settle(text, "fail"),
+    release: (text: string): void => finish(text, "release"),
+    fail: (text: string): void => finish(text, "fail"),
     /** What reached the synthesizer: one entry per new flight. */
     get requests() {
       return requests;

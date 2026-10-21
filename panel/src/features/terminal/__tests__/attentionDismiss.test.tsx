@@ -50,9 +50,9 @@
  */
 import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
-import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
-import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
+import type { CellSpeechState, GridSpeech } from "../../speech/types";
 import type { MediaSessionTransportTarget } from "../../speech/useMediaSessionTransport";
 import { useMediaSessionTransport } from "../../speech/useMediaSessionTransport";
 import { useSpeechKeys } from "../../speech/useSpeechKeys";
@@ -100,32 +100,8 @@ vi.mock("../../speech/synth", () => ({
   subscribeSpeechCache: () => () => {},
 }));
 
-/** Referentially stable — a fresh collection per call is a `useSyncExternalStore` loop. */
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(state: CellSpeechState): GridSpeech {
-  return {
-    stateFor: () => state,
-    queueFor: () => emptyUtteranceQueue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
+function speechIn(state: CellSpeechState): GridSpeech {
+  return makeSpeech({ stateFor: () => state });
 }
 
 /** What the activity channel would have been told by the server. */
@@ -142,7 +118,7 @@ function renderBar(sessionId: string, state: CellSpeechState = "ready") {
   return render(
     <SpeechControlBar
       sessionId={sessionId}
-      speech={makeSpeech(state)}
+      speech={speechIn(state)}
       answerOpen={false}
       onToggleAnswer={() => {}}
       send={() => true}
@@ -310,7 +286,7 @@ describe("attention clears when the user actually arrives", () => {
       rerender(
         <SpeechControlBar
           sessionId="cell-a"
-          speech={makeSpeech(state)}
+          speech={speechIn(state)}
           answerOpen={false}
           onToggleAnswer={() => {}}
           send={() => true}

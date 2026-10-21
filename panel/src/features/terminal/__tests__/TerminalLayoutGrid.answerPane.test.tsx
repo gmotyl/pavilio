@@ -15,6 +15,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 import { prepare } from "../../speech/prepare";
 import type { GridSpeech, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, utteranceQueueReducer } from "../../speech/utteranceQueue";
@@ -90,39 +91,19 @@ beforeAll(() => {
 
 const MARKDOWN = "# Deploy plan\n\nThe first paragraph explains why the deploy waits.\n";
 const utterance: Utterance = { id: "u-1", sessionId: "cell-a", text: MARKDOWN, at: 1 };
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
-/** A cell that has played nothing has heard nothing — shared, like every other
- *  "nothing here" snapshot on a host. */
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(): GridSpeech {
+function answeredSpeech(): GridSpeech {
   const queue = utteranceQueueReducer(emptyUtteranceQueue, {
     type: "arrived",
     utterance,
     speaking: false,
   });
   const units = prepare(MARKDOWN).units;
-  return {
+  return makeSpeech({
     stateFor: () => "ready",
     queueFor: () => queue,
-    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  };
+  });
 }
 
 const sessions: SessionMeta[] = [
@@ -170,7 +151,7 @@ describe("TerminalLayoutGrid — the answer pane across a layout change", () => 
   it("MAX and back leaves the pane open", async () => {
     // Off, so the pane below is open only because the eye opened it.
     setStoredAutoOpenAnswer(false);
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(grid(speech, false));
     await settle();
     expect(screen.getByTestId("terminal-grid")).toBeInTheDocument();
@@ -194,7 +175,7 @@ describe("TerminalLayoutGrid — the answer pane across a layout change", () => 
   });
 
   it("a pane closed before MAX stays closed after it", async () => {
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(grid(speech, false));
     await settle();
     fireEvent.click(eye());

@@ -185,6 +185,7 @@ vi.mock("../synth", () => ({
   SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
 }));
 
+import { drain, settle } from "./speech.harness";
 import type { SpeechPlaybackError, SpeechPlayer } from "../useSpeechPlayer";
 import { useSpeechPlayer } from "../useSpeechPlayer";
 import { voiceForSession } from "../../terminal/sessionVoice";
@@ -255,18 +256,6 @@ Object.defineProperty(HTMLMediaElement.prototype, "src", {
   },
 });
 
-/**
- * The player's steps are all microtasks — synthesis resolves, the object URL is
- * built, the next unit's load starts — so draining the microtask queue advances
- * it without a real-timer sleep. Bounded, so a step that never happens fails an
- * assertion instead of hanging the suite.
- */
-async function drain(): Promise<void> {
-  for (let i = 0; i < 100; i += 1) {
-    await Promise.resolve();
-  }
-}
-
 /** Starts playback and lets it get as far as it can without a unit ending. */
 async function startPlay(
   player: SpeechPlayer,
@@ -289,14 +278,6 @@ async function endCurrentUnit(): Promise<void> {
 
   await act(async () => {
     element.dispatchEvent(new Event("ended"));
-    await drain();
-  });
-}
-
-/** Runs a synchronous player call and lets the run settle around it. */
-async function settle(action: () => void): Promise<void> {
-  await act(async () => {
-    action();
     await drain();
   });
 }

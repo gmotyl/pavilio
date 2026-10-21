@@ -10,6 +10,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import { prepare } from "../../speech/prepare";
 import { preferences } from "../../../preferences/declarations";
@@ -119,8 +120,6 @@ const MARKDOWN = [
 
 const utterance: Utterance = { id: "u-1", sessionId: "cell-a", text: MARKDOWN, at: 1 };
 
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-
 /**
  * A host with one utterance under the cursor and nothing playing. The queue is
  * held in a box the tests can move: `arrive`, `previous` and `next` step it the
@@ -133,11 +132,7 @@ type Host = GridSpeech & {
   next: () => void;
 };
 
-/** A cell that has played nothing has heard nothing — shared, like every other
- *  "nothing here" snapshot on a host. */
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(): Host {
+function answeredSpeech(): Host {
   let queue: UtteranceQueue = utteranceQueueReducer(emptyUtteranceQueue, {
     type: "arrived",
     utterance,
@@ -145,6 +140,17 @@ function makeSpeech(): Host {
   });
   const units = prepare(MARKDOWN).units;
   return {
+    ...makeSpeech({
+      stateFor: () => "ready",
+      queueFor: () => queue,
+      unitsFor: () => units,
+      // The real host dispatches `newest` and speaks nothing, so this one moves
+      // the boxed queue the same way: a stub that did nothing would let the cell
+      // pass a test about the body following an arrival.
+      onNewestAnswer: () => {
+        queue = utteranceQueueReducer(queue, { type: "newest" });
+      },
+    }),
     arrive: (id) => {
       queue = utteranceQueueReducer(queue, {
         type: "arrived",
@@ -158,29 +164,6 @@ function makeSpeech(): Host {
     next: () => {
       queue = utteranceQueueReducer(queue, { type: "next" });
     },
-    stateFor: () => "ready",
-    queueFor: () => queue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => units,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    // The real host dispatches `newest` and speaks nothing, so this one moves
-    // the boxed queue the same way: a stub that did nothing would let the cell
-    // pass a test about the body following an arrival.
-    onNewestAnswer: () => {
-      queue = utteranceQueueReducer(queue, { type: "newest" });
-    },
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
   };
 }
 
@@ -231,7 +214,7 @@ afterEach(() => {
 
 describe("TerminalView and the answer pane", () => {
   it("the pane mounts beside the terminal and provokes no refit", async () => {
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     render(cell(speech));
     await settleTerminal();
     expect(pane()).toBeNull();
@@ -277,7 +260,7 @@ describe("TerminalView and the answer pane", () => {
     // pane's half of the same wiring, and it is asserted on the instance this
     // cell acquired rather than on a spy the test hands in — a prop threaded to
     // the wrong place would still satisfy the latter.
-    render(cell(makeSpeech()));
+    render(cell(answeredSpeech()));
     await settleTerminal();
 
     fireEvent.click(eye());
@@ -296,7 +279,7 @@ describe("TerminalView and the answer pane", () => {
   });
 
   it("mounts the pane inside the terminal area so the row stays uncovered", async () => {
-    render(cell(makeSpeech()));
+    render(cell(answeredSpeech()));
     await settleTerminal();
     const observedContainer = StubResizeObserver.observed[0];
     expect(observedContainer).toBeDefined();
@@ -346,7 +329,7 @@ describe("TerminalView and the answer pane", () => {
   });
 
   it("hiding the bar closes the pane", async () => {
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(cell(speech));
     await settleTerminal();
     fireEvent.click(eye());
@@ -358,7 +341,7 @@ describe("TerminalView and the answer pane", () => {
   });
 
   it("hiding the bar forgets the pane was open", async () => {
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(cell(speech));
     await settleTerminal();
     fireEvent.click(eye());
@@ -388,7 +371,7 @@ describe("TerminalView and the answer pane", () => {
     // Maximize, grid presets, drag and seam resize all remount `TerminalView`
     // (the grid swaps its body subtree). The xterm survives that through
     // `terminalInstances`; the pane's state must survive the same way.
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const first = render(cell(speech));
     await settleTerminal();
     fireEvent.click(eye());
@@ -407,7 +390,7 @@ describe("TerminalView and the answer pane", () => {
     // The seen set outlives the view too: the queue the remounted view is
     // handed holds nothing new, so a preference that is on opens nothing.
     storeDefault(true);
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const first = render(cell(speech));
     await settleTerminal();
     expect(pane()).toBeNull();
@@ -419,7 +402,7 @@ describe("TerminalView and the answer pane", () => {
   });
 
   it("Escape puts focus back in the terminal", async () => {
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     render(cell(speech));
     await settleTerminal();
     fireEvent.click(eye());
@@ -437,7 +420,7 @@ describe("TerminalView and the answer pane", () => {
 describe("TerminalView opens the pane on a new answer", () => {
   it("a new answer opens the pane and focuses it when the preference is on", async () => {
     storeDefault(true);
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(cell(speech));
     await settleTerminal();
     expect(pane()).toBeNull();
@@ -457,7 +440,7 @@ describe("TerminalView opens the pane on a new answer", () => {
     // is for a user who has never touched the Settings box. The declared default is ON,
     // so the answer this cell has just produced opens its own pane with no
     // click on the eye — the correction this default exists for.
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(cell(speech));
     await settleTerminal();
     expect(pane()).toBeNull();
@@ -481,7 +464,7 @@ describe("TerminalView opens the pane on a new answer", () => {
     globals.__PAVILIO_PREFS__ = reloaded;
     forgetAnswerPane("cell-a");
 
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(cell(speech));
     await settleTerminal();
 
@@ -492,7 +475,7 @@ describe("TerminalView opens the pane on a new answer", () => {
 
   it("the utterance a fresh tab is handed does not open the pane", async () => {
     storeDefault(true);
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(cell(speech));
     await settleTerminal();
 
@@ -517,7 +500,7 @@ describe("TerminalView opens the pane on a new answer", () => {
    */
   it("marks every answer in the history as seen", async () => {
     storeDefault(true);
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     // Three superseded answers behind the cursor, which is four utterances the
     // cell has shown and exactly what the mount has to seed itself from.
     speech.arrive("u-2");
@@ -535,7 +518,7 @@ describe("TerminalView opens the pane on a new answer", () => {
 
   it("previous and next open nothing", async () => {
     storeDefault(true);
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     speech.arrive("u-2");
     const view = render(cell(speech));
     await settleTerminal();
@@ -553,7 +536,7 @@ describe("TerminalView opens the pane on a new answer", () => {
   it("off, or a hidden bar, opens nothing", async () => {
     // Off: an arrival is not an opening.
     storeDefault(false);
-    const off = makeSpeech();
+    const off = answeredSpeech();
     const offView = render(cell(off));
     await settleTerminal();
     off.arrive("u-2");
@@ -564,7 +547,7 @@ describe("TerminalView opens the pane on a new answer", () => {
     // Hidden bar: the bar's visibility outranks the preference, and the arrival
     // is not held back for when the bar returns either.
     storeDefault(true);
-    const hidden = makeSpeech();
+    const hidden = answeredSpeech();
     const hiddenView = render(cell(hidden, false));
     await settleTerminal();
     hidden.arrive("u-2");

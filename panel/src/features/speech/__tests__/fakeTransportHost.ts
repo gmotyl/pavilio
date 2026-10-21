@@ -16,7 +16,7 @@
  * They deliberately do **not** move the cursor: a mocked host has a static
  * queue, and pretending otherwise would put a second reducer in the tests. The
  * cursor's own behaviour is pinned against the real host, in
- * `useSpeechHost.previousSilent.test.ts`.
+ * `useSpeechHost.navigation.test.ts`.
  *
  * The rules themselves are imported rather than restated — see `waveStep.ts` on
  * why there is exactly one definition of each.

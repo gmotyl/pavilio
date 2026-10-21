@@ -23,8 +23,9 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
-import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
+import type { CellSpeechState, GridSpeech, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 import { SpeechControlBar } from "../SpeechControlBar";
 import {
@@ -62,10 +63,6 @@ vi.mock("../../speech/synth", () => ({
 
 const SESSION = "cell-a";
 
-/** Referentially stable — a fresh value per call is a `useSyncExternalStore` loop. */
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-
 const answer = (id: string): Utterance => ({
   id,
   sessionId: SESSION,
@@ -86,24 +83,10 @@ interface Cell {
   queue: UtteranceQueue;
 }
 
-/** A cell that has played nothing has heard nothing — shared, like every other
- *  "nothing here" snapshot on a host. */
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(cell: Cell): GridSpeech {
-  return {
+function cellSpeech(cell: Cell): GridSpeech {
+  return makeSpeech({
     stateFor: () => cell.state,
     queueFor: () => cell.queue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
     // A spy alone is no longer a faithful host: the hold moved into
     // `onPrevious`/`onNext` so that the chord and the media keys take it too.
     // See `fakeTransportHost.ts`.
@@ -111,11 +94,7 @@ function makeSpeech(cell: Cell): GridSpeech {
     onNext: vi.fn((sessionId: string) =>
       fakeOnNext(sessionId, isAnswerHeld(sessionId), cell.queue.cursor, cell.queue.pending.length),
     ),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
+  });
 }
 
 /** A live socket: the write landed. `send` reports delivery now, and a stub
@@ -198,7 +177,7 @@ afterEach(() => {
 
 describe("the bar tells the waiting store whether the voice is reading", () => {
   it("defers the handover while the voice is speaking", () => {
-    render(barTree(makeSpeech({ state: "speaking", queue: WITH_HISTORY })));
+    render(barTree(cellSpeech({ state: "speaking", queue: WITH_HISTORY })));
 
     activity("busy", 2);
 
@@ -208,7 +187,7 @@ describe("the bar tells the waiting store whether the voice is reading", () => {
   });
 
   it("counts a stalled run as reading", () => {
-    render(barTree(makeSpeech({ state: "stalled", queue: WITH_HISTORY })));
+    render(barTree(cellSpeech({ state: "stalled", queue: WITH_HISTORY })));
 
     activity("busy", 2);
 
@@ -218,7 +197,7 @@ describe("the bar tells the waiting store whether the voice is reading", () => {
   });
 
   it("does not count a paused run as reading", () => {
-    render(barTree(makeSpeech({ state: "paused", queue: WITH_HISTORY })));
+    render(barTree(cellSpeech({ state: "paused", queue: WITH_HISTORY })));
 
     activity("busy", 2);
 
@@ -229,7 +208,7 @@ describe("the bar tells the waiting store whether the voice is reading", () => {
 
   it("hands the body over when the playback the deferral waited on ends", () => {
     const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     activity("busy", 2);
@@ -245,7 +224,7 @@ describe("the bar tells the waiting store whether the voice is reading", () => {
 
   it("keeps a deferral alive across speaking \u2192 stalled", () => {
     const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     activity("busy", 2);
@@ -268,7 +247,7 @@ describe("the bar tells the waiting store whether the voice is reading", () => {
   });
 
   it("pushes false when the bar unmounts while the voice is reading", () => {
-    const { unmount } = render(barTree(makeSpeech({ state: "speaking", queue: WITH_HISTORY })));
+    const { unmount } = render(barTree(cellSpeech({ state: "speaking", queue: WITH_HISTORY })));
 
     activity("busy", 2);
     expect(bodyHandedOver()).toBe(false);
@@ -290,7 +269,7 @@ describe("the bar tells the waiting store when an answer lands", () => {
     // `current?.id` this arrival is invisible — in the one situation a hold
     // exists for.
     const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     fireEvent.click(previousButton());
@@ -311,7 +290,7 @@ describe("the bar tells the waiting store when an answer lands", () => {
 
   it("does not snap when the arrival released no hold", () => {
     const cell: Cell = { state: "ready", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     cell.queue = queueWith({ previous: [answer("u-1")], current: answer("u-2") });
@@ -330,7 +309,7 @@ describe("the bar tells the waiting store when an answer lands", () => {
     // actually changed, or the first repaint after a step back would drop the
     // hold the user had just made.
     const cell: Cell = { state: "ready", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     activity("busy", 2);
@@ -354,7 +333,7 @@ describe("the bar tells the waiting store when an answer lands", () => {
     // tail. The shape that needs `answered` in the declared order is the
     // next test's.
     const cell: Cell = { state: "ready", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     activity("busy", 2);
@@ -383,7 +362,7 @@ describe("the bar tells the waiting store when an answer lands", () => {
     // the arrival's cancel long since spent — and it is then `endSend` alone
     // that must not re-open a window on the spell's tail.
     const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     activity("busy", 2);
@@ -418,7 +397,7 @@ describe("the transport holds the answer and lets it go", () => {
       // sits directly above the cursor, so one forward press reaches it.
       queue: queueWith(WITH_HISTORY),
     };
-    render(barTree(makeSpeech(cell)));
+    render(barTree(cellSpeech(cell)));
 
     activity("busy", 2);
     expect(bodyHandedOver()).toBe(true);
@@ -439,7 +418,7 @@ describe("the transport holds the answer and lets it go", () => {
       state: "ready",
       queue: queueWith({ ...WITH_HISTORY, pending: [answer("u-2")] }),
     };
-    render(barTree(makeSpeech(cell)));
+    render(barTree(cellSpeech(cell)));
 
     activity("busy", 2);
     fireEvent.click(previousButton());

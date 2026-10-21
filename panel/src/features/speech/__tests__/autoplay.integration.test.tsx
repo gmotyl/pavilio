@@ -24,6 +24,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { drain, emitUtterance, useWebSocketMock, ws } from "./speech.harness";
 
 /**
  * Deferred synthesis, copied in spirit from `useSpeechPlayer.test.ts`: the real
@@ -229,21 +230,6 @@ vi.mock("../prepare", async (importOriginal) => {
 });
 
 /**
- * A real, state-backed socket stand-in: `emit` pushes a frame into every mounted
- * `useWebSocket`, so a broadcast is an actual React state update rather than a
- * module variable plus a manual rerender.
- */
-const ws = vi.hoisted(() => {
-  const setters = new Set<(message: Record<string, unknown> | null) => void>();
-  return {
-    setters,
-    emit(message: Record<string, unknown>) {
-      for (const set of setters) set(message);
-    },
-  };
-});
-
-/**
  * Counts *mounted instances* of the two hooks the host owns — not renders. The
  * panel is allowed exactly one of each; before the host was hoisted out of the
  * surfaces there was one per surface, and two surfaces are mounted at once.
@@ -294,23 +280,7 @@ vi.mock("../useUtteranceChannel", async (importOriginal) => {
   };
 });
 
-vi.mock("../../realtime/useWebSocket", async () => {
-  const React = await import("react");
-  return {
-    useWebSocket: () => {
-      const [lastMessage, setLastMessage] = React.useState<Record<string, unknown> | null>(
-        null,
-      );
-      React.useEffect(() => {
-        ws.setters.add(setLastMessage);
-        return () => {
-          ws.setters.delete(setLastMessage);
-        };
-      }, []);
-      return { lastMessage };
-    },
-  };
-});
+vi.mock("../../realtime/useWebSocket", () => useWebSocketMock());
 
 /**
  * The realtime channel's listeners, captured so a test can stage a RETURN — the
@@ -472,19 +442,6 @@ const played: string[] = [];
 const objectUrls: string[] = [];
 /** Swapped per test: a browser that accepts the start, or one that refuses it. */
 let playResult: () => Promise<void>;
-
-/** Drains the microtask ladder the player runs on, without a real-timer sleep. */
-async function drain(): Promise<void> {
-  for (let i = 0; i < 100; i += 1) await Promise.resolve();
-}
-
-/** Broadcasts one `speech-utterance` frame and lets the host react to it. */
-async function emitUtterance(sessionId: string, id: string, text: string): Promise<void> {
-  await act(async () => {
-    ws.emit({ type: "speech-utterance", id, sessionId, text, at: Date.now() });
-    await drain();
-  });
-}
 
 /** Ends the unit that is currently playing, as the browser's `ended` would. */
 async function endCurrentUnit(): Promise<void> {
