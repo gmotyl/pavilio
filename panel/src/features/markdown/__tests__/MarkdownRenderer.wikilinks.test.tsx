@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MarkdownRenderer from "../MarkdownRenderer";
 
@@ -59,7 +59,7 @@ describe("MarkdownRenderer wikilinks", () => {
     renderMd("Owner: [[metro:wiki/entities/jane-doe|Jane]].");
 
     const link = screen.getByRole("link", { name: "Jane" });
-    expect(link.getAttribute("href")).toBe("/view/metro/wiki/entities/jane-doe.md");
+    expect(link.getAttribute("href")).toBe("/project/metro/wiki?file=metro%2Fwiki%2Fentities%2Fjane-doe.md");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const { paths } = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(paths).toEqual(["metro/wiki/entities/jane-doe.md"]);
@@ -67,16 +67,57 @@ describe("MarkdownRenderer wikilinks", () => {
   });
 
   it("percent-encodes each path segment of the viewer href", async () => {
-    existing.add("pavilio/wiki/notes/a b#c?d.md");
-    renderMd("See [[wiki/notes/a b#c?d|Odd]].");
+    existing.add("pavilio/memo/a b#c?d.md");
+    renderMd("See [[memo/a b#c?d|Odd]].");
 
     const link = screen.getByRole("link", { name: "Odd" });
-    expect(link.getAttribute("href")).toBe("/view/pavilio/wiki/notes/a%20b%23c%3Fd.md");
+    expect(link.getAttribute("href")).toBe("/view/pavilio/memo/a%20b%23c%3Fd.md");
     // The existence check still uses the raw path.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const { paths } = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    expect(paths).toEqual(["pavilio/wiki/notes/a b#c?d.md"]);
+    expect(paths).toEqual(["pavilio/memo/a b#c?d.md"]);
     expect(screen.getByRole("link", { name: "Odd" })).toBeTruthy();
+  });
+
+  it("opens a wiki page target in the wiki tab, not the bare viewer", async () => {
+    existing.add("pavilio/wiki/sources/progress-2026-07-31-pavilio-search-robustness.md");
+    renderMd("From [[wiki/sources/progress-2026-07-31-pavilio-search-robustness|search robustness]].");
+
+    const link = screen.getByRole("link", { name: "search robustness" });
+    expect(link.getAttribute("href")).toBe(
+      "/project/pavilio/wiki?file=pavilio%2Fwiki%2Fsources%2Fprogress-2026-07-31-pavilio-search-robustness.md",
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const { paths } = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(paths).toEqual(["pavilio/wiki/sources/progress-2026-07-31-pavilio-search-robustness.md"]);
+  });
+
+  it("navigates in-app to the wiki tab on a plain click", async () => {
+    existing.add("pavilio/wiki/concepts/x.md");
+    function Where() {
+      const { pathname, search } = useLocation();
+      return <output data-testid="where">{pathname + search}</output>;
+    }
+    render(
+      <MemoryRouter initialEntries={["/project/pavilio/wiki?file=pavilio%2Fwiki%2Fconcepts%2Futterance.md"]}>
+        <Routes>
+          <Route
+            path="*"
+            element={
+              <>
+                <MarkdownRenderer content="See [[wiki/concepts/x|X]]." basePath={BASE} />
+                <Where />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "X" }), { button: 0 });
+    expect(screen.getByTestId("where").textContent).toBe(
+      "/project/pavilio/wiki?file=pavilio%2Fwiki%2Fconcepts%2Fx.md",
+    );
   });
 
   it("renders a missing target as warning text", async () => {
@@ -111,7 +152,7 @@ describe("MarkdownRenderer wikilinks", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.getByRole("link", { name: "X" }).getAttribute("href")).toBe(
-      "/view/pavilio/wiki/concepts/x.md",
+      "/project/pavilio/wiki?file=pavilio%2Fwiki%2Fconcepts%2Fx.md",
     );
     expect(document.querySelector(".wikilink-missing")).toBeNull();
   });
