@@ -11,8 +11,6 @@ export interface FileRowProps {
   /** Type marker rendered as a small badge (e.g. "review" | "run"). */
   kind?: string;
   selected?: boolean;
-  /** Listed in the project's CURRENT.md. */
-  isCurrent?: boolean;
   title?: string;
   /** Pre-built drag handlers — plans and sections use different drag hooks. */
   dragProps?: HTMLAttributes<HTMLButtonElement>;
@@ -28,7 +26,6 @@ export default function FileRow({
   monoLabel,
   kind,
   selected = false,
-  isCurrent = false,
   title,
   dragProps,
   star,
@@ -45,12 +42,7 @@ export default function FileRow({
         className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1 rounded-md text-left text-xs transition-colors"
         style={{
           background: selected ? "var(--bg-active)" : "transparent",
-          color: selected
-            ? "var(--text-primary)"
-            : isCurrent
-              ? "var(--accent)"
-              : "var(--text-secondary)",
-          fontWeight: isCurrent ? 600 : 400,
+          color: selected ? "var(--text-primary)" : "var(--text-secondary)",
         }}
         onMouseEnter={(e) => {
           if (!selected) e.currentTarget.style.background = "var(--bg-hover)";
@@ -62,20 +54,11 @@ export default function FileRow({
         <FileText
           size={13}
           className="shrink-0"
-          style={{ color: isCurrent ? "var(--accent)" : "var(--text-tertiary)" }}
+          style={{ color: "var(--text-tertiary)" }}
         />
         <span className={`truncate flex-1 ${monoLabel ? "font-mono" : ""}`}>
           {label}
         </span>
-        {isCurrent && (
-          <span
-            data-testid={`${testId}-current-badge`}
-            className="shrink-0 text-[9px] uppercase tracking-wider"
-            style={{ color: "var(--accent)" }}
-          >
-            current
-          </span>
-        )}
         {kind && (
           <span
             data-testid={`${testId}-kind`}

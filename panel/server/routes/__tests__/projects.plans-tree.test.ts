@@ -168,38 +168,21 @@ describe("GET /api/projects/:name/plans/read", () => {
   });
 });
 
-describe("POST /api/projects/:name/plans/current/:planFile", () => {
-  it("appends a project plan line to CURRENT.md", async () => {
+describe("/api/projects/:name/plans/current/:planFile (retired)", () => {
+  it("the retired CURRENT.md endpoint answers 404 and writes nothing", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     seedFile(join(projectsDir, "alokai", "plans", "foo.md"), "# foo");
-    const res = await request(makeApp()).post("/api/projects/alokai/plans/current/foo.md");
-    expect(res.status).toBe(200);
-    const current = readFileSync(join(projectsDir, "alokai", "plans", "CURRENT.md"), "utf-8");
-    expect(current).toContain("projects/alokai/plans/foo.md");
-  });
+    const currentMd = join(projectsDir, "alokai", "plans", "CURRENT.md");
 
-  it("is idempotent — does not duplicate an already-active plan", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    seedFile(join(projectsDir, "alokai", "plans", "foo.md"), "# foo");
-    await request(makeApp()).post("/api/projects/alokai/plans/current/foo.md");
-    await request(makeApp()).post("/api/projects/alokai/plans/current/foo.md");
-    const current = readFileSync(join(projectsDir, "alokai", "plans", "CURRENT.md"), "utf-8");
-    expect(current.match(/foo\.md/g)).toHaveLength(1);
-  });
+    const post = await request(makeApp()).post("/api/projects/alokai/plans/current/foo.md");
+    expect(post.status).toBe(404);
+    expect(existsSync(currentMd)).toBe(false);
 
-  it("returns 404 when the plan file does not exist", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const res = await request(makeApp()).post("/api/projects/alokai/plans/current/ghost.md");
-    expect(res.status).toBe(404);
-  });
-
-  it("strips path traversal in the plan name (basename only)", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    // basename → "passwd.md", looked up only inside the project's plans dir → 404
-    const res = await request(makeApp()).post(
-      `/api/projects/alokai/plans/current/${encodeURIComponent("../../etc/passwd.md")}`,
-    );
-    expect(res.status).toBe(404);
+    // Seed a legacy CURRENT.md so a live DELETE handler would answer 200 and rewrite it.
+    writeFileSync(currentMd, "projects/alokai/plans/foo.md\n");
+    const del = await request(makeApp()).delete("/api/projects/alokai/plans/current/foo.md");
+    expect(del.status).toBe(404);
+    expect(readFileSync(currentMd, "utf-8")).toBe("projects/alokai/plans/foo.md\n");
   });
 });
 
