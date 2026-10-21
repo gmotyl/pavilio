@@ -62,7 +62,14 @@ Never edit one by hand; regenerate it.
 A knowledge page (`entities/`, `concepts/`) is written only when ≥2 distinct source-like pages
 name its slug. Source-like = `sources/**` and `repos/<repo>/**`; `questions/` and `notes/` never
 count. A term `CONTEXT.md` links as `See [[wiki/concepts/<slug>]]` qualifies with one source.
-`scripts/wiki mentions` decides; never write a knowledge page it did not list as `qualifying`.
+`scripts/wiki mentions` counts; never create a knowledge page `scripts/wiki backlog` does not list
+under `create`.
+
+`scripts/wiki backlog` turns that rule into the page writers' work list, read from the pages
+themselves: `create` — qualifying slugs with no page yet, with every source page naming them;
+`update` — existing pages with the source pages their `sources:` does not cite yet; `waiting` —
+named but not qualifying. A page writer that never finished leaves its sources in `update`, so the
+next run picks them up; a page with an empty backlog is up to date.
 
 ## Write regimes
 
@@ -94,6 +101,12 @@ One syntax (D14): `[[<path from project root>]]`, no `.md`, optional `<project>:
 
 Never relative paths (`../`), never markdown links to workspace files, never a bare slug
 (`[[utterance]]`). Every claim on a knowledge page cites the source page it came from.
+
+Body wikilinks point only at pages that exist — the ones `wiki/entities/index.md` and
+`wiki/concepts/index.md` list, the source pages being cited, and records. A name with no page yet
+stays plain text in the body; listing it in the frontmatter `entities:` / `concepts:` is what
+counts it toward its page. A link to a page that does not exist is a `broken` lint finding, not a
+placeholder.
 
 Frontmatter paths: `sources:` and `cited:` entries are project-root paths with `.md`
 (`wiki/sources/<kind>-<stem>.md`) so lint resolves them; `record:` and `raw:` are project-relative

@@ -9,17 +9,21 @@ tool's `model`; elsewhere the harness's small-model tier).
 
 - `project`
 - `slug` — namespaced: `entities/<name>` or `concepts/<name>`; the page is `wiki/<slug>.md`
-- `sources` — project-root paths (`wiki/sources/<kind>-<stem>.md`) of this run's new or refreshed
-  source pages naming the slug
+- `sources` — project-root paths (`wiki/sources/<kind>-<stem>.md`) of the source pages naming the
+  slug that the page does not cite yet (`scripts/wiki backlog`), at most 12
 - `glossary` — the slug's `CONTEXT.md` line, if it has one (passed in by the orchestrator, not read)
+
+The orchestrator passes these in the prompt; there is no input file to read.
 
 ## Read limits
 
 - `wiki/<slug>.md` if it exists.
 - The pages in `sources`.
+- `wiki/entities/index.md` and `wiki/concepts/index.md` — only to check which pages exist before
+  linking.
 
-Nothing else: no records, raw files, other knowledge pages, indexes, code or web. Link to other
-pages by slug from what the sources say; do not open them.
+Nothing else: no records, raw files, other knowledge pages, code or web. Link to other pages by
+slug from what the sources say; do not open them.
 
 ## Write
 
@@ -33,11 +37,20 @@ One file, `wiki/<slug>.md`, shaped per `skills/pavilio-wiki/PAGES.md § Entity p
   (`wiki/sources/<kind>-<stem>.md`); bump `updated`.
 - New page: synthesise from `sources`; `created` = `updated` = today.
 - Cite every claim with the source page it came from: `([[wiki/sources/<kind>-<stem>]])`.
+- Link another entity or concept only when the indexes list its page; a name without a page stays
+  plain text (`skills/pavilio-wiki/CONVENTIONS.md § Links`).
 - Entities: set `kind`. A `repository` entity links `Code: [[wiki/repos/<name>/index]]`.
 - No code identifiers — no file paths, functions, classes, components, flags or env vars
   (`skills/pavilio-wiki/CONVENTIONS.md § No code identifiers outside repos/`). Say where something
   is implemented with a `[[wiki/repos/<repo>/…]]` link instead.
-- A new source contradicting the page: keep both claims with their citations and report it.
+- A newer source that replaces an older decision (a later design, a reverted plan, a shipped
+  change) is not a contradiction: state what holds now with its citation, and keep the earlier
+  version as dated history ("until 2026-10-15, …") with its own. Report nothing.
+- Two sources that disagree with no later word settling it: keep both claims with their citations
+  and report it under `contradictions`.
+- The slug's name used by a source for something else (one word, two meanings): keep the page on
+  its own meaning, say the other use in one sentence under a `Terminology` note, and report it
+  under `collisions` — never merge the other meaning's claims into the page.
 
 ## Receipt
 
@@ -50,9 +63,10 @@ Reply with exactly one JSON object and nothing else:
   "slug": "concepts/speech-relay",
   "action": "created",
   "sources": 2,
-  "contradictions": ["Node 20 fix: page says undici upgrade, new source says timeout change"]
+  "contradictions": ["Node 20 fix: page says undici upgrade, new source says timeout change"],
+  "collisions": []
 }
 ```
 
-`action` is `created` or `updated`; `sources` is the total listed on the page; `contradictions` may
-be empty. On failure: `{"status": "error", "slug": "<slug>", "error": "<one line>"}`.
+`action` is `created` or `updated`; `sources` is the total listed on the page; `contradictions` and
+`collisions` may be empty. On failure: `{"status": "error", "slug": "<slug>", "error": "<one line>"}`.

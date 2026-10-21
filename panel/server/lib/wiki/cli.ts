@@ -2,6 +2,7 @@ import { existsSync, realpathSync, statSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
+import { pageBacklog } from "./backlog";
 import { cloneRepo } from "./clone-repo";
 import { loadWikiConfig, readWikiConfig, type WikiConfig } from "./config";
 import { fetchArticle } from "./fetch-article";
@@ -20,7 +21,8 @@ import { resolveProject, type FetchLike } from "./project";
  *
  * Paths in receipts: `pending` and `record` paths are project-relative; `index` `written`/`removed`,
  * `fetch-article` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
- * wiki-relative (relative to `projects/<p>/wiki/`), except `lint`'s own `wiki/…` page keys.
+ * wiki-relative (relative to `projects/<p>/wiki/`), except `lint`'s own `wiki/…` page keys and
+ * `backlog`'s source paths, which are project-root `wiki/…` paths ready for a page writer.
  *
  * The workspace root (the dir holding `projects/` and `.projects.local.md`) comes from
  * `PAVILIO_WORKSPACE_ROOT`, defaulting to the dir above `panel/` — in an installed workspace
@@ -35,6 +37,8 @@ const USAGE = `usage: scripts/wiki <command> [args]
   lock take|release <p> --session <id>      {held, takenOver[, busy]} (release adds released;
                                             busy: guard still busy, nothing decided — retry)
   mentions <p> [--touched a,b]              {slugs, qualifying}; slugs are entities/x, concepts/x
+  backlog <p> [--touched a,b]               {create, update, waiting}: what page writers still owe;
+                                            create/update map slug → wiki/sources/… paths
   index <p>                                 {written, removed} | exit 1 {error, page}
   lint <p>                                  {broken, orphans, malformed, untyped, stale, codeIdentifiers}
   config                                    {sessionStartIngest, writerModel}
@@ -114,6 +118,18 @@ function projectDir(workspaceRoot: string, name: string): string {
   return dir;
 }
 
+/** `--touched a,b` as a slug list (undefined when absent); warns about a slug without a namespace. */
+function touchedSlugs(raw: string | undefined, deps: CliDeps): string[] | undefined {
+  if (raw === undefined) return undefined;
+  const touched = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  for (const slug of touched) {
+    if (!/^(entities|concepts)\/./.test(slug)) {
+      deps.stderr.write(`wiki: --touched "${slug}" is not namespaced (entities/<slug> or concepts/<slug>)\n`);
+    }
+  }
+  return touched;
+}
+
 type Outcome = { code: 0 | 1 | 2; body: Record<string, unknown> };
 const ok = (body: Record<string, unknown>): Outcome => ({ code: 0, body });
 
@@ -167,15 +183,11 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
     }
     case "mentions": {
       const [p] = only(parsed, 1, "mentions <p> [--touched a,b]", ["touched"]);
-      const dir = projectDir(workspaceRoot, p);
-      const raw = flag("touched");
-      const touched = raw === undefined ? undefined : raw.split(",").map((s) => s.trim()).filter(Boolean);
-      for (const slug of touched ?? []) {
-        if (!/^(entities|concepts)\/./.test(slug)) {
-          deps.stderr.write(`wiki: --touched "${slug}" is not namespaced (entities/<slug> or concepts/<slug>)\n`);
-        }
-      }
-      return ok({ ...countMentions(dir, { touched }) });
+      return ok({ ...countMentions(projectDir(workspaceRoot, p), { touched: touchedSlugs(flag("touched"), deps) }) });
+    }
+    case "backlog": {
+      const [p] = only(parsed, 1, "backlog <p> [--touched a,b]", ["touched"]);
+      return ok({ ...pageBacklog(projectDir(workspaceRoot, p), { touched: touchedSlugs(flag("touched"), deps) }) });
     }
     case "index": {
       const [p] = only(parsed, 1, "index <p>");

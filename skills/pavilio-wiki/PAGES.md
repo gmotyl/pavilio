@@ -119,6 +119,7 @@ description: "Gaps the wiki could not answer and knowledge waiting for a home"
 ## Gaps
 - 2026-10-20 — Why does the relay fail on Node 20? Not covered. (query [[wiki/questions/2026-10-20-relay-node20]])
 - 2026-10-20 — [[wiki/concepts/utterance]] says X, [[wiki/sources/progress-…]] says Y. (ingest)
+- 2026-10-20 — Term collision: "catch-up" means the speech re-fetch ([[wiki/concepts/catch-up]]) and the session-start wiki ingest ([[wiki/sources/progress-…]]). (ingest)
 
 ## Knowledge candidates
 - 2026-10-20 — <generic finding> (from [[wiki/sources/progress-2026-10-19-tts-relay-node20]])
@@ -137,6 +138,7 @@ run after them:
 - sources: sources/note-2026-10-20-kickoff, …
 - pages: concepts/utterance (updated), entities/jane-doe (created)
 - waiting: concepts/speech-relay (1 mention)
+- behind: concepts/utterance                      # still in the backlog after its writer re-ran
 - failed: notes/2026-10-20-kickoff.md             # receipt was not JSON twice; not ledgered
 - warning: https://… paywall stub, no source page
 

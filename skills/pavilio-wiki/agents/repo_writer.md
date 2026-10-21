@@ -14,6 +14,8 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `mode` — `architecture` or `question`
 - `question` — question mode only
 
+The orchestrator passes these in the prompt; there is no input file to read.
+
 ## Read limits
 
 - Architecture mode: inside `clonePath` only — README, manifests (`package.json`, `pyproject.toml`,
