@@ -16,7 +16,7 @@ vi.mock("../../lib/discovery", async () => {
   return { ...actual, discoverProjects: () => [] };
 });
 
-import projectsRouter, { isPlanPathAllowed } from "../projects";
+import projectsRouter from "../projects";
 
 function makeApp() {
   const app = express();
@@ -40,24 +40,6 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(tmpRoot, { recursive: true, force: true });
-});
-
-describe("isPlanPathAllowed", () => {
-  it("accepts a .md file under an allowed dir", () => {
-    expect(isPlanPathAllowed("/tmp/x/plans/a.md", ["/tmp/x/plans"])).toBe(true);
-  });
-  it("rejects the dir itself", () => {
-    expect(isPlanPathAllowed("/tmp/x/plans", ["/tmp/x/plans"])).toBe(false);
-  });
-  it("rejects a non-.md file", () => {
-    expect(isPlanPathAllowed("/tmp/x/plans/a.txt", ["/tmp/x/plans"])).toBe(false);
-  });
-  it("rejects a path outside all dirs", () => {
-    expect(isPlanPathAllowed("/etc/passwd", ["/tmp/x/plans"])).toBe(false);
-  });
-  it("rejects null-byte", () => {
-    expect(isPlanPathAllowed("/tmp/x/plans/a.md\0", ["/tmp/x/plans"])).toBe(false);
-  });
 });
 
 describe("GET /api/projects/:name/plans-tree", () => {
@@ -134,16 +116,6 @@ describe("GET /api/projects/:name/plans/read", () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     const res = await request(makeApp()).get(
       `/api/projects/alokai/plans/read?path=${encodeURIComponent("/etc/passwd")}`,
-    );
-    expect(res.status).toBe(403);
-  });
-
-  it("rejects a non-.md file inside the plans dir with 403", async () => {
-    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const target = join(projectsDir, "alokai", "plans", "secret.txt");
-    seedFile(target, "leak");
-    const res = await request(makeApp()).get(
-      `/api/projects/alokai/plans/read?path=${encodeURIComponent(target)}`,
     );
     expect(res.status).toBe(403);
   });

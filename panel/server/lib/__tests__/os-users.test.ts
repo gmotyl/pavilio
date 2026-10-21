@@ -40,77 +40,49 @@ describe("os-users", () => {
   });
 
   describe("parsePasswd", () => {
-    it("parsePasswd includes a uid>=1000 entry with a real shell", () => {
-      const content = "greg:x:1000:1000:Greg:/home/greg:/bin/zsh\n";
-      expect(parsePasswd(content)).toEqual([
-        { username: "greg", homeDir: "/home/greg", shell: "/bin/zsh", uid: 1000, gid: 1000 },
-      ]);
-    });
+    const greg = { username: "greg", homeDir: "/home/greg", shell: "/bin/zsh", uid: 1000, gid: 1000 };
 
-    it("parsePasswd retains uid and gid", () => {
-      // A `runAsUser` session's files have to be chown'd to the account that
-      // actually runs the PTY, so the numeric ownership has to survive the
-      // parse — the username alone can't be handed to `fchown`.
-      const content = "greg-ip:x:1001:1002:Greg IP:/home/greg-ip:/bin/bash\n";
-      expect(parsePasswd(content)).toEqual([
-        {
-          username: "greg-ip",
-          homeDir: "/home/greg-ip",
-          shell: "/bin/bash",
-          uid: 1001,
-          gid: 1002,
-        },
-      ]);
-    });
-
-    it("parsePasswd skips an entry whose gid is not numeric", () => {
-      const content = "broken:x:1000:not-a-gid:Broken:/home/broken:/bin/zsh\n";
-      expect(parsePasswd(content)).toEqual([]);
-    });
-
-    it("parsePasswd excludes a system entry with uid below 1000", () => {
-      const content = "sync:x:4:65534:sync:/bin:/bin/sync\n";
-      expect(parsePasswd(content)).toEqual([]);
-    });
-
-    it("parsePasswd includes root (uid 0) despite being below 1000", () => {
-      // root is the one uid<1000 account worth offering: it's the
-      // panel-owner account itself on most setups, so `runAsUser: "root"`
-      // must resolve to a real discovered user for the owner-equality check
-      // in terminal-manager.ts to recognize it as "no wrapper needed"
-      // instead of silently falling back to an unknown-user direct spawn.
-      const content = "root:x:0:0:root:/root:/bin/bash\n";
-      expect(parsePasswd(content)).toEqual([
-        { username: "root", homeDir: "/root", shell: "/bin/bash", uid: 0, gid: 0 },
-      ]);
-    });
-
-    it("parsePasswd still excludes root if its shell is a non-login one", () => {
-      const content = "root:x:0:0:root:/root:/usr/sbin/nologin\n";
-      expect(parsePasswd(content)).toEqual([]);
-    });
-
-    it("parsePasswd excludes nologin and false shells regardless of uid", () => {
-      const content = [
-        "svc-a:x:1001:1001:Svc A:/home/svc-a:/usr/sbin/nologin",
-        "svc-b:x:1002:1002:Svc B:/home/svc-b:/sbin/nologin",
-        "svc-c:x:1003:1003:Svc C:/home/svc-c:/bin/false",
-        "svc-d:x:1004:1004:Svc D:/home/svc-d:/usr/bin/false",
-      ].join("\n");
-      expect(parsePasswd(content)).toEqual([]);
-    });
-
-    it("parsePasswd skips blank lines and comment lines", () => {
-      const content = [
-        "# a comment",
-        "",
-        "greg:x:1000:1000:Greg:/home/greg:/bin/zsh",
-        "",
-      ].join("\n");
-      expect(() => parsePasswd(content)).not.toThrow();
-      expect(parsePasswd(content)).toEqual([
-        { username: "greg", homeDir: "/home/greg", shell: "/bin/zsh", uid: 1000, gid: 1000 },
-      ]);
+    // Rows that carry a reason:
+    // - "retains uid and gid": a `runAsUser` session's files have to be chown'd
+    //   to the account that actually runs the PTY, so the numeric ownership has
+    //   to survive the parse — the username alone can't be handed to `fchown`.
+    // - "includes root": root is the one uid<1000 account worth offering: it's
+    //   the panel-owner account itself on most setups, so `runAsUser: "root"`
+    //   must resolve to a real discovered user for the owner-equality check in
+    //   terminal-manager.ts to recognize it as "no wrapper needed" instead of
+    //   silently falling back to an unknown-user direct spawn.
+    it.each<[string, string, unknown[]]>([
+      ["includes a uid>=1000 entry with a real shell", "greg:x:1000:1000:Greg:/home/greg:/bin/zsh\n", [greg]],
+      [
+        "retains uid and gid",
+        "greg-ip:x:1001:1002:Greg IP:/home/greg-ip:/bin/bash\n",
+        [{ username: "greg-ip", homeDir: "/home/greg-ip", shell: "/bin/bash", uid: 1001, gid: 1002 }],
+      ],
+      ["skips an entry whose gid is not numeric", "broken:x:1000:not-a-gid:Broken:/home/broken:/bin/zsh\n", []],
+      ["excludes a system entry with uid below 1000", "sync:x:4:65534:sync:/bin:/bin/sync\n", []],
+      [
+        "includes root (uid 0) despite being below 1000",
+        "root:x:0:0:root:/root:/bin/bash\n",
+        [{ username: "root", homeDir: "/root", shell: "/bin/bash", uid: 0, gid: 0 }],
+      ],
+      ["still excludes root if its shell is a non-login one", "root:x:0:0:root:/root:/usr/sbin/nologin\n", []],
+      [
+        "excludes nologin and false shells regardless of uid",
+        [
+          "svc-a:x:1001:1001:Svc A:/home/svc-a:/usr/sbin/nologin",
+          "svc-b:x:1002:1002:Svc B:/home/svc-b:/sbin/nologin",
+          "svc-c:x:1003:1003:Svc C:/home/svc-c:/bin/false",
+          "svc-d:x:1004:1004:Svc D:/home/svc-d:/usr/bin/false",
+        ].join("\n"),
+        [],
+      ],
+      [
+        "skips blank lines and comment lines",
+        ["# a comment", "", "greg:x:1000:1000:Greg:/home/greg:/bin/zsh", ""].join("\n"),
+        [greg],
+      ],
+    ])("parsePasswd %s", (_label, content, expected) => {
+      expect(parsePasswd(content)).toEqual(expected);
     });
   });
 

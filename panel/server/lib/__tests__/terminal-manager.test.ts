@@ -113,17 +113,13 @@ vi.mock("node-pty", () => ({
 }))
 
 describe("shouldSuppressRecord", () => {
-  it("returns false when suppressUntil is undefined", () => {
-    expect(shouldSuppressRecord(undefined, 1000)).toBe(false)
-  })
-  it("returns false when the window has expired", () => {
-    expect(shouldSuppressRecord(999, 1000)).toBe(false)
-  })
-  it("returns false at the exact expiry boundary", () => {
-    expect(shouldSuppressRecord(1000, 1000)).toBe(false)
-  })
-  it("returns true while the window is still open", () => {
-    expect(shouldSuppressRecord(1700, 1000)).toBe(true)
+  it.each<[string, number | undefined, number, boolean]>([
+    ["false when suppressUntil is undefined", undefined, 1000, false],
+    ["false when the window has expired", 999, 1000, false],
+    ["false at the exact expiry boundary", 1000, 1000, false],
+    ["true while the window is still open", 1700, 1000, true],
+  ])("returns %s", (_label, suppressUntil, now, expected) => {
+    expect(shouldSuppressRecord(suppressUntil, now)).toBe(expected)
   })
 })
 

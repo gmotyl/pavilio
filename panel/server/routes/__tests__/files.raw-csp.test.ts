@@ -48,41 +48,19 @@ describe("GET /api/files/raw CSP", () => {
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it("raw svg is served sandboxed", async () => {
-    const res = await request(makeApp()).get("/api/files/raw/p/mockups/a.svg");
+  // `sandbox` stops a served svg/xml from running script on the panel origin;
+  // html mockups may run their own scripts, but still in an opaque origin.
+  it.each<[string, string, string | undefined]>([
+    ["raw svg", "a.svg", "sandbox"],
+    ["raw html", "a.html", "sandbox allow-scripts"],
+    ["upper-case svg", "B.SVG", "sandbox"],
+    ["htm (like html)", "a.htm", "sandbox allow-scripts"],
+    ["xhtml (like html)", "a.xhtml", "sandbox allow-scripts"],
+    ["xml (without scripts)", "a.xml", "sandbox"],
+    ["raw png (no csp)", "a.png", undefined],
+  ])("%s is served with csp %j", async (_label, name, csp) => {
+    const res = await request(makeApp()).get(`/api/files/raw/p/mockups/${name}`);
     expect(res.status).toBe(200);
-    expect(res.headers["content-security-policy"]).toBe("sandbox");
-  });
-
-  it("raw html is sandboxed but may run scripts", async () => {
-    const res = await request(makeApp()).get("/api/files/raw/p/mockups/a.html");
-    expect(res.status).toBe(200);
-    expect(res.headers["content-security-policy"]).toBe("sandbox allow-scripts");
-  });
-
-  it("upper-case svg is sandboxed too", async () => {
-    const res = await request(makeApp()).get("/api/files/raw/p/mockups/B.SVG");
-    expect(res.status).toBe(200);
-    expect(res.headers["content-security-policy"]).toBe("sandbox");
-  });
-
-  it("htm and xhtml are sandboxed like html", async () => {
-    for (const name of ["a.htm", "a.xhtml"]) {
-      const res = await request(makeApp()).get(`/api/files/raw/p/mockups/${name}`);
-      expect(res.status).toBe(200);
-      expect(res.headers["content-security-policy"]).toBe("sandbox allow-scripts");
-    }
-  });
-
-  it("xml is sandboxed without scripts", async () => {
-    const res = await request(makeApp()).get("/api/files/raw/p/mockups/a.xml");
-    expect(res.status).toBe(200);
-    expect(res.headers["content-security-policy"]).toBe("sandbox");
-  });
-
-  it("raw png gets no csp", async () => {
-    const res = await request(makeApp()).get("/api/files/raw/p/mockups/a.png");
-    expect(res.status).toBe(200);
-    expect(res.headers["content-security-policy"]).toBeUndefined();
+    expect(res.headers["content-security-policy"]).toBe(csp);
   });
 });

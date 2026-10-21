@@ -18,41 +18,21 @@ describe("validateProjectName", () => {
   });
 
   describe("invalid names", () => {
-    it("rejects empty string", () => {
-      expect(validateProjectName("")).toMatch(/length/);
-    });
-    it("rejects '..'", () => {
-      expect(validateProjectName("..")).toMatch(/invalid/);
-    });
-    it("rejects '../etc'", () => {
-      expect(validateProjectName("../etc")).toMatch(/invalid/);
-    });
-    it("rejects forward slash", () => {
-      expect(validateProjectName("metro/sub")).toMatch(/invalid/);
-    });
-    it("rejects backslash", () => {
-      expect(validateProjectName("metro\\sub")).toMatch(/invalid/);
-    });
-    it("rejects trailing whitespace", () => {
-      expect(validateProjectName("metro ")).toMatch(/invalid/);
-    });
-    it("rejects leading dot (hidden)", () => {
-      expect(validateProjectName(".hidden")).toMatch(/invalid/);
-    });
-    it("rejects too long (65 chars)", () => {
-      expect(validateProjectName("a".repeat(65))).toMatch(/length/);
-    });
-    it("rejects non-string (undefined)", () => {
-      expect(validateProjectName(undefined)).toMatch(/string/);
-    });
-    it("rejects non-string (null)", () => {
-      expect(validateProjectName(null)).toMatch(/string/);
-    });
-    it("rejects non-string (number)", () => {
-      expect(validateProjectName(123)).toMatch(/string/);
-    });
-    it("rejects non-string (object)", () => {
-      expect(validateProjectName({})).toMatch(/string/);
+    it.each<[string, unknown, RegExp]>([
+      ["empty string", "", /length/],
+      ["'..'", "..", /invalid/],
+      ["'../etc'", "../etc", /invalid/],
+      ["forward slash", "metro/sub", /invalid/],
+      ["backslash", "metro\\sub", /invalid/],
+      ["trailing whitespace", "metro ", /invalid/],
+      ["leading dot (hidden)", ".hidden", /invalid/],
+      ["too long (65 chars)", "a".repeat(65), /length/],
+      ["non-string (undefined)", undefined, /string/],
+      ["non-string (null)", null, /string/],
+      ["non-string (number)", 123, /string/],
+      ["non-string (object)", {}, /string/],
+    ])("rejects %s", (_label, name, reason) => {
+      expect(validateProjectName(name)).toMatch(reason);
     });
   });
 });
